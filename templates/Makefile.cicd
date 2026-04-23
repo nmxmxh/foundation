@@ -1,0 +1,244 @@
+# =============================================================================
+# Makefile CI/CD Targets for Ovasabi Foundation Projects
+# =============================================================================
+# Include this file in your project's Makefile:
+#   include foundation/templates/Makefile.cicd
+#
+# Or copy the relevant targets to your Makefile
+# =============================================================================
+
+# Configuration (override in your Makefile)
+PROJECT_NAME ?= my_project
+DOCKER_COMPOSE ?= docker compose
+GO_TEST_TIMEOUT ?= 10m
+DEPLOY_BRANCH ?= main
+
+# Ports (from .env or defaults)
+DB_PORT ?= 5432
+REDIS_PORT ?= 6379
+SERVER_PORT ?= 8080
+
+# =============================================================================
+# Build Targets
+# =============================================================================
+
+.PHONY: build build-docker build-all
+
+## build: Build the Go binary
+build:
+	@echo "Building $(PROJECT_NAME)..."
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o ./bin/server ./cmd/server
+
+## build-docker: Build Docker images
+build-docker:
+	@echo "Building Docker images..."
+	$(DOCKER_COMPOSE) build
+
+## build-all: Build everything (proto, binary, docker)
+build-all: proto build build-docker
+
+# =============================================================================
+# Test Targets
+# =============================================================================
+
+.PHONY: test test-unit test-integration test-coverage test-all lint
+
+## test: Run all tests
+test:
+	@echo "Running tests..."
+	go test -v -race -timeout $(GO_TEST_TIMEOUT) ./...
+
+## test-unit: Run unit tests only
+test-unit:
+	@echo "Running unit tests..."
+	go test -v -race -short -timeout $(GO_TEST_TIMEOUT) ./...
+
+## test-integration: Run integration tests
+test-integration:
+	@echo "Running integration tests..."
+	go test -v -race -run Integration -timeout $(GO_TEST_TIMEOUT) ./...
+
+## test-coverage: Run tests with coverage report
+test-coverage:
+	@echo "Running tests with coverage..."
+	go test -v -race -coverprofile=coverage.out -timeout $(GO_TEST_TIMEOUT) ./...
+	go tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
+
+## test-all: Run all tests including integration
+test-all: lint test test-integration
+
+## lint: Run golangci-lint
+lint:
+	@echo "Running linter..."
+	golangci-lint run --timeout=10m ./...
+
+# =============================================================================
+# Docker Targets
+# =============================================================================
+
+.PHONY: docker-up docker-down docker-logs docker-ps docker-clean docker-restart
+
+## docker-up: Start development containers
+docker-up:
+	@echo "Starting development containers..."
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+## docker-down: Stop containers
+docker-down:
+	@echo "Stopping containers..."
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml down
+
+## docker-logs: View container logs
+docker-logs:
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml logs -f
+
+## docker-ps: Show container status
+docker-ps:
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml ps
+
+## docker-clean: Remove all containers, volumes, and images
+docker-clean:
+	@echo "Cleaning up Docker resources..."
+	$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml down -v --rmi local
+	docker system prune -f
+
+## docker-restart: Restart containers
+docker-restart: docker-down docker-up
+
+# =============================================================================
+# Database Migration Targets
+# =============================================================================
+
+.PHONY: migrate-up migrate-down migrate-create migrate-reset migrate-status
+
+## migrate-up: Run database migrations
+migrate-up:
+	@echo "Running migrations..."
+	migrate -path migrations -database "$(DATABASE_URL)" up
+
+## migrate-down: Rollback last migration
+migrate-down:
+	@echo "Rolling back migration..."
+	migrate -path migrations -database "$(DATABASE_URL)" down 1
+
+## migrate-create: Create a new migration (usage: make migrate-create name=migration_name)
+migrate-create:
+	@if [ -z "$(name)" ]; then echo "Usage: make migrate-create name=migration_name"; exit 1; fi
+	migrate create -ext sql -dir migrations -seq $(name)
+
+## migrate-reset: Reset database and re-run all migrations
+migrate-reset:
+	@echo "WARNING: This will reset the database!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ]
+	migrate -path migrations -database "$(DATABASE_URL)" drop -f
+	migrate -path migrations -database "$(DATABASE_URL)" up
+
+## migrate-status: Show migration status
+migrate-status:
+	migrate -path migrations -database "$(DATABASE_URL)" version
+
+# =============================================================================
+# Deployment Targets
+# =============================================================================
+
+.PHONY: deploy deploy-setup deploy-backup deploy-restore deploy-logs deploy-status
+
+## deploy: Deploy to production server
+deploy:
+	@if [ -z "$(DEPLOY_HOST)" ]; then echo "DEPLOY_HOST not set"; exit 1; fi
+	@echo "Deploying to $(DEPLOY_HOST)..."
+	@echo "Branch: $(DEPLOY_BRANCH)"
+	@read -p "Continue? [y/N] " confirm && [ "$$confirm" = "y" ]
+	ssh $(DEPLOY_USER)@$(DEPLOY_HOST) "cd $(DEPLOY_PATH) && \
+		git fetch origin && \
+		git checkout $(DEPLOY_BRANCH) && \
+		git pull origin $(DEPLOY_BRANCH) && \
+		$(DOCKER_COMPOSE) build && \
+		$(DOCKER_COMPOSE) up -d"
+
+## deploy-setup: Setup deployment directory on server
+deploy-setup:
+	@if [ -z "$(DEPLOY_HOST)" ]; then echo "DEPLOY_HOST not set"; exit 1; fi
+	ssh $(DEPLOY_USER)@$(DEPLOY_HOST) "mkdir -p $(DEPLOY_PATH) $(DEPLOY_BACKUP_PATH)"
+
+## deploy-backup: Create database backup on production
+deploy-backup:
+	@if [ -z "$(DEPLOY_HOST)" ]; then echo "DEPLOY_HOST not set"; exit 1; fi
+	@echo "Creating backup on $(DEPLOY_HOST)..."
+	ssh $(DEPLOY_USER)@$(DEPLOY_HOST) "cd $(DEPLOY_PATH) && \
+		pg_dump \$$DATABASE_URL > $(DEPLOY_BACKUP_PATH)/backup-\$$(date +%Y%m%d-%H%M%S).sql"
+
+## deploy-restore: Restore database from backup
+deploy-restore:
+	@if [ -z "$(DEPLOY_HOST)" ]; then echo "DEPLOY_HOST not set"; exit 1; fi
+	@echo "Available backups:"
+	@ssh $(DEPLOY_USER)@$(DEPLOY_HOST) "ls -la $(DEPLOY_BACKUP_PATH)/*.sql"
+	@read -p "Enter backup filename: " backup && \
+		ssh $(DEPLOY_USER)@$(DEPLOY_HOST) "psql \$$DATABASE_URL < $(DEPLOY_BACKUP_PATH)/$$backup"
+
+## deploy-logs: View production logs
+deploy-logs:
+	@if [ -z "$(DEPLOY_HOST)" ]; then echo "DEPLOY_HOST not set"; exit 1; fi
+	ssh $(DEPLOY_USER)@$(DEPLOY_HOST) "cd $(DEPLOY_PATH) && $(DOCKER_COMPOSE) logs -f"
+
+## deploy-status: Check production status
+deploy-status:
+	@if [ -z "$(DEPLOY_HOST)" ]; then echo "DEPLOY_HOST not set"; exit 1; fi
+	ssh $(DEPLOY_USER)@$(DEPLOY_HOST) "cd $(DEPLOY_PATH) && $(DOCKER_COMPOSE) ps"
+
+# =============================================================================
+# Code Generation Targets
+# =============================================================================
+
+.PHONY: proto generate clean-generated
+
+## proto: Generate protobuf code
+proto:
+	@echo "Generating protobuf code..."
+	@if [ -d "api/protos" ]; then \
+		protoc --go_out=. --go-grpc_out=. api/protos/**/*.proto; \
+	else \
+		echo "No protobuf files found"; \
+	fi
+
+## generate: Run go generate
+generate:
+	@echo "Running go generate..."
+	go generate ./...
+
+## clean-generated: Remove generated files
+clean-generated:
+	find . -name "*.pb.go" -delete
+
+# =============================================================================
+# Utility Targets
+# =============================================================================
+
+.PHONY: deps clean setup verify help
+
+## deps: Download and tidy dependencies
+deps:
+	go mod download
+	go mod tidy
+
+## clean: Clean build artifacts
+clean:
+	rm -rf ./bin ./coverage.out ./coverage.html
+
+## setup: Initial development setup
+setup: deps
+	@echo "Installing development tools..."
+	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+	@if [ ! -f .env ]; then cp .env.example .env; echo "Created .env from template"; fi
+	@echo "Setup complete!"
+
+## verify: Full verification (lint + test)
+verify: lint test
+	@echo "Verification complete!"
+
+## help: Show this help
+help:
+	@echo "Available targets:"
+	@grep -E '^##' $(MAKEFILE_LIST) | sed 's/## /  /'

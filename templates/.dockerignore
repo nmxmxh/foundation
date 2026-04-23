@@ -1,0 +1,60 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Build artifacts
+bin/
+dist/
+coverage.out
+coverage.html
+*.test
+*.out
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+testdata/
+*_test.go
+
+# Docker files (avoid recursive build)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Node modules (if frontend exists)
+node_modules/
+frontend/node_modules/
+
+# Vendor (if using vendoring, uncomment to exclude)
+# vendor/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

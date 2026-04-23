@@ -1,0 +1,147 @@
+# Generic CI Pipeline for Ovasabi Foundation Go Projects
+# Copy to .github/workflows/ci.yml and customize PROJECT_NAME and test database name
+
+name: CI Pipeline
+
+on:
+  push:
+    branches: ["main", "develop", "staging"]
+  pull_request:
+    branches: ["main", "develop"]
+  workflow_dispatch:
+
+env:
+  GO_VERSION: "1.24"
+  # Customize these for your project
+  PROJECT_NAME: "{{PROJECT_NAME}}"
+  TEST_DB_NAME: "{{PROJECT_NAME}}_test"
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ${{ env.TEST_DB_NAME }}
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+      redis:
+        image: redis:7-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Uncomment if your project uses protobuf
+      # - name: Install protobuf dependencies
+      #   run: |
+      #     sudo apt-get update
+      #     sudo apt-get install -y protobuf-compiler
+      #     go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+      #     go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+      #     echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+
+      # - name: Generate protobuf code
+      #   run: make proto
+
+      - name: Run database migrations
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/${{ env.TEST_DB_NAME }}?sslmode=disable
+        run: |
+          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+          migrate -path migrations -database "$DATABASE_URL" up
+
+      - name: Run tests
+        env:
+          CI: true
+          APP_ENV: test
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/${{ env.TEST_DB_NAME }}?sslmode=disable
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test-secret-key
+        run: |
+          go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
+
+      - name: Run linter
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=10m
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Build binary
+        run: |
+          CGO_ENABLED=0 go build -ldflags="-s -w" -o ./bin/server ./cmd/server
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-binary
+          path: ./bin/server
+          retention-days: 7
+
+  # Docker build (optional - uncomment if using Docker)
+  # docker:
+  #   name: Docker Build
+  #   runs-on: ubuntu-latest
+  #   needs: test
+  #   if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+  #
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Set up Docker Buildx
+  #       uses: docker/setup-buildx-action@v3
+  #
+  #     - name: Build Docker image
+  #       uses: docker/build-push-action@v5
+  #       with:
+  #         context: .
+  #         push: false
+  #         tags: ${{ env.PROJECT_NAME }}:${{ github.sha }}
+  #         cache-from: type=gha
+  #         cache-to: type=gha,mode=max

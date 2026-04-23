@@ -1,0 +1,14 @@
+# Service directory
+# Organize domain-specific services here
+# Example structure:
+# service/
+#   auth/
+#     service.go       # Business logic
+#     repository.go    # Data access
+#     handler.go       # HTTP handlers
+#     types.go         # Domain types
+#   user/
+#     service.go
+#     repository.go
+#     handler.go
+#     types.go

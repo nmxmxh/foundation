@@ -1,0 +1,10 @@
+[workspace]
+members = [
+  "crates/ovrt-core",
+  "crates/ovrt-browser",
+  "crates/ovrt-unit",
+  "crates/ovrt-ffi",
+  "crates/ovrt-native",
+  "crates/ovrt-wasm-host",
+]
+resolver = "2"

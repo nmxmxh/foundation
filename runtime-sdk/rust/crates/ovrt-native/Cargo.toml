@@ -1,0 +1,8 @@
+[package]
+name = "ovrt-native"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ovrt-core = { path = "../ovrt-core" }
+ovrt-unit = { path = "../ovrt-unit" }

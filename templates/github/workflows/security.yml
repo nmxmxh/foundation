@@ -1,0 +1,117 @@
+# Security Checks for Ovasabi Foundation Go Projects
+# Copy to .github/workflows/security.yml
+
+name: Security Checks
+
+on:
+  push:
+    branches: ["main", "develop", "staging"]
+  pull_request:
+    branches: ["main", "develop"]
+  schedule:
+    # Run weekly on Monday at 3 AM UTC
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  static-analysis:
+    name: Static Analysis (gosec)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Run gosec
+        uses: securego/gosec@v2.22.10
+        with:
+          args: -no-fail -fmt sarif -out gosec.sarif ./...
+
+      - name: Upload gosec report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gosec-sarif
+          path: gosec.sarif
+
+      # Uncomment to upload to GitHub Security tab (requires SARIF validation)
+      # - name: Upload gosec SARIF
+      #   if: always()
+      #   uses: github/codeql-action/upload-sarif@v4
+      #   with:
+      #     sarif_file: gosec.sarif
+      #     category: gosec
+
+  filesystem-scan:
+    name: Vulnerability Scan (Trivy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "0"
+          vuln-type: os,library
+          scanners: vuln,misconfig,secret
+          severity: CRITICAL,HIGH,MEDIUM
+
+      - name: Upload Trivy results
+        if: always() && github.actor != 'dependabot[bot]'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-filesystem
+
+  sbom:
+    name: Software Bill of Materials
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-spdx
+          path: sbom.spdx.json
+
+  dependency-review:
+    name: Dependency Review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC

@@ -1,0 +1,95 @@
+# =============================================================================
+# Docker Compose - Development Override
+# =============================================================================
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Or via Makefile: make docker-up
+#
+# This file overrides production docker-compose.yml for local development:
+# 1. Adds PostgreSQL service (production uses external database)
+# 2. Exposes ports for localhost access
+# 3. Removes Traefik labels (not needed locally)
+# 4. Sets development environment variables
+# =============================================================================
+
+services:
+  # PostgreSQL Database (local development only)
+  postgres:
+    image: postgres:16
+    container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-postgres
+    networks:
+      - app-network
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    environment:
+      POSTGRES_USER: "${DB_USER:-postgres}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-postgres}"
+      POSTGRES_DB: "${DB_NAME:-{{PROJECT_NAME}}_dev}"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${DB_USER:-postgres}", "-d", "${DB_NAME:-{{PROJECT_NAME}}_dev}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # Redis - expose port for local access
+  app-redis:
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
+  # Backend Server - development overrides
+  server:
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    volumes:
+      - ${UPLOADS_HOST_PATH:-./uploads}:/srv/uploads
+    environment:
+      APP_ENV: "development"
+      DATABASE_URL: ""
+      DB_USER: "${DB_USER:-postgres}"
+      DB_PASSWORD: "${DB_PASSWORD:-postgres}"
+      DB_NAME: "${DB_NAME:-{{PROJECT_NAME}}_dev}"
+      DB_HOST: "${DB_HOST:-postgres}"
+      DB_PORT: "5432"
+      DB_SSLMODE: "disable"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-redis}@app-redis:6379"
+      ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:5173,http://127.0.0.1:8080"
+      LOG_LEVEL: "debug"
+      # Disable external services in development
+      BILLING_DISABLED: "${BILLING_DISABLED:-true}"
+    labels: {}  # Remove Traefik labels in dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      app-redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # Migrations - development overrides
+  migrate:
+    environment:
+      - DATABASE_URL=
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_NAME=${DB_NAME:-{{PROJECT_NAME}}_dev}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_SSLMODE=disable
+    volumes:
+      - ./migrations:/migrations:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+# Override network to local bridge (production expects external network)
+networks:
+  app-network:
+    external: false
+    name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-network
+
+volumes:
+  postgres_data:
+    driver: local

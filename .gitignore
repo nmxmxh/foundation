@@ -1,0 +1,55 @@
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Dependencies
+**/node_modules/
+.pnpm-store/
+
+# Build outputs
+**/dist/
+**/build/
+**/target/
+**/*.wasm
+*.tsbuildinfo
+*.gz
+*.br
+
+# Go
+**/*.exe
+**/*.dll
+**/*.so
+**/*.dylib
+**/*.a
+**/*.o
+**/*.prof
+**/coverage.txt
+**/.gocache/
+**/.cache/
+
+# Test outputs
+**/coverage/
+**/*.cover
+**/*.out
+**/test-results/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+**/logs/
+
+# Temporary files
+**/tmp/
+**/.tmp/
+
+# Environment (should not be in foundation but just in case)
+.env
+.env.*
+
+# Generated files
+**/generated/

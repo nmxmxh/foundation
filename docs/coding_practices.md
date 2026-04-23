@@ -1,0 +1,623 @@
+# Ovasabi Coding Practices (Pragmatic Strict-Core)
+
+Status: v2.5  
+Date: 2026-04-22  
+Owner: Platform Architecture
+
+## Purpose and scope
+
+This document defines enforceable coding practices for Ovasabi services and clients built with Go, TypeScript, PostgreSQL, Redis, WebSocket event contracts, and River workers.
+
+It is intentionally strict on reliability-critical behavior and practical on delivery speed. Rules are designed to be checkable by tooling or code review.
+
+Primary references used for synthesis:
+
+- `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/JSF-AV-rules.pdf`
+- `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/P10.pdf`
+
+Related architecture blueprint:
+
+- `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/standalone_apps_architecture_blueprint.md`
+
+Related frontend practice docs:
+
+- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/styling_design_practices.md`
+- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/references/README.md`
+
+## Rule levels
+
+- `Mandatory`: required for merge unless a documented exception is approved.
+- `Recommended`: strong default; deviations require rationale in PR notes.
+- `Contextual`: apply when the condition is present (for example, hot paths, external integrations, safety-sensitive flows).
+
+## Security posture assumptions
+
+1. Assume deployment in a hostile environment with anonymous internet users, authenticated users, tenant adversaries, third-party API consumers/webhook callers, and limited insiders.
+2. Treat browser state, route params, headers, cookies, websocket payloads, uploaded files, queue payloads, object-storage callbacks, and third-party responses as untrusted until validated.
+3. Protect tokens, secrets, organization-scoped records, admin capabilities, signed URLs, audit trails, and billing/publish/approval flows as sensitive assets.
+4. Review new externally reachable features for entry points, trust boundaries, and plausible chained exploits, not only single-issue failures.
+
+## Rules (`CP-*`)
+
+### CP-01: Keep control flow simple and explicit
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Do not use hidden or confusing control flow patterns in production paths.
+2. `goto` is disallowed except tightly scoped cleanup exits where alternatives reduce clarity.
+3. Recursion is disallowed in request handlers, workers, and critical business logic unless explicitly approved.
+
+Enforcement:
+
+- Code review check on changed files.
+- Static lint checks for prohibited constructs where tool support exists.
+
+### CP-02: Bound loops, retries, and time-consuming operations
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Loops over variable-size inputs must have explicit practical bounds or timeout guards.
+2. Worker retries must use explicit `max_attempts` and backoff policy.
+3. All external calls must use bounded context deadlines/timeouts.
+
+Enforcement:
+
+- Review of worker/job options and timeout configuration.
+- Integration tests for retry/failure termination behavior.
+
+### CP-03: Control function size and decision complexity
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Keep function size within maintainable limits (target <= 80 logical lines; hard cap <= 120 unless justified).
+2. Keep cyclomatic complexity reasonable (target <= 15; hard cap <= 20 unless justified).
+3. Split orchestration from transformation logic when limits are exceeded.
+
+Enforcement:
+
+- Complexity tools in CI where available.
+- Reviewer gate on large/complex functions.
+
+### CP-04: Check return values and propagate errors intentionally
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Do not ignore return values from non-void/non-nil-producing calls unless explicitly intentional.
+2. If ignored intentionally, annotate rationale in code or PR.
+3. Error handling must preserve operational context (correlation/user/org where relevant).
+4. Runtime parsing and extraction failures must return controlled errors rather than panic.
+5. Error handling in multi-stage parsers and extractors must preserve stage/context so failures can be diagnosed without blind reproduction.
+
+Enforcement:
+
+- Lint/static checks for unchecked errors.
+- Reviewer gate for ignored returns and wrapped error context.
+- Reviewer gate on panic-prone parser paths and missing stage/context preservation.
+
+### CP-05: Use assertions/invariants at boundaries
+
+Level: `Recommended`
+
+Requirements:
+
+1. Validate preconditions/postconditions on domain boundaries.
+2. Assertions must be side-effect free.
+3. Assertion failures in runtime paths must fail safely and return controlled errors/events.
+
+Enforcement:
+
+- Unit and integration tests for boundary invariants.
+- Reviewer checks for side-effect-free assertion behavior.
+
+### CP-06: Minimize mutable shared state and scope data tightly
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Declare data at the smallest practical scope.
+2. Avoid unencapsulated global mutable state.
+3. Shared state access must be synchronized or isolated by design.
+
+Enforcement:
+
+- Reviewer gate on package-level mutable variables.
+- Concurrency-focused tests where shared state exists.
+
+### CP-07: Apply allocation discipline in hot paths
+
+Level: `Contextual`
+
+Requirements:
+
+1. Avoid unnecessary allocations in per-event/per-message hot paths.
+2. Do not introduce allocation patterns that create unpredictable latency under load.
+3. Prefer deterministic resource use in workers and realtime ingress paths.
+4. Reusable parsing artifacts used in hot paths must be initialized once and reused.
+5. Do not compile regexes inside per-record, per-line, or per-page loops when the pattern is static.
+6. Prefer `strings.Builder`, `bytes.Buffer`, or pre-sized slices for repeated text assembly in loops; avoid repeated string concatenation in accumulation paths.
+7. For large structured inputs, prefer bounded preview plus streaming iteration over full in-memory materialization when the downstream contract supports streaming.
+8. Precompute static lookup structures such as normalized header maps, token sets, compiled boundary patterns, and semantic lookup tables when they are reused across many records.
+9. Repeated normalization/parsing logic must be centralized; when identical raw values recur at scale, bounded caches may be used to avoid repeated work.
+10. Optimize proven hot paths first; precompute static work and stream variable work rather than expanding the same discipline indiscriminately across the whole codebase.
+
+Enforcement:
+
+- Reviewer gate on regex compilation inside hot loops, repeated parsing of identical values, and unnecessary full-buffer reads.
+- Benchmark/profile or representative fixture evidence for parser, ingestion, worker, and realtime hot path changes.
+- Load test regression gate for queue and WS critical paths.
+
+### CP-08: Zero-warning mindset and static analysis in CI
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Compile with strict warning settings and keep warnings at zero for supported toolchains.
+2. Run static analysis/lint checks in CI on every PR.
+3. Treat analyzer confusion as code clarity debt; simplify code when needed.
+
+Enforcement:
+
+- CI gates for `go test`, lint, static checks, and TypeScript checks.
+
+### CP-09: Restrict unsafe and reflection-heavy patterns
+
+Level: `Mandatory`
+
+Requirements:
+
+1. `unsafe` usage is prohibited unless absolutely required and ADR-approved.
+2. Reflection-heavy logic in core domain paths requires justification and tests.
+3. Dynamic behavior must not obscure call/control flow in critical logic.
+
+Enforcement:
+
+- Search-based CI checks for `unsafe`.
+- Reviewer + ADR gate for exceptional use.
+
+### CP-10: Keep event contracts deterministic and idempotent
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Mutating command flows must preserve stable request identity (`correlation_id` and idempotency keys where required).
+2. Emitted events must keep envelope contract fields complete and versioned when semantics break.
+3. Worker side effects must be idempotent under retries/duplicates.
+
+Enforcement:
+
+- Contract tests (integration/e2e).
+- Schema/event validation checks in CI.
+
+### CP-11: Code for testability-first behavior
+
+Level: `Mandatory`
+
+Requirements:
+
+1. New behavior must include unit tests for logic and failure paths.
+2. Critical flows must include integration coverage.
+3. User journey and guard behavior must be covered in e2e where applicable.
+4. Performance optimizations in correctness-sensitive code must keep or add regression tests for known edge cases and large representative fixtures.
+5. Centralizing parsers, adding caches, or changing fallback logic requires tests for false positives, stale reuse, and behavioral drift.
+6. Treat correctness regressions from cleanup refactors as a normal risk and test for them explicitly.
+7. Hot-path optimizations are not complete until both correctness and performance-sensitive regression suites pass.
+
+Enforcement:
+
+- PR test evidence requirements.
+- CI execution of required test slices by change class.
+
+### CP-12: Keep documentation and traceability current
+
+Level: `Recommended`
+
+Requirements:
+
+1. When contracts/routes/guards change, update test traceability docs (for example e2e matrix).
+2. Keep architecture and testing docs aligned with actual repo structure.
+3. Capture notable rule exceptions in ADRs.
+
+Enforcement:
+
+- Reviewer gate for doc updates on contract-sensitive changes.
+- Architecture review checklist.
+
+### CP-13: Prefer styled-component architecture and shared UI primitives
+
+Level: `Mandatory`
+
+Requirements:
+
+1. UI styling should be componentized through shared primitives, not repeated page-local inline styles.
+2. Reusable component surfaces (buttons, alerts, segmented controls, modal layouts, form rows) should live in shared `components/ui`.
+3. Theme and motion tokens must be consumed via shared primitives before introducing per-page style overrides.
+4. New styled-component modules should group declarations in a single object: `const Style = { Container: styled.div... }`. This is the preferred Ovasabi review format for application and feature code.
+5. Do not carry forward large inline style objects from legacy components into new shared primitives or product surfaces. Inline style usage is reserved for runtime coordinates, CSS custom-property injection, or motion-library transform values that are impractical to express in styled components.
+6. Separate styling, motion, and async-state concerns. Theme tokens belong in theme modules, loading boundaries belong in dedicated loader/skeleton components or route wrappers, and business components should compose them rather than owning every concern directly.
+7. New animation work must follow `styling_design_practices.md` and the animation reference notes under `docs/references/`.
+
+Enforcement:
+
+- Reviewer gate on high-volume inline style additions.
+- Frontend lint/review checklist for shared primitive reuse, grouped `Style` declarations, and loader/skeleton separation.
+
+### CP-14: Form state should default to a single object model
+
+Level: `Recommended`
+
+Requirements:
+
+1. Forms with multiple fields should use a single object state plus one named update function (for example `updateFormState`).
+2. Prefer shallow spread updates for flat form models.
+3. For nested form structures, use path-based update helpers to avoid repetitive state setters.
+4. Keep visual busy state explicit. `isSubmitting`, keyed loading flags, and validation state should not be hidden inside unrelated field setters or derived from ad-hoc DOM inspection.
+
+Enforcement:
+
+- Reviewer check on new form implementations.
+- Unit/UI behavior tests for form updates and validation paths.
+
+### CP-15: Use lodash intentionally to reduce code bloat (not hide logic)
+
+Level: `Recommended`
+
+Requirements:
+
+1. Use lodash helpers (`set`, `get`, `pick`, `omit`, `debounce`, `throttle`, `groupBy`, `keyBy`) when they reduce repeated boilerplate.
+2. Avoid chaining patterns that make business intent unclear.
+3. Keep lodash usage centralized in utilities for repeated patterns (state updates, normalization, grouping).
+
+Enforcement:
+
+- Reviewer check on readability and maintainability.
+- Bundle-size and performance review for frontend utility additions.
+
+### CP-16: Prefer adaptive concurrency over fixed internal request pacing
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Internal service dispatch must use bounded concurrency and timeout-based backpressure, not hardcoded tiny per-second caps.
+2. All concurrency and queue worker limits must be environment-driven configuration.
+3. Rate limiting is allowed at ingress or abuse-prone edges, with explicit `rate + period + burst`.
+4. Saturation behavior must emit measurable signals (timeouts, queue depth, retries, rejects).
+5. Acquire-timeout saturation must surface an explicit concurrency-limit error instead of silently collapsing into a generic deadline path.
+6. Listener and dispatch loops must prefer blocking fan-in worker pools over sleep-based busy polling.
+
+Enforcement:
+
+- Review gate on hardcoded throttle values in runtime code.
+- Benchmark/load evidence for hot path changes.
+- Config and runbook updates in the same PR when limits change.
+
+### CP-17: Frontend realtime architecture must stay contract-first and minimal
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Frontend route/auth behavior must preserve guest-to-user upgrade flow on the same websocket connection where applicable.
+2. Shared `Minimal*` UI primitives (including header/table/calendar baselines) must be used before page-local UI reinvention.
+3. Generated contracts (`proto-ts` and route metadata/docgen output) must be the source of truth for command routing and RBAC UI gating.
+4. Frontend utility additions (`lodash`, motion helpers, style primitives) must reduce repeated code and include typecheck/build evidence.
+
+Enforcement:
+
+- Frontend architecture review against `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/frontend_optimization_practices.md`.
+- CI typecheck/build and contract-drift checks when route/proto surfaces change.
+
+### CP-18: Ingress Edge Security, Abuse Resistance, and Origin Controls
+
+Level: `Mandatory`
+
+Requirements:
+
+1. **Rate Limiting**: All ingress API routes must use explicit rate controls (`rate + period + burst`) to prevent spam/abuse vectors and unbound hosting bill inflations. Auth, password-reset, OTP, upload, search, and webhook endpoints require tighter per-actor and per-source budgets than generic read APIs.
+2. **CORS Policy**: Explicit whitelisting is required. `Access-Control-Allow-Origin: *` is disallowed for authenticated pathways, and credentialed routes must use exact origin matching rather than broad regex or suffix shortcuts.
+3. **Origin Checks**: Cookie-authenticated mutation routes and websocket upgrades must validate `Origin` (and forwarded host where relevant) to reduce CSRF and cross-site socket abuse.
+4. **Webhook Verification**: Incoming webhooks (for example, Stripe, Twilio) must verify signature and freshness, enforce body-size limits, dedupe provider event IDs, and hand off slow work asynchronously.
+5. **Debug Surface Control**: Debug, profiling, and admin-only endpoints must be disabled or separately gated outside local development.
+
+Enforcement:
+
+- Gateway/Middleware configuration audit.
+- Integration tests for origin rejection, abuse budgets, and webhook verification failure paths.
+- PR reviewer checks on new integration handlers.
+
+### CP-19: Frontend Token & Secret Lifecycle Safety
+
+Level: `Mandatory`
+
+Requirements:
+
+1. **Frontend secrets**: Do not expose or hardcode private API keys in the frontend bundle. Use backend proxies for secure external call coordination.
+2. **Token Storage**: Auth tokens must prioritize Secure, `HttpOnly`, and `SameSite` cookie delivery paths over `localStorage`/`sessionStorage`. Storage exceptions require explicit rationale because they widen XSS impact.
+3. **Leak Prevention**: Never place bearer tokens, session IDs, signed URLs, password-reset tokens, invite tokens, or API secrets in query strings, analytics payloads, referer-bearing links, or client logs/crash reports.
+4. **Expiry policy**: Sensitive one-time tokens (for example, password reset, invites, email verification) must use short-lived TTLs (15–60 mins), enforce single-use consumption, and be stored server-side as digests or encrypted values rather than raw bearer material where lookup by digest suffices.
+5. **Rotation and Revocation**: Rotate session identifiers on login, privilege elevation, password change, and suspected compromise, and support server-side revocation/logout across devices where product risk warrants it.
+
+Enforcement:
+
+- Reviewer checks on cookie config, Storage usage, and client-side leak paths.
+- Tests for token expiry, single-use, rotation, and revocation behavior.
+
+### CP-20: Defence in Depth Validation, Authorization, and State Safety
+
+Level: `Mandatory`
+
+Requirements:
+
+1. **Input Validation**: All untrusted input must be validated and normalized server-side with explicit allowlists for shape, length, enum values, and character class where applicable. Reject ambiguous or overlong values early.
+2. **Safe Rendering**: Render untrusted content through safe templating/escaping APIs. `dangerouslySetInnerHTML` or equivalent raw HTML sinks require approved sanitization allowlists and tests.
+3. **Server-side Authorization**: Sensitive routes must enforce authorization on both the action and the target object (BOLA/IDOR protection). Never trust client-supplied org, user, or resource identifiers without re-deriving scope from the authenticated principal.
+4. **Mass-assignment Protection**: Mutation handlers must allowlist writable fields and reject or ignore ownership, role, billing, or system-managed attributes from clients.
+5. **State-transition Safety**: High-risk transitions (payments, refunds, approvals, invitations, role changes, publish/unpublish, file promotion) must re-check current state and actor authority inside the same transaction/lock boundary to resist race conditions and double-submit paths.
+6. **Interpreter and Egress Safety**: Outbound fetchers, template engines, shell/CLI calls, and dynamic interpreters must use allowlists, sandboxing, or disabled-by-default posture to prevent SSRF, command injection, template injection, and arbitrary file access.
+
+Enforcement:
+
+- Backend test validation for route access controls, object-level authorization, and mass-assignment rejection.
+- Reviewer checks on form render boundaries, outbound call sites, and state-transition guards.
+
+### CP-21: Frontend Resilience and Error Isolation
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Use React Error Boundaries at route, page, and feature container depths to isolate rendering failures and prevent full white-screen lockouts.
+2. Always present helpful fallback views allowing the user to retry or return home.
+
+Enforcement:
+
+- Review gate on route/page component wrappers.
+
+### CP-22: Operational Monitoring & Startup Safety
+
+Level: `Recommended`
+
+Requirements:
+
+1. **Startup Validation**: System startup must validate all required environment variables. Fail fast (panic/exit code 1) with descriptive audit trails for missing configs.
+2. **Health endpoint**: Every API service must expose a `/health` or `/status` endpoint returning system vitality for load balancers and upstream orchestrators.
+3. **Structured Logging**: Use structured JSON logging in production. Use correct severity levels; capture stack traces and correlation IDs for error tracking.
+4. Fallback selection, extraction failure, and degraded parsing paths must emit structured logs with explicit reason codes.
+5. Security-significant events (for example, login-failure bursts, privilege changes, token resets, webhook signature failures, and rate-limit trips) must emit structured logs or audit records without raw secrets.
+
+Enforcement:
+
+- CI validation on config binding setup.
+- Container/Cluster manifest verification for health check integration.
+- Reviewer gate on missing reason-coded logs for degraded runtime/parser paths.
+
+### CP-23: Safe Asset Management and Storage
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Do not store uploaded images or assets directly on the API server local file system.
+2. Use remote object-storage buckets (for example, GCS, AWS S3) that are private by default, with public access only through CDN policy or signed URLs with short TTLs and scoped permissions.
+3. File uploads must enforce allowed MIME/extension combinations, size/count limits, filename randomization, content sniffing, and quarantine/scanning for high-risk types before serving or downstream processing.
+4. Never trust user-supplied file names, path fragments, content types, or image metadata for storage keys, authorization, or processing decisions.
+
+Enforcement:
+
+- Review on file handler implementation.
+- Upload tests for type, size, and path-traversal rejection.
+
+### CP-24: Offload Slow Context Operations to Background Workers
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Critical request path handlers must not wait on slow external services (for example, SMTP servers, external lookups).
+2. Offload slower I/O bounded side-effects to asynchronous queue workers (for example, River workers) to prevent handler thread starvation and app hangs.
+
+Enforcement:
+
+- Reviewer assessment of synchronous handler side-effects.
+
+### CP-25: Frontend request replay, dedupe, and loading state must be scoped
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Replay/cache defaults must apply only to replay-safe read requests; auth and mutation flows require explicit opt-in if they want reuse or inflight dedupe.
+2. Replay and inflight keys must include current runtime identity context (for example session/user/org) so responses never bleed across auth transitions or organization switches.
+3. Concurrent UI actions must use reference-counted loading keys or equivalent scoped loading state, not a single boolean that can be cleared by the wrong request.
+4. Mutation flows that intentionally coalesce in flight must declare that intent explicitly in the command helper/store surface.
+
+Enforcement:
+
+- Unit tests for context separation, replay safety, and mutation opt-in behavior.
+- Reviewer gate on broad replay/dedupe applied to auth or mutating commands.
+
+### CP-26: Frontend boot, runtime singleton, and stale-build recovery must be deliberate
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Landing/public routes must lazy-load heavy authenticated shells, runtime bridges, and dashboard-only stores unless there is a measured reason not to.
+2. Asset warmup and prefetch logic must be route-family aware and must respect offline and save-data signals.
+3. Runtime bootstrap state that must survive HMR, code splitting, or shell remounts must live in a stable process-level singleton (`window`, `globalThis`, or equivalent module singleton).
+4. Dynamic-import and chunk-load failures must trigger a guarded stale-build recovery path (cache/service-worker refresh plus reload) instead of leaving the app stuck.
+
+Enforcement:
+
+- Bundle/build review for new public-route dependencies.
+- Smoke or integration coverage for stale-build recovery and runtime bootstrap behavior.
+
+### CP-27: Browser boundary, headers, and cache control must be explicit
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Set CSP, `frame-ancestors`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy`, and `Strict-Transport-Security` in TLS-backed environments; any exception must be documented.
+2. `SharedArrayBuffer` deployments must intentionally combine `Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`, and compatible asset policies (`CORP`/CORS) so cross-origin isolation does not silently fail or widen exposure.
+3. Authenticated or sensitive responses must default to `Cache-Control: no-store` or tightly scoped private caching. Shared CDN caches must never key only on path for user/org-specific data.
+4. Websocket connections must validate origin, authenticate explicitly, bind to current session context, and re-authorize privileged subscriptions/actions after connect.
+5. Disable compression on responses that reflect attacker-controlled input alongside secrets or one-time tokens when compression side channels become plausible.
+
+Enforcement:
+
+- Deployment/security-header review.
+- Integration tests for cache headers, cross-origin isolation, and websocket origin/auth behavior.
+
+### CP-28: Dependency, third-party integration, and secret supply chain hygiene
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Commit lockfiles and use reproducible installs for production builds. New dependencies require review of maintenance posture, transitive risk, and install/build scripts.
+2. CI must run dependency vulnerability scanning and flag critical/high findings before merge or release unless a documented exception exists.
+3. Third-party integrations must use least-privilege credentials, explicit outbound timeouts, retry limits, and signature or response validation where supported.
+4. Secrets must come from environment or secret managers, never source control, demo seeds, screenshots, or client bundles. Suspected leaks require rotation, not just deletion.
+5. Non-local environments must disable sample credentials, debug panels, verbose stack-trace pages, and unsafe developer toggles by default.
+
+Enforcement:
+
+- Dependency and lockfile diff review.
+- CI vulnerability scan / secret scan gates where available.
+- Config review for new external integrations.
+
+### CP-29: Adversarial threat modeling and attack-chain review are required for exposed features
+
+Level: `Mandatory`
+
+Requirements:
+
+1. New externally reachable or privilege-sensitive capabilities must document attacker profiles, entry points, trust boundaries, and sensitive assets in the PR, design note, or ADR.
+2. Reviews must consider chained exploits combining lower-severity issues (for example, XSS -> token theft -> websocket reuse -> BOLA, or weak upload validation -> CDN cache poisoning -> stored execution).
+3. High-risk changes must include negative tests for replay, race/double submit, privilege escalation, tenant bleed, stale cache reuse, and impossible-state transitions where applicable.
+4. If context is incomplete, record the assumption and compensating control instead of assuming safety.
+
+Enforcement:
+
+- PR template/security checklist completion for exposed features.
+- Reviewer gate on missing adversarial tests or undocumented trust-boundary changes.
+
+### CP-30: Use coverage plus complexity to prioritize change risk
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Coverage alone is not enough; changed methods/functions with meaningful branching must be reviewed as hotspot candidates using complexity plus coverage together.
+2. New code should target line coverage >= 80%, branch coverage >= 60%, and CRAP-style hotspot scores < 30 where the stack/tooling can calculate them.
+3. Changed methods with projected hotspot scores > 30, or with high complexity and near-zero coverage, must gain tests or lose complexity before feature work continues unless an exception is documented.
+4. Coverage collection must exclude test projects, benchmarks, migrations, generated files, and similarly non-production artifacts so hotspot signals remain useful.
+5. Legacy code can phase in lower thresholds, but touching high-risk methods must improve either coverage or complexity; do not leave both risk factors untouched.
+6. CI should publish machine-readable coverage output and a human-readable hotspot summary for changed modules where the app stack supports it.
+
+Enforcement:
+
+- CI coverage and hotspot reports where tooling exists.
+- Reviewer gate on changed hotspots above threshold without mitigation or documented exception.
+
+### CP-31: MutationObserver is exception-only architecture
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Do not use `MutationObserver` as a general app-state, auth-state, routing, or data-synchronization mechanism.
+2. Prefer explicit React/store/event flows first. Use `ResizeObserver` for size measurement and `IntersectionObserver` for visibility before considering `MutationObserver`.
+3. `MutationObserver` is allowed only for narrow UI adapters such as third-party widgets, `contenteditable` islands, or Shadow DOM integrations where declarative APIs are insufficient.
+4. Approved observers must target the smallest practical subtree, use the narrowest observe options, disconnect on cleanup, and batch expensive follow-up work with `requestAnimationFrame`, microtasks, or debounce/throttle as appropriate.
+5. Observer callbacks must not trigger unbounded dispatch loops, websocket emissions, or permission/session decisions from raw DOM mutations.
+
+Enforcement:
+
+- ESLint restriction on direct `MutationObserver` construction with explicit local waiver requirement.
+- Reviewer gate on observer scope, cleanup, and feedback-loop risk.
+
+## Enforcement matrix
+
+| Rule ID | Primary enforcement | Automation | Merge gate |
+| --- | --- | --- | --- |
+| `CP-01` | Review + lint | Partial | Yes |
+| `CP-02` | Review + integration tests | Partial | Yes |
+| `CP-03` | Complexity tools + review | Partial | Yes |
+| `CP-04` | Lint/static checks | Strong | Yes |
+| `CP-05` | Unit/integration tests | Partial | No (unless safety-critical path) |
+| `CP-06` | Review + concurrency tests | Partial | Yes |
+| `CP-07` | Bench/load checks | Contextual | Contextual |
+| `CP-08` | CI static/lint/compile checks | Strong | Yes |
+| `CP-09` | Search + ADR + review | Partial | Yes |
+| `CP-10` | Contract/integration/e2e tests | Strong | Yes |
+| `CP-11` | CI tests + review evidence | Strong | Yes |
+| `CP-12` | Review checklist | Partial | No |
+| `CP-13` | Frontend review + component reuse check | Partial | Yes |
+| `CP-14` | Review + UI tests | Partial | No |
+| `CP-15` | Review + bundle/perf checks | Partial | No |
+| `CP-16` | Review + benchmark/load evidence | Partial | Yes |
+| `CP-17` | Frontend architecture + contract drift review | Partial | Yes |
+| `CP-18` | Gateway/Middleware review | Partial | Yes |
+| `CP-19` | Review + Static analysis | Partial | Yes |
+| `CP-20` | Backend Auth Tests + Review | Partial | Yes |
+| `CP-21` | Review checklist | Partial | Yes |
+| `CP-22` | CI validation + container tests | Partial | No |
+| `CP-23` | Review on handlers | Partial | Yes |
+| `CP-24` | Review of handlers | Partial | Yes |
+| `CP-25` | Unit tests + review | Strong | Yes |
+| `CP-26` | Bundle review + smoke tests | Partial | Yes |
+| `CP-27` | Security-header/deploy review + integration tests | Partial | Yes |
+| `CP-28` | Dependency/config review + CI scans | Partial | Yes |
+| `CP-29` | PR security checklist + adversarial tests | Partial | Yes |
+| `CP-30` | CI coverage/hotspot reports + review | Partial | Yes |
+| `CP-31` | ESLint restriction + architecture review | Partial | Yes |
+
+## Exception process and ADR linkage
+
+Exceptions are allowed only when both reliability and delivery impact are evaluated.
+
+Required process:
+
+1. Record exception intent in PR using the relevant `CP-*` rule IDs.
+2. Describe risk, compensating controls, and rollback strategy.
+3. Create/update ADR using `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/architecture_decision_log_template.md` for any persistent exception.
+4. Add expiry/review date for temporary exceptions.
+
+Approval:
+
+1. Mandatory-rule exceptions require architecture owner approval.
+2. Contextual-rule exceptions require service owner approval.
+
+## Traceability: Source rule to Ovasabi adaptation
+
+| Source rule | Ovasabi adaptation | Enforcement method |
+| --- | --- | --- |
+| Power of Ten Rule 1 (simple control flow, no goto/recursion) | `CP-01` control flow simplicity with narrow cleanup exception | Review + lint |
+| Power of Ten Rule 2 (bounded loops) | `CP-02` bounded loops/retries/timeouts | Review + integration tests |
+| Power of Ten Rule 3 (no dynamic allocation after init) + JSF AV 206 | `CP-07` allocation discipline for hot paths in Go/TS runtime context | Bench/load + review |
+| Power of Ten Rule 4 (small functions) + JSF AV 1 | `CP-03` function size budgets | Complexity/report + review |
+| Power of Ten Rule 5 (assertion use) | `CP-05` boundary assertions/invariants | Unit/integration tests |
+| Power of Ten Rule 6 (small scope) + JSF coupling/cohesion guidance | `CP-06` minimal mutable shared state and tight scope | Review + tests |
+| Power of Ten Rule 7 (check returns) + JSF AV 115 | `CP-04` explicit return/error handling | Lint/static checks |
+| Power of Ten Rule 8 (restrict preprocessor complexity) | `CP-09` avoid dynamic/obscure flow patterns (`unsafe`/reflection overuse) | Review + search checks |
+| Power of Ten Rule 9 (pointer restriction) + JSF AV 215 pointer arithmetic caution | `CP-09` unsafe/pointer discipline and ADR-gated exceptions | Review + search checks |
+| Power of Ten Rule 10 (warnings + static analysis) + JSF AV 218 | `CP-08` zero-warning static-analysis CI baseline | CI merge gates |
+| JSF AV 3 (cyclomatic complexity <= 20) | `CP-03` target <= 15, hard cap <= 20 with justification | Complexity tools + review |
+| JSF testing guidance (base/derived invariants, structural coverage) | `CP-11` testability-first coverage policy per change class | CI + reviewer evidence |
+
+## Operating note
+
+Rules in this document are normative for new standalone app development and for major refactors in existing services. Teams should prefer verifiable rules over style-only preferences to keep standards enforceable.

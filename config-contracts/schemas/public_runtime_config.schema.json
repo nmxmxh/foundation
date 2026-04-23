@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ovasabi.dev/schemas/public_runtime_config.schema.json",
+  "type": "object",
+  "required": ["apiBaseUrl", "wsBaseUrl", "authMode", "defaultLocale", "transportTimeoutsMs", "wasmAssets"],
+  "properties": {
+    "schemaVersion": { "type": "string", "minLength": 1 },
+    "apiBaseUrl": { "type": "string", "minLength": 1 },
+    "wsBaseUrl": { "type": "string", "minLength": 1 },
+    "authMode": { "enum": ["guest-first", "credential-first", "authenticated-only"] },
+    "defaultLocale": { "type": "string", "minLength": 1 },
+    "featureFlags": { "type": "object", "additionalProperties": { "type": "boolean" } },
+    "transportTimeoutsMs": {
+      "type": "object",
+      "required": ["http", "ws", "wasm"],
+      "properties": {
+        "http": { "type": "integer", "minimum": 1 },
+        "ws": { "type": "integer", "minimum": 1 },
+        "wasm": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "wasmAssets": {
+      "type": "object",
+      "required": ["modulePath"],
+      "properties": {
+        "modulePath": { "type": "string", "minLength": 1 },
+        "compressedModulePath": { "type": "string" }
+      }
+    },
+    "diagnosticsEnabled": { "type": "boolean" },
+    "localeDefaults": {
+      "type": "object",
+      "properties": {
+        "timezone": { "type": "string" },
+        "currency": { "type": "string" }
+      }
+    }
+  },
+  "additionalProperties": false
+}

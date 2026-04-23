@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ovasabi.dev/schemas/server_runtime_config.schema.json",
+  "type": "object",
+  "required": ["public", "database", "redis", "objectStorage", "jwt", "runtimeBudgets", "queues"],
+  "properties": {
+    "schemaVersion": { "type": "string", "minLength": 1 },
+    "public": { "$ref": "./public_runtime_config.schema.json" },
+    "database": {
+      "type": "object",
+      "required": ["url", "maxConnections", "minConnections", "acquireTimeoutMs"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1 },
+        "maxConnections": { "type": "integer", "minimum": 1 },
+        "minConnections": { "type": "integer", "minimum": 0 },
+        "acquireTimeoutMs": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "redis": {
+      "type": "object",
+      "required": ["url", "keyPrefix", "defaultTTLSeconds"],
+      "properties": {
+        "url": { "type": "string", "minLength": 1 },
+        "keyPrefix": { "type": "string", "minLength": 1 },
+        "defaultTTLSeconds": { "type": "integer", "minimum": 1 },
+        "degradeOpen": { "type": "boolean" }
+      }
+    },
+    "objectStorage": {
+      "type": "object",
+      "required": ["endpoint", "bucket", "accessKey", "secretKey", "strict"],
+      "properties": {
+        "endpoint": { "type": "string", "minLength": 1 },
+        "bucket": { "type": "string", "minLength": 1 },
+        "accessKey": { "type": "string", "minLength": 1 },
+        "secretKey": { "type": "string", "minLength": 1 },
+        "strict": { "type": "boolean" }
+      }
+    },
+    "jwt": {
+      "type": "object",
+      "required": ["secret", "issuer"],
+      "properties": {
+        "secret": { "type": "string", "minLength": 1 },
+        "issuer": { "type": "string", "minLength": 1 },
+        "audience": { "type": "string" }
+      }
+    },
+    "runtimeBudgets": {
+      "type": "object",
+      "required": ["dispatchMaxConcurrent", "dispatchAcquireTimeoutMs"],
+      "properties": {
+        "dispatchMaxConcurrent": { "type": "integer", "minimum": 1 },
+        "dispatchAcquireTimeoutMs": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "queues": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["concurrency", "maxRetries"],
+        "properties": {
+          "concurrency": { "type": "integer", "minimum": 1 },
+          "maxRetries": { "type": "integer", "minimum": 0 }
+        }
+      }
+    }
+  },
+  "additionalProperties": false
+}

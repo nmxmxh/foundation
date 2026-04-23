@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package protoapi.test.v1;
+
+option go_package = "github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi/testprotos;testprotos";
+
+message GlobalContext {
+  string user_id = 1;
+  string source = 2;
+  string device_id = 3;
+}
+
+message Metadata {
+  string correlation_id = 1;
+  string request_id = 2;
+  string locale = 3;
+  GlobalContext global_context = 4;
+}
+
+message TestRequest {
+  Metadata metadata = 1;
+  string workspace_id = 2;
+  string content_type = 3;
+  int64 size = 4;
+  string hash = 5;
+}
+
+message TestResponse {
+  string resource_id = 1;
+  string status = 2;
+}

@@ -1,0 +1,14 @@
+# Features directory
+# Organize feature-specific code here
+# Example structure:
+# features/
+#   auth/
+#     components/
+#     hooks/
+#     api.ts
+#     types.ts
+#   dashboard/
+#     components/
+#     hooks/
+#     api.ts
+#     types.ts

@@ -1,0 +1,472 @@
+package runtimehost
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
+)
+
+func TestBufferRoundTrip(t *testing.T) {
+	raw := make([]byte, generated.BUFFER_TOTAL_BYTES)
+	buffer, err := NewBuffer(raw)
+	if err != nil {
+		t.Fatalf("NewBuffer() error = %v", err)
+	}
+
+	if err := buffer.Initialize(4); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	if err := buffer.SetInputBytes([]byte("asset")); err != nil {
+		t.Fatalf("SetInputBytes() error = %v", err)
+	}
+	if err := buffer.SetOutputBytes([]byte("layout")); err != nil {
+		t.Fatalf("SetOutputBytes() error = %v", err)
+	}
+
+	input, err := buffer.InputBytes()
+	if err != nil {
+		t.Fatalf("InputBytes() error = %v", err)
+	}
+	if string(input) != "asset" {
+		t.Fatalf("unexpected input payload %q", string(input))
+	}
+
+	output, err := buffer.OutputBytes()
+	if err != nil {
+		t.Fatalf("OutputBytes() error = %v", err)
+	}
+	if string(output) != "layout" {
+		t.Fatalf("unexpected output payload %q", string(output))
+	}
+
+	if err := buffer.SetDiagnosticsText("degraded"); err != nil {
+		t.Fatalf("SetDiagnosticsText() error = %v", err)
+	}
+	if buffer.DiagnosticsText() != "degraded" {
+		t.Fatalf("unexpected diagnostics payload %q", buffer.DiagnosticsText())
+	}
+}
+
+func TestRuntimeUnitDescriptorValidation(t *testing.T) {
+	descriptor := RuntimeUnitDescriptor{
+		UnitID:               "preview.compute",
+		Role:                 RuntimeRoleCompute,
+		InputSchema:          "media/v1/asset.capnp",
+		OutputSchema:         "preview/v1/layout.capnp",
+		SupportsWASM:         true,
+		SupportsNative:       true,
+		RequiresSharedMemory: true,
+		MaxConcurrency:       1,
+	}
+	if err := descriptor.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestProcessPoolDispatchesRuntimeBufferFrames(t *testing.T) {
+	if os.Getenv("OVRT_PROCESS_HELPER") == "1" {
+		runProcessPoolHelper(t)
+		return
+	}
+
+	pool, err := NewProcessPool(ProcessPoolOptions{
+		Command: []string{os.Args[0], "-test.run=TestProcessPoolDispatchesRuntimeBufferFrames", "--"},
+		Env:     []string{"OVRT_PROCESS_HELPER=1"},
+		Workers: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewProcessPool() error = %v", err)
+	}
+	defer func() {
+		if err := pool.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	response, err := pool.Execute(context.Background(), ProcessRequest{
+		UnitID:        "runtime.echo",
+		Input:         []byte("stable-safe-zone"),
+		ContextHash:   41,
+		ModuleVersion: 7,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if string(response.Output) != "STABLE-SAFE-ZONE" {
+		t.Fatalf("unexpected output payload %q", string(response.Output))
+	}
+	if response.OutputEpoch != 1 {
+		t.Fatalf("unexpected output epoch %d", response.OutputEpoch)
+	}
+	if response.Diagnostics != "" {
+		t.Fatalf("unexpected diagnostics %q", response.Diagnostics)
+	}
+}
+
+func TestProcessPoolSupportsSharedMemoryTransport(t *testing.T) {
+	if !sharedMemorySupported("") {
+		t.Skip("shared memory transport is not supported on this runtime")
+	}
+	if os.Getenv("OVRT_PROCESS_HELPER") == "1" {
+		runProcessPoolHelper(t)
+		return
+	}
+
+	pool, err := NewProcessPool(ProcessPoolOptions{
+		Command:   []string{os.Args[0], "-test.run=TestProcessPoolSupportsSharedMemoryTransport", "--"},
+		Env:       []string{"OVRT_PROCESS_HELPER=1"},
+		Workers:   1,
+		Transport: ProcessTransportSharedMemory,
+	})
+	if err != nil {
+		t.Fatalf("NewProcessPool() error = %v", err)
+	}
+	defer func() {
+		if err := pool.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	response, err := pool.Execute(context.Background(), ProcessRequest{
+		UnitID:        "runtime.echo",
+		Input:         []byte("shared-safe-zone"),
+		ContextHash:   42,
+		ModuleVersion: 7,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if string(response.Output) != "SHARED-SAFE-ZONE" {
+		t.Fatalf("unexpected output payload %q", string(response.Output))
+	}
+}
+
+func TestFFIPoolDispatchesRuntimeBufferFrames(t *testing.T) {
+	libraryPath := buildFFITestLibrary(t)
+	if libraryPath == "" {
+		t.Skip("ffi test library could not be built")
+	}
+
+	pool, err := NewFFIPool(FFIPoolOptions{
+		LibraryPath: libraryPath,
+		Workers:     2,
+	})
+	if err != nil {
+		t.Fatalf("NewFFIPool() error = %v", err)
+	}
+	defer func() {
+		if err := pool.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	response, err := pool.Execute(context.Background(), ProcessRequest{
+		UnitID:        "runtime.echo",
+		Input:         []byte("ffi-safe-zone"),
+		ContextHash:   84,
+		ModuleVersion: 7,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if string(response.Output) != "FFI-SAFE-ZONE" {
+		t.Fatalf("unexpected output payload %q", string(response.Output))
+	}
+	if response.OutputEpoch != 1 {
+		t.Fatalf("unexpected output epoch %d", response.OutputEpoch)
+	}
+}
+
+func TestDefaultProcessWorkerCount(t *testing.T) {
+	cases := map[int]int{
+		1:  1,
+		4:  2,
+		8:  4,
+		16: 8,
+		32: 12,
+	}
+	for cores, want := range cases {
+		if got := defaultProcessWorkerCount(cores); got != want {
+			t.Fatalf("defaultProcessWorkerCount(%d) = %d, want %d", cores, got, want)
+		}
+	}
+}
+
+func TestPreferredWorkerIndexUsesContextHash(t *testing.T) {
+	pool := &ProcessPool{
+		allWorkers: []*processWorker{{}, {}, {}, {}},
+	}
+	if got := pool.preferredWorkerIndex(9); got != 1 {
+		t.Fatalf("preferredWorkerIndex(9) = %d, want 1", got)
+	}
+	if got := pool.preferredWorkerIndex(-10); got != 2 {
+		t.Fatalf("preferredWorkerIndex(-10) = %d, want 2", got)
+	}
+}
+
+func TestResolveProcessTransportMode(t *testing.T) {
+	mode, err := resolveProcessTransportMode(ProcessTransportAuto, "")
+	if err != nil {
+		t.Fatalf("resolveProcessTransportMode(auto) error = %v", err)
+	}
+	if mode != ProcessTransportStdio && mode != ProcessTransportSharedMemory {
+		t.Fatalf("unexpected transport mode: %s", mode)
+	}
+	if _, err := resolveProcessTransportMode(ProcessTransportMode("invalid"), ""); err == nil {
+		t.Fatal("expected invalid transport mode to fail")
+	}
+	if !sharedMemorySupported("") {
+		if _, err := resolveProcessTransportMode(ProcessTransportSharedMemory, ""); err == nil {
+			t.Fatal("expected explicit shared memory mode to fail when unsupported")
+		}
+	} else {
+		mode, err := resolveProcessTransportMode(ProcessTransportSharedMemory, "")
+		if err != nil {
+			t.Fatalf("resolveProcessTransportMode(shm) error = %v", err)
+		}
+		if mode != ProcessTransportSharedMemory {
+			t.Fatalf("unexpected shared memory mode: %s", mode)
+		}
+	}
+	mode, err = resolveProcessTransportMode(ProcessTransportFFI, "")
+	if err != nil {
+		t.Fatalf("resolveProcessTransportMode(ffi) error = %v", err)
+	}
+	if mode != ProcessTransportFFI {
+		t.Fatalf("unexpected ffi mode: %s", mode)
+	}
+}
+
+func runProcessPoolHelper(t *testing.T) {
+	t.Helper()
+	if os.Getenv("OVRT_RUNTIME_TRANSPORT") == string(ProcessTransportSharedMemory) {
+		runSharedMemoryProcessPoolHelper(t)
+		return
+	}
+
+	for {
+		unitID, err := readFrame(os.Stdin)
+		if err != nil {
+			return
+		}
+		raw, err := readFrame(os.Stdin)
+		if err != nil {
+			t.Fatalf("read buffer frame: %v", err)
+		}
+		buffer, err := NewBuffer(raw)
+		if err != nil {
+			t.Fatalf("NewBuffer() error = %v", err)
+		}
+		input, err := buffer.InputBytes()
+		if err != nil {
+			t.Fatalf("InputBytes() error = %v", err)
+		}
+		if err := buffer.SetHeaderInt(generated.INT_IDX_STATUS_CODE, 0); err != nil {
+			t.Fatalf("SetHeaderInt() error = %v", err)
+		}
+		if err := buffer.SetOutputBytes([]byte(strings.ToUpper(string(input)))); err != nil {
+			t.Fatalf("SetOutputBytes() error = %v", err)
+		}
+		if _, err := buffer.AddEpoch(generated.IDX_OUTPUT_WRITTEN, 1); err != nil {
+			t.Fatalf("AddEpoch() error = %v", err)
+		}
+		if string(unitID) == "runtime.fail" {
+			if err := buffer.SetDiagnosticsText("forced failure"); err != nil {
+				t.Fatalf("SetDiagnosticsText() error = %v", err)
+			}
+			if err := buffer.SetHeaderInt(generated.INT_IDX_STATUS_CODE, 1); err != nil {
+				t.Fatalf("SetHeaderInt() error = %v", err)
+			}
+		}
+		if err := writeFrame(os.Stdout, raw); err != nil {
+			t.Fatalf("writeFrame() error = %v", err)
+		}
+	}
+}
+
+func runSharedMemoryProcessPoolHelper(t *testing.T) {
+	t.Helper()
+
+	path := os.Getenv("OVRT_SHM_PATH")
+	if strings.TrimSpace(path) == "" {
+		t.Fatal("OVRT_SHM_PATH is required for shared memory helper")
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("OpenFile() error = %v", err)
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	for {
+		unitID, err := readFrame(os.Stdin)
+		if err != nil {
+			return
+		}
+		raw := make([]byte, generated.BUFFER_TOTAL_BYTES)
+		if _, err := file.ReadAt(raw, 0); err != nil {
+			t.Fatalf("ReadAt() error = %v", err)
+		}
+		buffer, err := NewBuffer(raw)
+		if err != nil {
+			t.Fatalf("NewBuffer() error = %v", err)
+		}
+		input, err := buffer.InputBytes()
+		if err != nil {
+			t.Fatalf("InputBytes() error = %v", err)
+		}
+		if err := buffer.SetHeaderInt(generated.INT_IDX_STATUS_CODE, 0); err != nil {
+			t.Fatalf("SetHeaderInt() error = %v", err)
+		}
+		if err := buffer.SetOutputBytes([]byte(strings.ToUpper(string(input)))); err != nil {
+			t.Fatalf("SetOutputBytes() error = %v", err)
+		}
+		if _, err := buffer.AddEpoch(generated.IDX_OUTPUT_WRITTEN, 1); err != nil {
+			t.Fatalf("AddEpoch() error = %v", err)
+		}
+		if string(unitID) == "runtime.fail" {
+			if err := buffer.SetDiagnosticsText("forced failure"); err != nil {
+				t.Fatalf("SetDiagnosticsText() error = %v", err)
+			}
+			if err := buffer.SetHeaderInt(generated.INT_IDX_STATUS_CODE, 1); err != nil {
+				t.Fatalf("SetHeaderInt() error = %v", err)
+			}
+		}
+		if _, err := file.WriteAt(raw, 0); err != nil {
+			t.Fatalf("WriteAt() error = %v", err)
+		}
+		if err := writeFrame(os.Stdout, nil); err != nil {
+			t.Fatalf("writeFrame() error = %v", err)
+		}
+	}
+}
+
+func buildFFITestLibrary(t *testing.T) string {
+	t.Helper()
+
+	cc, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("cc compiler not available")
+	}
+
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "runtime_ffi_stub.c")
+	libraryPath := filepath.Join(dir, ffiLibraryFileName())
+	source := fmt.Sprintf(`#include <ctype.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+enum {
+  BUFFER_TOTAL_BYTES = %d,
+  INPUT_LENGTH_OFFSET = %d,
+  OUTPUT_LENGTH_OFFSET = %d,
+  STATUS_CODE_OFFSET = %d,
+  OUTPUT_WRITTEN_EPOCH_OFFSET = %d,
+  INPUT_BYTES_OFFSET = %d,
+  OUTPUT_BYTES_OFFSET = %d,
+  DIAGNOSTIC_BYTES_OFFSET = %d,
+  DIAGNOSTIC_MAX_BYTES = %d
+};
+
+static int32_t read_i32(const uint8_t* raw, uintptr_t offset) {
+  int32_t value = 0;
+  memcpy(&value, raw + offset, sizeof(value));
+  return value;
+}
+
+static void write_i32(uint8_t* raw, uintptr_t offset, int32_t value) {
+  memcpy(raw + offset, &value, sizeof(value));
+}
+
+uint32_t ovrt_runtime_abi_version(void) {
+  return 1;
+}
+
+int32_t ovrt_runtime_create(uintptr_t workers, void** out_host, char* err_buf, uintptr_t err_cap) {
+  (void)workers;
+  (void)err_buf;
+  (void)err_cap;
+  if (out_host == NULL) {
+    return 1;
+  }
+  *out_host = (void*)0x1;
+  return 0;
+}
+
+void ovrt_runtime_destroy(void* host) {
+  (void)host;
+}
+
+int32_t ovrt_runtime_process_buffer(void* host, const uint8_t* unit_id, uintptr_t unit_id_len, uint8_t* buffer, uintptr_t buffer_len, char* err_buf, uintptr_t err_cap) {
+  (void)host;
+  (void)unit_id;
+  (void)unit_id_len;
+  if (buffer == NULL || buffer_len != BUFFER_TOTAL_BYTES) {
+    if (err_buf != NULL && err_cap > 0) {
+      snprintf(err_buf, err_cap, "invalid runtime buffer");
+    }
+    return 1;
+  }
+  int32_t input_len = read_i32(buffer, INPUT_LENGTH_OFFSET);
+  if (input_len < 0) {
+    if (err_buf != NULL && err_cap > 0) {
+      snprintf(err_buf, err_cap, "invalid input length");
+    }
+    return 1;
+  }
+  memset(buffer + OUTPUT_BYTES_OFFSET, 0, BUFFER_TOTAL_BYTES - OUTPUT_BYTES_OFFSET);
+  for (int32_t index = 0; index < input_len; index++) {
+    buffer[OUTPUT_BYTES_OFFSET + index] = (uint8_t)toupper((unsigned char)buffer[INPUT_BYTES_OFFSET + index]);
+  }
+  write_i32(buffer, OUTPUT_LENGTH_OFFSET, input_len);
+  write_i32(buffer, STATUS_CODE_OFFSET, 0);
+  memset(buffer + DIAGNOSTIC_BYTES_OFFSET, 0, DIAGNOSTIC_MAX_BYTES);
+  write_i32(buffer, OUTPUT_WRITTEN_EPOCH_OFFSET, read_i32(buffer, OUTPUT_WRITTEN_EPOCH_OFFSET) + 1);
+  return 0;
+}
+`,
+		generated.BUFFER_TOTAL_BYTES,
+		generated.OFFSET_HEADER_INTS+generated.INT_IDX_INPUT_LENGTH*4,
+		generated.OFFSET_HEADER_INTS+generated.INT_IDX_OUTPUT_LENGTH*4,
+		generated.OFFSET_HEADER_INTS+generated.INT_IDX_STATUS_CODE*4,
+		generated.OFFSET_EPOCHS+generated.IDX_OUTPUT_WRITTEN*generated.EPOCH_SLOT_BYTES,
+		generated.OFFSET_INPUT_BYTES,
+		generated.OFFSET_OUTPUT_BYTES,
+		generated.OFFSET_DIAGNOSTIC_BYTES,
+		generated.DIAGNOSTIC_MAX_BYTES,
+	)
+	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	args := []string{"-O2", "-o", libraryPath}
+	switch runtime.GOOS {
+	case "darwin":
+		args = append(args, "-dynamiclib", sourcePath)
+	default:
+		args = append(args, "-shared", "-fPIC", sourcePath)
+	}
+	cmd := exec.Command(cc, args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("compile ffi test library: %v\n%s", err, string(output))
+	}
+	return libraryPath
+}
+
+func ffiLibraryFileName() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "libruntime_ffi_stub.dylib"
+	default:
+		return "libruntime_ffi_stub.so"
+	}
+}
