@@ -84,6 +84,31 @@ scaffold_copy_file() {
     [[ "$(basename "$dest")" == "start.sh" ]] && chmod +x "$dest" 2>/dev/null || true
 }
 
+scaffold_sync_frontend_manifest_contract() {
+    [[ "$PROFILE" == "full" || "$PROFILE" == "frontend" ]] || return 0
+
+    local frontend_root="$PROJECT_PATH/frontend"
+    [[ "$PROFILE" == "frontend" ]] && frontend_root="$PROJECT_PATH"
+
+    local target_manifest="$frontend_root/package.json"
+    local template_manifest="$FOUNDATION_DIR/templates/frontend/package.json"
+    local sync_script="$FOUNDATION_DIR/tooling/scripts/frontend_manifest_sync.mjs"
+
+    [[ -f "$target_manifest" && -f "$template_manifest" && -f "$sync_script" ]] || return 0
+
+    if ! command -v node >/dev/null 2>&1; then
+        foundation_log_warn "Node.js not found; skipping frontend manifest contract sync"
+        return 0
+    fi
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        foundation_log_info "[DRY RUN] Would synchronize frontend manifest contract"
+        return 0
+    fi
+
+    node "$sync_script" "$template_manifest" "$target_manifest"
+}
+
 scaffold_apply_manifest() {
     local manifest="$FOUNDATION_DIR/templates/scaffold.manifest.tsv"
     [[ -f "$manifest" ]] || {
@@ -101,6 +126,7 @@ scaffold_apply_manifest() {
         scaffold_copy_file "$FOUNDATION_DIR/$source" "$PROJECT_PATH/$expanded_dest" "$mode"
     done < "$manifest"
 
+    scaffold_sync_frontend_manifest_contract
     scaffold_remove_empty_pkg_dir
 }
 

@@ -69,6 +69,20 @@ check_file_contains() {
   fi
 }
 
+check_frontend_package_contains() {
+  local label="$1"
+  local file="$2"
+  local pattern="$3"
+  if [[ -f "$file" ]] && grep -Fq "$pattern" "$file"; then
+    echo "[OK] $label"
+  else
+    echo "[FAIL] $label"
+    echo "  missing frontend manifest contract: $pattern"
+    echo "  file: ${file#$target/}"
+    failed=1
+  fi
+}
+
 if [[ ! -f "$foundation_file" ]]; then
   echo "[FAIL] foundation metadata missing"
   exit 1
@@ -98,6 +112,7 @@ check_exists "security workflow" "$target/.github/workflows/security.yml"
 check_absent "stale vendored foundation initializer" "$target/foundation/init.sh"
 check_absent "stale vendored foundation updater" "$target/foundation/scripts/update-project.sh"
 check_absent "unowned root pkg directory" "$target/pkg"
+check_absent "legacy internal domain directory" "$target/internal/domain"
 
 if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "server command" "$target/cmd/server/main.go"
@@ -171,6 +186,16 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then
   check_exists "frontend vitest config" "$frontend_root/vitest.config.ts"
   check_exists "frontend vite env" "$frontend_root/src/vite-env.d.ts"
   check_exists "frontend test setup" "$frontend_root/src/test/setup.ts"
+  check_frontend_package_contains "frontend preview script" "$frontend_root/package.json" '"preview": "vite preview"'
+  check_frontend_package_contains "frontend test script" "$frontend_root/package.json" '"test": "vitest run"'
+  check_frontend_package_contains "frontend test watch script" "$frontend_root/package.json" '"test:watch": "vitest"'
+  check_frontend_package_contains "frontend router dependency" "$frontend_root/package.json" '"react-router-dom"'
+  check_frontend_package_contains "frontend styled-components dependency" "$frontend_root/package.json" '"styled-components"'
+  check_frontend_package_contains "frontend zustand dependency" "$frontend_root/package.json" '"zustand"'
+  check_frontend_package_contains "frontend jsdom dependency" "$frontend_root/package.json" '"jsdom"'
+  check_frontend_package_contains "frontend testing library react" "$frontend_root/package.json" '"@testing-library/react"'
+  check_frontend_package_contains "frontend testing library jest dom" "$frontend_root/package.json" '"@testing-library/jest-dom"'
+  check_frontend_package_contains "frontend testing library user event" "$frontend_root/package.json" '"@testing-library/user-event"'
 fi
 
 if [[ "${WITH_WASM:-false}" == "true" ]]; then

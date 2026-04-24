@@ -15,9 +15,9 @@ services:
     volumes:
       - redis_data:/data
       - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
-    command: redis-server /usr/local/etc/redis/redis.conf --requirepass "${REDIS_PASSWORD}"
+    command: redis-server /usr/local/etc/redis/redis.conf --requirepass "${REDIS_PASSWORD:-redis}"
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -52,8 +52,9 @@ services:
     environment:
       APP_ENV: "${APP_ENV:-production}"
       DATABASE_URL: "${DATABASE_URL:-}"
-      REDIS_URL: "redis://:${REDIS_PASSWORD}@app-redis:6379"
-      JWT_SECRET: "${JWT_SECRET}"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-redis}@app-redis:6379"
+      JWT_SECRET: "${JWT_SECRET:-dev-change-me}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-${JWT_SECRET:-dev-change-me}}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       # Tracing (optional)

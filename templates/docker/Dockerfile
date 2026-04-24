@@ -36,18 +36,15 @@ ARG CACHE_NAMESPACE
 # Copy dependency manifests only. Keep this list narrow so ordinary source edits
 # do not invalidate the module-download layer.
 COPY go.mod ./
+COPY go.sum ./
 COPY foundation/server-kit/go/go.mod ./foundation/server-kit/go/
+COPY foundation/server-kit/go/go.sum ./foundation/server-kit/go/
 COPY foundation/runtime-transport/go/go.mod ./foundation/runtime-transport/go/
+COPY foundation/runtime-transport/go/go.sum ./foundation/runtime-transport/go/
 COPY foundation/config-contracts/go/go.mod ./foundation/config-contracts/go/
 
-RUN --mount=type=bind,source=go.sum,target=/tmp/go.sum,required=false \
-    --mount=type=bind,source=foundation/server-kit/go/go.sum,target=/tmp/server-kit.go.sum,required=false \
-    --mount=type=bind,source=foundation/runtime-transport/go/go.sum,target=/tmp/runtime-transport.go.sum,required=false \
-    --mount=type=cache,id=${CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked \
+RUN --mount=type=cache,id=${CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,id=${CACHE_NAMESPACE}-gobuild,target=/root/.cache/go-build,sharing=locked \
-    cp /tmp/go.sum go.sum 2>/dev/null || touch go.sum; \
-    cp /tmp/server-kit.go.sum foundation/server-kit/go/go.sum 2>/dev/null || true; \
-    cp /tmp/runtime-transport.go.sum foundation/runtime-transport/go/go.sum 2>/dev/null || true; \
     go mod download && touch /tmp/deps-ready
 
 # --- Build Stage ---
