@@ -94,6 +94,14 @@ export type ParsedEventType = {
 };
 
 const terminalStates = new Set(["requested", "success", "failed", "ack"]);
+export const PERFORMANCE_TRANSPORT_ORDER: readonly TransportKind[] = Object.freeze([
+  "sab",
+  "wasm",
+  "transferable",
+  "ws",
+  "http",
+  "postMessage",
+]);
 const envelopeSchemaAliases = Object.freeze({
   v1: "1.0",
 });
@@ -227,7 +235,7 @@ export const createRouteRegistry = (routes: RuntimeRoute[]) => {
     method: normalizeString(route.method).toUpperCase(),
     path: normalizeString(route.path),
     eventType: parseEventType(route.eventType).raw,
-    transportOrder: route.transportOrder ? Array.from(new Set(route.transportOrder)) : undefined,
+    transportOrder: route.transportOrder ? Array.from(new Set(route.transportOrder)) : Array.from(PERFORMANCE_TRANSPORT_ORDER),
   }));
   const byEventType = new Map<string, RuntimeRoute>();
   const byPath = new Map<string, RuntimeRoute>();
@@ -328,7 +336,7 @@ export const createCommandBus = (options: CommandBusOptions) => {
         throw new Error(`dispatch is not allowed for ${normalizedEnvelope.eventType}`);
       }
 
-      const transports = route.transportOrder ?? Array.from(strategiesByKind.keys());
+      const transports = route.transportOrder ?? Array.from(PERFORMANCE_TRANSPORT_ORDER);
       let lastError: Error | null = null;
 
       for (let index = 0; index < transports.length; index += 1) {
@@ -387,6 +395,7 @@ export const createCommandBus = (options: CommandBusOptions) => {
 export * from "./binaryEnvelope";
 export * from "./compression";
 export * from "./http";
+export * from "./offlineQueue";
 export * from "./runtimeMetadata";
 export * from "./websocket";
 

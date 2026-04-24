@@ -107,6 +107,11 @@ func ValidateServer(cfg ServerRuntimeConfig) error {
 	if cfg.RuntimeBudgets.DispatchMaxConcurrent <= 0 || cfg.RuntimeBudgets.DispatchAcquireTimeoutMS <= 0 {
 		return fmt.Errorf("runtime budgets must be positive")
 	}
+	if !sloConfigIsZero(cfg.SLOs) {
+		if err := ValidateSLOs(cfg.SLOs); err != nil {
+			return err
+		}
+	}
 	if !postQuantumConfigIsZero(cfg.Security.PostQuantum) {
 		if err := ValidatePostQuantum(cfg.Security.PostQuantum); err != nil {
 			return err
@@ -136,6 +141,19 @@ func ValidatePostQuantum(cfg PostQuantumConfig) error {
 	return nil
 }
 
+func ValidateSLOs(cfg SLOConfig) error {
+	if cfg.DispatchP99LatencyMS <= 0 {
+		return fmt.Errorf("slos.dispatch_p99_latency_ms must be positive")
+	}
+	if cfg.WorkerSuccessRate <= 0 || cfg.WorkerSuccessRate > 1 {
+		return fmt.Errorf("slos.worker_success_rate must be between 0 and 1")
+	}
+	if cfg.EventDeliveryLagMS <= 0 {
+		return fmt.Errorf("slos.event_delivery_lag_ms must be positive")
+	}
+	return nil
+}
+
 func DerivePublic(cfg ServerRuntimeConfig) PublicRuntimeConfig {
 	public := cfg.Public
 	public.SchemaVersion = NormalizeSchemaVersion(public.SchemaVersion)
@@ -160,4 +178,8 @@ func runtimeMemoryConfigIsZero(cfg RuntimeMemoryConfig) bool {
 
 func postQuantumConfigIsZero(cfg PostQuantumConfig) bool {
 	return cfg.TLSHybridKEM == "" && cfg.SignatureAlgorithm == "" && !cfg.CryptoInventoryRequired && !cfg.LongLivedArtifactSigning
+}
+
+func sloConfigIsZero(cfg SLOConfig) bool {
+	return cfg.DispatchP99LatencyMS == 0 && cfg.WorkerSuccessRate == 0 && cfg.EventDeliveryLagMS == 0
 }

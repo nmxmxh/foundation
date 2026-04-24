@@ -82,6 +82,12 @@ export type RuntimeBudgetConfig = {
   dispatchAcquireTimeoutMs: number;
 };
 
+export type SLOConfig = {
+  dispatchP99LatencyMs: number;
+  workerSuccessRate: number;
+  eventDeliveryLagMs: number;
+};
+
 export type CompressionConfig = {
   apiMinBytes?: number;
   wasmPreferredEncoding?: "br" | "gz" | "identity";
@@ -111,6 +117,7 @@ export type ServerRuntimeConfig = {
   objectStorage: ObjectStorageConfig;
   jwt: JWTConfig;
   runtimeBudgets: RuntimeBudgetConfig;
+  slos?: SLOConfig;
   compression?: CompressionConfig;
   security?: ServerSecurityConfig;
   queues: Record<string, QueueConfig>;
@@ -247,6 +254,7 @@ export const validateServerRuntimeConfig = (value: unknown): value is ServerRunt
   const storage = readRecord(value, "objectStorage", "object_storage");
   const jwt = value.jwt;
   const budgets = readRecord(value, "runtimeBudgets", "runtime_budgets");
+  const slos = readRecord(value, "slos");
   const security = readRecord(value, "security");
   const queues = value.queues;
 
@@ -260,6 +268,10 @@ export const validateServerRuntimeConfig = (value: unknown): value is ServerRunt
     typeof (database.minConnections ?? database.min_connections) !== "number" ||
     !hasPositiveNumber(database.acquireTimeoutMs ?? database.acquire_timeout_ms)
   ) {
+    return false;
+  }
+
+  if (slos !== undefined && !validateSLOConfig(slos)) {
     return false;
   }
 
@@ -303,6 +315,23 @@ export const validateServerRuntimeConfig = (value: unknown): value is ServerRunt
     const maxRetries = queue.maxRetries ?? queue.max_retries;
     return hasPositiveNumber(queue.concurrency) && typeof maxRetries === "number" && maxRetries >= 0;
   });
+};
+
+export const validateSLOConfig = (value: unknown): value is SLOConfig => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const dispatchP99LatencyMs = value.dispatchP99LatencyMs ?? value.dispatch_p99_latency_ms;
+  const workerSuccessRate = value.workerSuccessRate ?? value.worker_success_rate;
+  const eventDeliveryLagMs = value.eventDeliveryLagMs ?? value.event_delivery_lag_ms;
+  return (
+    hasPositiveNumber(dispatchP99LatencyMs) &&
+    typeof workerSuccessRate === "number" &&
+    Number.isFinite(workerSuccessRate) &&
+    workerSuccessRate > 0 &&
+    workerSuccessRate <= 1 &&
+    hasPositiveNumber(eventDeliveryLagMs)
+  );
 };
 
 export const validateServerSecurityConfig = (value: unknown): value is ServerSecurityConfig => {

@@ -28,6 +28,10 @@ This document records the runtime foundation posture for this scaffold.
 2. `SharedArrayBuffer` requires cross-origin isolation headers in dev and preview serving.
 3. The shared runtime buffer contract is a 4KB hot control plane defined in `foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp`.
 4. Large payloads use transferable buffers, binary transport envelopes, or the optional `RuntimeSharedArena` defined in `foundation/runtime-sdk/protocols/system/v1/runtime_shared_arena.capnp`.
+5. Payload routing is automatic by policy:
+   - `<4KB`: 4KB control buffer
+   - `4KB-1MB`: `RuntimeSharedArena` when SAB is available
+   - `>1MB`: explicit async stream chunks with backpressure
 5. The browser runtime now uses a generic role-based worker split:
    - `pulse` watches and drives runtime epochs
    - `compute` owns the preview execution unit
@@ -128,13 +132,22 @@ This document records the runtime foundation posture for this scaffold.
    - try protobuf envelope first
    - fall back to legacy JSON envelope
 6. WebSocket/client traffic now uses the same protobuf envelope family as the internal bus.
-7. The frontend runtime client uses an authenticated websocket upgrade path that fits the existing allowset model:
+7. Internal same-host performance lanes may use `runtime-sdk` `ffi` or `shm` transports with epoch signaling. gRPC is implemented in `server-kit/go/grpcsvc` for cross-host service-to-service calls and polyglot network boundaries; do not replace network RPC with shared memory unless processes share a host and lifecycle.
+8. The default posture is performance-demanding. Managed communication must prefer typed/binary/shared-memory lanes even for ordinary app features; JSON maps are compatibility adapters, not foundation runtime primitives.
+9. `grpcsvc.Envelope` is a JSON compatibility path only. New hot service-to-service calls should use generated protobuf messages or `grpcsvc.Frame`, which carries typed event metadata plus raw payload bytes through a compact binary codec.
+10. Dynamic `map[string]any` JSON decoding is treated as a boundary adapter cost. Domain code may still accept JSON bytes for compatibility, but runtime transport should keep payloads as bytes until the owning handler validates and decodes them.
+11. Registry dispatch keeps protobuf request bytes through typed handlers and defaults typed protobuf responses back to protobuf bytes. HTTP protobuf requests default to protobuf responses when `Accept` is absent.
+12. Frontend route dispatch defaults to the performance ladder: `sab -> wasm -> transferable -> ws -> http -> postMessage`, skipping unavailable strategies and falling back only after observable failure.
+13. Same-process hot dispatch must use direct frame dispatch (`grpcsvc.NewDirectFrameClient` or equivalent typed in-process call), not gRPC. Current guardrail target is zero allocations for direct dispatch; gRPC is a network/polyglot boundary with materially higher stack cost.
+14. Frame codecs expose owned decode and borrowed `FrameView` decode. Use borrowed views for synchronous hot paths that do not retain frame data; use owned `Frame` decode when values escape the incoming buffer lifetime.
+15. Parallel operation chains should use `server-kit/go/chain`: independent operations run concurrently, non-critical failures do not block movement, and critical failures cancel the operation context for the rest of the chain.
+16. The frontend runtime client uses an authenticated websocket upgrade path that fits the existing allowset model:
    - guest socket opens and receives `identity:connection_open:v1:ack`
    - if a session access token exists, the client sends `identity:authenticate_connection:v1:requested` over that socket
    - once the socket is authenticated, route transport preference can safely switch to `ws -> http` for mutation paths without opening broad guest access
-8. Socket authentication is not sufficient on its own. Privileged subscriptions, commands, and topic joins must re-authorize against current session, user, and organization state after connect.
-9. Websocket upgrades must validate allowed origins and close or downgrade sessions when auth state changes or expires.
-10. Event envelopes and payload bodies must enforce schema validation, size limits, and replay/idempotency windows before handler dispatch.
+17. Socket authentication is not sufficient on its own. Privileged subscriptions, commands, and topic joins must re-authorize against current session, user, and organization state after connect.
+18. Websocket upgrades must validate allowed origins and close or downgrade sessions when auth state changes or expires.
+19. Event envelopes and payload bodies must enforce schema validation, size limits, and replay/idempotency windows before handler dispatch.
 
 ## Borrowed patterns
 

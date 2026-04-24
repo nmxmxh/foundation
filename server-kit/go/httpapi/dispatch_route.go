@@ -133,7 +133,8 @@ func payloadFromRequest(r *http.Request) (map[string]any, []byte, string, string
 	if r == nil {
 		return map[string]any{}, nil, "json", "json", nil
 	}
-	responseEncoding := responseEncodingFromRequest(r)
+	requestEncoding := requestEncodingFromRequest(r)
+	responseEncoding := responseEncodingFromRequest(r, requestEncoding)
 	if r.Method == http.MethodGet || r.Method == http.MethodDelete {
 		out := map[string]any{}
 		for key, values := range r.URL.Query() {
@@ -142,11 +143,11 @@ func payloadFromRequest(r *http.Request) (map[string]any, []byte, string, string
 			}
 			out[key] = strings.TrimSpace(values[0])
 		}
-		return out, nil, "json", responseEncoding, nil
+		return out, nil, requestEncoding, responseEncoding, nil
 	}
 
 	if r.Body == nil {
-		return map[string]any{}, nil, "json", responseEncoding, nil
+		return map[string]any{}, nil, requestEncoding, responseEncoding, nil
 	}
 	rawBody, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -154,9 +155,9 @@ func payloadFromRequest(r *http.Request) (map[string]any, []byte, string, string
 	}
 	r.Body = io.NopCloser(bytes.NewReader(rawBody))
 	if len(bytes.TrimSpace(rawBody)) == 0 {
-		return map[string]any{}, rawBody, requestEncodingFromRequest(r), responseEncoding, nil
+		return map[string]any{}, rawBody, requestEncoding, responseEncoding, nil
 	}
-	if requestEncodingFromRequest(r) == "protobuf" {
+	if requestEncoding == "protobuf" {
 		return nil, rawBody, "protobuf", responseEncoding, nil
 	}
 
@@ -204,12 +205,15 @@ func requestEncodingFromRequest(r *http.Request) string {
 	return "json"
 }
 
-func responseEncodingFromRequest(r *http.Request) string {
+func responseEncodingFromRequest(r *http.Request, requestEncoding string) string {
 	if r == nil {
 		return "json"
 	}
 	accept := strings.ToLower(strings.TrimSpace(r.Header.Get("Accept")))
 	if strings.Contains(accept, "application/x-protobuf") || strings.Contains(accept, "application/protobuf") {
+		return "protobuf"
+	}
+	if accept == "" && requestEncoding == "protobuf" {
 		return "protobuf"
 	}
 	return "json"

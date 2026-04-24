@@ -20,7 +20,10 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scaling"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/wsmetrics"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/wsrouting"
 )
 
 type wsRuntime struct {
@@ -29,6 +32,12 @@ type wsRuntime struct {
 	connectionCnt atomic.Int64
 	subscribeOnce sync.Once
 	guestLimiter  *security.RateLimiter
+
+	// Scaling and observability (optional, may be nil)
+	scalingConfig *scaling.Config
+	router        *wsrouting.Router
+	metrics       *wsmetrics.Collector
+	startedAt     time.Time
 }
 
 type wsConnection struct {
@@ -56,16 +65,54 @@ type wsOutbound struct {
 }
 
 func newWSRuntime() *wsRuntime {
+	// Auto-tune based on available CPU cores
+	cfg := scaling.AutoTune()
+
 	return &wsRuntime{
 		upgrader: websocket.Upgrader{
-			ReadBufferSize:  1024,
-			WriteBufferSize: 1024,
+			ReadBufferSize:  cfg.ScaleBuffer(1024),
+			WriteBufferSize: cfg.ScaleBuffer(1024),
 			CheckOrigin: func(_ *http.Request) bool {
 				return true
 			},
 		},
-		guestLimiter: security.NewRateLimiter(240, time.Minute),
+		guestLimiter:  security.NewRateLimiter(cfg.WSGuestRateLimit, time.Minute),
+		scalingConfig: &cfg,
+		metrics:       wsmetrics.NewCollector(""),
+		startedAt:     time.Now().UTC(),
 	}
+}
+
+// WithRouter configures a WebSocket connection router for horizontal scaling.
+// Pass a Redis client and server ID to enable cross-instance routing.
+func (ws *wsRuntime) WithRouter(router *wsrouting.Router) {
+	if ws != nil {
+		ws.router = router
+	}
+}
+
+// WithMetrics configures a custom metrics collector.
+func (ws *wsRuntime) WithMetrics(collector *wsmetrics.Collector) {
+	if ws != nil && collector != nil {
+		ws.metrics = collector
+	}
+}
+
+// Metrics returns the WebSocket metrics snapshot.
+func (ws *wsRuntime) Metrics() *wsmetrics.Snapshot {
+	if ws == nil || ws.metrics == nil {
+		return nil
+	}
+	snap := ws.metrics.Snapshot()
+	return &snap
+}
+
+// ScalingConfig returns the current scaling configuration.
+func (ws *wsRuntime) ScalingConfig() *scaling.Config {
+	if ws == nil {
+		return nil
+	}
+	return ws.scalingConfig
 }
 
 func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
@@ -158,9 +205,27 @@ func (s *Server) registerWSConnection(conn *wsConnection) bool {
 	next := s.ws.connectionCnt.Add(1)
 	if int(next) > s.wsMaxConnections {
 		s.ws.connectionCnt.Add(-1)
+		if s.ws.metrics != nil {
+			s.ws.metrics.RecordConnectionRejected()
+		}
 		return false
 	}
 	s.ws.connections.Store(conn.id, conn)
+
+	// Record metrics
+	if s.ws.metrics != nil {
+		s.ws.metrics.RecordConnectionOpen()
+	}
+
+	// Register with router for cross-instance routing
+	if s.ws.router != nil {
+		_ = s.ws.router.Register(context.Background(), wsrouting.ConnectionInfo{
+			ConnectionID: conn.id,
+			DeviceID:     conn.deviceID,
+			UserID:       conn.userID,
+		})
+	}
+
 	return true
 }
 
@@ -174,6 +239,16 @@ func (s *Server) unregisterWSConnection(conn *wsConnection) {
 	s.ws.connections.Delete(conn.id)
 	s.ws.connectionCnt.Add(-1)
 	_ = conn.conn.Close()
+
+	// Record metrics
+	if s.ws.metrics != nil {
+		s.ws.metrics.RecordConnectionClose()
+	}
+
+	// Unregister from router
+	if s.ws.router != nil {
+		_ = s.ws.router.Unregister(context.Background(), conn.id)
+	}
 }
 
 func (s *Server) runWSReader(ctx context.Context, conn *wsConnection) {
@@ -189,6 +264,12 @@ func (s *Server) runWSReader(ctx context.Context, conn *wsConnection) {
 		if len(payload) == 0 {
 			continue
 		}
+
+		// Record message received
+		if s.ws != nil && s.ws.metrics != nil {
+			s.ws.metrics.RecordMessageReceived(int64(len(payload)))
+		}
+
 		env, binaryFormat, err := s.decodeWSEnvelope(messageType, payload)
 		if err != nil {
 			s.sendWSDomainError(conn, domainerr.Validation("invalid_envelope", "invalid envelope"), "")
@@ -210,8 +291,13 @@ func (s *Server) runWSReader(ctx context.Context, conn *wsConnection) {
 			}
 		}
 
+		// Track dispatch latency
+		dispatchStart := time.Now()
 		if err := s.dispatchWSRequest(ctx, conn, env); err != nil {
 			s.log.Warn("websocket dispatch failed", "event_type", env.EventType, "error", err.Error())
+		}
+		if s.ws != nil && s.ws.metrics != nil {
+			s.ws.metrics.RecordLatency(time.Since(dispatchStart))
 		}
 	}
 }
@@ -229,7 +315,14 @@ func (s *Server) runWSWriter(ctx context.Context, conn *wsConnection) {
 			}
 			_ = conn.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
 			if err := conn.conn.WriteMessage(outbound.messageType, outbound.payload); err != nil {
+				if s.ws != nil && s.ws.metrics != nil {
+					s.ws.metrics.RecordMessageFailed()
+				}
 				return
+			}
+			// Record message sent
+			if s.ws != nil && s.ws.metrics != nil {
+				s.ws.metrics.RecordMessageSent(int64(len(outbound.payload)))
 			}
 		case <-ticker.C:
 			_ = conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
@@ -365,6 +458,11 @@ func (s *Server) handleWSSubscribe(conn *wsConnection, env events.Envelope) {
 	conn.subscriptions[pattern] = struct{}{}
 	conn.mu.Unlock()
 
+	// Record subscription metrics
+	if s.ws != nil && s.ws.metrics != nil {
+		s.ws.metrics.RecordSubscription()
+	}
+
 	_ = s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_subscribe:v1:success",
 		Payload:       map[string]any{"pattern": pattern},
@@ -387,6 +485,11 @@ func (s *Server) handleWSUnsubscribe(conn *wsConnection, env events.Envelope) {
 		delete(conn.subscriptions, pattern)
 	}
 	conn.mu.Unlock()
+
+	// Record unsubscription metrics
+	if s.ws != nil && s.ws.metrics != nil {
+		s.ws.metrics.RecordUnsubscription()
+	}
 
 	_ = s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_unsubscribe:v1:success",
@@ -417,9 +520,23 @@ func (s *Server) maybeUpgradeConnectionAuth(conn *wsConnection, eventType string
 		}
 	}
 	if userID == "" {
+		// Auth failed - no user ID in response
+		if s.ws != nil && s.ws.metrics != nil {
+			s.ws.metrics.RecordAuthFailure()
+		}
 		return
 	}
 	conn.setAuth(userID, orgID, roleID, caps)
+
+	// Record auth success
+	if s.ws != nil && s.ws.metrics != nil {
+		s.ws.metrics.RecordAuthSuccess()
+	}
+
+	// Update router with authenticated user
+	if s.ws != nil && s.ws.router != nil {
+		_ = s.ws.router.UpdateAuth(context.Background(), conn.id, userID)
+	}
 }
 
 func (s *Server) isWSGuestAllowedEvent(eventType string) bool {

@@ -148,12 +148,19 @@ Requirements:
 8. Precompute static lookup structures such as normalized header maps, token sets, compiled boundary patterns, and semantic lookup tables when they are reused across many records.
 9. Repeated normalization/parsing logic must be centralized; when identical raw values recur at scale, bounded caches may be used to avoid repeated work.
 10. Optimize proven hot paths first; precompute static work and stream variable work rather than expanding the same discipline indiscriminately across the whole codebase.
+11. Do not use `map[string]any` JSON envelopes on hot communication paths. Compatibility adapters may decode dynamic JSON at boundaries, but internal lanes must prefer typed protobuf, Cap'n Proto, raw byte frames, or shared-memory descriptors.
+12. Performance-sensitive gRPC calls must use generated proto messages or `grpcsvc.Frame`; `grpcsvc.Envelope` is compatibility-only and must not become the default for new service-to-service traffic.
+13. Foundation defaults assume every project can become performance-demanding. New communication APIs must provide a binary/typed path first and make JSON an explicit fallback.
+14. Typed registry, WebSocket, HTTP, and gRPC paths must preserve payload bytes until the owning handler validates/decodes them; avoid intermediate map materialization for observability, routing, or convenience.
+15. Same-process hot communication must not use gRPC, HTTP, Redis, or JSON. Use direct typed calls, direct frame dispatch, worker channels, or shared-memory descriptors so the hot path can remain zero-copy or near-zero allocation.
+16. Serialization boundaries should expose both owned and borrowed decode APIs where safe. Borrowed views are preferred inside synchronous hot paths; owned decoded values are required when data escapes the frame lifetime.
 
 Enforcement:
 
 - Reviewer gate on regex compilation inside hot loops, repeated parsing of identical values, and unnecessary full-buffer reads.
 - Benchmark/profile or representative fixture evidence for parser, ingestion, worker, and realtime hot path changes.
 - Load test regression gate for queue and WS critical paths.
+- Dev-only performance guard: `foundation/tooling/scripts/performance_check.sh`.
 
 ### CP-08: Zero-warning mindset and static analysis in CI
 
@@ -583,6 +590,28 @@ Enforcement:
 - Config-contract validation for `security.postQuantum`.
 - Reviewer gate on new crypto code without inventory, migration, and performance notes.
 
+### CP-34: Observability, SLOs, and fault tests are foundation requirements
+
+Level: `Mandatory`
+
+Requirements:
+
+1. New externally reachable handlers and workers must record low-cardinality counters, latency histograms, and queue/depth gauges where meaningful.
+2. Services with production traffic must define SLO thresholds for dispatch p99 latency, worker success rate, and event delivery lag.
+3. New queue, Redis, database, or runtime integration paths must include at least one negative-path or chaos/fault-injection test.
+4. Runtime payload movement changes must include unit tests and benchmark coverage for control, arena, and streaming lanes.
+5. Profiling endpoints must be disabled by default and protected by admin capability or equivalent authorization when enabled.
+6. gRPC service-to-service lanes must enforce auth metadata, message-size limits, deadline propagation, and bufconn contract tests.
+7. Parallel chains must distinguish critical and non-critical failures; critical failures must cancel dependent work through context cancellation.
+8. gRPC hot lanes must include allocation budget tests under the `perf` build tag when they introduce or alter serialization codecs.
+9. gRPC allocation budgets are boundary budgets, not hot-path budgets. Same-process frame dispatch must have a zero-allocation or explicitly justified near-zero-allocation benchmark.
+10. Frame codec changes must benchmark owned decode, append-buffer decode, borrowed view decode, generated protobuf `MarshalAppend`, and RPC boundary cost separately.
+
+Enforcement:
+
+- `server-kit/go/metrics`, `slo`, `chaos`, `contracttest`, and `profiling` unit coverage.
+- Scaffold checks for runtime streaming/arena APIs, performance guard tooling, and config-contract SLO support.
+
 ## Enforcement matrix
 
 | Rule ID | Primary enforcement | Automation | Merge gate |
@@ -620,6 +649,7 @@ Enforcement:
 | `CP-31` | ESLint restriction + architecture review | Partial | Yes |
 | `CP-32` | Scaffold checks + runtime tests | Partial | Yes |
 | `CP-33` | Config validation + crypto review | Partial | Yes |
+| `CP-34` | Metrics/SLO/chaos/runtime benchmark tests | Partial | Yes |
 
 ## Exception process and ADR linkage
 

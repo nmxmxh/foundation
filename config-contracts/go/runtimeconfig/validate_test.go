@@ -54,6 +54,11 @@ func TestValidateServerRuntimeConfig(t *testing.T) {
 			DispatchMaxConcurrent:    8,
 			DispatchAcquireTimeoutMS: 1000,
 		},
+		SLOs: SLOConfig{
+			DispatchP99LatencyMS: 100,
+			WorkerSuccessRate:    0.999,
+			EventDeliveryLagMS:   500,
+		},
 		Security: ServerSecurityConfig{
 			PostQuantum: PostQuantumConfig{
 				TLSHybridKEM:             "auto",

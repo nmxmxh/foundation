@@ -74,6 +74,12 @@ type RuntimeBudgetConfig struct {
 	DispatchAcquireTimeoutMS int `json:"dispatch_acquire_timeout_ms"`
 }
 
+type SLOConfig struct {
+	DispatchP99LatencyMS int     `json:"dispatch_p99_latency_ms"`
+	WorkerSuccessRate    float64 `json:"worker_success_rate"`
+	EventDeliveryLagMS   int     `json:"event_delivery_lag_ms"`
+}
+
 type CompressionConfig struct {
 	APIMinBytes           int    `json:"api_min_bytes"`
 	WASMPreferredEncoding string `json:"wasm_preferred_encoding"`
@@ -103,6 +109,7 @@ type ServerRuntimeConfig struct {
 	ObjectStorage  ObjectStorageConfig    `json:"object_storage"`
 	JWT            JWTConfig              `json:"jwt"`
 	RuntimeBudgets RuntimeBudgetConfig    `json:"runtime_budgets"`
+	SLOs           SLOConfig              `json:"slos,omitempty"`
 	Compression    CompressionConfig      `json:"compression"`
 	Security       ServerSecurityConfig   `json:"security,omitempty"`
 	Queues         map[string]QueueConfig `json:"queues"`

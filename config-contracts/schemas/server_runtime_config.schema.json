@@ -54,6 +54,16 @@
         "dispatchAcquireTimeoutMs": { "type": "integer", "minimum": 1 }
       }
     },
+    "slos": {
+      "type": "object",
+      "required": ["dispatchP99LatencyMs", "workerSuccessRate", "eventDeliveryLagMs"],
+      "properties": {
+        "dispatchP99LatencyMs": { "type": "integer", "minimum": 1 },
+        "workerSuccessRate": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+        "eventDeliveryLagMs": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false
+    },
     "security": {
       "type": "object",
       "properties": {
