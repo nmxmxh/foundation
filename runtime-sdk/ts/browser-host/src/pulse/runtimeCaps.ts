@@ -1,10 +1,27 @@
 import type { RuntimeCapabilities, RuntimeCapabilityIssue } from "../types";
 
+const hasSharedWebAssemblyMemory = (): boolean => {
+  if (typeof WebAssembly === "undefined" || typeof SharedArrayBuffer === "undefined") {
+    return false;
+  }
+  try {
+    const memory = new WebAssembly.Memory({
+      initial: 1,
+      maximum: 1,
+      shared: true,
+    });
+    return memory.buffer instanceof SharedArrayBuffer;
+  } catch {
+    return false;
+  }
+};
+
 export const getRuntimeCapabilities = (): RuntimeCapabilities => {
   const capabilities = {
     crossOriginIsolated:
       typeof globalThis.crossOriginIsolated === "boolean" ? globalThis.crossOriginIsolated : false,
     sharedArrayBuffer: typeof SharedArrayBuffer !== "undefined",
+    webAssemblySharedMemory: hasSharedWebAssemblyMemory(),
     worker: typeof Worker !== "undefined",
     waitAsync: typeof (Atomics as { waitAsync?: unknown }).waitAsync === "function",
   };
@@ -31,13 +48,26 @@ export const getRuntimeCapabilities = (): RuntimeCapabilities => {
       fallback: "main-thread",
     });
   }
+  if (!capabilities.webAssemblySharedMemory) {
+    issues.push({
+      capability: "webAssemblySharedMemory",
+      reason: "Shared WebAssembly.Memory is unavailable; WASM worker units must use copy/transfer fallback",
+      fallback: "unsupported",
+    });
+  }
 
   return {
     ...capabilities,
     issues,
-    supportsWorkerPulse: issues.length === 0,
+    supportsWorkerPulse:
+      capabilities.crossOriginIsolated && capabilities.sharedArrayBuffer && capabilities.worker,
     supportsSharedMemoryRuntime:
-      capabilities.crossOriginIsolated && capabilities.sharedArrayBuffer,
+      capabilities.crossOriginIsolated && capabilities.sharedArrayBuffer && capabilities.worker,
+    supportsSharedWasmMemory:
+      capabilities.crossOriginIsolated &&
+      capabilities.sharedArrayBuffer &&
+      capabilities.worker &&
+      capabilities.webAssemblySharedMemory,
   };
 };
 

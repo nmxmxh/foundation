@@ -48,6 +48,37 @@ func ValidatePublic(cfg PublicRuntimeConfig) error {
 	if cfg.WASMAssets.ModulePath == "" {
 		return fmt.Errorf("wasm_assets.module_path is required")
 	}
+	if !runtimeMemoryConfigIsZero(cfg.RuntimeMemory) {
+		if err := ValidateRuntimeMemory(cfg.RuntimeMemory); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ValidateRuntimeMemory(cfg RuntimeMemoryConfig) error {
+	if !oneOf(cfg.SharedMemory, "off", "auto", "required") {
+		return fmt.Errorf("runtime_memory.shared_memory must be off, auto, or required")
+	}
+	if len(cfg.TransportOrder) == 0 {
+		return fmt.Errorf("runtime_memory.transport_order requires at least one transport")
+	}
+	for _, transport := range cfg.TransportOrder {
+		if !oneOf(transport, "postMessage", "transferable", "sab", "ws", "http") {
+			return fmt.Errorf("runtime_memory.transport_order contains unsupported transport %q", transport)
+		}
+	}
+	if len(cfg.Compression) == 0 {
+		return fmt.Errorf("runtime_memory.compression requires at least one encoding")
+	}
+	for _, encoding := range cfg.Compression {
+		if !oneOf(encoding, "identity", "gzip", "br", "deflate") {
+			return fmt.Errorf("runtime_memory.compression contains unsupported encoding %q", encoding)
+		}
+	}
+	if cfg.ArenaBytes < 0 {
+		return fmt.Errorf("runtime_memory.arena_bytes must be positive when set")
+	}
 	return nil
 }
 
@@ -76,6 +107,11 @@ func ValidateServer(cfg ServerRuntimeConfig) error {
 	if cfg.RuntimeBudgets.DispatchMaxConcurrent <= 0 || cfg.RuntimeBudgets.DispatchAcquireTimeoutMS <= 0 {
 		return fmt.Errorf("runtime budgets must be positive")
 	}
+	if !postQuantumConfigIsZero(cfg.Security.PostQuantum) {
+		if err := ValidatePostQuantum(cfg.Security.PostQuantum); err != nil {
+			return err
+		}
+	}
 	if len(cfg.Queues) == 0 {
 		return fmt.Errorf("at least one queue configuration is required")
 	}
@@ -90,6 +126,16 @@ func ValidateServer(cfg ServerRuntimeConfig) error {
 	return nil
 }
 
+func ValidatePostQuantum(cfg PostQuantumConfig) error {
+	if !oneOf(cfg.TLSHybridKEM, "auto", "required", "disabled") {
+		return fmt.Errorf("security.post_quantum.tls_hybrid_kem must be auto, required, or disabled")
+	}
+	if !oneOf(cfg.SignatureAlgorithm, "classical", "ml-dsa", "slh-dsa") {
+		return fmt.Errorf("security.post_quantum.signature_algorithm must be classical, ml-dsa, or slh-dsa")
+	}
+	return nil
+}
+
 func DerivePublic(cfg ServerRuntimeConfig) PublicRuntimeConfig {
 	public := cfg.Public
 	public.SchemaVersion = NormalizeSchemaVersion(public.SchemaVersion)
@@ -97,4 +143,21 @@ func DerivePublic(cfg ServerRuntimeConfig) PublicRuntimeConfig {
 		public.SchemaVersion = NormalizeSchemaVersion(cfg.SchemaVersion)
 	}
 	return public
+}
+
+func oneOf(value string, allowed ...string) bool {
+	for _, item := range allowed {
+		if value == item {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimeMemoryConfigIsZero(cfg RuntimeMemoryConfig) bool {
+	return cfg.SharedMemory == "" && len(cfg.TransportOrder) == 0 && len(cfg.Compression) == 0 && cfg.ArenaBytes == 0 && !cfg.RequireSharedWASMMemory
+}
+
+func postQuantumConfigIsZero(cfg PostQuantumConfig) bool {
+	return cfg.TLSHybridKEM == "" && cfg.SignatureAlgorithm == "" && !cfg.CryptoInventoryRequired && !cfg.LongLivedArtifactSigning
 }

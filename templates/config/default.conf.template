@@ -16,11 +16,20 @@ server {
     root /usr/share/nginx/html;
     index index.html;
 
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    add_header Cross-Origin-Resource-Policy "same-origin" always;
+    add_header Origin-Agent-Cluster "?1" always;
+
     # Health check endpoint
     location /nginx-health {
         access_log off;
         return 200 "healthy\n";
         add_header Content-Type text/plain;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Embedder-Policy "require-corp" always;
+        add_header Cross-Origin-Resource-Policy "same-origin" always;
+        add_header Origin-Agent-Cluster "?1" always;
     }
 
     # API proxy
@@ -62,6 +71,10 @@ server {
     location /assets/ {
         expires 1y;
         add_header Cache-Control "public, immutable";
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Embedder-Policy "require-corp" always;
+        add_header Cross-Origin-Resource-Policy "same-origin" always;
+        add_header Origin-Agent-Cluster "?1" always;
         try_files $uri =404;
     }
 
@@ -70,6 +83,10 @@ server {
         expires 1y;
         add_header Cache-Control "public, immutable";
         add_header Content-Type "application/wasm";
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Embedder-Policy "require-corp" always;
+        add_header Cross-Origin-Resource-Policy "same-origin" always;
+        add_header Origin-Agent-Cluster "?1" always;
         try_files $uri =404;
     }
 
@@ -81,6 +98,10 @@ server {
         location ~* \.html$ {
             expires -1;
             add_header Cache-Control "no-cache, no-store, must-revalidate";
+            add_header Cross-Origin-Opener-Policy "same-origin" always;
+            add_header Cross-Origin-Embedder-Policy "require-corp" always;
+            add_header Cross-Origin-Resource-Policy "same-origin" always;
+            add_header Origin-Agent-Cluster "?1" always;
         }
     }
 

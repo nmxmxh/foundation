@@ -726,7 +726,7 @@ func main() {
 
 	cfg := Config{
 		Title:       "{{PROJECT_NAME}} API",
-		Version:     "1.0.0",
+		Version:     "{{FOUNDATION_VERSION}}",
 		Description: "API documentation for {{PROJECT_NAME}}",
 		PublicPaths: []string{
 			"/v1/health",

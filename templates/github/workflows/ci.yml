@@ -15,6 +15,11 @@ env:
   # Customize these for your project
   PROJECT_NAME: "{{PROJECT_NAME}}"
   TEST_DB_NAME: "{{PROJECT_NAME}}_test"
+  TEST_DB_HOST: localhost
+  TEST_DB_PORT: "5432"
+  TEST_DB_USER: postgres
+  TEST_DB_PASSWORD: postgres
+  TEST_REDIS_URL: redis://localhost:6379/0
 
 jobs:
   test:
@@ -68,22 +73,28 @@ jobs:
       # - name: Generate protobuf code
       #   run: make proto
 
+      - name: Install migration tool
+        run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
+
       - name: Run database migrations
         env:
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/${{ env.TEST_DB_NAME }}?sslmode=disable
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?sslmode=disable
         run: |
-          go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest
-          migrate -path migrations -database "$DATABASE_URL" up
+          make migrate-test
 
       - name: Run tests
         env:
           CI: true
           APP_ENV: test
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432/${{ env.TEST_DB_NAME }}?sslmode=disable
-          REDIS_URL: redis://localhost:6379
+          TEST_INFRA_REQUIRED: true
+          TEST_REDIS_REQUIRED: true
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?sslmode=disable
+          DATABASE_URL: postgres://postgres:postgres@localhost:${{ env.TEST_DB_PORT }}/${{ env.TEST_DB_NAME }}?sslmode=disable
+          REDIS_URL: ${{ env.TEST_REDIS_URL }}
           JWT_SECRET: test-secret-key
         run: |
-          go test -v -race -coverprofile=coverage.out ./...
+          make test-unit
+          make test-integration
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4

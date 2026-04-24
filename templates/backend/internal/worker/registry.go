@@ -1,6 +1,9 @@
 package worker
 
 import (
+	"os"
+	"strconv"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/riverqueue/river"
 
@@ -28,15 +31,25 @@ func RegisterAll(workers *river.Workers, deps *Dependencies) {
 }
 
 // DefaultQueueConfig returns queue configuration for River.
-// Adjust worker counts based on your application's needs.
+// Queue limits are environment-driven to keep runtime concurrency tunable.
 func DefaultQueueConfig(cfg *config.Config) map[string]river.QueueConfig {
-	defaultWorkers := 10
-	processingWorkers := 4
-	scheduledWorkers := 2
+	_ = cfg
 
 	return map[string]river.QueueConfig{
-		river.QueueDefault:       {MaxWorkers: defaultWorkers},
-		"processing":             {MaxWorkers: processingWorkers},
-		"scheduled_maintenance":  {MaxWorkers: scheduledWorkers},
+		river.QueueDefault:      {MaxWorkers: envInt("QUEUE_WORKERS_DEFAULT", 10)},
+		"processing":            {MaxWorkers: envInt("QUEUE_WORKERS_PROCESSING", 4)},
+		"scheduled_maintenance": {MaxWorkers: envInt("QUEUE_WORKERS_SCHEDULED", 2)},
 	}
+}
+
+func envInt(key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
 }

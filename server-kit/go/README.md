@@ -25,6 +25,7 @@ Handles transport-level optimization.
 ### 4. Security (`/security`)
 - **RedisRateLimiter**: Implements sliding-window rate limiting.
 - **Middleware**: Injects stricter default security headers, exact-origin CORS handling, hashed credential-aware rate-limit fingerprints, and JWT validation with RBAC (Role-Based Access Control) support.
+- **Post-Quantum TLS Helper**: `ApplyPostQuantumTLS` prefers hybrid TLS key exchange at connection setup while keeping app request handlers on the same hot path.
 - **Redaction Helpers**: Reusable helpers sanitize session identifiers and secret-bearing telemetry fields before analytics or logs persist them.
 
 ### 5. Bootstrap (`/bootstrap`)

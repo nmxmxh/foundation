@@ -16,6 +16,18 @@ export type WASMAssets = {
   compressedModulePath?: string;
 };
 
+export type RuntimeSharedMemoryMode = "off" | "auto" | "required";
+export type RuntimeTransportMode = "postMessage" | "transferable" | "sab" | "ws" | "http";
+export type RuntimeCompressionEncoding = "identity" | "gzip" | "br" | "deflate";
+
+export type RuntimeMemoryConfig = {
+  sharedMemory: RuntimeSharedMemoryMode;
+  transportOrder: RuntimeTransportMode[];
+  compression: RuntimeCompressionEncoding[];
+  arenaBytes?: number;
+  requireSharedWasmMemory?: boolean;
+};
+
 export type LocaleDefaults = {
   timezone?: string;
   currency?: string;
@@ -30,6 +42,7 @@ export type PublicRuntimeConfig = {
   featureFlags: Record<string, boolean>;
   transportTimeoutsMs: TransportTimeouts;
   wasmAssets: WASMAssets;
+  runtimeMemory?: RuntimeMemoryConfig;
   diagnosticsEnabled: boolean;
   localeDefaults?: LocaleDefaults;
 };
@@ -79,6 +92,17 @@ export type QueueConfig = {
   maxRetries: number;
 };
 
+export type PostQuantumConfig = {
+  tlsHybridKEM: "auto" | "required" | "disabled";
+  signatureAlgorithm: "classical" | "ml-dsa" | "slh-dsa";
+  cryptoInventoryRequired: boolean;
+  longLivedArtifactSigning: boolean;
+};
+
+export type ServerSecurityConfig = {
+  postQuantum?: PostQuantumConfig;
+};
+
 export type ServerRuntimeConfig = {
   schemaVersion?: string;
   public: PublicRuntimeConfig;
@@ -88,6 +112,7 @@ export type ServerRuntimeConfig = {
   jwt: JWTConfig;
   runtimeBudgets: RuntimeBudgetConfig;
   compression?: CompressionConfig;
+  security?: ServerSecurityConfig;
   queues: Record<string, QueueConfig>;
 };
 
@@ -125,6 +150,16 @@ const readRecord = (value: Record<string, unknown>, ...keys: string[]) => {
   return undefined;
 };
 
+const readArray = (value: Record<string, unknown>, ...keys: string[]) => {
+  for (const key of keys) {
+    const candidate = value[key];
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+};
+
 export const normalizeConfigSchemaVersion = (value: string | undefined): string => {
   const trimmed = value?.trim() ?? "";
   if (trimmed === "") {
@@ -153,6 +188,7 @@ export const validatePublicRuntimeConfig = (value: unknown): value is PublicRunt
   const timeouts = readRecord(value, "transportTimeoutsMs", "transport_timeouts_ms");
   const assets = readRecord(value, "wasmAssets", "wasm_assets");
   const featureFlags = readRecord(value, "featureFlags", "feature_flags");
+  const runtimeMemory = readRecord(value, "runtimeMemory", "runtime_memory");
   const diagnosticsEnabled = readBoolean(value, "diagnosticsEnabled", "diagnostics_enabled");
   return (
     readString(value, "apiBaseUrl", "api_base_url") !== "" &&
@@ -166,7 +202,30 @@ export const validatePublicRuntimeConfig = (value: unknown): value is PublicRunt
     hasPositiveNumber(timeouts.wasm) &&
     isRecord(assets) &&
     readString(assets, "modulePath", "module_path") !== "" &&
+    (runtimeMemory === undefined || validateRuntimeMemoryConfig(runtimeMemory)) &&
     (diagnosticsEnabled === undefined || typeof diagnosticsEnabled === "boolean")
+  );
+};
+
+export const validateRuntimeMemoryConfig = (value: unknown): value is RuntimeMemoryConfig => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const sharedMemory = readString(value, "sharedMemory", "shared_memory");
+  const transportOrder = readArray(value, "transportOrder", "transport_order");
+  const compression = readArray(value, "compression");
+  const arenaBytes = value.arenaBytes ?? value.arena_bytes;
+  const requireSharedWasmMemory = value.requireSharedWasmMemory ?? value.require_shared_wasm_memory;
+  return (
+    ["off", "auto", "required"].includes(sharedMemory) &&
+    Array.isArray(transportOrder) &&
+    transportOrder.length > 0 &&
+    transportOrder.every((item) => ["postMessage", "transferable", "sab", "ws", "http"].includes(String(item))) &&
+    Array.isArray(compression) &&
+    compression.length > 0 &&
+    compression.every((item) => ["identity", "gzip", "br", "deflate"].includes(String(item))) &&
+    (arenaBytes === undefined || (typeof arenaBytes === "number" && Number.isFinite(arenaBytes) && arenaBytes > 0)) &&
+    (requireSharedWasmMemory === undefined || typeof requireSharedWasmMemory === "boolean")
   );
 };
 
@@ -188,6 +247,7 @@ export const validateServerRuntimeConfig = (value: unknown): value is ServerRunt
   const storage = readRecord(value, "objectStorage", "object_storage");
   const jwt = value.jwt;
   const budgets = readRecord(value, "runtimeBudgets", "runtime_budgets");
+  const security = readRecord(value, "security");
   const queues = value.queues;
 
   if (!isRecord(database) || !isRecord(redis) || !isRecord(storage) || !isRecord(jwt) || !isRecord(budgets) || !isRecord(queues)) {
@@ -232,6 +292,10 @@ export const validateServerRuntimeConfig = (value: unknown): value is ServerRunt
     return false;
   }
 
+  if (security !== undefined && !validateServerSecurityConfig(security)) {
+    return false;
+  }
+
   return Object.values(queues).every((queue) => {
     if (!isRecord(queue)) {
       return false;
@@ -239,6 +303,33 @@ export const validateServerRuntimeConfig = (value: unknown): value is ServerRunt
     const maxRetries = queue.maxRetries ?? queue.max_retries;
     return hasPositiveNumber(queue.concurrency) && typeof maxRetries === "number" && maxRetries >= 0;
   });
+};
+
+export const validateServerSecurityConfig = (value: unknown): value is ServerSecurityConfig => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const postQuantum = readRecord(value, "postQuantum", "post_quantum");
+  if (postQuantum === undefined) {
+    return true;
+  }
+  return validatePostQuantumConfig(postQuantum);
+};
+
+export const validatePostQuantumConfig = (value: unknown): value is PostQuantumConfig => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const tlsHybridKEM = readString(value, "tlsHybridKEM", "tls_hybrid_kem");
+  const signatureAlgorithm = readString(value, "signatureAlgorithm", "signature_algorithm");
+  const cryptoInventoryRequired = value.cryptoInventoryRequired ?? value.crypto_inventory_required;
+  const longLivedArtifactSigning = value.longLivedArtifactSigning ?? value.long_lived_artifact_signing;
+  return (
+    ["auto", "required", "disabled"].includes(tlsHybridKEM) &&
+    ["classical", "ml-dsa", "slh-dsa"].includes(signatureAlgorithm) &&
+    typeof cryptoInventoryRequired === "boolean" &&
+    typeof longLivedArtifactSigning === "boolean"
+  );
 };
 
 export const normalizePublicRuntimeConfig = (config: PublicRuntimeConfig): PublicRuntimeConfig => ({

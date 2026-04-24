@@ -1,9 +1,11 @@
 import type { RuntimeEnvelope, RuntimeRoute, TransportStrategy } from "./index";
+import { compressRuntimeBytes, type RuntimeCompressionOptions } from "./compression";
 
 type HTTPTransportOptions = {
   baseUrl: string;
   fetchImpl?: typeof fetch;
   getHeaders?: () => HeadersInit;
+  compression?: RuntimeCompressionOptions;
 };
 
 const CONTENT_TYPE_JSON = "application/json";
@@ -117,7 +119,7 @@ const buildRequest = async <TPayload>(options: HTTPTransportOptions, route: Runt
     headers.set("Content-Type", CONTENT_TYPE_JSON);
   }
 
-  const compressed = await compressIfNeeded(body, headers);
+  const compressed = await compressIfNeeded(body, headers, options.compression);
   return {
     url: url.toString(),
     method,
@@ -126,11 +128,11 @@ const buildRequest = async <TPayload>(options: HTTPTransportOptions, route: Runt
   };
 };
 
-const compressIfNeeded = async (body: BodyInit, headers: Headers): Promise<BodyInit> => {
-  if (typeof CompressionStream === "undefined") {
-    return body;
-  }
-
+const compressIfNeeded = async (
+  body: BodyInit,
+  headers: Headers,
+  options: RuntimeCompressionOptions = { enabled: true, minBytes: 4096, preferred: ["gzip"] }
+): Promise<BodyInit> => {
   let data: Uint8Array;
   if (typeof body === "string") {
     data = new TextEncoder().encode(body);
@@ -140,20 +142,12 @@ const compressIfNeeded = async (body: BodyInit, headers: Headers): Promise<BodyI
     return body;
   }
 
-  if (data.length < 4096) {
+  const compressed = await compressRuntimeBytes(data, options);
+  if (compressed.encoding === "identity") {
     return body;
   }
-
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(data);
-      controller.close();
-    },
-  }).pipeThrough(new CompressionStream("gzip"));
-
-  headers.set("Content-Encoding", "gzip");
-  const response = new Response(stream);
-  return await response.blob();
+  headers.set("Content-Encoding", compressed.encoding);
+  return new Uint8Array(compressed.bytes).buffer as ArrayBuffer;
 };
 
 const optionsHeaders = (options: HTTPTransportOptions): Headers => {

@@ -11,22 +11,31 @@ type WASMAssets struct {
 	CompressedModulePath string `json:"compressed_module_path"`
 }
 
+type RuntimeMemoryConfig struct {
+	SharedMemory            string   `json:"shared_memory"`
+	TransportOrder          []string `json:"transport_order"`
+	Compression             []string `json:"compression"`
+	ArenaBytes              int      `json:"arena_bytes,omitempty"`
+	RequireSharedWASMMemory bool     `json:"require_shared_wasm_memory,omitempty"`
+}
+
 type LocaleDefaults struct {
 	Timezone string `json:"timezone"`
 	Currency string `json:"currency"`
 }
 
 type PublicRuntimeConfig struct {
-	SchemaVersion       string            `json:"schemaVersion,omitempty"`
-	APIBaseURL          string            `json:"api_base_url"`
-	WSBaseURL           string            `json:"ws_base_url"`
-	AuthMode            string            `json:"auth_mode"`
-	DefaultLocale       string            `json:"default_locale"`
-	FeatureFlags        map[string]bool   `json:"feature_flags"`
-	TransportTimeoutsMS TransportTimeouts `json:"transport_timeouts_ms"`
-	WASMAssets          WASMAssets        `json:"wasm_assets"`
-	DiagnosticsEnabled  bool              `json:"diagnostics_enabled"`
-	LocaleDefaults      LocaleDefaults    `json:"locale_defaults"`
+	SchemaVersion       string              `json:"schemaVersion,omitempty"`
+	APIBaseURL          string              `json:"api_base_url"`
+	WSBaseURL           string              `json:"ws_base_url"`
+	AuthMode            string              `json:"auth_mode"`
+	DefaultLocale       string              `json:"default_locale"`
+	FeatureFlags        map[string]bool     `json:"feature_flags"`
+	TransportTimeoutsMS TransportTimeouts   `json:"transport_timeouts_ms"`
+	WASMAssets          WASMAssets          `json:"wasm_assets"`
+	RuntimeMemory       RuntimeMemoryConfig `json:"runtime_memory,omitempty"`
+	DiagnosticsEnabled  bool                `json:"diagnostics_enabled"`
+	LocaleDefaults      LocaleDefaults      `json:"locale_defaults"`
 }
 
 type DatabaseConfig struct {
@@ -47,11 +56,11 @@ type ObjectStorageConfig struct {
 	Endpoint        string `json:"endpoint"`
 	PresignEndpoint string `json:"presign_endpoint"`
 	Region          string `json:"region"`
-	Bucket    string `json:"bucket"`
-	AccessKey string `json:"access_key"`
-	SecretKey string `json:"secret_key"`
-	UseTLS    bool   `json:"use_tls"`
-	Strict    bool   `json:"strict"`
+	Bucket          string `json:"bucket"`
+	AccessKey       string `json:"access_key"`
+	SecretKey       string `json:"secret_key"`
+	UseTLS          bool   `json:"use_tls"`
+	Strict          bool   `json:"strict"`
 }
 
 type JWTConfig struct {
@@ -75,8 +84,19 @@ type QueueConfig struct {
 	MaxRetries  int `json:"max_retries"`
 }
 
+type PostQuantumConfig struct {
+	TLSHybridKEM             string `json:"tls_hybrid_kem"`
+	SignatureAlgorithm       string `json:"signature_algorithm"`
+	CryptoInventoryRequired  bool   `json:"crypto_inventory_required"`
+	LongLivedArtifactSigning bool   `json:"long_lived_artifact_signing"`
+}
+
+type ServerSecurityConfig struct {
+	PostQuantum PostQuantumConfig `json:"post_quantum,omitempty"`
+}
+
 type ServerRuntimeConfig struct {
-	SchemaVersion string                `json:"schemaVersion,omitempty"`
+	SchemaVersion  string                 `json:"schemaVersion,omitempty"`
 	Public         PublicRuntimeConfig    `json:"public"`
 	Database       DatabaseConfig         `json:"database"`
 	Redis          RedisConfig            `json:"redis"`
@@ -84,5 +104,6 @@ type ServerRuntimeConfig struct {
 	JWT            JWTConfig              `json:"jwt"`
 	RuntimeBudgets RuntimeBudgetConfig    `json:"runtime_budgets"`
 	Compression    CompressionConfig      `json:"compression"`
+	Security       ServerSecurityConfig   `json:"security,omitempty"`
 	Queues         map[string]QueueConfig `json:"queues"`
 }

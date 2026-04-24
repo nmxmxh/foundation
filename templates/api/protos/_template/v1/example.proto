@@ -1,87 +1,39 @@
-// Example Domain Proto
-//
-// Copy this template to api/protos/<your_domain>/v1/<your_domain>.proto
-// Replace "example" with your domain name throughout
-//
-// Usage:
-//   1. Copy folder: cp -r api/protos/_template api/protos/mydomain
-//   2. Rename file: mv api/protos/mydomain/v1/example.proto api/protos/mydomain/v1/mydomain.proto
-//   3. Replace all "example" with "mydomain"
-//   4. Run: make proto
-
+// Example Domain Proto - Copy and customize for your domains
 syntax = "proto3";
 
 package example.v1;
 
-option go_package = "github.com/ovasabi/PROJECT_NAME/api/protos/example/v1;examplev1";
+option go_package = "github.com/ovasabi/{{PROJECT_NAME}}/api/protos/example/v1;examplev1";
 
 import "google/protobuf/timestamp.proto";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared Metadata (inline for template - prefer common/v1/metadata.proto)
-// ─────────────────────────────────────────────────────────────────────────────
-
 message RequestMetadata {
-  string correlation_id = 1;      // Tracing ID for this request chain
-  string idempotency_key = 2;     // Prevents duplicate processing
-  string device_id = 3;           // Client device identifier
-  string user_id = 4;             // Set by server after auth
-  string organization_id = 5;     // Tenant context (server-set)
+  string correlation_id = 1;
+  string idempotency_key = 2;
+  string device_id = 3;
+  string user_id = 4;
+  string organization_id = 5;
   google.protobuf.Timestamp timestamp = 6;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Core Entity
-// ─────────────────────────────────────────────────────────────────────────────
-
-// ExampleEntity represents a domain object.
-// Replace with your actual entity (User, Incident, Product, etc.)
 message ExampleEntity {
-  // Identity fields (1-5)
-  string id = 1;                           // UUID primary key
-  string organization_id = 2;              // Tenant ownership
-
-  // Business fields (6-20)
+  string id = 1;
+  string organization_id = 2;
   string name = 6;
   string description = 7;
-  ExampleStatus status = 8;
-  map<string, string> attributes = 9;      // Extensible key-value
-
-  // Audit fields (21-25)
-  string created_by = 21;
-  string updated_by = 22;
   google.protobuf.Timestamp created_at = 23;
   google.protobuf.Timestamp updated_at = 24;
 }
 
-enum ExampleStatus {
-  EXAMPLE_STATUS_UNSPECIFIED = 0;
-  EXAMPLE_STATUS_DRAFT = 1;
-  EXAMPLE_STATUS_ACTIVE = 2;
-  EXAMPLE_STATUS_ARCHIVED = 3;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Create Operation
-// Event: example:create:v1:requested -> example:create:v1:success
-// ─────────────────────────────────────────────────────────────────────────────
-
 message CreateExampleRequest {
   RequestMetadata metadata = 1;
-
   string name = 2;
   string description = 3;
-  map<string, string> attributes = 4;
 }
 
 message CreateExampleResponse {
   ExampleEntity entity = 1;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Get Operation
-// Event: example:get:v1:requested -> example:get:v1:success
-// ─────────────────────────────────────────────────────────────────────────────
 
 message GetExampleRequest {
   RequestMetadata metadata = 1;
@@ -92,60 +44,14 @@ message GetExampleResponse {
   ExampleEntity entity = 1;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// List Operation
-// Event: example:list:v1:requested -> example:list:v1:success
-// ─────────────────────────────────────────────────────────────────────────────
-
 message ListExampleRequest {
   RequestMetadata metadata = 1;
-
-  // Pagination
-  int32 page_size = 2;          // Max items per page (default: 20, max: 100)
-  string page_token = 3;        // Opaque token for next page
-
-  // Filtering
-  ExampleStatus status_filter = 4;
-  string search_query = 5;      // Full-text search
+  int32 page_size = 2;
+  string page_token = 3;
 }
 
 message ListExampleResponse {
   repeated ExampleEntity entities = 1;
-  string next_page_token = 2;   // Empty if no more pages
-  int32 total_count = 3;        // Total matching records
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Update Operation
-// Event: example:update:v1:requested -> example:update:v1:success
-// ─────────────────────────────────────────────────────────────────────────────
-
-message UpdateExampleRequest {
-  RequestMetadata metadata = 1;
-
-  string id = 2;
-
-  // Only set fields that should be updated
-  optional string name = 3;
-  optional string description = 4;
-  optional ExampleStatus status = 5;
-  map<string, string> attributes = 6;  // Merged with existing
-}
-
-message UpdateExampleResponse {
-  ExampleEntity entity = 1;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Delete Operation
-// Event: example:delete:v1:requested -> example:delete:v1:success
-// ─────────────────────────────────────────────────────────────────────────────
-
-message DeleteExampleRequest {
-  RequestMetadata metadata = 1;
-  string id = 2;
-}
-
-message DeleteExampleResponse {
-  bool deleted = 1;
+  string next_page_token = 2;
+  int32 total_count = 3;
 }

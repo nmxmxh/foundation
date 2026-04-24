@@ -1,0 +1,8 @@
+# {{PROJECT_NAME}} — Foundation Project
+# Read AGENTS.md before making architecture changes.
+#
+# Core constraints:
+# - Foundation owns structure, contracts, checks, and shared platform modules.
+# - The project owns domain behavior, handlers, route registration, and business workers.
+# - Do not create root pkg/ for shared code. Graduate shared behavior into foundation modules.
+# - Preserve correlation IDs, tenant boundaries, bounded operations, and River-backed workers.

@@ -8,10 +8,16 @@ import {
 } from "./index";
 import {
   decodeJSONRuntimeEnvelope,
-  decodeRuntimeEnvelope,
   encodeJSONRuntimeEnvelope,
   encodeRuntimeEnvelope,
 } from "./binaryEnvelope";
+import {
+  compressRuntimeBytes,
+  decodeRuntimeBinaryEnvelope,
+  encodeRuntimeBinaryFrame,
+  supportedRuntimeCompressionEncodings,
+  type RuntimeCompressionOptions,
+} from "./compression";
 
 const asWebSocketBinaryPayload = (bytes: Uint8Array): ArrayBuffer | ArrayBufferView<ArrayBuffer> => {
   if (bytes.buffer instanceof ArrayBuffer) {
@@ -25,6 +31,7 @@ type WebSocketTransportOptions = {
   url: string;
   preferBinary?: boolean;
   protocols?: string | string[];
+  compression?: RuntimeCompressionOptions;
   createSocket?: (url: string, protocols?: string | string[]) => WebSocket;
   onEnvelope?: (envelope: RuntimeEnvelope<unknown>) => void;
   readyWhenEnvelope?: (envelope: RuntimeEnvelope<unknown>) => boolean;
@@ -133,7 +140,7 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
     manualClose = false;
     connectionState = connectionState === "reconnecting" ? "reconnecting" : "connecting";
     connectPromise = new Promise<WebSocket>((resolve, reject) => {
-      const url = withFormat(options.url, preferBinary ? "binary" : "json");
+      const url = withFormat(options.url, preferBinary ? "binary" : "json", options.compression);
       const next = createSocket(url, options.protocols);
       let ready = false;
       let settled = false;
@@ -378,24 +385,30 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
         abort,
         { once: true }
       );
-      try {
-        if (preferBinary) {
-          activeSocket.send(asWebSocketBinaryPayload(encodeRuntimeEnvelope(envelope)));
-        } else {
-          activeSocket.send(encodeJSONRuntimeEnvelope(envelope));
+      void (async () => {
+        try {
+          if (preferBinary) {
+            const compressed = await compressRuntimeBytes(encodeRuntimeEnvelope(envelope), options.compression);
+            activeSocket.send(asWebSocketBinaryPayload(encodeRuntimeBinaryFrame(compressed)));
+          } else {
+            activeSocket.send(encodeJSONRuntimeEnvelope(envelope));
+          }
+        } catch (error) {
+          pending.delete(envelope.metadata.correlationId);
+          cleanup();
+          reject(error instanceof Error ? error : new Error("websocket dispatch failed"));
         }
-      } catch (error) {
-        pending.delete(envelope.metadata.correlationId);
-        cleanup();
-        reject(error instanceof Error ? error : new Error("websocket dispatch failed"));
-      }
+      })();
     });
   }
 };
 
-const withFormat = (url: string, format: "binary" | "json"): string => {
+const withFormat = (url: string, format: "binary" | "json", compression?: RuntimeCompressionOptions): string => {
   const parsed = new URL(url, typeof window !== "undefined" ? window.location.origin : "http://localhost");
   parsed.searchParams.set("format", format);
+  if (format === "binary" && compression?.enabled) {
+    parsed.searchParams.set("compression", supportedRuntimeCompressionEncodings().join(","));
+  }
   return parsed.toString();
 };
 
@@ -404,10 +417,10 @@ const decodeEnvelopeMessage = async (data: Blob | ArrayBuffer | string): Promise
     return decodeJSONRuntimeEnvelope(data);
   }
   if (data instanceof ArrayBuffer) {
-    return decodeRuntimeEnvelope(new Uint8Array(data));
+    return decodeRuntimeBinaryEnvelope(new Uint8Array(data));
   }
   if (typeof Blob !== "undefined" && data instanceof Blob) {
-    return decodeRuntimeEnvelope(new Uint8Array(await data.arrayBuffer()));
+    return decodeRuntimeBinaryEnvelope(new Uint8Array(await data.arrayBuffer()));
   }
   return null;
 };

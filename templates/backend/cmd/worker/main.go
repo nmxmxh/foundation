@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -25,11 +26,7 @@ func main() {
 	}
 
 	// Initialize logger
-	logLevel := slog.LevelInfo
-	if cfg.IsDevelopment() {
-		logLevel = slog.LevelDebug
-	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: workerLogLevel()}))
 	slog.SetDefault(logger)
 
 	// Connect to database
@@ -37,10 +34,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to parse database config: %v", err)
 	}
-	dbConfig.MaxConns = 25
-	dbConfig.MinConns = 5
-	dbConfig.HealthCheckPeriod = 30 * time.Second
-	dbConfig.ConnConfig.ConnectTimeout = 5 * time.Second
+	dbConfig.MaxConns = int32(envInt("DB_MAX_CONNS", 25))
+	dbConfig.MinConns = int32(envInt("DB_MIN_CONNS", 5))
+	dbConfig.HealthCheckPeriod = envDurationSeconds("DB_HEALTHCHECK_PERIOD_SECONDS", 30)
+	dbConfig.ConnConfig.ConnectTimeout = envDurationSeconds("DB_CONNECT_TIMEOUT_SECONDS", 5)
 
 	dbPool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
@@ -103,4 +100,33 @@ func main() {
 	}
 
 	slog.Info("worker stopped")
+}
+
+func workerLogLevel() slog.Level {
+	switch os.Getenv("LOG_LEVEL") {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
+}
+
+func envInt(key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+func envDurationSeconds(key string, fallback int) time.Duration {
+	return time.Duration(envInt(key, fallback)) * time.Second
 }

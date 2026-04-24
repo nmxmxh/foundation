@@ -34,7 +34,12 @@ export type RuntimeWorkerResponse<TOutput = Record<string, unknown>> = {
 export type PulseMode = "worker" | "main-thread" | "stopped";
 
 export type RuntimeCapabilityIssue = {
-  capability: "crossOriginIsolated" | "sharedArrayBuffer" | "worker" | "waitAsync";
+  capability:
+    | "crossOriginIsolated"
+    | "sharedArrayBuffer"
+    | "webAssemblySharedMemory"
+    | "worker"
+    | "waitAsync";
   reason: string;
   fallback: "main-thread" | "unsupported";
 };
@@ -42,11 +47,13 @@ export type RuntimeCapabilityIssue = {
 export type RuntimeCapabilities = {
   crossOriginIsolated: boolean;
   sharedArrayBuffer: boolean;
+  webAssemblySharedMemory: boolean;
   worker: boolean;
   waitAsync: boolean;
   issues: RuntimeCapabilityIssue[];
   supportsWorkerPulse: boolean;
   supportsSharedMemoryRuntime: boolean;
+  supportsSharedWasmMemory: boolean;
 };
 
 export type PulseDiagnostics = {

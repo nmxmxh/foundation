@@ -2,7 +2,7 @@ package integration
 
 import (
 	"context"
-	"log"
+	"flag"
 	"os"
 	"testing"
 
@@ -11,36 +11,22 @@ import (
 
 var (
 	// testDB holds the shared database pool for integration tests.
-	// Initialize in TestMain to share across all tests in the package.
+	// Initialize in TestMain if a package needs a shared environment.
 	testDB *testutil.RealTestEnv
 )
 
-// TestMain runs before all tests in this package.
-// It sets up the test database connection and runs migrations if needed.
+// TestMain exports scaffolded integration defaults before config is loaded.
 func TestMain(m *testing.M) {
-	// Skip setup if running short tests
-	if testing.Short() {
-		os.Exit(m.Run())
-	}
-
-	// Verify we can connect to the test database
-	dbURL := testutil.ResolveTestDatabaseURL()
-	if dbURL == "" {
-		log.Println("TEST_DB_* or DB_* environment variables not set, skipping integration tests")
-		os.Exit(0)
-	}
-
-	// Run all tests
-	code := m.Run()
-	os.Exit(code)
+	flag.Parse()
+	testutil.ApplyTestEnvDefaults()
+	os.Exit(m.Run())
 }
 
-// skipIfNoDatabase skips the test if no database connection is available.
+// skipIfNoDatabase keeps older integration tests compatible with the managed helper.
 func skipIfNoDatabase(t *testing.T) {
 	t.Helper()
-	dbURL := testutil.ResolveTestDatabaseURL()
-	if dbURL == "" {
-		t.Skip("database connection not available")
+	if testing.Short() {
+		t.Skip("database integration skipped in short mode")
 	}
 }
 

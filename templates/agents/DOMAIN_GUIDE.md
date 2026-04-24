@@ -216,4 +216,4 @@ The server-kit handles this automatically. Clients can request binary format wit
 - [ ] Write tests in `tests/integration/<domain>_test.go`
 
 ---
-*Foundation Domain Guide v1.0.0*
+*Foundation Domain Guide v{{FOUNDATION_VERSION}}*

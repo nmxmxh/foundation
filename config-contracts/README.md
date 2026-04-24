@@ -13,6 +13,7 @@ Rules:
 2. server env loaders must validate and derive the public subset
 3. object-storage, Redis, DB, JWT, and worker tuning remain server-only
 4. DB pools, dispatch concurrency, Redis prefix/TTL, and queue budgets must be explicit config, never hardcoded runtime defaults
+5. runtime memory, transport, compression, and post-quantum posture must be declared explicitly so scaffolded apps do not drift
 
 Planned public/server split:
 
@@ -22,6 +23,7 @@ Planned public/server split:
    - auth mode
    - transport timeout budgets
    - wasm asset paths
+   - runtime memory mode, transport order, and compression order
    - diagnostics toggles
    - locale defaults
 2. server config
@@ -31,6 +33,7 @@ Planned public/server split:
    - queue and DB pool tuning
    - Redis key prefix and TTL policy
    - dispatch concurrency budgets and compression strategy
+   - post-quantum security posture
 
 Extraction gate:
 

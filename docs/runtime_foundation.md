@@ -1,6 +1,6 @@
 # Runtime Foundation
 
-Date: 2026-04-21
+Date: 2026-04-24
 
 This document records the runtime foundation posture for this scaffold.
 
@@ -26,8 +26,8 @@ This document records the runtime foundation posture for this scaffold.
 
 1. Browser worker execution is isolated under `frontend/src/runtime/workers`.
 2. `SharedArrayBuffer` requires cross-origin isolation headers in dev and preview serving.
-3. The shared runtime buffer contract is defined in `foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp`.
-4. App schemas remain app-owned under `api/schemas` and currently use `media/v1/asset.capnp` for input and `preview/v1/layout.capnp` for output.
+3. The shared runtime buffer contract is a 4KB hot control plane defined in `foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp`.
+4. Large payloads use transferable buffers, binary transport envelopes, or the optional `RuntimeSharedArena` defined in `foundation/runtime-sdk/protocols/system/v1/runtime_shared_arena.capnp`.
 5. The browser runtime now uses a generic role-based worker split:
    - `pulse` watches and drives runtime epochs
    - `compute` owns the preview execution unit
@@ -38,7 +38,8 @@ This document records the runtime foundation posture for this scaffold.
 10. `SharedArrayBuffer` deployments must intentionally pair `COOP` + `COEP` and compatible asset policies (`CORP`/CORS) so cross-origin isolation is stable and auditable.
 11. Generated readers/writers and route contracts are the allowed parsing path for runtime payloads. Unknown or oversized frames must be rejected before render or storage flows.
 12. DOM mutation watching is not a foundation data-flow primitive. Prefer explicit stores, route contracts, and worker/runtime messages over `MutationObserver`.
-13. If DOM observation is unavoidable, keep it inside a narrow UI adapter and prefer `ResizeObserver` or `IntersectionObserver` before `MutationObserver`.
+13. Main-thread code must not call blocking `Atomics.wait`; workers own blocking waits and main-thread code uses `Atomics.waitAsync` or message fallback when needed.
+14. If DOM observation is unavoidable, keep it inside a narrow UI adapter and prefer `ResizeObserver` or `IntersectionObserver` before `MutationObserver`.
 
 ## Browser WASM build and binding flow
 
@@ -102,7 +103,7 @@ This document records the runtime foundation posture for this scaffold.
 
 1. HTTP egress now prefers Brotli when the client advertises `br`, then falls back to gzip, then identity.
 2. HTTP ingress now accepts Brotli, gzip, and deflate request bodies and normalizes them before handler dispatch.
-3. WebSocket binary frames now use best-effort compressed transport with Brotli preferred when the payload shrinks.
+3. WebSocket binary frames keep identity protobuf as the compatibility path and use explicit `OVRT` binary compression frames only when compression is enabled and the payload shrinks.
 4. Compression is transport-level only:
    - durable artifacts in object storage are stored as app artifacts, not automatically recompressed network blobs
    - the server decides response compression from `Accept-Encoding`

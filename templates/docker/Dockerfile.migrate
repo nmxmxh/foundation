@@ -1,13 +1,13 @@
-# Dockerfile for database migrations
-# Uses golang-migrate with PostgreSQL support
+# syntax=docker/dockerfile:1.7
 
-FROM migrate/migrate:latest
+# Dockerfile for database migrations.
+# Pin the migrate image for reproducible builds and global Docker image reuse.
 
-# Copy migration files into the image
+ARG MIGRATE_VERSION=v4.17.0
+FROM migrate/migrate:${MIGRATE_VERSION}
+
 COPY migrations /migrations
 
-# Set working directory
 WORKDIR /migrations
 
-# Default entrypoint (override with docker-compose command)
 ENTRYPOINT ["migrate"]

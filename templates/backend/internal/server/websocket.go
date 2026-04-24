@@ -124,8 +124,8 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		cancel:    cancel,
 		createdAt: time.Now().UTC(),
 		subscriptions: map[string]struct{}{
-			"identity:connection_open:v1:ack":   {},
-			"system:websocket_error:v1:failed":  {},
+			"identity:connection_open:v1:ack":  {},
+			"system:websocket_error:v1:failed": {},
 		},
 	}
 	wsConn.binaryFormat = strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("format")), "binary")
@@ -471,10 +471,22 @@ func (s *Server) sendWSDomainError(conn *wsConnection, err error, correlationID 
 	body := domainerr.Body(err, domainerr.ResponseOptions{
 		CorrelationID: correlationID,
 	})
-	payload := map[string]any{}
-	raw, marshalErr := json.Marshal(body)
-	if marshalErr == nil {
-		_ = json.Unmarshal(raw, &payload)
+	errorPayload := map[string]any{
+		"kind":           body.Error.Kind,
+		"code":           body.Error.Code,
+		"message":        body.Error.Message,
+		"status":         body.Error.Status,
+		"correlation_id": body.Error.CorrelationID,
+	}
+	if body.Error.EventType != "" {
+		errorPayload["event_type"] = body.Error.EventType
+	}
+	if len(body.Error.Details) > 0 {
+		errorPayload["details"] = body.Error.Details
+	}
+	payload := map[string]any{
+		"state": body.State,
+		"error": errorPayload,
 	}
 	_ = s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_error:v1:failed",

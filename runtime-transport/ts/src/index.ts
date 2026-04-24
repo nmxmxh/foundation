@@ -1,4 +1,4 @@
-export type TransportKind = "ws" | "http" | "wasm";
+export type TransportKind = "postMessage" | "transferable" | "sab" | "ws" | "http" | "wasm";
 export type PayloadEncoding = "json" | "protobuf";
 export type ProtobufCodec<TPayload> = {
   encode: (payload: TPayload) => Uint8Array;
@@ -385,6 +385,7 @@ export const createCommandBus = (options: CommandBusOptions) => {
 };
 
 export * from "./binaryEnvelope";
+export * from "./compression";
 export * from "./http";
 export * from "./runtimeMetadata";
 export * from "./websocket";

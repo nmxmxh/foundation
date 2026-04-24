@@ -18,6 +18,13 @@ func TestValidateServerRuntimeConfig(t *testing.T) {
 				ModulePath:           "/assets/runtime.wasm",
 				CompressedModulePath: "/assets/runtime.wasm.gz",
 			},
+			RuntimeMemory: RuntimeMemoryConfig{
+				SharedMemory:            "auto",
+				TransportOrder:          []string{"sab", "transferable", "postMessage", "ws", "http"},
+				Compression:             []string{"br", "gzip", "deflate", "identity"},
+				ArenaBytes:              8 * 1024 * 1024,
+				RequireSharedWASMMemory: true,
+			},
 		},
 		Database: DatabaseConfig{
 			URL:              "postgres://example",
@@ -46,6 +53,14 @@ func TestValidateServerRuntimeConfig(t *testing.T) {
 		RuntimeBudgets: RuntimeBudgetConfig{
 			DispatchMaxConcurrent:    8,
 			DispatchAcquireTimeoutMS: 1000,
+		},
+		Security: ServerSecurityConfig{
+			PostQuantum: PostQuantumConfig{
+				TLSHybridKEM:             "auto",
+				SignatureAlgorithm:       "classical",
+				CryptoInventoryRequired:  true,
+				LongLivedArtifactSigning: false,
+			},
 		},
 		Queues: map[string]QueueConfig{
 			"media_probe": {Concurrency: 2, MaxRetries: 3},

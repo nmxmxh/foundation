@@ -127,7 +127,7 @@ func initRedis(ctx context.Context, url string) (*redis.Client, error) {
 func initHealthChecker(db *sql.DB, redisClient *redis.Client) *healthcheck.HealthChecker {
 	hc := healthcheck.New(healthcheck.Config{
 		ServiceName:    "{{MODULE_PATH}}",
-		ServiceVersion: "1.0.0",
+		ServiceVersion: "{{FOUNDATION_VERSION}}",
 		DefaultTimeout: 5 * time.Second,
 	})
 

@@ -549,6 +549,40 @@ Enforcement:
 - ESLint restriction on direct `MutationObserver` construction with explicit local waiver requirement.
 - Reviewer gate on observer scope, cleanup, and feedback-loop risk.
 
+### CP-32: Runtime communication must use foundation transport contracts
+
+Level: `Mandatory`
+
+Requirements:
+
+1. App code must dispatch browser/backend/runtime messages through `runtime-transport` or `runtime-sdk` host APIs, not ad hoc websocket globals or raw JSON bridges.
+2. The 4KB runtime buffer is the control plane only. Large payloads must use transferable buffers, binary envelopes, or the optional `RuntimeSharedArena`.
+3. Main-thread code must not call blocking `Atomics.wait`; workers own blocking waits and main-thread code uses `Atomics.waitAsync` or message fallback when needed.
+4. `SharedArrayBuffer` execution requires COOP, COEP, and compatible CORP/CORS headers in local, preview, and production serving.
+5. Compression settings must be negotiated by transport capability and must retain identity fallback.
+
+Enforcement:
+
+- Scaffold checks for runtime arena schema, COOP/COEP headers, and Vite header config.
+- Unit tests for shared-memory fallback, large payload arena movement, and binary frame compression.
+
+### CP-33: Post-quantum readiness must be crypto-agile and hot-path safe
+
+Level: `Mandatory`
+
+Requirements:
+
+1. New cryptography decisions must document algorithm, key lifetime, migration path, and whether the data is long-lived enough to require post-quantum planning.
+2. Prefer platform TLS hybrid KEM support and edge termination policy over app-level per-request post-quantum operations.
+3. Use standardized post-quantum algorithms only; do not add experimental PQC packages without an ADR and benchmarks.
+4. Keep post-quantum signing for release artifacts, durable records, or compliance-driven workflows unless a threat model proves request-path need.
+5. Public config must not expose secrets or private key material when advertising runtime security capabilities.
+
+Enforcement:
+
+- Config-contract validation for `security.postQuantum`.
+- Reviewer gate on new crypto code without inventory, migration, and performance notes.
+
 ## Enforcement matrix
 
 | Rule ID | Primary enforcement | Automation | Merge gate |
@@ -584,6 +618,8 @@ Enforcement:
 | `CP-29` | PR security checklist + adversarial tests | Partial | Yes |
 | `CP-30` | CI coverage/hotspot reports + review | Partial | Yes |
 | `CP-31` | ESLint restriction + architecture review | Partial | Yes |
+| `CP-32` | Scaffold checks + runtime tests | Partial | Yes |
+| `CP-33` | Config validation + crypto review | Partial | Yes |
 
 ## Exception process and ADR linkage
 

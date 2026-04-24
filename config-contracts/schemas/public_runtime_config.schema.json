@@ -27,6 +27,26 @@
         "compressedModulePath": { "type": "string" }
       }
     },
+    "runtimeMemory": {
+      "type": "object",
+      "required": ["sharedMemory", "transportOrder", "compression"],
+      "properties": {
+        "sharedMemory": { "enum": ["off", "auto", "required"] },
+        "transportOrder": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["postMessage", "transferable", "sab", "ws", "http"] }
+        },
+        "compression": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["identity", "gzip", "br", "deflate"] }
+        },
+        "arenaBytes": { "type": "integer", "minimum": 1 },
+        "requireSharedWasmMemory": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
     "diagnosticsEnabled": { "type": "boolean" },
     "localeDefaults": {
       "type": "object",

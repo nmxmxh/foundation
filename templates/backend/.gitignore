@@ -12,6 +12,11 @@ bin/
 # Output of the go coverage tool
 *.out
 coverage.html
+coverage/
+
+# Local tool/test cache
+.cache/
+.docker-cache/
 
 # Go workspace
 go.work

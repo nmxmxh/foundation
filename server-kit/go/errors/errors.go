@@ -27,30 +27,30 @@ type Code string
 // Error code categories
 const (
 	// Client errors (4xx)
-	CodeBadRequest     Code = "BAD_REQUEST"      // 400: Malformed request
-	CodeUnauthorized   Code = "UNAUTHORIZED"     // 401: Missing or invalid auth
-	CodeForbidden      Code = "FORBIDDEN"        // 403: Insufficient permissions
-	CodeNotFound       Code = "NOT_FOUND"        // 404: Resource not found
-	CodeConflict       Code = "CONFLICT"         // 409: Resource conflict
-	CodeGone           Code = "GONE"             // 410: Resource no longer available
-	CodeValidation     Code = "VALIDATION_ERROR" // 422: Validation failed
-	CodeRateLimited    Code = "RATE_LIMITED"     // 429: Too many requests
-	CodePrecondition   Code = "PRECONDITION"     // 412: Precondition failed
+	CodeBadRequest   Code = "BAD_REQUEST"      // 400: Malformed request
+	CodeUnauthorized Code = "UNAUTHORIZED"     // 401: Missing or invalid auth
+	CodeForbidden    Code = "FORBIDDEN"        // 403: Insufficient permissions
+	CodeNotFound     Code = "NOT_FOUND"        // 404: Resource not found
+	CodeConflict     Code = "CONFLICT"         // 409: Resource conflict
+	CodeGone         Code = "GONE"             // 410: Resource no longer available
+	CodeValidation   Code = "VALIDATION_ERROR" // 422: Validation failed
+	CodeRateLimited  Code = "RATE_LIMITED"     // 429: Too many requests
+	CodePrecondition Code = "PRECONDITION"     // 412: Precondition failed
 
 	// Server errors (5xx)
-	CodeInternal       Code = "INTERNAL_ERROR"   // 500: Unexpected error
-	CodeNotImplemented Code = "NOT_IMPLEMENTED"  // 501: Feature not available
+	CodeInternal       Code = "INTERNAL_ERROR"      // 500: Unexpected error
+	CodeNotImplemented Code = "NOT_IMPLEMENTED"     // 501: Feature not available
 	CodeUnavailable    Code = "SERVICE_UNAVAILABLE" // 503: Temporary unavailable
-	CodeTimeout        Code = "TIMEOUT"          // 504: Operation timed out
-	CodeDependency     Code = "DEPENDENCY_ERROR" // 503: Downstream service failed
+	CodeTimeout        Code = "TIMEOUT"             // 504: Operation timed out
+	CodeDependency     Code = "DEPENDENCY_ERROR"    // 503: Downstream service failed
 
 	// Domain-specific codes
-	CodeDuplicate      Code = "DUPLICATE"        // Already exists
-	CodeInvalidState   Code = "INVALID_STATE"    // Invalid state transition
-	CodeExpired        Code = "EXPIRED"          // Token/resource expired
-	CodeQuotaExceeded  Code = "QUOTA_EXCEEDED"   // Limit reached
-	CodePaymentFailed  Code = "PAYMENT_FAILED"   // Payment processing error
-	CodeExternalAPI    Code = "EXTERNAL_API"     // Third-party API error
+	CodeDuplicate     Code = "DUPLICATE"      // Already exists
+	CodeInvalidState  Code = "INVALID_STATE"  // Invalid state transition
+	CodeExpired       Code = "EXPIRED"        // Token/resource expired
+	CodeQuotaExceeded Code = "QUOTA_EXCEEDED" // Limit reached
+	CodePaymentFailed Code = "PAYMENT_FAILED" // Payment processing error
+	CodeExternalAPI   Code = "EXTERNAL_API"   // Third-party API error
 )
 
 // HTTPStatus returns the HTTP status code for an error code.
@@ -221,7 +221,10 @@ func (e *Error) IsCode(code Code) bool {
 
 // ToJSON returns the error as JSON bytes.
 func (e *Error) ToJSON() []byte {
-	data, _ := json.Marshal(e)
+	data, err := json.Marshal(e)
+	if err != nil {
+		return []byte(`{"error":{"code":"INTERNAL","message":"failed to encode error"}}`)
+	}
 	return data
 }
 
@@ -429,4 +432,3 @@ func IsPermanent(err error) bool {
 func ShouldRetry(err error) bool {
 	return IsTransient(err)
 }
-

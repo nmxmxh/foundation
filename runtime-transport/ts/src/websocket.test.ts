@@ -123,6 +123,7 @@ describe('WebSocketTransport Resilience', () => {
 
     const sub = await transport.subscribe('media:*', () => {});
     sub.unsubscribe();
+    await new Promise(resolve => setTimeout(resolve, 10));
 
     // Verify unsubscription request sent
     const hasUnsubscribed = sockets[0].sentMessages.some((m: any) => {

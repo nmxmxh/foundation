@@ -6,23 +6,26 @@ version: '3.8'
 #
 # Environment variables:
 #   TEST_DB_NAME: Name of test database (default: {{PROJECT_NAME}}_test)
+#   TEST_DB_USER: Test database user (default: postgres)
+#   TEST_DB_PASSWORD: Test database password (default: postgres)
 #   TEST_DB_PORT: Port to expose PostgreSQL (default: 5433)
 #   TEST_REDIS_PORT: Port to expose Redis (default: 6380)
+#   TEST_REDIS_PASSWORD: Optional Redis password (default: empty)
 
 services:
   test-postgres:
     image: postgres:16-alpine
     container_name: {{PROJECT_NAME}}-test-postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: ${TEST_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${TEST_DB_PASSWORD:-postgres}
       POSTGRES_DB: ${TEST_DB_NAME:-{{PROJECT_NAME}}_test}
     ports:
       - "${TEST_DB_PORT:-5433}:5432"
     volumes:
       - test_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-{{PROJECT_NAME}}_test}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -32,10 +35,14 @@ services:
   test-redis:
     image: redis:7-alpine
     container_name: {{PROJECT_NAME}}-test-redis
+    environment:
+      TEST_REDIS_PASSWORD: ${TEST_REDIS_PASSWORD:-}
+    command: >
+      sh -c 'if [ -n "$$TEST_REDIS_PASSWORD" ]; then redis-server --requirepass "$$TEST_REDIS_PASSWORD"; else redis-server; fi'
     ports:
       - "${TEST_REDIS_PORT:-6380}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "if [ -n \"$${TEST_REDIS_PASSWORD}\" ]; then redis-cli -a \"$${TEST_REDIS_PASSWORD}\" ping; else redis-cli ping; fi"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -53,7 +60,7 @@ services:
       - ./migrations:/migrations:ro
     command: >
       -path=/migrations
-      -database=postgresql://postgres:postgres@test-postgres:5432/${TEST_DB_NAME:-{{PROJECT_NAME}}_test}?sslmode=disable
+      -database=postgresql://${TEST_DB_USER:-postgres}:${TEST_DB_PASSWORD:-postgres}@test-postgres:5432/${TEST_DB_NAME:-{{PROJECT_NAME}}_test}?sslmode=disable
       up
     networks:
       - test-network

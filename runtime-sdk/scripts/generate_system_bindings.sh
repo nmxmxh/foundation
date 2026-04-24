@@ -2,13 +2,19 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-SCHEMA_PATH="$ROOT_DIR/protocols/system/v1/runtime_buffer.capnp"
+SCHEMA_DIR="$ROOT_DIR/protocols/system/v1"
 RUST_OUT="$ROOT_DIR/rust/crates/ovrt-core/src/generated.rs"
 TS_OUT="$ROOT_DIR/ts/browser-host/src/generated/runtimeBuffer.ts"
 GO_OUT="$ROOT_DIR/go/runtimehost/generated/runtime_buffer_gen.go"
 
-if [[ ! -f "$SCHEMA_PATH" ]]; then
-  echo "missing runtime schema: $SCHEMA_PATH" >&2
+if [[ ! -d "$SCHEMA_DIR" ]]; then
+  echo "missing runtime schema directory: $SCHEMA_DIR" >&2
+  exit 1
+fi
+
+schema_paths=("$SCHEMA_DIR"/*.capnp)
+if [[ "${#schema_paths[@]}" -eq 0 || ! -f "${schema_paths[1]}" ]]; then
+  echo "missing runtime schemas in: $SCHEMA_DIR" >&2
   exit 1
 fi
 
@@ -23,7 +29,7 @@ EOF
       gsub(/;/, "", value)
       printf "pub const %s: u32 = %s;\n", $2, value
     }
-  ' "$SCHEMA_PATH"
+  ' "${schema_paths[@]}"
 } > "$RUST_OUT"
 
 {
@@ -37,7 +43,7 @@ EOF
       gsub(/;/, "", value)
       printf "export const %s = %s;\n", $2, value
     }
-  ' "$SCHEMA_PATH"
+  ' "${schema_paths[@]}"
 } > "$TS_OUT"
 
 {
@@ -53,7 +59,7 @@ EOF
       gsub(/;/, "", value)
       printf "const %s uint32 = %s\n", $2, value
     }
-  ' "$SCHEMA_PATH"
+  ' "${schema_paths[@]}"
 } > "$GO_OUT"
 
 echo "generated runtime system bindings"

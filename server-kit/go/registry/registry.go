@@ -237,7 +237,10 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 	// Prepare metadata and inject correlation
 	var metaMap map[string]any
 	if len(env.Metadata) > 0 {
-		_ = json.Unmarshal(env.Metadata, &metaMap)
+		if err := json.Unmarshal(env.Metadata, &metaMap); err != nil {
+			r.log.Error("failed to decode event metadata", zap.String("event_type", env.EventType), zap.Error(err))
+			return
+		}
 	}
 	if metaMap == nil {
 		metaMap = make(map[string]any)
@@ -264,7 +267,15 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 
 	// Legacy map-based handler
 	var payloadMap map[string]any
-	_ = json.Unmarshal(env.Payload, &payloadMap)
+	if len(env.Payload) > 0 {
+		if err := json.Unmarshal(env.Payload, &payloadMap); err != nil {
+			r.log.Error("failed to decode event payload", zap.String("event_type", env.EventType), zap.Error(err))
+			return
+		}
+	}
+	if payloadMap == nil {
+		payloadMap = map[string]any{}
+	}
 	_, err := method.handler(ctx, payloadMap)
 	if err != nil && r.handler != nil {
 		r.handler.Error(ctx, strings.TrimSuffix(env.EventType, ":requested"), "event processing failed", err, metaMap, "")

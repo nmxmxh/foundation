@@ -78,4 +78,4 @@ See `_template/v1/example.proto` for a complete domain example with:
 - Proper metadata usage
 
 ---
-*Foundation Proto Contracts v1.0.0*
+*Foundation Proto Contracts v{{FOUNDATION_VERSION}}*

@@ -31,6 +31,13 @@ services:
       context: .
       dockerfile: Dockerfile
       target: final
+      args:
+        GO_VERSION: "${GO_VERSION:-1.25}"
+        ALPINE_VERSION: "${ALPINE_VERSION:-3.23}"
+        CACHE_NAMESPACE: "${DOCKER_CACHE_NAMESPACE:-ovasabi-foundation-v1}"
+        PROJECT_NAME: "${PROJECT_NAME:-server}"
+        VERSION: "${VERSION:-dev}"
+        BUILDKIT_INLINE_CACHE: "1"
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-server
     depends_on:
       app-redis:
@@ -73,6 +80,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.migrate
+      args:
+        MIGRATE_VERSION: "${MIGRATE_VERSION:-v4.17.0}"
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-migrate
     entrypoint: ["/bin/sh", "-c"]
     networks:

@@ -54,6 +54,23 @@
         "dispatchAcquireTimeoutMs": { "type": "integer", "minimum": 1 }
       }
     },
+    "security": {
+      "type": "object",
+      "properties": {
+        "postQuantum": {
+          "type": "object",
+          "required": ["tlsHybridKEM", "signatureAlgorithm", "cryptoInventoryRequired", "longLivedArtifactSigning"],
+          "properties": {
+            "tlsHybridKEM": { "enum": ["auto", "required", "disabled"] },
+            "signatureAlgorithm": { "enum": ["classical", "ml-dsa", "slh-dsa"] },
+            "cryptoInventoryRequired": { "type": "boolean" },
+            "longLivedArtifactSigning": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "queues": {
       "type": "object",
       "additionalProperties": {

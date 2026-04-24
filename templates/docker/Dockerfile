@@ -1,133 +1,118 @@
+# syntax=docker/dockerfile:1.7
+
 # =============================================================================
 # Multi-stage Dockerfile for Ovasabi Foundation Go Projects
 # =============================================================================
-# Customize:
-# - PROJECT_NAME: Your project name
-# - Add/remove build dependencies as needed
-# - Uncomment frontend stages if building a full-stack app
+# Caching model:
+# - go.mod/go.sum and foundation module manifests are copied before source code.
+# - Named BuildKit caches are shared across all foundation projects by default.
+# - Source changes rebuild the binary, but do not re-download Go modules.
 # =============================================================================
 
-# --- Build Stage ---
-FROM golang:1.24-alpine AS builder
+ARG GO_VERSION=1.25
+ARG ALPINE_VERSION=3.23
+ARG CACHE_NAMESPACE=ovasabi-foundation-v1
+
+# --- Shared Go Base ---
+FROM golang:${GO_VERSION}-alpine AS go-base
+
+ARG CACHE_NAMESPACE
 
 WORKDIR /app
 
-# Build arguments
+ENV CGO_ENABLED=0 \
+    GOCACHE=/root/.cache/go-build \
+    GOMODCACHE=/go/pkg/mod \
+    GOPROXY=https://proxy.golang.org,direct
+
+RUN --mount=type=cache,id=${CACHE_NAMESPACE}-apk,target=/var/cache/apk,sharing=locked \
+    apk add --update-cache git make ca-certificates tzdata
+
+# --- Dependency Cache Stage ---
+FROM go-base AS go-deps
+
+ARG CACHE_NAMESPACE
+
+# Copy dependency manifests only. Keep this list narrow so ordinary source edits
+# do not invalidate the module-download layer.
+COPY go.mod ./
+COPY foundation/server-kit/go/go.mod ./foundation/server-kit/go/
+COPY foundation/runtime-transport/go/go.mod ./foundation/runtime-transport/go/
+COPY foundation/config-contracts/go/go.mod ./foundation/config-contracts/go/
+
+RUN --mount=type=bind,source=go.sum,target=/tmp/go.sum,required=false \
+    --mount=type=bind,source=foundation/server-kit/go/go.sum,target=/tmp/server-kit.go.sum,required=false \
+    --mount=type=bind,source=foundation/runtime-transport/go/go.sum,target=/tmp/runtime-transport.go.sum,required=false \
+    --mount=type=cache,id=${CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=${CACHE_NAMESPACE}-gobuild,target=/root/.cache/go-build,sharing=locked \
+    cp /tmp/go.sum go.sum 2>/dev/null || touch go.sum; \
+    cp /tmp/server-kit.go.sum foundation/server-kit/go/go.sum 2>/dev/null || true; \
+    cp /tmp/runtime-transport.go.sum foundation/runtime-transport/go/go.sum 2>/dev/null || true; \
+    go mod download && touch /tmp/deps-ready
+
+# --- Build Stage ---
+FROM go-base AS builder
+
+ARG CACHE_NAMESPACE
 ARG PROJECT_NAME=server
+ARG VERSION=dev
 ARG CGO_ENABLED=0
 
-# Set GOPROXY for reliability
-ENV GOPROXY=https://proxy.golang.org,direct
+COPY --from=go-deps /tmp/deps-ready /tmp/deps-ready
 
-# Install build dependencies
-# Uncomment additional dependencies as needed:
-# - protobuf protobuf-dev: for protobuf generation
-# - tesseract-ocr-dev leptonica-dev: for OCR support
-# - gcc g++ musl-dev: for CGO builds
-RUN apk add --no-cache git make ca-certificates tzdata
-
-# Uncomment for protobuf support
-# RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
-#     go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-
-# Cache dependencies
-COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod go mod download
-
-# Copy source code
+# Copy source code after dependency resolution so this layer is the normal
+# invalidation boundary for application changes.
 COPY . .
 
-# Generate code if needed (uncomment relevant lines)
-# RUN make proto
-# RUN make generate
-
-# Build the application
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg/mod \
+# Build the application. The named caches are shared with go-deps and with other
+# foundation projects on the same Docker builder.
+RUN --mount=type=cache,id=${CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,id=${CACHE_NAMESPACE}-gobuild,target=/root/.cache/go-build,sharing=locked \
     CGO_ENABLED=${CGO_ENABLED} go build \
-    -ldflags="-s -w -X main.Version=$(git describe --tags --always --dirty 2>/dev/null || echo 'dev')" \
+    -trimpath \
+    -ldflags="-s -w -X main.Version=${VERSION}" \
     -o /bin/${PROJECT_NAME} ./cmd/server
 
 # --- Final Stage ---
-FROM alpine:3.23 AS final
+FROM alpine:${ALPINE_VERSION} AS final
+
+ARG CACHE_NAMESPACE
+ARG PROJECT_NAME=server
 
 WORKDIR /srv
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata
+RUN --mount=type=cache,id=${CACHE_NAMESPACE}-apk-final,target=/var/cache/apk,sharing=locked \
+    apk add --update-cache ca-certificates tzdata
 
-# Create non-root user
 RUN addgroup -S app && adduser -S app -G app
 
-# Copy binary from builder
-ARG PROJECT_NAME=server
 COPY --from=builder /bin/${PROJECT_NAME} ./server
 
-# Copy additional assets (customize as needed)
-# COPY --from=builder /app/migrations ./migrations
+# Copy additional assets if the application needs them.
 # COPY --from=builder /app/assets ./assets
 
-# Set ownership
 RUN chown -R app:app /srv
 
-# Switch to non-root user
 USER app
 
-# Expose port (customize as needed)
 EXPOSE 8080
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget -q --spider http://localhost:8080/healthz || exit 1
 
-# Run the application
 CMD ["./server"]
 
 # =============================================================================
-# Optional: Frontend Builder Stage (uncomment for full-stack apps)
+# Optional: Frontend Builder Stage
 # =============================================================================
+# If a project chooses to build frontend assets in Docker, keep the same pattern:
+# copy package manifests first, use a named cache, then copy source.
+#
 # FROM node:22-alpine AS frontend-builder
-#
+# ARG CACHE_NAMESPACE
 # WORKDIR /app/frontend
-#
-# COPY frontend/package.json frontend/yarn.lock ./
-# RUN yarn install --frozen-lockfile
-#
+# COPY frontend/package.json frontend/package-lock.json* ./
+# RUN --mount=type=cache,id=${CACHE_NAMESPACE}-npm,target=/root/.npm,sharing=locked \
+#     npm ci
 # COPY frontend/ .
-# RUN yarn build
-#
-# # Pre-compress assets with Brotli
-# RUN apk add --no-cache brotli && \
-#     find dist -type f \( -name "*.js" -o -name "*.css" -o -name "*.html" -o -name "*.svg" -o -name "*.json" \) \
-#     -exec brotli -q 11 {} \;
-
-# =============================================================================
-# Optional: Nginx Final Stage (uncomment for full-stack apps)
-# =============================================================================
-# FROM alpine:3.23 AS final-nginx
-#
-# WORKDIR /srv
-#
-# RUN apk add --no-cache \
-#     ca-certificates \
-#     gettext-envsubst \
-#     libcap \
-#     nginx \
-#     nginx-mod-http-brotli && \
-#     mkdir -p /etc/nginx/conf.d
-#
-# COPY config/nginx.conf /etc/nginx/nginx.conf
-# COPY config/default.conf.template /etc/nginx/conf.d/default.conf.template
-# COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
-# COPY --from=builder /bin/server ./server
-# COPY start.sh /start.sh
-# RUN chmod +x /start.sh
-#
-# RUN addgroup -S app && adduser -S app -G app && \
-#     mkdir -p /etc/nginx/conf.d /srv /var/cache/nginx /var/lib/nginx /var/log/nginx /var/run && \
-#     setcap cap_net_bind_service=+ep /usr/sbin/nginx && \
-#     chown -R app:app /etc/nginx/conf.d /srv /start.sh /usr/share/nginx/html /var/cache/nginx /var/lib/nginx /var/log/nginx /var/run
-#
-# USER app
-# EXPOSE 80 8080
-# ENTRYPOINT ["/start.sh"]
+# RUN npm run build

@@ -16,6 +16,7 @@ import {
   OFFSET_INPUT_BYTES,
   OFFSET_OUTPUT_BYTES,
 } from "./generated/runtimeBuffer";
+import { negotiateRuntimeMemory, RuntimeSharedArena, type RuntimeMemoryOptions, type RuntimeMemorySelection } from "./arena";
 
 type RuntimeLogLevel = 0 | 1 | 2 | 3 | 4;
 
@@ -39,7 +40,21 @@ export class BrowserRuntimeHost {
   private instance: RuntimeInstance | null = null;
 
   createRuntimeBuffer(): SharedArrayBuffer {
+    if (typeof SharedArrayBuffer === "undefined") {
+      throw new Error("SharedArrayBuffer is unavailable; call negotiateMemory() and use transferable/postMessage fallback");
+    }
     return new SharedArrayBuffer(BUFFER_TOTAL_BYTES);
+  }
+
+  createSharedArena(options: Pick<RuntimeMemoryOptions, "arenaBytes" | "arenaProfile"> = {}): RuntimeSharedArena {
+    if (typeof SharedArrayBuffer === "undefined") {
+      throw new Error("SharedArrayBuffer is unavailable; RuntimeSharedArena cannot be created");
+    }
+    return RuntimeSharedArena.create(options);
+  }
+
+  negotiateMemory(options: RuntimeMemoryOptions = {}): RuntimeMemorySelection {
+    return negotiateRuntimeMemory(options);
   }
 
   registerBuffer(buffer: SharedArrayBuffer): RuntimeHandle {
