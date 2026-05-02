@@ -23,6 +23,13 @@ This document tracks the deliberate performance and architecture carryovers fold
 15. Stale chunk/module failures should trigger one-shot cache and service-worker refresh plus reload, instead of leaving the app in a white-screen state.
 16. Hot-path parsing should precompile regexes, centralize normalization, and use bounded caches when the same values recur heavily.
 
+**Phase 2 Implementation (Binary-First & Zero-Copy)**:
+- **Singleflight Cache**: `GetOrSet` prevents cache stampedes via concurrent request coalescing and double-check locking.
+- **Adaptive Concurrency**: Worker engine dynamically scales goroutine pools based on queue depth (up to 64 per queue) to handle traffic spikes.
+- **Vectorized Batching**: Support for bulk `EventBatch` envelopes reduces syscall and JS event-loop overhead for high-frequency streams.
+- **SharedArrayBuffer Ring Buffer**: Zero-copy log streaming from WASM to the host without main-thread blocking.
+- **Beautiful Diagnostics**: High-density, table-aligned logging for sub-millisecond anomaly detection.
+
 ## Deferred behind stubs
 
 1. Native Rust render RPC for server-authoritative media execution

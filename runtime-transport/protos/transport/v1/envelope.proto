@@ -24,3 +24,7 @@ message EventEnvelope {
   PayloadEncoding payload_encoding = 8;
   string source_node_id = 9;
 }
+
+message EventBatch {
+  repeated EventEnvelope envelopes = 1;
+}

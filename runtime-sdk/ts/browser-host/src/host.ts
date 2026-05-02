@@ -17,6 +17,7 @@ import {
   OFFSET_OUTPUT_BYTES,
 } from "./generated/runtimeBuffer";
 import { negotiateRuntimeMemory, RuntimeSharedArena, type RuntimeMemoryOptions, type RuntimeMemorySelection } from "./arena";
+import { LogRingBuffer } from "./pulse/logRing";
 
 type RuntimeLogLevel = 0 | 1 | 2 | 3 | 4;
 
@@ -38,6 +39,7 @@ export class BrowserRuntimeHost {
   private readonly buffers = new Map<RuntimeHandle, SharedArrayBuffer>();
   private nextHandle = 1;
   private instance: RuntimeInstance | null = null;
+  private logRing: LogRingBuffer | null = null;
 
   createRuntimeBuffer(): SharedArrayBuffer {
     if (typeof SharedArrayBuffer === "undefined") {
@@ -103,6 +105,12 @@ export class BrowserRuntimeHost {
         const message = new TextDecoder().decode(this.getMemoryView(ptr, len));
         this.log(message, level);
       },
+      ovrt_log_ring: (ptr: number, len: number) => {
+        if (this.logRing) {
+          const bytes = this.getMemoryView(ptr, len);
+          this.logRing.writeRaw(bytes);
+        }
+      },
       ovrt_get_now: () => Date.now(),
       ovrt_fill_random: (ptr: number, len: number) => {
         const slice = this.getMemoryView(ptr, len);
@@ -131,6 +139,14 @@ export class BrowserRuntimeHost {
     }
     const instance = result.instance as RuntimeInstance;
     this.attachInstance(instance);
+    
+    // Initialize log ring if available in memory
+    const memory = instance.exports.memory as WebAssembly.Memory;
+    if (memory) {
+       // Typically the log ring would be a separate SharedArrayBuffer 
+       // but here we just ensure the host can receive the calls.
+    }
+
     return instance;
   }
 
@@ -222,5 +238,9 @@ export class BrowserRuntimeHost {
       return;
     }
     console.debug(message);
+  }
+
+  setLogRing(ring: LogRingBuffer): void {
+    this.logRing = ring;
   }
 }

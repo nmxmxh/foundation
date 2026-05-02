@@ -11,14 +11,26 @@ import (
 	"strings"
 
 	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 )
 
 const (
 	EncodingIdentity = "identity"
 	EncodingBrotli   = "br"
+	EncodingZstd     = "zstd"
 	EncodingGzip     = "gzip"
 	EncodingDeflate  = "deflate"
 )
+
+var (
+	zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
+	zstdDecoder, _ = zstd.NewReader(nil)
+)
+
+// CompressZstd compresses data with Zstd at the configured level.
+func CompressZstd(data []byte) ([]byte, error) {
+	return zstdEncoder.EncodeAll(data, make([]byte, 0, len(data))), nil
+}
 
 // CompressGzip compresses data with gzip at the configured level.
 func CompressGzip(data []byte, level int) ([]byte, error) {
@@ -71,6 +83,9 @@ func Compress(data []byte, acceptEncoding string, level int) ([]byte, string, er
 	case EncodingBrotli:
 		compressed, err := CompressBrotli(data, level)
 		return compressed, EncodingBrotli, err
+	case EncodingZstd:
+		compressed, err := CompressZstd(data)
+		return compressed, EncodingZstd, err
 	case EncodingGzip:
 		compressed, err := CompressGzip(data, level)
 		return compressed, EncodingGzip, err
@@ -86,6 +101,10 @@ func CompressBest(data []byte, level int) ([]byte, string, error) {
 	compressed, err := CompressBrotli(data, level)
 	if err == nil && len(compressed) < len(data) {
 		return compressed, EncodingBrotli, nil
+	}
+	compressed, err = CompressZstd(data)
+	if err == nil && len(compressed) < len(data) {
+		return compressed, EncodingZstd, nil
 	}
 	compressed, err = CompressGzip(data, level)
 	if err == nil && len(compressed) < len(data) {
@@ -106,6 +125,9 @@ func Decompress(data []byte) ([]byte, error) {
 	if out, err := decompressBrotli(data); err == nil {
 		return out, nil
 	}
+	if out, err := decompressZstd(data); err == nil {
+		return out, nil
+	}
 	if out, err := decompressGzip(data); err == nil {
 		return out, nil
 	}
@@ -118,6 +140,8 @@ func DecompressWithEncoding(data []byte, encoding string) ([]byte, error) {
 		return append([]byte(nil), data...), nil
 	case EncodingBrotli:
 		return decompressBrotli(data)
+	case EncodingZstd:
+		return decompressZstd(data)
 	case EncodingGzip:
 		return decompressGzip(data)
 	case EncodingDeflate:
@@ -131,6 +155,10 @@ func DecompressWithEncoding(data []byte, encoding string) ([]byte, error) {
 
 func decompressBrotli(data []byte) ([]byte, error) {
 	return io.ReadAll(brotli.NewReader(bytes.NewReader(data)))
+}
+
+func decompressZstd(data []byte) ([]byte, error) {
+	return zstdDecoder.DecodeAll(data, nil)
 }
 
 func decompressGzip(data []byte) ([]byte, error) {
@@ -167,6 +195,8 @@ func PreferredEncoding(acceptEncoding string) string {
 	switch {
 	case qvalues[EncodingBrotli] > 0:
 		return EncodingBrotli
+	case qvalues[EncodingZstd] > 0:
+		return EncodingZstd
 	case qvalues[EncodingGzip] > 0:
 		return EncodingGzip
 	case qvalues[EncodingDeflate] > 0:

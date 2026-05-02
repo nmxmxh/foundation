@@ -20,9 +20,10 @@ Redis is for ephemeral speed and coordination, not durable business truth.
 1. Short-lived caches.
 2. Rate limiting counters.
 3. Idempotency fences/locks.
-4. Queue coordination and transient worker state.
-5. Lightweight pub/sub notifications.
-6. Transient session management (with explicit TTL and sliding window activity tracking where required).
+4. **Reliable Event Streaming**: Use Redis Streams (`XADD`, `XREADGROUP`) for business-critical events requiring "at-least-once" delivery.
+5. **Distributed Coordination**: Use Fenced Distributed Locks for cross-process resource protection.
+6. Lightweight pub/sub notifications (transient only).
+7. Transient session management.
 
 ## Key design
 
@@ -53,12 +54,15 @@ Rules:
 
 ## Runtime rules
 
-1. Use pipelining for batch operations.
-2. Avoid `KEYS` in runtime paths; use targeted keys or cursor scans for controlled maintenance only.
+1. Use pipelining for batch operations to reduce network roundtrips.
+2. Avoid `KEYS` in runtime paths; use targeted keys or cursor scans.
 3. Bound retries and timeouts for Redis calls.
 4. Record hit/miss/error metrics per key family.
-5. Distributed locks must use unique lock tokens or fencing semantics so one actor cannot release another actor's lock after timeout or retry drift.
-6. Do not cache authorization answers or user-scoped responses without an explicit invalidation/versioning strategy.
+5. **Fencing Tokens**: Distributed locks must use unique lock tokens (fencing tokens) or CAS semantics (`SET NX`). Locks must be released using a script that verifies the token to prevent accidental release of a lock re-acquired by another process.
+6. **Consumer Groups**: Use Redis Stream consumer groups to distribute event load across multiple worker instances while ensuring every message is acknowledged (`XACK`).
+7. **Big Key Prevention**: Do not store more than 10,000 elements in a single Hash, Set, or List. Large keys cause high latency during access and deletion (blocking the main thread) and lead to memory fragmentation.
+8. **Scalable Counting**: Use **HyperLogLog** (`PFADD`, `PFCOUNT`) for estimating the cardinality of unique items (e.g., daily unique users) when a ~1% error margin is acceptable. This maintains a constant 12KB memory footprint regardless of scale.
+9. **No O(N) Commands**: Strictly avoid `KEYS *`, `SMEMBERS` on large sets, or `HGETALL` on large hashes. Use `SCAN`, `SSCAN`, and `HSCAN` instead to prevent blocking the Redis event loop.
 
 ## Concurrency and scale controls
 

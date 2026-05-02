@@ -6,6 +6,7 @@ require (
 	github.com/andybalholm/brotli v1.2.1
 	github.com/aws/aws-sdk-go v1.55.7
 	github.com/jackc/pgx/v5 v5.9.1
+	github.com/klauspost/compress v1.18.6
 	github.com/nmxmxh/ovasabi_foundation/config-contracts/go v0.0.0
 	github.com/nmxmxh/ovasabi_foundation/runtime-transport/go v0.0.0
 	github.com/redis/go-redis/v9 v9.17.2
@@ -17,6 +18,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.43.0
 	go.opentelemetry.io/otel/trace v1.43.0
 	go.uber.org/zap v1.27.1
+	golang.org/x/sync v0.20.0
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 )
@@ -49,7 +51,6 @@ require (
 	go.uber.org/goleak v1.3.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.52.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260401024825-9d38bb4040a9 // indirect

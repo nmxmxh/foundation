@@ -278,7 +278,9 @@ func (hc *HealthChecker) writeResponse(w http.ResponseWriter, response HealthRes
 	}
 
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(response)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		_ = err
+	}
 }
 
 // Pre-built check functions
@@ -370,7 +372,7 @@ func HTTPCheck(url string) CheckFunc {
 			result.Status = StatusUnhealthy
 			result.Message = err.Error()
 		} else {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 				result.Status = StatusHealthy
 				result.Message = fmt.Sprintf("HTTP %d", resp.StatusCode)
@@ -402,7 +404,7 @@ func TCPCheck(address string) CheckFunc {
 			result.Status = StatusUnhealthy
 			result.Message = err.Error()
 		} else {
-			conn.Close()
+			_ = conn.Close()
 			result.Status = StatusHealthy
 			result.Message = fmt.Sprintf("TCP connection to %s successful", address)
 		}

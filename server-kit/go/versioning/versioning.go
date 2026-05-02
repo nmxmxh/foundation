@@ -335,10 +335,13 @@ func (v *Versioner) AllVersions() []Version {
 func (v *Versioner) VersionsHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"versions":        v.AllVersions(),
 			"current_version": v.config.DefaultVersion,
-		})
+		}); err != nil {
+			// Log error if needed, but at this point headers are sent
+			_ = err
+		}
 	})
 }
 

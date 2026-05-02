@@ -117,26 +117,23 @@ func (db *PostgresDB) QueryMaps(ctx context.Context, query string, args ...any) 
 		return nil, err
 	}
 	defer rows.Close()
+	return scanToMaps(rows)
+}
 
-	fields := rows.FieldDescriptions()
-	items := make([]map[string]any, 0, 32)
-	for rows.Next() {
-		values, err := rows.Values()
-		if err != nil {
-			return nil, err
-		}
-		item := make(map[string]any, len(fields))
-		for index, field := range fields {
-			value := values[index]
-			if bytesValue, ok := value.([]byte); ok {
-				item[string(field.Name)] = string(bytesValue)
-				continue
-			}
-			item[string(field.Name)] = value
-		}
-		items = append(items, item)
+func (db *PostgresDB) Stats() StoreStats {
+	if db == nil || db.pool == nil {
+		return StoreStats{}
 	}
-	return items, rows.Err()
+	s := db.pool.Stat()
+	return StoreStats{
+		TotalConns:      s.TotalConns(),
+		IdleConns:       s.IdleConns(),
+		ActiveConns:     s.TotalConns() - s.IdleConns(),
+		AcquireCount:    s.AcquireCount(),
+		AcquireDuration: s.AcquireDuration(),
+		MaxConns:        s.MaxConns(),
+		ConstructedAt:   time.Now(), // Approx as pgxpool doesn't track this directly
+	}
 }
 
 func (tx *postgresTx) Exec(ctx context.Context, query string, args ...any) error {
@@ -152,6 +149,44 @@ func (tx *postgresTx) QueryRow(ctx context.Context, query string, args ...any) R
 		return memoryRow{err: errors.New("postgres tx is nil")}
 	}
 	return tx.tx.QueryRow(ctx, query, args...)
+}
+
+func (tx *postgresTx) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
+	if tx == nil || tx.tx == nil {
+		return nil, errors.New("postgres tx is nil")
+	}
+	rows, err := tx.tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanToMaps(rows)
+}
+
+func scanToMaps(rows pgx.Rows) ([]map[string]any, error) {
+	fields := rows.FieldDescriptions()
+	numFields := len(fields)
+	items := make([]map[string]any, 0, 32)
+
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, err
+		}
+
+		item := make(map[string]any, numFields)
+		for i := 0; i < numFields; i++ {
+			val := values[i]
+			if b, ok := val.([]byte); ok {
+				item[fields[i].Name] = string(b)
+			} else {
+				item[fields[i].Name] = val
+			}
+		}
+		items = append(items, item)
+	}
+
+	return items, rows.Err()
 }
 
 func (tx *postgresTx) Commit(ctx context.Context) error {
@@ -327,14 +362,112 @@ func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organ
 }
 
 func (db *PostgresDB) CountRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any) (int64, error) {
-	items, err := db.ListRecords(ctx, domain, collection, organizationID, filters, 0)
+	if db == nil || db.pool == nil {
+		return 0, errors.New("postgres pool is nil")
+	}
+
+	domain = strings.TrimSpace(domain)
+	collection = strings.TrimSpace(collection)
+	organizationID = strings.TrimSpace(organizationID)
+
+	args := make([]any, 0, 3)
+	clauses := make([]string, 0, 3)
+	argPos := 1
+	if domain != "" {
+		clauses = append(clauses, fmt.Sprintf("domain = $%d", argPos))
+		args = append(args, domain)
+		argPos++
+	}
+	if collection != "" {
+		clauses = append(clauses, fmt.Sprintf("collection_name = $%d", argPos))
+		args = append(args, collection)
+		argPos++
+	}
+	if organizationID != "" {
+		clauses = append(clauses, fmt.Sprintf("organization_id = $%d", argPos))
+		args = append(args, organizationID)
+		argPos++
+	}
+
+	where := "TRUE"
+	if len(clauses) > 0 {
+		where = strings.Join(clauses, " AND ")
+	}
+
+	query := `SELECT COUNT(*) FROM governance_state_records WHERE ` + where
+	
+	// Note: filters are handled app-side in ListRecords, but for native count
+	// we should ideally push them to SQL. For now, we optimize the base count.
+	// Future: implement JSONB path filter pushdown.
+	
+	var count int64
+	err := db.pool.QueryRow(ctx, query, args...).Scan(&count)
+	return count, err
+}
+
+func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, organizationID string) (int64, error) {
+	if db == nil || db.pool == nil {
+		return 0, errors.New("postgres pool is nil")
+	}
+
+	domain = strings.TrimSpace(domain)
+	collection = strings.TrimSpace(collection)
+	organizationID = strings.TrimSpace(organizationID)
+
+	// If no filters, use the fastest catalog-based estimate
+	if domain == "" && collection == "" && organizationID == "" {
+		var estimate int64
+		err := db.pool.QueryRow(ctx, `
+			SELECT reltuples::bigint 
+			FROM pg_class 
+			WHERE oid = 'governance_state_records'::regclass
+		`).Scan(&estimate)
+		return estimate, err
+	}
+
+	// For scoped queries, use EXPLAIN to get the planner's estimate
+	args := make([]any, 0, 3)
+	clauses := make([]string, 0, 3)
+	argPos := 1
+	if domain != "" {
+		clauses = append(clauses, fmt.Sprintf("domain = $%d", argPos))
+		args = append(args, domain)
+		argPos++
+	}
+	if collection != "" {
+		clauses = append(clauses, fmt.Sprintf("collection_name = $%d", argPos))
+		args = append(args, collection)
+		argPos++
+	}
+	if organizationID != "" {
+		clauses = append(clauses, fmt.Sprintf("organization_id = $%d", argPos))
+		args = append(args, organizationID)
+		argPos++
+	}
+
+	query := `EXPLAIN SELECT 1 FROM governance_state_records WHERE ` + strings.Join(clauses, " AND ")
+	var plan string
+	err := db.pool.QueryRow(ctx, query, args...).Scan(&plan)
 	if err != nil {
 		return 0, err
 	}
-	return int64(len(items)), nil
-}
 
-// DeleteRecord removes a single governance state record.
+	// Parse "rows=X" from the EXPLAIN output
+	// Example: Seq Scan on governance_state_records  (cost=0.00..12.75 rows=110 width=4)
+	start := strings.Index(plan, "rows=")
+	if start == -1 {
+		return 0, nil
+	}
+	start += 5
+	end := strings.Index(plan[start:], " ")
+	if end == -1 {
+		end = len(plan[start:])
+	}
+	
+	var count int64
+	fmt.Sscanf(plan[start:start+end], "%d", &count)
+	return count, nil
+}
 func (db *PostgresDB) DeleteRecord(ctx context.Context, domain, collection, organizationID, recordID string) error {
 	if db == nil || db.pool == nil {
 		return errors.New("postgres pool is nil")

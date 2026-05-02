@@ -108,6 +108,22 @@ func (db *MemoryDB) QueryRow(ctx context.Context, _ string, _ ...any) RowScanner
 	return memoryRow{err: errors.New("no rows in memory database")}
 }
 
+func (db *MemoryDB) QueryMaps(ctx context.Context, _ string, _ ...any) ([]map[string]any, error) {
+	if err := db.ensureReady(ctx); err != nil {
+		return nil, err
+	}
+	return nil, nil // MemoryDB doesn't support generic SQL queries
+}
+
+func (db *MemoryDB) Stats() StoreStats {
+	return StoreStats{
+		TotalConns:    1,
+		IdleConns:     0,
+		ActiveConns:   1,
+		ConstructedAt: time.Now(),
+	}
+}
+
 func (db *MemoryDB) UpsertRecord(ctx context.Context, rec DomainRecord) (DomainRecord, error) {
 	if err := db.ensureReady(ctx); err != nil {
 		return DomainRecord{}, err
@@ -220,6 +236,10 @@ func (db *MemoryDB) CountRecords(ctx context.Context, domain, collection, organi
 		return 0, err
 	}
 	return int64(len(items)), nil
+}
+
+func (db *MemoryDB) EstimateCount(ctx context.Context, domain, collection, organizationID string) (int64, error) {
+	return db.CountRecords(ctx, domain, collection, organizationID, nil)
 }
 
 // DeleteRecord removes a single domain record when present.

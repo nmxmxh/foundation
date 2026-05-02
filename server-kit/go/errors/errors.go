@@ -297,7 +297,9 @@ func HTTPError(w http.ResponseWriter, err error) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(e.HTTPStatus())
-	json.NewEncoder(w).Encode(e.ToAPIResponse())
+	if err := json.NewEncoder(w).Encode(e.ToAPIResponse()); err != nil {
+		_ = err
+	}
 }
 
 // captureStack captures the current stack trace.

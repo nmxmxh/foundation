@@ -15,14 +15,39 @@ const (
 	DriverRedis  = "redis"
 )
 
-// Client is the pub/sub transport abstraction used by runtime components.
+// Client is the pub/sub and stream transport abstraction used by runtime components.
 type Client interface {
+	// Pub/Sub
 	Publish(context.Context, string, []byte) error
 	Subscribe(context.Context, string) (<-chan []byte, func(), error)
 	PSubscribe(context.Context, ...string) ([]<-chan []byte, func(), error)
+
+	// Streams (Reliable event delivery)
+	XAdd(ctx context.Context, stream string, values map[string]interface{}) (string, error)
+	XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error)
+	XAck(ctx context.Context, stream, group string, ids ...string) error
+
+	// Coordination & Locks
 	Incr(ctx context.Context, key string) (int64, error)
 	Expire(ctx context.Context, key string, ttl time.Duration) (bool, error)
+	Lock(ctx context.Context, key string, ttl time.Duration) (string, error)
+	Unlock(ctx context.Context, key, token string) (bool, error)
+
+	// Analytics & Cardinality (HyperLogLog)
+	PFAdd(ctx context.Context, key string, els ...interface{}) (int64, error)
+	PFCount(ctx context.Context, keys ...string) (int64, error)
+
+	// Primitives
+	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	Get(ctx context.Context, key string) ([]byte, error)
+	Del(ctx context.Context, keys ...string) error
 	Close() error
+}
+
+// StreamMessage represents a message read from a Redis stream.
+type StreamMessage struct {
+	ID     string
+	Values map[string]interface{}
 }
 
 // Connect creates a redis pub/sub client using the selected driver.
@@ -174,6 +199,46 @@ func (c *memoryClient) Expire(_ context.Context, key string, ttl time.Duration) 
 	return true, nil
 }
 
+func (c *memoryClient) XAdd(_ context.Context, _ string, _ map[string]interface{}) (string, error) {
+	return "msg-123", nil
+}
+
+func (c *memoryClient) XReadGroup(_ context.Context, _, _, _ string, _ int64) ([]StreamMessage, error) {
+	return nil, nil
+}
+
+func (c *memoryClient) XAck(_ context.Context, _, _ string, _ ...string) error {
+	return nil
+}
+
+func (c *memoryClient) Lock(_ context.Context, key string, _ time.Duration) (string, error) {
+	return "token-" + key, nil
+}
+
+func (c *memoryClient) Unlock(_ context.Context, _, _ string) (bool, error) {
+	return true, nil
+}
+
+func (c *memoryClient) Set(_ context.Context, _ string, _ interface{}, _ time.Duration) error {
+	return nil
+}
+
+func (c *memoryClient) Get(_ context.Context, _ string) ([]byte, error) {
+	return nil, nil
+}
+
+func (c *memoryClient) Del(_ context.Context, _ ...string) error {
+	return nil
+}
+
+func (c *memoryClient) PFAdd(_ context.Context, _ string, _ ...interface{}) (int64, error) {
+	return 1, nil
+}
+
+func (c *memoryClient) PFCount(_ context.Context, _ ...string) (int64, error) {
+	return 0, nil
+}
+
 func (c *memoryClient) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -323,6 +388,100 @@ func (c *redisClient) Incr(ctx context.Context, key string) (int64, error) {
 
 func (c *redisClient) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	return c.client.Expire(ctx, c.qualify(key), ttl).Result()
+}
+
+func (c *redisClient) XAdd(ctx context.Context, stream string, values map[string]interface{}) (string, error) {
+	return c.client.XAdd(ctx, &goredis.XAddArgs{
+		Stream: c.qualify(stream),
+		Values: values,
+	}).Result()
+}
+
+func (c *redisClient) XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error) {
+	res, err := c.client.XReadGroup(ctx, &goredis.XReadGroupArgs{
+		Group:    group,
+		Consumer: consumer,
+		Streams:  []string{c.qualify(stream), ">"},
+		Count:    count,
+		Block:    0,
+	}).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	messages := make([]StreamMessage, 0)
+	for _, xstream := range res {
+		for _, xmsg := range xstream.Messages {
+			messages = append(messages, StreamMessage{
+				ID:     xmsg.ID,
+				Values: xmsg.Values,
+			})
+		}
+	}
+	return messages, nil
+}
+
+func (c *redisClient) XAck(ctx context.Context, stream, group string, ids ...string) error {
+	return c.client.XAck(ctx, c.qualify(stream), group, ids...).Err()
+}
+
+func (c *redisClient) Lock(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	token := fmt.Sprintf("%d", time.Now().UnixNano())
+	qualified := c.qualify(key)
+	ok, err := c.client.SetNX(ctx, qualified, token, ttl).Result()
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("lock already held for key: %s", key)
+	}
+	return token, nil
+}
+
+func (c *redisClient) Unlock(ctx context.Context, key, token string) (bool, error) {
+	script := `
+		if redis.call("get", KEYS[1]) == ARGV[1] then
+			return redis.call("del", KEYS[1])
+		else
+			return 0
+		end
+	`
+	res, err := c.client.Eval(ctx, script, []string{c.qualify(key)}, token).Int64()
+	return res == 1, err
+}
+
+func (c *redisClient) PFAdd(ctx context.Context, key string, els ...interface{}) (int64, error) {
+	return c.client.PFAdd(ctx, c.qualify(key), els...).Result()
+}
+
+func (c *redisClient) PFCount(ctx context.Context, keys ...string) (int64, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	qualified := make([]string, len(keys))
+	for i, k := range keys {
+		qualified[i] = c.qualify(k)
+	}
+	return c.client.PFCount(ctx, qualified...).Result()
+}
+
+func (c *redisClient) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	return c.client.Set(ctx, c.qualify(key), value, ttl).Err()
+}
+
+func (c *redisClient) Get(ctx context.Context, key string) ([]byte, error) {
+	return c.client.Get(ctx, c.qualify(key)).Bytes()
+}
+
+func (c *redisClient) Del(ctx context.Context, keys ...string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	qualified := make([]string, len(keys))
+	for i, k := range keys {
+		qualified[i] = c.qualify(k)
+	}
+	return c.client.Del(ctx, qualified...).Err()
 }
 
 func (c *redisClient) Close() error {

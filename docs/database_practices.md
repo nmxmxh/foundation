@@ -38,13 +38,14 @@ This is the cross-app database standard for Ovasabi standalone apps. It is optim
 
 1. Use parameterized SQL only.
 2. Keep transactions short and scoped.
-3. Use explicit ordering + strict pagination (explicit bounding via `LIMIT`/`OFFSET` or Cursor pagination) for all list queries. Unbounded fetches loading tables into memory are prohibited.
+3. Use explicit ordering + keyset/cursor pagination for all list queries. **Prohibit `OFFSET` for large datasets**; as offset increases, Postgres must still scan and discard the preceding rows, leading to linear performance degradation. Use `WHERE id > last_seen_id` instead.
 4. Prefer deterministic upserts (`INSERT ... ON CONFLICT ... DO UPDATE`) for seed and idempotent command handlers.
 5. Never perform full-table updates/deletes without explicit scoped predicates.
 6. Do not wrap indexed columns in runtime casts/functions on hot paths. Use range predicates like `timestamp >= day_start AND timestamp < day_end` instead of `timestamp::date = ...`.
 7. N+1 reads inside write loops are performance bugs. Preload reusable reference data once per command or document.
 8. Dynamic sort fields, projection lists, and filter operators must come from allowlists. Do not concatenate user input into SQL identifiers or query fragments.
-9. Authorization predicates must be part of the read/write query itself or enforced by an equivalent DB policy. Do not fetch by ID first and rely on a later in-memory scope check for sensitive rows.
+9. **No `SELECT *`**: Explicitly list required columns. This reduces network I/O, prevents "wide-row" performance penalties, and ensures schema evolution (e.g., adding a large JSONB column) doesn't accidentally degrade unrelated read paths.
+10. Authorization predicates must be part of the read/write query itself or enforced by an equivalent DB policy. Do not fetch by ID first and rely on a later in-memory scope check for sensitive rows.
 10. High-value or uniqueness-sensitive mutations must use unique constraints, row/advisory locks, or `SERIALIZABLE` transactions to prevent race-driven double execution, quota bypass, or state desynchronization.
 11. Audit tables or append-only logs must capture privilege changes, exports, payout/billing actions, and destructive operations with actor and correlation data.
 
@@ -104,6 +105,13 @@ Rules:
 3. Reserve headroom in Postgres for migrations, admin sessions, and failover events.
 4. Introduce PgBouncer transaction pooling before large horizontal fanout.
 5. Monitor pool acquire latency and timeout rate as saturation signals.
+6. **Observability**: Export native `pgxpool` stats (Total, Idle, Active, Acquire Duration) to the Foundation's observability bridge. Alert on high acquire duration or connection exhaustion.
+7. **Zero-Allocation Scanning**: In high-throughput paths, use manual `rows.Scan()` or the Foundation's optimized `QueryMaps` bridge to avoid reflection and redundant allocations.
+8. **Count Optimization**: Exact `COUNT(*)` is an O(N) operation in Postgres due to MVCC.
+    *   **Small Sets**: Exact count with index is acceptable.
+    *   **Large Sets**: Use `EstimateCount` (via `EXPLAIN` plan analysis or `reltuples` catalog statistics) for UI indicators and non-critical analytics.
+    *   **Hot Counters**: Use a dedicated counter cache table or Redis if exact, high-frequency counting is required.
+9. **Index Overhead**: While missing indexes cause slow reads, excessive indexes cause slow writes and increased VACUUM pressure. Audit indexes regularly for usage.
 
 ## Security and compliance
 

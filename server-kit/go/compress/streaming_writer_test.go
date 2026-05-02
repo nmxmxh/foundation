@@ -63,7 +63,7 @@ func TestStreamingCompressor_Gzip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("write failed: %v", err)
 	}
-	sc.Close()
+	_ = sc.Close()
 
 	if rr.Header().Get("Content-Encoding") != EncodingGzip {
 		t.Errorf("expected gzip encoding, got %s", rr.Header().Get("Content-Encoding"))
@@ -111,5 +111,5 @@ func TestStreamingCompressor_Flush(t *testing.T) {
 	if rr.Body.Len() == 0 {
 		t.Error("expected data to be flushed to the response recorder")
 	}
-	sc.Close()
+	_ = sc.Close()
 }

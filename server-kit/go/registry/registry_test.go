@@ -57,7 +57,7 @@ func TestDispatchBytesKeepsTypedPayloadBinary(t *testing.T) {
 		t.Fatalf("response Unmarshal() error = %v", err)
 	}
 	if response.ResourceId != "asset_123" || response.Status != "complete" {
-		t.Fatalf("unexpected response: %+v", response)
+		t.Fatalf("unexpected response: %+v", &response)
 	}
 }
 

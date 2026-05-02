@@ -170,6 +170,19 @@ macro_rules! export_runtime_ffi {
                 err_cap,
             )
         }
+
+        #[no_mangle]
+        pub unsafe extern "C" fn ovrt_runtime_write_log(
+            ring_ptr: *mut u8,
+            msg_ptr: *const u8,
+            msg_len: usize,
+        ) {
+            let ring = $crate::ovrt_core::log_ring::LogRingBuffer::from_ptr(ring_ptr);
+            let msg_bytes = ::std::slice::from_raw_parts(msg_ptr, msg_len);
+            if let Ok(msg) = ::std::str::from_utf8(msg_bytes) {
+                ring.write(msg);
+            }
+        }
     };
 }
 

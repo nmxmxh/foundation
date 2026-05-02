@@ -32,6 +32,7 @@ type Engine struct {
 	dedupe     map[string]struct{}
 	jobHealth  map[string]JobHealthSnapshot
 	log        logger.Logger
+	predictor  ScalingPredictor
 	wg         sync.WaitGroup
 
 	riverClient   *river.Client[pgx.Tx]
@@ -56,6 +57,7 @@ func NewEngine(queueWorkers map[string]int, l logger.Logger) *Engine {
 		dedupe:     map[string]struct{}{},
 		jobHealth:  map[string]JobHealthSnapshot{},
 		log:        l.With(zap.String("component", "worker_engine")),
+		predictor:  NewTrendPredictor(),
 	}
 }
 
@@ -105,7 +107,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		return errors.New("no processors registered")
 	}
 
-	// In-memory queue runners (only used if River is not active or for specific local-only queues)
+	// In-memory queue runners
 	for queue, jobs := range e.queues {
 		workerCount := e.workers[queue]
 		if workerCount <= 0 {
@@ -119,7 +121,48 @@ func (e *Engine) Start(ctx context.Context) error {
 			}(queue, jobs, i+1)
 		}
 	}
+
+	// Start adaptive scaling controller
+	go e.adaptiveScaler(ctx)
+
 	return nil
+}
+
+func (e *Engine) adaptiveScaler(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			e.mu.Lock()
+			for queue, jobs := range e.queues {
+				depth := len(jobs)
+				currentWorkers := e.workers[queue]
+				
+				// Scale up if queue is getting full (> 50%) and we haven't reached a hard limit
+				if depth > 512 && currentWorkers < 64 {
+					newWorkers := 4
+					if currentWorkers+newWorkers > 64 {
+						newWorkers = 64 - currentWorkers
+					}
+					e.spawnWorkers(ctx, queue, jobs, newWorkers)
+					e.log.Info("scaled up workers (reactive)", zap.String("queue", queue), zap.Int("new_total", e.workers[queue]), zap.Int("depth", depth))
+				} else if e.predictor != nil {
+					// Pre-emptive scaling based on predictive signals
+					if needed := e.predictor.Predict(ctx, queue, depth, currentWorkers); needed > 0 {
+						e.spawnWorkers(ctx, queue, jobs, needed)
+						e.log.Info("scaled up workers (predictive)", zap.String("queue", queue), zap.Int("added", needed), zap.Int("new_total", e.workers[queue]), zap.Int("depth", depth))
+					}
+				}
+				
+				// Scale down if queue is empty for a while (TODO: track idle time for precise reaping)
+			}
+			e.mu.Unlock()
+		}
+	}
 }
 
 func (e *Engine) Wait() {
@@ -227,6 +270,17 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 		observability.Default().RecordWorker(job.Kind(), job.Queue, "enqueued")
 		observability.Default().RecordQueueDepth(job.Queue, len(queueCh))
 		return nil
+	}
+}
+
+func (e *Engine) spawnWorkers(ctx context.Context, queue string, jobs <-chan Job, count int) {
+	for i := 0; i < count; i++ {
+		e.workers[queue]++
+		e.wg.Add(1)
+		go func(q string, j <-chan Job, idx int) {
+			defer e.wg.Done()
+			e.runQueue(ctx, q, j, idx)
+		}(queue, jobs, e.workers[queue])
 	}
 }
 

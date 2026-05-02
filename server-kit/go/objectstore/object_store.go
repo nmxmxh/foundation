@@ -246,7 +246,7 @@ func (s *Store) PutFile(ctx context.Context, key, localPath string, opts PutOpti
 	if err != nil {
 		return Object{}, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	client, err := s.s3Client()
 	if err != nil {
@@ -302,7 +302,7 @@ func (s *Store) ReadBytes(ctx context.Context, key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer output.Body.Close()
+	defer func() { _ = output.Body.Close() }()
 	return io.ReadAll(output.Body)
 }
 

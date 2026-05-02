@@ -265,3 +265,84 @@ func payloadEncodingFromProto(value transportpb.PayloadEncoding) string {
 		return PayloadEncodingJSON
 	}
 }
+
+// Batch is a collection of envelopes for vectorized processing.
+type Batch struct {
+	Envelopes []Envelope `json:"envelopes"`
+}
+
+func (b Batch) ToBinary() ([]byte, error) {
+	batch := &transportpb.EventBatch{
+		Envelopes: make([]*transportpb.EventEnvelope, len(b.Envelopes)),
+	}
+	for i, e := range b.Envelopes {
+		e.Normalize()
+		if err := e.Validate(); err != nil {
+			return nil, err
+		}
+
+		metadataProto, err := metadata.FromMap(e.Metadata).ToTransportProto()
+		if err != nil {
+			return nil, err
+		}
+
+		payload := append([]byte(nil), e.PayloadBytes...)
+		if e.PayloadEncoding == PayloadEncodingJSON {
+			var err error
+			payload, err = json.Marshal(e.Payload)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		batch.Envelopes[i] = &transportpb.EventEnvelope{
+			Id:              e.ID,
+			EventType:       e.EventType,
+			Payload:         payload,
+			Metadata:        metadataProto,
+			CorrelationId:   e.CorrelationID,
+			SchemaVersion:   e.SchemaVersion,
+			OccurredAt:      timestamppb.New(e.Timestamp.UTC()),
+			PayloadEncoding: payloadEncodingToProto(e.PayloadEncoding),
+			SourceNodeId:    e.SourceNodeID,
+		}
+	}
+	return proto.Marshal(batch)
+}
+
+func FromBatchBinary(data []byte) (Batch, error) {
+	message := &transportpb.EventBatch{}
+	if err := proto.Unmarshal(data, message); err != nil {
+		return Batch{}, err
+	}
+
+	batch := Batch{
+		Envelopes: make([]Envelope, len(message.GetEnvelopes())),
+	}
+	for i, me := range message.GetEnvelopes() {
+		md, err := metadata.FromTransportProto(me.GetMetadata())
+		if err != nil {
+			return Batch{}, err
+		}
+
+		env := Envelope{
+			ID:              me.GetId(),
+			EventType:       me.GetEventType(),
+			PayloadBytes:    append([]byte(nil), me.GetPayload()...),
+			PayloadEncoding: payloadEncodingFromProto(me.GetPayloadEncoding()),
+			Metadata:        md.ToMap(),
+			CorrelationID:   me.GetCorrelationId(),
+			SchemaVersion:   NormalizeSchemaVersion(me.GetSchemaVersion()),
+			SourceNodeID:    me.GetSourceNodeId(),
+		}
+		if occurredAt := me.GetOccurredAt(); occurredAt != nil {
+			env.Timestamp = occurredAt.AsTime().UTC()
+		}
+		env.Normalize()
+		if env.PayloadEncoding == PayloadEncodingJSON && len(env.PayloadBytes) > 0 {
+			_ = json.Unmarshal(env.PayloadBytes, &env.Payload)
+		}
+		batch.Envelopes[i] = env
+	}
+	return batch, nil
+}

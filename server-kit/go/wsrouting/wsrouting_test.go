@@ -10,7 +10,7 @@ import (
 
 func TestNewRouter(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1")
 	if r.ServerID() != "server-1" {
@@ -20,7 +20,7 @@ func TestNewRouter(t *testing.T) {
 
 func TestNewRouterWithOptions(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1", WithTTL(1*time.Hour))
 	if r.ttl != 1*time.Hour {
@@ -30,7 +30,7 @@ func TestNewRouterWithOptions(t *testing.T) {
 
 func TestNewRouterEmptyServerID(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "")
 	if r.ServerID() == "" {
@@ -40,7 +40,7 @@ func TestNewRouterEmptyServerID(t *testing.T) {
 
 func TestRegisterAndGetLocalConnection(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1")
 	ctx := context.Background()
@@ -75,7 +75,7 @@ func TestRegisterAndGetLocalConnection(t *testing.T) {
 
 func TestRegisterEmptyConnectionID(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1")
 	ctx := context.Background()
@@ -88,7 +88,7 @@ func TestRegisterEmptyConnectionID(t *testing.T) {
 
 func TestGetLocalConnectionByDevice(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1")
 	ctx := context.Background()
@@ -109,7 +109,7 @@ func TestGetLocalConnectionByDevice(t *testing.T) {
 
 func TestGetLocalConnectionsByUser(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1")
 	ctx := context.Background()
@@ -138,7 +138,7 @@ func TestGetLocalConnectionsByUser(t *testing.T) {
 
 func TestUnregister(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1")
 	ctx := context.Background()
@@ -163,7 +163,7 @@ func TestUnregister(t *testing.T) {
 
 func TestUpdateAuth(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1")
 	ctx := context.Background()
@@ -185,7 +185,7 @@ func TestUpdateAuth(t *testing.T) {
 
 func TestLocalConnectionCount(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1")
 	ctx := context.Background()
@@ -204,7 +204,7 @@ func TestLocalConnectionCount(t *testing.T) {
 
 func TestResolveTargets(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1")
 	ctx := context.Background()
@@ -251,7 +251,7 @@ func TestResolveTargets(t *testing.T) {
 
 func TestHealth(t *testing.T) {
 	client := redis.NewMemoryClient("test")
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	r := NewRouter(client, "server-1")
 	ctx := context.Background()

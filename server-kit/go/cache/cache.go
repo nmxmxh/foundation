@@ -19,8 +19,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // Backend defines the interface for cache storage.
@@ -76,6 +79,7 @@ func (JSONSerializer) Unmarshal(data []byte, v interface{}) error {
 // Cache provides cache operations.
 type Cache struct {
 	config Config
+	sf     singleflight.Group
 }
 
 // New creates a new cache instance.
@@ -148,25 +152,39 @@ func (c *Cache) Exists(ctx context.Context, key string) (bool, error) {
 }
 
 // GetOrSet retrieves from cache or computes and stores the value.
+// It uses singleflight to ensure only one concurrent computation happens per key.
 func GetOrSet[T any](ctx context.Context, c *Cache, key string, compute func() (T, error), ttl ...time.Duration) (T, error) {
 	var result T
 
-	// Try to get from cache
+	// Try to get from cache first
 	err := c.Get(ctx, key, &result)
 	if err == nil {
 		return result, nil
 	}
 
-	// Cache miss or error - compute value
-	result, err = compute()
+	// Cache miss or error - compute value with singleflight protection
+	val, err, _ := c.sf.Do(key, func() (interface{}, error) {
+		// Double check cache inside singleflight to handle race conditions
+		var innerResult T
+		if err := c.Get(ctx, key, &innerResult); err == nil {
+			return innerResult, nil
+		}
+
+		res, err := compute()
+		if err != nil {
+			return nil, err
+		}
+
+		// Store in cache
+		_ = c.Set(ctx, key, res, ttl...)
+		return res, nil
+	})
+
 	if err != nil {
 		return result, err
 	}
 
-	// Store in cache (ignore errors)
-	_ = c.Set(ctx, key, result, ttl...)
-
-	return result, nil
+	return val.(T), nil
 }
 
 // Invalidator provides cache invalidation helpers.
@@ -345,7 +363,7 @@ func CacheKey(parts ...interface{}) string {
 	for i, p := range parts {
 		strs[i] = fmt.Sprintf("%v", p)
 	}
-	return fmt.Sprintf("%s", stringJoin(strs, ":"))
+	return strings.Join(strs, ":")
 }
 
 func stringJoin(strs []string, sep string) string {

@@ -261,11 +261,11 @@ func Middleware(serviceName string) func(http.Handler) http.Handler {
 			ctx, span := otel.Tracer(serviceName).Start(ctx, r.Method+" "+r.URL.Path,
 				trace.WithSpanKind(trace.SpanKindServer),
 				trace.WithAttributes(
-					semconv.HTTPMethod(r.Method),
-					semconv.HTTPRoute(r.URL.Path),
-					semconv.HTTPScheme(r.URL.Scheme),
-					attribute.String("http.host", r.Host),
-					attribute.String("http.user_agent", r.UserAgent()),
+					attribute.String("http.request.method", r.Method),
+					attribute.String("url.path", r.URL.Path),
+					attribute.String("url.scheme", r.URL.Scheme),
+					attribute.String("server.address", r.Host),
+					attribute.String("user_agent.original", r.UserAgent()),
 				),
 			)
 			defer span.End()
@@ -281,7 +281,7 @@ func Middleware(serviceName string) func(http.Handler) http.Handler {
 			next.ServeHTTP(wrapped, r.WithContext(ctx))
 
 			// Record response status
-			span.SetAttributes(semconv.HTTPStatusCode(wrapped.statusCode))
+			span.SetAttributes(attribute.Int("http.response.status_code", wrapped.statusCode))
 			if wrapped.statusCode >= 400 {
 				span.SetStatus(codes.Error, http.StatusText(wrapped.statusCode))
 			}

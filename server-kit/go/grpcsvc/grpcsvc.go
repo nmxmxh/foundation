@@ -190,7 +190,7 @@ func Dial(ctx context.Context, target string, opts ClientOptions) (*grpc.ClientC
 		dialOpts = append(dialOpts, grpc.WithUnaryInterceptor(clientAuthUnaryInterceptor(opts.AuthToken)))
 	}
 	dialOpts = append(dialOpts, opts.DialOptions...)
-	return grpc.DialContext(ctx, target, dialOpts...)
+	return grpc.NewClient(target, dialOpts...)
 }
 
 func NewClient(conn grpc.ClientConnInterface, opts ClientOptions) *Client {

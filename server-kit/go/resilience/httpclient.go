@@ -159,7 +159,7 @@ func (c *HTTPClient) doRequest(ctx context.Context, req Request) (*Response, err
 		}
 		return nil, errors.Unavailable(fmt.Sprintf("%s request failed", c.name)).WithCause(err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	// Read response body
 	body, err := io.ReadAll(httpResp.Body)

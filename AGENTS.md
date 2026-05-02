@@ -253,6 +253,8 @@ const envelope = createEnvelope('media:upload:requested', payload, {
 await bus.dispatch(envelope)
 ```
 
+For high-frequency streams, use the **Vectorized Batching** pattern by dispatching an `EventBatch` to reduce event-loop overhead.
+
 ### State Stores
 
 Use Zustand stores with deduplication:
@@ -365,6 +367,7 @@ The kit is the baseline for IndexedDB-backed persistence, metadata normalization
        "correlation_id", ctx.Value("correlation_id"),
        "order_id", orderID)
    ```
+   *Note: In development, logs use the **BeautifulEncoder** for high-density, table-aligned output. Ensure your `component` and `service` fields are descriptive to maximize visibility.*
 
 2. **Validate at boundaries**
 

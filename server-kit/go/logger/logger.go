@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -79,23 +80,25 @@ func ProductionConfig() Config {
 func New(cfg Config) (Logger, error) {
 	level := parseLogLevel(cfg.LogLevel)
 
-	encoderCfg := zap.NewProductionEncoderConfig()
-	encoderCfg.TimeKey = "timestamp"
-	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
-
 	var inner *zap.Logger
 	var err error
 
 	if strings.EqualFold(cfg.Environment, "production") {
 		zapCfg := zap.NewProductionConfig()
 		zapCfg.Level = zap.NewAtomicLevelAt(level)
+		zapCfg.EncoderConfig.TimeKey = "timestamp"
+		zapCfg.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
 		inner, err = zapCfg.Build()
 	} else {
 		zapCfg := zap.NewDevelopmentConfig()
 		if level != zap.InfoLevel {
 			zapCfg.Level = zap.NewAtomicLevelAt(level)
 		}
-		inner, err = zapCfg.Build()
+		
+		// Use custom beautiful encoder for development
+		encoder := NewBeautifulEncoder(zapCfg.EncoderConfig)
+		core := zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), zapCfg.Level)
+		inner = zap.New(core, zap.AddCaller())
 	}
 
 	if err != nil {
