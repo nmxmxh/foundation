@@ -3,6 +3,10 @@ package events
 import (
 	"testing"
 	"time"
+
+	transportpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/transport/v1"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func TestEnvelopeBinaryRoundTripWithJSONPayload(t *testing.T) {
@@ -114,5 +118,28 @@ func TestEnvelopeBinaryRoundTripWithProtobufPayloadBytes(t *testing.T) {
 	}
 	if string(decoded.PayloadBytes) != string(envelope.PayloadBytes) {
 		t.Fatalf("payload bytes mismatch: got %v want %v", decoded.PayloadBytes, envelope.PayloadBytes)
+	}
+}
+
+func TestBatchBinaryRejectsInvalidJSONPayload(t *testing.T) {
+	raw, err := proto.Marshal(&transportpb.EventBatch{
+		Envelopes: []*transportpb.EventEnvelope{
+			{
+				EventType:       "market:ingest_batch:v1:requested",
+				Payload:         []byte(`{"broken":`),
+				Metadata:        &transportpb.Metadata{CorrelationId: "corr_bad_json"},
+				CorrelationId:   "corr_bad_json",
+				SchemaVersion:   "1.0",
+				OccurredAt:      timestamppb.New(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
+				PayloadEncoding: transportpb.PayloadEncoding_PAYLOAD_ENCODING_JSON,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal test batch: %v", err)
+	}
+
+	if _, err := FromBatchBinary(raw); err == nil {
+		t.Fatal("FromBatchBinary() expected invalid JSON payload error, got nil")
 	}
 }

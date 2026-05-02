@@ -23,3 +23,9 @@ require (
 	github.com/pashagolub/pgxmock/v4 v4.4.0
 	github.com/stretchr/testify v1.11.1
 )
+
+replace github.com/nmxmxh/ovasabi_foundation/config-contracts/go => ./foundation/config-contracts/go
+
+replace github.com/nmxmxh/ovasabi_foundation/runtime-transport/go => ./foundation/runtime-transport/go
+
+replace github.com/nmxmxh/ovasabi_foundation/server-kit/go => ./foundation/server-kit/go

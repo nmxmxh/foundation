@@ -2,7 +2,7 @@
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
-FOUNDATION_PATH := $(shell grep -m1 "^FOUNDATION_PATH=" .foundation 2>/dev/null | cut -d'=' -f2)
+FOUNDATION_PATH := $(shell grep -m1 "^FOUNDATION_PATH=" .foundation 2>/dev/null | cut -d'=' -f2 | sed 's/\\ / /g')
 PROTO_PATH := api/protos
 WASM_PUBLIC_DIR ?= frontend/public
 WASM_MODULE_DIR ?= $(WASM_PUBLIC_DIR)/modules

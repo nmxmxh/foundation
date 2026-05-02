@@ -47,7 +47,14 @@ func run(ctx context.Context) error {
 	defer cleanup()
 
 	// Create and start server
-	srv := server.New(cfg, deps, logger)
+	srv := server.New(cfg, deps.Registry, deps.Handler)
+	if deps.Resilience != nil {
+		srv.ConfigureHealthChecks(
+			deps.Resilience.HealthHandler(),
+			deps.Resilience.LivenessHandler(),
+			deps.Resilience.ReadinessHandler(),
+		)
+	}
 
 	return srv.Run(ctx)
 }

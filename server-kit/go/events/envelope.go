@@ -340,7 +340,12 @@ func FromBatchBinary(data []byte) (Batch, error) {
 		}
 		env.Normalize()
 		if env.PayloadEncoding == PayloadEncodingJSON && len(env.PayloadBytes) > 0 {
-			_ = json.Unmarshal(env.PayloadBytes, &env.Payload)
+			if err := json.Unmarshal(env.PayloadBytes, &env.Payload); err != nil {
+				return Batch{}, err
+			}
+			if env.Payload == nil {
+				env.Payload = map[string]any{}
+			}
 		}
 		batch.Envelopes[i] = env
 	}

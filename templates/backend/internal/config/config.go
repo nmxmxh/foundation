@@ -16,9 +16,12 @@ type Config struct {
 
 	// Database
 	DatabaseURL string
+	StateStore  string
 
 	// Redis
-	RedisURL string
+	RedisURL    string
+	RedisPrefix string
+	EventBus    string
 
 	// JWT
 	JWTSecret     string
@@ -48,7 +51,10 @@ func Load() (*Config, error) {
 		Port:                                getEnvInt("PORT", 8080),
 		LogLevel:                            getEnv("LOG_LEVEL", "info"),
 		DatabaseURL:                         getEnv("DATABASE_URL", ""),
+		StateStore:                          getEnv("STATE_STORE_DRIVER", "postgres"),
 		RedisURL:                            getEnv("REDIS_URL", ""),
+		RedisPrefix:                         getEnv("REDIS_PREFIX", "{{PROJECT_NAME}}"),
+		EventBus:                            getEnv("EVENT_BUS_DRIVER", "redis"),
 		JWTSecret:                           getEnv("JWT_SECRET", ""),
 		JWTExpiration:                       getEnvDuration("JWT_EXPIRATION", 24*time.Hour),
 		RuntimeSharedMemory:                 getEnv("RUNTIME_SHARED_MEMORY", "auto"),
