@@ -114,7 +114,9 @@ fn read_frame<R: Read>(reader: &mut R) -> Result<Vec<u8>, FrameReadError> {
 
     let length = u32::from_le_bytes(size) as usize;
     let mut payload = vec![0_u8; length];
-    reader.read_exact(&mut payload).map_err(FrameReadError::Io)?;
+    reader
+        .read_exact(&mut payload)
+        .map_err(FrameReadError::Io)?;
     Ok(payload)
 }
 
@@ -128,9 +130,10 @@ fn write_frame<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
 pub(crate) fn read_frame_for_test<R: Read>(reader: &mut R) -> io::Result<Vec<u8>> {
     match read_frame(reader) {
         Ok(payload) => Ok(payload),
-        Err(FrameReadError::EndOfStream) => {
-            Err(io::Error::new(io::ErrorKind::UnexpectedEof, "end of stream"))
-        }
+        Err(FrameReadError::EndOfStream) => Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "end of stream",
+        )),
         Err(FrameReadError::Io(error)) => Err(error),
     }
 }

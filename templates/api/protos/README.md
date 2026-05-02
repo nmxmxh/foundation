@@ -54,8 +54,15 @@ Once a domain is in production, its package is "frozen":
 # Generate Go code
 make proto
 
-# Output location
+# Generate frontend TypeScript code
+make proto-ts
+
+# Regenerate app and foundation communication bindings together
+make communication-contracts
+
+# Output locations
 api/protos/<domain>/v1/<domain>.pb.go
+frontend/src/types/protos/<domain>/v1/<domain>.ts
 ```
 
 ## Event Type Mapping

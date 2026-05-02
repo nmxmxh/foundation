@@ -59,7 +59,7 @@ check_file_contains() {
   local label="$1"
   local file="$2"
   local pattern="$3"
-  if [[ -f "$file" ]] && grep -Fq "$pattern" "$file"; then
+  if [[ -f "$file" ]] && grep -Fq -- "$pattern" "$file"; then
     echo "[OK] $label"
   else
     echo "[FAIL] $label"
@@ -73,12 +73,45 @@ check_frontend_package_contains() {
   local label="$1"
   local file="$2"
   local pattern="$3"
-  if [[ -f "$file" ]] && grep -Fq "$pattern" "$file"; then
+  if [[ -f "$file" ]] && grep -Fq -- "$pattern" "$file"; then
     echo "[OK] $label"
   else
     echo "[FAIL] $label"
     echo "  missing frontend manifest contract: $pattern"
     echo "  file: ${file#$target/}"
+    failed=1
+  fi
+}
+
+check_file_not_contains() {
+  local label="$1"
+  local file="$2"
+  local pattern="$3"
+  if [[ -f "$file" ]] && grep -Fq -- "$pattern" "$file"; then
+    echo "[FAIL] $label"
+    echo "  forbidden pattern: $pattern"
+    echo "  file: ${file#$target/}"
+    failed=1
+  else
+    echo "[OK] $label"
+  fi
+}
+
+check_any_startup_contains() {
+  local label="$1"
+  local pattern="$2"
+  local found="false"
+  for file in "$target/internal/startup/dependencies.go" "$target/internal/startup/deps.go" "$target/internal/startup/init.go"; do
+    if [[ -f "$file" ]] && grep -Fq -- "$pattern" "$file"; then
+      found="true"
+      break
+    fi
+  done
+  if [[ "$found" == "true" ]]; then
+    echo "[OK] $label"
+  else
+    echo "[FAIL] $label"
+    echo "  missing startup pattern: $pattern"
     failed=1
   fi
 }
@@ -103,8 +136,10 @@ check_exists "foundation architecture contract" "$target/docs/foundation/foundat
 check_exists "coding practices" "$target/docs/foundation/coding_practices.md"
 check_exists "post quantum security posture" "$target/docs/foundation/post_quantum_security.md"
 check_exists "golangci baseline" "$target/.golangci.yml"
+check_file_contains "golangci resource lint baseline" "$target/.golangci.yml" "gocognit"
 check_exists "coding practices check" "$target/scripts/checks/coding_practices_check.sh"
 check_exists "river practices check" "$target/scripts/checks/river_practices_check.sh"
+check_exists "server-kit usage check" "$target/scripts/checks/server_kit_usage_check.sh"
 check_exists "project scaffold check" "$target/scripts/checks/project_scaffold_check.sh"
 check_exists "ci workflow" "$target/.github/workflows/ci.yml"
 check_exists "security workflow" "$target/.github/workflows/security.yml"
@@ -141,6 +176,10 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "foundation contract testing module" "$target/foundation/server-kit/go/contracttest/event_contract.go"
   check_exists "foundation profiling module" "$target/foundation/server-kit/go/profiling/profiling.go"
   check_exists "foundation SLO module" "$target/foundation/server-kit/go/slo/slo.go"
+  check_file_contains "make server-kit usage check target" "$target/Makefile" "check-server-kit-usage:"
+  check_any_startup_contains "startup initializes server-kit resilience" "resilience.New"
+  check_any_startup_contains "startup registers server-kit resilience dependencies" "RegisterDependency("
+  check_file_contains "server-kit usage check in foundation lint" "$target/Makefile" "check-server-kit-usage"
   check_exists "foundation runtime transport" "$target/foundation/runtime-transport/go/go.mod"
   check_exists "foundation config contracts" "$target/foundation/config-contracts/go/go.mod"
   check_exists "foundation tooling" "$target/foundation/tooling/docs/enforcement.md"
@@ -184,6 +223,13 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then
   check_file_contains "vite COEP header" "$frontend_root/vite.config.ts" "Cross-Origin-Embedder-Policy"
   check_file_contains "vite websocket proxy" "$frontend_root/vite.config.ts" "'/ws'"
   check_exists "frontend vitest config" "$frontend_root/vitest.config.ts"
+  check_file_contains "vite preserves workspace package symlinks" "$frontend_root/vite.config.ts" "preserveSymlinks: true"
+  check_file_contains "vitest preserves workspace package symlinks" "$frontend_root/vitest.config.ts" "preserveSymlinks: true"
+  check_file_contains "tsconfig preserves workspace package symlinks" "$frontend_root/tsconfig.app.json" "\"preserveSymlinks\": true"
+  check_file_not_contains "vite does not alias ui-minimal source" "$frontend_root/vite.config.ts" "foundation/ui-minimal/ts/src"
+  check_file_not_contains "vite does not alias runtime-transport source" "$frontend_root/vite.config.ts" "foundation/runtime-transport/ts/src"
+  check_file_not_contains "vitest does not alias ui-minimal source" "$frontend_root/vitest.config.ts" "foundation/ui-minimal/ts/src"
+  check_file_not_contains "vitest does not alias runtime-transport source" "$frontend_root/vitest.config.ts" "foundation/runtime-transport/ts/src"
   check_exists "frontend vite env" "$frontend_root/src/vite-env.d.ts"
   check_exists "frontend test setup" "$frontend_root/src/test/setup.ts"
   check_frontend_package_contains "frontend preview script" "$frontend_root/package.json" '"preview": "vite preview"'
@@ -196,9 +242,18 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then
   check_frontend_package_contains "frontend testing library react" "$frontend_root/package.json" '"@testing-library/react"'
   check_frontend_package_contains "frontend testing library jest dom" "$frontend_root/package.json" '"@testing-library/jest-dom"'
   check_frontend_package_contains "frontend testing library user event" "$frontend_root/package.json" '"@testing-library/user-event"'
+  check_frontend_package_contains "frontend runtime transport package" "$frontend_root/package.json" '"@ovasabi/runtime-transport"'
+  check_frontend_package_contains "frontend kit package" "$frontend_root/package.json" '"@ovasabi/frontend-kit"'
+  check_frontend_package_contains "frontend ui minimal package" "$frontend_root/package.json" '"@ovasabi/ui-minimal"'
+  check_file_contains "make proto-ts target" "$target/Makefile" "proto-ts:"
+  check_file_contains "make foundation transport proto target" "$target/Makefile" "foundation-transport-proto:"
+  check_file_contains "make communication contract aggregate" "$target/Makefile" "communication-contracts:"
+  check_file_contains "proto-ts writes generated app contracts" "$target/Makefile" "--ts_proto_out=frontend/src/types/protos"
 fi
 
 if [[ "${WITH_WASM:-false}" == "true" ]]; then
+  check_exists "rust clippy baseline" "$target/clippy.toml"
+  check_exists "rustfmt baseline" "$target/rustfmt.toml"
   check_exists "runtime sdk" "$target/foundation/runtime-sdk/go/go.mod"
   check_exists "runtime shared arena schema" "$target/foundation/runtime-sdk/protocols/system/v1/runtime_shared_arena.capnp"
   check_exists "runtime shared arena host API" "$target/foundation/runtime-sdk/ts/browser-host/src/arena.ts"

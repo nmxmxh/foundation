@@ -1,7 +1,7 @@
 # Standalone Apps Database Practices
 
 Status: baseline
-Date: 2026-04-20
+Date: 2026-05-01
 
 ## Purpose
 
@@ -19,6 +19,7 @@ This is the cross-app database standard for Ovasabi standalone apps. It is optim
 8. Queries on filter predicates without supporting indexes are performance bugs. Index queried fields aggressively.
 9. Externally referenced rows must expose opaque public identifiers or tightly scoped lookup keys. Authorization must not depend on guess-resistance of sequential IDs.
 10. Security-critical uniqueness, balance, and state-transition rules must be enforced by constraints or in-transaction locking, not app-side prechecks alone.
+11. Schema changes must be synchronized with service code and integration test mocks in the same commit. A migration is incomplete until all dependent queries and mocks are reconciled.
 
 ## Schema design rules
 
@@ -62,6 +63,7 @@ Rules:
 3. Provide paired `up` and `down` scripts for each active migration group.
 4. Seed data must carry stable markers (example: `seed_version`) for safe rollback.
 5. When databases are resettable, fold new indexes and constraints back into `0001_schema` before release. Temporary incremental migrations are acceptable only as rollout aids and should be squashed on the next reset.
+6. Maintain the strict three-group migration structure during active development. Folding changes back into `0001_schema`, `0002_seed_system_data`, and `0003_seed_demo_data` keeps the bootstrap path deterministic.
 
 ## Performance and operations
 
@@ -78,6 +80,8 @@ Rules:
 2. Re-upload dedupe must be scoped by source and domain, not just amount/date similarity.
 3. Similarity matching may assist recovery of legacy rows, but deterministic keys remain authoritative.
 4. Repeated child-row inserts must use batch primitives where supported.
+5. Batch handlers must resolve internal organization and user IDs efficiently, such as via one fetch, scoped preload, or short-lived command cache, to avoid N+1 queries during batch-write preparation.
+6. Batch ingestion errors must include the record key/index and stage name so retry, quarantine, and operator diagnostics can target the failed record without replaying the whole batch blindly.
 
 ## Load-test observations (2026-02-15)
 
@@ -88,6 +92,10 @@ Rules:
 4. Prefer combined aggregate queries (`SUM(CASE ...)`) for related metrics instead of separate per-metric queries.
 5. Keep expensive derived sections optional and metadata-driven so high-frequency dashboards can run in compact mode by default.
 6. Any runtime summary query must have bounded result sets (`LIMIT`, explicit period window, deterministic order).
+7. Report/export views may request expanded transaction detail only with explicit report context metadata (for example `request_context=report`) and must still map to a high but finite backend cap. Dashboard and bootstrap views must use compact or small-limit summary metadata so normal navigation does not inherit report-sized reads.
+8. Summary endpoints that combine aggregates with recent activity need matching compound indexes for both the filter and order shape, such as `(tenant/profile_id, transaction_date DESC, created_at DESC)`. A single foreign-key index is not enough for first-page latency.
+9. Metadata-driven query options must be parsed consistently from top-level metadata and sanctioned nested metadata containers (`extras`, attributes/fields maps). If a client must place options in metadata, tests must prove the backend honors the exact nesting shape.
+10. Treat frontend persistence as part of read-path performance. Persisted report-sized transaction snapshots can slow app hydration even when the backend query is fast; keep offline snapshots intentionally small and refetch expanded reports on demand.
 
 ## Connection and concurrency budgets
 

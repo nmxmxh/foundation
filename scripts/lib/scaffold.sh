@@ -146,6 +146,7 @@ scaffold_sync_foundation_modules() {
             foundation_log_info "[DRY RUN] Would ensure foundation module directory"
         else
             mkdir -p "$PROJECT_PATH/foundation"
+            cp "$FOUNDATION_DIR/.gitignore" "$PROJECT_PATH/foundation/.gitignore"
         fi
     fi
 
@@ -166,11 +167,13 @@ scaffold_sync_foundation_modules() {
 
     if [[ "$PROFILE" == "full" || "$PROFILE" == "frontend" ]]; then
         if [[ "${DRY_RUN:-false}" == "true" ]]; then
-            foundation_log_info "[DRY RUN] Would refresh foundation/ui-minimal"
+            foundation_log_info "[DRY RUN] Would refresh foundation/ui-minimal and foundation/frontend-kit"
         else
             mkdir -p "$PROJECT_PATH/foundation"
             rm -rf "$PROJECT_PATH/foundation/ui-minimal"
+            rm -rf "$PROJECT_PATH/foundation/frontend-kit"
             cp -R "$FOUNDATION_DIR/ui-minimal" "$PROJECT_PATH/foundation/"
+            cp -R "$FOUNDATION_DIR/frontend-kit" "$PROJECT_PATH/foundation/"
         fi
     fi
 
@@ -203,6 +206,8 @@ scaffold_sync_docs() {
 scaffold_sync_tooling() {
     foundation_log_info "Syncing tooling and checks..."
     scaffold_copy_file "$FOUNDATION_DIR/tooling/golangci/.golangci.yml" "$PROJECT_PATH/.golangci.yml" "overwrite"
+    scaffold_copy_file "$FOUNDATION_DIR/tooling/rust/clippy.toml" "$PROJECT_PATH/clippy.toml" "overwrite"
+    scaffold_copy_file "$FOUNDATION_DIR/tooling/rust/rustfmt.toml" "$PROJECT_PATH/rustfmt.toml" "overwrite"
 
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
         foundation_log_info "[DRY RUN] Would refresh scripts/checks"

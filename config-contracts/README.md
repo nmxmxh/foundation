@@ -14,6 +14,7 @@ Rules:
 3. object-storage, Redis, DB, JWT, and worker tuning remain server-only
 4. DB pools, dispatch concurrency, Redis prefix/TTL, and queue budgets must be explicit config, never hardcoded runtime defaults
 5. runtime memory, transport, compression, and post-quantum posture must be declared explicitly so scaffolded apps do not drift
+6. frontend communication packages are explicit config consumers: `@ovasabi/runtime-transport` chooses HTTP/WebSocket/binary fallback, `@ovasabi/frontend-kit` discovers runtime artifacts, and app code adapts generated protobuf domain types
 
 Planned public/server split:
 
@@ -22,6 +23,7 @@ Planned public/server split:
    - feature flags
    - auth mode
    - transport timeout budgets
+   - communication layer order and envelope schema version
    - wasm asset paths
    - runtime memory mode, transport order, and compression order
    - diagnostics toggles

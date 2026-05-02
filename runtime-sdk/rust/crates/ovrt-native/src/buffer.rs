@@ -21,7 +21,9 @@ impl NativeBuffer {
     }
 
     pub fn with_capacity() -> Self {
-        Self { raw: vec![0; ovrt_core::BUFFER_TOTAL_BYTES as usize] }
+        Self {
+            raw: vec![0; ovrt_core::BUFFER_TOTAL_BYTES as usize],
+        }
     }
 
     pub fn into_inner(self) -> Vec<u8> {
@@ -103,7 +105,9 @@ impl NativeBuffer {
     pub fn diagnostics_text(&self) -> String {
         let start = OFFSET_DIAGNOSTIC_BYTES as usize;
         let end = start + DIAGNOSTIC_MAX_BYTES as usize;
-        String::from_utf8_lossy(&self.raw[start..end]).trim_end_matches('\0').to_string()
+        String::from_utf8_lossy(&self.raw[start..end])
+            .trim_end_matches('\0')
+            .to_string()
     }
 
     pub fn set_diagnostics_text(&mut self, message: &str) -> Result<(), String> {
@@ -175,9 +179,13 @@ mod tests {
         buffer.initialize_control_plane(9).expect("init");
         buffer.write_input_bytes(b"asset").expect("write input");
         buffer.write_output_bytes(b"layout").expect("write output");
-        buffer.set_diagnostics_text("degraded").expect("write diagnostics");
+        buffer
+            .set_diagnostics_text("degraded")
+            .expect("write diagnostics");
         let _ = buffer.add_epoch(IDX_INPUT_WRITTEN, 1).expect("input epoch");
-        let _ = buffer.add_epoch(IDX_OUTPUT_WRITTEN, 1).expect("output epoch");
+        let _ = buffer
+            .add_epoch(IDX_OUTPUT_WRITTEN, 1)
+            .expect("output epoch");
 
         assert_eq!(buffer.read_input_bytes().expect("read input"), b"asset");
         assert_eq!(buffer.read_output_bytes().expect("read output"), b"layout");

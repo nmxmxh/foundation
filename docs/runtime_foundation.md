@@ -32,31 +32,33 @@ This document records the runtime foundation posture for this scaffold.
    - `<4KB`: 4KB control buffer
    - `4KB-1MB`: `RuntimeSharedArena` when SAB is available
    - `>1MB`: explicit async stream chunks with backpressure
-5. The browser runtime now uses a generic role-based worker split:
+6. The browser runtime now uses a generic role-based worker split:
    - `pulse` watches and drives runtime epochs
    - `compute` owns the preview execution unit
-6. Rust/WASM reads and writes serialized Cap'n Proto messages inside the runtime buffer regions and increments epoch counters.
-7. The UI reads the output region through generated `capnp-es` readers instead of manual offset mapping or ad hoc JS payloads.
-8. Frontend request replay/coalescing must be scoped by runtime identity context (session/user/org) so read caches stay safe across auth and org switches.
-9. Frontend loading state should use scoped reference counts rather than a single boolean when multiple concurrent commands can overlap.
-10. `SharedArrayBuffer` deployments must intentionally pair `COOP` + `COEP` and compatible asset policies (`CORP`/CORS) so cross-origin isolation is stable and auditable.
-11. Generated readers/writers and route contracts are the allowed parsing path for runtime payloads. Unknown or oversized frames must be rejected before render or storage flows.
-12. DOM mutation watching is not a foundation data-flow primitive. Prefer explicit stores, route contracts, and worker/runtime messages over `MutationObserver`.
-13. Main-thread code must not call blocking `Atomics.wait`; workers own blocking waits and main-thread code uses `Atomics.waitAsync` or message fallback when needed.
-14. If DOM observation is unavoidable, keep it inside a narrow UI adapter and prefer `ResizeObserver` or `IntersectionObserver` before `MutationObserver`.
+7. Rust/WASM reads and writes serialized Cap'n Proto messages inside the runtime buffer regions and increments epoch counters.
+8. The UI reads the output region through generated `capnp-es` readers instead of manual offset mapping or ad hoc JS payloads.
+9. Frontend request replay/coalescing must be scoped by runtime identity context (session/user/org) so read caches stay safe across auth and org switches.
+10. Frontend loading state should use scoped reference counts rather than a single boolean when multiple concurrent commands can overlap.
+11. `SharedArrayBuffer` deployments must intentionally pair `COOP` + `COEP` and compatible asset policies (`CORP`/CORS) so cross-origin isolation is stable and auditable.
+12. Generated readers/writers and route contracts are the allowed parsing path for runtime payloads. Unknown or oversized frames must be rejected before render or storage flows.
+13. DOM mutation watching is not a foundation data-flow primitive. Prefer explicit stores, route contracts, and worker/runtime messages over `MutationObserver`.
+14. Main-thread code must not call blocking `Atomics.wait`; workers own blocking waits and main-thread code uses `Atomics.waitAsync` or message fallback when needed.
+15. If DOM observation is unavoidable, keep it inside a narrow UI adapter and prefer `ResizeObserver` or `IntersectionObserver` before `MutationObserver`.
 
 ## Browser WASM build and binding flow
 
-1. `scripts/wasm_codegen.sh` builds `rust/crates/reframe-preview-wasm` for `wasm32-unknown-unknown` in release mode.
-2. That script copies the raw artifact into `frontend/src/runtime/wasm/generated/reframe_preview_wasm.wasm`.
-3. `frontend/src/runtime/wasm/reframePreview.ts` imports the wasm file with Vite's `?url` loader and instantiates it through `BrowserRuntimeHost.instantiate(...)`.
-4. `BrowserRuntimeHost` provides the low-level `env` imports:
+1. `make runtime-bindings` regenerates the shared runtime buffer constants from `foundation/runtime-sdk/protocols/system/v1/*` into the Rust, Go, and TypeScript runtime-sdk packages.
+2. `make build-wasm` builds the scaffolded Go WASM compatibility shim from `wasm/`, copies the matching `wasm_exec.js`, optionally optimizes/compresses the artifact, and emits `frontend/public/main.wasm`.
+3. `make build-rust-wasm` builds app-owned Rust compute modules from `rust/Cargo.toml` for `wasm32-unknown-unknown`, then copies emitted `.wasm` files into `frontend/public/modules/`. Foundation does not put app-domain compute crates in `runtime-sdk`.
+4. `make wasm-manifest` writes `frontend/public/runtime/wasm-manifest.json` so frontend code can discover runtime artifacts through `@ovasabi/frontend-kit` instead of hard-coded paths.
+5. Frontend code loads the manifest with `loadWasmManifest(...)`, selects the relevant kernel/module artifact, and instantiates compute units through `BrowserRuntimeHost.instantiate(...)` from `foundation/runtime-sdk/ts/browser-host`.
+6. `BrowserRuntimeHost` provides the low-level `env` imports:
    - copy bytes from wasm linear memory into the shared runtime buffer
    - copy bytes back out of the shared runtime buffer
    - atomic epoch operations
    - logging and timing hooks
-5. `probeWorker.ts` runs the compute unit off the UI thread. The main thread owns the `SharedArrayBuffer`, the worker writes the input contract, Rust/WASM executes `ovrt_process_preview`, and the UI reads the output Cap'n Proto payload.
-6. Frontend production build does not compile Rust itself. `yarn --cwd frontend build` first runs `scripts/wasm_codegen.sh`, then Vite bundles the emitted wasm asset.
+7. Workers run compute units off the UI thread. The main thread owns the `SharedArrayBuffer`, the worker writes the input contract, Rust/WASM executes the exported compute function, and the UI reads the output Cap'n Proto payload through generated readers.
+8. Frontend production builds should consume already-emitted artifacts from `frontend/public`. Rust/WASM generation belongs in Makefile targets (`build-runtime`, `build-rust-wasm`, `wasm-manifest`) so CI and local dev use the same propagation path.
 
 ## Frontend boot and recovery posture
 
@@ -102,6 +104,18 @@ This document records the runtime foundation posture for this scaffold.
    - `ffi` for trusted zero-copy control-buffer execution and maximum per-core throughput
 10. `ffi` is a trusted-only lane. Do not load arbitrary runtime libraries or allow user-controlled module/unit selection.
 11. `shm` and `stdio` lanes must enforce frame-size limits, same-host permissions, and explicit allowlists for callable units.
+12. FFI diagnostics must remain C-compatible and UTF-8 safe. Truncated error buffers must end on a character boundary and always be null-terminated when capacity is non-zero.
+13. Native host accounting must use RAII/symmetric cleanup guards for in-flight counters and other state that must be restored on every return path.
+14. The Rust unit registry is shared through synchronized interior state and returns `Arc<dyn RuntimeUnit>` handles for concurrent reads. Runtime units themselves must remain `Send + Sync`; any mutable caches inside a unit must use explicit synchronization.
+
+## Runtime parity posture
+
+1. `ParityHarness` compares outputs for the same unit input and reports the first mismatch offset for faster drift diagnosis.
+2. Stub runners may test the harness shape only. They do not prove runtime parity.
+3. Production parity coverage must compare the lanes the product actually uses: native direct dispatch, FFI buffer mutation, stdio framed buffers, Linux shared-memory transport, and browser worker/WASM where available.
+4. Runtime parity tests must compare full buffer state, not just returned payload bytes: status code, output bytes, diagnostics text, and epoch transitions (`IDX_INPUT_WRITTEN`, `IDX_OUTPUT_WRITTEN`, `IDX_PANIC_STATE`, `IDX_DIAGNOSTICS_WRITTEN`).
+5. Browser `SharedArrayBuffer` and native shared-memory parity must use `u32`/4-byte-aligned atomic slots only. Blocking waits stay in workers or native host threads, never on the browser main thread.
+6. A generic host runner such as Wasmtime may be useful for isolated tests, but it is not the foundation architecture by itself. The benchmark and parity target is the Ovasabi runtime ladder, not one embedding library.
 
 ## Compression posture
 
@@ -142,9 +156,11 @@ This document records the runtime foundation posture for this scaffold.
 14. Frame codecs expose owned decode and borrowed `FrameView` decode. Use borrowed views for synchronous hot paths that do not retain frame data; use owned `Frame` decode when values escape the incoming buffer lifetime.
 15. Parallel operation chains should use `server-kit/go/chain`: independent operations run concurrently, non-critical failures do not block movement, and critical failures cancel the operation context for the rest of the chain.
 16. The frontend runtime client uses an authenticated websocket upgrade path that fits the existing allowset model:
-   - guest socket opens and receives `identity:connection_open:v1:ack`
-   - if a session access token exists, the client sends `identity:authenticate_connection:v1:requested` over that socket
-   - once the socket is authenticated, route transport preference can safely switch to `ws -> http` for mutation paths without opening broad guest access
+
+    - guest socket opens and receives `identity:connection_open:v1:ack`
+    - if a session access token exists, the client sends `identity:authenticate_connection:v1:requested` over that socket
+    - once the socket is authenticated, route transport preference can safely switch to `ws -> http` for mutation paths without opening broad guest access
+
 17. Socket authentication is not sufficient on its own. Privileged subscriptions, commands, and topic joins must re-authorize against current session, user, and organization state after connect.
 18. Websocket upgrades must validate allowed origins and close or downgrade sessions when auth state changes or expires.
 19. Event envelopes and payload bodies must enforce schema validation, size limits, and replay/idempotency windows before handler dispatch.
@@ -160,8 +176,9 @@ This document records the runtime foundation posture for this scaffold.
 1. `runtime-sdk` is extracted now into `foundation` for this scaffold (copy of the canonical `ovasabi_foundation` repo family); it remains the upstream lane for browser/native performance use.
 2. `server-kit` is now consumed from `foundation/server-kit` for current builds; the canonical source remains `ovasabi_foundation/server-kit` and should be synced into this copy intentionally.
 3. The encompassing app keeps app-specific composition and services under `internal/`, while the canonical backend runtime scaffolding lives in foundation.
-4. `runtime-transport`, `config-contracts`, and `ui-minimal` are real shared package families upstream, but apps treat them as convergence targets rather than hard runtime dependencies.
-5. The backend posture is hybrid:
+4. `runtime-transport`, `frontend-kit`, `config-contracts`, and `ui-minimal` are real shared package families. Scaffolded frontends must consume them through local package dependencies, not raw source aliases.
+5. App domain schemas remain app-owned under `api/protos`; generated TypeScript contracts live under `frontend/src/types/protos` and are adapted into runtime transport stores/routes by app code.
+6. The backend posture is hybrid:
    - browser uses workers + WASM
    - backend uses Go orchestration plus native Rust host lanes where performance paths need them
 

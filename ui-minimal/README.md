@@ -15,7 +15,7 @@ It does not own:
 1. app brand identity
 2. page copy
 3. product-specific iconography
-4. page shell composition
+4. app-specific route, auth, and page shell composition
 
 Extraction status:
 
@@ -25,26 +25,31 @@ Extraction status:
 
 Current canonical surfaces:
 
-1. `MinimalHeader`
-2. `MinimalButton`
-3. `MinimalInput`
-4. `MinimalCard`
-5. `MinimalBadge`
-6. `MinimalTable`
-7. `MinimalCalendar`
-8. `MinimalStatCard`
-9. `MinimalFilterBar`
-10. `MinimalDropdown`
-11. `MinimalSegmentedControl`
-12. `MinimalAlert`
-13. `MinimalEmptyState`
-14. `MinimalExplainer`
-15. `MinimalTooltip`
-16. `MinimalActionModal`
-17. `MinimalFormSection`
-18. `MinimalFieldGrid`
-19. `MinimalActionRow`
-20. `MinimalSkeleton`
+1. `MinimalAppShell`
+2. `MinimalSkipLink`
+3. `MinimalSidebar`
+4. `MinimalScrollMain`
+5. `MinimalScrollFeedbackSurface`
+6. `MinimalHeader`
+7. `MinimalButton`
+8. `MinimalInput`
+9. `MinimalCard`
+10. `MinimalBadge`
+11. `MinimalTable`
+12. `MinimalCalendar`
+13. `MinimalStatCard`
+14. `MinimalFilterBar`
+15. `MinimalDropdown`
+16. `MinimalSegmentedControl`
+17. `MinimalAlert`
+18. `MinimalEmptyState`
+19. `MinimalExplainer`
+20. `MinimalTooltip`
+21. `MinimalActionModal`
+22. `MinimalFormSection`
+23. `MinimalFieldGrid`
+24. `MinimalActionRow`
+25. `MinimalSkeleton`
 
 Extension model:
 
@@ -52,6 +57,7 @@ Extension model:
 2. apps keep brand icons, copy, shells, and feature composition locally
 3. motion helpers are exported separately so apps can compose page choreography without forking primitives
 4. primitive contracts stay generic; app-specific variants should be wrappers, not changes to the shared component API
+5. app shells pass app-owned navigation, auth, and status content into `MinimalAppShell`/`MinimalScrollMain`; shared primitives only own layout, focus, scroll, and motion behavior
 
 Implementation posture:
 
@@ -60,6 +66,8 @@ Implementation posture:
 3. New primitive or app-level styled-component work should prefer grouped declarations in `const Style = { ... }`; legacy standalone declarations should be treated as normalization debt, not the preferred pattern to expand.
 4. Loading shells, entry states, and skeletons should remain separate from business feature rendering; use shared primitives such as `MinimalSkeleton` instead of ad hoc feature-level placeholders.
 5. Use `../docs/styling_design_practices.md` and `../docs/references/` for detailed styling and motion rules.
+6. Layout motion should reuse `useMinimalScrollFeedback` and `MinimalScrollFeedbackSurface` for tactile scroll response. Keep it subtle, reduced-motion aware, and limited to transform values.
+7. Route shells should use `MinimalSkipLink` and the `minimalMainScrollAttribute`/`scrollMinimalMainToTop` helpers so accessibility and scroll-reset behavior converge across apps.
 
 Observer posture:
 

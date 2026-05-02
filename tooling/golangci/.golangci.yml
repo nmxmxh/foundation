@@ -6,12 +6,59 @@ linters:
     - contextcheck
     - errcheck
     - errorlint
+    - exhaustive
+    - gocognit
+    - gocyclo
     - gosec
     - govet
+    - ineffassign
+    - misspell
     - noctx
+    - prealloc
+    - predeclared
     - revive
     - staticcheck
+    - unconvert
+    - unparam
+    - unused
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  gocognit:
+    min-complexity: 20
+  gocyclo:
+    min-complexity: 20
+  govet:
+    enable-all: true
+    disable:
+      - fieldalignment
+  revive:
+    rules:
+      - name: context-as-argument
+      - name: early-return
+      - name: error-return
+      - name: error-strings
+      - name: errorf
+      - name: exported
+        disabled: true
+      - name: if-return
+      - name: increment-decrement
+      - name: range
+      - name: receiver-naming
+      - name: var-naming
+  staticcheck:
+    checks:
+      - all
 
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
+  exclude-rules:
+    - path: '(.*/)?(api/protos|migrations|tests|testutil)/'
+      linters:
+        - gocognit
+        - gocyclo
+        - gosec
+        - revive

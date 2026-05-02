@@ -234,6 +234,20 @@ That matters in:
 - abuse detection
 - telemetry compression
 
+### Practice note: semantic cache keys
+
+The useful trick is not "cache everything." The trick is deciding which facts make two requests the same.
+
+For dashboard summaries, the stable identity is the actor/scope, period, organization/profile, and response-shaping options. Volatile metadata such as correlation IDs, timestamps, retry counters, or trace labels belongs in observability, not in cache identity.
+
+That distinction gives the system a compact witness for a larger truth:
+
+- same semantic key -> reuse or deduplicate safely
+- different filter/projection -> fetch again
+- volatile envelope fields -> do not churn the hot path
+
+This is small magic with practical teeth. It turns noisy runtime envelopes into deterministic behavior without erasing traceability.
+
 ---
 
 ## 5. Seal Magic: Hashes, Merkle Trees, and Tamper Evidence

@@ -30,8 +30,8 @@ Your app needs domain-specific protos. Foundation provides transport; you define
 mkdir -p api/protos/user/v1
 # Copy template
 cp api/protos/_template/v1/example.proto api/protos/user/v1/user.proto
-# Edit and customize, then generate
-make proto
+# Edit and customize, then generate app + foundation communication contracts
+make communication-contracts
 ```
 
 **Identify your 3-5 core domains.** Examples:
@@ -54,20 +54,17 @@ internal/service/<domain>/
 
 ### 3. Frontend Integration
 
-Your frontend connects via WebSocket with envelope-based messaging:
+Your frontend connects through `@ovasabi/runtime-transport`, which owns WebSocket, HTTP fallback, binary envelopes, compression, and route metadata. Domain payloads are generated from your app protos into `frontend/src/types/protos`.
 
 ```typescript
-// Connect with binary format for compression
-const ws = new WebSocket('ws://localhost:8080/ws?format=binary');
+import { createEnvelope } from '@ovasabi/runtime-transport'
+import { LoginRequest } from './types/protos/user/v1/user'
 
-// Send envelope
-const envelope = {
-  event_type: 'user:authenticate:v1:requested',
-  payload: { email, password },
-  correlation_id: generateCorrelationId(),
-  schema_version: '1.0.0',
-  timestamp: new Date().toISOString()
-};
+const payload: LoginRequest = { email, password }
+const envelope = createEnvelope({
+  eventType: 'user:login:v1:requested',
+  payload,
+})
 ```
 
 See `foundation/runtime-transport/ts/` for TypeScript envelope utilities.
@@ -97,14 +94,14 @@ For a comprehensive checklist, see:
 
 ## Communication Pattern
 
-Foundation uses **envelope-based WebSocket messaging** (not gRPC):
+Foundation uses **envelope-based runtime transport**:
 
-1. **Client sends**: `{ event_type, payload, correlation_id, ... }`
+1. **Client sends**: generated protobuf payload through a runtime envelope
 2. **Server dispatches**: Routes to registered handler by event_type
 3. **Handler processes**: Business logic, database, external calls
 4. **Server responds**: Same correlation_id, success/failed state
 
-Compression is automatic for payloads > 1KB.
+The transport layer chooses the available lane (`sab`, `wasm`, `transferable`, `ws`, `http`, `postMessage`) and applies compression/binary framing where supported.
 
 ## Key Files
 

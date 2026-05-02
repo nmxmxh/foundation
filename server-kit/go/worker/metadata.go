@@ -15,6 +15,7 @@ type JobMetadata struct {
 	EntityID      string         `json:"entity_id"`
 	UserID        string         `json:"user_id"`
 	CorrelationID string         `json:"correlation_id"`
+	RawPayload    []byte         `json:"raw_payload"`
 	TrackingData  map[string]any `json:"tracking_data"`
 }
 
@@ -81,4 +82,62 @@ func (s *InMemoryMetadataStore) UpdateTrackingData(_ context.Context, jobID int6
 
 func (m JobMetadata) ToJSON() ([]byte, error) {
 	return json.Marshal(m)
+}
+
+// PostgresMetadataStore implements MetadataStore using pgx and the foundation schema.
+type PostgresMetadataStore struct {
+	db interface {
+		Exec(context.Context, string, ...any) (any, error)
+		QueryRow(context.Context, string, ...any) any
+	}
+}
+
+func NewPostgresMetadataStore(db any) *PostgresMetadataStore {
+	type dbInterface interface {
+		Exec(context.Context, string, ...any) (any, error)
+		QueryRow(context.Context, string, ...any) any
+	}
+	if d, ok := db.(dbInterface); ok {
+		return &PostgresMetadataStore{db: d}
+	}
+	return nil
+}
+
+func (s *PostgresMetadataStore) Save(ctx context.Context, m JobMetadata) error {
+	query := `
+		INSERT INTO river_job_metadata (
+			job_id, workflow_name, entity_type, entity_id, user_id, correlation_id, raw_payload, tracking_data
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (job_id) DO UPDATE SET
+			workflow_name = EXCLUDED.workflow_name,
+			entity_type = EXCLUDED.entity_type,
+			entity_id = EXCLUDED.entity_id,
+			user_id = EXCLUDED.user_id,
+			correlation_id = EXCLUDED.correlation_id,
+			raw_payload = EXCLUDED.raw_payload,
+			tracking_data = EXCLUDED.tracking_data,
+			updated_at = now()
+	`
+	_, err := s.db.Exec(ctx, query,
+		m.JobID, m.WorkflowName, m.EntityType, m.EntityID, m.UserID, m.CorrelationID, m.RawPayload, m.TrackingData,
+	)
+	return err
+}
+
+func (s *PostgresMetadataStore) Get(ctx context.Context, jobID int64) (JobMetadata, error) {
+	query := `
+		SELECT job_id, workflow_name, entity_type, entity_id, user_id, correlation_id, raw_payload, tracking_data
+		FROM river_job_metadata
+		WHERE job_id = $1
+	`
+	var m JobMetadata
+	// Placeholder for row scan logic
+	_ = s.db.QueryRow(ctx, query, jobID)
+	return m, fmt.Errorf("not fully implemented for generic db interface")
+}
+
+func (s *PostgresMetadataStore) UpdateTrackingData(ctx context.Context, jobID int64, trackingData map[string]any) error {
+	query := `UPDATE river_job_metadata SET tracking_data = $1, updated_at = now() WHERE job_id = $2`
+	_, err := s.db.Exec(ctx, query, trackingData, jobID)
+	return err
 }

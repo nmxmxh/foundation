@@ -1,7 +1,7 @@
 # Ovasabi Coding Practices (Pragmatic Strict-Core)
 
-Status: v2.5  
-Date: 2026-04-22  
+Status: v2.6
+Date: 2026-05-01
 Owner: Platform Architecture
 
 ## Purpose and scope
@@ -63,6 +63,7 @@ Requirements:
 1. Loops over variable-size inputs must have explicit practical bounds or timeout guards.
 2. Worker retries must use explicit `max_attempts` and backoff policy.
 3. All external calls must use bounded context deadlines/timeouts.
+4. Runtime list and summary endpoints must keep bounded defaults. Expanded report/export reads require explicit report-scoped metadata and a finite service-side cap; sentinel values such as `-1` must not mean unbounded in dashboard, bootstrap, or generic API contexts.
 
 Enforcement:
 
@@ -95,6 +96,7 @@ Requirements:
 3. Error handling must preserve operational context (correlation/user/org where relevant).
 4. Runtime parsing and extraction failures must return controlled errors rather than panic.
 5. Error handling in multi-stage parsers and extractors must preserve stage/context so failures can be diagnosed without blind reproduction.
+6. Error handling in batch processing and multi-stage pipelines must preserve record identifiers and processing stages. Diagnostic logs must pinpoint exactly which record in a batch failed and at which stage, such as `upload`, `decode`, `validate`, or `DB insert`.
 
 Enforcement:
 
@@ -154,6 +156,11 @@ Requirements:
 14. Typed registry, WebSocket, HTTP, and gRPC paths must preserve payload bytes until the owning handler validates/decodes them; avoid intermediate map materialization for observability, routing, or convenience.
 15. Same-process hot communication must not use gRPC, HTTP, Redis, or JSON. Use direct typed calls, direct frame dispatch, worker channels, or shared-memory descriptors so the hot path can remain zero-copy or near-zero allocation.
 16. Serialization boundaries should expose both owned and borrowed decode APIs where safe. Borrowed views are preferred inside synchronous hot paths; owned decoded values are required when data escapes the frame lifetime.
+17. Prefer batch database primitives such as `pgx.Batch`, `CopyFrom`, and equivalent driver-native bulk APIs for high-volume inserts.
+18. Parallelize independent I/O-bound operations, such as object-storage uploads during batch ingestion, with bounded goroutines or the project chain helper. Preserve per-record diagnostics and cancellation semantics.
+19. Initial dashboard and bootstrap summaries must request the smallest useful projection: explicit compact/light metadata, bounded recent items, and expensive sections disabled unless the first viewport actually renders them.
+20. Frontend cache keys for summary/list hot paths must be semantic and stable. Include filters that change the response; exclude volatile metadata such as correlation IDs, timestamps, trace IDs, and retry markers.
+21. Do not log full summary/list payloads in store setters, reducers, or render-adjacent code. Hot UI paths may log compact counters/keys only behind a development guard.
 
 Enforcement:
 
@@ -174,7 +181,10 @@ Requirements:
 
 Enforcement:
 
-- CI gates for `go test`, lint, static checks, and TypeScript checks.
+- CI gates for `go test`, `golangci-lint`, Rust `fmt`/`clippy`, frontend ESLint, TypeScript checks, and scaffolded `scripts/checks/*`.
+- Foundation runtime, transport, server-kit, and SDK lanes use the strictest CP automation because resource leaks, compatibility envelopes, or dynamic JSON materialization become platform-wide costs.
+- Project and frontend lanes inherit the same boundary checks, but React complexity and app-composition rules may start as ESLint warnings when strictness would create migration noise rather than better resource behavior.
+- Managed `.foundation` projects must pass `server_kit_usage_check.sh`, which verifies that generated backend startup/server/worker paths actually bind server-kit runtime surfaces instead of merely carrying vendored packages.
 
 ### CP-09: Restrict unsafe and reflection-heavy patterns
 
@@ -219,11 +229,28 @@ Requirements:
 5. Centralizing parsers, adding caches, or changing fallback logic requires tests for false positives, stale reuse, and behavioral drift.
 6. Treat correctness regressions from cleanup refactors as a normal risk and test for them explicitly.
 7. Hot-path optimizations are not complete until both correctness and performance-sensitive regression suites pass.
+8. When mocking complex interfaces such as `pgx.Batch`, use a wrapper pattern like `BatchableMock` in tests. Simulate batch results without adding `isMock` flags, type switches, or test-only branching to production code.
 
 Enforcement:
 
 - PR test evidence requirements.
 - CI execution of required test slices by change class.
+
+### CP-11A: Use cleanup and unlock patterns deliberately
+
+Level: `Mandatory`
+
+Requirements:
+
+1. In Go, use `defer` immediately after acquiring resources that must be released on every exit path: `cancel`, `Close`, `Unlock`, `RUnlock`, `wg.Done`, `span.End`, timer/ticker stop, and temporary file cleanup.
+2. In hot loops, replace repeated `defer` with explicit cleanup only when profiling or allocation/latency evidence shows the deferred calls matter. Keep the explicit cleanup mechanically simple and covered by tests.
+3. Do not hold locks, DB transactions, or file descriptors across network calls, unbounded waits, or callbacks into user-controlled logic.
+4. In Rust, prefer RAII guards for symmetric cleanup such as counters, locks, temporary state, and FFI handles. Avoid duplicated decrement/release branches that can drift during later edits.
+
+Enforcement:
+
+- Reviewer gate for missing `defer`/RAII cleanup after resource acquisition.
+- Reviewer gate for explicit cleanup in loops without a hot-path rationale.
 
 ### CP-12: Keep documentation and traceability current
 
@@ -247,12 +274,14 @@ Level: `Mandatory`
 Requirements:
 
 1. UI styling should be componentized through shared primitives, not repeated page-local inline styles.
-2. Reusable component surfaces (buttons, alerts, segmented controls, modal layouts, form rows) should live in shared `components/ui`.
+2. Reusable component surfaces (buttons, alerts, segmented controls, modal layouts, form rows) should wrap `foundation/ui-minimal` `Minimal*` primitives from app-local `components/ui`; app-local components own brand defaults, not structural reimplementation.
 3. Theme and motion tokens must be consumed via shared primitives before introducing per-page style overrides.
 4. New styled-component modules should group declarations in a single object: `const Style = { Container: styled.div... }`. This is the preferred Ovasabi review format for application and feature code.
 5. Do not carry forward large inline style objects from legacy components into new shared primitives or product surfaces. Inline style usage is reserved for runtime coordinates, CSS custom-property injection, or motion-library transform values that are impractical to express in styled components.
 6. Separate styling, motion, and async-state concerns. Theme tokens belong in theme modules, loading boundaries belong in dedicated loader/skeleton components or route wrappers, and business components should compose them rather than owning every concern directly.
 7. New animation work must follow `styling_design_practices.md` and the animation reference notes under `docs/references/`.
+8. `ui-minimal` must be consumed as `@ovasabi/ui-minimal` through the local file package dependency. Do not alias raw source under `foundation/ui-minimal/ts/src`; keep `preserveSymlinks` enabled in frontend Vite, Vitest, and TypeScript config to avoid duplicate peer graphs.
+9. IndexedDB persistence, metadata normalization, store reset handles, and runtime/WASM external stores should use `@ovasabi/frontend-kit` before introducing app-local infrastructure.
 
 Enforcement:
 
@@ -319,11 +348,13 @@ Requirements:
 2. Shared `Minimal*` UI primitives (including header/table/calendar baselines) must be used before page-local UI reinvention.
 3. Generated contracts (`proto-ts` and route metadata/docgen output) must be the source of truth for command routing and RBAC UI gating.
 4. Frontend utility additions (`lodash`, motion helpers, style primitives) must reduce repeated code and include typecheck/build evidence.
+5. New or refactored frontend domain types must import from `frontend/src/types/protos` when a matching protobuf exists. Hand-written files under `frontend/src/types` are limited to UI-only helper types and adapters around generated contracts.
 
 Enforcement:
 
 - Frontend architecture review against `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/frontend_optimization_practices.md`.
 - CI typecheck/build and contract-drift checks when route/proto surfaces change.
+- Reviewer gate on handwritten API contract types when `api/protos` already contains the schema.
 
 ### CP-18: Ingress Edge Security, Abuse Resistance, and Origin Controls
 
@@ -554,6 +585,7 @@ Requirements:
 Enforcement:
 
 - ESLint restriction on direct `MutationObserver` construction with explicit local waiver requirement.
+- `scripts/checks/coding_practices_check.sh` blocks direct observer construction in generated project gates so the exception policy is not review-only.
 - Reviewer gate on observer scope, cleanup, and feedback-loop risk.
 
 ### CP-32: Runtime communication must use foundation transport contracts
@@ -570,7 +602,8 @@ Requirements:
 
 Enforcement:
 
-- Scaffold checks for runtime arena schema, COOP/COEP headers, and Vite header config.
+- Scaffold checks for runtime arena schema, COOP/COEP headers, Vite header config, and generated transport/package boundaries.
+- CP automation blocks blocking `Atomics.wait`, oversized runtime-control-buffer changes, raw foundation source imports, raw transport globals, and foundation hot-path dynamic JSON envelopes.
 - Unit tests for shared-memory fallback, large payload arena movement, and binary frame compression.
 
 ### CP-33: Post-quantum readiness must be crypto-agile and hot-path safe

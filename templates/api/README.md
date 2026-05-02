@@ -43,9 +43,11 @@
 
 ## Communication Pattern
 
-Foundation uses **event-driven messaging** over WebSocket:
+Foundation uses **event-driven messaging** over the runtime transport layer:
 
-- **No gRPC services** - all communication via envelope dispatch
+- **Typed app contracts** - app schemas live in `api/protos` and TypeScript types are generated with `make proto-ts`
+- **Shared transport** - browser code uses `@ovasabi/runtime-transport`; backend code uses foundation transport/server-kit primitives
+- **Layer fallback** - runtime clients can move across `sab`, `wasm`, `transferable`, `ws`, `http`, and `postMessage` based on capability
 - **Event types** follow `<domain>:<action>:<version>:<state>` pattern
 - **Compressed binary** - automatic brotli/gzip for large payloads
 - **Correlation tracing** - every request carries `correlation_id`
@@ -60,7 +62,7 @@ mkdir -p api/protos/<domain>/v1
 touch api/protos/<domain>/v1/<domain>.proto
 
 # Generate bindings
-make proto
+make communication-contracts
 ```
 
 See `api/protos/README.md` for contract rules and `.agents/DOMAIN_GUIDE.md` for detailed patterns.

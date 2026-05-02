@@ -40,10 +40,13 @@ fn serve_shared_memory(host: &NativeRuntimeHost) -> Result<(), String> {
         file.read_exact_at(&mut raw_buffer, 0)
             .map_err(|error| format!("read shared buffer: {error}"))?;
         let output = crate::process_runtime_buffer(host, &unit_id, raw_buffer)?;
-        file.write_all_at(&output, 0).map_err(|error| format!("write shared buffer: {error}"))?;
+        file.write_all_at(&output, 0)
+            .map_err(|error| format!("write shared buffer: {error}"))?;
         crate::stdio::write_frame_for_test(&mut writer, &[])
             .map_err(|error| format!("write shared memory ack: {error}"))?;
-        writer.flush().map_err(|error| format!("flush shared memory ack: {error}"))?;
+        writer
+            .flush()
+            .map_err(|error| format!("flush shared memory ack: {error}"))?;
     }
 }
 

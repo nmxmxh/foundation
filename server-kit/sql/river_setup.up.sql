@@ -104,12 +104,13 @@ where unique_key is not null
   and river_job_state_in_bitmask(unique_states, state);
 
 create table if not exists river_job_metadata (
-  job_id bigint primary key references river_job(id),
+  job_id bigint primary key references river_job(id) on delete cascade,
   workflow_name text not null,
   entity_type text not null,
   entity_id text not null,
   user_id text,
   correlation_id text,
+  raw_payload bytea,
   tracking_data jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

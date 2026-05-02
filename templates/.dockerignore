@@ -64,7 +64,6 @@ tmp/
 temp/
 *.tmp
 
-# Foundation assets not needed by backend Docker builds
-foundation/runtime-sdk/
-foundation/tooling/
-foundation/ui-minimal/
+# Keep foundation packages in the context. Frontend Docker builds need local
+# file dependencies under foundation/runtime-transport, foundation/frontend-kit,
+# foundation/ui-minimal, config-contracts, and runtime-sdk browser-host.

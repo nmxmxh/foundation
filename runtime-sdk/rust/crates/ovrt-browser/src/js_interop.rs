@@ -83,7 +83,12 @@ pub fn get_byte_length(handle: u32) -> u32 {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        with_buffers(|buffers| buffers.get(&handle).map(|buffer| buffer.len() as u32).unwrap_or(0))
+        with_buffers(|buffers| {
+            buffers
+                .get(&handle)
+                .map(|buffer| buffer.len() as u32)
+                .unwrap_or(0)
+        })
     }
 }
 

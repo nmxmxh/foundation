@@ -2,7 +2,12 @@ import {
   AnimatePresence,
   HTMLMotionProps,
   motion,
+  type MotionValue,
   type Transition,
+  useScroll,
+  useSpring,
+  useTransform,
+  useVelocity,
 } from "framer-motion";
 import React, {
   ForwardedRef,
@@ -10,6 +15,9 @@ import React, {
   InputHTMLAttributes,
   Key,
   ReactNode,
+  RefObject,
+  CSSProperties,
+  useCallback,
   forwardRef,
   useEffect,
   useId,
@@ -31,6 +39,7 @@ type InputState = "default" | "invalid" | "locked";
 type ButtonVariant = "primary" | "secondary" | "ghost" | "quiet";
 type TooltipPlacement = "top" | "bottom";
 type FloatingPlacement = "top" | "bottom";
+type MinimalScrollBehavior = "auto" | "smooth";
 
 export interface MinimalOption<T extends string> {
   value: T;
@@ -240,6 +249,53 @@ export interface MinimalSkeletonProps extends HTMLAttributes<HTMLSpanElement> {
   radius?: string;
 }
 
+export interface MinimalSkipLinkProps extends HTMLAttributes<HTMLAnchorElement> {
+  href?: string;
+  children?: ReactNode;
+}
+
+export interface MinimalAppShellProps extends HTMLAttributes<HTMLDivElement> {
+  children: ReactNode;
+  sidebar?: ReactNode;
+  mobileNavigation?: ReactNode;
+  systemLayer?: ReactNode;
+  sidebarWidth?: string;
+  bannerOffset?: string;
+  mobile?: boolean;
+}
+
+export interface MinimalSidebarProps extends HTMLAttributes<HTMLElement> {
+  children: ReactNode;
+  mainRef?: RefObject<HTMLElement | null>;
+  width?: string;
+  bannerOffset?: string;
+}
+
+export interface MinimalScrollMainProps extends Omit<HTMLMotionProps<"main">, "children" | "ref"> {
+  children: ReactNode;
+  sidebarWidth?: string;
+  bannerOffset?: string;
+  mobile?: boolean;
+  compact?: boolean;
+  scrollAttribute?: string;
+}
+
+export interface MinimalScrollFeedbackOptions {
+  enabled?: boolean;
+  maxSkew?: number;
+  minScale?: number;
+}
+
+export interface MinimalScrollFeedback {
+  skewY: MotionValue<number> | number;
+  scale: MotionValue<number> | number;
+}
+
+export interface MinimalScrollFeedbackSurfaceProps extends Omit<HTMLMotionProps<"div">, "children" | "ref"> {
+  children: ReactNode;
+  feedback?: MinimalScrollFeedback;
+}
+
 type FloatingPosition = {
   top: number;
   left: number;
@@ -354,6 +410,7 @@ const actionJustify = {
 const floatingYOffset = 8;
 const enterCurve = "cubic-bezier(0.22, 1, 0.36, 1)";
 const moveCurve = "cubic-bezier(0.25, 1, 0.5, 1)";
+export const minimalMainScrollAttribute = "data-minimal-main-scroll";
 const skeletonSweep = keyframes`
   0% {
     background-position: 100% 50%;
@@ -1450,6 +1507,224 @@ const forwardInputRef = (ref: ForwardedRef<HTMLInputElement>, element: HTMLInput
   if (ref) {
     ref.current = element;
   }
+};
+
+export const scrollMinimalMainToTop = (
+  behavior: MinimalScrollBehavior = "auto",
+  root?: ParentNode,
+) => {
+  if (!isBrowser()) {
+    return;
+  }
+  const target = (root ?? document).querySelector<HTMLElement>(`[${minimalMainScrollAttribute}="true"]`);
+  if (!target) {
+    return;
+  }
+  try {
+    target.scrollTo({ top: 0, left: 0, behavior });
+  } catch {
+    target.scrollTop = 0;
+    target.scrollLeft = 0;
+  }
+};
+
+export const useMinimalScrollFeedback = (
+  containerRef: RefObject<HTMLElement | null>,
+  options: MinimalScrollFeedbackOptions = {},
+): MinimalScrollFeedback => {
+  const { reducedMotion } = useMinimalMotion();
+  const { enabled = true, maxSkew = 2, minScale = 0.998 } = options;
+  const { scrollY } = useScroll({ container: containerRef });
+  const scrollVelocity = useVelocity(scrollY);
+  const skew = useTransform(scrollVelocity, [-2000, 2000], [-maxSkew, maxSkew]);
+  const scale = useTransform(scrollVelocity, [-3000, 0, 3000], [minScale, 1, minScale]);
+  const smoothSkew = useSpring(skew, { stiffness: 400, damping: 60, mass: 0.5 });
+  const smoothScale = useSpring(scale, { stiffness: 400, damping: 60, mass: 0.5 });
+
+  if (reducedMotion || !enabled) {
+    return { skewY: 0, scale: 1 };
+  }
+
+  return { skewY: smoothSkew, scale: smoothScale };
+};
+
+const ShellStyle = {
+  App: styled.div`
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: row;
+    isolation: isolate;
+    background: ${({ theme }) => theme.color.bgApp};
+    color: ${({ theme }) => theme.color.textPrimary};
+  `,
+  SkipLink: styled.a`
+    position: absolute;
+    top: -44px;
+    left: ${({ theme }) => theme.spacing.md};
+    z-index: ${({ theme }) => theme.zIndex.tooltip + 1};
+    padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.md}`};
+    border-radius: ${({ theme }) => theme.radius.md};
+    background: ${({ theme }) => theme.color.brand};
+    color: ${({ theme }) => theme.color.textInverse};
+    font-size: ${({ theme }) => theme.typography.metaSize};
+    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    text-decoration: none;
+    transition: top 160ms ${enterCurve};
+
+    &:focus {
+      top: ${({ theme }) => theme.spacing.sm};
+      outline: 2px solid ${({ theme }) => theme.color.borderFocus};
+      outline-offset: 2px;
+    }
+  `,
+  Sidebar: styled.aside<{ $width: string; $bannerOffset: string }>`
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: ${({ $width }) => $width};
+    display: flex;
+    flex-direction: column;
+    gap: ${({ theme }) => theme.spacing.md};
+    padding: ${({ theme, $bannerOffset }) => `calc(${$bannerOffset} + ${theme.spacing.xl}) ${theme.spacing.md} ${theme.spacing.lg}`};
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: linear-gradient(180deg, ${({ theme }) => theme.color.bgSurface} 0%, ${({ theme }) => theme.color.bgSurfaceAlt} 100%);
+    border-right: 1px solid ${({ theme }) => theme.color.borderSubtle};
+    box-shadow: ${({ theme }) => theme.shadow.subtle};
+    z-index: ${({ theme }) => theme.zIndex.sticky};
+    transform: translateZ(0);
+  `,
+  Main: styled(motion.main)<{ $sidebarWidth: string; $bannerOffset: string; $mobile: boolean; $compact: boolean }>`
+    flex: 1;
+    min-height: 100dvh;
+    height: 100dvh;
+    width: 100%;
+    max-width: ${({ $mobile, $sidebarWidth }) => ($mobile ? "100%" : `calc(100% - ${$sidebarWidth})`)};
+    margin-left: ${({ $mobile, $sidebarWidth }) => ($mobile ? "0" : $sidebarWidth)};
+    padding-top: ${({ theme, $mobile, $bannerOffset }) =>
+      $mobile ? `calc(${$bannerOffset} + env(safe-area-inset-top, 0px))` : `calc(${$bannerOffset} + ${theme.spacing.xl})`};
+    padding-right: ${({ theme, $mobile, $compact }) => ($mobile && $compact ? theme.spacing.sm : theme.spacing.lg)};
+    padding-bottom: ${({ theme, $mobile, $compact }) =>
+      $mobile ? `calc(${$compact ? "64px" : "72px"} + env(safe-area-inset-bottom, 0px))` : theme.spacing.xl};
+    padding-left: ${({ theme, $mobile, $compact }) => ($mobile && $compact ? theme.spacing.sm : theme.spacing.lg)};
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    background: ${({ theme }) => theme.color.bgApp};
+    transition:
+      padding 240ms ${moveCurve},
+      margin-left 240ms ${moveCurve},
+      background-color 240ms ${enterCurve};
+  `,
+  FeedbackSurface: styled(motion.div)`
+    min-width: 0;
+    transform-origin: center top;
+    padding-top: 0;
+  `,
+};
+
+export const MinimalSkipLink = ({
+  href = "#main-content",
+  children = "Skip to main content",
+  ...props
+}: MinimalSkipLinkProps) => (
+  <ShellStyle.SkipLink href={href} {...props}>
+    {children}
+  </ShellStyle.SkipLink>
+);
+
+export const MinimalAppShell = ({
+  children,
+  sidebar,
+  mobileNavigation,
+  systemLayer,
+  sidebarWidth = "252px",
+  bannerOffset = "0px",
+  mobile = false,
+  ...props
+}: MinimalAppShellProps) => (
+  <ShellStyle.App data-minimal="AppShell" {...props}>
+    <MinimalSkipLink />
+    {!mobile && sidebar ? (
+      <ShellStyle.Sidebar aria-label="Main navigation" $width={sidebarWidth} $bannerOffset={bannerOffset}>
+        {sidebar}
+      </ShellStyle.Sidebar>
+    ) : null}
+    {children}
+    {mobile ? mobileNavigation : null}
+    {systemLayer}
+  </ShellStyle.App>
+);
+
+export const MinimalSidebar = ({
+  children,
+  mainRef,
+  width = "252px",
+  bannerOffset = "0px",
+  onWheel,
+  ...props
+}: MinimalSidebarProps) => {
+  const handleWheel = useCallback(
+    (event: React.WheelEvent<HTMLElement>) => {
+      onWheel?.(event);
+      if (!event.defaultPrevented && mainRef?.current) {
+        mainRef.current.scrollTop += event.deltaY;
+      }
+    },
+    [mainRef, onWheel],
+  );
+
+  return (
+    <ShellStyle.Sidebar $width={width} $bannerOffset={bannerOffset} onWheel={handleWheel} {...props}>
+      {children}
+    </ShellStyle.Sidebar>
+  );
+};
+
+export const MinimalScrollMain = forwardRef<HTMLElement, MinimalScrollMainProps>(function MinimalScrollMain(
+  {
+    children,
+    id = "main-content",
+    sidebarWidth = "252px",
+    bannerOffset = "0px",
+    mobile = false,
+    compact = false,
+    scrollAttribute = minimalMainScrollAttribute,
+    ...props
+  },
+  ref,
+) {
+  return (
+    <ShellStyle.Main
+      id={id}
+      ref={ref}
+      tabIndex={-1}
+      $sidebarWidth={sidebarWidth}
+      $bannerOffset={bannerOffset}
+      $mobile={mobile}
+      $compact={compact}
+      {...{ [scrollAttribute]: "true" }}
+      {...props}
+    >
+      {children}
+    </ShellStyle.Main>
+  );
+});
+
+export const MinimalScrollFeedbackSurface = ({
+  children,
+  feedback,
+  style,
+  ...props
+}: MinimalScrollFeedbackSurfaceProps) => {
+  const feedbackStyle = feedback
+    ? ({ skewY: feedback.skewY, scale: feedback.scale } as CSSProperties)
+    : undefined;
+
+  return (
+    <ShellStyle.FeedbackSurface style={{ ...feedbackStyle, ...style }} {...props}>
+      {children}
+    </ShellStyle.FeedbackSurface>
+  );
 };
 
 export const MinimalHeader = ({

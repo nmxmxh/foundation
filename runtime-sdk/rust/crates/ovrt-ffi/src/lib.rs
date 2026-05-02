@@ -104,12 +104,27 @@ pub fn write_error(err_buf: *mut c_char, err_cap: usize, message: &str) {
         return;
     }
     let bytes = message.as_bytes();
-    let copy_len = bytes.len().min(err_cap.saturating_sub(1));
+    let copy_len = utf8_prefix_len(message, err_cap.saturating_sub(1));
     unsafe {
         let target = err_buf as *mut u8;
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), target, copy_len);
         *target.add(copy_len) = 0;
     }
+}
+
+fn utf8_prefix_len(message: &str, max_bytes: usize) -> usize {
+    if message.len() <= max_bytes {
+        return message.len();
+    }
+    let mut copy_len = 0;
+    for (index, character) in message.char_indices() {
+        let next_len = index + character.len_utf8();
+        if next_len > max_bytes {
+            break;
+        }
+        copy_len = next_len;
+    }
+    copy_len
 }
 
 #[macro_export]
@@ -186,7 +201,10 @@ mod tests {
         }
 
         fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-            Ok(input.iter().map(|value| value.to_ascii_uppercase()).collect())
+            Ok(input
+                .iter()
+                .map(|value| value.to_ascii_uppercase())
+                .collect())
         }
     }
 
@@ -201,7 +219,15 @@ mod tests {
         let mut raw_host: *mut c_void = std::ptr::null_mut();
         let mut error = [0_i8; 256];
         assert_eq!(
-            unsafe { create_host(1, &mut raw_host, error.as_mut_ptr(), error.len(), build_host) },
+            unsafe {
+                create_host(
+                    1,
+                    &mut raw_host,
+                    error.as_mut_ptr(),
+                    error.len(),
+                    build_host,
+                )
+            },
             0
         );
         assert!(!raw_host.is_null());
@@ -209,7 +235,9 @@ mod tests {
         let mut buffer = vec![0_u8; BUFFER_TOTAL_BYTES as usize];
         let mut runtime_buffer = ovrt_native::NativeBuffer::new(buffer.clone()).expect("buffer");
         runtime_buffer.initialize_control_plane(1).expect("init");
-        runtime_buffer.write_input_bytes(b"ffi").expect("write input");
+        runtime_buffer
+            .write_input_bytes(b"ffi")
+            .expect("write input");
         buffer.copy_from_slice(runtime_buffer.into_inner().as_slice());
 
         let mut error = [0_i8; 256];
@@ -230,6 +258,87 @@ mod tests {
 
         let runtime_buffer = ovrt_native::NativeBuffer::new(buffer).expect("buffer");
         assert_eq!(runtime_buffer.read_output_bytes().expect("output"), b"FFI");
+
+        unsafe {
+            destroy_host(raw_host);
+        }
+    }
+
+    #[test]
+    fn write_error_truncates_at_utf8_boundary() {
+        let mut error = [0_i8; 8];
+        write_error(error.as_mut_ptr(), error.len(), "err 🧑‍💻");
+
+        let bytes = error
+            .iter()
+            .take_while(|byte| **byte != 0)
+            .map(|byte| *byte as u8)
+            .collect::<Vec<_>>();
+        let message = std::str::from_utf8(&bytes).expect("error must remain valid utf-8");
+        assert_eq!(message, "err ");
+    }
+
+    #[test]
+    fn handles_parallel_process_buffer_calls_on_shared_host() {
+        let mut raw_host: *mut c_void = std::ptr::null_mut();
+        let mut error = [0_i8; 256];
+        assert_eq!(
+            unsafe {
+                create_host(
+                    4,
+                    &mut raw_host,
+                    error.as_mut_ptr(),
+                    error.len(),
+                    build_host,
+                )
+            },
+            0
+        );
+
+        let host_address = raw_host as usize;
+        let handles = (0..8)
+            .map(|index| {
+                std::thread::spawn(move || {
+                    let raw_host = host_address as *mut c_void;
+                    let input = format!("ffi-{index}");
+                    let expected = input.to_ascii_uppercase();
+                    let mut buffer = vec![0_u8; BUFFER_TOTAL_BYTES as usize];
+                    let mut runtime_buffer =
+                        ovrt_native::NativeBuffer::new(buffer.clone()).expect("buffer");
+                    runtime_buffer.initialize_control_plane(1).expect("init");
+                    runtime_buffer
+                        .write_input_bytes(input.as_bytes())
+                        .expect("write input");
+                    buffer.copy_from_slice(runtime_buffer.into_inner().as_slice());
+
+                    let mut error = [0_i8; 256];
+                    assert_eq!(
+                        unsafe {
+                            process_buffer(
+                                raw_host,
+                                b"ffi.echo".as_ptr(),
+                                "ffi.echo".len(),
+                                buffer.as_mut_ptr(),
+                                buffer.len(),
+                                error.as_mut_ptr(),
+                                error.len(),
+                            )
+                        },
+                        0
+                    );
+
+                    let runtime_buffer = ovrt_native::NativeBuffer::new(buffer).expect("buffer");
+                    assert_eq!(
+                        runtime_buffer.read_output_bytes().expect("output"),
+                        expected.as_bytes()
+                    );
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for handle in handles {
+            handle.join().expect("worker thread must finish");
+        }
 
         unsafe {
             destroy_host(raw_host);

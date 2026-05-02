@@ -67,7 +67,12 @@ impl NativeRuntimeHost {
             senders.insert(role, sender);
         }
 
-        Self { registry, diagnostics, senders, in_flight }
+        Self {
+            registry,
+            diagnostics,
+            senders,
+            in_flight,
+        }
     }
 
     pub fn register_unit(&self, unit: Arc<dyn RuntimeUnit>) -> Result<(), String> {
@@ -88,21 +93,26 @@ impl NativeRuntimeHost {
             .ok_or_else(|| format!("runtime unit {unit_id} is not registered"))?;
         let descriptor = unit.descriptor();
         let sender = self.senders.get(&descriptor.role).ok_or_else(|| {
-            format!("runtime role {} does not have a native worker pool", descriptor.role)
+            format!(
+                "runtime role {} does not have a native worker pool",
+                descriptor.role
+            )
         })?;
 
-        self.in_flight.fetch_add(1, Ordering::SeqCst);
+        let in_flight = InFlightGuard::new(Arc::clone(&self.in_flight));
         let (respond_to, response) = mpsc::channel();
-        sender.send(Task { unit_id: descriptor.unit_id, input, respond_to }).map_err(|_| {
-            self.in_flight.fetch_sub(1, Ordering::SeqCst);
-            "native runtime queue is unavailable".to_string()
-        })?;
+        sender
+            .send(Task {
+                unit_id: descriptor.unit_id,
+                input,
+                respond_to,
+            })
+            .map_err(|_| "native runtime queue is unavailable".to_string())?;
 
-        let result = response.recv().map_err(|_| {
-            self.in_flight.fetch_sub(1, Ordering::SeqCst);
-            "native runtime worker stopped unexpectedly".to_string()
-        })?;
-        self.in_flight.fetch_sub(1, Ordering::SeqCst);
+        let result = response
+            .recv()
+            .map_err(|_| "native runtime worker stopped unexpectedly".to_string())?;
+        in_flight.finish();
 
         let mut guard = self
             .diagnostics
@@ -157,9 +167,43 @@ impl NativeRuntimeHost {
     }
 
     pub fn diagnostics(&self) -> Result<RuntimeDiagnostics, String> {
-        let guard =
-            self.diagnostics.read().map_err(|_| "runtime diagnostics lock poisoned".to_string())?;
+        let guard = self
+            .diagnostics
+            .read()
+            .map_err(|_| "runtime diagnostics lock poisoned".to_string())?;
         Ok(guard.clone())
+    }
+}
+
+struct InFlightGuard {
+    counter: Arc<AtomicU32>,
+    active: bool,
+}
+
+impl InFlightGuard {
+    fn new(counter: Arc<AtomicU32>) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Self {
+            counter,
+            active: true,
+        }
+    }
+
+    fn finish(mut self) {
+        self.decrement();
+    }
+
+    fn decrement(&mut self) {
+        if self.active {
+            self.counter.fetch_sub(1, Ordering::SeqCst);
+            self.active = false;
+        }
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        self.decrement();
     }
 }
 
@@ -254,9 +298,12 @@ mod tests {
         role_limits.insert(RuntimeRole::Compute, 2);
 
         let host = NativeRuntimeHost::new(role_limits);
-        host.register_unit(Arc::new(UppercaseUnit)).expect("register unit");
+        host.register_unit(Arc::new(UppercaseUnit))
+            .expect("register unit");
 
-        let output = host.dispatch("text.compute", b"pulse".to_vec()).expect("dispatch unit");
+        let output = host
+            .dispatch("text.compute", b"pulse".to_vec())
+            .expect("dispatch unit");
         assert_eq!(output, b"PULSE");
 
         let diagnostics = host.diagnostics().expect("read diagnostics");
@@ -267,9 +314,12 @@ mod tests {
     #[test]
     fn dispatch_direct_uses_registered_units_without_role_pool() {
         let host = NativeRuntimeHost::new(BTreeMap::new());
-        host.register_unit(Arc::new(UppercaseUnit)).expect("register unit");
+        host.register_unit(Arc::new(UppercaseUnit))
+            .expect("register unit");
 
-        let output = host.dispatch_direct("text.compute", b"epochs").expect("dispatch direct");
+        let output = host
+            .dispatch_direct("text.compute", b"epochs")
+            .expect("dispatch direct");
         assert_eq!(output, b"EPOCHS");
 
         let diagnostics = host.diagnostics().expect("read diagnostics");
@@ -304,10 +354,12 @@ mod tests {
         role_limits.insert(RuntimeRole::Compute, 1);
 
         let host = NativeRuntimeHost::new(role_limits);
-        host.register_unit(Arc::new(PanicUnit)).expect("register unit");
+        host.register_unit(Arc::new(PanicUnit))
+            .expect("register unit");
 
-        let err =
-            host.dispatch("panic.compute", b"boom".to_vec()).expect_err("panic must be reported");
+        let err = host
+            .dispatch("panic.compute", b"boom".to_vec())
+            .expect_err("panic must be reported");
         assert!(err.contains("runtime unit panicked"));
     }
 
@@ -317,7 +369,8 @@ mod tests {
         role_limits.insert(RuntimeRole::Compute, 1);
 
         let host = NativeRuntimeHost::new(role_limits);
-        host.register_unit(Arc::new(UppercaseUnit)).expect("register unit");
+        host.register_unit(Arc::new(UppercaseUnit))
+            .expect("register unit");
 
         let mut buffer =
             NativeBuffer::new(vec![0_u8; BUFFER_TOTAL_BYTES as usize]).expect("buffer");
@@ -336,7 +389,12 @@ mod tests {
         let output_frame = stdio::read_frame_for_test(&mut Cursor::new(writer.into_inner()))
             .expect("read output frame");
         let output_buffer = NativeBuffer::new(output_frame).expect("output buffer");
-        assert_eq!(output_buffer.header_int(INT_IDX_STATUS_CODE).expect("status"), 0);
+        assert_eq!(
+            output_buffer
+                .header_int(INT_IDX_STATUS_CODE)
+                .expect("status"),
+            0
+        );
         assert_eq!(output_buffer.read_output_bytes().expect("output"), b"PULSE");
         assert_eq!(output_buffer.load_epoch(IDX_OUTPUT_WRITTEN), 1);
     }

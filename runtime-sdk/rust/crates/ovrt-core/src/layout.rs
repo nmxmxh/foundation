@@ -10,7 +10,10 @@ pub const fn header_byte_offset(index: u32) -> u32 {
 
 pub fn validate_buffer_size(size: usize) -> Result<(), String> {
     if size < BUFFER_TOTAL_BYTES as usize {
-        return Err(format!("runtime buffer too small: {} < {}", size, BUFFER_TOTAL_BYTES));
+        return Err(format!(
+            "runtime buffer too small: {} < {}",
+            size, BUFFER_TOTAL_BYTES
+        ));
     }
     Ok(())
 }
@@ -28,21 +31,30 @@ pub fn validate_region(offset: u32, length: u32, capacity: usize) -> Result<(), 
 
 pub fn validate_input_length(length: u32) -> Result<(), String> {
     if length > INPUT_MAX_BYTES {
-        return Err(format!("input payload too large: {} > {}", length, INPUT_MAX_BYTES));
+        return Err(format!(
+            "input payload too large: {} > {}",
+            length, INPUT_MAX_BYTES
+        ));
     }
     Ok(())
 }
 
 pub fn validate_output_length(length: u32) -> Result<(), String> {
     if length > OUTPUT_MAX_BYTES {
-        return Err(format!("output payload too large: {} > {}", length, OUTPUT_MAX_BYTES));
+        return Err(format!(
+            "output payload too large: {} > {}",
+            length, OUTPUT_MAX_BYTES
+        ));
     }
     Ok(())
 }
 
 pub fn validate_diagnostic_length(length: u32) -> Result<(), String> {
     if length > DIAGNOSTIC_MAX_BYTES {
-        return Err(format!("diagnostic payload too large: {} > {}", length, DIAGNOSTIC_MAX_BYTES));
+        return Err(format!(
+            "diagnostic payload too large: {} > {}",
+            length, DIAGNOSTIC_MAX_BYTES
+        ));
     }
     Ok(())
 }

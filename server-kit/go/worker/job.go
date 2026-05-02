@@ -12,7 +12,8 @@ type Job struct {
 	ID             string         `json:"id"`
 	JobKind        string         `json:"kind"`
 	Queue          string         `json:"queue"`
-	Payload        map[string]any `json:"payload"`
+	Payload        map[string]any `json:"payload,omitempty"`
+	RawPayload     []byte         `json:"raw_payload,omitempty"`
 	Metadata       map[string]any `json:"metadata"`
 	CorrelationID  string         `json:"correlation_id"`
 	IdempotencyKey string         `json:"idempotency_key"`

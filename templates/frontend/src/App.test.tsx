@@ -1,18 +1,17 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { ThemeProvider } from 'styled-components'
 import { describe, expect, it } from 'vitest'
 import App from './App'
-import { theme } from './styles/theme'
+import { AppThemeProvider, appTheme } from './styles/theme'
 
 describe('App', () => {
   it('renders the default scaffold message', () => {
     render(
-      <ThemeProvider theme={theme}>
+      <AppThemeProvider theme={appTheme}>
         <MemoryRouter>
           <App />
         </MemoryRouter>
-      </ThemeProvider>,
+      </AppThemeProvider>,
     )
 
     expect(screen.getByText(/welcome to/i)).toBeInTheDocument()

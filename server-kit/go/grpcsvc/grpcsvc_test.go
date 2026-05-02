@@ -94,6 +94,40 @@ func TestFrameCodecRejectsTruncatedInput(t *testing.T) {
 	}
 }
 
+func TestFrameCodecRejectsTrailingBytes(t *testing.T) {
+	raw := AppendMarshalFrame(nil, Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_1"}`),
+		CorrelationID: "corr_1",
+		SchemaVersion: "1.0",
+	})
+	raw = append(raw, 0)
+
+	var frame Frame
+	if err := (binaryFrameCodec{}).Unmarshal(raw, &frame); err == nil {
+		t.Fatalf("expected trailing bytes to fail")
+	}
+	if _, err := UnmarshalFrameView(raw); err == nil {
+		t.Fatalf("expected trailing bytes to fail for borrowed view")
+	}
+}
+
+func TestDirectFrameClientValidatesEnvelopeBoundsBeforeDispatch(t *testing.T) {
+	client := NewDirectFrameClient(testRouter(t), ServerOptions{
+		MaxEventTypeBytes:   len("order:create:v1:frame") - 1,
+		MaxCorrelationBytes: 64,
+	})
+	_, err := client.DispatchFrame(context.Background(), Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_1"}`),
+		CorrelationID: "corr_1",
+		SchemaVersion: "1.0",
+	})
+	if err == nil {
+		t.Fatalf("expected oversized event type to fail")
+	}
+}
+
 func TestUnmarshalFrameViewSharesBackingBytes(t *testing.T) {
 	raw := AppendMarshalFrame(nil, Frame{
 		EventType:     "order:create:v1:frame",

@@ -5,20 +5,12 @@
     "strict": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "paths": {
-      "framer-motion": ["../../../frontend/node_modules/framer-motion"],
-      "react": ["../../../frontend/node_modules/@types/react"],
-      "react-dom": ["../../../frontend/node_modules/@types/react-dom"],
-      "react/jsx-runtime": ["../../../frontend/node_modules/@types/react/jsx-runtime.d.ts"],
-      "styled-components": ["../../../frontend/node_modules/styled-components"]
-    },
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
     "skipLibCheck": true,
     "types": ["react", "react-dom"],
-    "typeRoots": ["../../../frontend/node_modules/@types"],
     "noEmit": true
   },
   "include": ["src"]

@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "paths": {
+      "react": ["../../../frontend/node_modules/@types/react"],
+      "react/jsx-runtime": ["../../../frontend/node_modules/@types/react/jsx-runtime.d.ts"]
+    },
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}

@@ -15,7 +15,11 @@ pub struct Epoch {
 impl Epoch {
     pub fn new(buffer: SafeBuffer, index: u32) -> Self {
         let last_seen = buffer.load_epoch(index);
-        Self { buffer, index, last_seen }
+        Self {
+            buffer,
+            index,
+            last_seen,
+        }
     }
 
     pub fn current(&self) -> i32 {

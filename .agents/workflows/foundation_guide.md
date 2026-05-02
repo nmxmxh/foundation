@@ -28,27 +28,28 @@ Before acting, verify your target against the structural boundaries of the Found
 
 Agents MUST navigate to these specific files for granular rules when operating within their respective domains:
 
-*   **Coding Practices**: [`docs/coding_practices.md`](../docs/coding_practices.md) - Contains CP-01 through CP-17 strict coding assertions.
-*   **Database Practices**: [`docs/database_practices.md`](../docs/database_practices.md) - Fixed 3-group migration structure and connection budgets.
-*   **Redis Practices**: [`docs/redis_practices.md`](../docs/redis_practices.md) - Ephemeral data structures, key-naming conventions, and TTL configurations.
-*   **Runtime Architecture**: [`docs/runtime_foundation.md`](../docs/runtime_foundation.md) - Top-level isolation posture between control-plane (Go) and hot-path (WASM/Rust).
-*   **Runtime SDK Kernel**: [`runtime-sdk/README.md`](../runtime-sdk/README.md) - Explains the memory topology of the 4KB fixed execution buffer.
-*   **Runtime Transport (Universal)**: [`runtime-transport/README.md`](../runtime-transport/README.md) - The stateless routing matrix and event envelopes.
-*   **Config Contracts**: [`config-contracts/README.md`](../config-contracts/README.md) - Separation of public frontend-safe parameters from secure server connections.
+* **Coding Practices**: [`docs/coding_practices.md`](../docs/coding_practices.md) - Contains CP-01 through CP-17 strict coding assertions.
+* **Database Practices**: [`docs/database_practices.md`](../docs/database_practices.md) - Fixed 3-group migration structure and connection budgets.
+* **Redis Practices**: [`docs/redis_practices.md`](../docs/redis_practices.md) - Ephemeral data structures, key-naming conventions, and TTL configurations.
+* **Runtime Architecture**: [`docs/runtime_foundation.md`](../docs/runtime_foundation.md) - Top-level isolation posture between control-plane (Go) and hot-path (WASM/Rust).
+* **Runtime SDK Kernel**: [`runtime-sdk/README.md`](../runtime-sdk/README.md) - Explains the memory topology of the 4KB fixed execution buffer.
+* **Runtime Transport (Universal)**: [`runtime-transport/README.md`](../runtime-transport/README.md) - The stateless routing matrix and event envelopes.
+* **Config Contracts**: [`config-contracts/README.md`](../config-contracts/README.md) - Separation of public frontend-safe parameters from secure server connections.
 
 ---
 
 ## 3. Core Operational Workflows (Agent Actions)
 
 ### A. Implementing Frontend State & Communication (Using `runtime-transport`)
+
 When you are asked to connect a new React component or Frontend module to the Backend, adhere to the following sequence:
 
 1. **Initialize the Singletons in App-Space**:
    Do NOT build independent fetching hooks. Ensure the application initializes `createMetadataStore()` and `createEventStore()`.
 2. **Metadata Rule - Implicit Tracking**:
-   NEVER manually attach context metadata to your view payloads unless overriding context (e.g. `organization_id`). The framework-agnostic `MetadataStore` state carries the correlation hashes invisibly. 
+   NEVER manually attach context metadata to your view payloads unless overriding context (e.g. `organization_id`). The framework-agnostic `MetadataStore` state carries the correlation hashes invisibly.
 3. **Dispatch Rule - Deduplication**:
-   To prevent React re-render floods, route all mutations and data requests through the `EventStore`. 
+   To prevent React re-render floods, route all mutations and data requests through the `EventStore`.
    `eventStore.emitEvent('domain:action:v1:requested', payload, { cacheDurationMs: 3000 })`
 4. **Offline Resilience (WebSocket)**:
    The stateless `CommandBus` owns a **Re-Subscription Map**. When writing socket listeners (e.g., `media:*`), know that on disconnect/reconnect, the foundation automatically resubscribes. Do not build redundant polling algorithms.
@@ -56,19 +57,23 @@ When you are asked to connect a new React component or Frontend module to the Ba
    Every payload traverses the wire inside a `RuntimeEnvelope` (preferring binary protobuf). The stateless command bus automatically falls back from `WS -> HTTP` on failure.
 
 ### B. Building High-Compute Operations (Using `runtime-sdk`)
+
 When handling large arrays, media blobs, or heavy mathematical reductions, do NOT write heavy execution in TypeScript/Browser/Go.
 
 1. **The 4KB Fixed Buffer**:
    Execution happens inside the `runtime-sdk` Native (FFI/SHM) or WASM lanes.
-   The memory is strictly partitioned: 
-   - `0-128`: Epoch Sync Counters 
-   - `128-256`: Control Headers
-   - `256-1280`: Input Blob
-   - `1280-3328`: Output Blob
+   The memory is strictly partitioned:
+   * `0-128`: Epoch Sync Counters
+   * `128-256`: Control Headers
+   * `256-1280`: Input Blob
+   * `1280-3328`: Output Blob
 2. **Zero-Copy Discipline**:
    You must read linearly from the pointers. Do not parse JSON inside these hot-paths. Rely on typed Cap'n Proto / Protobuf messages serialized directly into these buffer offsets.
+3. **Generation Discipline**:
+   Use the scaffold Makefile runtime targets instead of hand-copying browser artifacts. `make runtime-bindings` regenerates runtime-sdk buffer constants, `make build-rust-wasm` publishes app-owned Rust modules into `frontend/public/modules`, and `make wasm-manifest` exposes the resulting artifacts to frontend-kit. Frontend code should discover WASM through the manifest and instantiate through the runtime-sdk browser host.
 
 ### C. Backend Database Operations (PostgreSQL)
+
 When adding schemas or DB features inside the app:
 
 1. **The 3-Group Migration Fixation**:
@@ -79,12 +84,13 @@ When adding schemas or DB features inside the app:
    Transactions must be tightly scoped to mutations. Do not await Stripe/S3/external networks while an SQL `Tx` is open.
 
 ### D. Backend Ephemeral Operations (Redis)
+
 When adding caches or locks:
 
 1. **Strict Key Naming**:
    Keys must look like `<app>:<env>:<domain>:<entity>:<purpose>[:<id>]` (e.g., `app:prod:billing:sub:cache:999`).
 2. **Strict Expiration**:
-   Never default to indefinite TTLs. 
+   Never default to indefinite TTLs.
 3. **Graceful Degradation**:
    If Redis fails, the code must still execute (albeit slower) using the DB as the source of truth if it was a cache, or fail safely if it was an active idempotency fence.
 

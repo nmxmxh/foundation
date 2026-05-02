@@ -40,6 +40,48 @@ export default tseslint.config(
           selector: "NewExpression[callee.property.name='MutationObserver']",
           message:
             "Prefer explicit state flow, ResizeObserver, or IntersectionObserver. MutationObserver is exception-only and must be isolated behind an audited adapter with cleanup."
+        },
+        {
+          selector: "CallExpression[callee.object.name='Atomics'][callee.property.name='wait']",
+          message:
+            "Main-thread/runtime TypeScript must not use blocking Atomics.wait. Use workers, Atomics.waitAsync, transferable buffers, or message fallback."
+        },
+        {
+          selector: "NewExpression[callee.name='WebSocket']",
+          message:
+            "Route browser/backend messages through @ovasabi/runtime-transport instead of app-local raw WebSocket construction."
+        },
+        {
+          selector: "NewExpression[callee.property.name='WebSocket']",
+          message:
+            "Route browser/backend messages through @ovasabi/runtime-transport instead of app-local raw WebSocket construction."
+        }
+      ],
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "window",
+          property: "__OVASABI_RUNTIME_TRANSPORT",
+          message:
+            "Use @ovasabi/runtime-transport or @ovasabi/frontend-kit helpers; raw globals are compatibility shims only."
+        },
+        {
+          object: "globalThis",
+          property: "__OVASABI_RUNTIME_TRANSPORT",
+          message:
+            "Use @ovasabi/runtime-transport or @ovasabi/frontend-kit helpers; raw globals are compatibility shims only."
+        }
+      ],
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["*foundation/ui-minimal/ts/src*", "*foundation/runtime-transport/ts/src*", "*foundation/frontend-kit/ts/src*"],
+              message:
+                "Consume foundation communication/UI packages through @ovasabi/* package boundaries, not raw source aliases."
+            }
+          ]
         }
       ],
       complexity: ["error", 20],

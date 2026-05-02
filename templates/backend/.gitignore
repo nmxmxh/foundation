@@ -6,6 +6,13 @@ bin/
 *.so
 *.dylib
 
+# Generated frontend runtime artifacts
+frontend/public/*.wasm
+frontend/public/*.wasm.br
+frontend/public/wasm_exec.js
+frontend/public/modules/
+frontend/public/runtime/wasm-manifest.json
+
 # Test binary
 *.test
 

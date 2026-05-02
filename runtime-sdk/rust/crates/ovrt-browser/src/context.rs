@@ -12,9 +12,14 @@ pub fn init_context(buffer: SafeBuffer) {
     if current == 0 {
         return;
     }
-    if INITIAL_CONTEXT_HASH.compare_exchange(0, current, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+    if INITIAL_CONTEXT_HASH
+        .compare_exchange(0, current, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
     {
-        js_interop::console_log(&format!("[ovrt-browser] initialized context hash {}", current), 2);
+        js_interop::console_log(
+            &format!("[ovrt-browser] initialized context hash {}", current),
+            2,
+        );
     }
 }
 

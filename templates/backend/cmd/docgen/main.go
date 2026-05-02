@@ -78,6 +78,8 @@ type MediaType struct {
 
 type SecurityScheme struct {
 	Type         string `json:"type"`
+	Name         string `json:"name,omitempty"`
+	In           string `json:"in,omitempty"`
 	Scheme       string `json:"scheme,omitempty"`
 	BearerFormat string `json:"bearerFormat,omitempty"`
 	Description  string `json:"description,omitempty"`
@@ -112,11 +114,12 @@ type schemaGenerator struct {
 
 // Config holds docgen configuration
 type Config struct {
-	Title        string
-	Version      string
-	Description  string
-	PublicPaths  []string
-	Routes       []registry.HTTPRoute
+	Title           string
+	Version         string
+	Description     string
+	PublicPaths     []string
+	SecuritySchemes map[string]SecurityScheme
+	Routes          []registry.HTTPRoute
 }
 
 // Generate creates OpenAPI spec from routes
@@ -137,17 +140,21 @@ func Generate(cfg Config) OpenAPISpec {
 		},
 		Paths: make(map[string]PathItem),
 		Components: Components{
-			Schemas: make(map[string]Schema),
-			SecuritySchemes: map[string]SecurityScheme{
-				"bearerAuth": {
-					Type:         "http",
-					Scheme:       "bearer",
-					BearerFormat: "JWT",
-					Description:  "JWT bearer token. Example: Authorization: Bearer <token>",
-				},
-			},
+			Schemas:         make(map[string]Schema),
+			SecuritySchemes: make(map[string]SecurityScheme),
 		},
-		Security: []map[string][]string{{"bearerAuth": {}}},
+	}
+	spec.Components.SecuritySchemes["bearerAuth"] = SecurityScheme{
+		Type:         "http",
+		Scheme:       "bearer",
+		BearerFormat: "JWT",
+		Description:  "JWT bearer token. Example: Authorization: Bearer <token>",
+	}
+	for name, scheme := range cfg.SecuritySchemes {
+		spec.Components.SecuritySchemes[name] = scheme
+	}
+	if _, ok := spec.Components.SecuritySchemes["bearerAuth"]; ok {
+		spec.Security = []map[string][]string{{"bearerAuth": {}}}
 	}
 
 	addStandardSchemas(spec.Components.Schemas)
@@ -174,13 +181,25 @@ func Generate(cfg Config) OpenAPISpec {
 			},
 		}
 
-		if requiresAuthentication(route.Path, cfg.PublicPaths) {
+		if route.IsPublic || !requiresAuthentication(route.Path, cfg.PublicPaths) {
+			op.Security = emptySecurityRequirement()
+		} else if len(route.AuthRequirements) > 0 {
+			op.Security = securityRequirement(route.AuthRequirements)
 			op.Responses["401"] = buildErrorResponse("Unauthorized")
 		} else {
-			op.Security = emptySecurityRequirement()
+			op.Responses["401"] = buildErrorResponse("Unauthorized")
 		}
 
-		if route.RequestType != nil {
+		if route.RequestSchema != "" && method != "get" && method != "delete" {
+			op.RequestBody = &RequestBody{
+				Required: true,
+				Content: map[string]MediaType{
+					"application/json": {
+						Schema: Schema{Ref: "#/components/schemas/" + route.RequestSchema},
+					},
+				},
+			}
+		} else if route.RequestType != nil {
 			requestSchemaName := generator.generateSchema(route.RequestType)
 			if method == "get" || method == "delete" {
 				op.Parameters = buildQueryParameters(route.RequestType, route.RequiredQueryParams)
@@ -202,10 +221,31 @@ func Generate(cfg Config) OpenAPISpec {
 			}
 		}
 
-		if route.ResponseType != nil {
+		successStatus := route.SuccessStatusCode
+		if successStatus == 0 {
+			successStatus = 200
+		}
+		successCode := fmt.Sprintf("%d", successStatus)
+		successDescription := route.SuccessDescription
+		if successDescription == "" {
+			successDescription = "Successful response"
+		}
+
+		if route.NoContentResponse {
+			op.Responses[successCode] = Response{Description: successDescription}
+		} else if route.ResponseSchema != "" {
+			op.Responses[successCode] = Response{
+				Description: successDescription,
+				Content: map[string]MediaType{
+					"application/json": {
+						Schema: Schema{Ref: "#/components/schemas/" + route.ResponseSchema},
+					},
+				},
+			}
+		} else if route.ResponseType != nil {
 			responseSchemaName := generator.generateSchema(route.ResponseType)
-			op.Responses["200"] = Response{
-				Description: "Successful response",
+			op.Responses[successCode] = Response{
+				Description: successDescription,
 				Content: map[string]MediaType{
 					"application/json": {
 						Schema: Schema{Ref: "#/components/schemas/" + responseSchemaName},
@@ -217,8 +257,8 @@ func Generate(cfg Config) OpenAPISpec {
 			if isLikelyListEndpoint(route.Path, route.Description) {
 				defaultSchemaRef = "#/components/schemas/PaginatedResult"
 			}
-			op.Responses["200"] = Response{
-				Description: "Successful response",
+			op.Responses[successCode] = Response{
+				Description: successDescription,
 				Content: map[string]MediaType{
 					"application/json": {
 						Schema: Schema{Ref: defaultSchemaRef},
@@ -248,6 +288,24 @@ func newSchemaGenerator(schemas map[string]Schema) *schemaGenerator {
 		g.bySchemaName[name] = ""
 	}
 	return g
+}
+
+func securityRequirement(requirements []registry.HTTPSecurityRequirement) *[]map[string][]string {
+	result := make([]map[string][]string, 0, len(requirements))
+	for _, requirement := range requirements {
+		if requirement.Scheme == "" {
+			continue
+		}
+		scopes := requirement.Scopes
+		if scopes == nil {
+			scopes = []string{}
+		}
+		result = append(result, map[string][]string{requirement.Scheme: scopes})
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return &result
 }
 
 func (g *schemaGenerator) generateSchema(msg proto.Message) string {

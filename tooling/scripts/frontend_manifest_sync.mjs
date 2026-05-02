@@ -19,14 +19,30 @@ const target = readJSON(targetPath)
 const template = readJSON(templatePath)
 
 const requiredScripts = ['preview', 'test', 'test:watch']
-const requiredDependencies = ['react-router-dom', 'styled-components', 'zustand']
+const requiredDependencies = [
+  '@ovasabi/runtime-transport',
+  '@ovasabi/frontend-kit',
+  '@ovasabi/ui-minimal',
+  'framer-motion',
+  'react-router-dom',
+  'styled-components',
+  'zustand',
+]
 const requiredDevDependencies = [
   '@testing-library/jest-dom',
   '@testing-library/react',
   '@testing-library/user-event',
   'jsdom',
+  'ts-proto',
   'vitest',
 ]
+const pinnedDependencyVersions = new Set([
+  '@ovasabi/runtime-transport',
+  '@ovasabi/frontend-kit',
+  '@ovasabi/ui-minimal',
+  'framer-motion',
+])
+const pinnedDevDependencyVersions = new Set(['ts-proto'])
 
 let changed = false
 
@@ -44,7 +60,7 @@ for (const key of requiredScripts) {
 
 for (const key of requiredDependencies) {
   const value = template.dependencies?.[key]
-  if (value && !target.dependencies[key]) {
+  if (value && (!target.dependencies[key] || (pinnedDependencyVersions.has(key) && target.dependencies[key] !== value))) {
     target.dependencies[key] = value
     changed = true
   }
@@ -52,7 +68,7 @@ for (const key of requiredDependencies) {
 
 for (const key of requiredDevDependencies) {
   const value = template.devDependencies?.[key]
-  if (value && !target.devDependencies[key]) {
+  if (value && (!target.devDependencies[key] || (pinnedDevDependencyVersions.has(key) && target.devDependencies[key] !== value))) {
     target.devDependencies[key] = value
     changed = true
   }

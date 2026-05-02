@@ -3,8 +3,10 @@ import path from 'path'
 
 export default defineConfig({
   resolve: {
+    preserveSymlinks: true,
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@generated': path.resolve(__dirname, './src/types/protos'),
     },
   },
   test: {

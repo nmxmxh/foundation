@@ -102,14 +102,21 @@ CMD ["./server"]
 # =============================================================================
 # Optional: Frontend Builder Stage
 # =============================================================================
-# If a project chooses to build frontend assets in Docker, keep the same pattern:
-# copy package manifests first, use a named cache, then copy source.
+# If a project chooses to build frontend assets in Docker, keep foundation local
+# package dependencies in the build context and copy their manifests before
+# `npm ci` so @ovasabi/* file dependencies resolve deterministically.
 #
 # FROM node:22-alpine AS frontend-builder
 # ARG CACHE_NAMESPACE
 # WORKDIR /app/frontend
 # COPY frontend/package.json frontend/package-lock.json* ./
+# COPY foundation/runtime-transport/ts/package.json ../foundation/runtime-transport/ts/
+# COPY foundation/frontend-kit/ts/package.json ../foundation/frontend-kit/ts/
+# COPY foundation/ui-minimal/ts/package.json ../foundation/ui-minimal/ts/
 # RUN --mount=type=cache,id=${CACHE_NAMESPACE}-npm,target=/root/.npm,sharing=locked \
 #     npm ci
+# COPY foundation/runtime-transport/ts ../foundation/runtime-transport/ts
+# COPY foundation/frontend-kit/ts ../foundation/frontend-kit/ts
+# COPY foundation/ui-minimal/ts ../foundation/ui-minimal/ts
 # COPY frontend/ .
 # RUN npm run build

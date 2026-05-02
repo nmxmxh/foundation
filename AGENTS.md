@@ -47,6 +47,12 @@ project/
 
 ## Critical Rules (Mandatory)
 
+### Foundation Metadata And Build Output
+
+`.foundation` is tracked project metadata. Foundation tooling refreshes `LAST_UPDATED`, so a timestamp-only diff in that file is expected metadata churn, not an ignore-rule issue.
+
+Vendored foundation modules must carry `foundation/.gitignore`. Rust build output under `foundation/runtime-sdk/rust/target/` is generated and must stay ignored.
+
 ### 1. Correlation ID Propagation
 
 Every mutating command MUST carry a `correlationId`. Trace it through all workers, events, and logs.
@@ -265,11 +271,46 @@ Always use shared primitives from `foundation/ui-minimal`:
 
 ```typescript
 // CORRECT - use foundation primitives
-import { MinimalButton, MinimalInput } from '@/components/ui'
+import { MinimalButton, MinimalInput } from '@ovasabi/ui-minimal'
 
 // WRONG - page-local styled components for common patterns
 const MyButton = styled.button`...`
 ```
+
+App-level `src/components/ui/*` files should wrap `Minimal*` primitives with product naming, icons, and brand defaults. They must not reimplement button, input, card, table, modal, skeleton, dropdown, or header structure from scratch.
+
+Consume `ui-minimal` only through the package boundary:
+
+```typescript
+import { MinimalThemeProvider } from '@ovasabi/ui-minimal'
+```
+
+Do not alias or import raw files from `foundation/ui-minimal/ts/src/*`. Frontend Vite, Vitest, and TypeScript configs must set `preserveSymlinks: true` so the local `file:../foundation/ui-minimal/ts` dependency resolves React, styled-components, and framer-motion through the frontend package boundary.
+
+### Frontend Contract Types
+
+Use generated protobuf TypeScript as the domain contract source:
+
+```bash
+make proto-ts
+```
+
+Generated types live under `frontend/src/types/protos/`. Do not hand-write request, response, event, route, geo, safety, report, or identity contract types in `frontend/src/types/*` when a protobuf source exists under `api/protos`.
+
+### Frontend Operations Kit
+
+Use `@ovasabi/frontend-kit` for app operational state:
+
+```typescript
+import {
+  createFoundationMetadata,
+  createIndexedDBStorage,
+  createRuntimeExternalStore,
+  createStoreResetRegistry,
+} from '@ovasabi/frontend-kit'
+```
+
+The kit is the baseline for IndexedDB-backed persistence, metadata normalization, store reset handles, and runtime/WASM snapshot hooks. Do not copy app-local versions of these utilities from another product into a new app; wrap the kit with app-specific generated contract types instead.
 
 ## Gotchas and Anti-Patterns
 
@@ -409,6 +450,8 @@ Before merging any PR, verify:
 3. Follow the principle: explicit > implicit, bounded > unbounded
 4. When adding external calls, wrap with circuit breaker + retry
 5. When adding UI, check `foundation/ui-minimal`, `docs/foundation/styling_design_practices.md`, and `docs/foundation/references/README.md`
+6. Before adding frontend API types, run `make proto-ts` and import from `frontend/src/types/protos`
+7. Before adding frontend IndexedDB, metadata, store reset, or runtime hook utilities, check `foundation/frontend-kit`
 
 ---
 

@@ -18,6 +18,7 @@ This guide is **self-contained** and designed to be copied into any application 
 * **Core Services**:
   * **Event Bus**: Multi-driver (Redis/In-Memory) pattern matching for decoupled service communication. Highly focuses on `<domain>:<action>:requested/success/failed` lifecycle.
   * **Graceful Signalers**: Consistently formats error and success streams into conforming envelopes.
+* **Scaffold Contract**: Generated backends must use server-kit as the runtime spine. Startup registers dependencies with `resilience`; server ingress uses `registry`, `httpapi`, `metadata`, `graceful`, `security`, `compress`, and `observability`; WebSockets use `wsrouting` and `wsmetrics`; workers use bounded queue defaults.
 
 * **Extended Modules** (v1.0.0):
 
@@ -40,6 +41,7 @@ This guide is **self-contained** and designed to be copied into any application 
 * **Key Services**:
   * **Stateless Bus**: `createEnvelope`, `createCommandBus`. Automatically manages falling back between WebSocket setups and HTTP streams.
   * **Stateful SDK (New)**: `createMetadataStore`, `createEventStore` (Zustand/Vanilla). Offers framework-agnostic singletons for request deduplication and implicit metadata carrying.
+* **Scaffold Contract**: Frontends consume this as `@ovasabi/runtime-transport` from `file:../foundation/runtime-transport/ts`; raw aliases into `foundation/runtime-transport/ts/src` are drift.
 
 ### C. runtime-sdk (Rust/WASM)
 
@@ -95,9 +97,32 @@ This guide is **self-contained** and designed to be copied into any application 
 ### 7. Frontend Styling And Motion Rule
 
 * Follow the theme -> CSS variable -> primitive -> feature wrapper layering model.
+* Install and use `@ovasabi/ui-minimal` from the vendored `foundation/ui-minimal/ts` package; app `components/ui` modules should be wrappers around `Minimal*` primitives, not standalone replacements.
+* Recognize primitives before writing app-local UI: check `MinimalAppShell`, `MinimalScrollMain`, `MinimalSkipLink`, `MinimalSidebar`, `MinimalButton`, `MinimalCard`, `MinimalInput`, `MinimalTable`, `MinimalCalendar`, `MinimalActionModal`, `MinimalSkeleton`, and related surfaces first.
+* Use `useMinimalMotion` and `useMinimalScrollFeedback` for layout entrances, contextual panel movement, and subtle scroll response. App-specific auth, role gating, route lists, and product copy stay outside `ui-minimal`.
+* Install and use `@ovasabi/runtime-transport` and `@ovasabi/frontend-kit` from the vendored foundation TypeScript packages. Do not import or alias raw files from `foundation/ui-minimal/ts/src/*` or `foundation/runtime-transport/ts/src/*`.
+* Keep Vite, Vitest, and TypeScript `preserveSymlinks` enabled so local file dependencies resolve peers from the frontend package graph.
+* Run `make proto-ts` after protobuf changes and import domain contracts from `frontend/src/types/protos`.
+* See `frontend_scaffold_sync.md` for the full package, generated-type, Docker context, and communication-layer sync contract.
 * Prefer grouped styled-component declarations (`const Style = { ... }`) over long flat lists of standalone styled constants in app code.
 * Keep route loaders, keyed loading state, and skeletons separate from domain rendering instead of collapsing them into one component.
 * Read `styling_design_practices.md` and `docs/references/README.md` before introducing new interaction motion.
+
+### 8. Frontend Operations Rule
+
+* Use `@ovasabi/frontend-kit` for IndexedDB storage, metadata normalization, store reset registries, and runtime/WASM snapshot hooks.
+* Use `@ovasabi/runtime-transport` for WebSocket, HTTP fallback, binary envelopes, compression, offline queueing, route registries, and metadata/event stores.
+* Keep generated protobuf contracts in app space and pass them into app-specific stores/hooks; do not put app domain contracts inside `frontend-kit`.
+* Runtime and WASM views should expose React state through `useSyncExternalStore`-style handles. Avoid page-local polling loops for SAB epochs or worker diagnostics.
+* Use Makefile runtime targets for WASM propagation: `make runtime-bindings`, `make build-rust-wasm`, and `make wasm-manifest`. Frontend code should load `frontend/public/runtime/wasm-manifest.json` through `@ovasabi/frontend-kit` and instantiate modules through the runtime-sdk browser host.
+
+### 9. Backend Runtime Binding Rule
+
+* Use `server-kit` as a bound runtime layer, not as copied reference code.
+* Register database, Redis, object storage, and other critical dependencies with `resilience` during startup so health, circuit, retry, degradation, and failure-drill behavior share one dependency model.
+* Route HTTP and WebSocket ingress through `registry`, `httpapi`, `metadata`, `graceful`, `security`, `compress`, `observability`, `wsrouting`, and `wsmetrics` before app handlers receive payloads.
+* Keep worker throughput bounded through server-kit queue configuration and chain helpers instead of ad-hoc goroutine fan-out.
+* Run `make lint-foundation` or `scripts/checks/server_kit_usage_check.sh .` after scaffold sync. `.foundation` projects receive deep wiring checks; intentionally custom apps should either adopt the scaffold profile or remain explicitly outside that contract.
 
 ---
 

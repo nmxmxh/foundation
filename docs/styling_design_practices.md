@@ -29,8 +29,13 @@ Do not repeat these older patterns in new work:
 1. Large inline style objects inside shared components.
 2. One-file sprawl of many unrelated standalone styled-component constants when a grouped `Style` object would be clearer.
 3. Mixing data fetching, loading placeholders, theme mapping, and visual styling in a single component body.
+4. Creating standalone app-local `Button`, `Input`, `Card`, `Table`, `Modal`, `Dropdown`, or `Skeleton` implementations when `ui-minimal` already exposes the structural primitive.
+5. Starting a frontend vertical slice with hand-written API contract types instead of generating `frontend/src/types/protos` with `make proto-ts`.
+6. Importing `foundation/ui-minimal/ts/src/*` directly or creating source aliases to it. Use `@ovasabi/ui-minimal` as a local file dependency and preserve symlinks in Vite, Vitest, and TypeScript config.
 
 `ui-minimal` remains the structural baseline, but its internal implementation should continue normalizing toward the grouped `Style` pattern instead of expanding legacy declaration sprawl.
+
+Operational frontend concerns belong in `frontend-kit`, not visual primitives. Use `@ovasabi/frontend-kit` for persistence, metadata, reset handles, and runtime snapshot hooks, then compose those handles with `ui-minimal` surfaces.
 
 ## 2. Architecture Layers
 

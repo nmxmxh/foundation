@@ -58,7 +58,7 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	// Initialize health checker
 	deps.HealthChecker = initHealthChecker(deps.DB, deps.Redis)
 
-	// Initialize resilience patterns
+	// Initialize resilience patterns and bind known dependencies into one runtime view.
 	resilienceRuntime, err := initResilience(ctx)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init resilience: %w", err)
@@ -69,6 +69,7 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 			slog.Error("failed to close resilience runtime", "error", err)
 		}
 	})
+	bindResilienceDependencies(deps)
 
 	cleanup := func() {
 		for i := len(cleanups) - 1; i >= 0; i-- {
@@ -154,4 +155,31 @@ func initResilience(ctx context.Context) (*resilience.Runtime, error) {
 	cfg.RetryMaxDelay = 2 * time.Second
 
 	return resilience.New(ctx, cfg)
+}
+
+func bindResilienceDependencies(deps *Dependencies) {
+	if deps == nil || deps.Resilience == nil {
+		return
+	}
+	if deps.DB != nil {
+		deps.Resilience.RegisterDependency(
+			"database",
+			func(ctx context.Context) error {
+				return deps.DB.PingContext(ctx)
+			},
+			resilience.WithCritical(true),
+			resilience.WithFailureThreshold(3),
+		)
+	}
+	if deps.Redis != nil {
+		deps.Resilience.RegisterDependency(
+			"redis",
+			func(ctx context.Context) error {
+				return deps.Redis.Ping(ctx).Err()
+			},
+			resilience.WithCritical(false),
+			resilience.WithFailureThreshold(3),
+			resilience.WithFallbackBehavior("fail_open"),
+		)
+	}
 }

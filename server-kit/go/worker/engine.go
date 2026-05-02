@@ -34,7 +34,8 @@ type Engine struct {
 	log        logger.Logger
 	wg         sync.WaitGroup
 
-	riverClient *river.Client[pgx.Tx]
+	riverClient   *river.Client[pgx.Tx]
+	metadataStore MetadataStore
 }
 
 func NewEngine(queueWorkers map[string]int, l logger.Logger) *Engine {
@@ -63,6 +64,16 @@ func (e *Engine) SetRiverClient(client *river.Client[pgx.Tx]) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.riverClient = client
+	if client != nil {
+		e.metadataStore = NewPostgresMetadataStore(client)
+	}
+}
+
+// SetMetadataStore manually overrides the metadata store.
+func (e *Engine) SetMetadataStore(store MetadataStore) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.metadataStore = store
 }
 
 func (e *Engine) Register(processor Processor) error {
@@ -156,16 +167,47 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 		if !job.ScheduledAt.IsZero() {
 			opts.ScheduledAt = job.ScheduledAt
 		}
-		
-		var err error
+
+		var jobID int64
 		if tx != nil {
-			_, err = client.InsertTx(ctx, tx, job, opts)
+			res, err := client.InsertTx(ctx, tx, job, opts)
+			if err != nil {
+				return fmt.Errorf("failed to insert job into river: %w", err)
+			}
+			jobID = res.Job.ID
 		} else {
-			_, err = client.Insert(ctx, job, opts)
+			res, err := client.Insert(ctx, job, opts)
+			if err != nil {
+				return fmt.Errorf("failed to insert job into river: %w", err)
+			}
+			jobID = res.Job.ID
 		}
-		
-		if err != nil {
-			return fmt.Errorf("failed to insert job into river: %w", err)
+
+		// If there is a raw payload or explicit metadata, save it to the sidecar table
+		if len(job.RawPayload) > 0 || len(job.Metadata) > 0 {
+			e.mu.RLock()
+			ms := e.metadataStore
+			e.mu.RUnlock()
+
+			if ms != nil {
+				workflowName := job.Kind()
+				if v, ok := job.Metadata["workflow_name"].(string); ok {
+					workflowName = v
+				}
+
+				meta := JobMetadata{
+					JobID:         jobID,
+					WorkflowName:  workflowName,
+					EntityType:    "job",
+					EntityID:      fmt.Sprintf("%d", jobID),
+					CorrelationID: job.CorrelationID,
+					RawPayload:    job.RawPayload,
+					TrackingData:  job.Metadata,
+				}
+				if err := ms.Save(ctx, meta); err != nil {
+					e.log.Warn("failed to save job metadata", zap.Int64("job_id", jobID), zap.Error(err))
+				}
+			}
 		}
 		return nil
 	}

@@ -22,6 +22,29 @@ Recommended app usage:
 2. call the shell checks from app `make lint` or CI workflows
 3. keep app-specific checks close to the app and leave cross-app rules here
 
+## Lint strictness model
+
+Foundation uses a strict-core lint model:
+
+1. foundation/runtime/server code fails on resource-management and communication-contract drift
+2. generated projects inherit the same Go, Rust, scaffold, and CP checks through `.golangci.yml`, `clippy.toml`, `rustfmt.toml`, and `scripts/checks/*`
+3. frontend scaffolds use ESLint warnings for high-verbosity React shape rules and errors for boundary violations such as raw foundation source imports
+4. custom CP shell checks enforce cross-language architecture rules that stock linters cannot see consistently
+
+Native tool mapping:
+
+1. Go: `golangci-lint` owns unchecked errors, context use, body closing, security scans, static analysis, complexity, and allocation hints.
+2. Rust: `cargo fmt` and `cargo clippy -D warnings` own formatting, unwrap/expect/panic discipline, and warning-free runtime code.
+3. TypeScript/React: ESLint owns React hooks, import boundaries, observer exceptions, blocking atomics, and app-local raw WebSocket construction. TypeScript owns generated contract shape through `typecheck`.
+4. CP scripts own foundation-specific communication and performance rules: no oversized runtime control buffer, no hot-path dynamic JSON envelopes in foundation runtime lanes, no compatibility gRPC envelope as a default, and no checked-in build artifacts.
+
+The reason this is not all custom linter code:
+
+1. stock linters are faster to maintain and track language evolution
+2. Go custom analyzers and ESLint custom plugins are useful only when AST precision is needed beyond built-in rules
+3. shell checks remain acceptable for repo-structure and forbidden-boundary checks because they are transparent, cheap, and easy to scaffold into apps
+4. frontend rules intentionally avoid foundation-runtime strictness because React UI code often needs local composition, adapters, and gradual migration paths
+
 ## Coverage and hotspot baseline
 
 The foundation baseline treats change risk as complexity plus coverage together, not either in isolation.

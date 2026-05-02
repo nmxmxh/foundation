@@ -1,4 +1,9 @@
-// Common types used across the application
+// Common UI-only types used across the application.
+//
+// Domain API contracts belong in generated protobuf types under:
+//   src/types/protos
+//
+// Run `make proto-ts` from the project root after changing files in api/protos.
 
 // API response types
 export interface ApiResponse<T> {
