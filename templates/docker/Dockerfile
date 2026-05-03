@@ -99,24 +99,62 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 
 CMD ["./server"]
 
-# =============================================================================
-# Optional: Frontend Builder Stage
-# =============================================================================
-# If a project chooses to build frontend assets in Docker, keep foundation local
-# package dependencies in the build context and copy their manifests before
-# `npm ci` so @ovasabi/* file dependencies resolve deterministically.
-#
-# FROM node:22-alpine AS frontend-builder
-# ARG CACHE_NAMESPACE
-# WORKDIR /app/frontend
-# COPY frontend/package.json frontend/package-lock.json* ./
-# COPY foundation/runtime-transport/ts/package.json ../foundation/runtime-transport/ts/
-# COPY foundation/frontend-kit/ts/package.json ../foundation/frontend-kit/ts/
-# COPY foundation/ui-minimal/ts/package.json ../foundation/ui-minimal/ts/
-# RUN --mount=type=cache,id=${CACHE_NAMESPACE}-npm,target=/root/.npm,sharing=locked \
-#     npm ci
-# COPY foundation/runtime-transport/ts ../foundation/runtime-transport/ts
-# COPY foundation/frontend-kit/ts ../foundation/frontend-kit/ts
-# COPY foundation/ui-minimal/ts ../foundation/ui-minimal/ts
-# COPY frontend/ .
-# RUN npm run build
+# --- Frontend Builder ---
+FROM node:22-alpine AS frontend-builder
+
+ARG CACHE_NAMESPACE
+
+WORKDIR /app
+
+# Copy foundation package manifests first for dependency resolution
+COPY foundation/runtime-transport/ts/package.json ./foundation/runtime-transport/ts/
+COPY foundation/frontend-kit/ts/package.json ./foundation/frontend-kit/ts/
+COPY foundation/ui-minimal/ts/package.json ./foundation/ui-minimal/ts/
+COPY frontend/package.json frontend/package-lock.json* ./frontend/
+
+# Install dependencies using the shared npm cache
+RUN --mount=type=cache,id=${CACHE_NAMESPACE}-npm,target=/root/.npm,sharing=locked \
+    cd frontend && npm ci
+
+# Copy foundation source code
+COPY foundation/runtime-transport/ts ./foundation/runtime-transport/ts
+COPY foundation/frontend-kit/ts ./foundation/frontend-kit/ts
+COPY foundation/ui-minimal/ts ./foundation/ui-minimal/ts
+
+# Copy frontend source code
+COPY frontend/ ./frontend/
+
+# Build the frontend
+RUN cd frontend && npm run build
+
+# --- Frontend Final ---
+FROM alpine:3.23 AS frontend
+
+ARG CACHE_NAMESPACE
+
+# Install Nginx, Brotli, and setup non-root user
+RUN apk add --no-cache nginx nginx-mod-http-brotli ca-certificates libcap gettext && \
+    addgroup -S app && adduser -S app -G app && \
+    mkdir -p /var/cache/nginx /var/run /var/log/nginx /var/lib/nginx && \
+    setcap cap_net_bind_service=+ep /usr/sbin/nginx
+
+WORKDIR /srv
+
+# Copy custom nginx configuration templates and startup script
+COPY config/nginx.conf /etc/nginx/nginx.conf
+COPY config/default.conf.template /etc/nginx/conf.d/default.conf.template
+COPY start.sh ./start.sh
+RUN chmod +x ./start.sh
+
+# Copy built frontend assets
+COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
+
+RUN chown -R app:app /var/cache/nginx /var/run /var/log/nginx /var/lib/nginx /usr/share/nginx/html /etc/nginx/conf.d /etc/nginx/nginx.conf /srv/start.sh
+
+USER app
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -q --spider http://localhost:80/healthz || exit 1
+
+ENTRYPOINT ["./start.sh"]

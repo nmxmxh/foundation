@@ -2,6 +2,23 @@
 
 All notable changes to the Ovasabi Foundation will be documented in this file.
 
+## [1.1.0] - 2026-05-03
+
+### Added
+- **policy**: Policy-as-code authorization engine (Cedar-inspired)
+- **redis**: Native Redis client integration for server-kit
+- **worker**: River-based background job handling infrastructure
+- **cognitive-wire**: Stealth extension for AI compute and CWF transport
+- **docgen**: Automated documentation generation for generated projects
+
+### Changed
+- Updated tech stack standards to Go 1.25, React 19.2, TypeScript 6.0, Rust 1.95, PostgreSQL 18, Redis 8
+- Refined **AGENTS.md** with clearer terminology (Core vs Project vs Template)
+- Formalized Foundation Dependency Boundary rules
+
+### Fixed
+- Sync issues between template scaffold and foundation core package boundaries
+
 ## [1.0.0] - 2026-04-21
 
 ### Added

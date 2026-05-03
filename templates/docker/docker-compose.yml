@@ -65,7 +65,7 @@ services:
     labels:
       # Traefik routing (customize paths as needed)
       - "traefik.enable=true"
-      - "traefik.http.routers.${SERVICE_NAME:-{{PROJECT_NAME}}}-api.rule=PathPrefix(`/api`) || PathPrefix(`/ws`) || PathPrefix(`/healthz`)"
+      - "traefik.http.routers.${SERVICE_NAME:-{{PROJECT_NAME}}}-api.rule=PathPrefix(`/api`) || PathPrefix(`/v1`) || PathPrefix(`/ws`) || PathPrefix(`/healthz`)"
       - "traefik.http.routers.${SERVICE_NAME:-{{PROJECT_NAME}}}-api.priority=10"
       - "traefik.http.services.${SERVICE_NAME:-{{PROJECT_NAME}}}-api.loadbalancer.server.port=8080"
       - "traefik.http.services.${SERVICE_NAME:-{{PROJECT_NAME}}}-api.loadbalancer.server.scheme=http"
@@ -90,8 +90,15 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL:-}
       - DB_RESET=${DB_RESET:-false}
-      - MIGRATE_MAX_RETRIES=${MIGRATE_MAX_RETRIES:-60}
+      - DB_HOST=${DB_HOST:-}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-}
+      - DB_NAME=${DB_NAME:-{{PROJECT_NAME}}}
+      - DB_SSLMODE=${DB_SSLMODE:-disable}
+      - MIGRATE_MAX_RETRIES=${MIGRATE_MAX_RETRIES:-120}
       - MIGRATE_PATH=/migrations
+      - MIGRATE_DATABASE_OPTIONS=${MIGRATE_DATABASE_OPTIONS:-}
     volumes:
       - ${SSL_CA_CERT_PATH:-./config/certs/ca.crt}:/etc/ssl/certs/ca.crt:ro
     command:
@@ -100,17 +107,18 @@ services:
         if [ -z "$${db_url}" ]; then
           if [ -z "$${DB_HOST}" ]; then
             echo "Either DATABASE_URL or DB_HOST is required for migrations."
+            echo "Production deployments should provide DATABASE_URL or DB_HOST."
             exit 1
           fi
           db_query="sslmode=$${DB_SSLMODE:-disable}"
-          db_url="postgres://$${DB_USER:-postgres}:$${DB_PASSWORD}@$${DB_HOST}:$${DB_PORT:-5432}/$${DB_NAME}?$${db_query}"
+          db_url="postgres://$${DB_USER:-postgres}:$${DB_PASSWORD}@$${DB_HOST}:$${DB_PORT:-5432}/$${DB_NAME}?$${db_query}$${MIGRATE_DATABASE_OPTIONS}"
         fi
         if [ "$${DB_RESET}" = "true" ]; then
           echo "WARNING: Resetting database..."
           migrate -path="$${MIGRATE_PATH:-/migrations}" -database="$$db_url" drop -f
         fi
         attempt=1
-        max_attempts=$${MIGRATE_MAX_RETRIES:-60}
+        max_attempts=$${MIGRATE_MAX_RETRIES:-120}
         while [ $$attempt -le $$max_attempts ]; do
           output=$$(migrate -path="$${MIGRATE_PATH:-/migrations}" -database="$$db_url" up 2>&1)
           status=$$?
@@ -123,6 +131,11 @@ services:
             echo "Database is dirty - manual intervention required"
             exit $$status
           fi
+          if printf '%s' "$$output" | grep -Eqi 'no such host|name or service not known|temporary failure in name resolution'; then
+            echo "Migration failed: database host '$${DB_HOST}' is not resolvable from this Compose network."
+            echo "Use the development compose override locally, or set DB_HOST/DATABASE_URL to the reachable Postgres hostname."
+            exit $$status
+          fi
           if [ $$attempt -eq $$max_attempts ]; then
             echo "Migration failed after $$max_attempts attempts"
             exit $$status
@@ -132,6 +145,36 @@ services:
           sleep 1
         done
     restart: "no"
+  
+  # Frontend Application
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
+      args:
+        CACHE_NAMESPACE: "${DOCKER_CACHE_NAMESPACE:-ovasabi-foundation-v1}"
+    container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-frontend
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+    environment:
+      UPSTREAM_HOST: server
+      UPSTREAM_PORT: 8080
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.${SERVICE_NAME:-{{PROJECT_NAME}}}-web.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.${SERVICE_NAME:-{{PROJECT_NAME}}}-web.priority=1"
+      - "traefik.http.services.${SERVICE_NAME:-{{PROJECT_NAME}}}-web.loadbalancer.server.port=80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 networks:
   app-network:

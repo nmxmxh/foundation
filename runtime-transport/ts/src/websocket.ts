@@ -19,9 +19,9 @@ import {
   type RuntimeCompressionOptions,
 } from "./compression";
 
-const asWebSocketBinaryPayload = (bytes: Uint8Array): ArrayBuffer | ArrayBufferView<ArrayBuffer> => {
+const asWebSocketBinaryPayload = (bytes: Uint8Array): ArrayBuffer | ArrayBufferView => {
   if (bytes.buffer instanceof ArrayBuffer) {
-    return bytes as unknown as ArrayBufferView<ArrayBuffer>;
+    return bytes as unknown as ArrayBufferView;
   }
   const copy = Uint8Array.from(bytes);
   return copy.buffer as ArrayBuffer;

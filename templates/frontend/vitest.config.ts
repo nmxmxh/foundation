@@ -1,13 +1,21 @@
 import { defineConfig } from 'vitest/config'
+import react from '@vitejs/plugin-react'
 import path from 'path'
 
 export default defineConfig({
+  plugins: [react() as never],
   resolve: {
     preserveSymlinks: true,
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@generated': path.resolve(__dirname, './src/types/protos'),
+      react: path.resolve(__dirname, './node_modules/react'),
+      'react-dom': path.resolve(__dirname, './node_modules/react-dom'),
+      'styled-components': path.resolve(__dirname, './node_modules/styled-components'),
+      'framer-motion': path.resolve(__dirname, './node_modules/framer-motion'),
+      zustand: path.resolve(__dirname, './node_modules/zustand'),
     },
+    dedupe: ['react', 'react-dom', 'styled-components', 'framer-motion'],
   },
   test: {
     globals: true,

@@ -84,6 +84,14 @@ services:
       postgres:
         condition: service_healthy
 
+  # Frontend - development
+  frontend:
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    environment:
+      VITE_API_URL: "http://localhost:8080/api"
+      APP_ENV: "development"
+
 # Override network to local bridge (production expects external network)
 networks:
   app-network:

@@ -1,9 +1,9 @@
-import React, { PropsWithChildren, useMemo } from "react";
-import { ThemeProvider, createGlobalStyle, useTheme as useStyledTheme } from "styled-components";
+import { PropsWithChildren, useMemo } from "react";
+import { ThemeProvider, createGlobalStyle, useTheme as useStyledTheme, type DefaultTheme } from "styled-components";
 
 import type { DeepPartial, MinimalTheme } from "./types";
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+const isPlainObject = (value: unknown): value is object =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 export const minimalBaseTheme: MinimalTheme = {
@@ -210,7 +210,7 @@ export const MinimalThemeProvider = ({
   children,
 }: PropsWithChildren<{ theme?: DeepPartial<MinimalTheme> }>) => {
   const mergedTheme = useMemo(() => createMinimalTheme(theme), [theme]);
-  return <ThemeProvider theme={mergedTheme}>{children}</ThemeProvider>;
+  return <ThemeProvider theme={mergedTheme as unknown as DefaultTheme}>{children}</ThemeProvider>;
 };
 
 export const useMinimalTheme = (): MinimalTheme => {

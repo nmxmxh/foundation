@@ -10,7 +10,13 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@generated': path.resolve(__dirname, './src/types/protos'),
+      react: path.resolve(__dirname, './node_modules/react'),
+      'react-dom': path.resolve(__dirname, './node_modules/react-dom'),
+      'styled-components': path.resolve(__dirname, './node_modules/styled-components'),
+      'framer-motion': path.resolve(__dirname, './node_modules/framer-motion'),
+      zustand: path.resolve(__dirname, './node_modules/zustand'),
     },
+    dedupe: ['react', 'react-dom', 'styled-components', 'framer-motion'],
   },
   server: {
     port: 5173,
@@ -22,6 +28,10 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/v1': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },

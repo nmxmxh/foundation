@@ -28,7 +28,6 @@ func RunParallel[T any](ctx context.Context, operations []Operation[T]) []Result
 	results := make([]Result[T], len(operations))
 	var wg sync.WaitGroup
 	for index, operation := range operations {
-		index, operation := index, operation
 		results[index].Name = operation.Name
 		wg.Add(1)
 		go func() {
