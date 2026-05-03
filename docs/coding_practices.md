@@ -645,6 +645,26 @@ Enforcement:
 - `server-kit/go/metrics`, `slo`, `chaos`, `contracttest`, and `profiling` unit coverage.
 - Scaffold checks for runtime streaming/arena APIs, performance guard tooling, and config-contract SLO support.
 
+### CP-35: River / Background Job Reliability and Scaling
+
+Level: `Mandatory`
+
+Requirements:
+
+1. **Idempotency Deduplication**: In-memory idempotency maps must use TTL-based expiry or a bounded LRU to avoid unbounded memory growth. Default success retention should be 24 hours unless otherwise specified.
+2. **Retry Context and Shutdown**: Background retries and re-enqueuing must respect the parent context cancellation/shutdown signals. Do not use `context.Background()` in retry loops that fire during process draining.
+3. **Backoff Jitter**: All retry backoff calculations must include ±25% jitter to prevent thundering herd effects on downstream services and databases.
+4. **Metadata Sidecar Architecture**: Large binary payloads or extensive tracking metadata should be stored in a dedicated metadata sidecar table (e.g., `river_job_metadata` with a `bytea` column) rather than being stuffed into River's `args` JSONB column. Use FK cascades for automatic cleanup.
+5. **Postgres Pool Integration**: Metadata stores and job persistence logic must use `*pgxpool.Pool` directly for performance and connection lifecycle management, rather than generic/wrapped database interfaces that may obscure driver-specific optimizations.
+6. **Idempotent Migrations**: SQL setup scripts for queue infrastructure must be idempotent. Avoid destructive `DROP TABLE` statements at the top of migrations that might fire against non-empty production environments; use `CREATE TABLE IF NOT EXISTS` and separate reset scripts.
+7. **Production-Representative Benchmarks**: Performance-critical workers must include benchmarks that hit the River/Postgres path (using `testcontainers-go`) to capture serialization, indexing, and fsync costs, not just the in-memory fallback path.
+
+Enforcement:
+
+- Reviewer gate on worker retry logic, backoff jitter, and metadata storage patterns.
+- Automated migration checks for destructive drops.
+- CI benchmark evidence for hot-path workers.
+
 ## Enforcement matrix
 
 | Rule ID | Primary enforcement | Automation | Merge gate |
@@ -683,6 +703,7 @@ Enforcement:
 | `CP-32` | Scaffold checks + runtime tests | Partial | Yes |
 | `CP-33` | Config validation + crypto review | Partial | Yes |
 | `CP-34` | Metrics/SLO/chaos/runtime benchmark tests | Partial | Yes |
+| `CP-35` | Review + automated migration check | Partial | Yes |
 
 ## Exception process and ADR linkage
 

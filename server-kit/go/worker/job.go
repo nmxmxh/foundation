@@ -3,6 +3,7 @@ package worker
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 )
@@ -89,9 +90,11 @@ func (j Job) NextBackoff() time.Duration {
 	backoff := base << (j.Attempt - 1)
 	max := 30 * time.Second
 	if backoff > max {
-		return max
+		backoff = max
 	}
-	return backoff
+	// Add ±25% jitter
+	jitter := time.Duration(rand.Int63n(int64(backoff/2))) - backoff/4
+	return backoff + jitter
 }
 
 func (j Job) Timeout() time.Duration {

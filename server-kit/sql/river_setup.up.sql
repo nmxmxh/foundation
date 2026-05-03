@@ -9,6 +9,7 @@ drop function if exists river_job_state_in_bitmask(bitmask bit(8), state text);
 drop function if exists river_job_state_in_bitmask(bitmask bit(8), state river_job_state);
 drop type if exists river_job_state cascade;
 
+
 create type river_job_state as enum (
   'available',
   'scheduled',

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 	"github.com/riverqueue/river"
@@ -29,7 +30,7 @@ type Engine struct {
 	processors map[string]Processor
 	queues     map[string]chan Job
 	workers    map[string]int
-	dedupe     map[string]struct{}
+	dedupe     map[string]time.Time
 	jobHealth  map[string]JobHealthSnapshot
 	log        logger.Logger
 	predictor  ScalingPredictor
@@ -54,7 +55,7 @@ func NewEngine(queueWorkers map[string]int, l logger.Logger) *Engine {
 		processors: map[string]Processor{},
 		queues:     map[string]chan Job{},
 		workers:    workers,
-		dedupe:     map[string]struct{}{},
+		dedupe:     map[string]time.Time{},
 		jobHealth:  map[string]JobHealthSnapshot{},
 		log:        l.With(zap.String("component", "worker_engine")),
 		predictor:  NewTrendPredictor(),
@@ -62,12 +63,12 @@ func NewEngine(queueWorkers map[string]int, l logger.Logger) *Engine {
 }
 
 // SetRiverClient enables the River-backed persistent queue.
-func (e *Engine) SetRiverClient(client *river.Client[pgx.Tx]) {
+func (e *Engine) SetRiverClient(client *river.Client[pgx.Tx], pool *pgxpool.Pool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.riverClient = client
-	if client != nil {
-		e.metadataStore = NewPostgresMetadataStore(client)
+	if pool != nil {
+		e.metadataStore = NewPostgresMetadataStore(pool)
 	}
 }
 
@@ -125,7 +126,31 @@ func (e *Engine) Start(ctx context.Context) error {
 	// Start adaptive scaling controller
 	go e.adaptiveScaler(ctx)
 
+	// Start dedupe cleanup
+	go e.dedupeCleaner(ctx)
+
 	return nil
+}
+
+func (e *Engine) dedupeCleaner(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			e.mu.Lock()
+			now := time.Now().UTC()
+			for key, expiry := range e.dedupe {
+				if now.After(expiry) {
+					delete(e.dedupe, key)
+				}
+			}
+			e.mu.Unlock()
+		}
+	}
 }
 
 func (e *Engine) adaptiveScaler(ctx context.Context) {
@@ -137,30 +162,45 @@ func (e *Engine) adaptiveScaler(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			e.mu.Lock()
-			for queue, jobs := range e.queues {
-				depth := len(jobs)
-				currentWorkers := e.workers[queue]
-				
+			e.mu.RLock()
+			queues := make([]struct {
+				name string
+				ch   chan Job
+			}, 0, len(e.queues))
+			for name, ch := range e.queues {
+				queues = append(queues, struct {
+					name string
+					ch   chan Job
+				}{name, ch})
+			}
+			e.mu.RUnlock()
+
+			for _, q := range queues {
+				e.mu.RLock()
+				depth := len(q.ch)
+				currentWorkers := e.workers[q.name]
+				e.mu.RUnlock()
+
 				// Scale up if queue is getting full (> 50%) and we haven't reached a hard limit
 				if depth > 512 && currentWorkers < 64 {
 					newWorkers := 4
 					if currentWorkers+newWorkers > 64 {
 						newWorkers = 64 - currentWorkers
 					}
-					e.spawnWorkers(ctx, queue, jobs, newWorkers)
-					e.log.Info("scaled up workers (reactive)", zap.String("queue", queue), zap.Int("new_total", e.workers[queue]), zap.Int("depth", depth))
+					e.spawnWorkers(ctx, q.name, q.ch, newWorkers)
+					e.mu.RLock()
+					e.log.Info("scaled up workers (reactive)", zap.String("queue", q.name), zap.Int("new_total", e.workers[q.name]), zap.Int("depth", depth))
+					e.mu.RUnlock()
 				} else if e.predictor != nil {
 					// Pre-emptive scaling based on predictive signals
-					if needed := e.predictor.Predict(ctx, queue, depth, currentWorkers); needed > 0 {
-						e.spawnWorkers(ctx, queue, jobs, needed)
-						e.log.Info("scaled up workers (predictive)", zap.String("queue", queue), zap.Int("added", needed), zap.Int("new_total", e.workers[queue]), zap.Int("depth", depth))
+					if needed := e.predictor.Predict(ctx, q.name, depth, currentWorkers); needed > 0 {
+						e.spawnWorkers(ctx, q.name, q.ch, needed)
+						e.mu.RLock()
+						e.log.Info("scaled up workers (predictive)", zap.String("queue", q.name), zap.Int("added", needed), zap.Int("new_total", e.workers[q.name]), zap.Int("depth", depth))
+						e.mu.RUnlock()
 					}
 				}
-				
-				// Scale down if queue is empty for a while (TODO: track idle time for precise reaping)
 			}
-			e.mu.Unlock()
 		}
 	}
 }
@@ -274,6 +314,8 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 }
 
 func (e *Engine) spawnWorkers(ctx context.Context, queue string, jobs <-chan Job, count int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	for i := 0; i < count; i++ {
 		e.workers[queue]++
 		e.wg.Add(1)
@@ -372,7 +414,7 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-				_ = e.Enqueue(context.Background(), retryJob)
+				_ = e.Enqueue(ctx, retryJob)
 			}
 		}(job)
 		return
@@ -380,7 +422,7 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 
 	if key := dedupeKey(job); key != "" {
 		e.mu.Lock()
-		e.dedupe[key] = struct{}{}
+		e.dedupe[key] = time.Now().UTC().Add(24 * time.Hour)
 		e.mu.Unlock()
 	}
 	e.log.Info("job processed",

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // JobMetadata stores extended context for queued workflows.
@@ -84,23 +86,13 @@ func (m JobMetadata) ToJSON() ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// PostgresMetadataStore implements MetadataStore using pgx and the foundation schema.
+// PostgresMetadataStore implements MetadataStore using pgxpool.Pool.
 type PostgresMetadataStore struct {
-	db interface {
-		Exec(context.Context, string, ...any) (any, error)
-		QueryRow(context.Context, string, ...any) any
-	}
+	pool *pgxpool.Pool
 }
 
-func NewPostgresMetadataStore(db any) *PostgresMetadataStore {
-	type dbInterface interface {
-		Exec(context.Context, string, ...any) (any, error)
-		QueryRow(context.Context, string, ...any) any
-	}
-	if d, ok := db.(dbInterface); ok {
-		return &PostgresMetadataStore{db: d}
-	}
-	return nil
+func NewPostgresMetadataStore(pool *pgxpool.Pool) *PostgresMetadataStore {
+	return &PostgresMetadataStore{pool: pool}
 }
 
 func (s *PostgresMetadataStore) Save(ctx context.Context, m JobMetadata) error {
@@ -118,7 +110,7 @@ func (s *PostgresMetadataStore) Save(ctx context.Context, m JobMetadata) error {
 			tracking_data = EXCLUDED.tracking_data,
 			updated_at = now()
 	`
-	_, err := s.db.Exec(ctx, query,
+	_, err := s.pool.Exec(ctx, query,
 		m.JobID, m.WorkflowName, m.EntityType, m.EntityID, m.UserID, m.CorrelationID, m.RawPayload, m.TrackingData,
 	)
 	return err
@@ -131,13 +123,17 @@ func (s *PostgresMetadataStore) Get(ctx context.Context, jobID int64) (JobMetada
 		WHERE job_id = $1
 	`
 	var m JobMetadata
-	// Placeholder for row scan logic
-	_ = s.db.QueryRow(ctx, query, jobID)
-	return m, fmt.Errorf("not fully implemented for generic db interface")
+	err := s.pool.QueryRow(ctx, query, jobID).Scan(
+		&m.JobID, &m.WorkflowName, &m.EntityType, &m.EntityID, &m.UserID, &m.CorrelationID, &m.RawPayload, &m.TrackingData,
+	)
+	if err != nil {
+		return JobMetadata{}, err
+	}
+	return m, nil
 }
 
 func (s *PostgresMetadataStore) UpdateTrackingData(ctx context.Context, jobID int64, trackingData map[string]any) error {
 	query := `UPDATE river_job_metadata SET tracking_data = $1, updated_at = now() WHERE job_id = $2`
-	_, err := s.db.Exec(ctx, query, trackingData, jobID)
+	_, err := s.pool.Exec(ctx, query, trackingData, jobID)
 	return err
 }

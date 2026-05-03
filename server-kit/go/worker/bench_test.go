@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 )
@@ -9,12 +10,16 @@ import (
 type benchProcessor struct {
 	kind  string
 	queue string
+	wg    *sync.WaitGroup
 }
 
 func (p *benchProcessor) Kind() string     { return p.kind }
 func (p *benchProcessor) Queue() string    { return p.queue }
 func (p *benchProcessor) MaxAttempts() int { return 1 }
 func (p *benchProcessor) Handle(_ context.Context, _ Job) error {
+	if p.wg != nil {
+		p.wg.Done()
+	}
 	return nil
 }
 
@@ -63,9 +68,10 @@ func BenchmarkEngine_Enqueue_RawPayload(b *testing.B) {
 
 func BenchmarkEngine_Processing_Throughput(b *testing.B) {
 	// We want to measure how many jobs per second the engine can drain
-	engine := NewEngine(map[string]int{"bench": 8}, nil)
-	_ = engine.Register(&benchProcessor{kind: "bench_kind", queue: "bench"})
-	
+	var wg sync.WaitGroup
+	engine := NewEngine(map[string]int{"bench": 64}, nil) // Large pool for throughput
+	_ = engine.Register(&benchProcessor{kind: "bench_kind", queue: "bench", wg: &wg})
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	_ = engine.Start(ctx)
@@ -77,10 +83,37 @@ func BenchmarkEngine_Processing_Throughput(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
+	wg.Add(b.N)
 	for i := 0; i < b.N; i++ {
 		_ = engine.Enqueue(ctx, job)
 	}
-	// Note: this only benchmarks enqueue speed, drain speed is async.
+
+	// Drain everything
+	wg.Wait()
+}
+
+func BenchmarkEngine_Enqueue_River(b *testing.B) {
+	// This benchmark requires a real Postgres instance.
+	// In CI, use testcontainers-go to spin up a container.
+	b.Skip("Skipping River benchmark - requires Postgres container")
+
+	/*
+		pool := setupTestPostgres(b)
+		riverClient := setupRiverClient(b, pool)
+
+		engine := NewEngine(map[string]int{"bench": 1}, nil)
+		engine.SetRiverClient(riverClient, pool)
+
+		job := Job{
+			JobKind: "bench_kind",
+			Queue:   "bench",
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = engine.Enqueue(context.Background(), job)
+		}
+	*/
 }
 
 func BenchmarkJob_Normalize(b *testing.B) {
