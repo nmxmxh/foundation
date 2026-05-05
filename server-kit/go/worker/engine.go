@@ -15,6 +15,14 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultQueueCapacity = 1024
+	queueScaleThreshold  = defaultQueueCapacity / 2
+	maxAdaptiveWorkers   = 64
+)
+
+var errQueueFull = errors.New("worker queue full")
+
 // Processor handles jobs of a specific kind.
 type Processor interface {
 	Kind() string
@@ -92,7 +100,7 @@ func (e *Engine) Register(processor Processor) error {
 	defer e.mu.Unlock()
 	e.processors[kind] = processor
 	if _, ok := e.queues[processor.Queue()]; !ok {
-		e.queues[processor.Queue()] = make(chan Job, 1024)
+		e.queues[processor.Queue()] = make(chan Job, defaultQueueCapacity)
 	}
 	if _, ok := e.workers[processor.Queue()]; !ok {
 		e.workers[processor.Queue()] = 1
@@ -181,11 +189,11 @@ func (e *Engine) adaptiveScaler(ctx context.Context) {
 				currentWorkers := e.workers[q.name]
 				e.mu.RUnlock()
 
-				// Scale up if queue is getting full (> 50%) and we haven't reached a hard limit
-				if depth > 512 && currentWorkers < 64 {
+				// Scale up if queue is getting full (> 50%) and we haven't reached a hard limit.
+				if depth > queueScaleThreshold && currentWorkers < maxAdaptiveWorkers {
 					newWorkers := 4
-					if currentWorkers+newWorkers > 64 {
-						newWorkers = 64 - currentWorkers
+					if currentWorkers+newWorkers > maxAdaptiveWorkers {
+						newWorkers = maxAdaptiveWorkers - currentWorkers
 					}
 					e.spawnWorkers(ctx, q.name, q.ch, newWorkers)
 					e.mu.RLock()
@@ -238,7 +246,10 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 	e.mu.RUnlock()
 
 	if !ok {
-		return fmt.Errorf("no processor for kind %s", job.Kind())
+		err := fmt.Errorf("no processor for kind %s", job.Kind())
+		e.recordHealth(job, JobHealthDroppedNoProcessor, err, time.Time{}, time.Now().UTC())
+		observability.Default().RecordWorker(job.Kind(), job.Queue, "dropped_no_processor")
+		return err
 	}
 
 	// If River is active, we prefer it for persistence and reliability.
@@ -297,10 +308,16 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 
 	// Fallback to in-memory queue
 	if !qOk {
-		return fmt.Errorf("queue %s is not configured", job.Queue)
+		err := fmt.Errorf("queue %s is not configured", job.Queue)
+		e.recordHealth(job, JobHealthDroppedNoProcessor, err, time.Time{}, time.Now().UTC())
+		observability.Default().RecordWorker(job.Kind(), job.Queue, "dropped_no_processor")
+		return err
 	}
 	if processor.Queue() != job.Queue {
-		return fmt.Errorf("processor %s expects queue %s, got %s", job.Kind(), processor.Queue(), job.Queue)
+		err := fmt.Errorf("processor %s expects queue %s, got %s", job.Kind(), processor.Queue(), job.Queue)
+		e.recordHealth(job, JobHealthDroppedNoProcessor, err, time.Time{}, time.Now().UTC())
+		observability.Default().RecordWorker(job.Kind(), job.Queue, "dropped_no_processor")
+		return err
 	}
 
 	select {
@@ -310,6 +327,12 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 		observability.Default().RecordWorker(job.Kind(), job.Queue, "enqueued")
 		observability.Default().RecordQueueDepth(job.Queue, len(queueCh))
 		return nil
+	default:
+		err := fmt.Errorf("%w: %s depth=%d capacity=%d", errQueueFull, job.Queue, len(queueCh), cap(queueCh))
+		e.recordHealth(job, JobHealthRejectedQueueFull, err, time.Time{}, time.Now().UTC())
+		observability.Default().RecordWorker(job.Kind(), job.Queue, "rejected_queue_full")
+		observability.Default().RecordQueueDepth(job.Queue, len(queueCh))
+		return err
 	}
 }
 

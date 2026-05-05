@@ -12,6 +12,7 @@ const (
 	JobHealthTimedOut           JobHealthState = "timed_out"
 	JobHealthFailedExhausted    JobHealthState = "failed_exhausted"
 	JobHealthDroppedNoProcessor JobHealthState = "dropped_no_processor"
+	JobHealthRejectedQueueFull  JobHealthState = "rejected_queue_full"
 	JobHealthDeduped            JobHealthState = "deduped"
 )
 

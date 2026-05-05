@@ -36,6 +36,9 @@ export type TransportDiagnostics = {
   durationMs: number;
   eventType: string;
   schemaVersion: string;
+  correlationId: string;
+  requestId: string;
+  idempotencyKey: string;
   attempt: number;
   error?: string;
 };
@@ -360,6 +363,9 @@ export const createCommandBus = (options: CommandBusOptions) => {
             durationMs: performance.now() - startedAt,
             eventType: normalizedEnvelope.eventType,
             schemaVersion: normalizedEnvelope.metadata.schemaVersion,
+            correlationId: normalizedEnvelope.metadata.correlationId,
+            requestId: normalizedEnvelope.metadata.requestId,
+            idempotencyKey: normalizedEnvelope.metadata.idempotencyKey,
             attempt: index + 1,
           });
           return result;
@@ -371,6 +377,9 @@ export const createCommandBus = (options: CommandBusOptions) => {
             durationMs: performance.now() - startedAt,
             eventType: normalizedEnvelope.eventType,
             schemaVersion: normalizedEnvelope.metadata.schemaVersion,
+            correlationId: normalizedEnvelope.metadata.correlationId,
+            requestId: normalizedEnvelope.metadata.requestId,
+            idempotencyKey: normalizedEnvelope.metadata.idempotencyKey,
             attempt: index + 1,
             error: lastError.message,
           });

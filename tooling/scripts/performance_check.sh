@@ -9,6 +9,7 @@ echo "== foundation Go performance guards =="
   cd "$ROOT/server-kit/go"
   go test -tags=perf ./grpcsvc ./chain
   go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFrameClientDispatch|RouterDispatchFrameDirect|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$|BenchmarkRunParallel$' -benchmem ./grpcsvc ./chain
+  go test -bench='BenchmarkAppLane_' -benchmem -run='^$' ./appbench
   if [[ "${PROFILE:-0}" == "1" ]]; then
     mkdir -p /tmp/ovasabi-foundation-profiles
     go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFrameClientDispatch|RouterDispatchFrameDirect|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$' -benchmem \
@@ -19,6 +20,10 @@ echo "== foundation Go performance guards =="
       -cpuprofile /tmp/ovasabi-foundation-profiles/chain.cpu.out \
       -memprofile /tmp/ovasabi-foundation-profiles/chain.mem.out \
       ./chain
+    go test -bench='BenchmarkAppLane_' -benchmem -run='^$' \
+      -cpuprofile /tmp/ovasabi-foundation-profiles/appbench.cpu.out \
+      -memprofile /tmp/ovasabi-foundation-profiles/appbench.mem.out \
+      ./appbench
     echo "profiles written to /tmp/ovasabi-foundation-profiles"
   fi
 )

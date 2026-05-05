@@ -86,6 +86,9 @@ func TestDispatchFrameOverBufconn(t *testing.T) {
 	if res.EventType != "order:create:v1:frame:success" || !bytes.Equal(res.Payload, []byte(`{"id":"ord_1"}`)) {
 		t.Fatalf("unexpected response: %+v", res)
 	}
+	if res.CorrelationID != "corr_1" || res.SchemaVersion != "1.0" {
+		t.Fatalf("frame identity was not preserved: %+v", res)
+	}
 }
 
 func TestFrameCodecRejectsTruncatedInput(t *testing.T) {
@@ -142,6 +145,9 @@ func TestUnmarshalFrameViewSharesBackingBytes(t *testing.T) {
 	}
 	if !bytes.Equal(view.EventType, []byte("order:create:v1:frame")) {
 		t.Fatalf("event type = %q", string(view.EventType))
+	}
+	if !bytes.Equal(view.CorrelationID, []byte("corr_1")) || !bytes.Equal(view.SchemaVersion, []byte("1.0")) {
+		t.Fatalf("frame view identity was not preserved: correlation=%q schema=%q", view.CorrelationID, view.SchemaVersion)
 	}
 	if len(view.Payload) == 0 || &view.Payload[0] != &raw[4+len("order:create:v1:frame")+4] {
 		t.Fatalf("payload does not share backing frame bytes")

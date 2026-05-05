@@ -94,8 +94,17 @@ func enrichMetadataFromHeaders(md *metadata.EnvelopeMetadata, r *http.Request) {
 	if md == nil || r == nil {
 		return
 	}
-	if requestID := strings.TrimSpace(r.Header.Get("X-Request-ID")); requestID != "" && strings.TrimSpace(md.RequestID) == "" {
+	if requestID := strings.TrimSpace(r.Header.Get("X-Request-ID")); requestID != "" {
 		md.RequestID = requestID
+	}
+	if idempotencyKey := strings.TrimSpace(r.Header.Get("X-Idempotency-Key")); idempotencyKey != "" {
+		md.IdempotencyKey = idempotencyKey
+	}
+	if traceID := strings.TrimSpace(r.Header.Get("X-Trace-ID")); traceID != "" {
+		md.TraceID = traceID
+	}
+	if spanID := strings.TrimSpace(r.Header.Get("X-Span-ID")); spanID != "" {
+		md.SpanID = spanID
 	}
 	if channel := strings.TrimSpace(r.Header.Get("X-Channel")); channel != "" {
 		md.Channel = channel

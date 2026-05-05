@@ -189,9 +189,9 @@ func GetOrSet[T any](ctx context.Context, c *Cache, key string, compute func() (
 
 // Invalidator provides cache invalidation helpers.
 type Invalidator struct {
-	cache   *Cache
-	tags    map[string][]string
-	tagsMu  sync.RWMutex
+	cache  *Cache
+	tags   map[string][]string
+	tagsMu sync.RWMutex
 }
 
 // NewInvalidator creates a new cache invalidator.
@@ -231,8 +231,10 @@ var ErrNotFound = fmt.Errorf("cache: key not found")
 
 // MemoryBackend is an in-memory cache backend.
 type MemoryBackend struct {
-	mu    sync.RWMutex
-	items map[string]memoryItem
+	mu     sync.RWMutex
+	items  map[string]memoryItem
+	stopCh chan struct{}
+	once   sync.Once
 }
 
 type memoryItem struct {
@@ -243,7 +245,8 @@ type memoryItem struct {
 // NewMemoryBackend creates a new in-memory backend.
 func NewMemoryBackend() *MemoryBackend {
 	m := &MemoryBackend{
-		items: make(map[string]memoryItem),
+		items:  make(map[string]memoryItem),
+		stopCh: make(chan struct{}),
 	}
 	go m.cleanup()
 	return m
@@ -251,16 +254,32 @@ func NewMemoryBackend() *MemoryBackend {
 
 func (m *MemoryBackend) cleanup() {
 	ticker := time.NewTicker(1 * time.Minute)
-	for range ticker.C {
-		m.mu.Lock()
-		now := time.Now()
-		for k, v := range m.items {
-			if !v.expiresAt.IsZero() && now.After(v.expiresAt) {
-				delete(m.items, k)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stopCh:
+			return
+		case <-ticker.C:
+			m.mu.Lock()
+			now := time.Now()
+			for k, v := range m.items {
+				if !v.expiresAt.IsZero() && now.After(v.expiresAt) {
+					delete(m.items, k)
+				}
 			}
+			m.mu.Unlock()
 		}
-		m.mu.Unlock()
 	}
+}
+
+func (m *MemoryBackend) Close() error {
+	if m == nil {
+		return nil
+	}
+	m.once.Do(func() {
+		close(m.stopCh)
+	})
+	return nil
 }
 
 func (m *MemoryBackend) Get(ctx context.Context, key string) ([]byte, error) {

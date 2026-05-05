@@ -179,10 +179,8 @@ func (p *Policy) Do(ctx context.Context, fn func() error) error {
 		}
 
 		// Wait before retry
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(delay):
+		if err := waitDelay(ctx, delay); err != nil {
+			return err
 		}
 	}
 
@@ -225,16 +223,33 @@ func (p *Policy) DoWithResult(ctx context.Context, fn func() (interface{}, error
 			p.config.OnRetry(attempt, err, delay)
 		}
 
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(delay):
+		if err := waitDelay(ctx, delay); err != nil {
+			return nil, err
 		}
 	}
 
 	return result, &MaxAttemptsError{
 		Attempts: p.config.MaxAttempts,
 		LastErr:  lastErr,
+	}
+}
+
+func waitDelay(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return nil
+		}
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 

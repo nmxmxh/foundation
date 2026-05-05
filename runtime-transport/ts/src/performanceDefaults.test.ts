@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PERFORMANCE_TRANSPORT_ORDER, createEnvelope, createRouteRegistry, createCommandBus, type TransportStrategy } from "./index";
+import { PERFORMANCE_TRANSPORT_ORDER, createEnvelope, createRouteRegistry, createCommandBus, type TransportDiagnostics, type TransportStrategy } from "./index";
 
 describe("performance-first transport defaults", () => {
   it("defaults routes to the performance ladder", () => {
@@ -55,5 +55,55 @@ describe("performance-first transport defaults", () => {
     });
     await expect(bus.dispatch(createEnvelope({ eventType: "media:process_asset:v1:requested", payload: {} }))).resolves.toBe("ok");
     expect(attempts).toEqual(["wasm", "ws"]);
+  });
+
+  it("preserves request identity in diagnostics across fallback attempts", async () => {
+    const diagnostics: TransportDiagnostics[] = [];
+    const registry = createRouteRegistry([
+      {
+        method: "POST",
+        path: "/v1/media/assets",
+        eventType: "media:process_asset:v1:requested",
+        requiredCapability: "",
+        permission: "write",
+        transportOrder: ["sab", "http"],
+      },
+    ]);
+    const sab: TransportStrategy = {
+      kind: "sab",
+      async dispatch() {
+        throw new Error("sab unavailable");
+      },
+    };
+    const http: TransportStrategy = {
+      kind: "http",
+      async dispatch() {
+        return "ok";
+      },
+    };
+    const bus = createCommandBus({
+      registry,
+      strategies: [sab, http],
+      grantedCapabilities: ["*"],
+      hasPolicyAccess: () => true,
+      onDiagnostics: (entry) => diagnostics.push(entry),
+    });
+    await expect(
+      bus.dispatch(
+        createEnvelope({
+          eventType: "media:process_asset:v1:requested",
+          payload: {},
+          correlationId: "corr_keep",
+          requestId: "req_keep",
+          idempotencyKey: "idem_keep",
+        })
+      )
+    ).resolves.toBe("ok");
+    expect(diagnostics).toHaveLength(2);
+    expect(diagnostics.map((entry) => [entry.transport, entry.correlationId, entry.requestId, entry.idempotencyKey])).toEqual([
+      ["sab", "corr_keep", "req_keep", "idem_keep"],
+      ["http", "corr_keep", "req_keep", "idem_keep"],
+    ]);
+    expect(diagnostics[0]?.error).toContain("sab unavailable");
   });
 });

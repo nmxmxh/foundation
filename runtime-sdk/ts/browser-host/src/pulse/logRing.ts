@@ -9,6 +9,12 @@ export interface LogEntry {
   extra?: Record<string, unknown>;
 }
 
+export interface LogRingDiagnostics {
+  wrapCount: number;
+  droppedWrites: number;
+  corruptReads: number;
+}
+
 const FIELD_SEPARATOR = "\x1f";
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -73,7 +79,9 @@ const decodeEntry = (bytes: Uint8Array): LogEntry => {
  * [4..8]   - Read Offset (atomic)
  * [8..12]  - Buffer Size
  * [12..16] - Wrap Count
- * [16..64] - Reserved
+ * [16..20] - Dropped Writes
+ * [20..24] - Corrupt Reads
+ * [24..64] - Reserved
  * [64..]   - Data Slabs
  */
 export class LogRingBuffer {
@@ -104,6 +112,11 @@ export class LogRingBuffer {
     // We store: [Length (4 bytes)] [Bytes]
     const totalNeeded = length + 4;
     const size = Atomics.load(this.uint32, 2);
+
+    if (totalNeeded > size) {
+      Atomics.add(this.uint32, 4, 1);
+      return;
+    }
     
     let writeOffset = Atomics.load(this.uint32, 0);
     
@@ -142,7 +155,7 @@ export class LogRingBuffer {
       try {
         entries.push(decodeEntry(bytes));
       } catch (e) {
-        // Corrupt entry, skip
+        Atomics.add(this.uint32, 5, 1);
       }
 
       readOffset += (4 + length);
@@ -151,5 +164,13 @@ export class LogRingBuffer {
 
     Atomics.store(this.uint32, 1, readOffset);
     return entries;
+  }
+
+  diagnostics(): LogRingDiagnostics {
+    return {
+      wrapCount: Atomics.load(this.uint32, 3),
+      droppedWrites: Atomics.load(this.uint32, 4),
+      corruptReads: Atomics.load(this.uint32, 5),
+    };
   }
 }

@@ -101,6 +101,16 @@ func TestMemoryBackend_Exists(t *testing.T) {
 	}
 }
 
+func TestMemoryBackend_CloseIsIdempotent(t *testing.T) {
+	backend := NewMemoryBackend()
+	if err := backend.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+	if err := backend.Close(); err != nil {
+		t.Fatalf("second Close failed: %v", err)
+	}
+}
+
 func TestCache_GetOrSet(t *testing.T) {
 	c := New(Config{
 		Backend:    NewMemoryBackend(),
