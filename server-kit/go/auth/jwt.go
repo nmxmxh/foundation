@@ -74,18 +74,22 @@ func (m *JWTManager) ValidateToken(token string) (*Claims, error) {
 	if m == nil || len(m.secret) == 0 {
 		return nil, errors.New("jwt manager not initialized")
 	}
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
+	header, rest, ok := strings.Cut(token, ".")
+	if !ok {
+		return nil, errInvalidTokenFormat
+	}
+	payloadPart, signaturePart, ok := strings.Cut(rest, ".")
+	if !ok || strings.Contains(signaturePart, ".") {
 		return nil, errInvalidTokenFormat
 	}
 
-	unsigned := parts[0] + "." + parts[1]
+	unsigned := header + "." + payloadPart
 	expected := m.sign(unsigned)
-	if subtle.ConstantTimeCompare([]byte(expected), []byte(parts[2])) != 1 {
+	if subtle.ConstantTimeCompare([]byte(expected), []byte(signaturePart)) != 1 {
 		return nil, errInvalidSignature
 	}
 
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	payload, err := base64.RawURLEncoding.DecodeString(payloadPart)
 	if err != nil {
 		return nil, fmt.Errorf("decode payload: %w", err)
 	}
@@ -115,14 +119,15 @@ func (m *JWTManager) ValidateRefreshToken(token string) (*Claims, error) {
 
 // ParseBearerToken extracts bearer token from Authorization header.
 func ParseBearerToken(header string) (string, error) {
-	parts := strings.Split(strings.TrimSpace(header), " ")
-	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+	scheme, token, ok := strings.Cut(strings.TrimSpace(header), " ")
+	if !ok || !strings.EqualFold(scheme, "bearer") {
 		return "", errors.New("invalid authorization header")
 	}
-	if strings.TrimSpace(parts[1]) == "" {
+	token = strings.TrimSpace(token)
+	if token == "" || strings.Contains(token, " ") {
 		return "", errors.New("missing bearer token")
 	}
-	return parts[1], nil
+	return token, nil
 }
 
 func (m *JWTManager) generateToken(claims Claims, ttl time.Duration) (string, error) {

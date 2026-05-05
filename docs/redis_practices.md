@@ -7,6 +7,8 @@ Date: 2026-04-20
 
 Redis is for ephemeral speed and coordination, not durable business truth.
 
+In this architecture the default read order is local memory cache first, Redis second, Postgres/read model third. Redis should remove repeated network/DB work from hot paths; it should not decide durable state transitions alone.
+
 ## Non-negotiable rules
 
 1. Do not store source-of-truth business records in Redis.
@@ -63,6 +65,9 @@ Rules:
 7. **Big Key Prevention**: Do not store more than 10,000 elements in a single Hash, Set, or List. Large keys cause high latency during access and deletion (blocking the main thread) and lead to memory fragmentation.
 8. **Scalable Counting**: Use **HyperLogLog** (`PFADD`, `PFCOUNT`) for estimating the cardinality of unique items (e.g., daily unique users) when a ~1% error margin is acceptable. This maintains a constant 12KB memory footprint regardless of scale.
 9. **No O(N) Commands**: Strictly avoid `KEYS *`, `SMEMBERS` on large sets, or `HGETALL` on large hashes. Use `SCAN`, `SSCAN`, and `HSCAN` instead to prevent blocking the Redis event loop.
+10. Group repeated cache writes/invalidations into bounded pipeline batches. Large pipelines must be chunked so queued replies do not become the memory problem.
+11. Use `allkeys-lfu` for generic cache nodes unless the workload demands TTL-only eviction. LFU adapts better to mixed hot/cold cache traffic than pure recency.
+12. Keep Redis timeouts shorter than the app lane budget. A failed cache read should fall through quickly; a Redis stall must not consume a full API request budget.
 
 ## Concurrency and scale controls
 
@@ -72,6 +77,9 @@ Rules:
 4. For high throughput, pipeline multi-key operations and keep payloads compact.
 5. Plan migration path to managed Redis HA/cluster before memory or CPU saturation.
 6. Abuse-prone key families (login, OTP, password reset, uploads, invites, search) should combine actor and source signals such as IP/device/session where appropriate to make brute-force rotation harder.
+7. Use `REDIS_POOL_SIZE`, `REDIS_MIN_IDLE`, and bounded retries from the scaffold defaults instead of app-local hardcoded clients.
+8. Use `REDIS_SHARD_URLS` for coarse application-level sharding when one Redis node becomes a CPU/memory hotspot. Stable key hashing keeps single-key operations local to one shard; cross-key analytics should move to Postgres/read models instead of Redis-wide fanout.
+9. Use Redis Streams only for ephemeral or coordination-heavy event lanes. Durable business workflows still need Postgres/River/outbox as the replayable source.
 
 ## Safety and security
 

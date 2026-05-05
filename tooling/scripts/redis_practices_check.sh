@@ -18,6 +18,27 @@ if rg -n "redis" "$target" --glob '!**/node_modules/**' >/dev/null 2>&1; then
   else
     echo "[OK] redis TTL policy present"
   fi
+
+  if ! rg -n "(REDIS_POOL_SIZE|RedisPoolSize|pool_size|PoolSize|ConnectWithOptions)" "$target" --glob '!**/node_modules/**' >/dev/null 2>&1; then
+    echo "[FAIL] redis usage detected without pool sizing baseline"
+    failed=1
+  else
+    echo "[OK] redis pool sizing baseline present"
+  fi
+
+  if ! rg -n "(REDIS_SHARD_URLS|RedisShardURLs|shard_urls|ShardURLs)" "$target" --glob '!**/node_modules/**' >/dev/null 2>&1; then
+    echo "[FAIL] redis usage detected without shard-url extension point"
+    failed=1
+  else
+    echo "[OK] redis shard-url extension point present"
+  fi
+
+  if ! rg -n "(allkeys-lfu|pipeline|Pipelined|Pipeline|io-threads)" "$target" --glob '!**/node_modules/**' >/dev/null 2>&1; then
+    echo "[FAIL] redis usage detected without adaptive eviction/pipeline baseline"
+    failed=1
+  else
+    echo "[OK] redis adaptive eviction/pipeline baseline present"
+  fi
 else
   echo "[OK] no redis usage detected"
 fi

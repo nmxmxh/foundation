@@ -9,6 +9,7 @@ export default tseslint.config(
     ignores: [
       'coverage/**',
       'dist/**',
+      'foundation/**',
       'src/types/protos/**',
     ],
   },

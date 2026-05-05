@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -32,8 +31,6 @@ type DispatchRequest struct {
 
 // DispatchExecutor executes one validated envelope request.
 type DispatchExecutor func(http.ResponseWriter, *http.Request, DispatchRequest)
-
-var pathParamPattern = regexp.MustCompile(`\{([^{}]+)\}`)
 
 // NewEventRouteHandler builds a route-level handler that maps HTTP requests to dispatch requests.
 func NewEventRouteHandler(route registry.HTTPRoute, execute DispatchExecutor) http.HandlerFunc {
@@ -110,12 +107,19 @@ func appendPathParams(payload map[string]any, r *http.Request, pathPattern strin
 	if r == nil || payload == nil || strings.TrimSpace(pathPattern) == "" {
 		return
 	}
-	matches := pathParamPattern.FindAllStringSubmatch(pathPattern, -1)
-	for _, match := range matches {
-		if len(match) != 2 {
-			continue
+	for offset := 0; offset < len(pathPattern); {
+		open := strings.IndexByte(pathPattern[offset:], '{')
+		if open < 0 {
+			return
 		}
-		name := strings.TrimSpace(match[1])
+		open += offset
+		close := strings.IndexByte(pathPattern[open+1:], '}')
+		if close < 0 {
+			return
+		}
+		close += open + 1
+		name := strings.TrimSpace(pathPattern[open+1 : close])
+		offset = close + 1
 		if name == "" {
 			continue
 		}

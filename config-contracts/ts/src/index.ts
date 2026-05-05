@@ -52,13 +52,20 @@ export type DatabaseConfig = {
   maxConnections: number;
   minConnections: number;
   acquireTimeoutMs: number;
+  queryTimeoutMs?: number;
+  hotReadTimeoutMs?: number;
+  shardCount?: number;
 };
 
 export type RedisConfig = {
   url: string;
+  shardUrls?: string[];
   keyPrefix: string;
   defaultTTLSeconds: number;
   degradeOpen?: boolean;
+  poolSize?: number;
+  minIdle?: number;
+  maxRetries?: number;
 };
 
 export type ObjectStorageConfig = {
@@ -126,6 +133,7 @@ export type ServerRuntimeConfig = {
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === "object";
 
 const hasPositiveNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value > 0;
+const hasNonNegativeNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
 
 const readString = (value: Record<string, unknown>, ...keys: string[]) => {
   for (const key of keys) {
@@ -270,6 +278,11 @@ export const validateServerRuntimeConfig = (value: unknown): value is ServerRunt
   ) {
     return false;
   }
+  for (const value of [database.queryTimeoutMs ?? database.query_timeout_ms, database.hotReadTimeoutMs ?? database.hot_read_timeout_ms, database.shardCount ?? database.shard_count]) {
+    if (value !== undefined && !hasNonNegativeNumber(value)) {
+      return false;
+    }
+  }
 
   if (slos !== undefined && !validateSLOConfig(slos)) {
     return false;
@@ -281,6 +294,15 @@ export const validateServerRuntimeConfig = (value: unknown): value is ServerRunt
     !hasPositiveNumber(redis.defaultTTLSeconds ?? redis.default_ttl_seconds)
   ) {
     return false;
+  }
+  const shardUrls = redis.shardUrls ?? redis.shard_urls;
+  if (shardUrls !== undefined && (!Array.isArray(shardUrls) || shardUrls.some((url) => typeof url !== "string" || url.trim() === ""))) {
+    return false;
+  }
+  for (const value of [redis.poolSize ?? redis.pool_size, redis.minIdle ?? redis.min_idle, redis.maxRetries ?? redis.max_retries]) {
+    if (value !== undefined && !hasNonNegativeNumber(value)) {
+      return false;
+    }
   }
 
   if (

@@ -17,6 +17,7 @@ const maxInt32Value = 2_147_483_647
 // PostgresDB is a pgx-backed runtime adapter for DBTX + StateStore.
 type PostgresDB struct {
 	pool *pgxpool.Pool
+	opts PoolOptions
 }
 
 // Pool exposes the underlying pgx pool for application code that still needs
@@ -30,6 +31,16 @@ func (db *PostgresDB) Pool() *pgxpool.Pool {
 
 type postgresTx struct {
 	tx pgx.Tx
+}
+
+type budgetedRow struct {
+	row    RowScanner
+	cancel context.CancelFunc
+}
+
+func (r budgetedRow) Scan(dest ...any) error {
+	defer r.cancel()
+	return r.row.Scan(dest...)
 }
 
 func newPostgresDB(ctx context.Context, databaseURL string, opts PoolOptions) (*PostgresDB, error) {
@@ -50,6 +61,10 @@ func newPostgresDB(ctx context.Context, databaseURL string, opts PoolOptions) (*
 	cfg.MinConns = clampInt32(opts.MinConns)
 	cfg.HealthCheckPeriod = opts.HealthCheckPeriod
 	cfg.ConnConfig.ConnectTimeout = opts.ConnectTimeout
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = make(map[string]string, 1)
+	}
+	cfg.ConnConfig.RuntimeParams["statement_timeout"] = fmt.Sprintf("%d", opts.QueryTimeout.Milliseconds())
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -59,7 +74,7 @@ func newPostgresDB(ctx context.Context, databaseURL string, opts PoolOptions) (*
 		pool.Close()
 		return nil, err
 	}
-	return &PostgresDB{pool: pool}, nil
+	return &PostgresDB{pool: pool, opts: opts}, nil
 }
 
 func clampInt32(value int) int32 {
@@ -97,6 +112,9 @@ func (db *PostgresDB) Exec(ctx context.Context, query string, args ...any) error
 	if db == nil || db.pool == nil {
 		return errors.New("postgres pool is nil")
 	}
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	defer cancel()
 	_, err := db.pool.Exec(ctx, query, args...)
 	return err
 }
@@ -105,13 +123,18 @@ func (db *PostgresDB) QueryRow(ctx context.Context, query string, args ...any) R
 	if db == nil || db.pool == nil {
 		return memoryRow{err: errors.New("postgres pool is nil")}
 	}
-	return db.pool.QueryRow(ctx, query, args...)
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	return budgetedRow{row: db.pool.QueryRow(ctx, query, args...), cancel: cancel}
 }
 
 func (db *PostgresDB) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
 	if db == nil || db.pool == nil {
 		return nil, errors.New("postgres pool is nil")
 	}
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	defer cancel()
 	rows, err := db.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -395,11 +418,11 @@ func (db *PostgresDB) CountRecords(ctx context.Context, domain, collection, orga
 	}
 
 	query := `SELECT COUNT(*) FROM governance_state_records WHERE ` + where
-	
+
 	// Note: filters are handled app-side in ListRecords, but for native count
 	// we should ideally push them to SQL. For now, we optimize the base count.
 	// Future: implement JSONB path filter pushdown.
-	
+
 	var count int64
 	err := db.pool.QueryRow(ctx, query, args...).Scan(&count)
 	return count, err
@@ -463,7 +486,7 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 	if end == -1 {
 		end = len(plan[start:])
 	}
-	
+
 	var count int64
 	fmt.Sscanf(plan[start:start+end], "%d", &count)
 	return count, nil

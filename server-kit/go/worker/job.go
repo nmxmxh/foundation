@@ -40,12 +40,6 @@ func (j *Job) Normalize() {
 	if j == nil {
 		return
 	}
-	if j.Payload == nil {
-		j.Payload = map[string]any{}
-	}
-	if j.Metadata == nil {
-		j.Metadata = map[string]any{}
-	}
 	if strings.TrimSpace(j.Queue) == "" {
 		j.Queue = "default"
 	}

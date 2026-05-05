@@ -13,7 +13,10 @@
         "url": { "type": "string", "minLength": 1 },
         "maxConnections": { "type": "integer", "minimum": 1 },
         "minConnections": { "type": "integer", "minimum": 0 },
-        "acquireTimeoutMs": { "type": "integer", "minimum": 1 }
+        "acquireTimeoutMs": { "type": "integer", "minimum": 1 },
+        "queryTimeoutMs": { "type": "integer", "minimum": 0 },
+        "hotReadTimeoutMs": { "type": "integer", "minimum": 0 },
+        "shardCount": { "type": "integer", "minimum": 0 }
       }
     },
     "redis": {
@@ -23,7 +26,14 @@
         "url": { "type": "string", "minLength": 1 },
         "keyPrefix": { "type": "string", "minLength": 1 },
         "defaultTTLSeconds": { "type": "integer", "minimum": 1 },
-        "degradeOpen": { "type": "boolean" }
+        "degradeOpen": { "type": "boolean" },
+        "shardUrls": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "poolSize": { "type": "integer", "minimum": 0 },
+        "minIdle": { "type": "integer", "minimum": 0 },
+        "maxRetries": { "type": "integer", "minimum": 0 }
       }
     },
     "objectStorage": {

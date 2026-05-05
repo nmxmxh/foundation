@@ -43,13 +43,20 @@ type DatabaseConfig struct {
 	MaxConnections   int    `json:"max_connections"`
 	MinConnections   int    `json:"min_connections"`
 	AcquireTimeoutMS int    `json:"acquire_timeout_ms"`
+	QueryTimeoutMS   int    `json:"query_timeout_ms,omitempty"`
+	HotReadTimeoutMS int    `json:"hot_read_timeout_ms,omitempty"`
+	ShardCount       int    `json:"shard_count,omitempty"`
 }
 
 type RedisConfig struct {
-	URL               string `json:"url"`
-	KeyPrefix         string `json:"key_prefix"`
-	DefaultTTLSeconds int    `json:"default_ttl_seconds"`
-	DegradeOpen       bool   `json:"degrade_open"`
+	URL               string   `json:"url"`
+	ShardURLs         []string `json:"shard_urls,omitempty"`
+	KeyPrefix         string   `json:"key_prefix"`
+	DefaultTTLSeconds int      `json:"default_ttl_seconds"`
+	DegradeOpen       bool     `json:"degrade_open"`
+	PoolSize          int      `json:"pool_size,omitempty"`
+	MinIdle           int      `json:"min_idle,omitempty"`
+	MaxRetries        int      `json:"max_retries,omitempty"`
 }
 
 type ObjectStorageConfig struct {

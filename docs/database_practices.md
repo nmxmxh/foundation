@@ -7,6 +7,32 @@ Date: 2026-05-01
 
 This is the cross-app database standard for Ovasabi standalone apps. It is optimized for modular-monolith systems with strong domain boundaries, deterministic migrations, and low operational overhead.
 
+## Architecture posture
+
+Postgres gives this architecture the ACID side of the system: durable state, constraints, transactional idempotency, outbox records, auditability, and analytical read models. The BASE side should be built around append-only events, materialized/read-model tables, bounded caches, River durable workers, Redis ephemeral coordination, and idempotent retry semantics. Do not turn Redis, queues, or app memory into hidden sources of truth.
+
+Default lane budgets:
+
+1. `hot_read`: target single-row/materialized reads, 50ms query timeout, tenant predicate required.
+2. `hot_write`: command validation plus one short transaction, 150ms query timeout, idempotency key required where retryable.
+3. `default`: normal product API query budget, 250ms query timeout.
+4. `background`: bounded batch/worker operations, 2s query timeout, batch diagnostics preserved.
+5. `analytics`: report/materialized-view refresh work, 5s query timeout, never called from hot ingress paths.
+
+Use `server-kit/go/database.DefaultPoolOptionsFor` and `QueryBudgetContext` as the default app wiring. Pool budgets are CPU-aware and intentionally conservative so app replicas scale before Postgres connection count becomes the bottleneck.
+
+## PostgreSQL 18 baseline
+
+Foundation scaffolds now default local/test Postgres to version 18 because the release adds primitives that match our performance model:
+
+1. Async I/O improves eligible sequential scans, bitmap heap scans, vacuums, and related operations. The scaffold config enables the portable `io_method = worker` baseline with explicit combine/concurrency settings; production Linux hosts may benchmark `io_uring` if the Postgres build supports it.
+2. Multicolumn B-tree skip scans make some composite indexes useful even when the leading column is not fully constrained. This is useful, but it does not remove our rule that hot tenant/campaign paths must filter by tenant/campaign first.
+3. Virtual generated columns are now the generated-column default. Use them for derived searchable/display fields when recomputation on read is cheaper than write amplification; use `STORED` only when the read path proves it needs precomputed storage.
+4. Parallel GIN index creation and improved hash join/GROUP BY behavior help search and analytics lanes, not unbounded runtime queries.
+5. `pg_stat_io`, `pg_aios`, vacuum timing, WAL I/O timing, and richer `EXPLAIN` output are part of the operational contract. Production observability should include read/write bytes, WAL pressure, vacuum/analyze timing, pool acquire latency, and top query families.
+
+Production Postgres must still be sized from workload evidence: memory, WAL, autovacuum, partition strategy, and connection pool limits should be derived from p95/p99 latency, write rate, table growth, and EXPLAIN plans.
+
 ## Non-negotiable rules
 
 1. PostgreSQL is the system of record for durable business state.
@@ -132,6 +158,11 @@ State-machine candidates that deserve table-driven/property-style tests:
     *   **Large Sets**: Use `EstimateCount` (via `EXPLAIN` plan analysis or `reltuples` catalog statistics) for UI indicators and non-critical analytics.
     *   **Hot Counters**: Use a dedicated counter cache table or Redis if exact, high-frequency counting is required.
 9. **Index Overhead**: While missing indexes cause slow reads, excessive indexes cause slow writes and increased VACUUM pressure. Audit indexes regularly for usage.
+10. Use read models or materialized views for dashboard, feed, search, and analytics reads that would otherwise join many live transactional tables.
+11. Use partitioned append tables for high-volume events, audit logs, outbox history, and time/campaign-heavy telemetry. Partition by time, tenant/campaign, or hash only when query pruning and retention policy are explicit.
+12. Use `pgx.CopyFrom` or batched statements for high-volume writes. Per-row loops are acceptable only for small control-plane writes.
+13. Use `EXPLAIN (ANALYZE, BUFFERS, WAL, VERBOSE)` for slow or important queries on PostgreSQL 18 so CPU, memory, buffer, and WAL costs are visible.
+14. Enable `pg_stat_statements` in production and treat top total-time queries as optimization priorities, even if individual latency looks modest.
 
 ## Security and compliance
 

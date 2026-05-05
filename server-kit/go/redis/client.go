@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,19 @@ const (
 	DriverMemory = "memory"
 	DriverRedis  = "redis"
 )
+
+type Options struct {
+	URL          string
+	URLs         []string
+	Prefix       string
+	Driver       string
+	PoolSize     int
+	MinIdle      int
+	MaxRetries   int
+	DialTimeout  time.Duration
+	ReadTimeout  time.Duration
+	WriteTimeout time.Duration
+}
 
 // Client is the pub/sub and stream transport abstraction used by runtime components.
 type Client interface {
@@ -52,12 +66,48 @@ type StreamMessage struct {
 
 // Connect creates a redis pub/sub client using the selected driver.
 func Connect(url, prefix, driver string) (Client, error) {
-	switch normalizeDriver(driver) {
+	return ConnectWithOptions(Options{URL: url, Prefix: prefix, Driver: driver})
+}
+
+func ConnectWithOptions(opts Options) (Client, error) {
+	opts = normalizeOptions(opts)
+	switch normalizeDriver(opts.Driver) {
 	case DriverRedis:
-		return newRedisClient(url, prefix)
+		if len(opts.URLs) > 1 {
+			return newShardedClient(opts)
+		}
+		return newRedisClient(opts)
 	default:
-		return NewMemoryClient(prefix), nil
+		return NewMemoryClient(opts.Prefix), nil
 	}
+}
+
+func normalizeOptions(opts Options) Options {
+	if strings.TrimSpace(opts.URL) != "" && len(opts.URLs) == 0 {
+		opts.URLs = []string{opts.URL}
+	}
+	if strings.TrimSpace(opts.Prefix) == "" {
+		opts.Prefix = "ovasabi"
+	}
+	if opts.PoolSize <= 0 {
+		opts.PoolSize = 32
+	}
+	if opts.MinIdle < 0 {
+		opts.MinIdle = 0
+	}
+	if opts.MaxRetries < 0 {
+		opts.MaxRetries = 0
+	}
+	if opts.DialTimeout <= 0 {
+		opts.DialTimeout = 2 * time.Second
+	}
+	if opts.ReadTimeout <= 0 {
+		opts.ReadTimeout = 500 * time.Millisecond
+	}
+	if opts.WriteTimeout <= 0 {
+		opts.WriteTimeout = 500 * time.Millisecond
+	}
+	return opts
 }
 
 func normalizeDriver(driver string) string {
@@ -268,27 +318,66 @@ type redisClient struct {
 	prefix string
 }
 
-func newRedisClient(url, prefix string) (*redisClient, error) {
-	if strings.TrimSpace(url) == "" {
+func newRedisClient(opts Options) (*redisClient, error) {
+	if len(opts.URLs) == 0 || strings.TrimSpace(opts.URLs[0]) == "" {
 		return nil, fmt.Errorf("redis url is required when redis driver is enabled")
 	}
-	if strings.TrimSpace(prefix) == "" {
-		prefix = "ovasabi"
-	}
 
-	opts, err := goredis.ParseURL(url)
+	redisOpts, err := goredis.ParseURL(opts.URLs[0])
 	if err != nil {
 		return nil, err
 	}
-	client := goredis.NewClient(opts)
+	redisOpts.PoolSize = opts.PoolSize
+	redisOpts.MinIdleConns = opts.MinIdle
+	redisOpts.MaxRetries = opts.MaxRetries
+	redisOpts.DialTimeout = opts.DialTimeout
+	redisOpts.ReadTimeout = opts.ReadTimeout
+	redisOpts.WriteTimeout = opts.WriteTimeout
+	client := goredis.NewClient(redisOpts)
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		_ = client.Close()
 		return nil, err
 	}
 	return &redisClient{
 		client: client,
-		prefix: prefix,
+		prefix: opts.Prefix,
 	}, nil
+}
+
+type shardedClient struct {
+	shards []*redisClient
+}
+
+func newShardedClient(opts Options) (*shardedClient, error) {
+	shards := make([]*redisClient, 0, len(opts.URLs))
+	for _, url := range opts.URLs {
+		if strings.TrimSpace(url) == "" {
+			continue
+		}
+		shardOpts := opts
+		shardOpts.URLs = []string{url}
+		shard, err := newRedisClient(shardOpts)
+		if err != nil {
+			for _, existing := range shards {
+				_ = existing.Close()
+			}
+			return nil, err
+		}
+		shards = append(shards, shard)
+	}
+	if len(shards) == 0 {
+		return nil, fmt.Errorf("at least one redis shard url is required")
+	}
+	return &shardedClient{shards: shards}, nil
+}
+
+func (c *shardedClient) shard(key string) *redisClient {
+	if len(c.shards) == 1 {
+		return c.shards[0]
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return c.shards[int(h.Sum32())%len(c.shards)]
 }
 
 func (c *redisClient) Publish(ctx context.Context, channel string, payload []byte) error {
@@ -497,4 +586,89 @@ func (c *redisClient) qualify(channel string) string {
 		return trimmed
 	}
 	return fmt.Sprintf("%s:%s", c.prefix, trimmed)
+}
+
+func (c *shardedClient) Publish(ctx context.Context, channel string, payload []byte) error {
+	var firstErr error
+	for _, shard := range c.shards {
+		if err := shard.Publish(ctx, channel, payload); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (c *shardedClient) Subscribe(ctx context.Context, channel string) (<-chan []byte, func(), error) {
+	return c.shards[0].Subscribe(ctx, channel)
+}
+
+func (c *shardedClient) PSubscribe(ctx context.Context, patterns ...string) ([]<-chan []byte, func(), error) {
+	return c.shards[0].PSubscribe(ctx, patterns...)
+}
+
+func (c *shardedClient) XAdd(ctx context.Context, stream string, values map[string]interface{}) (string, error) {
+	return c.shard(stream).XAdd(ctx, stream, values)
+}
+
+func (c *shardedClient) XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error) {
+	return c.shard(stream).XReadGroup(ctx, stream, group, consumer, count)
+}
+
+func (c *shardedClient) XAck(ctx context.Context, stream, group string, ids ...string) error {
+	return c.shard(stream).XAck(ctx, stream, group, ids...)
+}
+
+func (c *shardedClient) Incr(ctx context.Context, key string) (int64, error) {
+	return c.shard(key).Incr(ctx, key)
+}
+
+func (c *shardedClient) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	return c.shard(key).Expire(ctx, key, ttl)
+}
+
+func (c *shardedClient) Lock(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	return c.shard(key).Lock(ctx, key, ttl)
+}
+
+func (c *shardedClient) Unlock(ctx context.Context, key, token string) (bool, error) {
+	return c.shard(key).Unlock(ctx, key, token)
+}
+
+func (c *shardedClient) PFAdd(ctx context.Context, key string, els ...interface{}) (int64, error) {
+	return c.shard(key).PFAdd(ctx, key, els...)
+}
+
+func (c *shardedClient) PFCount(ctx context.Context, keys ...string) (int64, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	return c.shard(keys[0]).PFCount(ctx, keys...)
+}
+
+func (c *shardedClient) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+	return c.shard(key).Set(ctx, key, value, ttl)
+}
+
+func (c *shardedClient) Get(ctx context.Context, key string) ([]byte, error) {
+	return c.shard(key).Get(ctx, key)
+}
+
+func (c *shardedClient) Del(ctx context.Context, keys ...string) error {
+	var firstErr error
+	for _, key := range keys {
+		if err := c.shard(key).Del(ctx, key); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
+func (c *shardedClient) Close() error {
+	var firstErr error
+	for _, shard := range c.shards {
+		if err := shard.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

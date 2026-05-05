@@ -95,8 +95,17 @@ func ValidateServer(cfg ServerRuntimeConfig) error {
 	if cfg.Database.MaxConnections <= 0 || cfg.Database.AcquireTimeoutMS <= 0 {
 		return fmt.Errorf("database runtime budgets must be positive")
 	}
+	if cfg.Database.MinConnections < 0 || cfg.Database.MinConnections > cfg.Database.MaxConnections {
+		return fmt.Errorf("database min_connections must be between zero and max_connections")
+	}
+	if cfg.Database.QueryTimeoutMS < 0 || cfg.Database.HotReadTimeoutMS < 0 || cfg.Database.ShardCount < 0 {
+		return fmt.Errorf("database query budgets and shard_count must be zero or greater")
+	}
 	if cfg.Redis.URL == "" || cfg.Redis.KeyPrefix == "" || cfg.Redis.DefaultTTLSeconds <= 0 {
 		return fmt.Errorf("redis url, key_prefix, and default_ttl_seconds are required")
+	}
+	if cfg.Redis.PoolSize < 0 || cfg.Redis.MinIdle < 0 || cfg.Redis.MaxRetries < 0 {
+		return fmt.Errorf("redis pool_size, min_idle, and max_retries must be zero or greater")
 	}
 	if cfg.ObjectStorage.Strict && (cfg.ObjectStorage.Endpoint == "" || cfg.ObjectStorage.Region == "" || cfg.ObjectStorage.Bucket == "" || cfg.ObjectStorage.AccessKey == "" || cfg.ObjectStorage.SecretKey == "") {
 		return fmt.Errorf("strict object storage requires endpoint, region, bucket, access key, and secret key")

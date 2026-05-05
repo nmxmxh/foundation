@@ -15,13 +15,23 @@ type Config struct {
 	LogLevel string
 
 	// Database
-	DatabaseURL string
-	StateStore  string
+	DatabaseURL      string
+	StateStore       string
+	DBMaxConns       int
+	DBMinConns       int
+	DBAcquireTimeout time.Duration
+	DBQueryTimeout   time.Duration
+	DBHotReadTimeout time.Duration
+	DBShardCount     int
 
 	// Redis
-	RedisURL    string
-	RedisPrefix string
-	EventBus    string
+	RedisURL        string
+	RedisShardURLs  string
+	RedisPrefix     string
+	RedisPoolSize   int
+	RedisMinIdle    int
+	RedisMaxRetries int
+	EventBus        string
 
 	// JWT
 	JWTSecret     string
@@ -52,8 +62,18 @@ func Load() (*Config, error) {
 		LogLevel:                            getEnv("LOG_LEVEL", "info"),
 		DatabaseURL:                         getEnv("DATABASE_URL", ""),
 		StateStore:                          getEnv("STATE_STORE_DRIVER", "postgres"),
+		DBMaxConns:                          getEnvInt("DB_MAX_CONNS", 0),
+		DBMinConns:                          getEnvInt("DB_MIN_CONNS", 0),
+		DBAcquireTimeout:                    getEnvDuration("DB_ACQUIRE_TIMEOUT", 100*time.Millisecond),
+		DBQueryTimeout:                      getEnvDuration("DB_QUERY_TIMEOUT", 250*time.Millisecond),
+		DBHotReadTimeout:                    getEnvDuration("DB_HOT_READ_TIMEOUT", 50*time.Millisecond),
+		DBShardCount:                        getEnvInt("DB_SHARD_COUNT", 1),
 		RedisURL:                            getEnv("REDIS_URL", ""),
+		RedisShardURLs:                      getEnv("REDIS_SHARD_URLS", ""),
 		RedisPrefix:                         getEnv("REDIS_PREFIX", "{{PROJECT_NAME}}"),
+		RedisPoolSize:                       getEnvInt("REDIS_POOL_SIZE", 32),
+		RedisMinIdle:                        getEnvInt("REDIS_MIN_IDLE", 4),
+		RedisMaxRetries:                     getEnvInt("REDIS_MAX_RETRIES", 1),
 		EventBus:                            getEnv("EVENT_BUS_DRIVER", "redis"),
 		JWTSecret:                           getEnv("JWT_SECRET", ""),
 		JWTExpiration:                       getEnvDuration("JWT_EXPIRATION", 24*time.Hour),
@@ -81,6 +101,18 @@ func (c *Config) validate() error {
 	}
 	if c.JWTSecret == "" && c.Env == "production" {
 		return fmt.Errorf("JWT_SECRET is required in production")
+	}
+	if c.DBMaxConns < 0 || c.DBMinConns < 0 || c.DBShardCount < 0 {
+		return fmt.Errorf("database pool and shard settings must be zero or greater")
+	}
+	if c.DBMaxConns > 0 && c.DBMinConns > c.DBMaxConns {
+		return fmt.Errorf("DB_MIN_CONNS cannot exceed DB_MAX_CONNS")
+	}
+	if c.DBAcquireTimeout <= 0 || c.DBQueryTimeout <= 0 || c.DBHotReadTimeout <= 0 {
+		return fmt.Errorf("database timeout settings must be positive")
+	}
+	if c.RedisPoolSize < 0 || c.RedisMinIdle < 0 || c.RedisMaxRetries < 0 {
+		return fmt.Errorf("redis pool settings must be zero or greater")
 	}
 	if !oneOf(c.RuntimeSharedMemory, "off", "auto", "required") {
 		return fmt.Errorf("RUNTIME_SHARED_MEMORY must be off, auto, or required")

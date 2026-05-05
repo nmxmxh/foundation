@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -30,14 +31,61 @@ type PoolOptions struct {
 	MinConns          int
 	HealthCheckPeriod time.Duration
 	ConnectTimeout    time.Duration
+	QueryTimeout      time.Duration
+	AcquireTimeout    time.Duration
 }
 
 func DefaultPoolOptions() PoolOptions {
+	return DefaultPoolOptionsFor(RuntimeLaneDefault)
+}
+
+type RuntimeLane string
+
+const (
+	RuntimeLaneDefault    RuntimeLane = "default"
+	RuntimeLaneHotRead    RuntimeLane = "hot_read"
+	RuntimeLaneHotWrite   RuntimeLane = "hot_write"
+	RuntimeLaneBackground RuntimeLane = "background"
+	RuntimeLaneAnalytics  RuntimeLane = "analytics"
+)
+
+func DefaultPoolOptionsFor(lane RuntimeLane) PoolOptions {
+	cpus := runtime.GOMAXPROCS(0)
+	maxConns := cpus * 2
+	if maxConns < 8 {
+		maxConns = 8
+	}
+	if maxConns > 64 {
+		maxConns = 64
+	}
+	minConns := maxConns / 4
+	if minConns < 2 {
+		minConns = 2
+	}
+	queryTimeout := 250 * time.Millisecond
+	switch lane {
+	case RuntimeLaneHotRead:
+		maxConns = clampInt(maxConns, 8, 48)
+		queryTimeout = 50 * time.Millisecond
+	case RuntimeLaneHotWrite:
+		maxConns = clampInt(maxConns, 8, 32)
+		queryTimeout = 150 * time.Millisecond
+	case RuntimeLaneBackground:
+		maxConns = clampInt(cpus, 4, 24)
+		minConns = min(minConns, maxConns)
+		queryTimeout = 2 * time.Second
+	case RuntimeLaneAnalytics:
+		maxConns = clampInt(cpus/2, 2, 12)
+		minConns = min(minConns, maxConns)
+		queryTimeout = 5 * time.Second
+	}
 	return PoolOptions{
-		MaxConns:          20,
-		MinConns:          2,
+		MaxConns:          maxConns,
+		MinConns:          minConns,
 		HealthCheckPeriod: 30 * time.Second,
 		ConnectTimeout:    10 * time.Second,
+		QueryTimeout:      queryTimeout,
+		AcquireTimeout:    100 * time.Millisecond,
 	}
 }
 
@@ -58,7 +106,31 @@ func normalizePoolOptions(opts PoolOptions) PoolOptions {
 	if opts.ConnectTimeout <= 0 {
 		opts.ConnectTimeout = defaults.ConnectTimeout
 	}
+	if opts.QueryTimeout <= 0 {
+		opts.QueryTimeout = defaults.QueryTimeout
+	}
+	if opts.AcquireTimeout <= 0 {
+		opts.AcquireTimeout = defaults.AcquireTimeout
+	}
 	return opts
+}
+
+func QueryBudgetContext(ctx context.Context, opts PoolOptions) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	opts = normalizePoolOptions(opts)
+	return context.WithTimeout(ctx, opts.QueryTimeout)
+}
+
+func clampInt(value, low, high int) int {
+	if value < low {
+		return low
+	}
+	if value > high {
+		return high
+	}
+	return value
 }
 
 func Connect(ctx context.Context, databaseURL, driver string, options ...PoolOptions) (RuntimeStore, error) {

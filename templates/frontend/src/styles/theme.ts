@@ -17,5 +17,7 @@ export const AppThemeProvider = MinimalThemeProvider
 export type Theme = MinimalTheme
 
 declare module 'styled-components' {
+  // styled-components requires interface augmentation for DefaultTheme.
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   export interface DefaultTheme extends MinimalTheme {}
 }

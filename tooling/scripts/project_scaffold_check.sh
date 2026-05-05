@@ -165,6 +165,11 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "make test Redis URL" "$target/Makefile" "TEST_REDIS_URL"
   check_file_contains "env test database URL" "$target/.env.example" "TEST_DATABASE_URL"
   check_file_contains "env test Redis URL" "$target/.env.example" "TEST_REDIS_URL"
+  check_file_contains "env DB pool budget" "$target/.env.example" "DB_MAX_CONNS"
+  check_file_contains "env DB query budget" "$target/.env.example" "DB_QUERY_TIMEOUT"
+  check_file_contains "env Postgres 18 baseline" "$target/.env.example" "POSTGRES_VERSION=18"
+  check_file_contains "env Redis pool budget" "$target/.env.example" "REDIS_POOL_SIZE"
+  check_file_contains "env Redis shard extension" "$target/.env.example" "REDIS_SHARD_URLS"
   check_file_contains "env runtime shared memory mode" "$target/.env.example" "RUNTIME_SHARED_MEMORY"
   check_file_contains "env post quantum TLS mode" "$target/.env.example" "POST_QUANTUM_TLS_HYBRID_KEM"
   check_exists "foundation server-kit" "$target/foundation/server-kit/go/go.mod"
@@ -173,6 +178,8 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "foundation direct frame dispatch client" "$target/foundation/server-kit/go/grpcsvc/grpcsvc.go" "NewDirectFrameClient"
   check_file_contains "foundation binary frame registration" "$target/foundation/server-kit/go/grpcsvc/grpcsvc.go" "RegisterFrame"
   check_file_contains "foundation borrowed frame view" "$target/foundation/server-kit/go/grpcsvc/grpcsvc.go" "UnmarshalFrameView"
+  check_file_contains "foundation lane-aware DB pool defaults" "$target/foundation/server-kit/go/database/database.go" "DefaultPoolOptionsFor"
+  check_file_contains "foundation Redis sharded client options" "$target/foundation/server-kit/go/redis/client.go" "ConnectWithOptions"
   check_exists "foundation performance check script" "$target/foundation/tooling/scripts/performance_check.sh"
   check_exists "foundation parallel chain module" "$target/foundation/server-kit/go/chain/chain.go"
   check_exists "foundation chaos module" "$target/foundation/server-kit/go/chaos/chaos.go"
@@ -194,14 +201,9 @@ fi
 
 if [[ "${WITH_DOCKER:-}" == "true" ]]; then
   check_exists "Dockerfile" "$target/Dockerfile"
-  check_exists "Dockerfile.migrate" "$target/Dockerfile.migrate"
   check_exists "docker-compose.yml" "$target/docker-compose.yml"
   check_exists "docker-compose.dev.yml" "$target/docker-compose.dev.yml"
-  check_exists "docker-compose.test.yml" "$target/docker-compose.test.yml"
   check_exists "docker ignore" "$target/.dockerignore"
-  check_file_contains "shared Docker Go module cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gomod'
-  check_file_contains "shared Docker Go build cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gobuild'
-  check_file_contains "Docker dependency stage" "$target/Dockerfile" "AS go-deps"
   check_file_contains "compose Docker cache namespace" "$target/docker-compose.yml" "DOCKER_CACHE_NAMESPACE"
   check_exists "nginx template" "$target/config/default.conf.template"
   check_exists "nginx config" "$target/config/nginx.conf"
@@ -209,8 +211,21 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
   check_file_contains "nginx COEP header" "$target/config/default.conf.template" "Cross-Origin-Embedder-Policy"
   check_file_contains "nginx CORP header" "$target/config/default.conf.template" "Cross-Origin-Resource-Policy"
   check_file_contains "nginx wasm compression types" "$target/config/nginx.conf" "application/wasm"
-  check_exists "postgresql config" "$target/config/postgresql.conf"
-  check_exists "redis config" "$target/config/redis.conf"
+  if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
+    check_exists "Dockerfile.migrate" "$target/Dockerfile.migrate"
+    check_exists "docker-compose.test.yml" "$target/docker-compose.test.yml"
+    check_file_contains "shared Docker Go module cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gomod'
+    check_file_contains "shared Docker Go build cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gobuild'
+    check_file_contains "Docker dependency stage" "$target/Dockerfile" "AS go-deps"
+    check_exists "postgresql config" "$target/config/postgresql.conf"
+    check_exists "redis config" "$target/config/redis.conf"
+    check_file_contains "postgres timeout guardrail" "$target/config/postgresql.conf" "statement_timeout"
+    check_file_contains "postgres autovacuum guardrail" "$target/config/postgresql.conf" "autovacuum_vacuum_scale_factor"
+    check_file_contains "postgres async I/O baseline" "$target/config/postgresql.conf" "io_method"
+    check_file_contains "postgres I/O observability baseline" "$target/config/postgresql.conf" "track_io_timing"
+    check_file_contains "redis LFU eviction guardrail" "$target/config/redis.conf" "maxmemory-policy allkeys-lfu"
+    check_file_contains "redis io thread baseline" "$target/config/redis.conf" "io-threads"
+  fi
 fi
 
 if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then

@@ -9,11 +9,12 @@
 #   TEST_DB_PORT: Port to expose PostgreSQL (default: 5433)
 #   TEST_REDIS_PORT: Port to expose Redis (default: 6380)
 #   TEST_REDIS_PASSWORD: Optional Redis password (default: empty)
+#   POSTGRES_VERSION: PostgreSQL major version (default: 18)
 
 services:
   test-postgres:
-    image: postgres:16-alpine
-    container_name: {{PROJECT_NAME}}-test-postgres
+    image: postgres:${POSTGRES_VERSION:-18}-alpine
+    container_name: "{{PROJECT_NAME}}-test-postgres"
     environment:
       POSTGRES_USER: ${TEST_DB_USER:-postgres}
       POSTGRES_PASSWORD: ${TEST_DB_PASSWORD:-postgres}
@@ -32,7 +33,7 @@ services:
 
   test-redis:
     image: redis:7-alpine
-    container_name: {{PROJECT_NAME}}-test-redis
+    container_name: "{{PROJECT_NAME}}-test-redis"
     environment:
       TEST_REDIS_PASSWORD: ${TEST_REDIS_PASSWORD:-}
     command: >
@@ -50,7 +51,7 @@ services:
   # Migration runner for test database
   test-migrate:
     image: migrate/migrate:v4.17.0
-    container_name: {{PROJECT_NAME}}-test-migrate
+    container_name: "{{PROJECT_NAME}}-test-migrate"
     depends_on:
       test-postgres:
         condition: service_healthy
