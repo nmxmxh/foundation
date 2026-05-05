@@ -6,8 +6,63 @@ export interface LogEntry {
   message: string;
   timestamp: number;
   correlationId: string;
-  extra?: Record<string, any>;
+  extra?: Record<string, unknown>;
 }
+
+const FIELD_SEPARATOR = "\x1f";
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
+const encodeField = (value: unknown): string => encodeURIComponent(String(value ?? ""));
+const decodeField = (value: string): string => decodeURIComponent(value);
+
+const encodeExtra = (extra: Record<string, unknown> | undefined): string => {
+  if (!extra) {
+    return "";
+  }
+  return Object.entries(extra)
+    .map(([key, value]) => `${encodeField(key)}=${encodeField(value)}`)
+    .join("&");
+};
+
+const decodeExtra = (encoded: string): Record<string, string> | undefined => {
+  if (encoded === "") {
+    return undefined;
+  }
+  const extra: Record<string, string> = {};
+  for (const pair of encoded.split("&")) {
+    const separator = pair.indexOf("=");
+    if (separator <= 0) {
+      continue;
+    }
+    extra[decodeField(pair.slice(0, separator))] = decodeField(pair.slice(separator + 1));
+  }
+  return extra;
+};
+
+const encodeEntry = (entry: LogEntry): Uint8Array => {
+  const line = [
+    encodeField(entry.level),
+    encodeField(entry.component),
+    encodeField(entry.message),
+    encodeField(entry.timestamp),
+    encodeField(entry.correlationId),
+    encodeExtra(entry.extra),
+  ].join(FIELD_SEPARATOR);
+  return textEncoder.encode(line);
+};
+
+const decodeEntry = (bytes: Uint8Array): LogEntry => {
+  const fields = textDecoder.decode(bytes).split(FIELD_SEPARATOR);
+  return {
+    level: decodeField(fields[0] ?? "info") as LogLevel,
+    component: decodeField(fields[1] ?? ""),
+    message: decodeField(fields[2] ?? ""),
+    timestamp: Number(decodeField(fields[3] ?? "0")),
+    correlationId: decodeField(fields[4] ?? ""),
+    extra: decodeExtra(fields[5] ?? ""),
+  };
+};
 
 /**
  * LogRingBuffer implements a high-performance, SharedArrayBuffer-backed
@@ -40,10 +95,7 @@ export class LogRingBuffer {
   }
 
   write(entry: LogEntry): void {
-    const json = JSON.stringify(entry);
-    const encoder = new TextEncoder();
-    const bytes = encoder.encode(json);
-    this.writeRaw(bytes);
+    this.writeRaw(encodeEntry(entry));
   }
 
   writeRaw(bytes: Uint8Array): void {
@@ -73,8 +125,6 @@ export class LogRingBuffer {
     const writeOffset = Atomics.load(this.uint32, 0);
     const size = Atomics.load(this.uint32, 2);
 
-    const decoder = new TextDecoder();
-
     while (readOffset !== writeOffset) {
       if (readOffset + 4 > size) {
         readOffset = 0;
@@ -90,8 +140,7 @@ export class LogRingBuffer {
 
       const bytes = this.buffer.slice(readOffset + 68, readOffset + 68 + length);
       try {
-        const json = decoder.decode(bytes);
-        entries.push(JSON.parse(json));
+        entries.push(decodeEntry(bytes));
       } catch (e) {
         // Corrupt entry, skip
       }

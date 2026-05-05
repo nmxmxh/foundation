@@ -35,17 +35,14 @@ func (e Envelope) Validate() error {
 	}
 
 	md := metadata.FromMap(e.Metadata)
-	correlationID := e.CorrelationID
-	if correlationID == "" {
-		correlationID = md.CorrelationID
-	}
+	metadataCorrelationID := md.CorrelationID
+	correlationID := md.NormalizeCorrelation(e.CorrelationID)
 	if correlationID == "" {
 		return errors.New("missing correlation_id")
 	}
-	if md.CorrelationID != "" && md.CorrelationID != correlationID {
+	if e.CorrelationID != "" && metadataCorrelationID != "" && metadataCorrelationID != e.CorrelationID {
 		return errors.New("metadata.correlation_id must match envelope correlation_id")
 	}
-	md.CorrelationID = correlationID
 	if err := md.Validate(); err != nil {
 		return err
 	}
@@ -82,6 +79,12 @@ func (e *Envelope) Normalize() {
 	if e.PayloadEncoding == PayloadEncodingJSON && e.Payload == nil {
 		e.Payload = map[string]any{}
 	}
+	md := metadata.FromMap(e.Metadata)
+	if e.CorrelationID != "" && md.CorrelationID != "" && e.CorrelationID != md.CorrelationID {
+		return
+	}
+	e.CorrelationID = md.EnsureCorrelation(e.CorrelationID)
+	e.Metadata = md.ToMap()
 }
 
 // ToMap creates a JSON-friendly envelope map shape.

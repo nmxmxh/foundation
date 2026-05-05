@@ -21,6 +21,18 @@ describe("RuntimeSharedArena payload movement", () => {
       arena.readSlab(descriptor.id);
       arena.markConsumed(descriptor.id);
     });
+
+    bench(`${size / 1024}KB slab write/read view`, () => {
+      arena.writeSlab(descriptor.id, slab);
+      arena.readSlabView(descriptor.id);
+      arena.markConsumed(descriptor.id);
+    });
+
+    bench(`${size / 1024}KB slab fast write/read view`, () => {
+      arena.writeSlabReady(descriptor.id, slab);
+      arena.readSlabView(descriptor.id);
+      arena.markConsumedById(descriptor.id);
+    });
   }
 
   const ringArena = RuntimeSharedArena.create({ arenaBytes: ARENA_HEAVY_BYTES });

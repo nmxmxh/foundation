@@ -40,6 +40,18 @@ type ButtonVariant = "primary" | "secondary" | "ghost" | "quiet";
 type TooltipPlacement = "top" | "bottom";
 type FloatingPlacement = "top" | "bottom";
 type MinimalScrollBehavior = "auto" | "smooth";
+type LandingAnchor =
+  | "center"
+  | "top-left"
+  | "bottom-left"
+  | "bottom-right"
+  | "left-visual"
+  | "right-visual"
+  | "offset"
+  | "stacked";
+type LandingVisualMode = "inline" | "background" | "side" | "canvas" | "none";
+type LandingIntensity = "calm" | "standard" | "statement";
+type InfoLayout = "row" | "stack" | "split";
 
 export interface MinimalOption<T extends string> {
   value: T;
@@ -105,6 +117,9 @@ export interface MinimalDropdownProps<T extends string> extends Omit<HTMLAttribu
   searchable?: boolean;
   searchPlaceholder?: string;
   disabled?: boolean;
+  panelMaxHeight?: number;
+  panelMinWidth?: number;
+  matchTriggerWidth?: boolean;
   renderValue?: (option: MinimalOption<T> | undefined) => ReactNode;
 }
 
@@ -238,8 +253,52 @@ export interface MinimalActionModalProps {
   confirmLabel?: string;
   cancelLabel?: string;
   confirmDisabled?: boolean;
+  maxWidth?: string;
+  maxHeight?: string;
+  align?: HeaderAlign;
+  bodyScrollable?: boolean;
+  mobileSheet?: boolean;
   onClose: () => void;
   onConfirm?: () => void | Promise<void>;
+}
+
+export interface MinimalDisplaySectionProps extends Omit<HTMLMotionProps<"section">, "children" | "ref" | "title"> {
+  eyebrow?: ReactNode;
+  title: ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
+  visual?: ReactNode;
+  anchor?: LandingAnchor;
+  visualMode?: LandingVisualMode;
+  intensity?: LandingIntensity;
+  minHeight?: string;
+  mediaAspectRatio?: string;
+  backgroundImage?: string;
+  overlay?: string;
+  children?: ReactNode;
+}
+
+export interface MinimalLandingSectionProps extends Omit<HTMLAttributes<HTMLElement>, "title"> {
+  eyebrow?: ReactNode;
+  title?: ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
+  children?: ReactNode;
+  anchor?: LandingAnchor;
+  intensity?: LandingIntensity;
+  media?: ReactNode;
+  mediaAspectRatio?: string;
+}
+
+export interface MinimalInfoPanelProps extends Omit<HTMLAttributes<HTMLElement>, "title"> {
+  eyebrow?: ReactNode;
+  title: ReactNode;
+  description?: ReactNode;
+  icon?: ReactNode;
+  meta?: ReactNode;
+  action?: ReactNode;
+  tone?: MinimalTone;
+  layout?: InfoLayout;
 }
 
 export interface MinimalSkeletonProps extends HTMLAttributes<HTMLSpanElement> {
@@ -300,31 +359,44 @@ type FloatingPosition = {
   top: number;
   left: number;
   width: number;
+  maxHeight: number;
   placement: FloatingPlacement;
 };
 
 const densityPadding = {
-  compact: "12px 14px",
+  compact: "10px 12px",
   comfortable: "14px 16px",
   relaxed: "16px 18px",
 } satisfies Record<MinimalDensity, string>;
 
 const sizePadding = {
-  sm: "8px 12px",
-  md: "10px 14px",
-  lg: "12px 18px",
+  sm: "6px 12px",
+  md: "7px 16px",
+  lg: "10px 18px",
 } satisfies Record<MinimalSize, string>;
 
 const sizeFont = {
-  sm: "0.75rem",
+  sm: "0.6875rem",
   md: "0.8125rem",
-  lg: "0.9375rem",
+  lg: "0.875rem",
 } satisfies Record<MinimalSize, string>;
 
 const cardPadding = {
-  sm: "14px",
-  md: "18px",
+  sm: "16px",
+  md: "20px",
   lg: "24px",
+} satisfies Record<MinimalSize, string>;
+
+const buttonMinHeight = {
+  sm: "32px",
+  md: "34px",
+  lg: "40px",
+} satisfies Record<MinimalSize, string>;
+
+const inputPadding = {
+  sm: "8px 12px",
+  md: "12px 16px",
+  lg: "14px 16px",
 } satisfies Record<MinimalSize, string>;
 
 const toneAccent = (theme: MinimalTheme, tone: MinimalTone) => {
@@ -468,7 +540,7 @@ const Style = {
     font-family: ${({ theme }) => theme.typography.displayFamily};
     font-size: ${({ theme }) => theme.typography.displaySize};
     line-height: ${({ theme }) => theme.typography.lineHeightTight};
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
   `,
   HeaderSubtitle: styled.p`
     margin: 0;
@@ -518,27 +590,29 @@ const Style = {
       `;
     }}
     align-items: center;
-    border-radius: ${({ theme }) => theme.radius.md};
+    border-radius: ${({ theme }) => theme.radius.sm};
     cursor: pointer;
     display: inline-flex;
     gap: ${({ theme }) => theme.spacing.sm};
     justify-content: center;
-    letter-spacing: 0.04em;
-    min-height: 40px;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    min-height: ${({ $size }) => buttonMinHeight[$size]};
     padding: ${({ $size }) => sizePadding[$size]};
-    text-transform: uppercase;
     transition:
-      filter 160ms ${enterCurve},
-      transform 160ms ${enterCurve},
-      border-color 160ms ${enterCurve},
-      background-color 160ms ${enterCurve},
-      color 160ms ${enterCurve};
+      background-color 240ms ${moveCurve},
+      border-color 240ms ${moveCurve},
+      box-shadow 240ms ${moveCurve},
+      color 240ms ${moveCurve},
+      filter 240ms ${moveCurve},
+      transform 240ms ${moveCurve};
     width: ${({ $fullWidth }) => ($fullWidth ? "100%" : "auto")};
     font-size: ${({ $size }) => sizeFont[$size]};
     font-weight: ${({ theme }) => theme.typography.weightSemibold};
 
     @media (hover: hover) and (pointer: fine) {
       &:not(:disabled):hover {
+        box-shadow: ${({ theme, $variant }) => ($variant === "quiet" ? "none" : theme.shadow.subtle)};
         filter: brightness(0.98);
       }
     }
@@ -570,9 +644,9 @@ const Style = {
         box-shadow: ${surface.shadow};
       `;
     }}
-    border-radius: ${({ theme }) => theme.radius.lg};
+    border-radius: ${({ theme }) => theme.radius.md};
     display: grid;
-    gap: ${({ theme }) => theme.spacing.md};
+    gap: ${({ theme }) => theme.spacing.sm};
     overflow: hidden;
     padding: ${({ $padding }) => cardPadding[$padding]};
     transition:
@@ -587,7 +661,7 @@ const Style = {
               &:hover {
                 border-color: ${theme.color.borderStrong};
                 box-shadow: ${theme.shadow.floating};
-                transform: translateY(${theme.motion.hoverLift}px);
+                transform: translateY(-1px);
               }
             }
           `
@@ -630,10 +704,11 @@ const Style = {
     }}
     ${focusRing}
     align-items: center;
-    border-radius: ${({ theme }) => theme.radius.md};
+    border-radius: ${({ theme }) => theme.radius.sm};
     display: flex;
     gap: ${({ theme }) => theme.spacing.sm};
-    padding: ${({ $size }) => sizePadding[$size]};
+    min-height: ${({ $size }) => ($size === "sm" ? "36px" : $size === "lg" ? "48px" : "44px")};
+    padding: ${({ $size }) => inputPadding[$size]};
     transition:
       border-color 160ms ${enterCurve},
       box-shadow 160ms ${enterCurve},
@@ -659,6 +734,17 @@ const Style = {
     min-width: 0;
     outline: none;
     padding: 0;
+
+    &:-webkit-autofill,
+    &:-webkit-autofill:hover,
+    &:-webkit-autofill:focus,
+    &:-webkit-autofill:active {
+      -webkit-text-fill-color: ${({ theme }) => theme.color.textPrimary} !important;
+      caret-color: ${({ theme }) => theme.color.textPrimary};
+      -webkit-box-shadow: 0 0 0 1000px ${({ theme }) => theme.color.bgSurface} inset !important;
+      box-shadow: 0 0 0 1000px ${({ theme }) => theme.color.bgSurface} inset !important;
+      transition: background-color 9999s ease-out 0s;
+    }
   `,
   FieldMessage: styled.p<{ $tone: MinimalTone }>`
     margin: 0;
@@ -680,12 +766,13 @@ const Style = {
       `;
     }}
     align-items: center;
-    border-radius: ${({ theme }) => theme.radius.pill};
+    border-radius: ${({ theme }) => theme.radius.sm};
     display: inline-flex;
     gap: ${({ theme }) => theme.spacing.xs};
     justify-content: center;
-    letter-spacing: 0.05em;
-    padding: ${({ $size }) => ($size === "sm" ? "2px 8px" : $size === "lg" ? "6px 12px" : "4px 10px")};
+    letter-spacing: 0.04em;
+    line-height: 1;
+    padding: ${({ $size }) => ($size === "sm" ? "3px 8px" : $size === "lg" ? "5px 10px" : "4px 9px")};
     text-transform: uppercase;
     white-space: nowrap;
     font-size: ${({ $size, theme }) =>
@@ -701,11 +788,13 @@ const Style = {
         border: 1px solid ${presentation.border};
       `;
     }}
-    border-radius: ${({ theme }) => theme.radius.lg};
+    border-left-width: 2px;
+    border-radius: ${({ theme }) => theme.radius.sm};
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    gap: ${({ theme }) => theme.spacing.sm};
-    padding: ${({ theme }) => theme.spacing.md};
+    gap: 9px;
+    padding: 10px 12px;
+    font-size: 0.75rem;
   `,
   AlertIcon: styled.div`
     display: inline-flex;
@@ -726,7 +815,7 @@ const Style = {
     align-items: ${({ $align }) => ($align === "center" ? "center" : "flex-start")};
     background: ${({ theme }) => theme.color.bgSurfaceAlt};
     border: 1px dashed ${({ theme }) => theme.color.borderStrong};
-    border-radius: ${({ theme }) => theme.radius.lg};
+    border-radius: ${({ theme }) => theme.radius.md};
     display: grid;
     gap: ${({ theme }) => theme.spacing.sm};
     justify-items: ${({ $align }) => ($align === "center" ? "center" : "stretch")};
@@ -747,9 +836,9 @@ const Style = {
     margin: 0;
     color: ${({ theme }) => theme.color.textPrimary};
     font-family: ${({ theme }) => theme.typography.displayFamily};
-    font-size: 1.25rem;
+    font-size: ${({ theme }) => theme.typography.h2Size};
     line-height: ${({ theme }) => theme.typography.lineHeightTight};
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
   `,
   FilterBarShell: styled.section`
     display: flex;
@@ -763,29 +852,32 @@ const Style = {
     ${({ theme, $selected }) =>
       $selected
         ? css`
-            background: ${theme.color.bgSurfaceAlt};
+            background: ${theme.color.bgSurface};
             border: 1px solid ${theme.color.borderFocus};
             color: ${theme.color.textPrimary};
+            box-shadow: ${theme.shadow.subtle};
           `
         : css`
             background: transparent;
             border: 1px solid transparent;
             color: ${theme.color.textSecondary};
           `}
-    border-radius: ${({ theme }) => theme.radius.md};
+    border-radius: ${({ theme }) => theme.radius.sm};
     cursor: pointer;
     font-size: ${({ $size }) => sizeFont[$size]};
     font-weight: ${({ theme }) => theme.typography.weightSemibold};
-    letter-spacing: 0.05em;
-    min-height: 36px;
+    letter-spacing: 0.02em;
+    line-height: 1;
+    min-height: ${({ $size }) => buttonMinHeight[$size]};
     opacity: ${({ $selected }) => ($selected ? 1 : 0.84)};
     padding: ${({ $size }) => sizePadding[$size]};
     text-transform: uppercase;
     transition:
-      opacity 160ms ${enterCurve},
-      background-color 160ms ${enterCurve},
-      border-color 160ms ${enterCurve},
-      color 160ms ${enterCurve};
+      opacity 240ms ${moveCurve},
+      background-color 240ms ${moveCurve},
+      border-color 240ms ${moveCurve},
+      color 240ms ${moveCurve},
+      box-shadow 240ms ${moveCurve};
 
     @media (hover: hover) and (pointer: fine) {
       &:hover {
@@ -797,9 +889,10 @@ const Style = {
     position: relative;
     display: inline-flex;
     align-items: stretch;
-    background: ${({ theme }) => theme.color.bgSurfaceAlt};
+    background: ${({ theme }) => theme.color.bgSurface};
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.pill};
+    border-radius: ${({ theme }) => theme.radius.sm};
+    gap: 4px;
     padding: 4px;
     min-height: ${({ $size }) => ($size === "sm" ? "34px" : $size === "lg" ? "44px" : "38px")};
   `,
@@ -811,7 +904,7 @@ const Style = {
     width: ${({ $count }) => `calc((100% / ${$count}) - 8px)`};
     background: ${({ theme }) => theme.color.bgSurface};
     border: 1px solid ${({ theme }) => theme.color.borderStrong};
-    border-radius: ${({ theme }) => theme.radius.pill};
+    border-radius: ${({ theme }) => theme.radius.sm};
     box-shadow: ${({ theme }) => theme.shadow.subtle};
   `,
   SegmentedButton: styled.button<{ $selected: boolean; $size: MinimalSize; $count: number }>`
@@ -823,9 +916,9 @@ const Style = {
     z-index: 1;
     min-width: 72px;
     width: ${({ $count }) => `${100 / $count}%`};
-    padding: ${({ $size }) => ($size === "sm" ? "6px 12px" : $size === "lg" ? "10px 16px" : "8px 14px")};
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    padding: ${({ $size }) => ($size === "sm" ? "6px 10px" : $size === "lg" ? "10px 14px" : "8px 12px")};
+    letter-spacing: 0;
+    line-height: 1;
     font-size: ${({ $size }) => sizeFont[$size]};
     font-weight: ${({ theme }) => theme.typography.weightSemibold};
 
@@ -836,7 +929,7 @@ const Style = {
   `,
   ExplainerShell: styled.div`
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.lg};
+    border-radius: ${({ theme }) => theme.radius.md};
     background: ${({ theme }) => theme.color.bgSurfaceAlt};
     overflow: hidden;
   `,
@@ -885,11 +978,11 @@ const Style = {
         --minimal-stat-bg: ${accent.soft};
       `;
     }}
-    border-radius: ${({ theme }) => theme.radius.lg};
+    border-radius: ${({ theme }) => theme.radius.md};
     display: grid;
-    gap: ${({ theme }) => theme.spacing.sm};
-    min-height: 168px;
-    padding: ${({ theme }) => theme.spacing.md};
+    gap: 4px;
+    min-height: 0;
+    padding: 20px;
   `,
   StatMeta: styled.div`
     display: flex;
@@ -897,9 +990,9 @@ const Style = {
     gap: ${({ theme }) => theme.spacing.sm};
   `,
   StatIcon: styled.div`
-    width: 34px;
-    height: 34px;
-    border-radius: 999px;
+    width: 36px;
+    height: 36px;
+    border-radius: ${({ theme }) => theme.radius.sm};
     background: var(--minimal-stat-bg);
     color: var(--minimal-stat-accent);
     display: inline-flex;
@@ -907,17 +1000,19 @@ const Style = {
     justify-content: center;
   `,
   StatLabel: styled.span`
-    color: ${({ theme }) => theme.color.textSecondary};
+    color: ${({ theme }) => theme.color.textTertiary};
     font-size: ${({ theme }) => theme.typography.metaSize};
     font-weight: ${({ theme }) => theme.typography.weightSemibold};
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   `,
   StatValue: styled.strong`
     color: ${({ theme }) => theme.color.textPrimary};
-    font-size: ${({ theme }) => theme.typography.h1Size};
+    font-size: 1.625rem;
+    font-weight: 300;
     line-height: ${({ theme }) => theme.typography.lineHeightTight};
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
   `,
   StatHint: styled.p`
     margin: 0;
@@ -950,7 +1045,7 @@ const Style = {
     font-family: ${({ theme }) => theme.typography.displayFamily};
     font-size: 1.125rem;
     line-height: ${({ theme }) => theme.typography.lineHeightTight};
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
   `,
   FieldGridShell: styled.div<{ $columns: 1 | 2 | 3 }>`
     display: grid;
@@ -970,19 +1065,22 @@ const Style = {
   `,
   TableShell: styled.div`
     overflow-x: auto;
-    border-radius: ${({ theme }) => theme.radius.lg};
+    border-radius: ${({ theme }) => theme.radius.md};
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
     background: ${({ theme }) => theme.color.bgSurface};
   `,
   StyledTable: styled.table<{ $density: MinimalDensity }>`
     width: 100%;
-    border-collapse: collapse;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: ${({ theme }) => theme.typography.captionSize};
 
     caption {
       caption-side: top;
       padding: ${({ theme }) => theme.spacing.md};
       text-align: left;
       color: ${({ theme }) => theme.color.textSecondary};
+      font-size: ${({ theme }) => theme.typography.captionSize};
     }
 
     th,
@@ -1002,17 +1100,19 @@ const Style = {
 
     @media (hover: hover) and (pointer: fine) {
       tbody tr[data-clickable="true"]:hover {
-        background: ${({ theme }) => theme.color.bgSurfaceAlt};
+        background: ${({ theme }) => theme.color.bgSurfaceHover};
       }
     }
   `,
   TableHeaderCell: styled.th<{ $align: "left" | "center" | "right"; $width?: string }>`
     width: ${({ $width }) => $width ?? "auto"};
     text-align: ${({ $align }) => $align};
-    color: ${({ theme }) => theme.color.textTertiary};
-    font-family: ${({ theme }) => theme.typography.monoFamily};
+    background: ${({ theme }) => theme.color.bgSurface};
+    color: ${({ theme }) => theme.color.textSecondary};
+    font-family: ${({ theme }) => theme.typography.bodyFamily};
     font-size: ${({ theme }) => theme.typography.metaSize};
-    letter-spacing: 0.08em;
+    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    letter-spacing: 0.04em;
     text-transform: uppercase;
   `,
   TableCell: styled.td<{ $align: "left" | "center" | "right" }>`
@@ -1022,7 +1122,7 @@ const Style = {
     display: grid;
     gap: ${({ theme }) => theme.spacing.md};
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.lg};
+    border-radius: ${({ theme }) => theme.radius.md};
     background: ${({ theme }) => theme.color.bgSurface};
     padding: ${({ theme }) => theme.spacing.md};
   `,
@@ -1037,7 +1137,7 @@ const Style = {
     ${focusRing}
     color: ${({ theme }) => theme.color.textSecondary};
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.md};
+    border-radius: ${({ theme }) => theme.radius.sm};
     width: 34px;
     height: 34px;
     display: inline-flex;
@@ -1076,8 +1176,8 @@ const Style = {
             color: ${$currentMonth ? theme.color.textPrimary : theme.color.textTertiary};
             border: 1px solid transparent;
           `}
-    min-height: 64px;
-    border-radius: ${({ theme }) => theme.radius.md};
+    min-height: 52px;
+    border-radius: ${({ theme }) => theme.radius.sm};
     padding: ${({ theme }) => theme.spacing.sm};
     display: grid;
     align-content: start;
@@ -1097,6 +1197,7 @@ const Style = {
   `,
   FloatingPanel: styled(motion.div)<{
     $width: number;
+    $maxHeight: number;
     $placement: FloatingPlacement;
     $top: number;
     $left: number;
@@ -1105,9 +1206,10 @@ const Style = {
     top: ${({ $top }) => `${$top}px`};
     left: ${({ $left }) => `${$left}px`};
     width: ${({ $width }) => `${$width}px`};
+    max-height: ${({ $maxHeight }) => `${$maxHeight}px`};
     background: ${({ theme }) => theme.color.bgSurface};
     border: 1px solid ${({ theme }) => theme.color.borderStrong};
-    border-radius: ${({ theme }) => theme.radius.lg};
+    border-radius: ${({ theme }) => theme.radius.md};
     box-shadow: ${({ theme }) => theme.shadow.floating};
     z-index: ${({ theme }) => theme.zIndex.dropdown};
     overflow: hidden;
@@ -1134,7 +1236,7 @@ const Style = {
     white-space: nowrap;
   `,
   DropdownList: styled.div`
-    max-height: 320px;
+    max-height: inherit;
     overflow-y: auto;
     padding: ${({ theme }) => theme.spacing.xs};
   `,
@@ -1144,7 +1246,7 @@ const Style = {
   DropdownSearch: styled.input`
     width: 100%;
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.md};
+    border-radius: ${({ theme }) => theme.radius.sm};
     background: ${({ theme }) => theme.color.bgSurfaceAlt};
     padding: 10px 12px;
     font: inherit;
@@ -1173,7 +1275,7 @@ const Style = {
     display: grid;
     gap: 2px;
     padding: 10px 12px;
-    border-radius: ${({ theme }) => theme.radius.md};
+    border-radius: ${({ theme }) => theme.radius.sm};
     cursor: pointer;
     background: ${({ theme, $selected }) => ($selected ? theme.color.bgSurfaceAlt : "transparent")};
     color: ${({ theme }) => theme.color.textPrimary};
@@ -1210,7 +1312,7 @@ const Style = {
     max-width: ${({ $maxWidth }) => $maxWidth};
     background: ${({ theme }) => theme.color.textPrimary};
     color: ${({ theme }) => theme.color.textInverse};
-    border-radius: ${({ theme }) => theme.radius.md};
+    border-radius: ${({ theme }) => theme.radius.sm};
     padding: 8px 10px;
     box-shadow: ${({ theme }) => theme.shadow.medium};
     z-index: ${({ theme }) => theme.zIndex.tooltip};
@@ -1227,19 +1329,40 @@ const Style = {
     backdrop-filter: blur(4px);
     z-index: ${({ theme }) => theme.zIndex.overlay};
   `,
-  ModalShell: styled(motion.section)`
+  ModalShell: styled(motion.section)<{ $mobileSheet: boolean }>`
     position: fixed;
     inset: 50% auto auto 50%;
     transform: translate(-50%, -50%);
-    width: min(92vw, 520px);
+    width: min(92vw, var(--minimal-modal-max-width, 520px));
+    max-height: var(--minimal-modal-max-height, calc(100dvh - 48px));
     background: ${({ theme }) => theme.color.bgSurface};
     border: 1px solid ${({ theme }) => theme.color.borderStrong};
-    border-radius: ${({ theme }) => theme.radius.xl};
+    border-radius: ${({ theme }) => theme.radius.md};
     box-shadow: ${({ theme }) => theme.shadow.floating};
     padding: ${({ theme }) => theme.spacing.lg};
     z-index: ${({ theme }) => theme.zIndex.modal};
     display: grid;
     gap: ${({ theme }) => theme.spacing.md};
+    overflow: hidden;
+
+    @media (max-width: 720px) {
+      inset: ${({ $mobileSheet }) => ($mobileSheet ? "auto 0 0 0" : "50% auto auto 50%")};
+      transform: ${({ $mobileSheet }) => ($mobileSheet ? "none" : "translate(-50%, -50%)")};
+      width: ${({ $mobileSheet }) => ($mobileSheet ? "100%" : "min(92vw, var(--minimal-modal-max-width, 520px))")};
+      max-height: min(90dvh, var(--minimal-modal-max-height, 90dvh));
+      border-radius: ${({ theme, $mobileSheet }) =>
+        $mobileSheet ? `${theme.radius.lg} ${theme.radius.lg} 0 0` : theme.radius.md};
+      padding: ${({ theme }) => `${theme.spacing.lg} ${theme.spacing.md}`};
+
+      ${({ $mobileSheet }) =>
+        $mobileSheet
+          ? css`
+              border-right: 0;
+              border-bottom: 0;
+              border-left: 0;
+            `
+          : null}
+    }
   `,
   ModalHeader: styled.div`
     display: grid;
@@ -1249,14 +1372,195 @@ const Style = {
     margin: 0;
     color: ${({ theme }) => theme.color.textPrimary};
     font-family: ${({ theme }) => theme.typography.displayFamily};
-    font-size: 1.5rem;
+    font-size: ${({ theme }) => theme.typography.h1Size};
     line-height: ${({ theme }) => theme.typography.lineHeightTight};
-    letter-spacing: -0.02em;
+    letter-spacing: 0;
   `,
   ModalActions: styled.div`
     display: flex;
     justify-content: flex-end;
     gap: ${({ theme }) => theme.spacing.sm};
+    flex-wrap: wrap;
+  `,
+  ModalBody: styled.div<{ $scrollable: boolean }>`
+    min-height: 0;
+    overflow-y: ${({ $scrollable }) => ($scrollable ? "auto" : "visible")};
+    padding-right: ${({ $scrollable }) => ($scrollable ? "4px" : "0")};
+  `,
+  DisplaySection: styled(motion.section)<{
+    $anchor: LandingAnchor;
+    $visualMode: LandingVisualMode;
+    $intensity: LandingIntensity;
+    $minHeight: string;
+    $backgroundImage?: string;
+    $overlay?: string;
+  }>`
+    position: relative;
+    isolation: isolate;
+    display: grid;
+    align-items: ${({ $anchor }) => ($anchor === "bottom-left" || $anchor === "bottom-right" ? "end" : "center")};
+    min-height: ${({ $minHeight }) => $minHeight};
+    overflow: hidden;
+    border-radius: ${({ theme }) => theme.radius.md};
+    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
+    background:
+      ${({ $overlay }) => $overlay ?? "linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.92))"},
+      ${({ $backgroundImage }) => ($backgroundImage ? `url(${$backgroundImage}) center / cover` : "transparent")};
+    box-shadow: ${({ theme, $intensity }) => ($intensity === "statement" ? theme.shadow.medium : theme.shadow.subtle)};
+    padding: ${({ theme, $intensity }) =>
+      $intensity === "statement" ? theme.spacing.xl : $intensity === "calm" ? theme.spacing.lg : theme.spacing.xl};
+
+    ${({ theme, $visualMode, $anchor }) =>
+      $visualMode === "background" || $visualMode === "canvas"
+        ? css`
+            color: ${theme.color.textPrimary};
+          `
+        : css`
+            grid-template-columns: ${$anchor === "right-visual" || $anchor === "left-visual"
+              ? $anchor === "right-visual"
+                ? "minmax(0, 0.9fr) minmax(320px, 1.1fr)"
+                : "minmax(320px, 1.1fr) minmax(0, 0.9fr)"
+              : "minmax(0, 1fr)"};
+            gap: ${theme.spacing.xl};
+            background-color: ${theme.color.bgSurface};
+          `}
+
+    @media (max-width: 860px) {
+      grid-template-columns: 1fr;
+      min-height: min(760px, max(520px, 76dvh));
+      padding: ${({ theme }) => theme.spacing.lg};
+    }
+  `,
+  DisplayCopy: styled.div<{ $anchor: LandingAnchor; $intensity: LandingIntensity }>`
+    position: relative;
+    z-index: 1;
+    display: grid;
+    gap: ${({ theme }) => theme.spacing.md};
+    max-width: ${({ $intensity }) => ($intensity === "statement" ? "760px" : "620px")};
+    justify-self: ${({ $anchor }) =>
+      $anchor === "center" || $anchor === "stacked"
+        ? "center"
+        : $anchor === "bottom-right"
+          ? "end"
+          : "start"};
+    align-self: ${({ $anchor }) => ($anchor === "top-left" ? "start" : $anchor.includes("bottom") ? "end" : "center")};
+    text-align: ${({ $anchor }) => ($anchor === "center" || $anchor === "stacked" ? "center" : "left")};
+  `,
+  DisplayTitle: styled.h1<{ $intensity: LandingIntensity }>`
+    margin: 0;
+    color: ${({ theme }) => theme.color.textPrimary};
+    font-family: ${({ theme }) => theme.typography.displayFamily};
+    font-size: ${({ theme, $intensity }) =>
+      $intensity === "statement" ? theme.typography.displaySize : theme.typography.h1Size};
+    line-height: ${({ theme }) => theme.typography.lineHeightTight};
+    letter-spacing: 0;
+  `,
+  DisplayVisual: styled.div<{ $anchor: LandingAnchor; $aspect: string }>`
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    aspect-ratio: ${({ $aspect }) => $aspect};
+    width: 100%;
+    align-self: stretch;
+    justify-self: stretch;
+    order: ${({ $anchor }) => ($anchor === "left-visual" ? -1 : 0)};
+    overflow: hidden;
+    border-radius: ${({ theme }) => theme.radius.md};
+
+    > * {
+      width: 100%;
+      height: 100%;
+    }
+
+    @media (max-width: 860px) {
+      order: 0;
+      max-height: 360px;
+    }
+  `,
+  LandingSection: styled.section<{ $anchor: LandingAnchor; $intensity: LandingIntensity }>`
+    display: grid;
+    gap: ${({ theme, $intensity }) => ($intensity === "calm" ? theme.spacing.md : theme.spacing.lg)};
+    padding: ${({ theme, $intensity }) =>
+      $intensity === "statement" ? `${theme.spacing["2xl"]} 0` : `${theme.spacing.xl} 0`};
+    align-items: center;
+    grid-template-columns: ${({ $anchor }) =>
+      $anchor === "left-visual"
+        ? "minmax(320px, 1fr) minmax(0, 0.9fr)"
+        : $anchor === "right-visual"
+          ? "minmax(0, 0.9fr) minmax(320px, 1fr)"
+          : "minmax(0, 1fr)"};
+
+    @media (max-width: 860px) {
+      grid-template-columns: 1fr;
+      padding: ${({ theme }) => `${theme.spacing.xl} 0`};
+    }
+  `,
+  LandingCopy: styled.div<{ $anchor: LandingAnchor }>`
+    display: grid;
+    gap: ${({ theme }) => theme.spacing.sm};
+    max-width: 680px;
+    justify-self: ${({ $anchor }) => ($anchor === "center" || $anchor === "stacked" ? "center" : "start")};
+    text-align: ${({ $anchor }) => ($anchor === "center" || $anchor === "stacked" ? "center" : "left")};
+  `,
+  LandingMedia: styled.div<{ $anchor: LandingAnchor; $aspect: string }>`
+    min-width: 0;
+    width: 100%;
+    aspect-ratio: ${({ $aspect }) => $aspect};
+    order: ${({ $anchor }) => ($anchor === "left-visual" ? -1 : 0)};
+    overflow: hidden;
+    border-radius: ${({ theme }) => theme.radius.md};
+    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
+    background: ${({ theme }) => theme.color.bgSurfaceAlt};
+
+    > * {
+      width: 100%;
+      height: 100%;
+    }
+  `,
+  InfoPanel: styled.article<{ $tone: MinimalTone; $layout: InfoLayout }>`
+    ${({ theme, $tone }) => {
+      const accent = toneAccent(theme, $tone);
+      return css`
+        --minimal-info-accent: ${accent.color};
+        --minimal-info-bg: ${accent.soft};
+      `;
+    }}
+    display: grid;
+    grid-template-columns: ${({ $layout }) =>
+      $layout === "row" ? "auto minmax(0, 1fr) auto" : $layout === "split" ? "minmax(0, 1fr) auto" : "1fr"};
+    gap: ${({ theme }) => theme.spacing.md};
+    align-items: start;
+    min-width: 0;
+    padding: ${({ theme }) => theme.spacing.md};
+    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
+    border-left: 2px solid var(--minimal-info-accent);
+    border-radius: ${({ theme }) => theme.radius.sm};
+    background: ${({ theme }) => theme.color.bgSurface};
+
+    @media (max-width: 640px) {
+      grid-template-columns: 1fr;
+    }
+  `,
+  InfoIcon: styled.div`
+    width: 36px;
+    height: 36px;
+    border-radius: ${({ theme }) => theme.radius.sm};
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--minimal-info-bg);
+    color: var(--minimal-info-accent);
+  `,
+  InfoCopy: styled.div`
+    display: grid;
+    gap: ${({ theme }) => theme.spacing.xs};
+    min-width: 0;
+  `,
+  InfoTitle: styled.h3`
+    margin: 0;
+    color: ${({ theme }) => theme.color.textPrimary};
+    font-size: ${({ theme }) => theme.typography.h2Size};
+    line-height: ${({ theme }) => theme.typography.lineHeightTight};
   `,
   Skeleton: styled.span<{
     $width?: string;
@@ -1361,6 +1665,18 @@ const {
   ModalHeader,
   ModalTitle,
   ModalActions,
+  ModalBody,
+  DisplaySection,
+  DisplayCopy,
+  DisplayTitle,
+  DisplayVisual,
+  LandingSection,
+  LandingCopy,
+  LandingMedia,
+  InfoPanel,
+  InfoIcon,
+  InfoCopy,
+  InfoTitle,
   Skeleton,
 } = Style;
 
@@ -1461,7 +1777,13 @@ const useDismissLayer = (refs: ReadonlyArray<{ current: HTMLElement | null }>, e
   }, [enabled, onDismiss, refs]);
 };
 
-const useFloatingPosition = (anchorRef: { current: HTMLElement | null }, open: boolean, panelHeight = 320) => {
+const useFloatingPosition = (
+  anchorRef: { current: HTMLElement | null },
+  open: boolean,
+  panelHeight = 320,
+  minWidth = 0,
+  matchTriggerWidth = true,
+) => {
   const [position, setPosition] = useState<FloatingPosition | null>(null);
 
   useEffect(() => {
@@ -1475,14 +1797,26 @@ const useFloatingPosition = (anchorRef: { current: HTMLElement | null }, open: b
         return;
       }
       const rect = anchor.getBoundingClientRect();
+      const viewportPadding = 12;
       const spaceBelow = window.innerHeight - rect.bottom;
       const placement: FloatingPlacement =
         spaceBelow < panelHeight && rect.top > spaceBelow ? "top" : "bottom";
+      const availableHeight =
+        placement === "bottom"
+          ? Math.max(120, window.innerHeight - rect.bottom - floatingYOffset - viewportPadding)
+          : Math.max(120, rect.top - floatingYOffset - viewportPadding);
+      const requestedWidth = matchTriggerWidth ? rect.width : Math.max(rect.width, minWidth);
+      const width = Math.min(requestedWidth, window.innerWidth - viewportPadding * 2);
+      const left = Math.min(
+        Math.max(viewportPadding, rect.left),
+        Math.max(viewportPadding, window.innerWidth - width - viewportPadding),
+      );
 
       setPosition({
         top: placement === "bottom" ? rect.bottom + floatingYOffset : rect.top - floatingYOffset,
-        left: rect.left,
-        width: rect.width,
+        left,
+        width,
+        maxHeight: Math.min(panelHeight, availableHeight),
         placement,
       });
     };
@@ -1494,7 +1828,7 @@ const useFloatingPosition = (anchorRef: { current: HTMLElement | null }, open: b
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [anchorRef, open, panelHeight]);
+  }, [anchorRef, matchTriggerWidth, minWidth, open, panelHeight]);
 
   return position;
 };
@@ -1766,6 +2100,106 @@ export const MinimalHeader = ({
   );
 };
 
+export const MinimalDisplaySection = ({
+  eyebrow,
+  title,
+  description,
+  actions,
+  visual,
+  anchor = "center",
+  visualMode = visual ? "inline" : "none",
+  intensity = "statement",
+  minHeight = "min(820px, 82dvh)",
+  mediaAspectRatio = "4 / 3",
+  backgroundImage,
+  overlay,
+  children,
+  ...props
+}: MinimalDisplaySectionProps) => {
+  const { slideUpVariants } = useMinimalMotion();
+
+  return (
+    <DisplaySection
+      data-minimal="DisplaySection"
+      $anchor={anchor}
+      $visualMode={visualMode}
+      $intensity={intensity}
+      $minHeight={minHeight}
+      $backgroundImage={backgroundImage}
+      $overlay={overlay}
+      variants={slideUpVariants}
+      initial="initial"
+      animate="animate"
+      exit="exit"
+      {...props}
+    >
+      <DisplayCopy $anchor={anchor} $intensity={intensity}>
+        {eyebrow ? <HeaderKicker as="span">{eyebrow}</HeaderKicker> : null}
+        <DisplayTitle $intensity={intensity}>{title}</DisplayTitle>
+        {description ? <HeaderSubtitle>{description}</HeaderSubtitle> : null}
+        {actions ? <ActionRowShell $align={anchor === "center" || anchor === "stacked" ? "center" : "start"}>{actions}</ActionRowShell> : null}
+        {children}
+      </DisplayCopy>
+      {visual && visualMode !== "background" && visualMode !== "canvas" ? (
+        <DisplayVisual $anchor={anchor} $aspect={mediaAspectRatio}>
+          {visual}
+        </DisplayVisual>
+      ) : null}
+    </DisplaySection>
+  );
+};
+
+export const MinimalLandingSection = ({
+  eyebrow,
+  title,
+  description,
+  actions,
+  children,
+  anchor = "stacked",
+  intensity = "standard",
+  media,
+  mediaAspectRatio = "16 / 10",
+  ...props
+}: MinimalLandingSectionProps) => (
+  <LandingSection data-minimal="LandingSection" $anchor={anchor} $intensity={intensity} {...props}>
+    <LandingCopy $anchor={anchor}>
+      {eyebrow ? <HeaderKicker as="span">{eyebrow}</HeaderKicker> : null}
+      {title ? <DisplayTitle as="h2" $intensity={intensity === "statement" ? "statement" : "standard"}>{title}</DisplayTitle> : null}
+      {description ? <HeaderSubtitle>{description}</HeaderSubtitle> : null}
+      {actions ? <ActionRowShell $align={anchor === "center" || anchor === "stacked" ? "center" : "start"}>{actions}</ActionRowShell> : null}
+    </LandingCopy>
+    {media ? (
+      <LandingMedia $anchor={anchor} $aspect={mediaAspectRatio}>
+        {media}
+      </LandingMedia>
+    ) : null}
+    {children}
+  </LandingSection>
+);
+
+export const MinimalInfoPanel = ({
+  eyebrow,
+  title,
+  description,
+  icon,
+  meta,
+  action,
+  tone = "neutral",
+  layout = "row",
+  ...props
+}: MinimalInfoPanelProps) => (
+  <InfoPanel data-minimal="InfoPanel" $tone={tone} $layout={layout} {...props}>
+    {icon ? <InfoIcon>{icon}</InfoIcon> : null}
+    <InfoCopy>
+      {eyebrow ? <HeaderKicker as="span">{eyebrow}</HeaderKicker> : null}
+      <InfoTitle>{title}</InfoTitle>
+      {description ? <HeaderSubtitle>{description}</HeaderSubtitle> : null}
+      {meta ? <FieldMessage as="div" $tone={tone}>{meta}</FieldMessage> : null}
+    </InfoCopy>
+    {action ? <div>{action}</div> : null}
+  </InfoPanel>
+);
+
 export const MinimalButton = ({
   children,
   variant = "primary",
@@ -1916,6 +2350,9 @@ export const MinimalDropdown = <T extends string>({
   searchable,
   searchPlaceholder = "Filter options…",
   disabled = false,
+  panelMaxHeight = 320,
+  panelMinWidth = 0,
+  matchTriggerWidth = true,
   renderValue,
   ...props
 }: MinimalDropdownProps<T>) => {
@@ -1928,7 +2365,7 @@ export const MinimalDropdown = <T extends string>({
   const [search, setSearch] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const position = useFloatingPosition(triggerRef, open);
+  const position = useFloatingPosition(triggerRef, open, panelMaxHeight, panelMinWidth, matchTriggerWidth);
   const { popVariants } = useMinimalMotion();
   const dismissRefs = useMemo(() => [triggerRef, panelRef], []);
 
@@ -1969,6 +2406,7 @@ export const MinimalDropdown = <T extends string>({
               role="listbox"
               aria-labelledby={label ? triggerId : undefined}
               $width={position.width}
+              $maxHeight={position.maxHeight}
               $placement={position.placement}
               $top={position.top}
               $left={position.left}
@@ -2520,6 +2958,11 @@ export const MinimalActionModal = ({
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
   confirmDisabled = false,
+  maxWidth = "520px",
+  maxHeight = "calc(100dvh - 48px)",
+  align = "start",
+  bodyScrollable = true,
+  mobileSheet = true,
   onClose,
   onConfirm,
 }: MinimalActionModalProps) => {
@@ -2572,20 +3015,25 @@ export const MinimalActionModal = ({
       <ModalShell
         data-minimal="ActionModal"
         ref={modalRef}
+        $mobileSheet={mobileSheet}
         role="dialog"
         aria-modal="true"
+        style={{
+          "--minimal-modal-max-width": maxWidth,
+          "--minimal-modal-max-height": maxHeight,
+        } as CSSProperties}
         variants={popVariants}
         initial="initial"
         animate="animate"
         exit="exit"
         onClick={(event) => event.stopPropagation()}
       >
-        <ModalHeader>
+        <ModalHeader style={{ textAlign: align === "center" ? "center" : "left" }}>
           <HeaderKicker as="span">{tone}</HeaderKicker>
           <ModalTitle>{title}</ModalTitle>
           {description ? <HeaderSubtitle>{description}</HeaderSubtitle> : null}
         </ModalHeader>
-        {children}
+        {children ? <ModalBody $scrollable={bodyScrollable}>{children}</ModalBody> : null}
         <ModalActions>
           <MinimalButton variant="quiet" tone="neutral" onClick={onClose}>
             {cancelLabel}

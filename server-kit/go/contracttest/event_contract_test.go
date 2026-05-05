@@ -39,3 +39,18 @@ func TestVerifyProducerAndConsumer(t *testing.T) {
 		t.Fatalf("consumer was not called")
 	}
 }
+
+func TestVerifyProducerRejectsSplitCorrelationIDs(t *testing.T) {
+	producer := producerFunc(func(_ context.Context, eventType string) (events.Envelope, error) {
+		return events.Envelope{
+			EventType:     eventType,
+			Payload:       map[string]any{"id": "1"},
+			Metadata:      map[string]any{"correlation_id": "corr_metadata"},
+			CorrelationID: "corr_envelope",
+		}, nil
+	})
+
+	if err := VerifyProducer(context.Background(), "order:created:v1:requested", producer); err == nil {
+		t.Fatal("expected split correlation IDs to fail producer contract")
+	}
+}

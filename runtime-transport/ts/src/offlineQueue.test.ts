@@ -24,4 +24,16 @@ describe("offline queue", () => {
       /capacity exceeded/
     );
   });
+
+  it("exposes bounded queue state for sync/backpressure decisions", () => {
+    const queue = createOfflineQueue({ maxQueueSize: 3 });
+    queue.enqueue(createEnvelope({ eventType: "order:create:v1:requested", payload: {} }));
+
+    expect(queue.snapshot()).toMatchObject({
+      size: 1,
+      capacity: 3,
+      attempts: 0,
+    });
+    expect(queue.snapshot().oldestQueuedAt).toEqual(expect.any(String));
+  });
 });

@@ -28,6 +28,7 @@ describe("RuntimeSharedArena", () => {
 
     expect(ready.state).toBe(ARENA_DESCRIPTOR_STATE_READY);
     expect(new TextDecoder().decode(arena.readSlab(descriptor.id))).toBe("runtime-arena-payload");
+    expect(new TextDecoder().decode(arena.readSlabView(descriptor.id))).toBe("runtime-arena-payload");
     expect(arena.enqueueDescriptorReady(descriptor.id, 42)).toBe(true);
 
     const entry = arena.dequeue();
@@ -36,6 +37,18 @@ describe("RuntimeSharedArena", () => {
 
     const consumed = arena.markConsumed(descriptor.id);
     expect(consumed.state).toBe(ARENA_DESCRIPTOR_STATE_CONSUMED);
+
+    arena.writeSlabReady(descriptor.id, payload);
+    expect(arena.readDescriptor(descriptor.id).state).toBe(ARENA_DESCRIPTOR_STATE_READY);
+    arena.markConsumedById(descriptor.id);
+    expect(arena.readDescriptor(descriptor.id).state).toBe(ARENA_DESCRIPTOR_STATE_CONSUMED);
+
+    expect(arena.invariantSnapshot()).toMatchObject({
+      capacityBytes: ARENA_MIN_BYTES,
+      queueDepth: 0,
+      queueDropped: 0,
+      invalidDescriptors: 0,
+    });
   });
 
   it("moves 1MB payloads through the shared arena data plane", () => {

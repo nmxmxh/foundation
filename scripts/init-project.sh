@@ -30,6 +30,7 @@ Options:
   --no-wasm             Skip WASM scaffold and runtime-sdk
   --with-wasm           Include WASM scaffold and runtime-sdk
   --dry-run             Preview without creating files
+  --update              Update an existing project-owned checkout with current vendored foundation modules, docs, tooling, and frontend manifest contract
   --skip-deps           Skip dependency verification
   --why                 Explain the Foundation architecture split
   --help, -h            Show this message
@@ -38,6 +39,7 @@ Examples:
   ./init.sh civic_watch
   ./init.sh api backend --go-module github.com/ovasabi/api
   ./init.sh dashboard frontend --project-dir ../dashboard_v1
+  ./init.sh civic_watch full --project-dir ../civic_watch_ng_v1 --update
 EOF
 }
 
@@ -169,6 +171,7 @@ WITH_WASM=""
 DRY_RUN="false"
 SKIP_DEPS="false"
 FORCE="false"
+UPDATE_EXISTING="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -208,6 +211,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN="true"
+            shift
+            ;;
+        --update)
+            UPDATE_EXISTING="true"
             shift
             ;;
         --skip-deps)
@@ -271,19 +278,35 @@ foundation_log_info "Path: $PROJECT_PATH"
 [[ "$PROFILE" == "full" || "$PROFILE" == "backend" ]] && foundation_log_info "Go module: $GO_MODULE"
 foundation_log_info "Docker: $WITH_DOCKER"
 foundation_log_info "WASM: $WITH_WASM"
+[[ "$UPDATE_EXISTING" == "true" ]] && foundation_log_info "Mode: update existing project"
 
 if [[ "$DRY_RUN" == "true" ]]; then
     foundation_log_info "[DRY RUN] Would create project from manifest-driven scaffold"
     exit 0
 fi
 
-if [[ -e "$PROJECT_PATH" ]]; then
+if [[ -e "$PROJECT_PATH" && "$UPDATE_EXISTING" != "true" ]]; then
     foundation_log_error "Directory already exists: $PROJECT_PATH"
+    exit 1
+fi
+
+if [[ "$UPDATE_EXISTING" == "true" && ! -d "$PROJECT_PATH" ]]; then
+    foundation_log_error "Cannot update missing project directory: $PROJECT_PATH"
     exit 1
 fi
 
 if [[ "$SKIP_DEPS" != "true" ]]; then
     check_dependencies
+fi
+
+if [[ "$UPDATE_EXISTING" == "true" ]]; then
+    foundation_log_info "Updating managed foundation surfaces..."
+    scaffold_sync_foundation_modules
+    scaffold_sync_docs
+    scaffold_sync_tooling
+    scaffold_sync_frontend_manifest_contract
+    foundation_log_success "$PROJECT_NAME foundation surfaces updated at $PROJECT_PATH"
+    exit 0
 fi
 
 mkdir -p "$PROJECT_PATH"

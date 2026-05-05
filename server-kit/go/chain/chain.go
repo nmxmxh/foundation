@@ -22,6 +22,18 @@ func RunParallel[T any](ctx context.Context, operations []Operation[T]) []Result
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if len(operations) == 0 {
+		return nil
+	}
+	if len(operations) == 1 {
+		result := Result[T]{Name: operations[0].Name}
+		if operations[0].Run == nil {
+			result.Error = errors.New("operation run function is nil")
+			return []Result[T]{result}
+		}
+		result.Value, result.Error = operations[0].Run(ctx)
+		return []Result[T]{result}
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

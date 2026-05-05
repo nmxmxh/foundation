@@ -45,6 +45,21 @@ This document records the runtime foundation posture for this scaffold.
 14. Main-thread code must not call blocking `Atomics.wait`; workers own blocking waits and main-thread code uses `Atomics.waitAsync` or message fallback when needed.
 15. If DOM observation is unavoidable, keep it inside a narrow UI adapter and prefer `ResizeObserver` or `IntersectionObserver` before `MutationObserver`.
 
+## Runtime state-machine invariants
+
+The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_architecture_practices.md`: each faster lane is a refinement of the same visible command/event contract.
+
+1. Visible runtime behavior is input contract, output contract, status code, diagnostics, terminal event, and canonical metadata.
+2. Hidden runtime state includes buffers, arena descriptors, stream chunks, retries, worker ownership, connection state, and lane-specific transport bookkeeping.
+3. `EpochMonotonic`: runtime epoch counters must never move backwards.
+4. `OutputAfterInput`: output and diagnostics epochs must correspond to a known input epoch.
+5. `MetadataPreserved`: correlation ID, idempotency key, session, user, organization, schema version, and locale must survive lane changes.
+6. `FallbackRefinement`: fallback from `sab`, WASM, transferable buffers, WebSocket, HTTP, `ffi`, `shm`, or `stdio` must produce the same accepted domain result or a controlled error class.
+7. `OwnedDecodeLifetime`: borrowed views must not outlive the source frame or runtime buffer region.
+8. `FrameSizeBound`: oversized frames and payloads must be rejected before decode, render, storage, or worker dispatch.
+9. No-op/stuttering steps such as duplicate suppression, empty polls, reconnect attempts, cache hits, or retry waits must not change visible semantics.
+10. Runtime parity tests must act as refinement checks, not just byte comparisons.
+
 ## Browser WASM build and binding flow
 
 1. `make runtime-bindings` regenerates the shared runtime buffer constants from `foundation/runtime-sdk/protocols/system/v1/*` into the Rust, Go, and TypeScript runtime-sdk packages.

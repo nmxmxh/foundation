@@ -17,12 +17,33 @@
 1. use transform and opacity only
 2. keep stagger subtle or absent for fast repeated interaction
 3. preserve anchor alignment during animation
+4. clamp panel width to the viewport before rendering
+5. expose a max-height policy and scroll the option list, not the page
+6. choose deliberately between trigger-matched width and a wider minimum panel for long labels
 
 ## Modals And Drawers
 
 1. start around `scale(0.85-0.95)`, never `scale(0)`
 2. separate backdrop fade from panel movement
 3. drawers should move in the direction of actual placement
+4. set `width`, `max-width`, and `max-height` as shell constraints
+5. put overflowing content in an internal scroll body so title and actions remain reachable
+6. treat small-screen action dialogs as bottom sheets when it improves reach and vertical fit
+
+## Display And Landing Sections
+
+1. declare the section anchor before styling: centered, bottom-left, bottom-right, side visual, stacked, or offset
+2. pair every media region with an aspect ratio and max-height
+3. use `min-height` as a deliberate viewport relationship, not a fixed decorative number
+4. keep text safe areas explicit when imagery is full-bleed
+5. vary section rhythm without changing the design system: palette, radius, type scale, and CTA family stay consistent
+
+## Information Panels
+
+1. reserve stable regions for icon, copy, metadata, and action
+2. collapse to one column before text or actions collide
+3. use border or accent bars for tone before adding heavy fills
+4. keep dense panels readable with fixed gaps and predictable line-height
 
 ## Toasts
 

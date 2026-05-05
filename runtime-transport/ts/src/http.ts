@@ -6,6 +6,7 @@ type HTTPTransportOptions = {
   fetchImpl?: typeof fetch;
   getHeaders?: () => HeadersInit;
   compression?: RuntimeCompressionOptions;
+  timeoutMs?: number;
 };
 
 const CONTENT_TYPE_JSON = "application/json";
@@ -18,12 +19,13 @@ export const createHTTPTransport = (options: HTTPTransportOptions): TransportStr
     kind: "http",
     async dispatch<TPayload>(envelope: RuntimeEnvelope<TPayload>, route: RuntimeRoute, signal: AbortSignal): Promise<unknown> {
       const request = await buildRequest(options, route, envelope);
+      const { signal: requestSignal, cleanup } = withTimeout(signal, options.timeoutMs);
       const response = await fetchImpl(request.url, {
         method: request.method,
         headers: request.headers,
         body: request.body,
-        signal,
-      });
+        signal: requestSignal,
+      }).finally(cleanup);
 
       if (!response.ok) {
         const errorBody = await parseErrorBody(response);
@@ -70,6 +72,35 @@ export const createHTTPTransport = (options: HTTPTransportOptions): TransportStr
 
       const decoded = (await response.json()) as Record<string, unknown>;
       return decoded.response_payload ?? decoded;
+    },
+  };
+};
+
+const withTimeout = (signal: AbortSignal, timeoutMs = 30000): { signal: AbortSignal; cleanup: () => void } => {
+  const boundedTimeout = Math.max(1, timeoutMs);
+  const controller = new AbortController();
+  let settled = false;
+  const abort = () => {
+    if (!settled) {
+      controller.abort(signal.reason);
+    }
+  };
+  const timeoutId = globalThis.setTimeout(() => {
+    if (!settled) {
+      controller.abort(new Error(`http transport timed out after ${boundedTimeout}ms`));
+    }
+  }, boundedTimeout);
+  if (signal.aborted) {
+    abort();
+  } else {
+    signal.addEventListener("abort", abort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      settled = true;
+      globalThis.clearTimeout(timeoutId);
+      signal.removeEventListener("abort", abort);
     },
   };
 };

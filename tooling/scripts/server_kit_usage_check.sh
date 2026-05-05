@@ -30,6 +30,27 @@ check_exists() {
   fi
 }
 
+check_no_project_match() {
+  local label="$1"
+  local pattern="$2"
+  shift 2
+  local output
+  if output="$(rg -n "$pattern" "$@" \
+    --glob '!foundation/**' \
+    --glob '!docs/**' \
+    --glob '!scripts/checks/**' \
+    --glob '!**/*test*' \
+    --glob '!**/testdata/**' \
+    --glob '!**/node_modules/**' \
+    --glob '!**/vendor/**' 2>/dev/null)"; then
+    echo "[FAIL] $label"
+    echo "$output"
+    failed=1
+  else
+    echo "[OK] $label"
+  fi
+}
+
 if [[ -d "$target/foundation/server-kit/go" ]]; then
   kit="$target/foundation/server-kit/go"
 else
@@ -47,6 +68,9 @@ check_exists "server-kit compression" "$kit/compress/middleware.go"
 check_exists "server-kit observability" "$kit/observability/http.go"
 check_exists "server-kit resilience" "$kit/resilience/resilience.go"
 check_exists "server-kit worker engine" "$kit/worker/engine.go"
+check_file_contains "server-kit exposes direct frame client" "$kit/grpcsvc/grpcsvc.go" "NewDirectFrameClient"
+check_file_contains "server-kit exposes binary frame registration" "$kit/grpcsvc/grpcsvc.go" "RegisterFrame"
+check_file_contains "server-kit exposes borrowed frame views" "$kit/grpcsvc/grpcsvc.go" "UnmarshalFrameView"
 
 if [[ -f "$target/.foundation" && -d "$target/internal" ]]; then
   startup_file=""
@@ -69,6 +93,7 @@ if [[ -f "$target/.foundation" && -d "$target/internal" ]]; then
   check_file_contains "websocket uses routing metrics" "$target/internal/server/websocket.go" "server-kit/go/wsrouting"
   check_file_contains "websocket uses websocket metrics" "$target/internal/server/websocket.go" "server-kit/go/wsmetrics"
   check_file_contains "worker queues are bounded by config" "$target/internal/worker/registry.go" "DefaultQueueConfig"
+  check_no_project_match "internal code avoids JSON gRPC compatibility dispatch" "grpcsvc\\.Dispatch\\s*\\(|\\.Dispatch\\s*\\([^\\n]*grpcsvc\\.Envelope|grpcsvc\\.Envelope\\b" "$target/internal" "$target/cmd"
 fi
 
 if [[ "$failed" -ne 0 ]]; then

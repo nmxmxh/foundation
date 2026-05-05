@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/domainerr"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
 )
 
@@ -88,21 +89,19 @@ func BuildDispatchRequest(r *http.Request, route registry.HTTPRoute) (DispatchRe
 		payload["_request_headers"] = headers
 	}
 
+	requestMetadata := MetadataFromRequest(r)
 	req := DispatchRequest{
 		EventType:          strings.TrimSpace(route.EventType),
 		Payload:            payload,
 		PayloadBytes:       rawBody,
 		PayloadEncoding:    payloadEncoding,
 		ResponseEncoding:   responseEncoding,
-		Metadata:           metadataFromHeaders(r),
-		CorrelationID:      strings.TrimSpace(r.Header.Get("X-Correlation-ID")),
+		Metadata:           metadataFromHeaders(r, requestMetadata),
+		CorrelationID:      requestMetadata.CorrelationID,
 		SchemaVersion:      "1.0",
 		Timestamp:          time.Now().UTC().Format(time.RFC3339),
 		RequiredCapability: strings.TrimSpace(route.RequiredCapability),
 		RequiredPermission: strings.TrimSpace(route.Permission),
-	}
-	if req.CorrelationID == "" {
-		req.CorrelationID = "corr_" + time.Now().UTC().Format("20060102T150405.000000000")
 	}
 	return req, nil
 }
@@ -174,8 +173,8 @@ func payloadFromRequest(r *http.Request) (map[string]any, []byte, string, string
 	return payload, rawBody, "json", responseEncoding, nil
 }
 
-func metadataFromHeaders(r *http.Request) map[string]any {
-	metadata := map[string]any{}
+func metadataFromHeaders(r *http.Request, requestMetadata metadata.EnvelopeMetadata) map[string]any {
+	metadata := requestMetadata.ToMap()
 	if r == nil {
 		return metadata
 	}

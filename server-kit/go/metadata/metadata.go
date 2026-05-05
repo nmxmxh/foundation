@@ -2,6 +2,8 @@ package metadata
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,6 +67,46 @@ func New() EnvelopeMetadata {
 		Attributes: map[string]string{},
 		Extras:     map[string]any{},
 	}
+}
+
+func NewCorrelationID() string {
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err == nil {
+		return "corr_" + time.Now().UTC().Format("20060102T150405.000000000") + "_" + hex.EncodeToString(random[:])
+	}
+	return "corr_" + time.Now().UTC().Format("20060102T150405.000000000")
+}
+
+func (m *EnvelopeMetadata) EnsureCorrelation(candidates ...string) string {
+	if m == nil {
+		for _, candidate := range candidates {
+			if corr := strings.TrimSpace(candidate); corr != "" {
+				return corr
+			}
+		}
+		return NewCorrelationID()
+	}
+	for _, candidate := range candidates {
+		if corr := strings.TrimSpace(candidate); corr != "" {
+			m.CorrelationID = corr
+			if strings.TrimSpace(m.RequestID) == "" {
+				m.RequestID = corr
+			}
+			return corr
+		}
+	}
+	if corr := strings.TrimSpace(m.CorrelationID); corr != "" {
+		m.CorrelationID = corr
+		if strings.TrimSpace(m.RequestID) == "" {
+			m.RequestID = corr
+		}
+		return corr
+	}
+	m.CorrelationID = NewCorrelationID()
+	if strings.TrimSpace(m.RequestID) == "" {
+		m.RequestID = m.CorrelationID
+	}
+	return m.CorrelationID
 }
 
 func IntoContext(ctx context.Context, md EnvelopeMetadata) context.Context {
@@ -221,7 +263,7 @@ func (m EnvelopeMetadata) appendScalarFields(result map[string]any) {
 func PrepareForEmit(ctx context.Context, raw map[string]any) map[string]any {
 	md := FromContext(ctx)
 	emitted := mergeMaps(md.ToMap(), raw)
-	
+
 	if emitted["correlation_id"] == nil || emitted["correlation_id"] == "" {
 		if corr := correlationFromGlobalContext(emitted); corr != "" {
 			emitted["correlation_id"] = corr

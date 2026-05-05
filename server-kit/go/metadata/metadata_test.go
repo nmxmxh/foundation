@@ -86,6 +86,23 @@ func TestNormalizeAndDefaults(t *testing.T) {
 	}
 }
 
+func TestEnsureCorrelation(t *testing.T) {
+	md := New()
+	corr := md.EnsureCorrelation(" corr_from_request ")
+	if corr != "corr_from_request" {
+		t.Fatalf("unexpected correlation: %q", corr)
+	}
+	if md.CorrelationID != "corr_from_request" || md.RequestID != "corr_from_request" {
+		t.Fatalf("expected correlation and request id to be populated: %#v", md)
+	}
+
+	md = New()
+	corr = md.EnsureCorrelation()
+	if corr == "" || md.CorrelationID == "" || md.RequestID == "" {
+		t.Fatalf("expected generated correlation and request id: %#v", md)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	md := FromMap(map[string]any{
 		"ai_confidence":   1.2,

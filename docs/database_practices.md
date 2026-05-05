@@ -75,6 +75,26 @@ Rules:
 5. Prefer batched writes for child-row inserts. Use `COPY`/`CopyFrom` or batched statements for child rows, association rows, and other repeated inserts.
 6. Document-ingestion flows should distinguish re-upload dedupe from legitimate recurring records. Repeated records from valid recurring processes must not be collapsed just because key fields or timestamps are similar.
 
+## Database state-machine invariants
+
+Use `foundation/docs/tla_architecture_practices.md` for high-risk DB workflows where concurrency, retries, or performance optimizations can change behavior.
+
+1. `DBUniquenessAuthoritative`: security-critical and idempotency-critical uniqueness must be enforced by constraints, indexes, locks, or serializable transactions, not only app prechecks.
+2. `TransactionScopeBounded`: DB transactions must have finite scope, finite timeout, and no external network call inside the open transaction.
+3. `OutboxRefinement`: publishing an event is a lower-level implementation of the durable state transition; the durable outbox write must exist before publication can be observed as successful.
+4. `QueryBounded`: runtime queries must have tenant predicates, explicit order, finite limits, and no unbounded offset scans.
+5. `RetryIdempotent`: retrying a DB-backed command must converge on the same visible state or controlled duplicate result.
+6. `BatchDiagnosticsPreserved`: batching may change internal execution, but visible per-record success/failure identity and stage diagnostics must remain available.
+7. `LockProgressBounded`: lock waits and pool acquire waits must have hard timeouts and visible failure classes.
+
+State-machine candidates that deserve table-driven/property-style tests:
+
+1. outbox insert -> publish -> mark published/failed
+2. idempotent command insert/update under duplicate submissions
+3. worker lease acquire -> renew -> complete/fail/expire
+4. batch ingestion with partial failure and retry
+5. report/export expanded reads vs compact dashboard reads
+
 ## Ingestion and idempotency
 
 1. Every ingestion pipeline must produce a stable fingerprint for dedupe.

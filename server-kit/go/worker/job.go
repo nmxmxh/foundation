@@ -10,18 +10,18 @@ import (
 
 // Job is the transport shape used by the worker engine.
 type Job struct {
-	ID             string         `json:"id"`
-	JobKind        string         `json:"kind"`
-	Queue          string         `json:"queue"`
-	Payload        map[string]any `json:"payload,omitempty"`
-	RawPayload     []byte         `json:"raw_payload,omitempty"`
-	Metadata       map[string]any `json:"metadata"`
-	CorrelationID  string         `json:"correlation_id"`
-	IdempotencyKey string         `json:"idempotency_key"`
-	Attempt        int            `json:"attempt"`
-	MaxAttempts    int            `json:"max_attempts"`
-	ScheduledAt    time.Time      `json:"scheduled_at"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID              string             `json:"id"`
+	JobKind         string             `json:"kind"`
+	Queue           string             `json:"queue"`
+	Payload         map[string]any     `json:"payload,omitempty"`
+	RawPayload      []byte             `json:"raw_payload,omitempty"`
+	Metadata        map[string]any     `json:"metadata"`
+	CorrelationID   string             `json:"correlation_id"`
+	IdempotencyKey  string             `json:"idempotency_key"`
+	Attempt         int                `json:"attempt"`
+	MaxAttempts     int                `json:"max_attempts"`
+	ScheduledAt     time.Time          `json:"scheduled_at"`
+	CreatedAt       time.Time          `json:"created_at"`
 	ExecutionPolicy JobExecutionPolicy `json:"execution_policy,omitempty"`
 }
 
@@ -84,11 +84,14 @@ func (j Job) Validate() error {
 
 func (j Job) NextBackoff() time.Duration {
 	base := 250 * time.Millisecond
-	if j.Attempt <= 1 {
-		return base
-	}
-	backoff := base << (j.Attempt - 1)
 	max := 30 * time.Second
+	backoff := base
+	for attempt := 1; attempt < j.Attempt && backoff < max; attempt++ {
+		backoff *= 2
+		if backoff > max {
+			backoff = max
+		}
+	}
 	if backoff > max {
 		backoff = max
 	}

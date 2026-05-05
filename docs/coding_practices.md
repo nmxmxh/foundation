@@ -169,6 +169,24 @@ Enforcement:
 - Load test regression gate for queue and WS critical paths.
 - Dev-only performance guard: `foundation/tooling/scripts/performance_check.sh`.
 
+### CP-07b: Specify hot-path behavior before optimizing
+
+Level: `Contextual`
+
+Requirements:
+
+1. High-risk performance changes must identify visible state, hidden/internal state, allowed transitions, invariants, liveness/fairness expectations, and worst-case bounds before implementation.
+2. Keep hard behavioral bounds separate from statistical performance targets. Deadlines, queue caps, retry limits, and acquire timeouts are architecture properties; p95/p99, RPS, CPU, heap, and allocation trends are benchmark/telemetry properties.
+3. Optimized lanes must refine the original behavior. Direct dispatch, binary frames, gRPC, WebSocket, HTTP fallback, `ffi`, `shm`, `stdio`, and JSON compatibility paths must preserve canonical metadata, payload semantics, terminal events, and controlled error classes.
+4. Coarsening an operation into a larger atomic step requires a commutativity check: reordering must not change visible state, authorization, idempotency, capacity, deadlines, or diagnostics.
+5. No-op/stuttering behavior such as retries, duplicate suppression, cache hits, empty polls, and reconnect attempts must be explicitly safe for the visible contract.
+
+Enforcement:
+
+- Reviewer gate against `foundation/docs/tla_architecture_practices.md` for hot-path transport, runtime, worker, cache, DB, and WebSocket changes.
+- Parity/refinement tests when an optimized path claims to replace or bypass an existing path.
+- Benchmark/load evidence for statistical claims; integration/property-style tests for hard bounds and invariants.
+
 ### CP-08: Zero-warning mindset and static analysis in CI
 
 Level: `Mandatory`
@@ -658,12 +676,15 @@ Requirements:
 5. **Postgres Pool Integration**: Metadata stores and job persistence logic must use `*pgxpool.Pool` directly for performance and connection lifecycle management, rather than generic/wrapped database interfaces that may obscure driver-specific optimizations.
 6. **Idempotent Migrations**: SQL setup scripts for queue infrastructure must be idempotent. Avoid destructive `DROP TABLE` statements at the top of migrations that might fire against non-empty production environments; use `CREATE TABLE IF NOT EXISTS` and separate reset scripts.
 7. **Production-Representative Benchmarks**: Performance-critical workers must include benchmarks that hit the River/Postgres path (using `testcontainers-go`) to capture serialization, indexing, and fsync costs, not just the in-memory fallback path.
+8. **State-Machine Contract**: Worker queues must document accepted visible states, hidden retry/lease state, terminal states, and liveness expectations. Every accepted job must eventually reach success, failed, cancelled, quarantined, or expired under its retry/deadline budget.
+9. **Finite Model Candidate**: New queue semantics that alter leases, retries, dedupe, cancellation, or terminal-state rules should be small enough to model with two workers, queue depth two, and retry cap two, even if implemented only as table-driven tests rather than TLC.
 
 Enforcement:
 
 - Reviewer gate on worker retry logic, backoff jitter, and metadata storage patterns.
 - Automated migration checks for destructive drops.
 - CI benchmark evidence for hot-path workers.
+- Integration tests for terminal-state reachability and idempotent retry behavior.
 
 ## Enforcement matrix
 

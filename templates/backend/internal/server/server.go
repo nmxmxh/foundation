@@ -529,11 +529,8 @@ func (s *Server) performDispatch(r *http.Request, req httpapi.DispatchRequest) (
 	}
 
 	md := metadata.FromMap(req.Metadata)
-	req.CorrelationID = md.NormalizeCorrelation(req.CorrelationID)
-	if req.CorrelationID == "" {
-		return dispatchExecution{EventType: eventType}, false, domainerr.Validation("correlation_id_required", "missing correlation_id")
-	}
-
+	httpapi.EnrichMetadataFromRequest(&md, r)
+	req.CorrelationID = md.EnsureCorrelation(req.CorrelationID)
 	md.ApplyDefaults("http.dispatch")
 	enrichMetadataFromRequest(&md, r)
 	enrichMetadataFromAuthContext(&md, r.Context())

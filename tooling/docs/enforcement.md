@@ -36,7 +36,19 @@ Native tool mapping:
 1. Go: `golangci-lint` owns unchecked errors, context use, body closing, security scans, static analysis, complexity, and allocation hints.
 2. Rust: `cargo fmt` and `cargo clippy -D warnings` own formatting, unwrap/expect/panic discipline, and warning-free runtime code.
 3. TypeScript/React: ESLint owns React hooks, import boundaries, observer exceptions, blocking atomics, and app-local raw WebSocket construction. TypeScript owns generated contract shape through `typecheck`.
-4. CP scripts own foundation-specific communication and performance rules: no oversized runtime control buffer, no hot-path dynamic JSON envelopes in foundation runtime lanes, no compatibility gRPC envelope as a default, and no checked-in build artifacts.
+4. CP scripts own foundation-specific communication and performance rules: no oversized runtime control buffer, no hot-path dynamic JSON envelopes in foundation runtime lanes, no compatibility gRPC envelope as a default, no app-internal JSON gRPC dispatch, and no checked-in build artifacts.
+
+## Communication Lane Enforcement
+
+Foundation-generated apps inherit a boundary policy:
+
+1. same-process or app-internal Go communication uses `grpcsvc.NewDirectFrameClient`, `Router.DispatchFrame`, `RegisterFrame`, or typed protobuf handlers
+2. Go service-to-service communication uses binary `DispatchFrame` or typed protobuf contracts
+3. JSON/map dispatch is ingress, admin, debug, or explicit compatibility behavior
+4. HTTP and WebSocket ingress may accept JSON because they are external boundaries, but internal forwarding should preserve protobuf bytes or binary envelopes when negotiated
+5. browser/runtime dispatch keeps the performance ladder order: `sab`, `wasm`, `transferable`, `ws`, `http`, `postMessage`
+
+The generated checks fail app-internal `grpcsvc.Dispatch(...)` and `grpcsvc.Envelope` usage outside vendored foundation code and tests. If a project needs a compatibility adapter, keep it in a clearly named external boundary package and document the reason before adding an allowlist.
 
 The reason this is not all custom linter code:
 

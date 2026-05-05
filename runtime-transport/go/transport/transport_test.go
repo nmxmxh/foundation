@@ -7,6 +7,9 @@ func TestCreateEnvelopeIncludesRequiredMetadata(t *testing.T) {
 	if envelope.Metadata.CorrelationID == "" || envelope.Metadata.RequestID == "" || envelope.Metadata.IdempotencyKey == "" {
 		t.Fatalf("envelope metadata is incomplete: %+v", envelope.Metadata)
 	}
+	if envelope.Metadata.RequestID != envelope.Metadata.CorrelationID {
+		t.Fatalf("request_id = %q, want correlation_id %q", envelope.Metadata.RequestID, envelope.Metadata.CorrelationID)
+	}
 	if envelope.PayloadEncoding != PayloadEncodingJSON {
 		t.Fatalf("payload encoding = %s, want %s", envelope.PayloadEncoding, PayloadEncodingJSON)
 	}

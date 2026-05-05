@@ -12,6 +12,7 @@ Use this folder as the quick-reference companion to `../styling_design_practices
 | `performance-deep-dive.md` | Debugging jank, choosing CSS vs WAAPI vs Motion, and avoiding repaint traps |
 | `review-format.md` | Reviewing animation code using a before/after/why format and issue checklist |
 | `contextual-animations.md` | Contextual icon swaps, staggered entrances, shared-element continuity, or fixed-offset exits |
+| `design-md.md` | Writing or consuming product-level `DESIGN.md` visual identity contracts |
 
 Workflow checklist:
 

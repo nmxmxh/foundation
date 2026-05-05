@@ -115,18 +115,22 @@ Recommended split:
 2. `contextTheme.ts`: feature or mode-specific semantic token mapping
 3. `motion.ts`: reusable motion helpers and defaults
 4. `styles.ts` or component-local `Style`: component surface declarations
+5. `DESIGN.md`: product-level visual identity contract for agents and future audits
 
 Do:
 
 1. use semantic names such as `bgSurface`, `borderSubtle`, `brandSoft`
 2. keep z-index, radius, spacing, and typography in the theme contract
 3. disable transitions during theme flips: `[data-theme-switching] * { transition: none !important; }`
+4. keep `DESIGN.md` tokens aligned with the app theme and `MinimalThemeProvider` overrides
+5. express component width and height intent in `DESIGN.md` component tokens for overlays, modals, media wells, and landing sections
 
 Do not:
 
 1. bake raw hex values into page components when a token already exists
 2. use a page file as the only place where a brand color or radius value is defined
 3. spread visual constants across stores, hooks, and components without a theme boundary
+4. treat `DESIGN.md` prose as decorative documentation; agents should rely on it before making visual changes
 
 ## 5. Loading Surfaces And Separation Of Concerns
 
@@ -222,7 +226,51 @@ Performance:
 3. avoid CSS-variable-driven drag transforms on complex trees
 4. do not mix Motion `x`/`y` props with handwritten `transform` on the same element
 
-## 7. Review Checklist
+## 7. Width, Height, And Section Fidelity
+
+Shared primitives must own their dimensional behavior. Visual polish is not only padding and radius; it is whether a component understands its container, viewport, and content load.
+
+Rules:
+
+1. Anchored overlays should measure the trigger and viewport, then clamp `left`, `width`, and `max-height` before rendering. Dropdowns should expose whether they match trigger width or use a minimum panel width.
+2. Modals should use `width: min(...)`, explicit `max-height`, and an internal scroll body. Content should never push a dialog beyond the viewport.
+3. Mobile dialogs should be able to become bottom sheets, with safe-area-aware padding and no hidden action rows.
+4. Fixed-format media regions need `aspect-ratio`, `min/max-height`, and overflow policy. Do not rely on image intrinsic size to define the layout.
+5. Display sections should declare their composition anchor, visual mode, and minimum height. Do not rebuild hero geometry with one-off inline styles.
+6. Information panels should handle icon, copy, metadata, and action regions without text collision at narrow widths.
+7. When a component has portal positioning, runtime coordinates are allowed inline; the surrounding sizing rules still belong in the primitive.
+
+Use these shared primitives for the common dimensional cases:
+
+1. `MinimalDisplaySection`: hero or display-first section with art-directed anchors, background/image modes, min-height, and media aspect ratio.
+2. `MinimalLandingSection`: editorial landing/information sections with optional media and responsive composition anchors.
+3. `MinimalInfoPanel`: dense but readable information callouts, receipts, validation notes, proof rows, and explanation panels.
+4. `MinimalDropdown`: anchored select/search panels with viewport-aware width and max-height.
+5. `MinimalActionModal`: confirmation and action dialogs with max-width, max-height, mobile sheet behavior, and scrollable bodies.
+
+## 8. Frontend Reference Art Direction
+
+When using generated or reference images to guide frontend implementation, require one horizontal image per section. Never compress a whole page into one tall mock when component fidelity matters.
+
+Reference images should make these decisions visible:
+
+1. composition anchor: centered, bottom-left over image, right-third caption, off-grid, stacked, or visual-first
+2. background mode: solid surface, full-bleed image, side image, canvas image, color block, or tactile texture
+3. dimensional intent: section min-height, media aspect ratio, panel width, CTA position, and safe text area
+4. hierarchy: headline scale, secondary copy width, button priority, and repeated component rhythm
+5. continuity: one palette, type scale, CTA language, radius system, and image treatment across all section frames
+
+Do not use generic AI design habits as references:
+
+1. repeated left-text/right-image sections
+2. full pages collapsed into one vertical frame
+3. card rows where a visual section is needed
+4. decorative blobs, random gradients, or fake dashboard clutter
+5. typography that cannot fit its declared container
+
+For landing pages with no explicit count, use six section frames. For full websites, use eight. Each frame should be codeable as a single section.
+
+## 9. Review Checklist
 
 Before merging frontend work, verify:
 
@@ -233,8 +281,11 @@ Before merging frontend work, verify:
 5. hover motion is gated for actual hover devices
 6. exits are faster than enters
 7. repeated surfaces reuse primitives instead of page-local restyling
+8. overlays clamp width and height to the viewport
+9. modals have explicit max-height and scroll-body behavior
+10. media/display sections declare aspect-ratio and min-height instead of depending on content accidents
 
-## 8. Reference Notes
+## 10. Reference Notes
 
 Use the animation reference notes in `docs/references/`:
 

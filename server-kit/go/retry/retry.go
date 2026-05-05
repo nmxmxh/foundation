@@ -21,6 +21,7 @@ import (
 	"errors"
 	"math"
 	"math/rand"
+	"sync"
 	"time"
 )
 
@@ -79,6 +80,7 @@ func DefaultRetryIf(err error) bool {
 type Policy struct {
 	config Config
 	rng    *rand.Rand
+	rngMu  sync.Mutex
 }
 
 // NewPolicy creates a new retry policy.
@@ -124,7 +126,10 @@ func (p *Policy) calculateDelay(attempt int) time.Duration {
 	// Apply jitter
 	if p.config.Jitter > 0 {
 		jitterRange := delay * p.config.Jitter
-		jitter := (p.rng.Float64()*2 - 1) * jitterRange // -jitterRange to +jitterRange
+		p.rngMu.Lock()
+		random := p.rng.Float64()
+		p.rngMu.Unlock()
+		jitter := (random*2 - 1) * jitterRange // -jitterRange to +jitterRange
 		delay += jitter
 	}
 

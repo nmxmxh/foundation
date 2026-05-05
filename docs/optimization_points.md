@@ -1,8 +1,8 @@
 # Optimization Points
 
-Date: 2026-04-19
+Date: 2026-05-05
 
-This document tracks the deliberate performance and architecture carryovers folded into the scaffold after reviewing `fintech_v1` history. For deep-dives into legendary computer science optimization tricks, see [Coding Magic](file:///Users/okhai/Desktop/OVASABI%20STUDIOS/reframe_v1/foundation/docs/coding_magic.md).
+This document tracks the deliberate performance and architecture carryovers folded into the scaffold after reviewing `fintech_v1` history and the current performance synthesis. For cross-cutting Go, networking, PostgreSQL, Rust, benchmarking, and documentation-tracking practices, see `foundation/docs/performance_practices.md`. For TLA+/`Specifying Systems` state-machine, invariant, liveness, real-time bound, composition, and refinement practices, see `foundation/docs/tla_architecture_practices.md`. For deep-dives into legendary computer science optimization tricks, see [Coding Magic](file:///Users/okhai/Desktop/OVASABI%20STUDIOS/reframe_v1/foundation/docs/coding_magic.md).
 
 ## Adopted immediately
 
@@ -22,6 +22,14 @@ This document tracks the deliberate performance and architecture carryovers fold
 14. Runtime bootstrap state that must survive HMR or code splitting should live on a process-level singleton (`window`/`globalThis` or equivalent module singleton), not component-local state.
 15. Stale chunk/module failures should trigger one-shot cache and service-worker refresh plus reload, instead of leaving the app in a white-screen state.
 16. Hot-path parsing should precompile regexes, centralize normalization, and use bounded caches when the same values recur heavily.
+17. Performance work must start with a behavior boundary and a baseline measurement: profile, benchmark, load test, query plan, or production telemetry.
+18. Go hot paths should preallocate predictable collections, preserve payload bytes until owner decode, use borrowed frame views where lifetime-safe, and keep `sync.Pool` limited to stateless temporary objects.
+19. Concurrency defaults must be bounded and observable: worker pools, buffered channels, queue depth, acquire timeouts, context cancellation, and rejection metrics are part of the contract.
+20. Network tuning follows the runtime ladder: direct/frame dispatch for same-process hot paths, `ffi`/`shm`/`stdio` for native runtime boundaries, generated protobuf or `grpcsvc.Frame` for cross-host service calls, and JSON only as a compatibility adapter.
+21. PostgreSQL tuning starts with `EXPLAIN (ANALYZE, BUFFERS)` and `pg_stat_statements`; indexes must match actual predicates, and high-volume writes should use `COPY`, `pgx.CopyFrom`, or driver-native batching.
+22. Long-lived connection paths must document deadlines, write queue bounds, topic authorization, lifecycle cleanup, backpressure, and overload shedding.
+23. Significant performance decisions must update the relevant doc in the same change set: coding, database, benchmark, runtime, WebSocket, or this optimization tracker.
+24. High-risk concurrency and transport optimizations must name visible state, hidden state, invariants, liveness/fairness, real-time bounds, and refinement/parity tests before becoming defaults.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 - **Singleflight Cache**: `GetOrSet` prevents cache stampedes via concurrent request coalescing and double-check locking.
@@ -44,3 +52,5 @@ This document tracks the deliberate performance and architecture carryovers fold
 3. Add service-worker stale-build recovery helpers and tests to the foundation runtime package family.
 4. Tighten Rust/Go media-engine boundaries around manifest and quality-report contracts.
 5. Promote parser hot-path helpers for regex/date caching into shared utilities once two apps converge on the same fixtures.
+6. Add a recurring benchmark/profile review note for runtime lanes, database hot queries, WebSocket saturation paths, and worker queues.
+7. Add a docs-tracking check in PR review templates for optimization changes that alter defaults, budgets, or benchmark expectations.

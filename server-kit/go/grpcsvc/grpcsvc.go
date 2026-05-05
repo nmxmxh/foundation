@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -177,8 +178,12 @@ func Serve(ctx context.Context, listener net.Listener, router *Router, opts Serv
 }
 
 func Dial(ctx context.Context, target string, opts ClientOptions) (*grpc.ClientConn, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	dialOpts := []grpc.DialOption{
 		grpc.WithDefaultCallOptions(grpc.ForceCodec(jsonCodec{})),
+		grpc.WithBlock(),
 	}
 	if opts.MaxMessageBytes > 0 {
 		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(
@@ -190,7 +195,7 @@ func Dial(ctx context.Context, target string, opts ClientOptions) (*grpc.ClientC
 		dialOpts = append(dialOpts, grpc.WithUnaryInterceptor(clientAuthUnaryInterceptor(opts.AuthToken)))
 	}
 	dialOpts = append(dialOpts, opts.DialOptions...)
-	return grpc.NewClient(target, dialOpts...)
+	return grpc.DialContext(ctx, target, dialOpts...)
 }
 
 func NewClient(conn grpc.ClientConnInterface, opts ClientOptions) *Client {
@@ -477,7 +482,7 @@ func marshalFrame(frame Frame) []byte {
 func AppendMarshalFrame(dst []byte, frame Frame) []byte {
 	size := 16 + len(frame.EventType) + len(frame.Payload) + len(frame.CorrelationID) + len(frame.SchemaVersion)
 	offset := len(dst)
-	dst = append(dst, make([]byte, size)...)
+	dst = slices.Grow(dst, size)[:offset+size]
 	offset = putStringField(dst, offset, frame.EventType)
 	offset = putField(dst, offset, frame.Payload)
 	offset = putStringField(dst, offset, frame.CorrelationID)

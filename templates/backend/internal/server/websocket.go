@@ -349,7 +349,7 @@ func (s *Server) sendWSAck(conn *wsConnection) {
 				"source":    "ws",
 			},
 		},
-		CorrelationID: fmt.Sprintf("corr_%d", time.Now().UTC().UnixNano()),
+		CorrelationID: httpapi.NewCorrelationID(),
 		Timestamp:     time.Now().UTC(),
 		SchemaVersion: events.EnvelopeSchemaVersion,
 	}
@@ -583,7 +583,7 @@ func (s *Server) sendWSDomainError(conn *wsConnection, err error, correlationID 
 	}
 	correlationID = strings.TrimSpace(correlationID)
 	if correlationID == "" {
-		correlationID = fmt.Sprintf("corr_%d", time.Now().UTC().UnixNano())
+		correlationID = httpapi.NewCorrelationID()
 	}
 	body := domainerr.Body(err, domainerr.ResponseOptions{
 		CorrelationID: correlationID,

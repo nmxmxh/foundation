@@ -50,6 +50,9 @@ Current canonical surfaces:
 23. `MinimalFieldGrid`
 24. `MinimalActionRow`
 25. `MinimalSkeleton`
+26. `MinimalDisplaySection`
+27. `MinimalLandingSection`
+28. `MinimalInfoPanel`
 
 Extension model:
 
@@ -68,6 +71,10 @@ Implementation posture:
 5. Use `../docs/styling_design_practices.md` and `../docs/references/` for detailed styling and motion rules.
 6. Layout motion should reuse `useMinimalScrollFeedback` and `MinimalScrollFeedbackSurface` for tactile scroll response. Keep it subtle, reduced-motion aware, and limited to transform values.
 7. Route shells should use `MinimalSkipLink` and the `minimalMainScrollAttribute`/`scrollMinimalMainToTop` helpers so accessibility and scroll-reset behavior converge across apps.
+8. Anchored overlays must be width/height aware: dropdowns clamp to the viewport, expose max-height/min-width policy, and preserve trigger alignment without overflowing small screens.
+9. Dialog primitives must separate shell height from body scroll. Use modal max-width/max-height and scrollable body regions instead of letting content push panels off-screen.
+10. Display and landing sections should encode composition anchors, media aspect ratios, and min-height decisions in props. Page files should not recreate hero/display geometry with ad hoc inline CSS.
+11. Frontend reference imagery should be section-sliced: one horizontal frame per section, consistent palette/type/CTA logic, and enough width/height clarity that components can be rebuilt without guessing.
 
 Observer posture:
 

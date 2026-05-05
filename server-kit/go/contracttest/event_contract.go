@@ -26,7 +26,8 @@ func VerifyProducer(ctx context.Context, eventType string, producer Producer) er
 	if env.EventType != eventType {
 		return fmt.Errorf("producer emitted %q, want %q", env.EventType, eventType)
 	}
-	return events.ValidateEventType(env.EventType)
+	env.Normalize()
+	return env.Validate()
 }
 
 func VerifyConsumer(ctx context.Context, eventType string, producer Producer, consumer Consumer) error {
@@ -38,6 +39,10 @@ func VerifyConsumer(ctx context.Context, eventType string, producer Producer, co
 		return err
 	}
 	if err := events.ValidateEventType(env.EventType); err != nil {
+		return err
+	}
+	env.Normalize()
+	if err := env.Validate(); err != nil {
 		return err
 	}
 	return consumer.ConsumeContractEvent(ctx, env)

@@ -24,6 +24,19 @@ library shelf. The scaffold wires these surfaces by default:
 The generated `scripts/checks/server_kit_usage_check.sh` fails when these
 runtime bindings are present but not wired through startup/server paths.
 
+## Communication Lane Policy
+
+Foundation enforces the fastest correct lane by boundary:
+
+1. same-process hot communication: `NewDirectFrameClient`, `Router.DispatchFrame`, `RegisterFrame`, and borrowed `UnmarshalFrameView`
+2. Go service-to-service boundaries: binary `DispatchFrame` or typed protobuf handlers
+3. external HTTP/WebSocket ingress: JSON or protobuf according to negotiated content type
+4. compatibility/admin/debug paths: JSON envelopes only with explicit boundary ownership
+
+Generated app checks reject app-internal `grpcsvc.Dispatch(...)` and
+`grpcsvc.Envelope` usage. That keeps JSON compatibility from becoming the
+default internal fabric while preserving HTTP/WebSocket ingress compatibility.
+
 ### 1. Events (`/events`)
 The event system is the nervous system of the application.
 - **Bus Interface**: A generic interface for pub/sub.

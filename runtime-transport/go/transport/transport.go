@@ -1,8 +1,8 @@
 package transport
 
 import (
-	"fmt"
-	"math/rand/v2"
+	"crypto/rand"
+	"encoding/hex"
 	"strings"
 	"time"
 )
@@ -41,7 +41,7 @@ type Route struct {
 
 func CreateEnvelope(eventType string, payload map[string]any, extra map[string]interface{}) Envelope {
 	now := time.Now().UTC()
-	token := fmt.Sprintf("%d_%08x", now.UnixMilli(), rand.Uint32())
+	correlationID := NewCorrelationID()
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -50,14 +50,22 @@ func CreateEnvelope(eventType string, payload map[string]any, extra map[string]i
 		Payload:         payload,
 		PayloadEncoding: PayloadEncodingJSON,
 		Metadata: EnvelopeMetadata{
-			CorrelationID:  "corr_" + token,
-			RequestID:      "req_" + token,
-			IdempotencyKey: "idem_" + token,
+			CorrelationID:  correlationID,
+			RequestID:      correlationID,
+			IdempotencyKey: "idem_" + strings.TrimPrefix(correlationID, "corr_"),
 			SchemaVersion:  EnvelopeSchemaVersion,
 			Timestamp:      now,
 			Extra:          extra,
 		},
 	}
+}
+
+func NewCorrelationID() string {
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err == nil {
+		return "corr_" + time.Now().UTC().Format("20060102T150405.000000000") + "_" + hex.EncodeToString(random[:])
+	}
+	return "corr_" + time.Now().UTC().Format("20060102T150405.000000000")
 }
 
 func ResolveRoute(routes []Route, eventType string) *Route {

@@ -7,6 +7,13 @@ export type OfflineQueueOptions = {
   conflictResolution?: OfflineConflictResolution;
 };
 
+export type OfflineQueueSnapshot = {
+  size: number;
+  capacity: number;
+  attempts: number;
+  oldestQueuedAt: string | null;
+};
+
 export type OfflineQueueEntry<TPayload = unknown> = {
   envelope: RuntimeEnvelope<TPayload>;
   queuedAt: string;
@@ -26,6 +33,14 @@ export const createOfflineQueue = (options: OfflineQueueOptions = {}) => {
     },
     drain(): OfflineQueueEntry[] {
       return entries.splice(0, entries.length);
+    },
+    snapshot(): OfflineQueueSnapshot {
+      return {
+        size: entries.length,
+        capacity: maxQueueSize,
+        attempts: entries.reduce((total, entry) => total + entry.attempts, 0),
+        oldestQueuedAt: entries[0]?.queuedAt ?? null,
+      };
     },
     size(): number {
       return entries.length;

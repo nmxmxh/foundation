@@ -35,7 +35,9 @@ export const routeRuntimePayload = (
   if (payload.byteLength <= arenaMaxBytes && options.arena) {
     const descriptor = options.arena.allocate(payload.byteLength);
     options.arena.writeSlab(descriptor.id, payload);
-    options.arena.enqueueDescriptorReady(descriptor.id);
+    if (!options.arena.enqueueDescriptorReady(descriptor.id)) {
+      throw new Error("runtime arena queue backpressure: descriptor-ready event was not enqueued");
+    }
     return { lane: "arena", byteLength: payload.byteLength, descriptor: options.arena.readDescriptor(descriptor.id) };
   }
 

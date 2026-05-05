@@ -8,6 +8,13 @@ The **Ovasabi Foundation** is the master template and infrastructure baseline fo
 
 This guide is **self-contained** and designed to be copied into any application using the foundation.
 
+Primary performance companions:
+
+* `performance_practices.md`: cross-cutting Go, networking, PostgreSQL, Rust, benchmarking, and documentation-tracking rules.
+* `tla_architecture_practices.md`: state-machine, invariant, liveness, real-time bound, composition, and refinement practices from `Specifying Systems`.
+* `foundation_benchmarks.md`: benchmark commands, reference results, and allocation guardrails.
+* `database_practices.md`: PostgreSQL schema, query, pool, migration, and operational standards.
+
 ---
 
 ## 1. Core Modules & Elements
@@ -77,6 +84,13 @@ This guide is **self-contained** and designed to be copied into any application 
 ### 3. Compute Locality Rule
 
 * Calculations involving massive bytes or mathematical loops belong in **`runtime-sdk`** via WASM, not the browser logic streams.
+
+### 3b. Performance Specification Rule
+
+* Before optimizing, define the behavior boundary: tenant scope, state transition, payload size, concurrency budget, timeout, backpressure behavior, and failure semantics.
+* For high-risk concurrent or performance-sensitive work, also define visible state, hidden/internal state, invariants, liveness/fairness, real-time bounds, and refinement/parity expectations. Use `tla_architecture_practices.md` as the granular guide.
+* Establish a baseline with a benchmark, profile, load test, query plan, or production telemetry. Performance work without measurement belongs in docs as a hypothesis, not in code as a default.
+* Update `performance_practices.md`, `tla_architecture_practices.md`, `foundation_benchmarks.md`, `database_practices.md`, `runtime_foundation.md`, `websocket_scaling.md`, or `optimization_points.md` when an optimization changes a default, budget, invariant, benchmark expectation, or operational runbook.
 
 ### 4. Hostile-Environment Security Rule
 

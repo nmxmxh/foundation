@@ -10,6 +10,52 @@ The foundation provides three modules for WebSocket scaling:
 2. **wsrouting** - Redis-backed connection routing for horizontal scaling
 3. **wsmetrics** - Connection and message metrics collection
 
+## State-machine contract
+
+WebSocket scaling is a state-machine problem, not only a connection-count problem. Follow `foundation/docs/tla_architecture_practices.md` for high-risk changes.
+
+Visible state:
+
+1. connection accepted/rejected
+2. authentication state
+3. authorized subscriptions
+4. delivered, rejected, or failed outbound messages
+5. disconnect reason
+
+Hidden state:
+
+1. local connection maps
+2. Redis routing keys
+3. write queues
+4. ping/pong timers
+5. reconnect/replay state
+6. per-server capacity counters
+
+Invariants:
+
+1. `ConnectionOwned`: one live connection ID belongs to one server instance at a time.
+2. `AuthStateCurrent`: privileged messages and subscriptions re-check current session/user/org state, not just upgrade-time auth.
+3. `TopicAuthorized`: every subscription is authorized for the current organization and actor.
+4. `WriteQueueBounded`: each connection has a finite outbound queue with defined saturation behavior.
+5. `DeadlineMaintained`: read deadline, write deadline, ping interval, and idle timeout are finite and refreshed or the connection closes.
+6. `DisconnectCleansState`: local and Redis routing state is removed or expires after disconnect.
+
+Liveness/fairness:
+
+1. If an outbound message remains sendable and the connection remains healthy, it is eventually written or failed visibly.
+2. If a connection remains idle past its budget, it is eventually pinged, downgraded, or closed.
+3. If auth expires or organization scope changes, privileged routing eventually closes, downgrades, or re-authorizes before more privileged delivery.
+
+Hard bounds:
+
+1. max connection count
+2. write queue depth
+3. read limit bytes
+4. dispatch acquire timeout
+5. guest idle timeout
+6. ping/pong interval
+7. rate limit and burst budget
+
 ## CPU-Aware Auto-Tuning
 
 The `scaling` module automatically configures server resources based on available CPU cores.

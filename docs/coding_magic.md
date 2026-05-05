@@ -709,6 +709,58 @@ After that it becomes engineering.
 
 ---
 
+## 14b. Specification Magic: Making Speed Safe
+
+Some of the deepest performance magic is not a faster instruction.
+It is proving that a faster path is still the same path.
+
+TLA+ names this discipline with ordinary mathematical tools:
+
+- visible state
+- hidden state
+- initial conditions
+- next-state actions
+- invariants
+- liveness and fairness
+- real-time bounds
+- refinement mappings
+
+### Why it feels magical
+
+A system can change its internal machinery completely and still behave the same from the outside.
+
+That is the same trick behind:
+
+- a JSON compatibility path becoming a binary frame path
+- a direct in-process dispatch replacing gRPC inside one process
+- a queue gaining retries, leases, and dedupe without changing command semantics
+- a cache adding singleflight without changing the value contract
+- a runtime switching between `ffi`, `shm`, `stdio`, WASM, WebSocket, and HTTP fallback
+
+The magic is refinement: the optimized implementation is allowed to have different hidden state, but every visible behavior must still satisfy the higher-level contract.
+
+### The performance spellbook
+
+Ask these before calling a change an optimization:
+
+1. What visible behavior must remain unchanged?
+2. What hidden state did we introduce?
+3. Which invariant carries the correctness?
+4. What must eventually happen under healthy capacity?
+5. What is the hard worst-case bound?
+6. Which statistical metric proves it got faster?
+7. Which parity test proves it stayed the same?
+
+This separates three different ideas that engineers often blur:
+
+- correctness: what must never go wrong
+- worst-case behavior: what must happen within a hard bound
+- statistical performance: how fast it usually is under measured load
+
+The first two are architecture. The third is benchmarking.
+
+---
+
 ## 15. Stack-Specific Arcana for Ovasabi
 
 These are the magical ideas that map directly to our foundation work.

@@ -1,4 +1,8 @@
 -- canonical River bootstrap owned by foundation/server-kit
+-- River's published bootstrap/reset path intentionally drops and recreates
+-- these tables/types so the local foundation copy matches River's canonical
+-- schema. CP migration scans must exempt this file; app-owned up migrations
+-- remain non-destructive.
 drop table if exists river_job_metadata cascade;
 drop table if exists river_client_queue cascade;
 drop table if exists river_client cascade;
