@@ -203,6 +203,7 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
   check_exists "Dockerfile" "$target/Dockerfile"
   check_exists "docker-compose.yml" "$target/docker-compose.yml"
   check_exists "docker-compose.dev.yml" "$target/docker-compose.dev.yml"
+  check_file_not_contains "dev Postgres 18 avoids legacy data mount" "$target/docker-compose.dev.yml" "/var/lib/postgresql/data"
   check_exists "docker ignore" "$target/.dockerignore"
   check_file_contains "compose Docker cache namespace" "$target/docker-compose.yml" "DOCKER_CACHE_NAMESPACE"
   check_exists "nginx template" "$target/config/default.conf.template"
@@ -214,6 +215,7 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
   if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
     check_exists "Dockerfile.migrate" "$target/Dockerfile.migrate"
     check_exists "docker-compose.test.yml" "$target/docker-compose.test.yml"
+    check_file_not_contains "test Postgres 18 avoids legacy data mount" "$target/docker-compose.test.yml" "/var/lib/postgresql/data"
     check_file_contains "shared Docker Go module cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gomod'
     check_file_contains "shared Docker Go build cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gobuild'
     check_file_contains "Docker dependency stage" "$target/Dockerfile" "AS go-deps"

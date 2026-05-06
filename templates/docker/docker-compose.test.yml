@@ -22,7 +22,9 @@ services:
     ports:
       - "${TEST_DB_PORT:-5433}:5432"
     volumes:
-      - test_postgres_data:/var/lib/postgresql/data
+      # PostgreSQL 18+ stores data in major-version-specific subdirectories.
+      # Mount the parent directory so pg_upgrade can work across versions.
+      - test_postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-{{PROJECT_NAME}}_test}"]
       interval: 5s

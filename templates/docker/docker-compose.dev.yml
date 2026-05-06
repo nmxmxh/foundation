@@ -22,7 +22,9 @@ services:
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # PostgreSQL 18+ stores data in major-version-specific subdirectories.
+      # Mount the parent directory so pg_upgrade can work across versions.
+      - postgres_data:/var/lib/postgresql
       - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     environment:
       POSTGRES_USER: "${DB_USER:-postgres}"
@@ -100,6 +102,10 @@ services:
   frontend:
     ports:
       - "${FRONTEND_PORT:-5173}:80"
+    volumes:
+      # Serve the workspace build output in development so UI edits do not depend
+      # on rebuilding the frontend image every time.
+      - ./frontend/dist:/usr/share/nginx/html:ro
     environment:
       VITE_API_URL: "http://localhost:8080/api"
       APP_ENV: "development"
