@@ -275,6 +275,8 @@ pub fn fill_random(bytes: &mut [u8]) {
 
     #[cfg(not(target_arch = "wasm32"))]
     {
+        // Deterministic host fallback for repeatable native tests. This is not
+        // cryptographic randomness and must not be reused for security tokens.
         for (index, byte) in bytes.iter_mut().enumerate() {
             *byte = (index % u8::MAX as usize) as u8;
         }

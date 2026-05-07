@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing"
 )
 
 type fakeProcessor struct {
@@ -27,6 +28,16 @@ func (p *fakeProcessor) Handle(_ context.Context, _ Job) error {
 	if call <= p.failUntil {
 		return context.DeadlineExceeded
 	}
+	return nil
+}
+
+type correlationProcessor struct {
+	fakeProcessor
+	seen chan string
+}
+
+func (p *correlationProcessor) Handle(ctx context.Context, _ Job) error {
+	p.seen <- tracing.CorrelationIDFromContext(ctx)
 	return nil
 }
 
@@ -96,6 +107,45 @@ func TestEngineDedupesByIdempotencyKey(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 	if processor.calls.Load() != 1 {
 		t.Fatalf("expected one call due to dedupe, got %d", processor.calls.Load())
+	}
+}
+
+func TestEngineInjectsJobCorrelationIntoProcessorContext(t *testing.T) {
+	engine := NewEngine(map[string]int{"operations_core": 1}, nil)
+	processor := &correlationProcessor{
+		fakeProcessor: fakeProcessor{
+			kind:        "operations_lifecycle",
+			queue:       "operations_core",
+			maxAttempts: 1,
+		},
+		seen: make(chan string, 1),
+	}
+	if err := engine.Register(processor); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := engine.Start(ctx); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	if err := engine.Enqueue(ctx, Job{
+		JobKind:       "operations_lifecycle",
+		Queue:         "operations_core",
+		MaxAttempts:   1,
+		CorrelationID: "corr_worker_context",
+	}); err != nil {
+		t.Fatalf("enqueue failed: %v", err)
+	}
+
+	select {
+	case got := <-processor.seen:
+		if got != "corr_worker_context" {
+			t.Fatalf("correlation ID = %q, want %q", got, "corr_worker_context")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("processor did not receive job")
 	}
 }
 

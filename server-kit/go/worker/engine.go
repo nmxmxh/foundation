@@ -10,7 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing"
 	"github.com/riverqueue/river"
 	"go.uber.org/zap"
 )
@@ -19,6 +21,7 @@ const (
 	defaultQueueCapacity = 1024
 	queueScaleThreshold  = defaultQueueCapacity / 2
 	maxAdaptiveWorkers   = 64
+	maxDedupeEntries     = 100000
 )
 
 var errQueueFull = errors.New("worker queue full")
@@ -149,14 +152,28 @@ func (e *Engine) dedupeCleaner(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			e.mu.Lock()
-			now := time.Now().UTC()
-			for key, expiry := range e.dedupe {
-				if now.After(expiry) {
-					delete(e.dedupe, key)
-				}
-			}
-			e.mu.Unlock()
+			e.pruneDedupe(time.Now().UTC())
+		}
+	}
+}
+
+func (e *Engine) pruneDedupe(now time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for key, expiry := range e.dedupe {
+		if now.After(expiry) {
+			delete(e.dedupe, key)
+		}
+	}
+	if len(e.dedupe) <= maxDedupeEntries {
+		return
+	}
+	overflow := len(e.dedupe) - maxDedupeEntries
+	for key := range e.dedupe {
+		delete(e.dedupe, key)
+		overflow--
+		if overflow <= 0 {
+			return
 		}
 	}
 }
@@ -400,6 +417,7 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 	e.recordHealth(job, JobHealthProcessing, nil, startedAt, time.Time{})
 	runCtx, cancel := context.WithTimeout(ctx, job.Timeout())
 	defer cancel()
+	runCtx = contextWithJobCorrelation(runCtx, job)
 	observability.Default().RecordWorker(job.Kind(), queue, "processing")
 
 	err := processor.Handle(runCtx, job)
@@ -430,23 +448,25 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 		job.ScheduledAt = time.Now().UTC().Add(backoff)
 		observability.Default().RecordWorker(job.Kind(), queue, "retry_scheduled")
 		e.recordHealth(job, JobHealthRetryScheduled, err, startedAt, finishedAt)
-		go func(retryJob Job) {
-			timer := time.NewTimer(backoff)
-			defer timer.Stop()
-			select {
-			case <-ctx.Done():
-				return
-			case <-timer.C:
-				_ = e.Enqueue(ctx, retryJob)
-			}
-		}(job)
+		timer := time.NewTimer(backoff)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			e.handleJob(ctx, queue, workerIndex, job)
+		}
 		return
 	}
 
 	if key := dedupeKey(job); key != "" {
 		e.mu.Lock()
 		e.dedupe[key] = time.Now().UTC().Add(24 * time.Hour)
+		needsPrune := len(e.dedupe) > maxDedupeEntries
 		e.mu.Unlock()
+		if needsPrune {
+			e.pruneDedupe(time.Now().UTC())
+		}
 	}
 	e.log.Info("job processed",
 		zap.String("kind", job.Kind()),
@@ -455,6 +475,16 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 	)
 	observability.Default().RecordWorker(job.Kind(), queue, "succeeded")
 	e.recordHealth(job, JobHealthSucceeded, nil, startedAt, time.Now().UTC())
+}
+
+func contextWithJobCorrelation(ctx context.Context, job Job) context.Context {
+	if job.CorrelationID == "" {
+		return ctx
+	}
+	md := metadata.FromContext(ctx)
+	md.EnsureCorrelation(job.CorrelationID)
+	ctx = metadata.IntoContext(ctx, md)
+	return tracing.WithCorrelationID(ctx, job.CorrelationID)
 }
 
 func dedupeKey(job Job) string {

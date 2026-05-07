@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"strings"
+	"sync/atomic"
+	"unsafe"
 
 	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
 )
@@ -55,7 +57,7 @@ func (b *Buffer) LoadEpoch(index uint32) int32 {
 		return 0
 	}
 	offset := generated.OFFSET_EPOCHS + index*generated.EPOCH_SLOT_BYTES
-	return int32(binary.LittleEndian.Uint32(b.raw[offset : offset+4]))
+	return atomic.LoadInt32((*int32)(unsafe.Pointer(&b.raw[offset])))
 }
 
 func (b *Buffer) StoreEpoch(index uint32, value int32) error {
@@ -63,14 +65,17 @@ func (b *Buffer) StoreEpoch(index uint32, value int32) error {
 		return fmt.Errorf("invalid epoch index %d", index)
 	}
 	offset := generated.OFFSET_EPOCHS + index*generated.EPOCH_SLOT_BYTES
-	binary.LittleEndian.PutUint32(b.raw[offset:offset+4], uint32(value))
+	atomic.StoreInt32((*int32)(unsafe.Pointer(&b.raw[offset])), value)
 	return nil
 }
 
 func (b *Buffer) AddEpoch(index uint32, delta int32) (int32, error) {
-	current := b.LoadEpoch(index)
-	next := current + delta
-	return current, b.StoreEpoch(index, next)
+	if index >= generated.EPOCH_SLOT_COUNT {
+		return 0, fmt.Errorf("invalid epoch index %d", index)
+	}
+	offset := generated.OFFSET_EPOCHS + index*generated.EPOCH_SLOT_BYTES
+	current := atomic.AddInt32((*int32)(unsafe.Pointer(&b.raw[offset])), delta)
+	return current - delta, nil
 }
 
 func (b *Buffer) SetInputBytes(payload []byte) error {

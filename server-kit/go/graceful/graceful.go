@@ -169,6 +169,8 @@ func (h *Handler) Success(ctx context.Context, action string, msg string, result
 }
 
 // Error records a failed operation and emits <action>:failed when configured.
+// The metadata argument is augmented, not trusted as authoritative: PrepareForEmit
+// preserves caller-provided extra fields but always overwrites correlation_id from ctx.
 func (h *Handler) Error(ctx context.Context, action string, msg string, cause error, metadata map[string]any, entityID string) {
 	errContext := &ErrorContext{
 		Code:      "error",

@@ -94,6 +94,9 @@ func enrichMetadataFromHeaders(md *metadata.EnvelopeMetadata, r *http.Request) {
 	if md == nil || r == nil {
 		return
 	}
+	// Header-derived identity is request metadata only. Authentication middleware
+	// must overwrite user, session, device, organization, and role fields with
+	// trusted claims before authorization or domain handlers rely on them.
 	if requestID := strings.TrimSpace(r.Header.Get("X-Request-ID")); requestID != "" {
 		md.RequestID = requestID
 	}

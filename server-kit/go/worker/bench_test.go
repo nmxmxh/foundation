@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 )
 
 type benchProcessor struct {
@@ -24,7 +26,7 @@ func (p *benchProcessor) Handle(_ context.Context, _ Job) error {
 }
 
 func BenchmarkEngine_Enqueue_InMemory(b *testing.B) {
-	engine := NewEngine(map[string]int{"bench": 1}, nil)
+	engine := NewEngine(map[string]int{"bench": 1}, benchmarkLogger(b))
 	_ = engine.Register(&benchProcessor{kind: "bench_kind", queue: "bench"})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -44,7 +46,7 @@ func BenchmarkEngine_Enqueue_InMemory(b *testing.B) {
 }
 
 func BenchmarkEngine_Enqueue_RawPayload(b *testing.B) {
-	engine := NewEngine(map[string]int{"bench": 1}, nil)
+	engine := NewEngine(map[string]int{"bench": 1}, benchmarkLogger(b))
 	_ = engine.Register(&benchProcessor{kind: "bench_kind", queue: "bench"})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -69,7 +71,7 @@ func BenchmarkEngine_Enqueue_RawPayload(b *testing.B) {
 func BenchmarkEngine_Processing_Throughput(b *testing.B) {
 	// We want to measure how many jobs per second the engine can drain
 	var wg sync.WaitGroup
-	engine := NewEngine(map[string]int{"bench": 64}, nil) // Large pool for throughput
+	engine := NewEngine(map[string]int{"bench": 64}, benchmarkLogger(b)) // Large pool for throughput
 	_ = engine.Register(&benchProcessor{kind: "bench_kind", queue: "bench", wg: &wg})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -85,7 +87,9 @@ func BenchmarkEngine_Processing_Throughput(b *testing.B) {
 	b.ReportAllocs()
 	wg.Add(b.N)
 	for i := 0; i < b.N; i++ {
-		_ = engine.Enqueue(ctx, job)
+		if err := engine.Enqueue(ctx, job); err != nil {
+			wg.Done()
+		}
 	}
 
 	// Drain everything
@@ -118,7 +122,7 @@ func BenchmarkEngine_Enqueue_River(b *testing.B) {
 
 func BenchmarkJob_Normalize(b *testing.B) {
 	job := &Job{
-		JobKind: "test",
+		JobKind:  "test",
 		Metadata: map[string]any{"timeout_ms": 1000},
 	}
 
@@ -141,4 +145,17 @@ func BenchmarkJob_HealthKey(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = job.HealthKey()
 	}
+}
+
+func benchmarkLogger(b *testing.B) kitlogger.Logger {
+	b.Helper()
+	l, err := kitlogger.New(kitlogger.Config{
+		Environment: "production",
+		LogLevel:    "error",
+		ServiceName: "worker-benchmark",
+	})
+	if err != nil {
+		b.Fatalf("benchmark logger: %v", err)
+	}
+	return l
 }

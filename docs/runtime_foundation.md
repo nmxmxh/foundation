@@ -129,7 +129,7 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
 2. Stub runners may test the harness shape only. They do not prove runtime parity.
 3. Production parity coverage must compare the lanes the product actually uses: native direct dispatch, FFI buffer mutation, stdio framed buffers, Linux shared-memory transport, and browser worker/WASM where available.
 4. Runtime parity tests must compare full buffer state, not just returned payload bytes: status code, output bytes, diagnostics text, and epoch transitions (`IDX_INPUT_WRITTEN`, `IDX_OUTPUT_WRITTEN`, `IDX_PANIC_STATE`, `IDX_DIAGNOSTICS_WRITTEN`).
-5. Browser `SharedArrayBuffer` and native shared-memory parity must use `u32`/4-byte-aligned atomic slots only. Blocking waits stay in workers or native host threads, never on the browser main thread.
+5. Browser `SharedArrayBuffer` and native shared-memory parity must use `u32`/4-byte-aligned atomic slots only. Go, Rust, and TypeScript hosts must use atomic load/store/add/CAS operations for epoch slots; plain byte-order reads are allowed only for non-shared header and payload regions. Blocking waits stay in workers or native host threads, never on the browser main thread.
 6. A generic host runner such as Wasmtime may be useful for isolated tests, but it is not the foundation architecture by itself. The benchmark and parity target is the Ovasabi runtime ladder, not one embedding library.
 
 ## Compression posture

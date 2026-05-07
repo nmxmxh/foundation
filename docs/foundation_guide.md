@@ -75,6 +75,8 @@ Primary performance companions:
 
 * Every mutating command **must** carry a `correlationId`.
 * Incoming streams reconcile by carrying this identifier through sub-routes or workers.
+* Worker runtimes must inject the job correlation ID into `context.Context` before calling processors so tracing, graceful events, and metadata emission share one trusted request chain.
+* Header-derived user, session, device, organization, role, forwarded IP, and real IP values are provisional metadata. Auth and proxy-trust middleware must overwrite them from trusted claims or trusted edge headers before authorization or domain logic relies on them.
 
 ### 2. Client Stateful Pipeline Boundaries
 
