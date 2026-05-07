@@ -189,6 +189,26 @@ The next runtime benchmark target should compare:
 
 Each run should report latency, bytes copied at transport boundaries, allocations where the language runtime exposes them, and failure-path behavior.
 
+Runtime lane planning now has explicit scheduling inputs: payload size, workload class, trust, locality, batch size, deadline, unit capabilities, and available hardware/runtime features. The planner must preserve the runtime contract while selecting the cheapest physical lane:
+
+1. direct/same-process for trusted control payloads,
+2. Rust FFI or CPU SIMD for trusted vector-sized work,
+3. shared-memory or WASM/SAB for bounded same-host/browser payloads,
+4. WebGPU for wide data-parallel batches large enough to amortize dispatch,
+5. transfer or stream fallbacks when SAB/GPU lanes are unavailable.
+
+GPU batch layouts should be benchmarked separately from descriptor-ring traffic. The browser-host helper packs batch regions on 256-byte boundaries by default so storage-buffer style workloads can move through the arena without per-item ad hoc layout decisions.
+
+`RuntimeWebGpuHost` is intentionally split into testable pieces:
+
+1. pack arena descriptors into aligned GPU input buffers,
+2. create/cache compute pipelines asynchronously,
+3. dispatch workgroups,
+4. copy GPU output to a readback buffer,
+5. write output slices back to the source arena descriptors.
+
+Node tests validate the deterministic packing/writeback helpers without requiring a physical GPU. Browser/device benchmarks should add real `GPUDevice` dispatch metrics separately because adapter choice, driver, browser, and power state dominate those numbers.
+
 ## Browser shared-arena reference
 
 The browser-host benchmark measures payload movement inside `RuntimeSharedArena`. Current local reference:
@@ -201,6 +221,89 @@ The browser-host benchmark measures payload movement inside `RuntimeSharedArena`
 | sustained descriptor-ready ring traffic | 922.79 | 1.0837 | 1.2702 | Descriptor queue pressure path |
 
 The 4KB control-plane-sized path is roughly 7.22x faster than the 64KB slab path and 87.45x faster than the 1024KB slab path in this run. That supports the current design split: keep the hot control plane fixed and small, move larger payloads through arena descriptors or explicit streams, and benchmark descriptor-ring pressure separately from raw slab copies.
+
+### Browser Shared-Arena Hardening Run
+
+Environment:
+
+- Date: 2026-05-07
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Command: `cd foundation/runtime-sdk/ts/browser-host && npm run bench -- --reporter=verbose`
+
+| Benchmark | mean ns | p99 ns | Interpretation |
+| --- | ---: | ---: | --- |
+| 4KB slab write/read | 1500 | 4000 | Owned read copy path |
+| 4KB slab write/read view | 500 | 600 | Borrowed view avoids output copy |
+| 4KB slab fast write/read view | 400 | 500 | Thin hot path for prevalidated descriptor use |
+| 64KB slab write/read | 10700 | 55500 | Owned read cost grows with payload size |
+| 64KB slab write/read view | 3000 | 3200 | View path stays near memory-copy cost |
+| 64KB slab fast write/read view | 2900 | 3200 | Fast path is limited by slab copy |
+| 1024KB slab write/read | 121400 | 762200 | Large owned copy path |
+| 1024KB slab write/read view | 43100 | 62200 | Large view path avoids the second copy |
+| 1024KB slab fast write/read view | 43100 | 60700 | Same limit: moving 1MB dominates |
+| sustained descriptor-ready ring traffic | 1079900 | 1255700 | Single-entry queue CAS loop baseline |
+| descriptor-ready batch traffic x128 | 1090900 | 1243800 | Old batched API still pays per-entry queue work |
+| descriptor-ready fast batch traffic x128 | 487800 | 607600 | One tail CAS plus one head CAS per batch |
+| preallocated write/enqueue/dequeue batch x128 | 57200 | 80600 | Best full hot lane when descriptors are already owned |
+| descriptor release/reallocate free-list x1 | 313 | 400 | Reuse path is sub-4KB-copy cost |
+| descriptor release/reallocate free-list x128 | 35100 | 55700 | Lifecycle churn stays below preallocated write/enqueue/dequeue x128 |
+
+The major improvement is descriptor orchestration, not raw memory bandwidth. `descriptor-ready fast batch traffic x128` is about 2.24x faster than the old x128 batch path in this run. The new release/reallocate path also proves long-running processes can recycle descriptor IDs and their page-aligned slab regions without advancing the arena allocation head when the next request fits.
+
+Operational rule: allocate descriptors for stable flows, reuse them aggressively, and use fast queue reservations only for batches. For x1, the old single-entry path remains competitive because the fast batch path has extra setup without amortization.
+
+### Rust Native Buffer Hardening Run
+
+Environment:
+
+- Date: 2026-05-07
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Command: `cd foundation/runtime-sdk/rust && cargo run --release -p ovrt-native --bin buffer_bench`
+
+| Benchmark | ns/op | Interpretation |
+| --- | ---: | --- |
+| native read_output_bytes owned Vec | 68.58 | Copies output into a new owned allocation |
+| native output_bytes_view borrowed | 4.05 | Borrows from the fixed control buffer |
+| native write_output_bytes clear+copy | 55.37 | Clears the full output region, then copies payload |
+| native write_output_bytes_fast copy only | 33.98 | Copies payload and updates length only |
+
+The Rust-side optimization space is real but specific: prefer borrowed views when bytes do not need to outlive the control buffer, and use the explicit fast write path only when all readers honor the length field. The default clearing write remains available for defensive hygiene when stale bytes outside the active length must be erased.
+
+Research notes:
+
+- Rust `copy_nonoverlapping` is the `memcpy`-equivalent primitive for proven non-overlapping regions, but it is unsafe and requires strict validity/alignment guarantees. Safe `copy_from_slice` remains the default until a benchmark proves the unsafe path matters.
+- Rust `std::hint::black_box` is appropriate for this local benchmark because it asks the compiler to avoid optimizing away the measured operation, but the standard library documents it as best-effort rather than a correctness mechanism.
+- Crates such as `bytes` and `zerocopy` are relevant future options for cross-boundary owned/shared byte views, but the current 4KB control buffer is already simpler and faster with direct borrowed slices.
+
+### Packet-Ring Exploration
+
+Foundation now carries a DPDK-shaped browser-host primitive for optional packet-like lanes: fixed descriptor slots, burst enqueue/dequeue, explicit ownership states, monotonic timestamps, and drop/high-water counters. This is not a DPDK dependency. It is the contract a future native packet adapter must refine.
+
+Research alignment:
+
+- DPDK ring guidance emphasizes fixed-size FIFO rings, lockless producer/consumer modes, and bulk/burst enqueue/dequeue. Foundation mirrors those mechanics at the runtime contract level.
+- Linux timestamping separates ordinary software timestamps from hardware/NIC timestamps. Foundation treats timestamp precision as diagnostics and keeps domain-visible behavior independent of timestamp source.
+- Solarflare/Onload-style acceleration is valuable because it can preserve socket-shaped application code while moving packet handling closer to hardware. Foundation follows the same compatibility principle: app code keeps server-kit/runtime contracts, while optional adapters can use lower-level lanes underneath.
+
+Packet-ring benchmarks should be compared against descriptor-ring and preallocated arena paths, not against HTTP. HTTP pays for identity, middleware, routing, and compatibility; packet rings measure low-level lane mechanics.
+
+Local exploratory run:
+
+- Date: 2026-05-07
+- Command: `cd foundation/runtime-sdk/ts/browser-host && npm run bench -- --reporter=verbose`
+
+| Benchmark | mean ns | p99 ns | Comparison |
+| --- | ---: | ---: | --- |
+| packet-ring enqueue/dequeue/complete/release x1 | 400 | 500 | Similar class as 4KB fast arena view, with lifecycle timestamps |
+| packet-ring enqueue/dequeue/complete/release x8 | 2800 | 3500 | Faster than preallocated arena x8 in this run |
+| packet-ring enqueue/dequeue/complete/release x32 | 10900 | 20200 | Lower than preallocated arena x32, but with p99 noise from timestamp/lifecycle work |
+| packet-ring enqueue/dequeue/complete/release x128 | 47900 | 109700 | Faster mean than preallocated arena x128, noisier tail |
+| descriptor-ready fast batch traffic x128 | 495200 | 610800 | Packet ring is roughly 10.3x cheaper for packet-like local lifecycle work |
+| descriptor-ready batch traffic x128 | 1097500 | 1289900 | Packet ring is roughly 22.9x cheaper than old descriptor queue orchestration |
+
+Interpretation: packet-ring mechanics are useful for packet-like streams where descriptors are owned by a tight worker/runtime lane. They are not a replacement for the shared arena descriptor ring, which carries larger cross-lane payload ownership and WebGPU/WASM interop semantics. The current packet-ring tail is dominated by JavaScript object/lifecycle/timestamp work; a native/Rust version should use structure-of-arrays descriptor storage and monotonic timestamp sampling only at configured boundaries.
 
 ## Guardrails
 

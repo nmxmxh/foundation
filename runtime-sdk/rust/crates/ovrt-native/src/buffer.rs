@@ -72,9 +72,7 @@ impl NativeBuffer {
     }
 
     pub fn read_input_bytes(&self) -> Result<Vec<u8>, String> {
-        let length = self.header_int(INT_IDX_INPUT_LENGTH)?.max(0) as u32;
-        validate_input_length(length)?;
-        self.read_region(OFFSET_INPUT_BYTES, length)
+        Ok(self.input_bytes_view()?.to_vec())
     }
 
     pub fn write_input_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
@@ -84,10 +82,20 @@ impl NativeBuffer {
         self.set_header_int(INT_IDX_INPUT_LENGTH, bytes.len() as i32)
     }
 
+    pub fn write_input_bytes_fast(&mut self, bytes: &[u8]) -> Result<(), String> {
+        validate_input_length(bytes.len() as u32)?;
+        self.write_region(OFFSET_INPUT_BYTES, bytes)?;
+        self.set_header_int(INT_IDX_INPUT_LENGTH, bytes.len() as i32)
+    }
+
+    pub fn input_bytes_view(&self) -> Result<&[u8], String> {
+        let length = self.header_int(INT_IDX_INPUT_LENGTH)?.max(0) as u32;
+        validate_input_length(length)?;
+        self.region_view(OFFSET_INPUT_BYTES, length)
+    }
+
     pub fn read_output_bytes(&self) -> Result<Vec<u8>, String> {
-        let length = self.header_int(INT_IDX_OUTPUT_LENGTH)?.max(0) as u32;
-        validate_output_length(length)?;
-        self.read_region(OFFSET_OUTPUT_BYTES, length)
+        Ok(self.output_bytes_view()?.to_vec())
     }
 
     pub fn write_output_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
@@ -95,6 +103,18 @@ impl NativeBuffer {
         self.zero_region(OFFSET_OUTPUT_BYTES, ovrt_core::OUTPUT_MAX_BYTES)?;
         self.write_region(OFFSET_OUTPUT_BYTES, bytes)?;
         self.set_header_int(INT_IDX_OUTPUT_LENGTH, bytes.len() as i32)
+    }
+
+    pub fn write_output_bytes_fast(&mut self, bytes: &[u8]) -> Result<(), String> {
+        validate_output_length(bytes.len() as u32)?;
+        self.write_region(OFFSET_OUTPUT_BYTES, bytes)?;
+        self.set_header_int(INT_IDX_OUTPUT_LENGTH, bytes.len() as i32)
+    }
+
+    pub fn output_bytes_view(&self) -> Result<&[u8], String> {
+        let length = self.header_int(INT_IDX_OUTPUT_LENGTH)?.max(0) as u32;
+        validate_output_length(length)?;
+        self.region_view(OFFSET_OUTPUT_BYTES, length)
     }
 
     pub fn clear_output(&mut self) -> Result<(), String> {
@@ -143,11 +163,11 @@ impl NativeBuffer {
         Ok(current)
     }
 
-    fn read_region(&self, offset: u32, length: u32) -> Result<Vec<u8>, String> {
+    fn region_view(&self, offset: u32, length: u32) -> Result<&[u8], String> {
         validate_region(offset, length, self.raw.len())?;
         let start = offset as usize;
         let end = start + length as usize;
-        Ok(self.raw[start..end].to_vec())
+        Ok(&self.raw[start..end])
     }
 
     fn write_region(&mut self, offset: u32, bytes: &[u8]) -> Result<(), String> {
@@ -189,8 +209,25 @@ mod tests {
 
         assert_eq!(buffer.read_input_bytes().expect("read input"), b"asset");
         assert_eq!(buffer.read_output_bytes().expect("read output"), b"layout");
+        assert_eq!(buffer.input_bytes_view().expect("input view"), b"asset");
+        assert_eq!(buffer.output_bytes_view().expect("output view"), b"layout");
         assert_eq!(buffer.diagnostics_text(), "degraded");
         assert_eq!(buffer.load_epoch(IDX_INPUT_WRITTEN), 1);
         assert_eq!(buffer.load_epoch(IDX_OUTPUT_WRITTEN), 1);
+    }
+
+    #[test]
+    fn fast_writes_update_lengths_without_clearing_full_regions() {
+        let mut buffer = NativeBuffer::new(vec![0; BUFFER_TOTAL_BYTES as usize]).expect("buffer");
+
+        buffer
+            .write_output_bytes(b"long-output")
+            .expect("write output");
+        buffer
+            .write_output_bytes_fast(b"short")
+            .expect("fast output");
+
+        assert_eq!(buffer.output_bytes_view().expect("output view"), b"short");
+        assert_eq!(buffer.read_output_bytes().expect("owned output"), b"short");
     }
 }

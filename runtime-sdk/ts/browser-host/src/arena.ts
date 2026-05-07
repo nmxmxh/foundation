@@ -89,6 +89,27 @@ export type RuntimeArenaQueueEntry = {
   epoch: number;
 };
 
+export type RuntimeArenaBatchItem = {
+  data: Uint8Array;
+  type?: RuntimeDescriptorType;
+  flags?: number;
+  correlationHash?: number;
+};
+
+export type RuntimeArenaBatchResult = {
+  descriptors: RuntimeArenaDescriptor[];
+  enqueued: number;
+};
+
+export type RuntimeArenaQueueDrain = {
+  entries: RuntimeArenaQueueEntry[];
+  count: number;
+};
+
+export type RuntimeArenaReleaseOptions = {
+  force?: boolean;
+};
+
 export type RuntimeMemorySelection = {
   controlBuffer: SharedArrayBuffer | ArrayBuffer;
   arena: RuntimeSharedArena | null;
@@ -154,6 +175,7 @@ export class RuntimeSharedArena {
   private readonly epochs: Int32Array;
   private readonly bytes: Uint8Array;
   private readonly view: DataView;
+  private readonly descriptorFreeList: number[] = [];
 
   static create(options: Pick<RuntimeMemoryOptions, "arenaBytes" | "arenaProfile"> = {}): RuntimeSharedArena {
     if (typeof SharedArrayBuffer === "undefined") {
@@ -186,6 +208,10 @@ export class RuntimeSharedArena {
     Atomics.store(this.epochs, ARENA_IDX_QUEUE_HEAD, 0);
     Atomics.store(this.epochs, ARENA_IDX_QUEUE_TAIL, 0);
     Atomics.store(this.epochs, ARENA_IDX_READY, 1);
+    this.descriptorFreeList.length = 0;
+    for (let id = ARENA_DESCRIPTOR_COUNT - 1; id >= 0; id -= 1) {
+      this.descriptorFreeList.push(id);
+    }
   }
 
   capacity(): number {
@@ -200,14 +226,26 @@ export class RuntimeSharedArena {
     if (!Number.isFinite(length) || length <= 0) {
       throw new Error(`invalid runtime arena allocation length: ${length}`);
     }
-    const capacity = alignToPage(length);
-    const offset = Atomics.add(this.epochs, ARENA_IDX_ALLOC_HEAD, capacity);
-    if (offset + capacity > this.buffer.byteLength) {
-      Atomics.add(this.epochs, ARENA_IDX_BACKPRESSURE, 1);
-      throw new Error(`runtime shared arena capacity exceeded: ${offset + capacity} > ${this.buffer.byteLength}`);
+    const id = this.reserveDescriptor();
+    let capacity = alignToPage(length);
+    let offset = this.view.getUint32(descriptorOffset(id) + 4, true);
+    const reusableCapacity = this.view.getUint32(descriptorOffset(id) + 12, true);
+    const canReuseRegion =
+      reusableCapacity >= capacity &&
+      offset >= ARENA_OFFSET_PAGES &&
+      offset + reusableCapacity <= this.buffer.byteLength;
+    if (canReuseRegion) {
+      capacity = reusableCapacity;
+    } else {
+      offset = Atomics.add(this.epochs, ARENA_IDX_ALLOC_HEAD, capacity);
+      if (offset + capacity > this.buffer.byteLength) {
+        Atomics.add(this.epochs, ARENA_IDX_BACKPRESSURE, 1);
+        this.descriptorFreeList.push(id);
+        throw new Error(`runtime shared arena capacity exceeded: ${offset + capacity} > ${this.buffer.byteLength}`);
+      }
+      this.header[ARENA_HEADER_IDX_ALLOCATED_BYTES] = offset + capacity;
     }
 
-    const id = this.reserveDescriptor();
     const descriptor: RuntimeArenaDescriptor = {
       id,
       state: ARENA_DESCRIPTOR_STATE_ALLOCATED,
@@ -220,7 +258,6 @@ export class RuntimeSharedArena {
       consumerEpoch: 0,
     };
     this.writeDescriptor(descriptor);
-    this.header[ARENA_HEADER_IDX_ALLOCATED_BYTES] = offset + capacity;
     Atomics.add(this.epochs, ARENA_IDX_DESCRIPTOR_EPOCH, 1);
     return descriptor;
   }
@@ -228,6 +265,15 @@ export class RuntimeSharedArena {
   writeSlab(descriptorId: number, data: Uint8Array): RuntimeArenaDescriptor {
     this.writeSlabReady(descriptorId, data);
     return this.readDescriptor(descriptorId);
+  }
+
+  writeSlabsReady(items: Array<{ descriptorId: number; data: Uint8Array }>): RuntimeArenaDescriptor[] {
+    const descriptors: RuntimeArenaDescriptor[] = [];
+    for (const item of items) {
+      this.writeSlabReady(item.descriptorId, item.data);
+      descriptors.push(this.readDescriptor(item.descriptorId));
+    }
+    return descriptors;
   }
 
   writeSlabReady(descriptorId: number, data: Uint8Array): void {
@@ -289,6 +335,45 @@ export class RuntimeSharedArena {
     Atomics.add(this.epochs, ARENA_IDX_DESCRIPTOR_EPOCH, 1);
   }
 
+  releaseDescriptor(descriptorId: number, options: RuntimeArenaReleaseOptions = {}): RuntimeArenaDescriptor {
+    this.releaseDescriptorById(descriptorId, options);
+    return this.readDescriptor(descriptorId);
+  }
+
+  releaseDescriptorById(descriptorId: number, options: RuntimeArenaReleaseOptions = {}): void {
+    this.assertDescriptorId(descriptorId);
+    const descriptorTableOffset = descriptorOffset(descriptorId);
+    const state = this.view.getUint32(descriptorTableOffset, true);
+    if (state === ARENA_DESCRIPTOR_STATE_FREE) {
+      return;
+    }
+    if (!options.force && state === ARENA_DESCRIPTOR_STATE_READY) {
+      throw new Error(`runtime arena descriptor ${descriptorId} is ready and must be consumed before release`);
+    }
+    this.view.setUint32(descriptorTableOffset, ARENA_DESCRIPTOR_STATE_FREE, true);
+    this.view.setUint32(descriptorTableOffset + 8, 0, true);
+    this.view.setUint32(descriptorTableOffset + 20, 0, true);
+    this.view.setUint32(
+      descriptorTableOffset + 28,
+      this.view.getUint32(descriptorTableOffset + 28, true) + 1,
+      true
+    );
+    this.descriptorFreeList.push(descriptorId);
+    Atomics.add(this.epochs, ARENA_IDX_DESCRIPTOR_EPOCH, 1);
+  }
+
+  releaseDescriptors(descriptorIds: readonly number[], options: RuntimeArenaReleaseOptions = {}): number {
+    let released = 0;
+    for (const descriptorId of descriptorIds) {
+      const before = this.view.getUint32(descriptorOffset(descriptorId), true);
+      this.releaseDescriptorById(descriptorId, options);
+      if (before !== ARENA_DESCRIPTOR_STATE_FREE) {
+        released += 1;
+      }
+    }
+    return released;
+  }
+
   enqueue(entry: Omit<RuntimeArenaQueueEntry, "epoch">): boolean {
     while (true) {
       const head = Atomics.load(this.epochs, ARENA_IDX_QUEUE_HEAD);
@@ -320,6 +405,63 @@ export class RuntimeSharedArena {
     });
   }
 
+  enqueueDescriptorReadyBatch(descriptorIds: readonly number[], correlationHash = 0): number {
+    let enqueued = 0;
+    for (const descriptorId of descriptorIds) {
+      if (!this.enqueueDescriptorReady(descriptorId, correlationHash)) {
+        return enqueued;
+      }
+      enqueued += 1;
+    }
+    return enqueued;
+  }
+
+  enqueueDescriptorReadyBatchFast(descriptorIds: readonly number[], correlationHash = 0): number {
+    const count = descriptorIds.length;
+    if (count === 0) {
+      return 0;
+    }
+    const head = Atomics.load(this.epochs, ARENA_IDX_QUEUE_HEAD);
+    const tail = Atomics.load(this.epochs, ARENA_IDX_QUEUE_TAIL);
+    const available = ARENA_QUEUE_SLOT_COUNT - (tail - head);
+    if (available <= 0) {
+      Atomics.add(this.header, ARENA_HEADER_IDX_QUEUE_DROPPED, count);
+      Atomics.add(this.epochs, ARENA_IDX_BACKPRESSURE, 1);
+      return 0;
+    }
+    const accepted = Math.min(count, available);
+    if (Atomics.compareExchange(this.epochs, ARENA_IDX_QUEUE_TAIL, tail, tail + accepted) !== tail) {
+      return this.enqueueDescriptorReadyBatch(descriptorIds, correlationHash);
+    }
+    for (let index = 0; index < accepted; index += 1) {
+      this.writeDescriptorReadyQueueSlot((tail + index) % ARENA_QUEUE_SLOT_COUNT, descriptorIds[index], correlationHash, tail + index + 1);
+    }
+    Atomics.add(this.epochs, ARENA_IDX_QUEUE_EPOCH, accepted);
+    if (accepted < count) {
+      Atomics.add(this.header, ARENA_HEADER_IDX_QUEUE_DROPPED, count - accepted);
+      Atomics.add(this.epochs, ARENA_IDX_BACKPRESSURE, 1);
+    }
+    return accepted;
+  }
+
+  allocateWriteReadyBatch(items: readonly RuntimeArenaBatchItem[]): RuntimeArenaBatchResult {
+    const descriptors: RuntimeArenaDescriptor[] = [];
+    for (const item of items) {
+      const descriptor = this.allocate(item.data.byteLength, item.type ?? ARENA_DESCRIPTOR_TYPE_BYTES, item.flags ?? 0);
+      this.writeSlabReady(descriptor.id, item.data);
+      descriptors.push(this.readDescriptor(descriptor.id));
+    }
+    let enqueued = 0;
+    for (let index = 0; index < descriptors.length; index += 1) {
+      const descriptor = descriptors[index];
+      if (!this.enqueueDescriptorReady(descriptor.id, items[index]?.correlationHash ?? 0)) {
+        return { descriptors, enqueued };
+      }
+      enqueued += 1;
+    }
+    return { descriptors, enqueued };
+  }
+
   dequeue(): RuntimeArenaQueueEntry | null {
     while (true) {
       const head = Atomics.load(this.epochs, ARENA_IDX_QUEUE_HEAD);
@@ -332,6 +474,60 @@ export class RuntimeSharedArena {
       }
       return this.readQueueSlot(head % ARENA_QUEUE_SLOT_COUNT);
     }
+  }
+
+  dequeueBatch(limit: number): RuntimeArenaQueueEntry[] {
+    const max = Math.max(0, Math.floor(limit));
+    if (max === 0) {
+      return [];
+    }
+    const entries: RuntimeArenaQueueEntry[] = [];
+    while (entries.length < max) {
+      const entry = this.dequeue();
+      if (!entry) {
+        break;
+      }
+      entries.push(entry);
+    }
+    return entries;
+  }
+
+  dequeueBatchInto(limit: number, target: RuntimeArenaQueueEntry[]): RuntimeArenaQueueDrain {
+    const max = Math.max(0, Math.floor(limit));
+    target.length = 0;
+    if (max === 0) {
+      return { entries: target, count: 0 };
+    }
+    while (target.length < max) {
+      const entry = this.dequeue();
+      if (!entry) {
+        break;
+      }
+      target.push(entry);
+    }
+    return { entries: target, count: target.length };
+  }
+
+  dequeueBatchFast(limit: number, target: RuntimeArenaQueueEntry[] = []): RuntimeArenaQueueDrain {
+    const max = Math.max(0, Math.floor(limit));
+    target.length = 0;
+    if (max === 0) {
+      return { entries: target, count: 0 };
+    }
+    const head = Atomics.load(this.epochs, ARENA_IDX_QUEUE_HEAD);
+    const tail = Atomics.load(this.epochs, ARENA_IDX_QUEUE_TAIL);
+    const available = tail - head;
+    if (available <= 0) {
+      return { entries: target, count: 0 };
+    }
+    const accepted = Math.min(max, available);
+    if (Atomics.compareExchange(this.epochs, ARENA_IDX_QUEUE_HEAD, head, head + accepted) !== head) {
+      return this.dequeueBatchInto(max, target);
+    }
+    for (let index = 0; index < accepted; index += 1) {
+      target.push(this.readQueueSlot((head + index) % ARENA_QUEUE_SLOT_COUNT));
+    }
+    return { entries: target, count: accepted };
   }
 
   invariantSnapshot(): RuntimeArenaInvariantSnapshot {
@@ -393,6 +589,12 @@ export class RuntimeSharedArena {
   }
 
   private reserveDescriptor(): number {
+    while (this.descriptorFreeList.length > 0) {
+      const id = this.descriptorFreeList.pop() as number;
+      if (this.view.getUint32(descriptorOffset(id), true) === ARENA_DESCRIPTOR_STATE_FREE) {
+        return id;
+      }
+    }
     for (let id = 0; id < ARENA_DESCRIPTOR_COUNT; id += 1) {
       if (this.readDescriptor(id).state === ARENA_DESCRIPTOR_STATE_FREE) {
         return id;
@@ -424,6 +626,20 @@ export class RuntimeSharedArena {
     this.view.setUint32(offset + 16, entry.flags, true);
     this.view.setUint32(offset + 20, entry.correlationHash, true);
     this.view.setUint32(offset + 24, entry.epoch, true);
+    this.view.setUint32(offset + 28, 0, true);
+  }
+
+  private writeDescriptorReadyQueueSlot(slot: number, descriptorId: number, correlationHash: number, epoch: number): void {
+    this.assertDescriptorId(descriptorId);
+    const descriptorTableOffset = descriptorOffset(descriptorId);
+    const offset = queueSlotOffset(slot);
+    this.view.setUint32(offset, ARENA_QUEUE_OP_DESCRIPTOR_READY, true);
+    this.view.setUint32(offset + 4, descriptorId, true);
+    this.view.setUint32(offset + 8, this.view.getUint32(descriptorTableOffset + 4, true), true);
+    this.view.setUint32(offset + 12, this.view.getUint32(descriptorTableOffset + 8, true), true);
+    this.view.setUint32(offset + 16, this.view.getUint32(descriptorTableOffset + 20, true), true);
+    this.view.setUint32(offset + 20, correlationHash, true);
+    this.view.setUint32(offset + 24, epoch, true);
     this.view.setUint32(offset + 28, 0, true);
   }
 

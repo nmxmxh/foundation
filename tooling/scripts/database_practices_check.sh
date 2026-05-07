@@ -17,15 +17,15 @@ else
 
   first_up_path="$migrations_dir/$first_up"
 
-  if ! rg -n "CREATE TABLE" "$first_up_path" >/dev/null 2>&1; then
+  if ! rg -in "CREATE TABLE" "$first_up_path" >/dev/null 2>&1; then
     echo "[FAIL] first migration must establish schema tables"
     failed=1
   else
     echo "[OK] first migration creates schema objects"
   fi
 
-  if rg -n "(organization_id|org_id|workspace_id)" "$first_up_path" >/dev/null 2>&1; then
-    if ! rg -n "CREATE( UNIQUE)? INDEX .*?(organization_id|org_id|workspace_id)|PRIMARY KEY .*?(organization_id|org_id|workspace_id)" "$first_up_path" >/dev/null 2>&1; then
+  if rg -in "(organization_id|org_id|workspace_id)" "$first_up_path" >/dev/null 2>&1; then
+    if ! rg -in "CREATE( UNIQUE)? INDEX .*?(organization_id|org_id|workspace_id)|PRIMARY KEY .*?(organization_id|org_id|workspace_id)|UNIQUE .*?(organization_id|org_id|workspace_id)" "$first_up_path" >/dev/null 2>&1; then
       echo "[FAIL] tenant boundary columns found without supporting index guidance in first migration"
       failed=1
     else

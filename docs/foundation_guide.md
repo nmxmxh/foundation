@@ -131,6 +131,9 @@ Primary performance companions:
 * Keep generated protobuf contracts in app space and pass them into app-specific stores/hooks; do not put app domain contracts inside `frontend-kit`.
 * Runtime and WASM views should expose React state through `useSyncExternalStore`-style handles. Avoid page-local polling loops for SAB epochs or worker diagnostics.
 * Use Makefile runtime targets for WASM propagation: `make runtime-bindings`, `make build-rust-wasm`, and `make wasm-manifest`. Frontend code should load `frontend/public/runtime/wasm-manifest.json` through `@ovasabi/frontend-kit` and instantiate modules through the runtime-sdk browser host.
+* Performance-sensitive frontend code must call the runtime lane planner before choosing a transport/compute path. Treat the planner output as the contract: `copyBudget`, `allocationBudget`, `expectedLatencyClass`, `deadlineRisk`, and `requiresCrossOriginIsolation` decide whether a feature uses SAB/WASM, transferable workers, WebGPU, WebSocket, or HTTP.
+* Keep UI thread work on control and render duties. Do not decode large JSON maps, spin on SAB epochs, or dispatch WebGPU compute from React render paths. Workers own compute, SAB waits, transfer fallback, and GPU dispatch orchestration.
+* Use WebGPU only for wide homogeneous batches where dispatch/readback is amortized. Use SAB/WASM or transferable workers for small bounded payloads, and keep hot domain payloads as typed bytes/views until the owning adapter must materialize objects.
 
 ### 9. Backend Runtime Binding Rule
 
