@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest test test-unit test-integration test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-coding-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest test test-unit test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-coding-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -25,6 +25,12 @@ GOTEST := $(GOCMD) test
 GO_TEST_TIMEOUT ?= 120s
 GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
 GO_PACKAGE_EXCLUDE_RE ?= /node_modules/|/api/protos/
+LOAD_RACE ?= 1
+ifeq ($(LOAD_RACE),0)
+LOAD_RACE_FLAG :=
+else
+LOAD_RACE_FLAG := -race
+endif
 
 DOCKER_COMPOSE ?= docker compose -f docker-compose.yml -f docker-compose.dev.yml
 DOCKER_COMPOSE_TEST ?= docker compose -f docker-compose.test.yml
@@ -260,6 +266,48 @@ test-integration:
 	REDIS_PREFIX="test_$(PROJECT_NAME):" \
 	$(GOTEST) -race -count=1 -timeout $(GO_TEST_TIMEOUT) -tags=integration ./tests/integration/...
 
+test-load:
+	@set -e; \
+	if [ ! -f go.mod ]; then \
+		echo "No Go module; skipping load tests"; \
+		exit 0; \
+	fi; \
+	if [ ! -d tests/load ]; then \
+		echo "No tests/load package; skipping load tests"; \
+		exit 0; \
+	fi; \
+	if [ -z "$$CI" ]; then \
+		$(MAKE) test-env-up; \
+	fi; \
+	$(MAKE) migrate-test; \
+	mkdir -p "$(GO_CACHE_DIR)"; \
+	APP_ENV=test \
+	GOCACHE="$(GO_CACHE_DIR)" \
+	RUN_LOAD_TESTS="$${RUN_LOAD_TESTS:-1}" \
+	TEST_INFRA_REQUIRED=true \
+	TEST_REDIS_REQUIRED=true \
+	TEST_DB_HOST="$(TEST_DB_HOST)" \
+	TEST_DB_PORT="$(TEST_DB_PORT)" \
+	TEST_DB_USER="$(TEST_DB_USER)" \
+	TEST_DB_PASSWORD="$(TEST_DB_PASSWORD)" \
+	TEST_DB_NAME="$(TEST_DB_NAME)" \
+	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
+	DATABASE_URL="$(TEST_DATABASE_URL)" \
+	TEST_REDIS_URL="$(TEST_REDIS_URL)" \
+	REDIS_URL="$(TEST_REDIS_URL)" \
+	REDIS_PREFIX="test_$(PROJECT_NAME):" \
+	$(GOTEST) $(LOAD_RACE_FLAG) -v -count=1 -timeout "$${LOAD_TEST_TIMEOUT:-10m}" ./tests/load/...
+
+test-bench:
+	@if [ -f go.mod ]; then \
+		mkdir -p "$(GO_CACHE_DIR)"; \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		if [ -z "$$packages" ]; then echo "No Go packages found"; exit 0; fi; \
+		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -run '^$$' -bench "$${BENCH_PATTERN:-.}" -benchmem -count "$${BENCH_COUNT:-3}" -timeout "$${BENCH_TIMEOUT:-20m}" $$packages; \
+	else \
+		echo "No Go module; skipping benchmarks"; \
+	fi
+
 test-all: lint-foundation test-unit test-integration test-frontend
 
 test-frontend:
@@ -450,6 +498,8 @@ help:
 	@echo "  test             - Run unit and frontend tests"
 	@echo "  test-unit        - Run Go tests without integration tag"
 	@echo "  test-integration - Start scaffolded DB/Redis, migrate, and run integration tests"
+	@echo "  test-load        - Run opt-in DB/Redis/queue recurring load tests"
+	@echo "  test-bench       - Run Go benchmarks with benchmem"
 	@echo "  test-all         - Run foundation checks, unit tests, integration tests, and frontend tests"
 	@echo "  lint             - Run linters and scaffold checks"
 	@echo "  verify           - Run lint, test, and build"

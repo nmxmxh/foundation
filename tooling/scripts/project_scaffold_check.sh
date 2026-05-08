@@ -160,7 +160,14 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "integration infra test" "$target/tests/integration/infra_test.go"
   check_file_contains "managed test env defaults" "$target/tests/testutil/env.go" "ApplyTestEnvDefaults"
   check_file_contains "managed test infra required flag" "$target/tests/testutil/env.go" "TEST_INFRA_REQUIRED"
+  check_exists "managed recurring load test harness" "$target/tests/load/load_test.go"
+  check_file_contains "load tests are opt-in" "$target/tests/load/load_test.go" "RUN_LOAD_TESTS"
+  check_file_contains "load tests cover Redis path" "$target/tests/load/load_test.go" "opRedis"
+  check_file_contains "load tests cover DB write path" "$target/tests/load/load_test.go" "opDBWrite"
+  check_file_contains "load tests expose River queue state" "$target/tests/load/load_test.go" "fetchRiverStateCounts"
   check_file_contains "make integration target" "$target/Makefile" "test-integration"
+  check_file_contains "make load target" "$target/Makefile" "test-load:"
+  check_file_contains "make benchmark target" "$target/Makefile" "test-bench:"
   check_file_contains "make test database URL" "$target/Makefile" "TEST_DATABASE_URL"
   check_file_contains "make test Redis URL" "$target/Makefile" "TEST_REDIS_URL"
   check_file_contains "env test database URL" "$target/.env.example" "TEST_DATABASE_URL"
@@ -215,6 +222,7 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
   if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
     check_exists "Dockerfile.migrate" "$target/Dockerfile.migrate"
     check_exists "docker-compose.test.yml" "$target/docker-compose.test.yml"
+    check_file_contains "test Postgres image override" "$target/docker-compose.test.yml" "TEST_POSTGRES_IMAGE"
     check_file_not_contains "test Postgres 18 avoids legacy data mount" "$target/docker-compose.test.yml" "/var/lib/postgresql/data"
     check_file_contains "shared Docker Go module cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gomod'
     check_file_contains "shared Docker Go build cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gobuild'

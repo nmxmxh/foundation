@@ -10,10 +10,11 @@
 #   TEST_REDIS_PORT: Port to expose Redis (default: 6380)
 #   TEST_REDIS_PASSWORD: Optional Redis password (default: empty)
 #   POSTGRES_VERSION: PostgreSQL major version (default: 18)
+#   TEST_POSTGRES_IMAGE: override test DB image, e.g. postgis/postgis:17-3.5 for PostGIS migrations
 
 services:
   test-postgres:
-    image: postgres:${POSTGRES_VERSION:-18}-alpine
+    image: ${TEST_POSTGRES_IMAGE:-postgres:${POSTGRES_VERSION:-18}-alpine}
     container_name: "{{PROJECT_NAME}}-test-postgres"
     environment:
       POSTGRES_USER: ${TEST_DB_USER:-postgres}

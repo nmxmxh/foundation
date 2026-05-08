@@ -42,6 +42,9 @@ templates/backend/migrations/000001_init.down.sql	migrations/000001_init.down.sq
 templates/backend/tests/integration/health_test.go	tests/integration/health_test.go	full,backend	always	create
 templates/backend/tests/integration/infra_test.go	tests/integration/infra_test.go	full,backend	always	force
 templates/backend/tests/integration/setup_test.go	tests/integration/setup_test.go	full,backend	always	force
+templates/backend/tests/load/main_test.go	tests/load/main_test.go	full,backend	always	force
+templates/backend/tests/load/load_test.go	tests/load/load_test.go	full,backend	always	force
+templates/backend/tests/load/load_helpers_test.go	tests/load/load_helpers_test.go	full,backend	always	force
 templates/backend/tests/testutil/env.go	tests/testutil/env.go	full,backend	always	force
 templates/backend/tests/testutil/fixtures.go	tests/testutil/fixtures.go	full,backend	always	create
 templates/backend/tests/testutil/storage.go	tests/testutil/storage.go	full,backend	always	create
