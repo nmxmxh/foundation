@@ -98,6 +98,137 @@ func TestValidateServerRejectsInvalidStorageBudgets(t *testing.T) {
 	}
 }
 
+func TestValidatePublicRejectsRequiredFieldsAndRuntimeMemory(t *testing.T) {
+	cfg := validServerConfigForTest().Public
+	cases := []struct {
+		name   string
+		mutate func(*PublicRuntimeConfig)
+	}{
+		{name: "bad schema", mutate: func(cfg *PublicRuntimeConfig) { cfg.SchemaVersion = "2.0" }},
+		{name: "missing api", mutate: func(cfg *PublicRuntimeConfig) { cfg.APIBaseURL = "" }},
+		{name: "missing websocket", mutate: func(cfg *PublicRuntimeConfig) { cfg.WSBaseURL = "" }},
+		{name: "missing locale", mutate: func(cfg *PublicRuntimeConfig) { cfg.DefaultLocale = "" }},
+		{name: "bad timeout", mutate: func(cfg *PublicRuntimeConfig) { cfg.TransportTimeoutsMS.WASM = 0 }},
+		{name: "missing wasm", mutate: func(cfg *PublicRuntimeConfig) { cfg.WASMAssets.ModulePath = "" }},
+		{name: "bad runtime memory", mutate: func(cfg *PublicRuntimeConfig) {
+			cfg.RuntimeMemory = RuntimeMemoryConfig{
+				SharedMemory:   "sometimes",
+				TransportOrder: []string{"sab"},
+				Compression:    []string{"identity"},
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			next := cfg
+			tc.mutate(&next)
+			if err := ValidatePublic(next); err == nil {
+				t.Fatal("expected ValidatePublic to fail")
+			}
+		})
+	}
+}
+
+func TestValidateRuntimeMemoryRejectsUnsupportedValues(t *testing.T) {
+	valid := RuntimeMemoryConfig{
+		SharedMemory:   "required",
+		TransportOrder: []string{"postMessage", "transferable", "sab", "ws", "http"},
+		Compression:    []string{"identity", "gzip", "br", "deflate"},
+		ArenaBytes:     4096,
+	}
+	if err := ValidateRuntimeMemory(valid); err != nil {
+		t.Fatalf("ValidateRuntimeMemory(valid) error = %v", err)
+	}
+	cases := []struct {
+		name   string
+		mutate func(*RuntimeMemoryConfig)
+	}{
+		{name: "shared memory", mutate: func(cfg *RuntimeMemoryConfig) { cfg.SharedMemory = "bad" }},
+		{name: "transport order empty", mutate: func(cfg *RuntimeMemoryConfig) { cfg.TransportOrder = nil }},
+		{name: "transport unsupported", mutate: func(cfg *RuntimeMemoryConfig) { cfg.TransportOrder = []string{"pipe"} }},
+		{name: "compression empty", mutate: func(cfg *RuntimeMemoryConfig) { cfg.Compression = nil }},
+		{name: "compression unsupported", mutate: func(cfg *RuntimeMemoryConfig) { cfg.Compression = []string{"zstd"} }},
+		{name: "negative arena", mutate: func(cfg *RuntimeMemoryConfig) { cfg.ArenaBytes = -1 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			next := valid
+			tc.mutate(&next)
+			if err := ValidateRuntimeMemory(next); err == nil {
+				t.Fatal("expected ValidateRuntimeMemory to fail")
+			}
+		})
+	}
+}
+
+func TestValidateServerRejectsCriticalRuntimeFields(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*ServerRuntimeConfig)
+	}{
+		{name: "server schema", mutate: func(cfg *ServerRuntimeConfig) { cfg.SchemaVersion = "2.0" }},
+		{name: "public", mutate: func(cfg *ServerRuntimeConfig) { cfg.Public.APIBaseURL = "" }},
+		{name: "database url", mutate: func(cfg *ServerRuntimeConfig) { cfg.Database.URL = "" }},
+		{name: "database max", mutate: func(cfg *ServerRuntimeConfig) { cfg.Database.MaxConnections = 0 }},
+		{name: "database negative budget", mutate: func(cfg *ServerRuntimeConfig) { cfg.Database.QueryTimeoutMS = -1 }},
+		{name: "redis url", mutate: func(cfg *ServerRuntimeConfig) { cfg.Redis.URL = "" }},
+		{name: "strict object storage", mutate: func(cfg *ServerRuntimeConfig) { cfg.ObjectStorage.SecretKey = "" }},
+		{name: "jwt secret", mutate: func(cfg *ServerRuntimeConfig) { cfg.JWT.Secret = "" }},
+		{name: "runtime budget", mutate: func(cfg *ServerRuntimeConfig) { cfg.RuntimeBudgets.DispatchMaxConcurrent = 0 }},
+		{name: "slo", mutate: func(cfg *ServerRuntimeConfig) { cfg.SLOs.WorkerSuccessRate = 2 }},
+		{name: "post quantum", mutate: func(cfg *ServerRuntimeConfig) { cfg.Security.PostQuantum.TLSHybridKEM = "unknown" }},
+		{name: "queues missing", mutate: func(cfg *ServerRuntimeConfig) { cfg.Queues = nil }},
+		{name: "queue concurrency", mutate: func(cfg *ServerRuntimeConfig) { cfg.Queues["media_probe"] = QueueConfig{} }},
+		{name: "queue retries", mutate: func(cfg *ServerRuntimeConfig) {
+			cfg.Queues["media_probe"] = QueueConfig{Concurrency: 1, MaxRetries: -1}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validServerConfigForTest()
+			cfg.SLOs = SLOConfig{DispatchP99LatencyMS: 100, WorkerSuccessRate: 0.99, EventDeliveryLagMS: 50}
+			cfg.Security.PostQuantum = PostQuantumConfig{TLSHybridKEM: "auto", SignatureAlgorithm: "classical"}
+			tc.mutate(&cfg)
+			if err := ValidateServer(cfg); err == nil {
+				t.Fatal("expected ValidateServer to fail")
+			}
+		})
+	}
+}
+
+func TestPostQuantumAndSLOValidation(t *testing.T) {
+	if err := ValidatePostQuantum(PostQuantumConfig{TLSHybridKEM: "required", SignatureAlgorithm: "ml-dsa"}); err != nil {
+		t.Fatalf("ValidatePostQuantum() error = %v", err)
+	}
+	if err := ValidatePostQuantum(PostQuantumConfig{TLSHybridKEM: "auto", SignatureAlgorithm: "slh-dsa"}); err != nil {
+		t.Fatalf("ValidatePostQuantum() error = %v", err)
+	}
+	if err := ValidatePostQuantum(PostQuantumConfig{TLSHybridKEM: "disabled", SignatureAlgorithm: "bad"}); err == nil {
+		t.Fatal("expected invalid signature algorithm to fail")
+	}
+	if err := ValidateSLOs(SLOConfig{DispatchP99LatencyMS: 10, WorkerSuccessRate: 1, EventDeliveryLagMS: 5}); err != nil {
+		t.Fatalf("ValidateSLOs() error = %v", err)
+	}
+	if err := ValidateSLOs(SLOConfig{DispatchP99LatencyMS: 0, WorkerSuccessRate: 1, EventDeliveryLagMS: 5}); err == nil {
+		t.Fatal("expected invalid latency SLO to fail")
+	}
+	if err := ValidateSLOs(SLOConfig{DispatchP99LatencyMS: 1, WorkerSuccessRate: 0, EventDeliveryLagMS: 5}); err == nil {
+		t.Fatal("expected invalid worker success SLO to fail")
+	}
+	if err := ValidateSLOs(SLOConfig{DispatchP99LatencyMS: 1, WorkerSuccessRate: 1, EventDeliveryLagMS: 0}); err == nil {
+		t.Fatal("expected invalid lag SLO to fail")
+	}
+}
+
+func TestDerivePublicNormalizesSchemaVersion(t *testing.T) {
+	cfg := validServerConfigForTest()
+	cfg.Public.SchemaVersion = "v1"
+	public := DerivePublic(cfg)
+	if public.SchemaVersion != RuntimeConfigSchemaVersion {
+		t.Fatalf("SchemaVersion = %q, want %q", public.SchemaVersion, RuntimeConfigSchemaVersion)
+	}
+}
+
 func validServerConfigForTest() ServerRuntimeConfig {
 	return ServerRuntimeConfig{
 		Public: PublicRuntimeConfig{

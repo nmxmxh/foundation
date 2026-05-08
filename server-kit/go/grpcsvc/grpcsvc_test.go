@@ -57,6 +57,30 @@ func TestDispatchRequiresAuth(t *testing.T) {
 	}
 }
 
+func TestServeStopsWhenContextIsCanceled(t *testing.T) {
+	listener := bufconn.Listen(bufSize)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+
+	go func() {
+		done <- Serve(ctx, listener, testRouter(t), ServerOptions{})
+	}()
+	cancel()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		_ = listener.Close()
+		t.Fatal("Serve did not stop after context cancellation")
+	}
+
+	var svc RuntimeServiceServer = &runtimeService{}
+	svc.mustEmbedRuntimeServiceServer()
+}
+
 func TestDispatchRejectsOversizedMessage(t *testing.T) {
 	conn, cleanup := startTestServer(t, ServerOptions{AuthToken: "secret", MaxMessageBytes: 256})
 	defer cleanup()
@@ -88,6 +112,143 @@ func TestDispatchFrameOverBufconn(t *testing.T) {
 	}
 	if res.CorrelationID != "corr_1" || res.SchemaVersion != "1.0" {
 		t.Fatalf("frame identity was not preserved: %+v", res)
+	}
+}
+
+func TestClientDispatchMethodsOverBufconn(t *testing.T) {
+	conn, cleanup := startTestServer(t, ServerOptions{AuthToken: "secret", MaxMessageBytes: 64 * 1024})
+	defer cleanup()
+	client := NewClient(conn, ClientOptions{MaxMessageBytes: 64 * 1024})
+
+	res, err := client.Dispatch(context.Background(), Envelope{
+		EventType:     "order:create:v1:requested",
+		Payload:       map[string]any{"id": "ord_2"},
+		CorrelationID: "corr_2",
+	})
+	if err != nil {
+		t.Fatalf("client Dispatch() error = %v", err)
+	}
+	if res.EventType != "order:create:v1:success" || res.Payload["id"] != "ord_2" {
+		t.Fatalf("unexpected response: %+v", res)
+	}
+
+	frame, err := client.DispatchFrame(context.Background(), Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_2"}`),
+		CorrelationID: "corr_2",
+	})
+	if err != nil {
+		t.Fatalf("client DispatchFrame() error = %v", err)
+	}
+	if frame.EventType != "order:create:v1:frame:success" || frame.CorrelationID != "corr_2" {
+		t.Fatalf("unexpected frame response: %+v", frame)
+	}
+	if _, err := client.DispatchFrame(context.Background(), Frame{EventType: ""}); err == nil {
+		t.Fatalf("expected client frame validation error")
+	}
+}
+
+func TestRouterValidationAndDirectFrameErrors(t *testing.T) {
+	var nilRouter *Router
+	if err := nilRouter.Register("order:create:v1:requested", func(context.Context, Envelope) (Envelope, error) { return Envelope{}, nil }); err == nil {
+		t.Fatalf("expected nil router register error")
+	}
+	if err := nilRouter.RegisterFrame("order:create:v1:frame", func(context.Context, Frame) (Frame, error) { return Frame{}, nil }); err == nil {
+		t.Fatalf("expected nil router register frame error")
+	}
+	if _, err := nilRouter.DispatchFrame(context.Background(), Frame{EventType: "order:create:v1:frame"}); err == nil {
+		t.Fatalf("expected nil router dispatch frame error")
+	}
+
+	router := NewRouter()
+	if err := router.Register("", func(context.Context, Envelope) (Envelope, error) { return Envelope{}, nil }); err == nil {
+		t.Fatalf("expected blank handler registration error")
+	}
+	if err := router.Register("order:create:v1:requested", nil); err == nil {
+		t.Fatalf("expected nil handler registration error")
+	}
+	handler := func(context.Context, Envelope) (Envelope, error) { return Envelope{}, nil }
+	if err := router.Register("order:create:v1:requested", handler); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if err := router.Register("order:create:v1:requested", handler); err == nil {
+		t.Fatalf("expected duplicate handler registration error")
+	}
+
+	if err := router.RegisterFrame("", func(context.Context, Frame) (Frame, error) { return Frame{}, nil }); err == nil {
+		t.Fatalf("expected blank frame handler registration error")
+	}
+	if err := router.RegisterFrame("order:create:v1:frame", nil); err == nil {
+		t.Fatalf("expected nil frame handler registration error")
+	}
+	frameHandler := func(context.Context, Frame) (Frame, error) { return Frame{EventType: "ok"}, nil }
+	if err := router.RegisterFrame("order:create:v1:frame", frameHandler); err != nil {
+		t.Fatalf("RegisterFrame() error = %v", err)
+	}
+	if err := router.RegisterFrame("order:create:v1:frame", frameHandler); err == nil {
+		t.Fatalf("expected duplicate frame handler registration error")
+	}
+	if _, err := router.DispatchFrame(context.Background(), Frame{EventType: "missing"}); err == nil {
+		t.Fatalf("expected missing frame handler error")
+	}
+
+	if _, err := (*DirectFrameClient)(nil).DispatchFrame(context.Background(), Frame{EventType: "order:create:v1:frame"}); err == nil {
+		t.Fatalf("expected nil direct client error")
+	}
+	client := NewDirectFrameClient(router, ServerOptions{MaxCorrelationBytes: 3})
+	if _, err := client.DispatchFrame(context.Background(), Frame{EventType: "order:create:v1:frame", CorrelationID: "too-long"}); err == nil {
+		t.Fatalf("expected correlation bound error")
+	}
+}
+
+func TestDispatchHandlersDecodeRouterAndInterceptorPaths(t *testing.T) {
+	service := &runtimeService{router: NewRouter()}
+	if _, err := dispatchHandler(service, context.Background(), func(any) error { return nil }, nil); err == nil {
+		t.Fatalf("expected missing envelope handler error")
+	}
+	if _, err := dispatchFrameHandler(service, context.Background(), func(any) error { return nil }, nil); err == nil {
+		t.Fatalf("expected missing frame handler error")
+	}
+	if _, err := dispatchHandler(&runtimeService{}, context.Background(), func(v any) error {
+		*(v.(*Envelope)) = Envelope{EventType: "order:create:v1:requested"}
+		return nil
+	}, nil); err == nil {
+		t.Fatalf("expected nil router dispatch error")
+	}
+	if _, err := dispatchHandler(service, context.Background(), func(any) error { return context.Canceled }, nil); err == nil {
+		t.Fatalf("expected decode error")
+	}
+
+	if err := service.router.Register("order:create:v1:requested", func(context.Context, Envelope) (Envelope, error) {
+		return Envelope{EventType: "ok"}, nil
+	}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	called := false
+	out, err := dispatchHandler(service, context.Background(), func(v any) error {
+		*(v.(*Envelope)) = Envelope{EventType: "order:create:v1:requested"}
+		return nil
+	}, func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		called = info.FullMethod == dispatchMethod
+		return handler(ctx, req)
+	})
+	if err != nil || !called || out.(Envelope).EventType != "ok" {
+		t.Fatalf("intercepted dispatch out=%+v called=%v err=%v", out, called, err)
+	}
+}
+
+func TestCodecValidationHelpers(t *testing.T) {
+	if _, err := (binaryFrameCodec{}).Marshal("not-frame"); err == nil {
+		t.Fatalf("expected marshal type error")
+	}
+	if err := (binaryFrameCodec{}).Unmarshal(nil, (*Frame)(nil)); err == nil {
+		t.Fatalf("expected unmarshal target error")
+	}
+	if _, err := UnmarshalFrameView([]byte{0}); err == nil {
+		t.Fatalf("expected truncated view error")
+	}
+	if first(nil) != "" || first([]string{"a", "b"}) != "a" {
+		t.Fatalf("first helper failed")
 	}
 }
 

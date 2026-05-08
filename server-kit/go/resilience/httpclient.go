@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/errors"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 )
 
 // HTTPClient is a resilient HTTP client with circuit breaker, retry, and tracing.
@@ -18,15 +21,19 @@ type HTTPClient struct {
 	httpClient *http.Client
 	name       string
 	baseURL    string
+	maxBody    int64
+	urlPolicy  *security.OutboundURLPolicy
 }
 
 // HTTPClientConfig configures the HTTP client.
 type HTTPClientConfig struct {
-	Name           string
-	BaseURL        string
-	Timeout        time.Duration
-	MaxIdleConns   int
-	IdleConnTimeout time.Duration
+	Name              string
+	BaseURL           string
+	Timeout           time.Duration
+	MaxIdleConns      int
+	IdleConnTimeout   time.Duration
+	MaxResponseBytes  int64
+	OutboundURLPolicy *security.OutboundURLPolicy
 }
 
 // NewHTTPClient creates a new resilient HTTP client.
@@ -39,6 +46,9 @@ func NewHTTPClient(runtime *Runtime, cfg HTTPClientConfig) *HTTPClient {
 	}
 	if cfg.IdleConnTimeout == 0 {
 		cfg.IdleConnTimeout = 90 * time.Second
+	}
+	if cfg.MaxResponseBytes <= 0 {
+		cfg.MaxResponseBytes = 10 * 1024 * 1024
 	}
 
 	transport := &http.Transport{
@@ -57,6 +67,8 @@ func NewHTTPClient(runtime *Runtime, cfg HTTPClientConfig) *HTTPClient {
 		httpClient: client,
 		name:       cfg.Name,
 		baseURL:    cfg.BaseURL,
+		maxBody:    cfg.MaxResponseBytes,
+		urlPolicy:  cfg.OutboundURLPolicy,
 	}
 }
 
@@ -112,19 +124,9 @@ func (c *HTTPClient) Do(ctx context.Context, req Request) (*Response, error) {
 }
 
 func (c *HTTPClient) doRequest(ctx context.Context, req Request) (*Response, error) {
-	url := c.baseURL + req.Path
-
-	// Add query parameters
-	if len(req.Query) > 0 {
-		url += "?"
-		first := true
-		for k, v := range req.Query {
-			if !first {
-				url += "&"
-			}
-			url += fmt.Sprintf("%s=%s", k, v)
-			first = false
-		}
+	requestURL, err := c.requestURL(ctx, req)
+	if err != nil {
+		return nil, err
 	}
 
 	// Marshal body if present
@@ -138,7 +140,7 @@ func (c *HTTPClient) doRequest(ctx context.Context, req Request) (*Response, err
 	}
 
 	// Create HTTP request
-	httpReq, err := http.NewRequestWithContext(ctx, req.Method, url, bodyReader)
+	httpReq, err := http.NewRequestWithContext(ctx, req.Method, requestURL, bodyReader)
 	if err != nil {
 		return nil, errors.Internal("failed to create request").WithCause(err)
 	}
@@ -162,9 +164,9 @@ func (c *HTTPClient) doRequest(ctx context.Context, req Request) (*Response, err
 	defer func() { _ = httpResp.Body.Close() }()
 
 	// Read response body
-	body, err := io.ReadAll(httpResp.Body)
+	body, err := readBoundedBody(httpResp.Body, c.maxBody)
 	if err != nil {
-		return nil, errors.Internal("failed to read response body").WithCause(err)
+		return nil, err
 	}
 
 	resp := &Response{
@@ -188,6 +190,44 @@ func (c *HTTPClient) doRequest(ctx context.Context, req Request) (*Response, err
 	}
 
 	return resp, nil
+}
+
+func (c *HTTPClient) requestURL(ctx context.Context, req Request) (string, error) {
+	base, err := url.Parse(strings.TrimRight(c.baseURL, "/") + "/")
+	if err != nil {
+		return "", errors.Internal("invalid base url").WithCause(err)
+	}
+	relative, err := url.Parse(strings.TrimLeft(req.Path, "/"))
+	if err != nil {
+		return "", errors.Internal("invalid request path").WithCause(err)
+	}
+	target := base.ResolveReference(relative)
+	query := target.Query()
+	for key, value := range req.Query {
+		query.Set(key, value)
+	}
+	target.RawQuery = query.Encode()
+	if c.urlPolicy != nil {
+		if _, err := security.ValidateOutboundURL(ctx, target.String(), *c.urlPolicy); err != nil {
+			return "", errors.Validation("unsafe outbound url").WithCause(err)
+		}
+	}
+	return target.String(), nil
+}
+
+func readBoundedBody(body io.Reader, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		maxBytes = 10 * 1024 * 1024
+	}
+	limited := io.LimitReader(body, maxBytes+1)
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, errors.Internal("failed to read response body").WithCause(err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, errors.Validation("response body too large")
+	}
+	return data, nil
 }
 
 // Get performs a GET request.

@@ -88,7 +88,7 @@ func NewProvider(cfg Config) (*Provider, error) {
 
 	res, err := resource.Merge(
 		resource.Default(),
-		resource.NewWithAttributes(semconv.SchemaURL, attrs...),
+		resource.NewWithAttributes("", attrs...),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create resource: %w", err)

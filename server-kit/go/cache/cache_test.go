@@ -2,6 +2,7 @@ package cache
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -187,6 +188,39 @@ func TestCacheKey(t *testing.T) {
 	}
 }
 
+func TestCacheHelpersAndPolicy(t *testing.T) {
+	c := New(Config{Backend: NewMemoryBackend(), Prefix: "test:"})
+	ctx := context.Background()
+	if err := c.Set(ctx, "user:1", "one"); err != nil {
+		t.Fatalf("Set user:1 error = %v", err)
+	}
+	if err := c.Set(ctx, "user:2", "two"); err != nil {
+		t.Fatalf("Set user:2 error = %v", err)
+	}
+	exists, err := c.Exists(ctx, "user:1")
+	if err != nil || !exists {
+		t.Fatalf("Exists user:1 = %v, %v", exists, err)
+	}
+	if err := c.DeletePattern(ctx, "user:*"); err != nil {
+		t.Fatalf("DeletePattern() error = %v", err)
+	}
+	exists, err = c.Exists(ctx, "user:1")
+	if err != nil || exists {
+		t.Fatalf("Exists after delete pattern = %v, %v", exists, err)
+	}
+
+	policy := DefaultTTLPolicy()
+	if policy.Short <= 0 || policy.Medium <= policy.Short || policy.Long <= policy.Medium || policy.Extended <= policy.Long {
+		t.Fatalf("unexpected TTL policy ordering: %+v", policy)
+	}
+	if got := stringJoin([]string{"a", "b", "c"}, "/"); got != "a/b/c" {
+		t.Fatalf("stringJoin() = %q", got)
+	}
+	if got := stringJoin(nil, "/"); got != "" {
+		t.Fatalf("stringJoin(nil) = %q", got)
+	}
+}
+
 func TestCache_Prefix(t *testing.T) {
 	c := New(Config{
 		Backend:    NewMemoryBackend(),
@@ -226,6 +260,77 @@ func TestCache_HitMissCallbacks(t *testing.T) {
 	}
 	if misses.Load() != 1 {
 		t.Fatalf("expected 1 miss, got %d", misses.Load())
+	}
+}
+
+type failingBackend struct {
+	err error
+}
+
+func (b failingBackend) Get(context.Context, string) ([]byte, error) {
+	return nil, b.err
+}
+
+func (b failingBackend) Set(context.Context, string, []byte, time.Duration) error {
+	return b.err
+}
+
+func (b failingBackend) Delete(context.Context, string) error {
+	return b.err
+}
+
+func (b failingBackend) DeletePattern(context.Context, string) error {
+	return b.err
+}
+
+func (b failingBackend) Exists(context.Context, string) (bool, error) {
+	return false, b.err
+}
+
+type failingSerializer struct{}
+
+func (failingSerializer) Marshal(interface{}) ([]byte, error) {
+	return nil, errors.New("marshal failed")
+}
+
+func (failingSerializer) Unmarshal([]byte, interface{}) error {
+	return errors.New("unmarshal failed")
+}
+
+func TestCacheErrorAndSerializerBranches(t *testing.T) {
+	backendErr := errors.New("backend failed")
+	var callbackKey string
+	var callbackErr error
+	c := New(Config{
+		Backend: failingBackend{err: backendErr},
+		OnError: func(key string, err error) {
+			callbackKey = key
+			callbackErr = err
+		},
+	})
+	var dest string
+	if err := c.Get(context.Background(), "missing", &dest); !errors.Is(err, backendErr) {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if callbackKey != "missing" || !errors.Is(callbackErr, backendErr) {
+		t.Fatalf("error callback key=%q err=%v", callbackKey, callbackErr)
+	}
+
+	c = New(Config{Backend: NewMemoryBackend(), Serializer: failingSerializer{}})
+	if err := c.Set(context.Background(), "bad", "value"); err == nil {
+		t.Fatal("expected marshal failure")
+	}
+	_ = c.config.Backend.Set(context.Background(), "bad", []byte("raw"), time.Minute)
+	if err := c.Get(context.Background(), "bad", &dest); err == nil {
+		t.Fatal("expected unmarshal failure")
+	}
+
+	c = New(Config{Backend: NewMemoryBackend()})
+	_, err := GetOrSet(context.Background(), c, "compute-fails", func() (string, error) {
+		return "", errors.New("compute failed")
+	})
+	if err == nil {
+		t.Fatal("expected compute failure")
 	}
 }
 

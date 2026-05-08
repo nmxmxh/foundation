@@ -2,7 +2,12 @@ package database
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestMemoryDBUpsertGetListCount(t *testing.T) {
@@ -62,4 +67,403 @@ func TestMemoryDBContextCancel(t *testing.T) {
 	}); err == nil {
 		t.Fatalf("expected context canceled error")
 	}
+}
+
+func TestMemoryDBQueryDeleteAtomicAndClosedPaths(t *testing.T) {
+	db := NewMemoryDB()
+	ctx := context.Background()
+	if err := db.Exec(ctx, "select 1"); err != nil {
+		t.Fatalf("Exec() error = %v", err)
+	}
+	if _, err := db.QueryMaps(ctx, "select 1"); err != nil {
+		t.Fatalf("QueryMaps() error = %v", err)
+	}
+	if err := db.QueryRow(ctx, "select 1").Scan(); err == nil {
+		t.Fatal("expected memory QueryRow scan to fail")
+	}
+	for _, rec := range []DomainRecord{
+		{Domain: "media", Collection: "assets", OrganizationID: "org1", RecordID: "a", Data: map[string]any{"kind": "image"}},
+		{Domain: "media", Collection: "assets", OrganizationID: "org1", RecordID: "b", Data: map[string]any{"kind": "video"}},
+		{Domain: "media", Collection: "assets", OrganizationID: "org2", RecordID: "c", Data: map[string]any{"kind": "image"}},
+	} {
+		if _, err := db.UpsertRecord(ctx, rec); err != nil {
+			t.Fatalf("UpsertRecord() error = %v", err)
+		}
+	}
+	items, err := db.ListRecords(ctx, "media", "assets", "org1", map[string]any{"kind": "image"}, 10)
+	if err != nil || len(items) != 1 || items[0].RecordID != "a" {
+		t.Fatalf("ListRecords() = %+v err=%v", items, err)
+	}
+	count, err := db.EstimateCount(ctx, "media", "assets", "org1")
+	if err != nil || count != 2 {
+		t.Fatalf("EstimateCount() = %d err=%v", count, err)
+	}
+	if err := db.DeleteRecord(ctx, "media", "assets", "org1", "a"); err != nil {
+		t.Fatalf("DeleteRecord() error = %v", err)
+	}
+	if _, ok, err := db.GetRecord(ctx, "media", "assets", "org1", "a"); err != nil || ok {
+		t.Fatalf("deleted GetRecord ok=%v err=%v", ok, err)
+	}
+	removed, err := db.DeleteRecordsByOrganization(ctx, "org1")
+	if err != nil || removed != 1 {
+		t.Fatalf("DeleteRecordsByOrganization() = %d err=%v", removed, err)
+	}
+	removed, err = db.DeleteRecordsByOrganization(ctx, " ")
+	if err != nil || removed != 0 {
+		t.Fatalf("empty org delete = %d err=%v", removed, err)
+	}
+	if err := Atomic(ctx, db, func(DBTX) error { return nil }); err != nil {
+		t.Fatalf("Atomic() without tx beginner error = %v", err)
+	}
+	if err := Atomic(ctx, db, nil); err == nil {
+		t.Fatal("expected nil atomic function to fail")
+	}
+	db.Close()
+	if err := db.Exec(ctx, ""); err == nil {
+		t.Fatal("expected closed db exec to fail")
+	}
+	if _, err := db.QueryMaps(ctx, ""); err == nil {
+		t.Fatal("expected closed db query maps to fail")
+	}
+	if err := db.QueryRow(ctx, "").Scan(); err == nil {
+		t.Fatal("expected closed db query row to fail")
+	}
+}
+
+func TestDatabaseHelpers(t *testing.T) {
+	if normalizeDriver(" POSTGRES ") != DriverPostgres || normalizeDriver("bad") != DriverMemory {
+		t.Fatal("normalizeDriver failed")
+	}
+	if clampInt(1, 2, 4) != 2 || clampInt(5, 2, 4) != 4 || clampInt(3, 2, 4) != 3 {
+		t.Fatal("clampInt failed")
+	}
+	opts := normalizePoolOptions(PoolOptions{MaxConns: 2, MinConns: 10})
+	if opts.MinConns != opts.MaxConns || opts.QueryTimeout <= 0 || opts.AcquireTimeout <= 0 {
+		t.Fatalf("normalizePoolOptions = %+v", opts)
+	}
+	for _, lane := range []RuntimeLane{RuntimeLaneDefault, RuntimeLaneHotRead, RuntimeLaneHotWrite, RuntimeLaneBackground, RuntimeLaneAnalytics} {
+		if got := DefaultPoolOptionsFor(lane); got.MaxConns <= 0 || got.QueryTimeout <= 0 {
+			t.Fatalf("DefaultPoolOptionsFor(%s) = %+v", lane, got)
+		}
+	}
+	ctx, cancel := QueryBudgetContext(nil, PoolOptions{QueryTimeout: time.Millisecond})
+	defer cancel()
+	if ctx == nil {
+		t.Fatal("expected query budget context")
+	}
+	store, err := Connect(context.Background(), "", "memory")
+	if err != nil || store == nil {
+		t.Fatalf("Connect(memory) = %v err=%v", store, err)
+	}
+	if !matchesFilter(map[string]any{"a": " 1 "}, map[string]any{"a": 1}) || matchesFilter(map[string]any{}, map[string]any{"missing": 1}) {
+		t.Fatal("matchesFilter failed")
+	}
+}
+
+func TestMemoryDBValidationAndCopySemantics(t *testing.T) {
+	db := NewMemoryDB()
+	ctx := context.Background()
+	for _, rec := range []DomainRecord{
+		{Collection: "c", RecordID: "r"},
+		{Domain: "d", RecordID: "r"},
+		{Domain: "d", Collection: "c"},
+	} {
+		if _, err := db.UpsertRecord(ctx, rec); err == nil {
+			t.Fatalf("expected validation error for %+v", rec)
+		}
+	}
+	input := map[string]any{"nested": map[string]any{"unchanged": true}}
+	rec, err := db.UpsertRecord(ctx, DomainRecord{
+		Domain:         " domain ",
+		Collection:     " collection ",
+		OrganizationID: " org ",
+		RecordID:       " rec ",
+		Data:           input,
+	})
+	if err != nil {
+		t.Fatalf("UpsertRecord() error = %v", err)
+	}
+	input["mutated"] = true
+	if rec.Domain != "domain" || rec.Collection != "collection" || rec.OrganizationID != "org" || rec.RecordID != "rec" {
+		t.Fatalf("record fields not normalized: %+v", rec)
+	}
+	if rec.Data["organization_id"] != "org" || rec.Data["mutated"] != nil {
+		t.Fatalf("record data copy/default mismatch: %+v", rec.Data)
+	}
+	got, ok, err := db.GetRecord(ctx, " domain ", " collection ", " org ", " rec ")
+	if err != nil || !ok {
+		t.Fatalf("GetRecord() ok=%v err=%v", ok, err)
+	}
+	got.Data["changed"] = true
+	gotAgain, _, _ := db.GetRecord(ctx, "domain", "collection", "org", "rec")
+	if gotAgain.Data["changed"] != nil {
+		t.Fatalf("GetRecord should return a copy")
+	}
+}
+
+func TestMemoryDBListOrderingLimitAndCancellation(t *testing.T) {
+	db := NewMemoryDB()
+	ctx := context.Background()
+	for _, id := range []string{"b", "a", "c"} {
+		if _, err := db.UpsertRecord(ctx, DomainRecord{Domain: "d", Collection: "c", OrganizationID: "o", RecordID: id, Data: map[string]any{"kind": "same"}}); err != nil {
+			t.Fatalf("UpsertRecord() error = %v", err)
+		}
+	}
+	items, err := db.ListRecords(ctx, "d", "c", "o", nil, 2)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("ListRecords limit = %+v err=%v", items, err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := db.ListRecords(cancelled, "d", "c", "o", nil, 0); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled ListRecords error = %v", err)
+	}
+	if _, _, err := db.GetRecord(cancelled, "d", "c", "o", "a"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled GetRecord error = %v", err)
+	}
+	if _, err := db.CountRecords(cancelled, "d", "c", "o", nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled CountRecords error = %v", err)
+	}
+	if err := db.DeleteRecord(cancelled, "d", "c", "o", "a"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled DeleteRecord error = %v", err)
+	}
+	if _, err := db.DeleteRecordsByOrganization(cancelled, "o"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled DeleteRecordsByOrganization error = %v", err)
+	}
+}
+
+func TestAtomicWithBeginnerCommitRollback(t *testing.T) {
+	tx := &fakeTx{}
+	db := &fakeBeginner{tx: tx}
+	if err := Atomic(context.Background(), db, func(DBTX) error { return nil }); err != nil {
+		t.Fatalf("Atomic commit path error = %v", err)
+	}
+	if !tx.committed || tx.rolledBack {
+		t.Fatalf("commit path state: %+v", tx)
+	}
+	tx = &fakeTx{}
+	db.tx = tx
+	errBoom := errors.New("boom")
+	if err := Atomic(context.Background(), db, func(DBTX) error { return errBoom }); !errors.Is(err, errBoom) {
+		t.Fatalf("Atomic rollback error = %v", err)
+	}
+	if !tx.rolledBack || tx.committed {
+		t.Fatalf("rollback path state: %+v", tx)
+	}
+	db.beginErr = errors.New("begin")
+	if err := Atomic(context.Background(), db, func(DBTX) error { return nil }); !errors.Is(err, db.beginErr) {
+		t.Fatalf("begin error = %v", err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := Atomic(cancelled, db, func(DBTX) error { return nil }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Atomic error = %v", err)
+	}
+}
+
+type fakeBeginner struct {
+	tx       Tx
+	beginErr error
+}
+
+func (f *fakeBeginner) Exec(context.Context, string, ...any) error { return nil }
+func (f *fakeBeginner) QueryRow(context.Context, string, ...any) RowScanner {
+	return memoryRow{}
+}
+func (f *fakeBeginner) QueryMaps(context.Context, string, ...any) ([]map[string]any, error) {
+	return nil, nil
+}
+func (f *fakeBeginner) BeginTx(context.Context) (Tx, error) {
+	if f.beginErr != nil {
+		return nil, f.beginErr
+	}
+	return f.tx, nil
+}
+
+type fakeTx struct {
+	committed  bool
+	rolledBack bool
+}
+
+func (f *fakeTx) Exec(context.Context, string, ...any) error { return nil }
+func (f *fakeTx) QueryRow(context.Context, string, ...any) RowScanner {
+	return memoryRow{}
+}
+func (f *fakeTx) QueryMaps(context.Context, string, ...any) ([]map[string]any, error) {
+	return nil, nil
+}
+func (f *fakeTx) Commit(context.Context) error {
+	f.committed = true
+	return nil
+}
+func (f *fakeTx) Rollback(context.Context) error {
+	f.rolledBack = true
+	return nil
+}
+
+func TestPostgresNilAndHelperPaths(t *testing.T) {
+	var db *PostgresDB
+	if db.Pool() != nil {
+		t.Fatalf("nil Pool should be nil")
+	}
+	db.Close()
+	if _, err := db.BeginTx(context.Background()); err == nil {
+		t.Fatalf("expected nil BeginTx error")
+	}
+	if err := db.Exec(context.Background(), "select 1"); err == nil {
+		t.Fatalf("expected nil Exec error")
+	}
+	if err := db.QueryRow(context.Background(), "select 1").Scan(); err == nil {
+		t.Fatalf("expected nil QueryRow scan error")
+	}
+	if _, err := db.QueryMaps(context.Background(), "select 1"); err == nil {
+		t.Fatalf("expected nil QueryMaps error")
+	}
+	if db.Stats().TotalConns != 0 {
+		t.Fatalf("nil Stats should be zero")
+	}
+	if _, err := db.UpsertRecord(context.Background(), DomainRecord{}); err == nil {
+		t.Fatalf("expected nil UpsertRecord error")
+	}
+	if _, _, err := db.GetRecord(context.Background(), "d", "c", "o", "r"); err == nil {
+		t.Fatalf("expected nil GetRecord error")
+	}
+	if _, err := db.ListRecords(context.Background(), "d", "c", "o", nil, 1); err == nil {
+		t.Fatalf("expected nil ListRecords error")
+	}
+	if _, err := db.CountRecords(context.Background(), "d", "c", "o", nil); err == nil {
+		t.Fatalf("expected nil CountRecords error")
+	}
+	if _, err := db.EstimateCount(context.Background(), "d", "c", "o"); err == nil {
+		t.Fatalf("expected nil EstimateCount error")
+	}
+	if err := db.DeleteRecord(context.Background(), "d", "c", "o", "r"); err == nil {
+		t.Fatalf("expected nil DeleteRecord error")
+	}
+	if _, err := db.DeleteRecordsByOrganization(context.Background(), "o"); err == nil {
+		t.Fatalf("expected nil DeleteRecordsByOrganization error")
+	}
+	if clampInt32(-1) != 0 || clampInt32(maxInt32Value+1) != maxInt32Value || clampInt32(3) != 3 {
+		t.Fatalf("clampInt32 failed")
+	}
+	if _, err := newPostgresDB(context.Background(), "", PoolOptions{}); err == nil {
+		t.Fatalf("expected empty postgres URL error")
+	}
+
+	var tx *postgresTx
+	if err := tx.Exec(context.Background(), "select 1"); err == nil {
+		t.Fatalf("expected nil tx Exec error")
+	}
+	if err := tx.QueryRow(context.Background(), "select 1").Scan(); err == nil {
+		t.Fatalf("expected nil tx QueryRow error")
+	}
+	if _, err := tx.QueryMaps(context.Background(), "select 1"); err == nil {
+		t.Fatalf("expected nil tx QueryMaps error")
+	}
+	if err := tx.Commit(context.Background()); err == nil {
+		t.Fatalf("expected nil tx Commit error")
+	}
+	if err := tx.Rollback(context.Background()); err != nil {
+		t.Fatalf("nil tx Rollback should no-op: %v", err)
+	}
+}
+
+func TestPostgresRecordValidationAndJSONParsing(t *testing.T) {
+	if err := validateDomainRecord(nil); err == nil {
+		t.Fatalf("expected nil record validation error")
+	}
+	rec := DomainRecord{Domain: " d ", Collection: " c ", OrganizationID: " o ", RecordID: " r "}
+	if err := validateDomainRecord(&rec); err != nil {
+		t.Fatalf("validateDomainRecord() error = %v", err)
+	}
+	if rec.Domain != "d" || rec.Collection != "c" || rec.OrganizationID != "o" || rec.RecordID != "r" || rec.Data["organization_id"] != "o" {
+		t.Fatalf("record normalization failed: %+v", rec)
+	}
+	for _, rec := range []DomainRecord{
+		{Collection: "c", RecordID: "r"},
+		{Domain: "d", RecordID: "r"},
+		{Domain: "d", Collection: "c"},
+	} {
+		if err := validateDomainRecord(&rec); err == nil {
+			t.Fatalf("expected validation error for %+v", rec)
+		}
+	}
+	parsed, err := parseDataJSON([]byte(`{"a":1}`))
+	if err != nil || parsed["a"].(float64) != 1 {
+		t.Fatalf("parseDataJSON object = %+v err=%v", parsed, err)
+	}
+	if parsed, err := parseDataJSON(nil); err != nil || len(parsed) != 0 {
+		t.Fatalf("parseDataJSON nil = %+v err=%v", parsed, err)
+	}
+	if _, err := parseDataJSON([]byte(`bad`)); err == nil {
+		t.Fatalf("expected invalid JSON error")
+	}
+}
+
+func TestScanToMapsConvertsBytesAndReturnsRowErrors(t *testing.T) {
+	rows := &fakeRows{
+		fields: []pgconn.FieldDescription{{Name: "id"}, {Name: "payload"}},
+		values: [][]any{
+			{"row_1", []byte("bytes")},
+		},
+	}
+	items, err := scanToMaps(rows)
+	if err != nil {
+		t.Fatalf("scanToMaps() error = %v", err)
+	}
+	if len(items) != 1 || items[0]["payload"] != "bytes" {
+		t.Fatalf("items = %+v", items)
+	}
+
+	valueErr := errors.New("values failed")
+	rows = &fakeRows{fields: []pgconn.FieldDescription{{Name: "id"}}, values: [][]any{{"row_1"}}, valueErr: valueErr}
+	if _, err := scanToMaps(rows); !errors.Is(err, valueErr) {
+		t.Fatalf("values error = %v", err)
+	}
+	rowErr := errors.New("rows failed")
+	rows = &fakeRows{fields: []pgconn.FieldDescription{{Name: "id"}}, err: rowErr}
+	if _, err := scanToMaps(rows); !errors.Is(err, rowErr) {
+		t.Fatalf("rows error = %v", err)
+	}
+}
+
+type fakeRows struct {
+	fields   []pgconn.FieldDescription
+	values   [][]any
+	index    int
+	err      error
+	valueErr error
+}
+
+func (r *fakeRows) Close() {}
+func (r *fakeRows) Err() error {
+	return r.err
+}
+func (r *fakeRows) CommandTag() pgconn.CommandTag {
+	return pgconn.CommandTag{}
+}
+func (r *fakeRows) FieldDescriptions() []pgconn.FieldDescription {
+	return r.fields
+}
+func (r *fakeRows) Next() bool {
+	if r.index >= len(r.values) {
+		return false
+	}
+	r.index++
+	return true
+}
+func (r *fakeRows) Scan(...any) error {
+	return nil
+}
+func (r *fakeRows) Values() ([]any, error) {
+	if r.valueErr != nil {
+		return nil, r.valueErr
+	}
+	return r.values[r.index-1], nil
+}
+func (r *fakeRows) RawValues() [][]byte {
+	return nil
+}
+func (r *fakeRows) Conn() *pgx.Conn {
+	return nil
 }

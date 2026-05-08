@@ -216,6 +216,16 @@ func TestCircuitBreaker_ContextCancellation(t *testing.T) {
 
 func TestCircuitBreaker_Stats(t *testing.T) {
 	cb := New("my-service", Config{FailureThreshold: 5})
+	if cb.Name() != "my-service" {
+		t.Fatalf("Name() = %q", cb.Name())
+	}
+	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+		return nil, errFake
+	})
+	failures, successes := cb.Counts()
+	if failures != 1 || successes != 0 {
+		t.Fatalf("Counts() = %d, %d", failures, successes)
+	}
 	stats := cb.Stats()
 	if stats.Name != "my-service" {
 		t.Fatalf("expected name 'my-service', got '%s'", stats.Name)
@@ -225,6 +235,68 @@ func TestCircuitBreaker_Stats(t *testing.T) {
 	}
 	if stats.Config.FailureThreshold != 5 {
 		t.Fatalf("expected threshold 5, got %d", stats.Config.FailureThreshold)
+	}
+}
+
+func TestCircuitBreaker_DefaultsAndCustomFailureClassifier(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.FailureThreshold != 5 || cfg.SuccessThreshold != 2 || cfg.HalfOpenMaxCalls != 3 {
+		t.Fatalf("unexpected default config: %+v", cfg)
+	}
+	cb := New("classifier", Config{
+		FailureThreshold: 1,
+		IsFailure: func(err error) bool {
+			return errors.Is(err, errFake)
+		},
+	})
+	_, err := cb.Execute(context.Background(), func() (interface{}, error) {
+		return nil, errors.New("ignored")
+	})
+	if err == nil {
+		t.Fatalf("expected operation error to propagate")
+	}
+	if cb.State() != StateClosed {
+		t.Fatalf("ignored error should not open circuit")
+	}
+	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+		return nil, errFake
+	})
+	if cb.State() != StateOpen {
+		t.Fatalf("classified failure should open circuit")
+	}
+}
+
+func TestCircuitBreaker_HalfOpenMaxCalls(t *testing.T) {
+	clock := &mockClock{now: time.Now()}
+	cb := New("half-open-limit", Config{
+		FailureThreshold: 1,
+		Timeout:          time.Second,
+		HalfOpenMaxCalls: 1,
+		SuccessThreshold: 3,
+		Clock:            clock,
+	})
+	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+		return nil, errFake
+	})
+	clock.Advance(2 * time.Second)
+
+	_, err := cb.Execute(context.Background(), func() (interface{}, error) {
+		return "first", nil
+	})
+	if err != nil {
+		t.Fatalf("first half-open call error = %v", err)
+	}
+	_, err = cb.Execute(context.Background(), func() (interface{}, error) {
+		return "second", nil
+	})
+	if !errors.Is(err, ErrTooManyRequests) {
+		t.Fatalf("second half-open call error = %v, want ErrTooManyRequests", err)
+	}
+}
+
+func TestStateStringUnknown(t *testing.T) {
+	if got := State(99).String(); got != "unknown" {
+		t.Fatalf("unknown state string = %q", got)
 	}
 }
 

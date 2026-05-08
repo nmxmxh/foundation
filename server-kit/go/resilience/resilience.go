@@ -290,6 +290,9 @@ func ExecuteWithResult[T any](r *Runtime, ctx context.Context, name string, fn f
 
 // IsDegraded returns true if the named dependency is in degraded state.
 func (r *Runtime) IsDegraded(name string) bool {
+	if r.DegradationManager.GetStatus(name) == nil {
+		return false
+	}
 	sentinel := r.DegradationManager.Sentinel(name)
 	if sentinel == nil {
 		return false
@@ -427,4 +430,3 @@ type CircuitBreakerStatus struct {
 	Successes   int64     `json:"successes"`
 	LastFailure time.Time `json:"last_failure,omitempty"`
 }
-

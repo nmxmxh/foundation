@@ -87,6 +87,43 @@ func TestResponseFromMap(t *testing.T) {
 	}
 }
 
+func TestBindingValidationAndNilResponses(t *testing.T) {
+	valid := Binding{
+		Request:  factory(func() anyProto { return &testprotos.Metadata{} }).toFactory(),
+		Response: factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if _, err := (Binding{}).NewRequest(); err == nil {
+		t.Fatalf("expected missing request factory error")
+	}
+	if _, err := (Binding{}).NewResponse(); err == nil {
+		t.Fatalf("expected missing response factory error")
+	}
+	if err := (Binding{Request: func() proto.Message { return nil }, Response: valid.Response}).Validate(); err == nil {
+		t.Fatalf("expected nil request validation error")
+	}
+	if err := (Binding{Request: valid.Request, Response: func() proto.Message { return nil }}).Validate(); err == nil {
+		t.Fatalf("expected nil response validation error")
+	}
+	if err := (Binding{Request: valid.Request}).Validate(); err == nil {
+		t.Fatalf("expected missing response factory error")
+	}
+	if _, err := (Binding{Request: func() proto.Message { return nil }}).NewRequest(); err == nil {
+		t.Fatalf("expected nil request factory result error")
+	}
+	if _, err := (Binding{Response: func() proto.Message { return nil }}).NewResponse(); err == nil {
+		t.Fatalf("expected nil response factory result error")
+	}
+	if got, err := valid.EncodeResponseMap(nil); err != nil || len(got) != 0 {
+		t.Fatalf("EncodeResponseMap(nil) = %+v err=%v", got, err)
+	}
+	if got, err := valid.EncodeResponseBytes(nil); err != nil || len(got) != 0 {
+		t.Fatalf("EncodeResponseBytes(nil) = %+v err=%v", got, err)
+	}
+}
+
 func TestDecodeByEncoding(t *testing.T) {
 	binding := Binding{
 		Request:  factory(func() anyProto { return &testprotos.TestRequest{} }).toFactory(),
@@ -114,6 +151,128 @@ func TestDecodeByEncoding(t *testing.T) {
 	if typed.Metadata.GetCorrelationId() != "corr_bytes" || typed.Metadata.GetRequestId() != "req_bytes" {
 		t.Fatalf("unexpected metadata: %+v", typed.Metadata)
 	}
+}
+
+func TestDecodeByEncodingJSONUnsupportedAndInvalidBytes(t *testing.T) {
+	binding := Binding{
+		Request:  factory(func() anyProto { return &testprotos.TestRequest{} }).toFactory(),
+		Response: factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
+	}
+	msg, err := DecodeByEncoding(binding, "", map[string]any{"workspace_id": "wrk_json"}, nil, nil)
+	if err != nil {
+		t.Fatalf("JSON DecodeByEncoding() error = %v", err)
+	}
+	if msg.(*testprotos.TestRequest).WorkspaceId != "wrk_json" {
+		t.Fatalf("JSON request mismatch: %+v", msg)
+	}
+	if _, err := DecodeByEncoding(binding, PayloadEncodingProtobuf, nil, []byte("bad"), nil); err == nil {
+		t.Fatalf("expected invalid protobuf bytes error")
+	}
+	if _, err := DecodeByEncoding(binding, "xml", nil, nil, nil); err == nil {
+		t.Fatalf("expected unsupported encoding error")
+	}
+	if _, err := binding.DecodeRequestMap(map[string]any{"metadata": func() {}}, nil); err == nil {
+		t.Fatalf("expected map decode marshal error")
+	}
+	if _, err := binding.ResponseFromMap(map[string]any{"resource_id": 10}); err == nil {
+		t.Fatalf("expected response decode type error")
+	}
+}
+
+func TestMapCloneHelpersAndMetadataDetection(t *testing.T) {
+	original := map[string]any{
+		"nested": map[string]any{"k": "v"},
+		"items":  []any{map[string]any{"x": "y"}},
+	}
+	cloned := cloneMap(original)
+	cloned["nested"].(map[string]any)["k"] = "changed"
+	if original["nested"].(map[string]any)["k"] != "v" {
+		t.Fatalf("cloneMap did not deep clone nested maps")
+	}
+	if len(asMap(nil)) != 0 || len(asMap("bad")) != 0 {
+		t.Fatalf("asMap should return empty map for non-maps")
+	}
+	if !hasMetadataField(&testprotos.TestRequest{}) {
+		t.Fatalf("TestRequest should have metadata field")
+	}
+	if hasMetadataField(&testprotos.TestResponse{}) || hasMetadataField(nil) {
+		t.Fatalf("metadata field detection mismatch")
+	}
+	merged := mergeMetadataMap(map[string]any{
+		"global_context": map[string]any{"source": "web", "device_id": "old"},
+	}, map[string]any{
+		"global_context": map[string]any{"device_id": "new"},
+		"request_id":     "req",
+	})
+	if merged["request_id"] != "req" || merged["global_context"].(map[string]any)["source"] != "web" || merged["global_context"].(map[string]any)["device_id"] != "new" {
+		t.Fatalf("metadata merge mismatch: %+v", merged)
+	}
+}
+
+func TestGeneratedTestProtoAccessors(t *testing.T) {
+	gc := &testprotos.GlobalContext{UserId: "user", Source: "api", DeviceId: "device"}
+	if gc.String() == "" || gc.ProtoReflect().Descriptor().FullName() == "" {
+		t.Fatalf("global context reflection failed")
+	}
+	if gc.GetUserId() != "user" || gc.GetSource() != "api" || gc.GetDeviceId() != "device" {
+		t.Fatalf("global context getters failed")
+	}
+	gc.Reset()
+	if gc.GetUserId() != "" {
+		t.Fatalf("reset global context should clear fields")
+	}
+	if (*testprotos.GlobalContext)(nil).GetUserId() != "" || (*testprotos.GlobalContext)(nil).GetSource() != "" || (*testprotos.GlobalContext)(nil).GetDeviceId() != "" {
+		t.Fatalf("nil global context getters failed")
+	}
+	_, _ = (&testprotos.GlobalContext{}).Descriptor()
+
+	md := &testprotos.Metadata{CorrelationId: "corr", RequestId: "req", Locale: "en", GlobalContext: &testprotos.GlobalContext{Source: "api"}}
+	if md.String() == "" || md.ProtoReflect().Descriptor().FullName() == "" {
+		t.Fatalf("metadata reflection failed")
+	}
+	if md.GetCorrelationId() != "corr" || md.GetRequestId() != "req" || md.GetLocale() != "en" || md.GetGlobalContext().GetSource() != "api" {
+		t.Fatalf("metadata getters failed")
+	}
+	md.Reset()
+	if md.GetCorrelationId() != "" {
+		t.Fatalf("reset metadata should clear fields")
+	}
+	if (*testprotos.Metadata)(nil).GetCorrelationId() != "" || (*testprotos.Metadata)(nil).GetRequestId() != "" || (*testprotos.Metadata)(nil).GetLocale() != "" || (*testprotos.Metadata)(nil).GetGlobalContext() != nil {
+		t.Fatalf("nil metadata getters failed")
+	}
+	_, _ = (&testprotos.Metadata{}).Descriptor()
+
+	req := &testprotos.TestRequest{Metadata: &testprotos.Metadata{CorrelationId: "corr"}, WorkspaceId: "wrk", ContentType: "image/png", Size: 7, Hash: "sha"}
+	if req.String() == "" || req.ProtoReflect().Descriptor().FullName() == "" {
+		t.Fatalf("request reflection failed")
+	}
+	if req.GetMetadata().GetCorrelationId() != "corr" || req.GetWorkspaceId() != "wrk" || req.GetContentType() != "image/png" || req.GetSize() != 7 || req.GetHash() != "sha" {
+		t.Fatalf("request getters failed")
+	}
+	req.Reset()
+	if req.GetWorkspaceId() != "" {
+		t.Fatalf("reset request should clear fields")
+	}
+	if (*testprotos.TestRequest)(nil).GetMetadata() != nil || (*testprotos.TestRequest)(nil).GetWorkspaceId() != "" || (*testprotos.TestRequest)(nil).GetContentType() != "" || (*testprotos.TestRequest)(nil).GetSize() != 0 || (*testprotos.TestRequest)(nil).GetHash() != "" {
+		t.Fatalf("nil request getters failed")
+	}
+	_, _ = (&testprotos.TestRequest{}).Descriptor()
+
+	resp := &testprotos.TestResponse{ResourceId: "res", Status: "ok"}
+	if resp.String() == "" || resp.ProtoReflect().Descriptor().FullName() == "" {
+		t.Fatalf("response reflection failed")
+	}
+	if resp.GetResourceId() != "res" || resp.GetStatus() != "ok" {
+		t.Fatalf("response getters failed")
+	}
+	resp.Reset()
+	if resp.GetResourceId() != "" {
+		t.Fatalf("reset response should clear fields")
+	}
+	if (*testprotos.TestResponse)(nil).GetResourceId() != "" || (*testprotos.TestResponse)(nil).GetStatus() != "" {
+		t.Fatalf("nil response getters failed")
+	}
+	_, _ = (&testprotos.TestResponse{}).Descriptor()
 }
 
 type anyProto interface {

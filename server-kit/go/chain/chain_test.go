@@ -53,6 +53,32 @@ func TestRunParallelKeepsMovingOnNonCriticalFailure(t *testing.T) {
 	}
 }
 
+func TestRunParallelSingleNilAndNilContextBranches(t *testing.T) {
+	if got := RunParallel[int](nil, nil); got != nil {
+		t.Fatalf("empty operations = %+v, want nil", got)
+	}
+	results := RunParallel[int](nil, []Operation[int]{{Name: "missing"}})
+	if len(results) != 1 || results[0].Name != "missing" || results[0].Error == nil {
+		t.Fatalf("single nil operation result = %+v", results)
+	}
+	results = RunParallel[int](nil, []Operation[int]{{Name: "one", Run: func(ctx context.Context) (int, error) {
+		if ctx == nil {
+			t.Fatalf("expected default context")
+		}
+		return 42, nil
+	}}})
+	if len(results) != 1 || results[0].Value != 42 || results[0].Error != nil {
+		t.Fatalf("single operation result = %+v", results)
+	}
+	results = RunParallel[int](context.Background(), []Operation[int]{
+		{Name: "critical", Critical: true},
+		{Name: "other", Run: func(context.Context) (int, error) { return 1, nil }},
+	})
+	if !HasCriticalFailure([]Operation[int]{{Name: "critical", Critical: true}}, results) {
+		t.Fatalf("expected critical failure from nil run function")
+	}
+}
+
 func BenchmarkRunParallel(b *testing.B) {
 	ops := []Operation[int]{
 		{Name: "a", Critical: true, Run: func(context.Context) (int, error) { return 1, nil }},

@@ -1,6 +1,7 @@
 package runtimehost
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -8,7 +9,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
 )
@@ -54,6 +57,65 @@ func TestBufferRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBufferBoundsAndReset(t *testing.T) {
+	if _, err := NewBuffer(make([]byte, generated.BUFFER_TOTAL_BYTES-1)); err == nil {
+		t.Fatal("expected undersized buffer to fail")
+	}
+	buffer, err := NewBuffer(make([]byte, generated.BUFFER_TOTAL_BYTES))
+	if err != nil {
+		t.Fatalf("NewBuffer() error = %v", err)
+	}
+	if buffer.RawBytes() == nil {
+		t.Fatal("expected raw bytes")
+	}
+	if got := (*Buffer)(nil).RawBytes(); got != nil {
+		t.Fatalf("nil RawBytes() = %+v, want nil", got)
+	}
+	(*Buffer)(nil).Reset()
+
+	if _, err := buffer.HeaderInt(generated.HEADER_INT_COUNT); err == nil {
+		t.Fatal("expected invalid header index to fail")
+	}
+	if err := buffer.SetHeaderInt(generated.HEADER_INT_COUNT, 1); err == nil {
+		t.Fatal("expected invalid header write to fail")
+	}
+	if got := buffer.LoadEpoch(generated.EPOCH_SLOT_COUNT); got != 0 {
+		t.Fatalf("invalid epoch load = %d, want 0", got)
+	}
+	if err := buffer.StoreEpoch(generated.EPOCH_SLOT_COUNT, 1); err == nil {
+		t.Fatal("expected invalid epoch store to fail")
+	}
+	if _, err := buffer.AddEpoch(generated.EPOCH_SLOT_COUNT, 1); err == nil {
+		t.Fatal("expected invalid epoch add to fail")
+	}
+
+	if err := buffer.SetInputBytes(make([]byte, generated.INPUT_MAX_BYTES+1)); err == nil {
+		t.Fatal("expected oversized input to fail")
+	}
+	if err := buffer.SetOutputBytes(make([]byte, generated.OUTPUT_MAX_BYTES+1)); err == nil {
+		t.Fatal("expected oversized output to fail")
+	}
+	if err := buffer.SetHeaderInt(generated.INT_IDX_INPUT_LENGTH, -1); err != nil {
+		t.Fatalf("SetHeaderInt(input length) error = %v", err)
+	}
+	if _, err := buffer.InputBytes(); err == nil {
+		t.Fatal("expected negative input length to fail")
+	}
+	if err := buffer.SetHeaderInt(generated.INT_IDX_OUTPUT_LENGTH, int32(generated.OUTPUT_MAX_BYTES+1)); err != nil {
+		t.Fatalf("SetHeaderInt(output length) error = %v", err)
+	}
+	if _, err := buffer.OutputBytes(); err == nil {
+		t.Fatal("expected oversized output length to fail")
+	}
+	if err := buffer.SetDiagnosticsText(strings.Repeat("x", int(generated.DIAGNOSTIC_MAX_BYTES)+1)); err == nil {
+		t.Fatal("expected oversized diagnostics to fail")
+	}
+	buffer.Reset()
+	if buffer.DiagnosticsText() != "" {
+		t.Fatalf("DiagnosticsText() = %q, want empty after reset", buffer.DiagnosticsText())
+	}
+}
+
 func TestRuntimeUnitDescriptorValidation(t *testing.T) {
 	descriptor := RuntimeUnitDescriptor{
 		UnitID:               "preview.compute",
@@ -67,6 +129,19 @@ func TestRuntimeUnitDescriptorValidation(t *testing.T) {
 	}
 	if err := descriptor.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+	for _, invalid := range []RuntimeUnitDescriptor{
+		{},
+		{UnitID: "unit"},
+		{UnitID: "unit", InputSchema: "in"},
+		{UnitID: "unit", InputSchema: "in", OutputSchema: "out"},
+	} {
+		if err := invalid.Validate(); err == nil {
+			t.Fatalf("expected invalid descriptor to fail: %+v", invalid)
+		}
+	}
+	if ErrInvalidDescriptor("bad").Error() != "bad" {
+		t.Fatal("descriptor error mismatch")
 	}
 }
 
@@ -241,6 +316,93 @@ func TestResolveProcessTransportMode(t *testing.T) {
 	}
 	if mode != ProcessTransportFFI {
 		t.Fatalf("unexpected ffi mode: %s", mode)
+	}
+}
+
+func TestResolveProcessTransportSupportReportsFallbacks(t *testing.T) {
+	support, err := ResolveProcessTransportSupport(ProcessTransportAuto, "")
+	if err != nil {
+		t.Fatalf("ResolveProcessTransportSupport(auto) error = %v", err)
+	}
+	if support.Requested != ProcessTransportAuto {
+		t.Fatalf("Requested = %s, want auto", support.Requested)
+	}
+	if support.Resolved != ProcessTransportStdio && support.Resolved != ProcessTransportSharedMemory {
+		t.Fatalf("Resolved = %s", support.Resolved)
+	}
+	if _, err := ResolveProcessTransportSupport(ProcessTransportMode("bogus"), ""); err == nil {
+		t.Fatal("expected unsupported transport to fail")
+	}
+	if !sharedMemorySupported("") {
+		if _, err := ResolveProcessTransportSupport(ProcessTransportSharedMemory, ""); err == nil {
+			t.Fatal("expected unsupported shared memory transport to fail")
+		}
+	}
+}
+
+func TestProcessPoolDiagnosticsAndErrorPaths(t *testing.T) {
+	if _, err := NewProcessPool(ProcessPoolOptions{}); err == nil {
+		t.Fatal("expected missing command to fail")
+	}
+	if _, err := (*ProcessPool)(nil).Execute(context.Background(), ProcessRequest{UnitID: "unit"}); err == nil {
+		t.Fatal("expected nil pool execute to fail")
+	}
+	pool := &ProcessPool{
+		exchangeTimeout: DefaultProcessExchangeTimeout,
+		bufferPool: sync.Pool{New: func() any {
+			return make([]byte, generated.BUFFER_TOTAL_BYTES)
+		}},
+	}
+	if _, err := pool.Execute(context.Background(), ProcessRequest{}); err == nil {
+		t.Fatal("expected missing unit id to fail")
+	}
+	if _, err := pool.Execute(context.Background(), ProcessRequest{UnitID: "unit"}); err == nil {
+		t.Fatal("expected no workers to fail")
+	}
+	if got := (*ProcessPool)(nil).Diagnostics(); got.ExchangeTimeoutMS != 0 || len(got.Workers) != 0 {
+		t.Fatalf("nil diagnostics = %+v", got)
+	}
+	worker := &processWorker{index: 1, mode: ProcessTransportStdio}
+	worker.busy.Store(true)
+	worker.recordStarted()
+	worker.recordFailure(fmt.Errorf("boom"))
+	worker.incrementRestart()
+	snapshot := worker.snapshot()
+	if !snapshot.Busy || snapshot.LastError != "boom" || snapshot.RestartCount != 1 || snapshot.LastStarted.IsZero() || snapshot.LastFailure.IsZero() {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	worker.recordSuccess()
+	if worker.snapshot().LastError != "" || worker.snapshot().LastSuccess.IsZero() {
+		t.Fatalf("success snapshot = %+v", worker.snapshot())
+	}
+	pool = &ProcessPool{
+		exchangeTimeout: 2 * time.Second,
+		transport:       ProcessTransportSupport{Requested: ProcessTransportStdio, Resolved: ProcessTransportStdio},
+		allWorkers:      []*processWorker{worker},
+	}
+	diagnostics := pool.Diagnostics()
+	if diagnostics.ExchangeTimeoutMS != 2000 || len(diagnostics.Workers) != 1 {
+		t.Fatalf("diagnostics = %+v", diagnostics)
+	}
+}
+
+func TestFrameHelpersAndStringTrim(t *testing.T) {
+	var frame bytes.Buffer
+	if err := writeFrame(&frame, []byte("payload")); err != nil {
+		t.Fatalf("writeFrame() error = %v", err)
+	}
+	payload, err := readFrame(&frame)
+	if err != nil || string(payload) != "payload" {
+		t.Fatalf("readFrame() = %q err=%v", string(payload), err)
+	}
+	if _, err := readFrame(strings.NewReader("\x05\x00")); err == nil {
+		t.Fatal("expected short frame to fail")
+	}
+	if stringsTrim(" \n\tvalue\r ") != "value" {
+		t.Fatal("stringsTrim failed")
+	}
+	if cStringBytes([]byte{'o', 'k', 0, 'x'}) != "ok" || cStringBytes([]byte{'o', 'k'}) != "ok" {
+		t.Fatal("cStringBytes failed")
 	}
 }
 

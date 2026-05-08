@@ -10,6 +10,7 @@ import (
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing"
+	"github.com/riverqueue/river"
 )
 
 type fakeProcessor struct {
@@ -324,5 +325,50 @@ func TestEngineAcceptsAfterQueueFullBackpressureClears(t *testing.T) {
 			t.Fatalf("job did not succeed after backpressure cleared; state=%s", snapshot.State)
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestEngineSettersPruneSpawnAndWait(t *testing.T) {
+	engine := NewEngine(map[string]int{"operations_core": 1}, nil)
+	store := NewInMemoryMetadataStore()
+	engine.SetMetadataStore(store)
+	if engine.metadataStore != store {
+		t.Fatalf("metadata store was not set")
+	}
+	engine.SetRiverClient(nil, nil)
+	if engine.riverClient != nil || engine.metadataStore != store {
+		t.Fatalf("nil river client should not replace explicit metadata store")
+	}
+
+	expired := time.Now().UTC().Add(-time.Hour)
+	future := time.Now().UTC().Add(time.Hour)
+	engine.dedupe["expired"] = expired
+	engine.dedupe["future"] = future
+	engine.pruneDedupe(time.Now().UTC())
+	if _, ok := engine.dedupe["expired"]; ok {
+		t.Fatalf("expired dedupe entry was not pruned")
+	}
+	if _, ok := engine.dedupe["future"]; !ok {
+		t.Fatalf("future dedupe entry was pruned")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	jobs := make(chan Job)
+	engine.spawnWorkers(ctx, "operations_core", jobs, 2)
+	cancel()
+	engine.Wait()
+	if engine.workers["operations_core"] != 3 {
+		t.Fatalf("workers = %d, want 3", engine.workers["operations_core"])
+	}
+}
+
+func TestBridgeWorkDelegatesToProcessor(t *testing.T) {
+	processor := &fakeProcessor{kind: "operations_lifecycle", queue: "operations_core", maxAttempts: 1}
+	bridge := &Bridge{Processor: processor}
+	if err := bridge.Work(context.Background(), &river.Job[Job]{Args: Job{JobKind: "operations_lifecycle", Queue: "operations_core", MaxAttempts: 1}}); err != nil {
+		t.Fatalf("Bridge Work() error = %v", err)
+	}
+	if processor.calls.Load() != 1 {
+		t.Fatalf("processor calls = %d", processor.calls.Load())
 	}
 }

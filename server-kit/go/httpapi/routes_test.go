@@ -1,6 +1,11 @@
 package httpapi
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
 
 func TestMakeEventRouteWithOptions(t *testing.T) {
 	route := MakeEventRoute(
@@ -49,6 +54,58 @@ func TestMakeEventRouteRBACOverride(t *testing.T) {
 	}
 }
 
+func TestRouteOptionsCoverRawStreamingHeadersAndStaticPayload(t *testing.T) {
+	route := MakeEventRoute(
+		" patch ",
+		" /v1/assets ",
+		"assets:update:v1:requested",
+		" update ",
+		" UpdateRequest ",
+		" UpdateResponse ",
+		WithRawBody(),
+		WithStreaming(),
+		WithRequestHeaders("X-Trace-ID", "X-Trace-ID", " "),
+		WithRequiredCapability(" assets.override "),
+		WithPermission("nonsense"),
+		WithStaticPayload(map[string]any{" ": "ignored", "mode": "test"}),
+	)
+	if route.Method != "PATCH" || route.Path != "/v1/assets" || route.Description != "update" {
+		t.Fatalf("route normalization failed: %+v", route)
+	}
+	if !route.IncludeRawBody || !route.IsStreaming {
+		t.Fatalf("expected raw body and streaming route")
+	}
+	if len(route.IncludeHeaders) != 1 || route.IncludeHeaders[0] != "X-Trace-ID" {
+		t.Fatalf("unexpected headers: %+v", route.IncludeHeaders)
+	}
+	if route.RequiredCapability != "assets.override" || route.Permission != "write" {
+		t.Fatalf("unexpected RBAC: %q %q", route.RequiredCapability, route.Permission)
+	}
+	if route.StaticPayload["mode"] != "test" {
+		t.Fatalf("static payload missing: %+v", route.StaticPayload)
+	}
+}
+
+func TestEmptyRouteOptionsAreNoops(t *testing.T) {
+	route := MakeEventRoute(
+		"GET",
+		"/v1/test",
+		"test:ping:v1:requested",
+		"Ping",
+		"PingRequest",
+		"PingResponse",
+		WithAnyOfQueryParams(" ", ""),
+		WithStaticPayload(nil),
+		nil,
+	)
+	if len(route.AnyOfQueryParams) != 0 {
+		t.Fatalf("empty any-of params should be ignored: %+v", route.AnyOfQueryParams)
+	}
+	if len(dedupeNonEmpty([]string{" ", "a", "a", "b"})) != 2 {
+		t.Fatalf("dedupeNonEmpty did not dedupe")
+	}
+}
+
 func TestStaticRouteBuildsScaffoldHandler(t *testing.T) {
 	route := StaticRoute(
 		"GET",
@@ -66,5 +123,17 @@ func TestStaticRouteBuildsScaffoldHandler(t *testing.T) {
 	}
 	if route.StaticPayload["kind"] != "scaffold" {
 		t.Fatalf("expected static payload on route metadata")
+	}
+	rec := httptest.NewRecorder()
+	route.Handler(rec, httptest.NewRequest(http.MethodGet, route.Path, nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("static route status = %d", rec.Code)
+	}
+	var body staticScaffoldResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode static response: %v", err)
+	}
+	if body.EventType != "media:list_assets:v1:requested" || body.Payload["kind"] != "scaffold" {
+		t.Fatalf("unexpected static response: %+v", body)
 	}
 }

@@ -14,6 +14,7 @@ Primary references used for synthesis:
 
 - `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/JSF-AV-rules.pdf`
 - `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/P10.pdf`
+- `/Users/okhai/Desktop/Real-World Bug Hunting - A Field Guide to Web Hacking by Peter Yaworski.pdf` (defensive vulnerability taxonomy synthesis; no exploit payloads embedded)
 
 Related architecture blueprint:
 
@@ -23,6 +24,10 @@ Related frontend practice docs:
 
 - `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/styling_design_practices.md`
 - `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/references/README.md`
+
+Related security practice docs:
+
+- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/security_practices.md`
 
 ## Rule levels
 
@@ -385,6 +390,8 @@ Requirements:
 3. **Origin Checks**: Cookie-authenticated mutation routes and websocket upgrades must validate `Origin` (and forwarded host where relevant) to reduce CSRF and cross-site socket abuse.
 4. **Webhook Verification**: Incoming webhooks (for example, Stripe, Twilio) must verify signature and freshness, enforce body-size limits, dedupe provider event IDs, and hand off slow work asynchronously.
 5. **Debug Surface Control**: Debug, profiling, and admin-only endpoints must be disabled or separately gated outside local development.
+6. **HTTP Parameter Pollution**: Security-sensitive query/form parameters must reject duplicate keys instead of relying on parser first-value or last-value behavior. Foundation HTTP dispatch rejects duplicate GET/DELETE query parameters by default.
+7. **Redirect Safety**: Redirect targets must be relative same-origin paths or exact-match allowlisted absolute hosts. Schemeless URLs, userinfo URLs, CRLF/control characters, backslashes, and suffix-style host checks are disallowed.
 
 Enforcement:
 
@@ -421,11 +428,15 @@ Requirements:
 4. **Mass-assignment Protection**: Mutation handlers must allowlist writable fields and reject or ignore ownership, role, billing, or system-managed attributes from clients.
 5. **State-transition Safety**: High-risk transitions (payments, refunds, approvals, invitations, role changes, publish/unpublish, file promotion) must re-check current state and actor authority inside the same transaction/lock boundary to resist race conditions and double-submit paths.
 6. **Interpreter and Egress Safety**: Outbound fetchers, template engines, shell/CLI calls, and dynamic interpreters must use allowlists, sandboxing, or disabled-by-default posture to prevent SSRF, command injection, template injection, and arbitrary file access.
+7. **SSRF Controls**: Server-side URL fetches must require `https` by default, exact host allowlists for partner integrations, DNS/IP checks that block loopback/private/link-local/metadata networks, bounded lookup/connect/read timeouts, and redirect re-validation before each hop.
+8. **Path and File Safety**: File paths derived from user input must normalize under an approved root and reject absolute paths, traversal, and control characters. Upload handlers must enforce size, extension, MIME, and magic-byte allowlists and store untrusted bytes outside executable roots.
+9. **Header/Cookie Safety**: Header, cookie, filename, and redirect values derived from input must reject CRLF/control characters before they reach response writers or proxy clients.
 
 Enforcement:
 
 - Backend test validation for route access controls, object-level authorization, and mass-assignment rejection.
-- Reviewer checks on form render boundaries, outbound call sites, and state-transition guards.
+- Reviewer checks on form render boundaries, outbound call sites, path joins, and state-transition guards.
+- Unit tests around `server-kit/go/security` URL, duplicate-parameter, and path-safety helpers for new exposed flows.
 
 ### CP-21: Frontend Resilience and Error Isolation
 

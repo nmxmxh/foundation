@@ -64,6 +64,31 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	}
 }
 
+// CSRFProtection rejects non-safe cross-origin browser mutations using Go's
+// Fetch-Metadata/Origin based CrossOriginProtection.
+func CSRFProtection(trustedOrigins []string, bypassPatterns ...string) func(http.Handler) http.Handler {
+	protection := http.NewCrossOriginProtection()
+	for _, origin := range trustedOrigins {
+		if err := protection.AddTrustedOrigin(strings.TrimSpace(origin)); err != nil {
+			continue
+		}
+	}
+	for _, pattern := range bypassPatterns {
+		if trimmed := strings.TrimSpace(pattern); trimmed != "" {
+			protection.AddInsecureBypassPattern(trimmed)
+		}
+	}
+	protection.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		domainerr.WriteHTTP(w, domainerr.Forbidden("csrf_rejected", "cross-origin request rejected"), domainerr.ResponseOptions{
+			Status: http.StatusForbidden,
+		})
+	}))
+
+	return func(next http.Handler) http.Handler {
+		return protection.Handler(next)
+	}
+}
+
 func isOriginAllowed(origin string, allowed []string) bool {
 	if origin == "" {
 		return false

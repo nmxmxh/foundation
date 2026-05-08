@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -94,5 +95,61 @@ func TestMetadataFromRequestPreservesCommunicationHeaders(t *testing.T) {
 	}
 	if md.GlobalContext.IPAddress != "203.0.113.10" || md.GlobalContext.UserAgent != "foundation-test" || md.GlobalContext.Source != "api" {
 		t.Fatalf("request communication context was not preserved: %#v", md.GlobalContext)
+	}
+}
+
+func TestCorrelationHelpersHandleFallbacksAndNil(t *testing.T) {
+	if got := CorrelationIDFromRequest(nil); got != "" {
+		t.Fatalf("nil correlation = %q", got)
+	}
+	if NewCorrelationID() == "" {
+		t.Fatalf("expected generated correlation id")
+	}
+	ctx := WithCorrelationMetadata(context.Background(), " corr_manual ")
+	if got := metadata.FromContext(ctx).CorrelationID; got != "corr_manual" {
+		t.Fatalf("WithCorrelationMetadata correlation = %q", got)
+	}
+	if got := metadata.FromContext(WithCorrelationMetadata(ctx, " ")).CorrelationID; got != "corr_manual" {
+		t.Fatalf("blank correlation should preserve existing value, got %q", got)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/test", nil)
+	req.RemoteAddr = "198.51.100.10:443"
+	ctx = ContextWithRequestMetadata(req)
+	if got := metadata.FromContext(ctx).GlobalContext.IPAddress; got != "198.51.100.10" {
+		t.Fatalf("ContextWithRequestMetadata IP = %q", got)
+	}
+	if got := metadata.FromContext(ContextWithRequestMetadata(nil)).CorrelationID; got != "" {
+		t.Fatalf("nil request context should be empty metadata, got %q", got)
+	}
+}
+
+func TestEnrichMetadataFromRequestNilAndRealIP(t *testing.T) {
+	EnrichMetadataFromRequest(nil, nil)
+
+	md := metadata.New()
+	req := httptest.NewRequest(http.MethodGet, "/v1/test", nil)
+	req.Header.Set("X-Real-IP", "203.0.113.8")
+	EnrichMetadataFromRequest(&md, req)
+	if md.CorrelationID == "" {
+		t.Fatalf("expected generated correlation id")
+	}
+	if md.GlobalContext == nil || md.GlobalContext.IPAddress != "203.0.113.8" {
+		t.Fatalf("expected X-Real-IP metadata: %#v", md.GlobalContext)
+	}
+
+	md = metadata.New()
+	EnrichMetadataFromRequest(&md, nil)
+	if md.CorrelationID == "" {
+		t.Fatalf("nil request should still ensure correlation")
+	}
+}
+
+func TestCorrelationMiddlewareHandlesNilNext(t *testing.T) {
+	handler := CorrelationMiddleware(nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/test", nil))
+	if rec.Header().Get("X-Correlation-ID") == "" {
+		t.Fatalf("expected generated response correlation id")
 	}
 }

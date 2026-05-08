@@ -95,6 +95,40 @@ func TestScaleWorkers(t *testing.T) {
 	}
 }
 
+func TestAutoTuneAndScaleDefaultsForAllTiers(t *testing.T) {
+	if cfg := AutoTune(); cfg.CPUCount <= 0 {
+		t.Fatalf("AutoTune CPUCount = %d", cfg.CPUCount)
+	}
+	cases := []struct {
+		tier          Tier
+		workers       int
+		buffer        int
+		defaultWorker int
+		defaultBuffer int
+	}{
+		{TierDevelopment, 3, 10, 1, 64},
+		{TierMidRange, 6, 20, 2, 128},
+		{TierProduction, 12, 40, 4, 256},
+		{TierHyperscale, 18, 80, 6, 512},
+		{Tier(99), 3, 10, 1, 64},
+	}
+	for _, tc := range cases {
+		cfg := Config{Tier: tc.tier}
+		if got := cfg.ScaleWorkers(3); got != tc.workers {
+			t.Fatalf("ScaleWorkers tier=%v got %d want %d", tc.tier, got, tc.workers)
+		}
+		if got := cfg.ScaleBuffer(10); got != tc.buffer {
+			t.Fatalf("ScaleBuffer tier=%v got %d want %d", tc.tier, got, tc.buffer)
+		}
+		if got := cfg.ScaleWorkers(0); got != tc.defaultWorker {
+			t.Fatalf("ScaleWorkers default tier=%v got %d want %d", tc.tier, got, tc.defaultWorker)
+		}
+		if got := cfg.ScaleBuffer(0); got != tc.defaultBuffer {
+			t.Fatalf("ScaleBuffer default tier=%v got %d want %d", tc.tier, got, tc.defaultBuffer)
+		}
+	}
+}
+
 func TestScaleBuffer(t *testing.T) {
 	devCfg := AutoTuneForCores(2)
 	hyperCfg := AutoTuneForCores(32)

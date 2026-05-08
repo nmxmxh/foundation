@@ -83,6 +83,31 @@ func TestStreamingCompressor_Gzip(t *testing.T) {
 	}
 }
 
+func TestStreamingCompressor_DeflateAndHeader(t *testing.T) {
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept-Encoding", "deflate")
+	sc, ok := NewStreamingCompressor(rr, req, 100)
+	if !ok {
+		t.Fatal("expected StreamingCompressor to be created")
+	}
+	sc.Header().Set("X-Stream", "true")
+	sc.WriteHeader(http.StatusCreated)
+	_, _ = sc.Write([]byte("deflate-streaming-data"))
+	if err := sc.Close(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if rr.Header().Get("X-Stream") != "true" {
+		t.Fatalf("missing passthrough header")
+	}
+	if rr.Header().Get("Content-Length") != "" {
+		t.Fatalf("content length should be removed")
+	}
+}
+
 func TestStreamingCompressor_NoCompression(t *testing.T) {
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/", nil)

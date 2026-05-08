@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	transportpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/transport/v1"
 )
 
 func TestFromMapAndToMap(t *testing.T) {
@@ -170,5 +172,135 @@ func TestContextAndJSONRoundTrip(t *testing.T) {
 	}
 	if parsed.CorrelationID != "corr_1" {
 		t.Fatalf("json round trip mismatch")
+	}
+
+	ctx = NewContext(context.Background(), map[string]any{"correlation_id": "corr_new"})
+	if got := FromContext(ctx).CorrelationID; got != "corr_new" {
+		t.Fatalf("NewContext correlation = %q", got)
+	}
+	if got := FromContext(context.Background()); got.Attributes == nil || got.Extras == nil {
+		t.Fatalf("FromContext missing should initialize maps: %+v", got)
+	}
+}
+
+func TestMetadataMapVariantsAndPrepareForEmit(t *testing.T) {
+	md := FromMap(map[string]any{
+		"globalContext": map[string]string{
+			"userId":         "user_2",
+			"organizationId": "org_2",
+		},
+		"tags":         []string{"a", "b"},
+		"categories":   []any{"ops", 1, ""},
+		"aiConfidence": float32(0.5),
+		"attributes": map[string]any{
+			"attempt": 2,
+		},
+		"custom": "preserved",
+	})
+	if md.GlobalContext == nil || md.GlobalContext.UserID != "user_2" || md.GlobalContext.OrganizationID != "org_2" {
+		t.Fatalf("global context variant was not parsed: %+v", md.GlobalContext)
+	}
+	if len(md.Tags) != 2 || len(md.Categories) != 1 || md.Attributes["attempt"] != "2" || md.Extras["custom"] != "preserved" {
+		t.Fatalf("collection parsing mismatch: %+v", md)
+	}
+
+	ctx := IntoContext(context.Background(), EnvelopeMetadata{
+		CorrelationID: "corr_ctx",
+		Channel:       "worker",
+	})
+	emitted := PrepareForEmit(ctx, map[string]any{
+		"correlation_id": "",
+		"global_context": map[string]any{"correlation_id": "corr_nested"},
+		"channel":        "override",
+	})
+	if emitted["correlation_id"] != "corr_ctx" || emitted["channel"] != "override" {
+		t.Fatalf("PrepareForEmit result = %+v", emitted)
+	}
+
+	emitted = PrepareForEmit(context.Background(), map[string]any{
+		"global_context": map[string]any{"correlation_id": "corr_nested"},
+	})
+	if emitted["correlation_id"] != "corr_nested" {
+		t.Fatalf("expected nested correlation fallback: %+v", emitted)
+	}
+
+	md = FromMap(map[string]any{
+		"global_context": map[string]any{},
+		"ai_confidence":  int64(1),
+	})
+	if md.GlobalContext != nil || md.AIConfidence != 1 {
+		t.Fatalf("empty global context/int64 confidence mismatch: %+v", md)
+	}
+}
+
+func TestMetadataNilReceiversAndValidationEdges(t *testing.T) {
+	var nilMeta *EnvelopeMetadata
+	if got := nilMeta.EnsureCorrelation(" corr_nil "); got != "corr_nil" {
+		t.Fatalf("nil EnsureCorrelation = %q", got)
+	}
+	if got := nilMeta.NormalizeCorrelation(" corr_norm "); got != "corr_norm" {
+		t.Fatalf("nil NormalizeCorrelation = %q", got)
+	}
+	nilMeta.ApplyDefaults("ignored")
+
+	md := EnvelopeMetadata{CorrelationID: "bad space"}
+	if err := md.Validate(); err == nil {
+		t.Fatalf("expected token validation error")
+	}
+	md = EnvelopeMetadata{ValidityPeriod: &ValidityPeriod{EffectiveFrom: "not-a-date"}}
+	if err := md.Validate(); err == nil {
+		t.Fatalf("expected invalid date error")
+	}
+	md = EnvelopeMetadata{ValidityPeriod: &ValidityPeriod{EffectiveFrom: "2026-01-01T00:00:00Z", EffectiveTo: "2026-01-02T00:00:00Z"}}
+	if err := md.Validate(); err != nil {
+		t.Fatalf("RFC3339 validity period should pass: %v", err)
+	}
+	if _, err := FromJSON([]byte("{bad")); err == nil {
+		t.Fatalf("expected invalid JSON error")
+	}
+}
+
+func TestTransportProtoRoundTrip(t *testing.T) {
+	md := EnvelopeMetadata{
+		GlobalContext: &GlobalContext{
+			UserID:         "user_1",
+			SessionID:      "session_1",
+			Source:         "api",
+			DeviceID:       "device_1",
+			OrganizationID: "org_1",
+			RoleID:         "admin",
+			AuditContext:   "audit",
+			IPAddress:      "203.0.113.1",
+			UserAgent:      "test",
+		},
+		Tags:           []string{"tag"},
+		AIConfidence:   0.7,
+		EmbeddingID:    "emb",
+		Categories:     []string{"cat"},
+		KnowledgeGraph: "kg",
+		SourceRef:      "source",
+		ValidityPeriod: &ValidityPeriod{EffectiveFrom: "2026-01-01", EffectiveTo: "2026-01-02"},
+		CorrelationID:  "corr_1",
+		Attributes:     map[string]string{"k": "v"},
+		Extras:         map[string]any{"extra": "value"},
+	}
+	pb, err := md.ToTransportProto()
+	if err != nil {
+		t.Fatalf("ToTransportProto() error = %v", err)
+	}
+	roundTrip, err := FromTransportProto(pb)
+	if err != nil {
+		t.Fatalf("FromTransportProto() error = %v", err)
+	}
+	if roundTrip.CorrelationID != "corr_1" || roundTrip.GlobalContext.UserID != "user_1" || roundTrip.Extras["extra"] != "value" {
+		t.Fatalf("transport roundtrip mismatch: %+v", roundTrip)
+	}
+	empty, err := FromTransportProto(nil)
+	if err != nil || empty.Attributes == nil {
+		t.Fatalf("nil transport metadata = %+v err=%v", empty, err)
+	}
+	_, err = FromTransportProto(&transportpb.Metadata{ExtrasJson: []byte("{bad")})
+	if err == nil {
+		t.Fatalf("expected invalid extras JSON error")
 	}
 }

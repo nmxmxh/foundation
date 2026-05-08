@@ -1,74 +1,103 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
 )
 
-func TestBuildDispatchRequestDefaultsProtobufResponseForProtobufRequest(t *testing.T) {
-	request := httptest.NewRequest(http.MethodPost, "/v1/media/assets", nil)
-	request.Header.Set("Content-Type", "application/x-protobuf")
+func TestNewEventRouteHandlerValidationAndExecution(t *testing.T) {
+	route := registry.HTTPRoute{Method: http.MethodPost, EventType: "orders:create:v1:requested"}
+	rec := httptest.NewRecorder()
+	NewEventRouteHandler(route, nil)(rec, httptest.NewRequest(http.MethodPost, "/v1/orders", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("nil executor status = %d", rec.Code)
+	}
 
-	dispatch, err := BuildDispatchRequest(request, registry.HTTPRoute{
-		Method:    http.MethodPost,
-		Path:      "/v1/media/assets",
-		EventType: "media:process_asset:v1:requested",
+	called := false
+	handler := NewEventRouteHandler(route, func(w http.ResponseWriter, _ *http.Request, req DispatchRequest) {
+		called = true
+		if req.EventType != "orders:create:v1:requested" || req.Payload["name"] != "Ada" {
+			t.Fatalf("dispatch request = %+v", req)
+		}
+		w.WriteHeader(http.StatusAccepted)
 	})
-	if err != nil {
-		t.Fatalf("BuildDispatchRequest() error = %v", err)
+	rec = httptest.NewRecorder()
+	handler(rec, httptest.NewRequest(http.MethodGet, "/v1/orders", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("wrong method status = %d", rec.Code)
 	}
-	if dispatch.PayloadEncoding != "protobuf" {
-		t.Fatalf("PayloadEncoding = %q", dispatch.PayloadEncoding)
+	rec = httptest.NewRecorder()
+	handler(rec, httptest.NewRequest(http.MethodPost, "/v1/orders", bytes.NewBufferString(`{`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad json status = %d", rec.Code)
 	}
-	if dispatch.ResponseEncoding != "protobuf" {
-		t.Fatalf("ResponseEncoding = %q", dispatch.ResponseEncoding)
+	req := httptest.NewRequest(http.MethodPost, "/v1/orders", bytes.NewBufferString(`{"name":"Ada"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	handler(rec, req)
+	if rec.Code != http.StatusAccepted || !called {
+		t.Fatalf("handler status=%d called=%v", rec.Code, called)
 	}
 }
 
-func TestBuildDispatchRequestUsesOneCorrelationID(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/v1/media/assets/asset_1", nil)
-	request.Header.Set("X-Request-ID", "req_123")
-
-	dispatch, err := BuildDispatchRequest(request, registry.HTTPRoute{
-		Method:    http.MethodGet,
-		Path:      "/v1/media/assets/{id}",
-		EventType: "media:get_asset:v1:requested",
-	})
+func TestBuildDispatchRequestPayloadVariants(t *testing.T) {
+	route := registry.HTTPRoute{
+		Method:         http.MethodGet,
+		Path:           "/v1/orders/{order_id}",
+		EventType:      "orders:get:v1:requested",
+		StaticPayload:  map[string]any{"source": "route", "order_id": "static"},
+		IncludeHeaders: []string{"X-Trace-ID", " "},
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/orders/ord_1?workspace_id=wrk_1", nil)
+	req.SetPathValue("order_id", "ord_1")
+	req.Header.Set("X-Trace-ID", "trace_1")
+	out, err := BuildDispatchRequest(req, route)
 	if err != nil {
 		t.Fatalf("BuildDispatchRequest() error = %v", err)
 	}
-	if dispatch.CorrelationID != "req_123" {
-		t.Fatalf("CorrelationID = %q, want req_123", dispatch.CorrelationID)
+	if out.Payload["order_id"] != "ord_1" || out.Payload["source"] != "route" || out.Payload["workspace_id"] != "wrk_1" {
+		t.Fatalf("payload = %+v", out.Payload)
 	}
-	md := metadata.FromMap(dispatch.Metadata)
-	if md.CorrelationID != dispatch.CorrelationID {
-		t.Fatalf("metadata.correlation_id = %q, want %q", md.CorrelationID, dispatch.CorrelationID)
+	if out.Payload["_request_headers"].(map[string]any)["x-trace-id"] != "trace_1" {
+		t.Fatalf("headers payload = %+v", out.Payload["_request_headers"])
 	}
-	if md.RequestID != "req_123" {
-		t.Fatalf("metadata.request_id = %q, want req_123", md.RequestID)
-	}
-}
 
-func TestBuildDispatchRequestGeneratesOneCorrelationID(t *testing.T) {
-	request := httptest.NewRequest(http.MethodGet, "/v1/media/assets", nil)
+	req = httptest.NewRequest(http.MethodGet, "/v1/orders?role=user&role=admin", nil)
+	if _, err := BuildDispatchRequest(req, route); err == nil {
+		t.Fatalf("expected duplicate query rejection")
+	}
 
-	dispatch, err := BuildDispatchRequest(request, registry.HTTPRoute{
-		Method:    http.MethodGet,
-		Path:      "/v1/media/assets",
-		EventType: "media:list_assets:v1:requested",
+	body := []byte{0x01, 0x02}
+	req = httptest.NewRequest(http.MethodPost, "/v1/orders", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	out, err = BuildDispatchRequest(req, registry.HTTPRoute{Method: http.MethodPost, EventType: "orders:create:v1:requested"})
+	if err != nil {
+		t.Fatalf("protobuf BuildDispatchRequest() error = %v", err)
+	}
+	if out.PayloadEncoding != "protobuf" || !bytes.Equal(out.PayloadBytes, body) || out.ResponseEncoding != "protobuf" {
+		t.Fatalf("protobuf request = %+v bytes=%v", out, out.PayloadBytes)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/orders", bytes.NewReader([]byte(`{"id":"ord_1"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/protobuf")
+	out, err = BuildDispatchRequest(req, registry.HTTPRoute{
+		Method:         http.MethodPost,
+		EventType:      "orders:create:v1:requested",
+		IncludeRawBody: true,
 	})
 	if err != nil {
-		t.Fatalf("BuildDispatchRequest() error = %v", err)
+		t.Fatalf("json BuildDispatchRequest() error = %v", err)
 	}
-	if dispatch.CorrelationID == "" {
-		t.Fatal("expected generated correlation id")
+	if out.ResponseEncoding != "protobuf" || out.Payload["_raw_body"] == "" {
+		t.Fatalf("json request = %+v", out)
 	}
-	md := metadata.FromMap(dispatch.Metadata)
-	if md.CorrelationID != dispatch.CorrelationID {
-		t.Fatalf("metadata.correlation_id = %q, want %q", md.CorrelationID, dispatch.CorrelationID)
+	if _, err := json.Marshal(out.Metadata); err != nil {
+		t.Fatalf("metadata should be JSON-safe: %v", err)
 	}
 }

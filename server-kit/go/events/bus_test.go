@@ -119,6 +119,27 @@ func TestInMemoryBus_Recent(t *testing.T) {
 	}
 }
 
+func TestInMemoryBusDefaultsAndMiddleWildcardMatching(t *testing.T) {
+	bus := NewInMemoryBus(0)
+	if bus.maxRecent != 200 {
+		t.Fatalf("default max recent = %d, want 200", bus.maxRecent)
+	}
+	cases := []struct {
+		pattern   string
+		eventType string
+		expected  bool
+	}{
+		{"media:*:requested", "media:upload:requested", true},
+		{"media:*:success", "media:upload:requested", false},
+		{"media:upload:requested:extra", "media:upload:requested", false},
+	}
+	for _, tc := range cases {
+		if got := Matches(tc.pattern, tc.eventType); got != tc.expected {
+			t.Fatalf("Matches(%q, %q) = %v, want %v", tc.pattern, tc.eventType, got, tc.expected)
+		}
+	}
+}
+
 func TestInMemoryBus_NilSubscriberIgnored(t *testing.T) {
 	bus := NewInMemoryBus(100)
 	bus.Subscribe("test:event:requested", nil) // should not panic

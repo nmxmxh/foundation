@@ -34,3 +34,32 @@ func TestPrometheusExportIsStable(t *testing.T) {
 		t.Fatalf("unexpected prometheus output: %s", out)
 	}
 }
+
+func TestDefaultMetricsResetAndNilRegistry(t *testing.T) {
+	Default().Reset()
+	Counter("requests.total", Tags{"route": "/v1/test"})
+	Gauge("queue.depth", nil, 4)
+	Histogram("latency", nil, 10)
+	if snapshot := Default().Snapshot(); len(snapshot.Counters) == 0 || len(snapshot.Gauges) == 0 || len(snapshot.Histograms) == 0 {
+		t.Fatalf("default registry did not record metrics: %+v", snapshot)
+	}
+	Default().Reset()
+	if snapshot := Default().Snapshot(); len(snapshot.Counters) != 0 || len(snapshot.Gauges) != 0 || len(snapshot.Histograms) != 0 {
+		t.Fatalf("default registry did not reset: %+v", snapshot)
+	}
+
+	var nilRegistry *Registry
+	nilRegistry.Counter("ignored", nil)
+	nilRegistry.Gauge("ignored", nil, 1)
+	nilRegistry.Histogram("ignored", nil, 1)
+	nilRegistry.Reset()
+	if nilRegistry.Snapshot().Timestamp.IsZero() {
+		t.Fatalf("nil snapshot should include timestamp")
+	}
+	if got := sanitize(" $ "); got != "_" {
+		t.Fatalf("sanitize symbol = %q", got)
+	}
+	if got := sanitize(" "); got != "unknown" {
+		t.Fatalf("sanitize blank = %q", got)
+	}
+}

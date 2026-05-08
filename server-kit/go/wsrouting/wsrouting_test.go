@@ -183,6 +183,69 @@ func TestUpdateAuth(t *testing.T) {
 	}
 }
 
+func TestLocalOnlyRouterBranches(t *testing.T) {
+	r := NewRouter(nil, "server-1", WithTTL(0))
+	ctx := context.Background()
+
+	if r.ttl != DefaultTTL {
+		t.Fatalf("zero TTL option should preserve default, got %s", r.ttl)
+	}
+	if err := r.Register(ctx, ConnectionInfo{ConnectionID: "conn-1"}); err != nil {
+		t.Fatalf("Register() with nil client error = %v", err)
+	}
+	info, ok := r.GetLocalConnection("conn-1")
+	if !ok || info.DeviceID != "conn-1" || info.ServerID != "server-1" || info.ConnectedAt.IsZero() {
+		t.Fatalf("defaulted local connection = %+v ok=%v", info, ok)
+	}
+	info.UserID = "mutated"
+	info, _ = r.GetLocalConnection("conn-1")
+	if info.UserID == "mutated" {
+		t.Fatal("GetLocalConnection should return a copy")
+	}
+	if err := r.UpdateAuth(ctx, "", "user-1"); err == nil {
+		t.Fatal("expected empty connection id update error")
+	}
+	if err := r.UpdateAuth(ctx, "missing", "user-1"); err != nil {
+		t.Fatalf("UpdateAuth missing with nil client error = %v", err)
+	}
+	if err := r.UpdateAuth(ctx, "conn-1", ""); err != nil {
+		t.Fatalf("UpdateAuth blank user with nil client error = %v", err)
+	}
+	if err := r.Unregister(ctx, ""); err == nil {
+		t.Fatal("expected empty unregister error")
+	}
+	if err := r.Unregister(ctx, "missing"); err != nil {
+		t.Fatalf("Unregister missing with nil client error = %v", err)
+	}
+	if err := r.Unregister(ctx, "conn-1"); err != nil {
+		t.Fatalf("Unregister existing with nil client error = %v", err)
+	}
+}
+
+func TestForEachLocalStopsEarlyAndHealth(t *testing.T) {
+	r := NewRouter(nil, "server-1")
+	ctx := context.Background()
+	_ = r.Register(ctx, ConnectionInfo{ConnectionID: "conn-1"})
+	_ = r.Register(ctx, ConnectionInfo{ConnectionID: "conn-2"})
+
+	var seen int
+	r.ForEachLocal(func(info *ConnectionInfo) bool {
+		seen++
+		info.ConnectionID = "mutated"
+		return false
+	})
+	if seen != 1 {
+		t.Fatalf("ForEachLocal seen = %d, want 1", seen)
+	}
+	if _, ok := r.GetLocalConnection("mutated"); ok {
+		t.Fatal("ForEachLocal should pass copies")
+	}
+	health := r.Health()
+	if health.ServerID != "server-1" || health.LocalConnections != 2 || health.Timestamp.IsZero() {
+		t.Fatalf("bad health snapshot: %+v", health)
+	}
+}
+
 func TestLocalConnectionCount(t *testing.T) {
 	client := redis.NewMemoryClient("test")
 	defer func() { _ = client.Close() }()
@@ -213,9 +276,9 @@ func TestResolveTargets(t *testing.T) {
 	_ = r.Register(ctx, ConnectionInfo{ConnectionID: "conn-2", DeviceID: "device-2", UserID: "user-1"})
 
 	tests := []struct {
-		target       TargetedDelivery
-		expectedLen  int
-		expectedIDs  []string
+		target      TargetedDelivery
+		expectedLen int
+		expectedIDs []string
 	}{
 		{
 			target:      TargetedDelivery{TargetType: "connection", TargetID: "conn-1"},

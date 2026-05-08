@@ -21,6 +21,7 @@ func TestSanitizeTelemetryValueRecursivelyRedactsSensitiveFields(t *testing.T) {
 				"auth_token": "opaque-secret",
 				"session_id": "header.payload.signature",
 			},
+			"tokens": []string{"first", "second"},
 		},
 		"",
 	).(map[string]any)
@@ -29,10 +30,24 @@ func TestSanitizeTelemetryValueRecursivelyRedactsSensitiveFields(t *testing.T) {
 	nested := sanitized["nested"].(map[string]any)
 	assert.Equal(t, RedactSecret("opaque-secret"), nested["auth_token"])
 	assert.Equal(t, RedactSecret("header.payload.signature"), nested["session_id"])
+	assert.Equal(t, []any{"first", "second"}, sanitized["tokens"])
 }
 
 func TestHashIdentifierIgnoresWhitespace(t *testing.T) {
 	assert.Equal(t, HashIdentifier(" secret "), HashIdentifier("secret"))
 	assert.NotEmpty(t, HashIdentifier("secret"))
 	assert.Empty(t, HashIdentifier("   "))
+}
+
+func TestLooksLikeJWTRejectsAmbiguousTokens(t *testing.T) {
+	assert.True(t, LooksLikeJWT("a.b.c"))
+	assert.False(t, LooksLikeJWT("a.b"))
+	assert.False(t, LooksLikeJWT("a..c"))
+	assert.False(t, LooksLikeJWT("   "))
+}
+
+func TestSanitizeTelemetryValueHandlesSensitiveKeyVariants(t *testing.T) {
+	assert.Equal(t, RedactSecret("secret"), SanitizeTelemetryValue("secret", "API_KEY"))
+	assert.Equal(t, "public", SanitizeTelemetryValue("public", "label"))
+	assert.Equal(t, 42, SanitizeTelemetryValue(42, "password"))
 }

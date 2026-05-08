@@ -12,6 +12,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/domainerr"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 )
 
 // DispatchRequest is the canonical request envelope used by HTTP ingress.
@@ -139,6 +140,9 @@ func payloadFromRequest(r *http.Request) (map[string]any, []byte, string, string
 	requestEncoding := requestEncodingFromRequest(r)
 	responseEncoding := responseEncodingFromRequest(r, requestEncoding)
 	if r.Method == http.MethodGet || r.Method == http.MethodDelete {
+		if err := security.RejectDuplicateQueryParams(r.URL.Query()); err != nil {
+			return nil, nil, "", "", domainerr.Validation("duplicate_query_parameter", "duplicate query parameter")
+		}
 		out := map[string]any{}
 		for key, values := range r.URL.Query() {
 			if len(values) == 0 {
