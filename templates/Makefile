@@ -329,10 +329,10 @@ lint: lint-go lint-rust lint-frontend lint-foundation
 lint-go:
 	@if [ -f go.mod ]; then \
 		mkdir -p "$(GO_CACHE_DIR)"; \
-		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list -f '{{.Dir}}' ./... | sed "s#^$$(pwd)#.#" | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
 		if [ -z "$$packages" ]; then echo "No Go packages found"; exit 0; fi; \
 		if command -v golangci-lint >/dev/null 2>&1; then \
-			golangci-lint run --timeout 10m $$packages; \
+			GOCACHE="$(GO_CACHE_DIR)" golangci-lint run --timeout 10m $$packages; \
 		else \
 			GOCACHE="$(GO_CACHE_DIR)" go vet $$packages; \
 		fi; \

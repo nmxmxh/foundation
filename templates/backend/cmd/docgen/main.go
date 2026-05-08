@@ -122,7 +122,9 @@ type Config struct {
 	Routes          []registry.HTTPRoute
 }
 
-// Generate creates OpenAPI spec from routes
+// Generate creates OpenAPI spec from routes.
+//
+//nolint:gocognit,gocyclo // OpenAPI generation intentionally keeps route, schema, security, and response assembly in one pass.
 func Generate(cfg Config) OpenAPISpec {
 	sort.Slice(cfg.Routes, func(i, j int) bool {
 		if cfg.Routes[i].Path == cfg.Routes[j].Path {
@@ -468,11 +470,11 @@ func (g *schemaGenerator) schemaForMessageKind(md protoreflect.MessageDescriptor
 	case "google.protobuf.BytesValue":
 		return Schema{Type: "string", Format: "byte", Nullable: true}
 	case "google.protobuf.Struct":
-		any := Schema{}
-		return Schema{Type: "object", AdditionalProperties: &any}
+		anySchema := Schema{}
+		return Schema{Type: "object", AdditionalProperties: &anySchema}
 	case "google.protobuf.ListValue":
-		any := Schema{}
-		return Schema{Type: "array", Items: &any}
+		anySchema := Schema{}
+		return Schema{Type: "array", Items: &anySchema}
 	case "google.protobuf.Value", "google.protobuf.Any":
 		return Schema{Type: "object"}
 	}
@@ -538,6 +540,7 @@ func buildQueryParameters(msg proto.Message, requiredQueryParams []string) []Par
 	return params
 }
 
+//nolint:exhaustive // Unsupported reflection kinds intentionally fall through to false.
 func querySchemaForGoType(t reflect.Type) (Schema, bool) {
 	if t.Kind() == reflect.Ptr {
 		return Schema{}, false
@@ -637,7 +640,7 @@ func emptySecurityRequirement() *[]map[string][]string {
 }
 
 func addStandardSchemas(schemas map[string]Schema) {
-	any := Schema{}
+	anySchema := Schema{}
 
 	schemas["ErrorResponse"] = Schema{
 		Type:     "object",
@@ -653,7 +656,7 @@ func addStandardSchemas(schemas map[string]Schema) {
 			},
 			"details": {
 				Type:                 "object",
-				AdditionalProperties: &any,
+				AdditionalProperties: &anySchema,
 			},
 		},
 	}
@@ -675,7 +678,7 @@ func addStandardSchemas(schemas map[string]Schema) {
 			"message": {Type: "string", Example: "Successful response"},
 			"data": {
 				Type:                 "object",
-				AdditionalProperties: &any,
+				AdditionalProperties: &anySchema,
 			},
 		},
 	}

@@ -1,3 +1,4 @@
+// Package testutil provides scaffolded database and Redis test helpers.
 package testutil
 
 import (

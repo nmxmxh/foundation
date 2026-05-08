@@ -1,3 +1,4 @@
+// Package middleware contains HTTP middleware used by the application server.
 package middleware
 
 import (
@@ -71,12 +72,13 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
 			defer func() {
 				if err := recover(); err != nil {
 					logger.Error("panic recovered",
 						"error", err,
 						"stack", string(debug.Stack()),
-						"request_id", GetRequestID(r.Context()),
+						"request_id", GetRequestID(ctx),
 					)
 					http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				}

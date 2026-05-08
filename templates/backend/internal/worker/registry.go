@@ -1,3 +1,4 @@
+// Package worker registers bounded background jobs for the application.
 package worker
 
 import (

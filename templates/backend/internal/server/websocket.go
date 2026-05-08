@@ -1,3 +1,4 @@
+// Package server exposes the HTTP, WebSocket, and foundation dispatch surfaces.
 package server
 
 import (
@@ -177,18 +178,22 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	}
 	wsConn.binaryFormat = strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("format")), "binary")
 
-	if !s.registerWSConnection(wsConn) {
-		_ = conn.Close()
+	if !s.registerWSConnection(ctx, wsConn) {
+		if err := conn.Close(); err != nil {
+			s.log.Warn("failed to close rejected websocket", "error", err)
+		}
 		cancel()
 		domainerr.WriteHTTP(w, domainerr.Unavailable("ws_capacity_reached", "websocket capacity reached"), domainerr.ResponseOptions{
 			Status: http.StatusServiceUnavailable,
 		})
 		return
 	}
-	defer s.unregisterWSConnection(wsConn)
+	defer s.unregisterWSConnection(ctx, wsConn)
 
 	conn.SetReadLimit(s.wsReadLimitBytes)
-	_ = conn.SetReadDeadline(time.Now().Add(s.wsPingInterval * 2))
+	if err := conn.SetReadDeadline(time.Now().Add(s.wsPingInterval * 2)); err != nil {
+		s.log.Warn("failed to set websocket read deadline", "error", err)
+	}
 	conn.SetPongHandler(func(_ string) error {
 		return conn.SetReadDeadline(time.Now().Add(s.wsPingInterval * 2))
 	})
@@ -198,7 +203,7 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	s.runWSReader(ctx, wsConn)
 }
 
-func (s *Server) registerWSConnection(conn *wsConnection) bool {
+func (s *Server) registerWSConnection(ctx context.Context, conn *wsConnection) bool {
 	if conn == nil || s.ws == nil {
 		return false
 	}
@@ -219,17 +224,19 @@ func (s *Server) registerWSConnection(conn *wsConnection) bool {
 
 	// Register with router for cross-instance routing
 	if s.ws.router != nil {
-		_ = s.ws.router.Register(context.Background(), wsrouting.ConnectionInfo{
+		if err := s.ws.router.Register(ctx, wsrouting.ConnectionInfo{
 			ConnectionID: conn.id,
 			DeviceID:     conn.deviceID,
 			UserID:       conn.userID,
-		})
+		}); err != nil {
+			s.log.Warn("failed to register websocket route", "connection_id", conn.id, "error", err)
+		}
 	}
 
 	return true
 }
 
-func (s *Server) unregisterWSConnection(conn *wsConnection) {
+func (s *Server) unregisterWSConnection(ctx context.Context, conn *wsConnection) {
 	if conn == nil || s.ws == nil {
 		return
 	}
@@ -238,7 +245,9 @@ func (s *Server) unregisterWSConnection(conn *wsConnection) {
 	}
 	s.ws.connections.Delete(conn.id)
 	s.ws.connectionCnt.Add(-1)
-	_ = conn.conn.Close()
+	if err := conn.conn.Close(); err != nil {
+		s.log.Warn("failed to close websocket connection", "connection_id", conn.id, "error", err)
+	}
 
 	// Record metrics
 	if s.ws.metrics != nil {
@@ -247,10 +256,13 @@ func (s *Server) unregisterWSConnection(conn *wsConnection) {
 
 	// Unregister from router
 	if s.ws.router != nil {
-		_ = s.ws.router.Unregister(context.Background(), conn.id)
+		if err := s.ws.router.Unregister(ctx, conn.id); err != nil {
+			s.log.Warn("failed to unregister websocket route", "connection_id", conn.id, "error", err)
+		}
 	}
 }
 
+//nolint:gocognit // Reader loop keeps protocol validation, auth gating, dispatch, and metrics in one ordered hot path.
 func (s *Server) runWSReader(ctx context.Context, conn *wsConnection) {
 	for {
 		if !conn.isAuthenticated() && time.Since(conn.createdAt) > s.wsGuestIdleTimeout {
@@ -302,6 +314,7 @@ func (s *Server) runWSReader(ctx context.Context, conn *wsConnection) {
 	}
 }
 
+//nolint:gocognit // Writer loop keeps deadline, queue, ping, and metrics handling in one ordered hot path.
 func (s *Server) runWSWriter(ctx context.Context, conn *wsConnection) {
 	ticker := time.NewTicker(s.wsPingInterval)
 	defer ticker.Stop()
@@ -313,7 +326,10 @@ func (s *Server) runWSWriter(ctx context.Context, conn *wsConnection) {
 			if !ok {
 				return
 			}
-			_ = conn.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
+			if err := conn.conn.SetWriteDeadline(time.Now().Add(15 * time.Second)); err != nil {
+				s.log.Warn("failed to set websocket write deadline", "connection_id", conn.id, "error", err)
+				return
+			}
 			if err := conn.conn.WriteMessage(outbound.messageType, outbound.payload); err != nil {
 				if s.ws != nil && s.ws.metrics != nil {
 					s.ws.metrics.RecordMessageFailed()
@@ -325,7 +341,10 @@ func (s *Server) runWSWriter(ctx context.Context, conn *wsConnection) {
 				s.ws.metrics.RecordMessageSent(int64(len(outbound.payload)))
 			}
 		case <-ticker.C:
-			_ = conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			if err := conn.conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+				s.log.Warn("failed to set websocket ping deadline", "connection_id", conn.id, "error", err)
+				return
+			}
 			if err := conn.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -353,7 +372,9 @@ func (s *Server) sendWSAck(conn *wsConnection) {
 		Timestamp:     time.Now().UTC(),
 		SchemaVersion: events.EnvelopeSchemaVersion,
 	}
-	_ = s.enqueueWSEnvelope(conn, env)
+	if err := s.enqueueWSEnvelope(conn, env); err != nil {
+		s.log.Warn("failed to enqueue websocket ack", "connection_id", conn.id, "error", err)
+	}
 }
 
 func (s *Server) dispatchWSRequest(ctx context.Context, conn *wsConnection, env events.Envelope) error {
@@ -424,11 +445,8 @@ func (s *Server) dispatchWSRequest(ctx context.Context, conn *wsConnection, env 
 		return s.enqueueWSEnvelope(conn, responseEnvelope)
 	}
 
-	responseEnvelope, err := buildWSDispatchResponseEnvelope(env, md, execution.Response)
-	if err != nil {
-		return err
-	}
-	s.maybeUpgradeConnectionAuth(conn, env.EventType, execution.Response.Payload)
+	responseEnvelope := buildWSDispatchResponseEnvelope(env, md, execution.Response)
+	s.maybeUpgradeConnectionAuth(ctx, conn, env.EventType, execution.Response.Payload)
 	if env.EventType == "identity:logout_connection:v1:requested" {
 		conn.clearAuth()
 	}
@@ -444,7 +462,10 @@ func (s *Server) dispatchWSRequest(ctx context.Context, conn *wsConnection, env 
 }
 
 func (s *Server) handleWSSubscribe(conn *wsConnection, env events.Envelope) {
-	pattern, _ := env.Payload["pattern"].(string)
+	pattern, ok := env.Payload["pattern"].(string)
+	if !ok {
+		pattern = ""
+	}
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
 		s.sendWSDomainError(conn, domainerr.Validation("pattern_required", "subscription pattern is required"), env.CorrelationID)
@@ -463,17 +484,22 @@ func (s *Server) handleWSSubscribe(conn *wsConnection, env events.Envelope) {
 		s.ws.metrics.RecordSubscription()
 	}
 
-	_ = s.enqueueWSEnvelope(conn, events.Envelope{
+	if err := s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_subscribe:v1:success",
 		Payload:       map[string]any{"pattern": pattern},
 		CorrelationID: env.CorrelationID,
 		SchemaVersion: events.EnvelopeSchemaVersion,
 		Timestamp:     time.Now().UTC(),
-	})
+	}); err != nil {
+		s.log.Warn("failed to enqueue websocket subscribe ack", "connection_id", conn.id, "error", err)
+	}
 }
 
 func (s *Server) handleWSUnsubscribe(conn *wsConnection, env events.Envelope) {
-	pattern, _ := env.Payload["pattern"].(string)
+	pattern, ok := env.Payload["pattern"].(string)
+	if !ok {
+		pattern = ""
+	}
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
 		s.sendWSDomainError(conn, domainerr.Validation("pattern_required", "unsubscription pattern is required"), env.CorrelationID)
@@ -491,16 +517,18 @@ func (s *Server) handleWSUnsubscribe(conn *wsConnection, env events.Envelope) {
 		s.ws.metrics.RecordUnsubscription()
 	}
 
-	_ = s.enqueueWSEnvelope(conn, events.Envelope{
+	if err := s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_unsubscribe:v1:success",
 		Payload:       map[string]any{"pattern": pattern},
 		CorrelationID: env.CorrelationID,
 		SchemaVersion: events.EnvelopeSchemaVersion,
 		Timestamp:     time.Now().UTC(),
-	})
+	}); err != nil {
+		s.log.Warn("failed to enqueue websocket unsubscribe ack", "connection_id", conn.id, "error", err)
+	}
 }
 
-func (s *Server) maybeUpgradeConnectionAuth(conn *wsConnection, eventType string, payload map[string]any) {
+func (s *Server) maybeUpgradeConnectionAuth(ctx context.Context, conn *wsConnection, eventType string, payload map[string]any) {
 	switch eventType {
 	case "identity:authenticate_connection:v1:requested", "identity:refresh_connection:v1:requested", "identity:bind_connection_token:v1:requested":
 	default:
@@ -509,10 +537,22 @@ func (s *Server) maybeUpgradeConnectionAuth(conn *wsConnection, eventType string
 	if payload == nil {
 		return
 	}
-	userID, _ := payload["user_id"].(string)
-	orgID, _ := payload["organization_id"].(string)
-	roleID, _ := payload["role_id"].(string)
-	rawCaps, _ := payload["capabilities"].([]any)
+	userID, ok := payload["user_id"].(string)
+	if !ok {
+		userID = ""
+	}
+	orgID, ok := payload["organization_id"].(string)
+	if !ok {
+		orgID = ""
+	}
+	roleID, ok := payload["role_id"].(string)
+	if !ok {
+		roleID = ""
+	}
+	rawCaps, ok := payload["capabilities"].([]any)
+	if !ok {
+		rawCaps = nil
+	}
 	caps := make([]string, 0, len(rawCaps))
 	for _, capability := range rawCaps {
 		if text, ok := capability.(string); ok && strings.TrimSpace(text) != "" {
@@ -535,7 +575,9 @@ func (s *Server) maybeUpgradeConnectionAuth(conn *wsConnection, eventType string
 
 	// Update router with authenticated user
 	if s.ws != nil && s.ws.router != nil {
-		_ = s.ws.router.UpdateAuth(context.Background(), conn.id, userID)
+		if err := s.ws.router.UpdateAuth(ctx, conn.id, userID); err != nil {
+			s.log.Warn("failed to update websocket auth route", "connection_id", conn.id, "user_id", userID, "error", err)
+		}
 	}
 }
 
@@ -605,14 +647,16 @@ func (s *Server) sendWSDomainError(conn *wsConnection, err error, correlationID 
 		"state": body.State,
 		"error": errorPayload,
 	}
-	_ = s.enqueueWSEnvelope(conn, events.Envelope{
+	if err := s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_error:v1:failed",
 		Payload:       payload,
 		Metadata:      map[string]any{},
 		CorrelationID: correlationID,
 		SchemaVersion: events.EnvelopeSchemaVersion,
 		Timestamp:     time.Now().UTC(),
-	})
+	}); err != nil {
+		s.log.Warn("failed to enqueue websocket error", "connection_id", conn.id, "error", err)
+	}
 }
 
 func (s *Server) ensureEventSubscription() {
@@ -672,7 +716,9 @@ func (s *Server) forwardEventToConnections(_ context.Context, envelope events.En
 		conn.mu.RUnlock()
 
 		if subscribed {
-			_ = s.enqueueWSEnvelope(conn, envelope)
+			if err := s.enqueueWSEnvelope(conn, envelope); err != nil {
+				s.log.Warn("failed to forward websocket event", "connection_id", conn.id, "event_type", envelope.EventType, "error", err)
+			}
 		}
 		return true
 	})
@@ -759,7 +805,7 @@ func (s *Server) decodeWSEnvelope(messageType int, payload []byte) (events.Envel
 	}
 }
 
-func buildWSDispatchResponseEnvelope(request events.Envelope, md metadata.EnvelopeMetadata, result registry.DispatchResult) (events.Envelope, error) {
+func buildWSDispatchResponseEnvelope(request events.Envelope, md metadata.EnvelopeMetadata, result registry.DispatchResult) events.Envelope {
 	meta := md.ToMap()
 	meta["status"] = http.StatusOK
 	envelope := events.Envelope{
@@ -773,7 +819,7 @@ func buildWSDispatchResponseEnvelope(request events.Envelope, md metadata.Envelo
 		Timestamp:       time.Now().UTC(),
 	}
 	envelope.Normalize()
-	return envelope, nil
+	return envelope
 }
 
 func buildWSDispatchErrorEnvelope(request events.Envelope, md metadata.EnvelopeMetadata, err error) (events.Envelope, error) {
@@ -786,8 +832,8 @@ func buildWSDispatchErrorEnvelope(request events.Envelope, md metadata.EnvelopeM
 	if marshalErr != nil {
 		return events.Envelope{}, marshalErr
 	}
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		return events.Envelope{}, err
+	if decodeErr := json.Unmarshal(raw, &payload); decodeErr != nil {
+		return events.Envelope{}, decodeErr
 	}
 	meta := md.ToMap()
 	meta["status"] = domainerr.HTTPStatus(err)

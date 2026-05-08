@@ -1,3 +1,4 @@
+// Package startup initializes infrastructure dependencies for the application.
 package startup
 
 import (
@@ -34,15 +35,17 @@ type Dependencies struct {
 // InitDependencies initializes all application dependencies
 func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, func(), error) {
 	deps := &Dependencies{}
-	var cleanups []func()
+	var cleanups []func(context.Context)
 
 	db, err := initDatabase(ctx, cfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init database: %w", err)
 	}
 	deps.DB = db
-	cleanups = append(cleanups, func() {
-		db.Close()
+	cleanups = append(cleanups, func(context.Context) {
+		if err := db.Close(); err != nil {
+			slog.Error("failed to close database", "error", err)
+		}
 	})
 
 	redisClient, bus, closeBus, err := initEventBus(cfg)
@@ -57,14 +60,14 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	deps.Bus = bus
 	deps.closeBus = closeBus
 	if closeBus != nil {
-		cleanups = append(cleanups, func() {
+		cleanups = append(cleanups, func(context.Context) {
 			if err := closeBus(); err != nil {
 				slog.Error("failed to close event bus", "error", err)
 			}
 		})
 	}
 	if redisClient != nil {
-		cleanups = append(cleanups, func() {
+		cleanups = append(cleanups, func(context.Context) {
 			if err := redisClient.Close(); err != nil {
 				slog.Error("failed to close redis", "error", err)
 			}
@@ -90,16 +93,18 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 		return nil, nil, fmt.Errorf("init resilience: %w", err)
 	}
 	deps.Resilience = resilienceRuntime
-	cleanups = append(cleanups, func() {
-		if err := resilienceRuntime.Close(context.Background()); err != nil {
+	cleanups = append(cleanups, func(ctx context.Context) {
+		if err := resilienceRuntime.Close(ctx); err != nil {
 			slog.Error("failed to close resilience runtime", "error", err)
 		}
 	})
 	bindResilienceDependencies(deps)
 
 	cleanup := func() {
+		cleanupCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
 		for i := len(cleanups) - 1; i >= 0; i-- {
-			cleanups[i]()
+			cleanups[i](cleanupCtx)
 		}
 	}
 
@@ -156,7 +161,9 @@ func initHealthChecker(db database.RuntimeStore, redisClient rediskit.Client) *h
 			if err != nil {
 				return err
 			}
-			_, _ = redisClient.Expire(ctx, "__health_check__", time.Minute)
+			if _, err := redisClient.Expire(ctx, "__health_check__", time.Minute); err != nil {
+				return err
+			}
 			return nil
 		}))
 	}
@@ -198,7 +205,9 @@ func bindResilienceDependencies(deps *Dependencies) {
 				if err != nil {
 					return err
 				}
-				_, _ = deps.Redis.Expire(ctx, "__resilience_health_check__", time.Minute)
+				if _, err := deps.Redis.Expire(ctx, "__resilience_health_check__", time.Minute); err != nil {
+					return err
+				}
 				return nil
 			},
 			resilience.WithCritical(false),

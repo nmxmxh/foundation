@@ -1,3 +1,4 @@
+// Package testutil provides scaffolded database and Redis test helpers.
 package testutil
 
 import (
@@ -103,7 +104,7 @@ func SetupRealTestEnv(t *testing.T) *RealTestEnv {
 		skipOrFailInfra(t, "unable to parse database URL: %v", err)
 	}
 
-	dbConfig.MaxConns = int32(intFromEnvOrDefault("TEST_DB_MAX_CONNS", 10))
+	dbConfig.MaxConns = safeInt32FromEnvOrDefault("TEST_DB_MAX_CONNS", 10)
 	dbConfig.MinConns = 1
 	dbConfig.MaxConnLifetime = 5 * time.Minute
 	dbConfig.MaxConnIdleTime = 1 * time.Minute
@@ -117,9 +118,9 @@ func SetupRealTestEnv(t *testing.T) *RealTestEnv {
 		skipOrFailInfra(t, "unable to connect to database: %v", err)
 	}
 
-	if err := dbPool.Ping(ctx); err != nil {
+	if pingErr := dbPool.Ping(ctx); pingErr != nil {
 		dbPool.Close()
-		skipOrFailInfra(t, "unable to ping database: %v", err)
+		skipOrFailInfra(t, "unable to ping database: %v", pingErr)
 	}
 
 	var redisClient *redis.Client
@@ -132,7 +133,9 @@ func SetupRealTestEnv(t *testing.T) *RealTestEnv {
 	} else {
 		redisClient = redis.NewClient(opts)
 		if err := redisClient.Ping(ctx).Err(); err != nil {
-			_ = redisClient.Close()
+			if closeErr := redisClient.Close(); closeErr != nil {
+				t.Logf("failed to close redis client after ping failure: %v", closeErr)
+			}
 			redisClient = nil
 			if boolFromEnv("TEST_REDIS_REQUIRED") || boolFromEnv("TEST_INFRA_REQUIRED") {
 				t.Fatalf("unable to ping Redis: %v", err)
@@ -166,7 +169,9 @@ func (e *RealTestEnv) Teardown(t *testing.T) {
 	e.cleanupTrackedEntities(ctx, t)
 
 	if e.Redis != nil {
-		_ = e.Redis.Close()
+		if err := e.Redis.Close(); err != nil {
+			t.Logf("failed to close redis: %v", err)
+		}
 	}
 	if e.DB != nil {
 		e.DB.Close()
@@ -175,17 +180,17 @@ func (e *RealTestEnv) Teardown(t *testing.T) {
 
 // cleanupTrackedEntities deletes all tracked test data.
 func (e *RealTestEnv) cleanupTrackedEntities(ctx context.Context, t *testing.T) {
-	for _, orgID := range e.CreatedOrgIDs {
-		_, err := e.DB.Exec(ctx, "DELETE FROM organizations WHERE id = $1 OR public_id = $1", orgID)
-		if err != nil {
-			t.Logf("failed to delete org %s: %v", orgID, err)
-		}
-	}
-
 	for _, userID := range e.CreatedUserIDs {
 		_, err := e.DB.Exec(ctx, "DELETE FROM users WHERE id = $1 OR public_id = $1", userID)
 		if err != nil {
 			t.Logf("failed to delete user %s: %v", userID, err)
+		}
+	}
+
+	for _, orgID := range e.CreatedOrgIDs {
+		_, err := e.DB.Exec(ctx, "DELETE FROM organizations WHERE id = $1 OR public_id = $1", orgID)
+		if err != nil {
+			t.Logf("failed to delete org %s: %v", orgID, err)
 		}
 	}
 }
@@ -213,33 +218,33 @@ func ApplyTestEnvDefaults() (databaseURL, redisURL string) {
 	redisURL = redisCfg.URL()
 
 	setEnvDefault("APP_ENV", "test")
-	_ = os.Setenv("TEST_DB_HOST", db.Host)
-	_ = os.Setenv("TEST_DB_PORT", db.Port)
-	_ = os.Setenv("TEST_DB_USER", db.User)
-	_ = os.Setenv("TEST_DB_PASSWORD", db.Password)
-	_ = os.Setenv("TEST_DB_NAME", db.Name)
-	_ = os.Setenv("TEST_DATABASE_URL", databaseURL)
-	_ = os.Setenv("DB_HOST", db.Host)
-	_ = os.Setenv("DB_PORT", db.Port)
-	_ = os.Setenv("DB_USER", db.User)
-	_ = os.Setenv("DB_PASSWORD", db.Password)
-	_ = os.Setenv("DB_NAME", db.Name)
-	_ = os.Setenv("DATABASE_URL", databaseURL)
+	mustSetenv("TEST_DB_HOST", db.Host)
+	mustSetenv("TEST_DB_PORT", db.Port)
+	mustSetenv("TEST_DB_USER", db.User)
+	mustSetenv("TEST_DB_PASSWORD", db.Password)
+	mustSetenv("TEST_DB_NAME", db.Name)
+	mustSetenv("TEST_DATABASE_URL", databaseURL)
+	mustSetenv("DB_HOST", db.Host)
+	mustSetenv("DB_PORT", db.Port)
+	mustSetenv("DB_USER", db.User)
+	mustSetenv("DB_PASSWORD", db.Password)
+	mustSetenv("DB_NAME", db.Name)
+	mustSetenv("DATABASE_URL", databaseURL)
 
-	_ = os.Setenv("TEST_REDIS_HOST", redisCfg.Host)
-	_ = os.Setenv("TEST_REDIS_PORT", redisCfg.Port)
-	_ = os.Setenv("TEST_REDIS_DB", redisCfg.DB)
-	_ = os.Setenv("TEST_REDIS_URL", redisURL)
-	_ = os.Setenv("REDIS_URL", redisURL)
+	mustSetenv("TEST_REDIS_HOST", redisCfg.Host)
+	mustSetenv("TEST_REDIS_PORT", redisCfg.Port)
+	mustSetenv("TEST_REDIS_DB", redisCfg.DB)
+	mustSetenv("TEST_REDIS_URL", redisURL)
+	mustSetenv("REDIS_URL", redisURL)
 	redisPrefix := firstNonEmpty(os.Getenv("TEST_REDIS_PREFIX"), defaultTestRedisPrefix)
-	_ = os.Setenv("TEST_REDIS_PREFIX", redisPrefix)
-	_ = os.Setenv("REDIS_PREFIX", redisPrefix)
+	mustSetenv("TEST_REDIS_PREFIX", redisPrefix)
+	mustSetenv("REDIS_PREFIX", redisPrefix)
 	if redisCfg.Password != "" {
-		_ = os.Setenv("TEST_REDIS_PASSWORD", redisCfg.Password)
-		_ = os.Setenv("REDIS_PASSWORD", redisCfg.Password)
+		mustSetenv("TEST_REDIS_PASSWORD", redisCfg.Password)
+		mustSetenv("REDIS_PASSWORD", redisCfg.Password)
 	} else {
-		_ = os.Unsetenv("TEST_REDIS_PASSWORD")
-		_ = os.Unsetenv("REDIS_PASSWORD")
+		mustUnsetenv("TEST_REDIS_PASSWORD")
+		mustUnsetenv("REDIS_PASSWORD")
 	}
 
 	return databaseURL, redisURL
@@ -384,9 +389,21 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func mustSetenv(key, value string) {
+	if err := os.Setenv(key, value); err != nil {
+		panic(fmt.Sprintf("set %s: %v", key, err))
+	}
+}
+
+func mustUnsetenv(key string) {
+	if err := os.Unsetenv(key); err != nil {
+		panic(fmt.Sprintf("unset %s: %v", key, err))
+	}
+}
+
 func setEnvDefault(key, value string) {
 	if strings.TrimSpace(os.Getenv(key)) == "" {
-		_ = os.Setenv(key, value)
+		mustSetenv(key, value)
 	}
 }
 
@@ -399,10 +416,11 @@ func boolFromEnv(key string) bool {
 	}
 }
 
-func intFromEnvOrDefault(key string, defaultVal int) int {
+func safeInt32FromEnvOrDefault(key string, defaultVal int32) int32 {
 	if val := os.Getenv(key); val != "" {
-		if i, err := strconv.Atoi(val); err == nil && i > 0 {
-			return i
+		parsed, err := strconv.ParseInt(val, 10, 32)
+		if err == nil && parsed > 0 {
+			return int32(parsed)
 		}
 	}
 	return defaultVal

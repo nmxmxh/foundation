@@ -1,3 +1,4 @@
+// Package startup initializes infrastructure dependencies for the application.
 package startup
 
 import (

@@ -1,3 +1,4 @@
+// Package bootstrap wires project-owned domain services into foundation dispatch.
 package bootstrap
 
 // Services is the project-owned domain service container.

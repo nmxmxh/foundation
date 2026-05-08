@@ -34,8 +34,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to parse database config: %v", err)
 	}
-	dbConfig.MaxConns = int32(envInt("DB_MAX_CONNS", 25))
-	dbConfig.MinConns = int32(envInt("DB_MIN_CONNS", 5))
+	dbConfig.MaxConns = safeInt32FromEnvOrDefault("DB_MAX_CONNS", 25)
+	dbConfig.MinConns = safeInt32FromEnvOrDefault("DB_MIN_CONNS", 5)
 	dbConfig.HealthCheckPeriod = envDurationSeconds("DB_HEALTHCHECK_PERIOD_SECONDS", 30)
 	dbConfig.ConnConfig.ConnectTimeout = envDurationSeconds("DB_CONNECT_TIMEOUT_SECONDS", 5)
 
@@ -47,9 +47,9 @@ func main() {
 
 	// Verify database connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := dbPool.Ping(ctx); err != nil {
+	if pingErr := dbPool.Ping(ctx); pingErr != nil {
 		cancel()
-		log.Fatalf("Unable to ping database: %v", err)
+		log.Fatalf("Unable to ping database: %v", pingErr)
 	}
 	cancel()
 	slog.Info("database connected")
@@ -125,6 +125,18 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func safeInt32FromEnvOrDefault(key string, fallback int32) int32 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	return int32(value)
 }
 
 func envDurationSeconds(key string, fallback int) time.Duration {

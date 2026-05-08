@@ -1,3 +1,4 @@
+// Package server exposes the HTTP, WebSocket, and foundation dispatch surfaces.
 package server
 
 import (
@@ -63,7 +64,6 @@ type Server struct {
 	wsAuthRequired            bool
 	wsCompressionEnabled      bool
 	wsCompressionThreshold    int
-	wsEventChannel            string
 	wsUnauthenticatedAllowset map[string]struct{}
 	ws                        *wsRuntime
 
@@ -268,7 +268,7 @@ func (s *Server) Run(ctx context.Context) error {
 		s.log.Info("shutting down server")
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
@@ -359,7 +359,7 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	writeJSON(s.log, w, map[string]any{"status": "ok"})
 }
 
 func (s *Server) liveness(w http.ResponseWriter, r *http.Request) {
@@ -368,7 +368,7 @@ func (s *Server) liveness(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	writeJSON(s.log, w, map[string]any{"status": "ok"})
 }
 
 func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
@@ -377,30 +377,30 @@ func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+	writeJSON(s.log, w, map[string]any{"status": "ok"})
 }
 
 func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(observability.Default().Snapshot())
+	writeJSON(s.log, w, observability.Default().Snapshot())
 }
 
 func (s *Server) recentEvents(w http.ResponseWriter, _ *http.Request) {
 	if s.handler == nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"events": []any{}})
+		writeJSON(s.log, w, map[string]any{"events": []any{}})
 		return
 	}
 
 	inMemoryEmitter, ok := s.handler.EventEmitter.(*graceful.InMemoryEventEmitter)
 	if !ok || inMemoryEmitter == nil || inMemoryEmitter.Bus == nil {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"events": []any{}})
+		writeJSON(s.log, w, map[string]any{"events": []any{}})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(s.log, w, map[string]any{
 		"events": inMemoryEmitter.Bus.Recent(50),
 	})
 }
@@ -458,14 +458,17 @@ func (s *Server) executeDispatch(w http.ResponseWriter, r *http.Request, req htt
 	// Handle protobuf responses
 	if execution.Response.PayloadEncoding == "protobuf" && execution.Response.PayloadBytes != nil {
 		w.Header().Set("Content-Type", "application/x-protobuf")
-		w.Write(execution.Response.PayloadBytes)
+		if _, writeErr := w.Write(execution.Response.PayloadBytes); writeErr != nil {
+			s.log.Warn("failed to write protobuf dispatch response", "event_type", execution.EventType, "error", writeErr)
+			return
+		}
 		observedState = "success"
 		return
 	}
 
 	// Standard JSON response
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	writeJSON(s.log, w, map[string]any{
 		"event_type":       execution.EventType,
 		"correlation_id":   execution.CorrelationID,
 		"state":            "success",
@@ -474,13 +477,17 @@ func (s *Server) executeDispatch(w http.ResponseWriter, r *http.Request, req htt
 	observedState = "success"
 }
 
+//nolint:gocognit // Streaming response handling keeps channel type selection and cancellation together.
 func (s *Server) handleStreamResponse(w http.ResponseWriter, r *http.Request, execution dispatchExecution) {
 	switch stream := execution.Response.Stream.(type) {
 	case <-chan map[string]any:
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.WriteHeader(http.StatusOK)
-		flusher, _ := w.(http.Flusher)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			flusher = nil
+		}
 		for {
 			select {
 			case <-r.Context().Done():
@@ -489,7 +496,10 @@ func (s *Server) handleStreamResponse(w http.ResponseWriter, r *http.Request, ex
 				if !ok {
 					return
 				}
-				json.NewEncoder(w).Encode(item)
+				if err := json.NewEncoder(w).Encode(item); err != nil {
+					s.log.Warn("failed to encode stream item", "event_type", execution.EventType, "error", err)
+					return
+				}
 				if flusher != nil {
 					flusher.Flush()
 				}
@@ -499,7 +509,10 @@ func (s *Server) handleStreamResponse(w http.ResponseWriter, r *http.Request, ex
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.Header().Set("Transfer-Encoding", "chunked")
 		w.WriteHeader(http.StatusOK)
-		flusher, _ := w.(http.Flusher)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			flusher = nil
+		}
 		for {
 			select {
 			case <-r.Context().Done():
@@ -508,12 +521,21 @@ func (s *Server) handleStreamResponse(w http.ResponseWriter, r *http.Request, ex
 				if !ok {
 					return
 				}
-				w.Write(chunk)
+				if _, err := w.Write(chunk); err != nil {
+					s.log.Warn("failed to write stream chunk", "event_type", execution.EventType, "error", err)
+					return
+				}
 				if flusher != nil {
 					flusher.Flush()
 				}
 			}
 		}
+	}
+}
+
+func writeJSON(log *slog.Logger, w http.ResponseWriter, value any) {
+	if err := json.NewEncoder(w).Encode(value); err != nil && log != nil {
+		log.Warn("failed to encode json response", "error", err)
 	}
 }
 
@@ -533,10 +555,10 @@ func (s *Server) performDispatch(r *http.Request, req httpapi.DispatchRequest) (
 	req.CorrelationID = md.EnsureCorrelation(req.CorrelationID)
 	md.ApplyDefaults("http.dispatch")
 	enrichMetadataFromRequest(&md, r)
-	enrichMetadataFromAuthContext(&md, r.Context())
+	enrichMetadataFromAuthContext(r.Context(), &md)
 
-	if err := md.Validate(); err != nil {
-		return dispatchExecution{EventType: eventType, CorrelationID: req.CorrelationID, Metadata: md}, false, err
+	if validateErr := md.Validate(); validateErr != nil {
+		return dispatchExecution{EventType: eventType, CorrelationID: req.CorrelationID, Metadata: md}, false, validateErr
 	}
 
 	if req.Payload == nil {
@@ -555,15 +577,15 @@ func (s *Server) performDispatch(r *http.Request, req httpapi.DispatchRequest) (
 	}
 	env.Normalize()
 
-	if err := env.Validate(); err != nil {
-		return dispatchExecution{EventType: eventType, CorrelationID: req.CorrelationID, Metadata: md}, false, err
+	if validateErr := env.Validate(); validateErr != nil {
+		return dispatchExecution{EventType: eventType, CorrelationID: req.CorrelationID, Metadata: md}, false, validateErr
 	}
 
 	ctx := metadata.IntoContext(r.Context(), md)
 
 	if !s.isPublicPath(r.URL.Path) {
-		if err := s.enforceRBAC(ctx, eventType, req.RequiredCapability, req.RequiredPermission); err != nil {
-			return dispatchExecution{EventType: eventType, CorrelationID: req.CorrelationID, Metadata: md}, false, err
+		if accessErr := s.enforceRBAC(ctx, eventType, req.RequiredCapability, req.RequiredPermission); accessErr != nil {
+			return dispatchExecution{EventType: eventType, CorrelationID: req.CorrelationID, Metadata: md}, false, accessErr
 		}
 	}
 
@@ -638,7 +660,7 @@ func enrichMetadataFromRequest(md *metadata.EnvelopeMetadata, r *http.Request) {
 	}
 }
 
-func enrichMetadataFromAuthContext(md *metadata.EnvelopeMetadata, ctx context.Context) {
+func enrichMetadataFromAuthContext(ctx context.Context, md *metadata.EnvelopeMetadata) {
 	if md == nil {
 		return
 	}
