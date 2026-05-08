@@ -62,10 +62,23 @@ func CreateEnvelope(eventType string, payload map[string]any, extra map[string]i
 
 func NewCorrelationID() string {
 	var random [8]byte
+	now := time.Now().UTC()
 	if _, err := rand.Read(random[:]); err == nil {
-		return "corr_" + time.Now().UTC().Format("20060102T150405.000000000") + "_" + hex.EncodeToString(random[:])
+		var storage [len("corr_") + len("20060102T150405.000000000") + 1 + 16]byte
+		buf := storage[:0]
+		buf = append(buf, "corr_"...)
+		buf = now.AppendFormat(buf, "20060102T150405.000000000")
+		buf = append(buf, '_')
+		offset := len(buf)
+		buf = buf[:offset+hex.EncodedLen(len(random))]
+		hex.Encode(buf[offset:], random[:])
+		return string(buf)
 	}
-	return "corr_" + time.Now().UTC().Format("20060102T150405.000000000")
+	var storage [len("corr_") + len("20060102T150405.000000000")]byte
+	buf := storage[:0]
+	buf = append(buf, "corr_"...)
+	buf = now.AppendFormat(buf, "20060102T150405.000000000")
+	return string(buf)
 }
 
 func ResolveRoute(routes []Route, eventType string) *Route {
@@ -89,7 +102,7 @@ func CanDispatch(route *Route, grantedCapabilities []string, hasPolicyAccess fun
 			return true
 		}
 	}
-	domain := strings.Split(route.RequiredCapability, ".")[0]
+	domain, _, _ := strings.Cut(route.RequiredCapability, ".")
 	if domain == "" {
 		return false
 	}

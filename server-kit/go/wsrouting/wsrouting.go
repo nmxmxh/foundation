@@ -285,15 +285,23 @@ func (r *Router) ResolveTargets(ctx context.Context, target TargetedDelivery) ([
 		}
 
 	case "user":
-		for _, info := range r.GetLocalConnectionsByUser(target.TargetID) {
-			connectionIDs = append(connectionIDs, info.ConnectionID)
+		r.mu.RLock()
+		for _, info := range r.connections {
+			if info != nil && info.UserID == target.TargetID {
+				connectionIDs = append(connectionIDs, info.ConnectionID)
+			}
 		}
+		r.mu.RUnlock()
 
 	case "broadcast":
-		r.ForEachLocal(func(info *ConnectionInfo) bool {
-			connectionIDs = append(connectionIDs, info.ConnectionID)
-			return true
-		})
+		r.mu.RLock()
+		connectionIDs = make([]string, 0, len(r.connections))
+		for _, info := range r.connections {
+			if info != nil {
+				connectionIDs = append(connectionIDs, info.ConnectionID)
+			}
+		}
+		r.mu.RUnlock()
 
 	default:
 		return nil, fmt.Errorf("unknown target type: %s", target.TargetType)

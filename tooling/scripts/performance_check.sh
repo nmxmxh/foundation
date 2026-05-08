@@ -10,6 +10,7 @@ echo "== foundation Go performance guards =="
   go test -tags=perf ./grpcsvc ./chain
   go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFrameClientDispatch|RouterDispatchFrameDirect|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$|BenchmarkRunParallel$' -benchmem ./grpcsvc ./chain
   go test -bench='BenchmarkAppLane_' -benchmem -run='^$' ./appbench
+  go test -bench='BenchmarkRouter' -benchmem -run='^$' ./wsrouting
   if [[ "${PROFILE:-0}" == "1" ]]; then
     mkdir -p /tmp/ovasabi-foundation-profiles
     go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFrameClientDispatch|RouterDispatchFrameDirect|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$' -benchmem \
@@ -28,14 +29,36 @@ echo "== foundation Go performance guards =="
   fi
 )
 
+echo "== foundation runtime-sdk Go benchmarks =="
+(
+  cd "$ROOT/runtime-sdk/go"
+  go test -bench='BenchmarkBuffer' -benchmem -run='^$' ./runtimehost
+)
+
+echo "== foundation runtime-transport Go benchmarks =="
+(
+  cd "$ROOT/runtime-transport/go"
+  go test -bench='Benchmark' -benchmem -run='^$' ./transport
+)
+
 if [[ -d "$ROOT/runtime-sdk/ts/browser-host/node_modules" ]]; then
   echo "== foundation runtime-sdk browser-host benchmarks =="
   (
     cd "$ROOT/runtime-sdk/ts/browser-host"
-    npm run bench
+    npm run bench -- --run
   )
 else
   echo "skip runtime-sdk TS benchmarks: node_modules not installed"
+fi
+
+if command -v cargo >/dev/null 2>&1; then
+  echo "== foundation runtime-sdk Rust native buffer benchmarks =="
+  (
+    cd "$ROOT/runtime-sdk/rust"
+    cargo run -p ovrt-native --bin buffer_bench --release
+  )
+else
+  echo "skip runtime-sdk Rust benchmarks: cargo not installed"
 fi
 
 if [[ -d "$ROOT/runtime-transport/ts/node_modules" ]]; then
@@ -43,6 +66,7 @@ if [[ -d "$ROOT/runtime-transport/ts/node_modules" ]]; then
   (
     cd "$ROOT/runtime-transport/ts"
     npm test
+    npm run bench -- --run src/binaryEnvelope.bench.ts src/routing.bench.ts
   )
 else
   echo "skip runtime-transport TS tests: node_modules not installed"

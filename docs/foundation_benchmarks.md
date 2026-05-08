@@ -277,6 +277,103 @@ Research notes:
 - Rust `std::hint::black_box` is appropriate for this local benchmark because it asks the compiler to avoid optimizing away the measured operation, but the standard library documents it as best-effort rather than a correctness mechanism.
 - Crates such as `bytes` and `zerocopy` are relevant future options for cross-boundary owned/shared byte views, but the current 4KB control buffer is already simpler and faster with direct borrowed slices.
 
+### Cross-Runtime Benchmark Expansion Run
+
+Environment:
+
+- Date: 2026-05-08
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Commands:
+  - `cd foundation/runtime-sdk/go && go test -bench='BenchmarkBuffer' -benchmem -run='^$' ./runtimehost`
+  - `cd foundation/runtime-sdk/ts/browser-host && npm run bench -- --run`
+  - `cd foundation/runtime-sdk/rust && cargo run -p ovrt-native --bin buffer_bench --release`
+  - `cd foundation/server-kit/go && go test ./wsrouting -run 'TestResolveTargets|TestNilClient' -bench 'BenchmarkRouter' -benchmem`
+
+Go runtimehost fixed-buffer results:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkBufferSetInputBytes1KB` | 31.45 | 0 | 0 | Full input-region clear + copy remains allocation-free |
+| `BenchmarkBufferInputBytesOwned1KB` | 184.6 | 1024 | 1 | Owned read cost is exactly the output copy |
+| `BenchmarkBufferSetOutputBytes2KB` | 79.81 | 0 | 0 | Full output-region clear + copy remains allocation-free |
+| `BenchmarkBufferOutputBytesOwned2KB` | 326.8 | 2048 | 1 | Owned output read allocates one copied payload |
+| `BenchmarkBufferEpochAdd` | 7.165 | 0 | 0 | Atomic epoch movement is nanosecond-class |
+| `BenchmarkBufferDiagnosticsText` | 345.9 | 768 | 1 | Current diagnostics read materializes a bounded string |
+
+The Go runtimehost hot write paths now clear fixed regions with `clear(...)` instead of allocating temporary zero slices. That preserves the security hygiene of clearing stale bytes while restoring the intended allocation-free control-plane write behavior.
+
+Browser shared-arena update:
+
+| Benchmark | mean ns | p99 ns | Interpretation |
+| --- | ---: | ---: | --- |
+| 4KB slab write/read | 1400 | 4400 | Owned read copy path remains around control-plane scale |
+| 4KB slab write/read view | 500 | 600 | Borrowed view stays sub-microsecond |
+| 4KB slab fast write/read view | 400 | 500 | Fast prevalidated path remains the browser hot lane |
+| 64KB slab write/read view | 3000 | 3700 | Medium borrowed payloads stay near memory-copy cost |
+| 1024KB slab write/read view | 43200 | 64400 | Large borrowed payloads avoid a second copy |
+| descriptor-ready fast batch traffic x128 | 484000 | 665000 | Fast batch queueing remains about 2.26x faster than old x128 batch |
+| preallocated write/enqueue/dequeue batch x128 | 61600 | 95500 | Best full arena lane when descriptors are pre-owned |
+| packet-ring enqueue/dequeue/complete/release x128 | 43900 | 66200 | Packet-like lifecycle is cheaper than general arena descriptor orchestration |
+
+Rust native buffer update:
+
+| Benchmark | ns/op | Interpretation |
+| --- | ---: | --- |
+| native read_output_bytes owned Vec | 53.11 | Owned read copy is faster than the prior local run |
+| native output_bytes_view borrowed | 3.73 | Borrowed native view remains the fastest runtime lane |
+| native write_output_bytes clear+copy | 39.59 | Defensive clear + copy improved |
+| native write_output_bytes_fast copy only | 16.65 | Fast write is the trusted hot path when stale bytes outside length are irrelevant |
+
+WebSocket routing local-load results:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkRouterRegisterLocalOnly` | 534.9 | 228 | 4 | Local connection registration is sub-microsecond |
+| `BenchmarkRouterResolveTargetsUserLocal` | 18758 | 59760 | 12 | Resolves 1024 local user targets without per-connection copy allocation |
+| `BenchmarkRouterForEachLocal1024` | 37044 | 98304 | 1024 | Public copy-safe iterator intentionally allocates per connection |
+
+The WebSocket routing improvement is behavioral-neutral: public read helpers still return copies, but `ResolveTargets` now resolves local user/broadcast targets under the router read lock and appends connection IDs directly. That keeps tenant/session safety semantics while removing avoidable per-connection object copies from realtime fanout.
+
+Runtime-transport Go results:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkCreateEnvelopeJSON` | 356.7 | 96 | 2 | Creates correlation/request/idempotency metadata with crypto randomness |
+| `BenchmarkResolveRouteLinear16` | 33.37 | 0 | 0 | Small generated route tables are cheap even with linear lookup |
+| `BenchmarkCanDispatchExactCapability` | 5.353 | 0 | 0 | Capability guard is effectively free on exact match |
+| `BenchmarkSchemaRegistryNegotiate` | 31.15 | 0 | 0 | Schema negotiation is allocation-free for small accepted-version sets |
+
+Runtime-transport TypeScript binary-envelope results:
+
+| Benchmark | mean ns | p99 ns | Interpretation |
+| --- | ---: | ---: | --- |
+| encode JSON envelope to protobuf bytes | 7100 | 13000 | JSON payload materialization dominates binary envelope encode |
+| decode JSON envelope from protobuf bytes | 2900 | 4300 | JSON payload decode is still microsecond-class |
+| encode protobuf envelope bytes | 3900 | 8900 | Typed/binary payloads avoid JSON payload stringify |
+| decode protobuf envelope bytes | 1700 | 2200 | Typed/binary decode is about 1.7x faster than JSON decode |
+| encode JSON compatibility envelope | 1400 | 1900 | Compatibility JSON string path is fast for already-object payloads, but less typed |
+| decode identity binary frame | 200 | 300 | Identity frame detection is effectively a header check |
+
+Runtime-transport TypeScript routing results:
+
+| Benchmark | mean ns | p99 ns | Interpretation |
+| --- | ---: | ---: | --- |
+| parse event type | 200 | 300 | Event contract validation is sub-microsecond |
+| create JSON envelope | 700 | 800 | Browser envelope creation is cheap when IDs are provided |
+| resolve route by event type | 100 | 100 | Precomputed route map lookup is effectively free |
+| resolve route by path | 200 | 300 | Method normalization + path map lookup remains sub-microsecond |
+| can dispatch exact capability | <100 | 100 | Exact capability fast path is extremely cheap |
+| can dispatch write via admin fallback | 200 | 300 | Admin fallback remains sub-microsecond after removing transient arrays |
+
+Transport improvement notes:
+
+- Runtime binary frame decode now uses `subarray` for framed compressed payloads, avoiding a copy before decompression.
+- Runtime metadata extras encoding reuses a constant `{}` byte sequence for empty extras and strips reserved JSON metadata keys lazily, avoiding unnecessary object copies for normal envelopes.
+- Go correlation ID construction now uses a stack buffer before the final string conversion, reducing `CreateEnvelope` from 3 allocations to 2 in the local run.
+- TypeScript event parsing now reuses precompiled regex objects, and capability fallback checks avoid transient arrays.
+- Malformed binary frames now have explicit tests for unsupported version, unsupported encoding id, and truncated payload. These are security-relevant parser boundaries, not just benchmark fixtures.
+
 ### Packet-Ring Exploration
 
 Foundation now carries a DPDK-shaped browser-host primitive for optional packet-like lanes: fixed descriptor slots, burst enqueue/dequeue, explicit ownership states, monotonic timestamps, and drop/high-water counters. This is not a DPDK dependency. It is the contract a future native packet adapter must refine.

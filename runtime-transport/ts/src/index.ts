@@ -119,11 +119,14 @@ export const RUNTIME_ENVELOPE_COMPATIBILITY_MATRIX: EnvelopeCompatibilityMatrix 
 const nextToken = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 const normalizeString = (value: string | null | undefined) => value?.trim() ?? "";
 
+const lowerSnakeSegmentPattern = /^[a-z0-9_]+$/;
+const versionSegmentPattern = /^v\d+$/;
+
 const isLowerSnakeSegment = (segment: string) =>
-  segment !== "" && /^[a-z0-9_]+$/.test(segment);
+  segment !== "" && lowerSnakeSegmentPattern.test(segment);
 
 const isVersionSegment = (segment: string) =>
-  /^v\d+$/.test(segment);
+  versionSegmentPattern.test(segment);
 
 export const normalizeSchemaVersion = (value: string | null | undefined): string => {
   const trimmed = normalizeString(value);
@@ -293,12 +296,15 @@ export const canDispatch = (
     return true;
   }
   if (route.permission === "view") {
-    return grantedCapabilities.some((capability) =>
-      [`${domain}.view`, `${domain}.write`, `${domain}.admin`].includes(capability)
-    );
+    const view = `${domain}.view`;
+    const write = `${domain}.write`;
+    const admin = `${domain}.admin`;
+    return grantedCapabilities.some((capability) => capability === view || capability === write || capability === admin);
   }
   if (route.permission === "write") {
-    return grantedCapabilities.some((capability) => [`${domain}.write`, `${domain}.admin`].includes(capability));
+    const write = `${domain}.write`;
+    const admin = `${domain}.admin`;
+    return grantedCapabilities.some((capability) => capability === write || capability === admin);
   }
   return grantedCapabilities.includes(`${domain}.admin`);
 };

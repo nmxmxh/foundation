@@ -2,6 +2,7 @@ package wsrouting
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -345,5 +346,78 @@ func TestNilClient(t *testing.T) {
 
 	if r.LocalConnectionCount() != 1 {
 		t.Error("Local tracking should work without Redis")
+	}
+}
+
+func BenchmarkRouterRegisterLocalOnly(b *testing.B) {
+	router := NewRouter(nil, "bench-server")
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		id := strconv.Itoa(i)
+		err := router.Register(ctx, ConnectionInfo{
+			ConnectionID: "conn-" + id,
+			DeviceID:     "device-" + id,
+			UserID:       "user-1",
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkRouterResolveTargetsUserLocal(b *testing.B) {
+	router := NewRouter(nil, "bench-server")
+	ctx := context.Background()
+	for i := 0; i < 1024; i++ {
+		id := strconv.Itoa(i)
+		err := router.Register(ctx, ConnectionInfo{
+			ConnectionID: "conn-" + id,
+			DeviceID:     "device-" + id,
+			UserID:       "user-1",
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	target := TargetedDelivery{TargetType: "user", TargetID: "user-1", LocalOnly: true}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ids, err := router.ResolveTargets(ctx, target)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(ids) != 1024 {
+			b.Fatalf("resolved %d targets, want 1024", len(ids))
+		}
+	}
+}
+
+func BenchmarkRouterForEachLocal1024(b *testing.B) {
+	router := NewRouter(nil, "bench-server")
+	ctx := context.Background()
+	for i := 0; i < 1024; i++ {
+		id := strconv.Itoa(i)
+		err := router.Register(ctx, ConnectionInfo{
+			ConnectionID: "conn-" + id,
+			DeviceID:     "device-" + id,
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		count := 0
+		router.ForEachLocal(func(*ConnectionInfo) bool {
+			count++
+			return true
+		})
+		if count != 1024 {
+			b.Fatalf("iterated %d connections, want 1024", count)
+		}
 	}
 }

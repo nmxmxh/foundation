@@ -82,7 +82,7 @@ func (b *Buffer) SetInputBytes(payload []byte) error {
 	if len(payload) > int(generated.INPUT_MAX_BYTES) {
 		return fmt.Errorf("input payload too large: %d > %d", len(payload), generated.INPUT_MAX_BYTES)
 	}
-	copy(b.raw[generated.OFFSET_INPUT_BYTES:generated.OFFSET_INPUT_BYTES+generated.INPUT_MAX_BYTES], make([]byte, generated.INPUT_MAX_BYTES))
+	clear(b.raw[generated.OFFSET_INPUT_BYTES : generated.OFFSET_INPUT_BYTES+generated.INPUT_MAX_BYTES])
 	copy(b.raw[generated.OFFSET_INPUT_BYTES:], payload)
 	return b.SetHeaderInt(generated.INT_IDX_INPUT_LENGTH, int32(len(payload)))
 }
@@ -104,7 +104,7 @@ func (b *Buffer) SetOutputBytes(payload []byte) error {
 	if len(payload) > int(generated.OUTPUT_MAX_BYTES) {
 		return fmt.Errorf("output payload too large: %d > %d", len(payload), generated.OUTPUT_MAX_BYTES)
 	}
-	copy(b.raw[generated.OFFSET_OUTPUT_BYTES:generated.OFFSET_OUTPUT_BYTES+generated.OUTPUT_MAX_BYTES], make([]byte, generated.OUTPUT_MAX_BYTES))
+	clear(b.raw[generated.OFFSET_OUTPUT_BYTES : generated.OFFSET_OUTPUT_BYTES+generated.OUTPUT_MAX_BYTES])
 	copy(b.raw[generated.OFFSET_OUTPUT_BYTES:], payload)
 	return b.SetHeaderInt(generated.INT_IDX_OUTPUT_LENGTH, int32(len(payload)))
 }
@@ -152,10 +152,7 @@ func (b *Buffer) SetDiagnosticsText(message string) error {
 	if len(bytes) > int(generated.DIAGNOSTIC_MAX_BYTES) {
 		return fmt.Errorf("diagnostic payload too large: %d > %d", len(bytes), generated.DIAGNOSTIC_MAX_BYTES)
 	}
-	copy(
-		b.raw[generated.OFFSET_DIAGNOSTIC_BYTES:generated.OFFSET_DIAGNOSTIC_BYTES+generated.DIAGNOSTIC_MAX_BYTES],
-		make([]byte, generated.DIAGNOSTIC_MAX_BYTES),
-	)
+	clear(b.raw[generated.OFFSET_DIAGNOSTIC_BYTES : generated.OFFSET_DIAGNOSTIC_BYTES+generated.DIAGNOSTIC_MAX_BYTES])
 	copy(b.raw[generated.OFFSET_DIAGNOSTIC_BYTES:], bytes)
 	_, err := b.AddEpoch(generated.IDX_DIAGNOSTICS_WRITTEN, 1)
 	return err

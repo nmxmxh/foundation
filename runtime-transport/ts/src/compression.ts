@@ -111,7 +111,7 @@ export const decodeRuntimeBinaryFrame = async (input: Uint8Array): Promise<Uint8
   if (FRAME_HEADER_BYTES + payloadLength > input.byteLength) {
     throw new Error("runtime binary frame is truncated");
   }
-  const payload = input.slice(FRAME_HEADER_BYTES, FRAME_HEADER_BYTES + payloadLength);
+  const payload = input.subarray(FRAME_HEADER_BYTES, FRAME_HEADER_BYTES + payloadLength);
   const decoded = await decompressRuntimeBytes(payload, encoding);
   if (rawLength > 0 && decoded.byteLength !== rawLength) {
     throw new Error(`runtime binary frame length mismatch: ${decoded.byteLength} != ${rawLength}`);

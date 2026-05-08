@@ -14,6 +14,7 @@ import {
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const emptyJSONBytes = textEncoder.encode("{}");
 
 export const encodeRuntimeEnvelope = <TPayload>(envelope: RuntimeEnvelope<TPayload>): Uint8Array => {
   const payloadEncoding = normalizePayloadEncoding(envelope.payloadEncoding);
@@ -142,7 +143,7 @@ const encodeMetadata = (metadata: EnvelopeMetadata): ProtoMetadata => ({
   locale: "",
   tenantRegion: "",
   attributes: {},
-  extrasJson: textEncoder.encode(JSON.stringify(metadata.extra ?? {})),
+  extrasJson: encodeExtras(metadata.extra),
 });
 
 const decodeMetadata = (envelope: EventEnvelope): EnvelopeMetadata => {
@@ -201,15 +202,31 @@ const protoToPayloadEncoding = (value: ProtoPayloadEncoding): PayloadEncoding =>
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
 
+const reservedMetadataKeys = new Set([
+  "correlation_id",
+  "correlationId",
+  "request_id",
+  "requestId",
+  "idempotency_key",
+  "idempotencyKey",
+  "schema_version",
+  "schemaVersion",
+]);
+
+const encodeExtras = (extra: Record<string, unknown> | undefined): Uint8Array => {
+  if (!extra || Object.keys(extra).length === 0) {
+    return emptyJSONBytes;
+  }
+  return textEncoder.encode(JSON.stringify(extra));
+};
+
 const stripReservedMetadataKeys = (value: Record<string, unknown>): Record<string, unknown> => {
-  const next = { ...value };
-  delete next.correlation_id;
-  delete next.correlationId;
-  delete next.request_id;
-  delete next.requestId;
-  delete next.idempotency_key;
-  delete next.idempotencyKey;
-  delete next.schema_version;
-  delete next.schemaVersion;
-  return next;
+  let next: Record<string, unknown> | undefined;
+  for (const key of Object.keys(value)) {
+    if (reservedMetadataKeys.has(key)) {
+      next ??= { ...value };
+      delete next[key];
+    }
+  }
+  return next ?? value;
 };

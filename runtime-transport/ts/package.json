@@ -14,7 +14,8 @@
   "scripts": {
     "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
     "test": "node ./node_modules/vitest/dist/cli.js run",
-    "coverage": "node ./node_modules/vitest/dist/cli.js run --coverage"
+    "coverage": "node ./node_modules/vitest/dist/cli.js run --coverage",
+    "bench": "node ./node_modules/vitest/dist/cli.js bench"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",

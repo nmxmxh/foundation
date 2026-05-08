@@ -97,7 +97,11 @@ func TestBuildDispatchRequestPayloadVariants(t *testing.T) {
 	if out.ResponseEncoding != "protobuf" || out.Payload["_raw_body"] == "" {
 		t.Fatalf("json request = %+v", out)
 	}
-	if _, err := json.Marshal(out.Metadata); err != nil {
+	metadataJSON, err := json.Marshal(out.Metadata)
+	if err != nil {
 		t.Fatalf("metadata should be JSON-safe: %v", err)
+	}
+	if len(metadataJSON) == 0 {
+		t.Fatal("metadata JSON should not be empty")
 	}
 }
