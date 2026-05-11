@@ -2,10 +2,14 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use ovrt_core::{
-    BUFFER_TOTAL_BYTES, IDX_OUTPUT_WRITTEN, IDX_PANIC_STATE, IDX_RUNTIME_TICK, INT_IDX_STATUS_CODE,
+    BUFFER_TOTAL_BYTES, DIAGNOSTIC_MAX_BYTES, EPOCH_SLOT_BYTES, EPOCH_SLOT_COUNT, HEADER_INT_COUNT,
+    IDX_DIAGNOSTICS_WRITTEN, IDX_OUTPUT_WRITTEN, IDX_PANIC_STATE, IDX_RUNTIME_TICK,
+    INPUT_MAX_BYTES, INT_IDX_INPUT_LENGTH, INT_IDX_OUTPUT_LENGTH, INT_IDX_STATUS_CODE,
+    OFFSET_DIAGNOSTIC_BYTES, OFFSET_EPOCHS, OFFSET_HEADER_INTS, OFFSET_INPUT_BYTES,
+    OFFSET_OUTPUT_BYTES, OUTPUT_MAX_BYTES,
 };
 
-use crate::{panic_payload_message, NativeBuffer, NativeRuntimeHost};
+use crate::{panic_payload_message, NativeRuntimeHost};
 
 pub fn serve_stdio(host: &NativeRuntimeHost) -> Result<(), String> {
     let stdin = io::stdin();
@@ -65,32 +69,152 @@ pub fn process_runtime_buffer_in_place(
         ));
     }
 
-    let mut buffer = NativeBuffer::new(raw_buffer.to_vec())?;
-    let input = buffer.read_input_bytes()?;
-    let _ = buffer.add_epoch(IDX_RUNTIME_TICK, 1)?;
+    add_epoch_raw(raw_buffer, IDX_RUNTIME_TICK, 1)?;
 
-    let result = catch_unwind(AssertUnwindSafe(|| host.dispatch_direct(unit_id, &input)));
+    let result = {
+        let input = input_bytes_view_raw(raw_buffer)?;
+        catch_unwind(AssertUnwindSafe(|| host.dispatch_direct(unit_id, input)))
+    };
     match result {
         Ok(Ok(output)) => {
-            buffer.set_header_int(INT_IDX_STATUS_CODE, 0)?;
-            buffer.set_diagnostics_text("")?;
-            buffer.write_output_bytes(&output)?;
-            let _ = buffer.add_epoch(IDX_OUTPUT_WRITTEN, 1)?;
+            set_header_int_raw(raw_buffer, INT_IDX_STATUS_CODE, 0)?;
+            set_diagnostics_text_raw(raw_buffer, "")?;
+            write_output_bytes_raw(raw_buffer, &output)?;
+            add_epoch_raw(raw_buffer, IDX_OUTPUT_WRITTEN, 1)?;
         }
         Ok(Err(error)) => {
-            buffer.set_header_int(INT_IDX_STATUS_CODE, 1)?;
-            buffer.clear_output()?;
-            buffer.set_diagnostics_text(&error)?;
+            set_header_int_raw(raw_buffer, INT_IDX_STATUS_CODE, 1)?;
+            clear_output_raw(raw_buffer)?;
+            set_diagnostics_text_raw(raw_buffer, &error)?;
         }
         Err(payload) => {
-            buffer.set_header_int(INT_IDX_STATUS_CODE, 2)?;
-            buffer.clear_output()?;
-            buffer.set_diagnostics_text(&panic_payload_message(payload))?;
-            let _ = buffer.add_epoch(IDX_PANIC_STATE, 1)?;
+            set_header_int_raw(raw_buffer, INT_IDX_STATUS_CODE, 2)?;
+            clear_output_raw(raw_buffer)?;
+            set_diagnostics_text_raw(raw_buffer, &panic_payload_message(payload))?;
+            add_epoch_raw(raw_buffer, IDX_PANIC_STATE, 1)?;
         }
     }
-    raw_buffer.copy_from_slice(buffer.into_inner().as_slice());
     Ok(())
+}
+
+fn header_int_raw(raw_buffer: &[u8], index: u32) -> Result<i32, String> {
+    if index >= HEADER_INT_COUNT {
+        return Err(format!("invalid header index: {index}"));
+    }
+    let offset = (OFFSET_HEADER_INTS + index * 4) as usize;
+    let bytes: [u8; 4] = raw_buffer[offset..offset + 4]
+        .try_into()
+        .map_err(|_| "header integer region must be exactly four bytes".to_string())?;
+    Ok(i32::from_le_bytes(bytes))
+}
+
+fn set_header_int_raw(raw_buffer: &mut [u8], index: u32, value: i32) -> Result<(), String> {
+    if index >= HEADER_INT_COUNT {
+        return Err(format!("invalid header index: {index}"));
+    }
+    let offset = (OFFSET_HEADER_INTS + index * 4) as usize;
+    raw_buffer[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+fn input_bytes_view_raw(raw_buffer: &[u8]) -> Result<&[u8], String> {
+    let length = header_int_raw(raw_buffer, INT_IDX_INPUT_LENGTH)?;
+    if length < 0 || length as u32 > INPUT_MAX_BYTES {
+        return Err(format!("invalid input length {length}"));
+    }
+    region_raw(raw_buffer, OFFSET_INPUT_BYTES, length as u32)
+}
+
+fn write_output_bytes_raw(raw_buffer: &mut [u8], bytes: &[u8]) -> Result<(), String> {
+    if bytes.len() > OUTPUT_MAX_BYTES as usize {
+        return Err(format!(
+            "output payload too large: {} > {}",
+            bytes.len(),
+            OUTPUT_MAX_BYTES
+        ));
+    }
+    clear_output_region_raw(raw_buffer)?;
+    let output = region_raw_mut(raw_buffer, OFFSET_OUTPUT_BYTES, bytes.len() as u32)?;
+    output.copy_from_slice(bytes);
+    set_header_int_raw(raw_buffer, INT_IDX_OUTPUT_LENGTH, bytes.len() as i32)
+}
+
+fn clear_output_raw(raw_buffer: &mut [u8]) -> Result<(), String> {
+    clear_output_region_raw(raw_buffer)?;
+    set_header_int_raw(raw_buffer, INT_IDX_OUTPUT_LENGTH, 0)
+}
+
+fn clear_output_region_raw(raw_buffer: &mut [u8]) -> Result<(), String> {
+    region_raw_mut(raw_buffer, OFFSET_OUTPUT_BYTES, OUTPUT_MAX_BYTES)?.fill(0);
+    Ok(())
+}
+
+fn set_diagnostics_text_raw(raw_buffer: &mut [u8], message: &str) -> Result<(), String> {
+    let bytes = message.as_bytes();
+    if bytes.len() > DIAGNOSTIC_MAX_BYTES as usize {
+        return Err(format!(
+            "diagnostic payload too large: {} > {}",
+            bytes.len(),
+            DIAGNOSTIC_MAX_BYTES
+        ));
+    }
+    let diagnostics = region_raw_mut(raw_buffer, OFFSET_DIAGNOSTIC_BYTES, DIAGNOSTIC_MAX_BYTES)?;
+    diagnostics.fill(0);
+    diagnostics[..bytes.len()].copy_from_slice(bytes);
+    add_epoch_raw(raw_buffer, IDX_DIAGNOSTICS_WRITTEN, 1)
+}
+
+fn add_epoch_raw(raw_buffer: &mut [u8], index: u32, delta: i32) -> Result<(), String> {
+    let current = load_epoch_raw(raw_buffer, index);
+    store_epoch_raw(raw_buffer, index, current.saturating_add(delta))
+}
+
+fn load_epoch_raw(raw_buffer: &[u8], index: u32) -> i32 {
+    if index >= EPOCH_SLOT_COUNT {
+        return 0;
+    }
+    let offset = (OFFSET_EPOCHS + index * EPOCH_SLOT_BYTES) as usize;
+    let bytes: [u8; 4] = raw_buffer[offset..offset + 4]
+        .try_into()
+        .unwrap_or_default();
+    i32::from_le_bytes(bytes)
+}
+
+fn store_epoch_raw(raw_buffer: &mut [u8], index: u32, value: i32) -> Result<(), String> {
+    if index >= EPOCH_SLOT_COUNT {
+        return Err(format!("invalid epoch index: {index}"));
+    }
+    let offset = (OFFSET_EPOCHS + index * EPOCH_SLOT_BYTES) as usize;
+    raw_buffer[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+fn region_raw(raw_buffer: &[u8], offset: u32, length: u32) -> Result<&[u8], String> {
+    let start = offset as usize;
+    let end = start + length as usize;
+    if end > raw_buffer.len() {
+        return Err(format!(
+            "runtime region out of bounds: {} + {} > {}",
+            offset,
+            length,
+            raw_buffer.len()
+        ));
+    }
+    Ok(&raw_buffer[start..end])
+}
+
+fn region_raw_mut(raw_buffer: &mut [u8], offset: u32, length: u32) -> Result<&mut [u8], String> {
+    let start = offset as usize;
+    let end = start + length as usize;
+    if end > raw_buffer.len() {
+        return Err(format!(
+            "runtime region out of bounds: {} + {} > {}",
+            offset,
+            length,
+            raw_buffer.len()
+        ));
+    }
+    Ok(&mut raw_buffer[start..end])
 }
 
 #[derive(Debug)]

@@ -39,8 +39,40 @@ func ValidateSchemaVersion(version string) error {
 // ValidateEventType enforces the canonical event-type contract:
 // <domain>:<action>[:vN]:<state>
 func ValidateEventType(eventType string) error {
-	_, err := ParseEventType(eventType)
-	return err
+	et := strings.TrimSpace(eventType)
+	if et == "" {
+		return fmt.Errorf("event_type is required")
+	}
+
+	lastColon := strings.LastIndexByte(et, ':')
+	if lastColon <= 0 || lastColon == len(et)-1 {
+		return fmt.Errorf("event_type %q must have at least 3 segments", et)
+	}
+	terminal := et[lastColon+1:]
+	if _, ok := terminalStates[terminal]; !ok {
+		return fmt.Errorf("event_type %q has invalid terminal state %q", et, terminal)
+	}
+
+	head := et[:lastColon]
+	firstColon := strings.IndexByte(head, ':')
+	if firstColon <= 0 || firstColon == len(head)-1 {
+		return fmt.Errorf("event_type %q must have at least 3 segments", et)
+	}
+	domain := head[:firstColon]
+	if !isLowerSnake(domain) {
+		return fmt.Errorf("event_type %q has invalid domain %q", et, domain)
+	}
+
+	actionSegments := head[firstColon+1:]
+	if versionColon := strings.LastIndexByte(actionSegments, ':'); versionColon >= 0 {
+		if candidate := actionSegments[versionColon+1:]; isVersionSegment(candidate) {
+			actionSegments = actionSegments[:versionColon]
+		}
+	}
+	if actionSegments == "" {
+		return fmt.Errorf("event_type %q must include an action segment", et)
+	}
+	return validateActionSegments(et, actionSegments)
 }
 
 func ParseEventType(eventType string) (ParsedEventType, error) {
@@ -139,6 +171,26 @@ func isLowerSnake(seg string) bool {
 		return false
 	}
 	return true
+}
+
+func validateActionSegments(eventType, segments string) error {
+	start := 0
+	for start <= len(segments) {
+		next := strings.IndexByte(segments[start:], ':')
+		end := len(segments)
+		if next >= 0 {
+			end = start + next
+		}
+		segment := segments[start:end]
+		if !isLowerSnake(segment) {
+			return fmt.Errorf("event_type %q has invalid action segment %q", eventType, segment)
+		}
+		if next < 0 {
+			return nil
+		}
+		start = end + 1
+	}
+	return nil
 }
 
 func isVersionSegment(seg string) bool {

@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap"
 	eventcontract "github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
 	testprotos "github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi/testprotos"
@@ -213,6 +215,62 @@ func TestDispatchBytesKeepsTypedPayloadBinary(t *testing.T) {
 	}
 	if response.ResourceId != "asset_123" || response.Status != "complete" {
 		t.Fatalf("unexpected response: %+v", &response)
+	}
+}
+
+func TestTypedRegistryAndFrameDispatchParity(t *testing.T) {
+	registry := New(nil, nil, nil)
+	router := grpcsvc.NewRouter()
+	binding := protoapi.Binding{
+		Request:  func() proto.Message { return &testprotos.TestRequest{} },
+		Response: func() proto.Message { return &testprotos.TestResponse{} },
+	}
+	handlers := bootstrap.TypedServiceHandlers{
+		"media:process_asset:v1:requested": {
+			Binding: binding,
+			Handler: func(_ context.Context, request proto.Message) (proto.Message, error) {
+				typed := request.(*testprotos.TestRequest)
+				return &testprotos.TestResponse{
+					ResourceId: typed.GetWorkspaceId() + ":" + typed.GetMetadata().GetCorrelationId(),
+					Status:     "complete",
+				}, nil
+			},
+		},
+	}
+	if err := bootstrap.RegisterTypedHandlers(registry, handlers); err != nil {
+		t.Fatalf("RegisterTypedHandlers() error = %v", err)
+	}
+	if err := bootstrap.RegisterTypedFrameHandlers(router, handlers); err != nil {
+		t.Fatalf("RegisterTypedFrameHandlers() error = %v", err)
+	}
+
+	payload, err := proto.Marshal(&testprotos.TestRequest{WorkspaceId: "wrk_parity"})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	registryBytes, ok, err := registry.DispatchBytes(
+		context.Background(),
+		"media:process_asset:v1:requested",
+		payload,
+		map[string]any{"correlation_id": "corr_parity"},
+	)
+	if err != nil || !ok {
+		t.Fatalf("DispatchBytes() ok=%v err=%v", ok, err)
+	}
+	frame, err := router.DispatchFrame(context.Background(), grpcsvc.Frame{
+		EventType:     "media:process_asset:v1:requested",
+		Payload:       payload,
+		CorrelationID: "corr_parity",
+		SchemaVersion: "schema_v1",
+	})
+	if err != nil {
+		t.Fatalf("DispatchFrame() error = %v", err)
+	}
+	if frame.CorrelationID != "corr_parity" || frame.SchemaVersion != "schema_v1" {
+		t.Fatalf("frame metadata not preserved: %+v", frame)
+	}
+	if !bytes.Equal(registryBytes, frame.Payload) {
+		t.Fatalf("registry/frame response payload mismatch: registry=%x frame=%x", registryBytes, frame.Payload)
 	}
 }
 

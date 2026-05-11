@@ -90,6 +90,106 @@ Environment:
 
 The important signal is unchanged: same-process and borrowed binary lanes are nanosecond paths, while gRPC/JSON lanes are microsecond boundary paths. Use benchmark deltas here as local evidence only; laptops, battery state, scheduler noise, and dependency versions can move these numbers by double-digit percentages.
 
+### 2026-05-09 Core Tuning Check
+
+This pass added an opt-in bound frame client for same-process hot routes. The default router and direct client behavior remains unchanged; the bound client resolves the frame handler once at startup and avoids the per-dispatch route-map lookup. Use it only for stable internal lanes where the route is known and registered during initialization.
+
+The follow-up data-shape change keeps the binary frame wire format unchanged but interns low-cardinality control strings during owned decode. `EventType` and `SchemaVersion` are treated as bounded vocabularies; `CorrelationID` remains owned per message because it is high-cardinality. Borrowed `FrameView` remains the zero-copy lane for synchronous hot paths.
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkRouterDispatchFrameDirect` | 17.44 | 0 | 0 | Generic same-process router remains map lookup + handler call |
+| `BenchmarkDirectFrameClientDispatch` | 22.49 | 0 | 0 | Validated client facade is modestly faster |
+| `BenchmarkBoundFrameClientDispatch` | 11.11 | 0 | 0 | Bound same-process route nearly halves the direct-client facade |
+| `BenchmarkBoundFrameClientDispatchTrusted` | 10.80 | 0 | 0 | Remaining cost is mostly the handler function call |
+| `BenchmarkBinaryFrameAppendViewRoundTrip` | 22.10 | 0 | 0 | Borrowed binary view remains stable |
+| `BenchmarkBinaryFrameAppendRoundTrip` | 51.41 | 8 | 1 | Owned decode now only owns the high-cardinality correlation string on warm control vocabularies |
+| `BenchmarkBinaryFrameCodecRoundTrip` | 102.4 | 152 | 3 | Codec-compatible owned path keeps marshal allocation but avoids repeated control-string ownership |
+| `BenchmarkDispatchFrameOverBufconn` | 22751 | 10932 | 178 | gRPC boundary remains microsecond-class; binary codec saves allocations but not the gRPC stack cost |
+| `BenchmarkDispatchOverBufconn` | 28187 | 12688 | 213 | JSON envelope remains compatibility lane |
+
+The practical performance target is not to force every lane under the same nanosecond budget. The route-bound path is the right tool for trusted in-process hot dispatch. Borrowed frame views are the right shape when data does not escape the source buffer; owned decode is now cheaper for compatibility paths that need durable strings. gRPC, JSON, queue, DB, and external Redis/Postgres lanes must be optimized with batching, pooling, backpressure, and tail-latency controls instead of pretending they are equivalent to a direct function call.
+
+### 2026-05-09 Local Scale Pressure Check
+
+This pass added `server-kit/go/appbench/scale_paths_test.go`, a no-external-service pressure harness for the scale questions that local nanosecond dispatch benchmarks cannot answer by themselves. It pushes tenant predicates, cache stampede coalescing, in-memory Redis fanout, WebSocket churn/routing, worker queue saturation, exact/wildcard event fanout, config convergence, and mixed p50/p95/p99 latency with local substitutes.
+
+Environment:
+
+- Date: 2026-05-09
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Command: `cd foundation/server-kit/go && go test -run=^$ -bench='BenchmarkScale_' -benchmem ./appbench`
+
+| Benchmark | First pressure run | Tuned run | Allocation change | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale_MemoryDBTenantCount100K` | 5191 ns | 5177 ns | 0 -> 0 | Tenant count is index-shaped and stable |
+| `BenchmarkScale_MemoryDBTenantListFiltered100K` | 36164 ns | 29708 ns | 41592 B / 105 allocs -> 33400 B / 105 allocs | Scalar `Data` filter index narrows candidates before defensive record copies |
+| `BenchmarkScale_WebSocketBroadcastResolveInto100K` | 2495856 ns | 27382 ns | 0 -> 0 | Broadcast routing now copies from a contiguous connection index instead of walking the connection map |
+| `BenchmarkScale_WebSocketUserResolve100K` | 231.4 ns | 227.8 ns | 0 -> 0 | User routing remains direct indexed lookup |
+| `BenchmarkScale_EventExactDispatch100KSubscriptions` | 2179 ns | 194.1 ns | 1811 B / 13 allocs -> 0 B / 0 allocs | Exact event fanout is now map lookup + ring-buffer record + callback |
+| `BenchmarkScale_EventWildcardDispatch1KSubscriptions` | 26050 ns | 23209 ns | 1790 B / 13 allocs -> 64 B / 1 alloc | Wildcard fanout still scans wildcard patterns; use exact tenant topics for hot paths |
+| `BenchmarkScale_ConfigConvergence10K` | 159.3 ns | 158.2 ns | 0 -> 0 | Runtime config validation is not a deploy-time bottleneck in-process |
+| `BenchmarkScale_LocalOperationMixLatency` | 10183 ns mean, 24084 ns p99 | 7874 ns mean, 15959 ns p99 | 3794 B / 34 allocs -> 1984 B / 21 allocs | Mixed local DB count + WS user route + cache hit + event publish + config validation stays sub-20 us p99 locally |
+
+Correctness pressure covered by the local test:
+
+- 100 tenants x 100 records with tenant predicates and filtered list checks.
+- 1000 users x 10 WebSocket connections with unregister/register churn and broadcast resolution.
+- 512 concurrent cache misses coalesced to one computation.
+- 1000 exact subscribers per tenant with no cross-tenant delivery.
+- 1024 in-memory Redis subscribers receiving one fanout payload.
+- Worker queue fills to the bounded 1024 capacity and rejects overflow.
+- 2048 concurrent runtime config validations converge without mutation.
+
+What this proves: the foundation's local data structures are now shaped correctly for the distributed bottlenecks. Exact topics avoid broad fanout scans, WebSocket broadcast has a contiguous local index, user/device routes are indexed, cache stampedes coalesce, queue overflow is explicit, config validation is cheap, and p99 for the mixed local lane is tracked.
+
+What this does not prove: real Postgres query plans, real Redis cluster fanout behavior, TLS/network jitter, kernel socket buffers, browser slow-client write queues, cross-region routing, or deploy orchestration behavior. Those need service-backed load tests with `EXPLAIN (ANALYZE, BUFFERS)`, Redis/pubsub metrics, WebSocket slow-consumer injection, and p95/p99 dashboards. The local harness is the fast regression net before those external proofs.
+
+### 2026-05-09 1M Local Scale Check
+
+This pass extends the local proof to 1 million records/connections/subscriptions and reconciles the in-memory store with the Postgres state-store contract. The scaffold migration now creates `governance_state_records` with the same identity key the adapter uses, scoped/order indexes for tenant queries, and a JSONB GIN index for app-specific containment queries. The Postgres adapter now pushes scalar JSONB filters into SQL before `LIMIT`, applies query budgets to state-store methods, and still rechecks filters in Go to preserve MemoryDB semantics.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -run=^$ -bench='BenchmarkScale1M_' -benchmem -benchtime=100x ./appbench
+```
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale1M_MemoryDBTenantCount` | 5544 | 0 | 0 | Tenant count stays indexed at 1M records |
+| `BenchmarkScale1M_MemoryDBTenantListFiltered` | 18360 | 33400 | 105 | Filtered list uses scoped/filter indexes, then pays intentional response-copy cost |
+| `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit` | 19051 | 33400 | 105 | Dense single-tenant filtered list uses order-aware field indexes and stops at `LIMIT 50` |
+| `BenchmarkScale1M_WebSocketBroadcastResolveInto` | 556400 | 0 | 0 | Materializing 1M local connection IDs is a contiguous 16 MB string-header slice copy |
+| `BenchmarkScale1M_WebSocketBroadcastForEach` | 2096710 | 0 | 0 | Per-connection streaming avoids materialization but costs one callback per connection |
+| `BenchmarkScale1M_WebSocketBroadcastBatch` | 753.8 | 0 | 0 | Adaptive chunked broadcast routing uses borrowed slices and scales with batch count |
+| `BenchmarkScale1M_WebSocketUserResolve` | 271.7 | 0 | 0 | User routing remains direct indexed lookup even with 1M local connections |
+| `BenchmarkScale1M_EventExactDispatchSubscriptions` | 244.2 | 0 | 0 | Exact event dispatch remains constant-time at 1M subscription cardinality |
+
+Data-shape check:
+
+| Benchmark | Before | After | Allocation change | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit` | 603816285 ns | 19051 ns | 72032888 B / 105 allocs -> 33400 B / 105 allocs | Dense tenant reads must use order-aware scoped/filter indexes; sorting/materializing all candidates is the wrong shape for `LIMIT` |
+| `BenchmarkScale_EventWildcardDispatch1KSubscriptions` | 23209 ns | 286.7 ns | 64 B / 1 alloc -> 64 B / 1 alloc | Colon-prefix wildcard subscriptions now route by prefix bucket instead of scanning all wildcard patterns |
+| `BenchmarkScale_EventPrefixWildcardDispatch100KSubscriptions` | 2542881 ns | 333.8 ns | 64 B / 1 alloc -> 64 B / 1 alloc | Tenant prefix fanout scales by event depth and matching bucket, not total wildcard subscriptions |
+
+Broadcast strategy check:
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale_WebSocketBroadcastResolveInto1K` | 327.5 | 0 | 0 | Materializing 1k IDs is cheap when a stable slice is needed |
+| `BenchmarkScale_WebSocketBroadcastBatch1K` | 32.08 | 0 | 0 | 1k broadcast routes as one borrowed batch |
+| `BenchmarkScale_WebSocketBroadcastResolveInto100K` | 39578 | 0 | 0 | 100k materialization is still sub-0.1 ms, but copies target IDs |
+| `BenchmarkScale_WebSocketBroadcastBatch100K` | 336.2 | 0 | 0 | 100k broadcast routes as adaptive borrowed batches |
+| `BenchmarkScale1M_WebSocketBroadcastResolveInto` | 556400 | 0 | 0 | 1M materialization is dominated by copying the target slice |
+| `BenchmarkScale1M_WebSocketBroadcastForEach` | 2096710 | 0 | 0 | 1M per-connection callbacks are too expensive for routing alone |
+| `BenchmarkScale1M_WebSocketBroadcastBatch` | 753.8 | 0 | 0 | 1M adaptive batches keep routing overhead sub-microsecond in this run |
+
+Interpretation: 1M local scale is not breaking the foundation data structures, but the API and container choice matters. Use `ResolveTargetsInto` only when the caller needs an owned/stable target list. Use adaptive `ForEachTargetBatch` for broadcast fanout so the router hands write queues borrowed chunks instead of copying a huge slice or invoking a million callbacks. Event wildcards should be exact or colon-prefix shaped for product traffic; complex wildcard patterns remain compatibility/observability tools. Returning 50 DB records allocates because public records are defensive copies. Dense tenant reads must stop at indexed `LIMIT`, not sort broad state. Broadcast to 1M live sockets is still a product-level write-pressure problem: it requires bounded per-connection queues, slow-client shedding, and node-level fanout budgets.
+
 ### Latest App-Lane Check
 
 | Benchmark | ns/op | B/op | allocs/op | Role |
@@ -197,6 +297,8 @@ Runtime lane planning now has explicit scheduling inputs: payload size, workload
 4. WebGPU for wide data-parallel batches large enough to amortize dispatch,
 5. transfer or stream fallbacks when SAB/GPU lanes are unavailable.
 
+For financial applications, Rust is the deterministic math lane, not the database orchestration lane. Use Rust for exact minor-unit conversion, checked integer arithmetic, fee/basis-point kernels, route scoring, settlement simulation, canonical payload hashing, and proof-adjacent state machines. Keep provider calls, Postgres transactions, policy lookups, audit writes, and request orchestration in Go/server-kit. A Rust boundary is justified when it removes floating-point ambiguity, batch-computes enough work to amortize the call, or needs parity across native/WASM/browser lanes.
+
 GPU batch layouts should be benchmarked separately from descriptor-ring traffic. The browser-host helper packs batch regions on 256-byte boundaries by default so storage-buffer style workloads can move through the arena without per-item ad hoc layout decisions.
 
 `RuntimeWebGpuHost` is intentionally split into testable pieces:
@@ -301,6 +403,8 @@ Go runtimehost fixed-buffer results:
 | `BenchmarkBufferEpochAdd` | 7.165 | 0 | 0 | Atomic epoch movement is nanosecond-class |
 | `BenchmarkBufferDiagnosticsText` | 345.9 | 768 | 1 | Current diagnostics read materializes a bounded string |
 
+2026-05-09 follow-up: `BenchmarkBufferDiagnosticsText` is now 267.2 ns/op and 48 B/op after trimming the diagnostic byte region before string materialization. Borrowed input/output views remain about 3 ns/op and allocation-free; owned reads still allocate exactly the copied payload size.
+
 The Go runtimehost hot write paths now clear fixed regions with `clear(...)` instead of allocating temporary zero slices. That preserves the security hygiene of clearing stale bytes while restoring the intended allocation-free control-plane write behavior.
 
 Browser shared-arena update:
@@ -324,6 +428,8 @@ Rust native buffer update:
 | native output_bytes_view borrowed | 3.73 | Borrowed native view remains the fastest runtime lane |
 | native write_output_bytes clear+copy | 39.59 | Defensive clear + copy improved |
 | native write_output_bytes_fast copy only | 16.65 | Fast write is the trusted hot path when stale bytes outside length are irrelevant |
+
+2026-05-09 follow-up: `process_runtime_buffer_in_place` now operates directly on the caller-provided 4KB buffer instead of cloning the entire control plane into a temporary `Vec` and copying it back. The release benchmark reports `native process_runtime_buffer_in_place` at 143.44 ns/op for a 1KB echo unit on this machine. Public Go `ProcessResponse.Output` remains owned; FFI/process pools copy the active output before returning so pooled buffers cannot leak into caller-owned responses.
 
 WebSocket routing local-load results:
 

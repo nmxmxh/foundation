@@ -125,9 +125,12 @@ impl NativeBuffer {
     pub fn diagnostics_text(&self) -> String {
         let start = OFFSET_DIAGNOSTIC_BYTES as usize;
         let end = start + DIAGNOSTIC_MAX_BYTES as usize;
-        String::from_utf8_lossy(&self.raw[start..end])
-            .trim_end_matches('\0')
-            .to_string()
+        let payload = &self.raw[start..end];
+        let length = payload
+            .iter()
+            .rposition(|byte| *byte != 0)
+            .map_or(0, |index| index + 1);
+        String::from_utf8_lossy(&payload[..length]).into_owned()
     }
 
     pub fn set_diagnostics_text(&mut self, message: &str) -> Result<(), String> {

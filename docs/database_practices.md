@@ -60,7 +60,63 @@ Production Postgres must still be sized from workload evidence: memory, WAL, aut
 9. Separate especially sensitive fields (PII, tax identifiers, recovery data) from broad read paths and duplicate them as little as possible.
 10. App runtime roles must default to least privilege on tables, sequences, functions, and views.
 
+## Foundation state store
+
+The scaffolded Postgres schema must include `governance_state_records` because `server-kit/go/database.PostgresDB` uses it as the durable implementation of the `StateStore` contract. Generated apps that default `STATE_STORE_DRIVER=postgres` must not require application teams to rediscover this table manually.
+
+Required base shape:
+
+1. Columns: `domain`, `collection_name`, `organization_id`, `record_id`, `data jsonb`, `created_at`, and `updated_at`.
+2. Unique identity: `(domain, collection_name, organization_id, record_id)`.
+3. Tenant/list index: `(domain, collection_name, organization_id, updated_at DESC, record_id ASC)`.
+4. Organization cleanup index: `(organization_id)`.
+5. JSONB index: `USING GIN (data jsonb_path_ops)` for app-specific containment/search lanes.
+6. Foundation state filter index: `(domain, collection_name, organization_id, btrim(data ->> 'state'), updated_at DESC, record_id ASC) WHERE data ? 'state'` for the common `state` predicate plus first-page ordering.
+
+Adapter semantics:
+
+1. `UpsertRecord` normalizes the durable identity fields and mirrors `organization_id` into `data`.
+2. `GetRecord`, `ListRecords`, `CountRecords`, and delete operations must run under `QueryBudgetContext`.
+3. Scalar filters must be applied before `LIMIT` in SQL, then rechecked in Go so MemoryDB and Postgres preserve the same visible filter behavior.
+4. Recurring JSONB filter fields need app-owned expression indexes that match the exact predicate. Example: if a hot read uses `state`, add a scoped expression index for `btrim(data ->> 'state')`.
+5. Bounded list reads should match predicate and order in the same index where possible. A JSONB GIN index can narrow containment searches, but first-page runtime reads also need B-tree order support for `ORDER BY updated_at DESC, record_id ASC LIMIT n`.
+
 ## Query and transaction rules
+
+Use `server-kit/go/database` executor helpers for repository operations before
+reaching for raw driver calls:
+
+1. `ExecCommand` for command statements that do not need returned rows.
+2. `ExecRowsAffected` for strict update/delete paths that must distinguish
+   "not found" from "updated" without exposing driver-specific command tags.
+3. `QueryOne` for single-row reads/writes with `RETURNING`.
+4. `QueryEach` for bounded streaming reads where retaining all rows is not appropriate.
+5. `QueryAll` for typed, bounded list reads.
+6. `AtomicLane` for short transactions with a lane-specific timeout budget.
+7. `PostgresDB.SendBatch` for independent statements that should amortize one
+   client/server round trip.
+8. `PostgresDB.CopyFromSource` / `CopyFromRows` for bulk ingest.
+
+Performance order for write-heavy paths, fastest to slowest when the workload
+matches the lane:
+
+1. `COPY`/`CopyFrom` for bulk append/import.
+2. Batched statements or prepared repeated statements inside one short transaction.
+3. Single `INSERT ... RETURNING` / `UPDATE ... RETURNING` through `QueryOne`.
+4. Repeated one-row writes with independent commits.
+
+`DBTX` intentionally remains small so command-only fakes, transactional helpers,
+and state stores are easy to test. Repositories that need streamed rows should
+opt into `RowQueryer` instead of widening every fake and store. This keeps the
+contract testable while still exposing the fast row path for hot repositories.
+Repositories that need row counts should opt into `ResultExecutor`; this keeps
+strict conflict/not-found behavior portable across Postgres and tests.
+
+Foundation Postgres connections must keep pgx statement caching enabled for
+stable repeated SQL. `PoolOptions.StatementCacheCapacity` defaults to a non-zero
+capacity, `PostgresDB` forces `QueryExecModeCacheStatement`, and existing
+`pgxpool.Pool` instances should be projected through `WrapPostgresPool` while
+legacy services migrate toward the Foundation repository interfaces.
 
 1. Use parameterized SQL only.
 2. Keep transactions short and scoped.
@@ -72,8 +128,8 @@ Production Postgres must still be sized from workload evidence: memory, WAL, aut
 8. Dynamic sort fields, projection lists, and filter operators must come from allowlists. Do not concatenate user input into SQL identifiers or query fragments.
 9. **No `SELECT *`**: Explicitly list required columns. This reduces network I/O, prevents "wide-row" performance penalties, and ensures schema evolution (e.g., adding a large JSONB column) doesn't accidentally degrade unrelated read paths.
 10. Authorization predicates must be part of the read/write query itself or enforced by an equivalent DB policy. Do not fetch by ID first and rely on a later in-memory scope check for sensitive rows.
-10. High-value or uniqueness-sensitive mutations must use unique constraints, row/advisory locks, or `SERIALIZABLE` transactions to prevent race-driven double execution, quota bypass, or state desynchronization.
-11. Audit tables or append-only logs must capture privilege changes, exports, payout/billing actions, and destructive operations with actor and correlation data.
+11. High-value or uniqueness-sensitive mutations must use unique constraints, row/advisory locks, or `SERIALIZABLE` transactions to prevent race-driven double execution, quota bypass, or state desynchronization.
+12. Audit tables or append-only logs must capture privilege changes, exports, payout/billing actions, and destructive operations with actor and correlation data.
 
 ## Migration policy (active development)
 
@@ -154,9 +210,9 @@ State-machine candidates that deserve table-driven/property-style tests:
 6. **Observability**: Export native `pgxpool` stats (Total, Idle, Active, Acquire Duration) to the Foundation's observability bridge. Alert on high acquire duration or connection exhaustion.
 7. **Zero-Allocation Scanning**: In high-throughput paths, use manual `rows.Scan()` or the Foundation's optimized `QueryMaps` bridge to avoid reflection and redundant allocations.
 8. **Count Optimization**: Exact `COUNT(*)` is an O(N) operation in Postgres due to MVCC.
-    *   **Small Sets**: Exact count with index is acceptable.
-    *   **Large Sets**: Use `EstimateCount` (via `EXPLAIN` plan analysis or `reltuples` catalog statistics) for UI indicators and non-critical analytics.
-    *   **Hot Counters**: Use a dedicated counter cache table or Redis if exact, high-frequency counting is required.
+    * **Small Sets**: Exact count with index is acceptable.
+    * **Large Sets**: Use `EstimateCount` (via `EXPLAIN` plan analysis or `reltuples` catalog statistics) for UI indicators and non-critical analytics.
+    * **Hot Counters**: Use a dedicated counter cache table or Redis if exact, high-frequency counting is required.
 9. **Index Overhead**: While missing indexes cause slow reads, excessive indexes cause slow writes and increased VACUUM pressure. Audit indexes regularly for usage.
 10. Use read models or materialized views for dashboard, feed, search, and analytics reads that would otherwise join many live transactional tables.
 11. Use partitioned append tables for high-volume events, audit logs, outbox history, and time/campaign-heavy telemetry. Partition by time, tenant/campaign, or hash only when query pruning and retention policy are explicit.
@@ -187,6 +243,16 @@ State-machine candidates that deserve table-driven/property-style tests:
 1. Keeping only three active migration groups is fast, but it increases risk of schema/seed drift while files are edited in place.
 2. Add an explicit pre-merge gate that runs a clean bootstrap (`schema -> system seed -> demo seed`) so seed references fail early if column/constraint names diverge.
 3. Org-scoped table indexes should be audited continuously; adding domains without matching org predicates causes avoidable contention under recurring load.
+
+## Merchant hub load observation (2026-05-09)
+
+1. Product-layer slowness can come from query shape even when Foundation dispatch is nanosecond-fast. Measure DB-backed domain flows separately from pure dispatch.
+2. Dashboard reads must not recompute live aggregates from transactional tables under normal navigation. Use compact read models, counter shards, or materialized refreshes.
+3. A single merchant-wide counter row can become a write-contention point during shared-merchant bursts. If exact hot counters are required, shard them by deterministic business key and sum a bounded shard set on read.
+4. Do not add synchronous read-model writes to command paths unless the visible state truly requires them. Invoice creation should stay minimal; terminal payment transitions may update operational counters.
+5. Load harnesses must propagate pool settings into the actual startup path. `TEST_DB_MAX_CONNS` is not useful if `DB_MAX_CONNS` remains pinned to a smaller runtime default.
+6. Failed load steps must report a bounded sample error. A percentage without the representative SQLSTATE or timeout class is not enough to correct the architecture.
+7. Deadlock, lock-wait, pool-acquire, and query-timeout failures are different signals. Preserve their error classes in tests and logs.
 
 ## Ingestion observations (2026-03-26)
 

@@ -1,0 +1,158 @@
+package bootstrap
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi/testprotos"
+	"google.golang.org/protobuf/proto"
+)
+
+func TestRegisterTypedFrameHandlersValidation(t *testing.T) {
+	binding := frameTestBinding()
+	handler := func(context.Context, proto.Message) (proto.Message, error) {
+		return &testprotos.TestResponse{}, nil
+	}
+
+	if err := RegisterTypedFrameHandlers(nil, TypedServiceHandlers{
+		"media:process_asset:v1:requested": {Binding: binding, Handler: handler},
+	}); err == nil {
+		t.Fatal("expected nil router to fail")
+	}
+	if err := RegisterTypedFrameHandlers(grpcsvc.NewRouter(), TypedServiceHandlers{
+		"media:process_asset:v1:requested": {Binding: binding},
+	}); err == nil {
+		t.Fatal("expected nil handler to fail")
+	}
+	if err := RegisterTypedFrameHandlers(grpcsvc.NewRouter(), TypedServiceHandlers{
+		"media:process_asset:v1:success": {Binding: binding, Handler: handler},
+	}); err == nil {
+		t.Fatal("expected non-requested event type to fail")
+	}
+	if err := RegisterTypedFrameHandlers(grpcsvc.NewRouter(), TypedServiceHandlers{
+		"media:process_asset:v1:requested": {Handler: handler},
+	}); err == nil {
+		t.Fatal("expected invalid binding to fail")
+	}
+}
+
+func TestRegisterTypedFrameHandlersDispatchPreservesFrameMetadata(t *testing.T) {
+	router := grpcsvc.NewRouter()
+	binding := frameTestBinding()
+	err := RegisterTypedFrameHandlers(router, TypedServiceHandlers{
+		"media:process_asset:v1:requested": {
+			Binding: binding,
+			Handler: func(_ context.Context, request proto.Message) (proto.Message, error) {
+				typed := request.(*testprotos.TestRequest)
+				if typed.GetMetadata().GetCorrelationId() != "corr_frame" {
+					t.Fatalf("metadata.correlation_id = %q", typed.GetMetadata().GetCorrelationId())
+				}
+				if typed.GetMetadata().GetGlobalContext().GetSource() != "payload" {
+					t.Fatalf("metadata.global_context.source = %q", typed.GetMetadata().GetGlobalContext().GetSource())
+				}
+				return &testprotos.TestResponse{ResourceId: typed.GetWorkspaceId(), Status: "complete"}, nil
+			},
+		},
+	}, ConcurrencyOptions{MaxConcurrent: 1, AcquireTimeout: time.Second})
+	if err != nil {
+		t.Fatalf("RegisterTypedFrameHandlers() error = %v", err)
+	}
+
+	payload, err := proto.Marshal(&testprotos.TestRequest{
+		Metadata: &testprotos.Metadata{
+			GlobalContext: &testprotos.GlobalContext{Source: "payload"},
+		},
+		WorkspaceId: "wrk_frame",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	responseFrame, err := router.DispatchFrame(context.Background(), grpcsvc.Frame{
+		EventType:     "media:process_asset:v1:requested",
+		Payload:       payload,
+		CorrelationID: "corr_frame",
+		SchemaVersion: "schema_v1",
+	})
+	if err != nil {
+		t.Fatalf("DispatchFrame() error = %v", err)
+	}
+	if responseFrame.EventType != "media:process_asset:v1:requested" ||
+		responseFrame.CorrelationID != "corr_frame" ||
+		responseFrame.SchemaVersion != "schema_v1" {
+		t.Fatalf("frame metadata not preserved: %+v", responseFrame)
+	}
+	var response testprotos.TestResponse
+	if err := proto.Unmarshal(responseFrame.Payload, &response); err != nil {
+		t.Fatalf("response Unmarshal() error = %v", err)
+	}
+	if response.ResourceId != "wrk_frame" || response.Status != "complete" {
+		t.Fatalf("unexpected response: %+v", &response)
+	}
+}
+
+func TestRegisterTypedFrameHandlersMapsHandlerErrors(t *testing.T) {
+	router := grpcsvc.NewRouter()
+	expected := errors.New("typed handler failed")
+	err := RegisterTypedFrameHandlers(router, TypedServiceHandlers{
+		"media:process_asset:v1:requested": {
+			Binding: frameTestBinding(),
+			Handler: func(context.Context, proto.Message) (proto.Message, error) {
+				return nil, expected
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterTypedFrameHandlers() error = %v", err)
+	}
+
+	_, err = router.DispatchFrame(context.Background(), grpcsvc.Frame{
+		EventType: "media:process_asset:v1:requested",
+	})
+	if !errors.Is(err, expected) {
+		t.Fatalf("expected handler error, got %v", err)
+	}
+}
+
+func BenchmarkTypedFrameAdapterDispatch(b *testing.B) {
+	router := grpcsvc.NewRouter()
+	if err := RegisterTypedFrameHandlers(router, TypedServiceHandlers{
+		"media:process_asset:v1:requested": {
+			Binding: frameTestBinding(),
+			Handler: func(_ context.Context, request proto.Message) (proto.Message, error) {
+				typed := request.(*testprotos.TestRequest)
+				return &testprotos.TestResponse{ResourceId: typed.GetWorkspaceId(), Status: "complete"}, nil
+			},
+		},
+	}); err != nil {
+		b.Fatalf("RegisterTypedFrameHandlers() error = %v", err)
+	}
+	payload, err := proto.Marshal(&testprotos.TestRequest{WorkspaceId: "wrk_bench"})
+	if err != nil {
+		b.Fatalf("Marshal() error = %v", err)
+	}
+	frame := grpcsvc.Frame{
+		EventType:     "media:process_asset:v1:requested",
+		Payload:       payload,
+		CorrelationID: "corr_bench",
+		SchemaVersion: "schema_v1",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := router.DispatchFrame(context.Background(), frame); err != nil {
+			b.Fatalf("DispatchFrame() error = %v", err)
+		}
+	}
+}
+
+func frameTestBinding() protoapi.Binding {
+	return protoapi.Binding{
+		Request:  func() proto.Message { return &testprotos.TestRequest{} },
+		Response: func() proto.Message { return &testprotos.TestResponse{} },
+	}
+}

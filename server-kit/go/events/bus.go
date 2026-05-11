@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"strings"
 	"sync"
 )
 
@@ -17,10 +18,15 @@ type Bus interface {
 
 // InMemoryBus is a development-safe event bus implementation with fanout support.
 type InMemoryBus struct {
-	mu          sync.RWMutex
-	subscribers map[string][]Subscriber
-	recent      []Envelope
-	maxRecent   int
+	mu                 sync.RWMutex
+	exactSubscribers   map[string][]Subscriber
+	allSubscribers     []Subscriber
+	prefixSubscribers  map[string][]Subscriber
+	patternSubscribers map[string][]Subscriber
+	recent             []Envelope
+	recentStart        int
+	recentCount        int
+	maxRecent          int
 }
 
 func NewInMemoryBus(maxRecent int) *InMemoryBus {
@@ -28,26 +34,38 @@ func NewInMemoryBus(maxRecent int) *InMemoryBus {
 		maxRecent = 200
 	}
 	return &InMemoryBus{
-		subscribers: map[string][]Subscriber{},
-		recent:      make([]Envelope, 0, maxRecent),
-		maxRecent:   maxRecent,
+		exactSubscribers:   map[string][]Subscriber{},
+		prefixSubscribers:  map[string][]Subscriber{},
+		patternSubscribers: map[string][]Subscriber{},
+		recent:             make([]Envelope, maxRecent),
+		maxRecent:          maxRecent,
 	}
 }
 
 func (b *InMemoryBus) Publish(ctx context.Context, envelope Envelope) error {
-	envelope.Normalize()
+	if !envelopeDispatchReady(envelope) {
+		envelope.Normalize()
+	}
 	if err := envelope.Validate(); err != nil {
 		return err
 	}
 
 	b.mu.Lock()
-	b.recent = append(b.recent, envelope)
-	if len(b.recent) > b.maxRecent {
-		b.recent = b.recent[len(b.recent)-b.maxRecent:]
-	}
+	b.recordRecentLocked(envelope)
 
-	matching := make([]Subscriber, 0, 8)
-	for pattern, subs := range b.subscribers {
+	exact := b.exactSubscribers[envelope.EventType]
+	if len(b.allSubscribers) == 0 && len(b.prefixSubscribers) == 0 && len(b.patternSubscribers) == 0 {
+		b.mu.Unlock()
+		for _, subscriber := range exact {
+			subscriber(ctx, envelope)
+		}
+		return nil
+	}
+	matching := make([]Subscriber, 0, len(exact)+len(b.allSubscribers)+8)
+	matching = append(matching, exact...)
+	matching = append(matching, b.allSubscribers...)
+	matching = appendPrefixSubscribers(matching, b.prefixSubscribers, envelope.EventType)
+	for pattern, subs := range b.patternSubscribers {
 		if Matches(pattern, envelope.EventType) {
 			matching = append(matching, subs...)
 		}
@@ -66,19 +84,108 @@ func (b *InMemoryBus) Subscribe(pattern string, subscriber Subscriber) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.subscribers[pattern] = append(b.subscribers[pattern], subscriber)
+	if exactEventPattern(pattern) {
+		b.exactSubscribers[pattern] = appendSubscriber(b.exactSubscribers[pattern], subscriber)
+		return
+	}
+	if prefix, ok := prefixWildcardPattern(pattern); ok {
+		if prefix == "" {
+			b.allSubscribers = appendSubscriber(b.allSubscribers, subscriber)
+			return
+		}
+		b.prefixSubscribers[prefix] = appendSubscriber(b.prefixSubscribers[prefix], subscriber)
+		return
+	}
+	b.patternSubscribers[pattern] = appendSubscriber(b.patternSubscribers[pattern], subscriber)
 }
 
 func (b *InMemoryBus) Recent(limit int) []Envelope {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	if limit <= 0 || limit > len(b.recent) {
-		limit = len(b.recent)
+	if limit <= 0 || limit > b.recentCount {
+		limit = b.recentCount
 	}
 	out := make([]Envelope, limit)
-	copy(out, b.recent[len(b.recent)-limit:])
+	start := b.recentStart + b.recentCount - limit
+	for i := 0; i < limit; i++ {
+		out[i] = b.recent[(start+i)%b.maxRecent]
+	}
 	return out
+}
+
+func (b *InMemoryBus) recordRecentLocked(envelope Envelope) {
+	if b.maxRecent <= 0 {
+		return
+	}
+	if b.recentCount < b.maxRecent {
+		index := (b.recentStart + b.recentCount) % b.maxRecent
+		b.recent[index] = envelope
+		b.recentCount++
+		return
+	}
+	b.recent[b.recentStart] = envelope
+	b.recentStart = (b.recentStart + 1) % b.maxRecent
+}
+
+func exactEventPattern(pattern string) bool {
+	return pattern != "" && !strings.Contains(pattern, "*")
+}
+
+func prefixWildcardPattern(pattern string) (string, bool) {
+	if pattern == "" || pattern == "*" {
+		return "", true
+	}
+	if strings.Count(pattern, "*") != 1 || !strings.HasSuffix(pattern, "*") {
+		return "", false
+	}
+	prefix := strings.TrimSuffix(pattern, "*")
+	if prefix == "" {
+		return "", true
+	}
+	if !strings.HasSuffix(prefix, ":") {
+		return "", false
+	}
+	return prefix, true
+}
+
+func appendPrefixSubscribers(out []Subscriber, subscribers map[string][]Subscriber, eventType string) []Subscriber {
+	if len(subscribers) == 0 {
+		return out
+	}
+	for i := 0; i < len(eventType); i++ {
+		if eventType[i] != ':' {
+			continue
+		}
+		out = append(out, subscribers[eventType[:i+1]]...)
+	}
+	return out
+}
+
+func appendSubscriber(subscribers []Subscriber, subscriber Subscriber) []Subscriber {
+	next := make([]Subscriber, len(subscribers)+1)
+	copy(next, subscribers)
+	next[len(subscribers)] = subscriber
+	return next
+}
+
+func envelopeDispatchReady(envelope Envelope) bool {
+	if envelope.SchemaVersion == "" || envelope.Timestamp.IsZero() || envelope.PayloadEncoding == "" || envelope.CorrelationID == "" {
+		return false
+	}
+	if envelope.PayloadEncoding == PayloadEncodingJSON && envelope.Payload == nil {
+		return false
+	}
+	if envelope.Metadata == nil {
+		return false
+	}
+	if correlationID, _ := envelope.Metadata["correlation_id"].(string); correlationID == envelope.CorrelationID {
+		return true
+	}
+	if correlationID, _ := envelope.Metadata["correlationId"].(string); correlationID == envelope.CorrelationID {
+		return true
+	}
+	return false
 }
 
 func Matches(pattern, eventType string) bool {

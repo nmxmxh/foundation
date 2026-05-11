@@ -33,6 +33,13 @@ Foundation enforces the fastest correct lane by boundary:
 3. external HTTP/WebSocket ingress: JSON or protobuf according to negotiated content type
 4. compatibility/admin/debug paths: JSON envelopes only with explicit boundary ownership
 
+Typed service bindings register into two runtime surfaces by default:
+`bootstrap.RegisterTypedHandlers` feeds registry protobuf dispatch for ingress,
+events, and lifecycle work; `bootstrap.RegisterTypedFrameHandlers` feeds
+`grpcsvc.Router` for internal synchronous frame dispatch. The binding remains
+single-source: request decode, handler execution, response encode, correlation
+ID, schema version, and bounded execution are preserved across both paths.
+
 Generated app checks reject app-internal `grpcsvc.Dispatch(...)` and
 `grpcsvc.Envelope` usage. That keeps JSON compatibility from becoming the
 default internal fabric while preserving HTTP/WebSocket ingress compatibility.
@@ -78,6 +85,10 @@ Handles transport-level optimization.
 - Use `go test ./...` for correctness.
 - Use `go test -bench=. ./chain ./compress ./grpcsvc ./metrics ./profiling ./slo`
   from `foundation/server-kit/go` when changing hot runtime primitives.
+- Use `go test -bench='BenchmarkTypedFrameAdapterDispatch$' -benchmem -run='^$' ./bootstrap`
+  when changing the typed frame adapter. Keep this separate from raw frame
+  dispatch benchmarks because protobuf decode/encode cost is part of the adapter
+  path, not the router-only lane.
 - Use scaffold `make lint-foundation` to run CP, database, Redis, River,
   contract drift, server-kit usage, and project scaffold checks together.
 

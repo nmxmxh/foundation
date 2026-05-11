@@ -55,6 +55,8 @@ type FFIPool struct {
 	logger logger.Logger
 
 	mu           sync.RWMutex
+	bufferPool   sync.Pool
+	errBufPool   sync.Pool
 	library      unsafe.Pointer
 	host         unsafe.Pointer
 	abiVersionFn unsafe.Pointer
@@ -86,6 +88,12 @@ func NewFFIPool(opts FFIPoolOptions) (*FFIPool, error) {
 	pool := &FFIPool{
 		logger:  opts.Logger,
 		library: handle,
+		bufferPool: sync.Pool{New: func() any {
+			return make([]byte, generated.BUFFER_TOTAL_BYTES)
+		}},
+		errBufPool: sync.Pool{New: func() any {
+			return make([]byte, 4096)
+		}},
 	}
 
 	var err error
@@ -144,7 +152,9 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 		return ProcessResponse{}, err
 	}
 
-	raw := make([]byte, generated.BUFFER_TOTAL_BYTES)
+	raw := p.bufferPool.Get().([]byte)
+	defer p.bufferPool.Put(raw)
+	clear(raw)
 	buffer, err := NewBuffer(raw)
 	if err != nil {
 		return ProcessResponse{}, err
@@ -172,7 +182,9 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 	}
 
 	unitID := []byte(req.UnitID)
-	errBuf := make([]byte, 4096)
+	errBuf := p.errBufPool.Get().([]byte)
+	defer p.errBufPool.Put(errBuf)
+	clear(errBuf)
 	status := int32(C.ovrt_call_process(
 		processFn,
 		host,

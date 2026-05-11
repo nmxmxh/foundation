@@ -40,6 +40,13 @@ func TestBufferRoundTrip(t *testing.T) {
 	if string(input) != "asset" {
 		t.Fatalf("unexpected input payload %q", string(input))
 	}
+	inputView, err := buffer.InputBytesView()
+	if err != nil {
+		t.Fatalf("InputBytesView() error = %v", err)
+	}
+	if string(inputView) != "asset" {
+		t.Fatalf("unexpected input view payload %q", string(inputView))
+	}
 
 	output, err := buffer.OutputBytes()
 	if err != nil {
@@ -47,6 +54,13 @@ func TestBufferRoundTrip(t *testing.T) {
 	}
 	if string(output) != "layout" {
 		t.Fatalf("unexpected output payload %q", string(output))
+	}
+	outputView, err := buffer.OutputBytesView()
+	if err != nil {
+		t.Fatalf("OutputBytesView() error = %v", err)
+	}
+	if string(outputView) != "layout" {
+		t.Fatalf("unexpected output view payload %q", string(outputView))
 	}
 
 	if err := buffer.SetDiagnosticsText("degraded"); err != nil {
@@ -101,11 +115,17 @@ func TestBufferBoundsAndReset(t *testing.T) {
 	if _, err := buffer.InputBytes(); err == nil {
 		t.Fatal("expected negative input length to fail")
 	}
+	if _, err := buffer.InputBytesView(); err == nil {
+		t.Fatal("expected negative input view length to fail")
+	}
 	if err := buffer.SetHeaderInt(generated.INT_IDX_OUTPUT_LENGTH, int32(generated.OUTPUT_MAX_BYTES+1)); err != nil {
 		t.Fatalf("SetHeaderInt(output length) error = %v", err)
 	}
 	if _, err := buffer.OutputBytes(); err == nil {
 		t.Fatal("expected oversized output length to fail")
+	}
+	if _, err := buffer.OutputBytesView(); err == nil {
+		t.Fatal("expected oversized output view length to fail")
 	}
 	if err := buffer.SetDiagnosticsText(strings.Repeat("x", int(generated.DIAGNOSTIC_MAX_BYTES)+1)); err == nil {
 		t.Fatal("expected oversized diagnostics to fail")

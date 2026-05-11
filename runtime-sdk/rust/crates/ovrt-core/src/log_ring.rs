@@ -17,6 +17,14 @@ pub struct LogRingBuffer<'a> {
 }
 
 impl<'a> LogRingBuffer<'a> {
+    /// # Safety
+    ///
+    /// `ptr` must point to a writable log-ring memory region that is valid for
+    /// the returned buffer lifetime. The first 16 bytes must contain the
+    /// expected atomic write/read offsets, buffer size, and wrap counter using
+    /// the runtime log-ring layout. The backing region must be at least
+    /// `64 + size` bytes long and must not be concurrently freed while this
+    /// handle is used.
     pub unsafe fn from_ptr(ptr: *mut u8) -> Self {
         let size_ptr = ptr.add(8) as *const u32;
         let size = *size_ptr;

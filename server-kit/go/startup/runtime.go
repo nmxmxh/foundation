@@ -7,6 +7,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
 	eventcontract "github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
@@ -16,13 +17,14 @@ import (
 type CloseFunc func() error
 
 type Runtime struct {
-	Logger   logger.Logger
-	Registry *registry.ServiceRegistry
-	Bus      eventcontract.Bus
-	Redis    redis.Client
-	Handler  *graceful.Handler
-	JWT      *auth.JWTManager
-	RBAC     *security.Authorizer
+	Logger      logger.Logger
+	Registry    *registry.ServiceRegistry
+	FrameRouter *grpcsvc.Router
+	Bus         eventcontract.Bus
+	Redis       redis.Client
+	Handler     *graceful.Handler
+	JWT         *auth.JWTManager
+	RBAC        *security.Authorizer
 
 	closeFns []CloseFunc
 }
@@ -32,6 +34,7 @@ type Options struct {
 	Version       string
 	Logger        logger.Logger
 	Registry      *registry.ServiceRegistry
+	FrameRouter   *grpcsvc.Router
 	Bus           eventcontract.Bus
 	Redis         redis.Client
 	BusCloser     CloseFunc
@@ -98,16 +101,21 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	if reg == nil {
 		reg = registry.New(opts.Redis, handler, l)
 	}
+	frameRouter := opts.FrameRouter
+	if frameRouter == nil {
+		frameRouter = grpcsvc.NewRouter()
+	}
 
 	runtime := &Runtime{
-		Logger:   l,
-		Registry: reg,
-		Bus:      opts.Bus,
-		Redis:    opts.Redis,
-		Handler:  handler,
-		JWT:      jwtManager,
-		RBAC:     authorizer,
-		closeFns: make([]CloseFunc, 0, 4),
+		Logger:      l,
+		Registry:    reg,
+		FrameRouter: frameRouter,
+		Bus:         opts.Bus,
+		Redis:       opts.Redis,
+		Handler:     handler,
+		JWT:         jwtManager,
+		RBAC:        authorizer,
+		closeFns:    make([]CloseFunc, 0, 4),
 	}
 	if opts.BusCloser != nil {
 		runtime.AddCloser(opts.BusCloser)

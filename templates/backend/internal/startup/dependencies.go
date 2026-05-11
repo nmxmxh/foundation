@@ -11,6 +11,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/healthcheck"
 	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
@@ -30,6 +31,7 @@ type Dependencies struct {
 	Resilience    *resilience.Runtime
 	Handler       *graceful.Handler
 	Registry      *registry.ServiceRegistry
+	FrameRouter   *grpcsvc.Router
 }
 
 // InitDependencies initializes all application dependencies
@@ -87,6 +89,7 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 		graceful.WithEventEmitter(graceful.NewRedisEventEmitter(deps.Bus)),
 	)
 	deps.Registry = registry.New(deps.Redis, deps.Handler, kitLog)
+	deps.FrameRouter = grpcsvc.NewRouter()
 
 	resilienceRuntime, err := initResilience(ctx)
 	if err != nil {
@@ -113,10 +116,12 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 
 func initDatabase(ctx context.Context, cfg *config.Config) (database.RuntimeStore, error) {
 	db, err := database.Connect(ctx, cfg.DatabaseURL, cfg.StateStore, database.PoolOptions{
-		MaxConns:          25,
-		MinConns:          2,
+		MaxConns:          cfg.DBMaxConns,
+		MinConns:          cfg.DBMinConns,
 		HealthCheckPeriod: 30 * time.Second,
 		ConnectTimeout:    5 * time.Second,
+		QueryTimeout:      cfg.DBQueryTimeout,
+		AcquireTimeout:    cfg.DBAcquireTimeout,
 	})
 	if err != nil {
 		return nil, err

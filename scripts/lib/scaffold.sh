@@ -150,7 +150,7 @@ scaffold_sync_foundation_modules() {
         fi
     fi
 
-    if [[ "$PROFILE" == "full" || "$PROFILE" == "backend" ]]; then
+    if [[ "$PROFILE" == "full" || "$PROFILE" == "backend" || -f "$PROJECT_PATH/backend/go.mod" ]]; then
         for dir in server-kit runtime-transport config-contracts tooling; do
             if [[ "${DRY_RUN:-false}" == "true" ]]; then
                 foundation_log_info "[DRY RUN] Would refresh foundation/$dir"

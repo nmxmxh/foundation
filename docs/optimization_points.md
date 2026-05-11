@@ -1,6 +1,6 @@
 # Optimization Points
 
-Date: 2026-05-05
+Date: 2026-05-09
 
 This document tracks the deliberate performance and architecture carryovers folded into the scaffold after reviewing `fintech_v1` history and the current performance synthesis. For cross-cutting Go, networking, PostgreSQL, Rust, benchmarking, and documentation-tracking practices, see `foundation/docs/performance_practices.md`. For TLA+/`Specifying Systems` state-machine, invariant, liveness, real-time bound, composition, and refinement practices, see `foundation/docs/tla_architecture_practices.md`. For deep-dives into legendary computer science optimization tricks, see [Coding Magic](file:///Users/okhai/Desktop/OVASABI%20STUDIOS/reframe_v1/foundation/docs/coding_magic.md).
 
@@ -30,13 +30,38 @@ This document tracks the deliberate performance and architecture carryovers fold
 22. Long-lived connection paths must document deadlines, write queue bounds, topic authorization, lifecycle cleanup, backpressure, and overload shedding.
 23. Significant performance decisions must update the relevant doc in the same change set: coding, database, benchmark, runtime, WebSocket, or this optimization tracker.
 24. High-risk concurrency and transport optimizations must name visible state, hidden state, invariants, liveness/fairness, real-time bounds, and refinement/parity tests before becoming defaults.
+25. Scale proof must include load-shaped local regression tests before service-backed load tests: tenant predicates, fanout, reconnect/churn, stampede coalescing, queue saturation, config convergence, and p95/p99 latency.
+26. Hot fanout paths should prefer exact topics plus pre-indexed target sets. Wildcards remain useful for observability and broad subscriptions, but product hot paths should not scan broad pattern state per event.
+27. Bounded observability buffers should use fixed rings instead of append-and-slice retention. Sustained event pressure must not allocate just to keep the latest `N` records.
+28. WebSocket broadcast pressure should copy from a contiguous local connection index; map scans are acceptable for maintenance paths, not for high-frequency fanout.
+29. In-memory test stores should model real query shape: tenant/scope indexes first, then scalar filter indexes, with defensive copies preserved at public API boundaries.
+30. The scaffolded Postgres schema must include the same state-store table, uniqueness constraints, and scoped indexes that `server-kit/go/database.PostgresDB` expects. A generated app should not boot with `STATE_STORE_DRIVER=postgres` against a schema that only exists in the adapter.
+31. At 1M local scale, avoid confusing target lookup with delivery. Resolving a user/device target should stay indexed; broadcast routing should use adaptive borrowed batches, while delivery remains bounded by per-connection write queues and slow-client policy.
+32. Colon-delimited event names are not arbitrary strings in hot paths. Exact subscriptions should use direct maps, prefix wildcards such as `tenant:org_0042:*` should use prefix buckets, and complex wildcard scans should stay off product fanout lanes.
+33. Store indexes must match both predicate and result order. For bounded list reads, the right shape is scoped/filter candidate selection plus order-aware early stop at `LIMIT`, not "scan broad state, sort everything, then trim".
+34. Binary frame control fields have different cardinality. `EventType` and `SchemaVersion` are bounded vocabularies and can be interned in owned compatibility decode; `CorrelationID` and payload bytes are per-message data and must remain owned or borrowed according to lifetime.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
+
 - **Singleflight Cache**: `GetOrSet` prevents cache stampedes via concurrent request coalescing and double-check locking.
 - **Adaptive Concurrency**: Worker engine dynamically scales goroutine pools based on queue depth (up to 64 per queue) to handle traffic spikes.
 - **Vectorized Batching**: Support for bulk `EventBatch` envelopes reduces syscall and JS event-loop overhead for high-frequency streams.
 - **SharedArrayBuffer Ring Buffer**: Zero-copy log streaming from WASM to the host without main-thread blocking.
 - **Beautiful Diagnostics**: High-density, table-aligned logging for sub-millisecond anomaly detection.
+
+**Scale Pressure Pass (2026-05-09)**:
+
+- **Exact Event Fanout**: Exact subscribers are separated from wildcard subscribers; hot tenant events avoid wildcard scans.
+- **Prefix Event Fanout**: colon-prefix wildcards are bucketed by prefix so tenant wildcard routes scale with event depth and matching subscribers instead of total wildcard subscriptions.
+- **Recent Event Ring**: In-memory and Redis event buses keep bounded recent history with a fixed ring buffer.
+- **No-Alloc Event Validation**: common normalized envelopes validate event type and simple metadata without `strings.Split` or metadata map materialization.
+- **WebSocket Route Index**: local broadcast resolves from a contiguous connection order index; user and device routes stay map-indexed.
+- **Adaptive Broadcast Batches**: broad WebSocket fanout can iterate borrowed target chunks so routing scales by batch count instead of copying a huge slice or invoking one callback per connection.
+- **Frame Control String Interning**: owned binary frame decode reuses low-cardinality event/schema strings while keeping correlation IDs owned per message.
+- **MemoryDB Filter/Order Index**: scalar `Data` filters narrow tenant-list candidates and order-aware index logs let bounded reads stop at `LIMIT` before broad materialization.
+- **Scale Harness**: `appbench` now exercises DB pressure, Redis fanout, WebSocket churn, cache stampedes, queue saturation, config convergence, and mixed p95/p99 latency without external services.
+- **1M Scale Slice**: `BenchmarkScale1M_*` validates 1M record/connection/subscription shapes with fixed benchmark iteration counts.
+- **Postgres State Store Alignment**: scalar JSONB filters push down before `LIMIT`, state-store methods use query budgets, and the scaffold migration creates `governance_state_records` plus scoped indexes.
 
 ## Deferred behind stubs
 

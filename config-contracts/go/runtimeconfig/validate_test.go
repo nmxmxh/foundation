@@ -1,6 +1,9 @@
 package runtimeconfig
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
 
 func TestValidateServerRuntimeConfig(t *testing.T) {
 	cfg := ServerRuntimeConfig{
@@ -226,6 +229,79 @@ func TestDerivePublicNormalizesSchemaVersion(t *testing.T) {
 	public := DerivePublic(cfg)
 	if public.SchemaVersion != RuntimeConfigSchemaVersion {
 		t.Fatalf("SchemaVersion = %q, want %q", public.SchemaVersion, RuntimeConfigSchemaVersion)
+	}
+}
+
+func TestRuntimeConfigValidationConvergesAcrossConcurrentReaders(t *testing.T) {
+	cfg := validServerConfigForTest()
+	cfg.SchemaVersion = "v1"
+	cfg.Public.SchemaVersion = "v1"
+	cfg.Public.RuntimeMemory = RuntimeMemoryConfig{
+		SharedMemory:   "auto",
+		TransportOrder: []string{"sab", "transferable", "postMessage", "ws", "http"},
+		Compression:    []string{"br", "gzip", "identity"},
+		ArenaBytes:     4 * 1024 * 1024,
+	}
+	cfg.SLOs = SLOConfig{DispatchP99LatencyMS: 100, WorkerSuccessRate: 0.999, EventDeliveryLagMS: 250}
+	cfg.Security.PostQuantum = PostQuantumConfig{TLSHybridKEM: "auto", SignatureAlgorithm: "classical"}
+
+	const readers = 64
+	var wg sync.WaitGroup
+	errs := make(chan error, readers)
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := ValidateServer(cfg); err != nil {
+				errs <- err
+				return
+			}
+			public := DerivePublic(cfg)
+			if public.SchemaVersion != RuntimeConfigSchemaVersion {
+				errs <- ValidateSchemaVersion(public.SchemaVersion)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkValidateServerRuntimeConfig(b *testing.B) {
+	cfg := validServerConfigForTest()
+	cfg.Public.RuntimeMemory = RuntimeMemoryConfig{
+		SharedMemory:   "auto",
+		TransportOrder: []string{"sab", "transferable", "postMessage", "ws", "http"},
+		Compression:    []string{"br", "gzip", "identity"},
+		ArenaBytes:     4 * 1024 * 1024,
+	}
+	cfg.SLOs = SLOConfig{DispatchP99LatencyMS: 100, WorkerSuccessRate: 0.999, EventDeliveryLagMS: 250}
+	cfg.Security.PostQuantum = PostQuantumConfig{TLSHybridKEM: "auto", SignatureAlgorithm: "classical"}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := ValidateServer(cfg); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkDerivePublicRuntimeConfig(b *testing.B) {
+	cfg := validServerConfigForTest()
+	cfg.SchemaVersion = "v1"
+	cfg.Public.SchemaVersion = "v1"
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if public := DerivePublic(cfg); public.SchemaVersion != RuntimeConfigSchemaVersion {
+			b.Fatalf("schema = %q, want %q", public.SchemaVersion, RuntimeConfigSchemaVersion)
+		}
 	}
 }
 

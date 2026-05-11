@@ -4,6 +4,20 @@ node_modules
 # Build output
 dist
 dist-ssr
+target
+**/target/
+
+# Local tool/test cache
+.cache/
+**/.cache/
+.docker-cache/
+
+# Test binaries
+*.test
+
+# Go coverage output
+*.out
+coverage.html
 
 # Local env files
 .env

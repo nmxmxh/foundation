@@ -29,6 +29,10 @@ coverage/
 go.work
 go.work.sum
 
+# Rust
+target/
+**/target/
+
 # Dependency directories
 vendor/
 

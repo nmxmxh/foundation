@@ -3,6 +3,7 @@ set -euo pipefail
 
 target="${1:-.}"
 failed=0
+app_proto_count=0
 
 resolve_path() {
   local relative="$1"
@@ -87,6 +88,53 @@ if resolve_path "foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp
     "foundation/runtime-sdk/rust/crates/ovrt-core/src/generated.rs"
 else
   echo "[OK] runtime-sdk not vendored for this project"
+fi
+
+if [[ -d "$target/api/protos" ]]; then
+  while IFS= read -r proto_file; do
+    [[ "$proto_file" == */transport/v1/* ]] && continue
+    [[ "$proto_file" == */_template/* ]] && continue
+    app_proto_count=$((app_proto_count + 1))
+    generated="${proto_file%.proto}.pb.go"
+    if [[ -s "$generated" ]]; then
+      echo "[OK] app protobuf Go binding: ${generated#$target/}"
+    else
+      echo "[FAIL] app protobuf Go binding missing"
+      echo "  source: ${proto_file#$target/}"
+      echo "  expected: ${generated#$target/}"
+      failed=1
+    fi
+  done < <(find "$target/api/protos" -name '*.proto' -type f | sort)
+else
+  echo "[OK] no app protobuf directory"
+fi
+
+if [[ "$app_proto_count" -gt 0 && -d "$target/internal" ]]; then
+  startup_hits="$(rg -n "RegisterTypedPlanes|RegisterTypedFrameHandlers" "$target/internal" "$target/cmd" \
+    --glob '!**/*test*' 2>/dev/null || true)"
+  typed_hits="$(rg -n "AllTypedHandlers|GetTypedHandlers|BuildTypedServiceHandlers|TypedServiceHandlers" "$target/internal" \
+    --glob '!**/*test*' 2>/dev/null || true)"
+  if [[ -n "$startup_hits" && -n "$typed_hits" ]]; then
+    echo "[OK] app typed service plane registered"
+  else
+    echo "[FAIL] app typed service plane registered"
+    [[ -z "$typed_hits" ]] && echo "  missing: app-owned typed handler bindings in internal/"
+    [[ -z "$startup_hits" ]] && echo "  missing: startup registration into typed frame/registry plane"
+    failed=1
+  fi
+elif [[ "$app_proto_count" -gt 0 && -d "$target/backend/internal" ]]; then
+  startup_hits="$(rg -n "RegisterTypedPlanes|RegisterTypedFrameHandlers|FrameRouter" "$target/backend/internal" \
+    --glob '!**/*test*' 2>/dev/null || true)"
+  typed_hits="$(rg -n "AllTypedHandlers|GetTypedHandlers|BuildTypedServiceHandlers|TypedServiceHandlers" "$target/backend/internal" \
+    --glob '!**/*test*' 2>/dev/null || true)"
+  if [[ -n "$startup_hits" && -n "$typed_hits" ]]; then
+    echo "[OK] app typed service plane registered"
+  else
+    echo "[FAIL] app typed service plane registered"
+    [[ -z "$typed_hits" ]] && echo "  missing: app-owned typed handler bindings in backend/internal/"
+    [[ -z "$startup_hits" ]] && echo "  missing: backend startup registration into typed frame/registry plane"
+    failed=1
+  fi
 fi
 
 if [[ "$failed" -ne 0 ]]; then

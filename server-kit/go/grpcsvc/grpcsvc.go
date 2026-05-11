@@ -9,6 +9,8 @@ import (
 	"net"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/encoding"
@@ -22,6 +24,7 @@ const (
 	dispatchFrameMethod        = "/foundation.runtime.v1.RuntimeService/DispatchFrame"
 	defaultMaxEventTypeBytes   = 256
 	defaultMaxCorrelationBytes = 512
+	defaultFrameStringTableMax = 4096
 )
 
 type Envelope struct {
@@ -62,6 +65,12 @@ type DirectFrameClient struct {
 	maxCorrBytes  int
 }
 
+type BoundFrameClient struct {
+	eventType    string
+	handler      FrameHandler
+	maxCorrBytes int
+}
+
 type Router struct {
 	handlers      map[string]Handler
 	frameHandlers map[string]FrameHandler
@@ -91,6 +100,7 @@ var (
 	binaryFrameForceCodecOption  = grpc.ForceCodec(binaryFrameCodec{})
 	jsonForceCodecOptions        = []grpc.CallOption{jsonForceCodecOption}
 	binaryFrameForceCodecOptions = []grpc.CallOption{binaryFrameForceCodecOption}
+	frameControlStrings          = newFrameStringTable(defaultFrameStringTableMax)
 )
 
 func NewRouter() *Router {
@@ -137,14 +147,12 @@ func (r *Router) RegisterFrame(eventType string, handler FrameHandler) error {
 }
 
 func (r *Router) DispatchFrame(ctx context.Context, frame Frame) (Frame, error) {
-	if r == nil {
-		return Frame{}, errors.New("grpc router is nil")
+	if r != nil {
+		if h := r.frameHandlers[frame.EventType]; h != nil {
+			return h(ctx, frame)
+		}
 	}
-	h := r.frameHandlers[frame.EventType]
-	if h == nil {
-		return Frame{}, fmt.Errorf("no grpc frame handler for %s", frame.EventType)
-	}
-	return h(ctx, frame)
+	return Frame{}, dispatchFrameError(r, frame.EventType)
 }
 
 func NewServer(router *Router, opts ServerOptions) *grpc.Server {
@@ -234,14 +242,55 @@ func NewDirectFrameClient(router *Router, opts ServerOptions) *DirectFrameClient
 	}
 }
 
+func NewBoundFrameClient(router *Router, eventType string, opts ServerOptions) (*BoundFrameClient, error) {
+	if router == nil {
+		return nil, errors.New("grpc router is nil")
+	}
+	eventType = strings.TrimSpace(eventType)
+	maxEventBytes := opts.MaxEventTypeBytes
+	if maxEventBytes <= 0 {
+		maxEventBytes = defaultMaxEventTypeBytes
+	}
+	maxCorrBytes := opts.MaxCorrelationBytes
+	if maxCorrBytes <= 0 {
+		maxCorrBytes = defaultMaxCorrelationBytes
+	}
+	if eventType == "" {
+		return nil, errors.New("grpc event type is required")
+	}
+	if len(eventType) > maxEventBytes {
+		return nil, fmt.Errorf("grpc event type too large: %d > %d", len(eventType), maxEventBytes)
+	}
+	handler := router.frameHandlers[eventType]
+	if handler == nil {
+		return nil, fmt.Errorf("no grpc frame handler for %s", eventType)
+	}
+	return &BoundFrameClient{
+		eventType:    eventType,
+		handler:      handler,
+		maxCorrBytes: maxCorrBytes,
+	}, nil
+}
+
 func (c *DirectFrameClient) DispatchFrame(ctx context.Context, frame Frame) (Frame, error) {
-	if c == nil || c.router == nil {
-		return Frame{}, errors.New("direct frame client router is nil")
+	if c != nil && c.router != nil && frameValid(frame, c.maxEventBytes, c.maxCorrBytes) {
+		return c.router.DispatchFrame(ctx, frame)
 	}
-	if err := validateFrame(frame, c.maxEventBytes, c.maxCorrBytes); err != nil {
-		return Frame{}, err
+	return Frame{}, directFrameDispatchError(c, frame)
+}
+
+func (c *BoundFrameClient) DispatchFrame(ctx context.Context, frame Frame) (Frame, error) {
+	if c != nil && c.handler != nil && frame.EventType == c.eventType && len(frame.CorrelationID) <= c.maxCorrBytes {
+		return c.handler(ctx, frame)
 	}
-	return c.router.DispatchFrame(ctx, frame)
+	return Frame{}, boundFrameDispatchError(c, frame)
+}
+
+func (c *BoundFrameClient) DispatchFrameTrusted(ctx context.Context, frame Frame) (Frame, error) {
+	if c != nil && c.handler != nil {
+		return c.handler(ctx, frame)
+	}
+	return Frame{}, boundFrameClientNilError()
 }
 
 func (c *Client) Dispatch(ctx context.Context, envelope Envelope, opts ...grpc.CallOption) (Envelope, error) {
@@ -430,6 +479,47 @@ func validateFrame(frame Frame, maxEventTypeBytes, maxCorrelationBytes int) erro
 	return nil
 }
 
+func frameValid(frame Frame, maxEventTypeBytes, maxCorrelationBytes int) bool {
+	return frame.EventType != "" &&
+		len(frame.EventType) <= maxEventTypeBytes &&
+		len(frame.CorrelationID) <= maxCorrelationBytes
+}
+
+//go:noinline
+func dispatchFrameError(r *Router, eventType string) error {
+	if r == nil {
+		return errors.New("grpc router is nil")
+	}
+	return fmt.Errorf("no grpc frame handler for %s", eventType)
+}
+
+//go:noinline
+func directFrameDispatchError(c *DirectFrameClient, frame Frame) error {
+	if c == nil || c.router == nil {
+		return errors.New("direct frame client router is nil")
+	}
+	return validateFrame(frame, c.maxEventBytes, c.maxCorrBytes)
+}
+
+//go:noinline
+func boundFrameDispatchError(c *BoundFrameClient, frame Frame) error {
+	if c == nil || c.handler == nil {
+		return errors.New("bound frame client handler is nil")
+	}
+	if frame.EventType != c.eventType {
+		return fmt.Errorf("bound frame client event mismatch: %s != %s", frame.EventType, c.eventType)
+	}
+	if len(frame.CorrelationID) > c.maxCorrBytes {
+		return fmt.Errorf("grpc correlation id too large: %d > %d", len(frame.CorrelationID), c.maxCorrBytes)
+	}
+	return errors.New("bound frame client dispatch rejected")
+}
+
+//go:noinline
+func boundFrameClientNilError() error {
+	return errors.New("bound frame client handler is nil")
+}
+
 type jsonCodec struct{}
 
 func (jsonCodec) Name() string { return CodecName }
@@ -514,9 +604,9 @@ func unmarshalFrame(data []byte) (Frame, error) {
 	if offset != len(data) {
 		return Frame{}, errors.New("trailing bytes in foundation binary frame")
 	}
-	frame.EventType = string(eventType)
+	frame.EventType = frameControlStrings.internBytes(eventType)
 	frame.CorrelationID = string(correlationID)
-	frame.SchemaVersion = string(schemaVersion)
+	frame.SchemaVersion = frameControlStrings.internBytes(schemaVersion)
 	return frame, nil
 }
 
@@ -577,4 +667,47 @@ func first(values []string) string {
 		return ""
 	}
 	return values[0]
+}
+
+type frameStringTable struct {
+	mu     sync.Mutex
+	max    int
+	values atomic.Value
+}
+
+func newFrameStringTable(max int) *frameStringTable {
+	if max <= 0 {
+		max = defaultFrameStringTableMax
+	}
+	table := &frameStringTable{max: max}
+	table.values.Store(map[string]string{})
+	return table
+}
+
+func (t *frameStringTable) internBytes(value []byte) string {
+	if len(value) == 0 {
+		return ""
+	}
+	values := t.values.Load().(map[string]string)
+	if interned, ok := values[string(value)]; ok {
+		return interned
+	}
+
+	owned := string(value)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	values = t.values.Load().(map[string]string)
+	if interned, ok := values[owned]; ok {
+		return interned
+	}
+	if len(values) >= t.max {
+		return owned
+	}
+	next := make(map[string]string, len(values)+1)
+	for key, interned := range values {
+		next[key] = interned
+	}
+	next[owned] = owned
+	t.values.Store(next)
+	return owned
 }

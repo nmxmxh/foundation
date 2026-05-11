@@ -14,7 +14,7 @@
 
 services:
   test-postgres:
-    image: ${TEST_POSTGRES_IMAGE:-postgres:${POSTGRES_VERSION:-18}-alpine}
+    image: ${TEST_POSTGRES_IMAGE:-postgres:18-alpine}
     container_name: "{{PROJECT_NAME}}-test-postgres"
     environment:
       POSTGRES_USER: ${TEST_DB_USER:-postgres}

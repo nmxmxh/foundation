@@ -150,6 +150,36 @@ func TestEngineInjectsJobCorrelationIntoProcessorContext(t *testing.T) {
 	}
 }
 
+func TestDetachedContextWithTimeoutKeepsLiveParentValues(t *testing.T) {
+	type contextKey string
+	parent := context.WithValue(context.Background(), contextKey("request_id"), "req_live")
+	ctx, cancel := DetachedContextWithTimeout(parent, time.Second)
+	defer cancel()
+
+	if got := ctx.Value(contextKey("request_id")); got != "req_live" {
+		t.Fatalf("request value = %v, want req_live", got)
+	}
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("detached context should be live: %v", err)
+	}
+}
+
+func TestDetachedContextWithTimeoutSurvivesCancelledParent(t *testing.T) {
+	type contextKey string
+	parent, cancelParent := context.WithCancel(context.WithValue(context.Background(), contextKey("request_id"), "req_cancelled"))
+	cancelParent()
+
+	ctx, cancel := DetachedContextWithTimeout(parent, time.Second)
+	defer cancel()
+
+	if got := ctx.Value(contextKey("request_id")); got != "req_cancelled" {
+		t.Fatalf("request value = %v, want req_cancelled", got)
+	}
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("detached context should not inherit cancellation: %v", err)
+	}
+}
+
 func TestEngineRecordsObservabilityStates(t *testing.T) {
 	observability.Default().Reset()
 	engine := NewEngine(map[string]int{"operations_core": 1}, nil)
@@ -370,5 +400,35 @@ func TestBridgeWorkDelegatesToProcessor(t *testing.T) {
 	}
 	if processor.calls.Load() != 1 {
 		t.Fatalf("processor calls = %d", processor.calls.Load())
+	}
+}
+
+func TestBridgeWorkInjectsCorrelationIntoProcessorContext(t *testing.T) {
+	processor := &correlationProcessor{
+		fakeProcessor: fakeProcessor{
+			kind:        "operations_lifecycle",
+			queue:       "operations_core",
+			maxAttempts: 1,
+		},
+		seen: make(chan string, 1),
+	}
+	bridge := &Bridge{Processor: processor}
+	err := bridge.Work(context.Background(), &river.Job[Job]{Args: Job{
+		JobKind:       "operations_lifecycle",
+		Queue:         "operations_core",
+		MaxAttempts:   1,
+		CorrelationID: "corr_bridge_context",
+	}})
+	if err != nil {
+		t.Fatalf("Bridge Work() error = %v", err)
+	}
+
+	select {
+	case got := <-processor.seen:
+		if got != "corr_bridge_context" {
+			t.Fatalf("correlation ID = %q, want %q", got, "corr_bridge_context")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("processor did not receive bridge job")
 	}
 }

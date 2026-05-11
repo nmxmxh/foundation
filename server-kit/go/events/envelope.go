@@ -3,6 +3,8 @@ package events
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	transportpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/transport/v1"
@@ -34,17 +36,23 @@ func (e Envelope) Validate() error {
 		return err
 	}
 
-	md := metadata.FromMap(e.Metadata)
-	metadataCorrelationID := md.CorrelationID
-	correlationID := md.NormalizeCorrelation(e.CorrelationID)
-	if correlationID == "" {
-		return errors.New("missing correlation_id")
-	}
-	if e.CorrelationID != "" && metadataCorrelationID != "" && metadataCorrelationID != e.CorrelationID {
-		return errors.New("metadata.correlation_id must match envelope correlation_id")
-	}
-	if err := md.Validate(); err != nil {
-		return err
+	if fast, err := validateEnvelopeMetadataFast(e.Metadata, e.CorrelationID); fast {
+		if err != nil {
+			return err
+		}
+	} else {
+		md := metadata.FromMap(e.Metadata)
+		metadataCorrelationID := md.CorrelationID
+		correlationID := md.NormalizeCorrelation(e.CorrelationID)
+		if correlationID == "" {
+			return errors.New("missing correlation_id")
+		}
+		if e.CorrelationID != "" && metadataCorrelationID != "" && metadataCorrelationID != e.CorrelationID {
+			return errors.New("metadata.correlation_id must match envelope correlation_id")
+		}
+		if err := md.Validate(); err != nil {
+			return err
+		}
 	}
 
 	if err := ValidateSchemaVersion(e.SchemaVersion); err != nil {
@@ -64,6 +72,75 @@ func (e Envelope) Validate() error {
 	default:
 		return errors.New("unsupported payload_encoding")
 	}
+}
+
+func validateEnvelopeMetadataFast(raw map[string]any, envelopeCorrelationID string) (bool, error) {
+	correlationID := strings.TrimSpace(envelopeCorrelationID)
+	metadataCorrelationID := ""
+	metadataCorrelationIDRaw := ""
+	tokenFields := [5]string{}
+	tokenCount := 0
+
+	for key, value := range raw {
+		switch key {
+		case "ai_confidence", "aiConfidence", "validity_period", "validityPeriod", "attributes", "tags", "categories":
+			return false, nil
+		case "correlation_id", "correlationId":
+			str, ok := value.(string)
+			if !ok {
+				continue
+			}
+			metadataCorrelationIDRaw = str
+			metadataCorrelationID = strings.TrimSpace(str)
+		case "causation_id", "causationId", "request_id", "requestId", "idempotency_key", "idempotencyKey", "trace_id", "traceId", "span_id", "spanId":
+			str, ok := value.(string)
+			if !ok || strings.TrimSpace(str) == "" {
+				continue
+			}
+			if tokenCount == len(tokenFields) {
+				return false, nil
+			}
+			tokenFields[tokenCount] = strings.TrimSpace(str)
+			tokenCount++
+		default:
+			continue
+		}
+	}
+
+	if correlationID == "" {
+		correlationID = metadataCorrelationID
+	}
+	if correlationID == "" {
+		return true, errors.New("missing correlation_id")
+	}
+	if envelopeCorrelationID != "" && metadataCorrelationIDRaw != "" && metadataCorrelationIDRaw != envelopeCorrelationID {
+		return true, errors.New("metadata.correlation_id must match envelope correlation_id")
+	}
+	if err := validateMetadataTokenFast("correlation_id", correlationID); err != nil {
+		return true, err
+	}
+	for i := 0; i < tokenCount; i++ {
+		if err := validateMetadataTokenFast("token", tokenFields[i]); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
+}
+
+func validateMetadataTokenFast(name, value string) error {
+	if value == "" {
+		return nil
+	}
+	if len(value) > 128 {
+		return fmt.Errorf("metadata.%s has invalid format", name)
+	}
+	for _, r := range value {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == ':' || r == '-' {
+			continue
+		}
+		return fmt.Errorf("metadata.%s has invalid format", name)
+	}
+	return nil
 }
 
 // Normalize mutates envelope defaults for schema version and timestamp.

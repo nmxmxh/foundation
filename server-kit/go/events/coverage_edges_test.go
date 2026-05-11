@@ -137,9 +137,6 @@ func TestRedisBusConsumeLoopAndSleep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToBinary() error = %v", err)
 	}
-	if err := client.Publish(context.Background(), "events:orders-channel", raw); err != nil {
-		t.Fatalf("Publish() error = %v", err)
-	}
 	bus.consumeLoop(singleMessage(raw))
 	select {
 	case <-done:

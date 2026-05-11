@@ -30,7 +30,7 @@ Primary performance companions:
 * **Extended Modules** (v1.0.0):
 
 | Module | Package | Purpose |
-|--------|---------|---------|
+| -------- | --------- | --------- |
 | **Circuit Breaker** | `circuitbreaker` | Fault tolerance for external service calls with configurable thresholds |
 | **Feature Flags** | `featureflags` | Structured feature toggles with percentage rollouts and user targeting |
 | **Distributed Tracing** | `tracing` | OpenTelemetry integration with correlation ID bridging |
@@ -76,6 +76,7 @@ Primary performance companions:
 * Every mutating command **must** carry a `correlationId`.
 * Incoming streams reconcile by carrying this identifier through sub-routes or workers.
 * Worker runtimes must inject the job correlation ID into `context.Context` before calling processors so tracing, graceful events, and metadata emission share one trusted request chain.
+* Cascading jobs, failure persistence, audit writes, and other durable follow-up operations from inside a worker must use a bounded detached context that preserves metadata values but does not inherit an already-cancelled or nearly-expired worker deadline. This prevents a parent job timeout from silently dropping a required child job while still enforcing a small enqueue/write budget.
 * Header-derived user, session, device, organization, role, forwarded IP, and real IP values are provisional metadata. Auth and proxy-trust middleware must overwrite them from trusted claims or trusted edge headers before authorization or domain logic relies on them.
 
 ### 2. Client Stateful Pipeline Boundaries
@@ -140,6 +141,9 @@ Primary performance companions:
 * Use `server-kit` as a bound runtime layer, not as copied reference code.
 * Register database, Redis, object storage, and other critical dependencies with `resilience` during startup so health, circuit, retry, degradation, and failure-drill behavior share one dependency model.
 * Route HTTP and WebSocket ingress through `registry`, `httpapi`, `metadata`, `graceful`, `security`, `compress`, `observability`, `wsrouting`, and `wsmetrics` before app handlers receive payloads.
+* Keep scalar request validation in-process when it is already allocation-free and nanosecond-scale. Use `runtimehost`/Rust only when deterministic compute is large enough to amortize the FFI, stdio, shm, or WASM boundary.
+* App Rust compute must expose a Foundation runtime descriptor and stable schema names before services depend on it. The service contract should remain the same whether the selected lane is direct Go, native Rust, shared-memory Rust, or WASM.
+* Financial kernels must use integer minor units and checked arithmetic only. Floats are not allowed for ledger balances, merchant settlement, fee calculation, stablecoin reserve math, or compliance thresholds.
 * Keep worker throughput bounded through server-kit queue configuration and chain helpers instead of ad-hoc goroutine fan-out.
 * Run `make lint-foundation` or `scripts/checks/server_kit_usage_check.sh .` after scaffold sync. `.foundation` projects receive deep wiring checks; intentionally custom apps should either adopt the scaffold profile or remain explicitly outside that contract.
 

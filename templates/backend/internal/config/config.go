@@ -3,6 +3,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -18,6 +20,12 @@ type Config struct {
 	// Database
 	DatabaseURL      string
 	StateStore       string
+	DBHost           string
+	DBPort           int
+	DBUser           string
+	DBPassword       string
+	DBName           string
+	DBSSLMode        string
 	DBMaxConns       int
 	DBMinConns       int
 	DBAcquireTimeout time.Duration
@@ -63,6 +71,12 @@ func Load() (*Config, error) {
 		LogLevel:                            getEnv("LOG_LEVEL", "info"),
 		DatabaseURL:                         getEnv("DATABASE_URL", ""),
 		StateStore:                          getEnv("STATE_STORE_DRIVER", "postgres"),
+		DBHost:                              getEnv("DB_HOST", ""),
+		DBPort:                              getEnvInt("DB_PORT", 5432),
+		DBUser:                              getEnv("DB_USER", "postgres"),
+		DBPassword:                          getEnv("DB_PASSWORD", ""),
+		DBName:                              getEnv("DB_NAME", "{{PROJECT_NAME}}_dev"),
+		DBSSLMode:                           getEnv("DB_SSLMODE", "disable"),
 		DBMaxConns:                          getEnvInt("DB_MAX_CONNS", 0),
 		DBMinConns:                          getEnvInt("DB_MIN_CONNS", 0),
 		DBAcquireTimeout:                    getEnvDuration("DB_ACQUIRE_TIMEOUT", 100*time.Millisecond),
@@ -88,6 +102,9 @@ func Load() (*Config, error) {
 		PostQuantumCryptoInventoryRequired:  getEnvBool("POST_QUANTUM_CRYPTO_INVENTORY_REQUIRED", true),
 		PostQuantumLongLivedArtifactSigning: getEnvBool("POST_QUANTUM_LONG_LIVED_ARTIFACT_SIGNING", false),
 	}
+	if cfg.DatabaseURL == "" {
+		cfg.DatabaseURL = databaseURLFromParts(cfg.DBUser, cfg.DBPassword, cfg.DBHost, cfg.DBPort, cfg.DBName, cfg.DBSSLMode)
+	}
 
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -96,8 +113,37 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+func databaseURLFromParts(user, password, host string, port int, dbName, sslMode string) string {
+	if host == "" || dbName == "" {
+		return ""
+	}
+	if port <= 0 {
+		port = 5432
+	}
+	if user == "" {
+		user = "postgres"
+	}
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+	userInfo := url.User(user)
+	if password != "" {
+		userInfo = url.UserPassword(user, password)
+	}
+	u := url.URL{
+		Scheme: "postgres",
+		User:   userInfo,
+		Host:   net.JoinHostPort(host, strconv.Itoa(port)),
+		Path:   "/" + dbName,
+	}
+	q := u.Query()
+	q.Set("sslmode", sslMode)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 func (c *Config) validate() error {
-	if c.DatabaseURL == "" {
+	if c.DatabaseURL == "" && c.StateStore != "memory" {
 		return fmt.Errorf("DATABASE_URL is required")
 	}
 	if c.JWTSecret == "" && c.Env == "production" {

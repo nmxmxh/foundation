@@ -19,10 +19,15 @@ type RedisBus struct {
 	nodeID  string
 	logger  logger.Logger
 
-	mu          sync.RWMutex
-	subscribers map[string][]Subscriber
-	recent      []Envelope
-	maxRecent   int
+	mu                 sync.RWMutex
+	exactSubscribers   map[string][]Subscriber
+	allSubscribers     []Subscriber
+	prefixSubscribers  map[string][]Subscriber
+	patternSubscribers map[string][]Subscriber
+	recent             []Envelope
+	recentStart        int
+	recentCount        int
+	maxRecent          int
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -42,15 +47,17 @@ func NewRedisBus(client rediskit.Client, channel string, maxRecent int, l logger
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	bus := &RedisBus{
-		client:      client,
-		channel:     channel,
-		nodeID:      fmt.Sprintf("bus-%d", time.Now().UTC().UnixNano()),
-		logger:      l,
-		subscribers: map[string][]Subscriber{},
-		recent:      make([]Envelope, 0, maxRecent),
-		maxRecent:   maxRecent,
-		ctx:         ctx,
-		cancel:      cancel,
+		client:             client,
+		channel:            channel,
+		nodeID:             fmt.Sprintf("bus-%d", time.Now().UTC().UnixNano()),
+		logger:             l,
+		exactSubscribers:   map[string][]Subscriber{},
+		prefixSubscribers:  map[string][]Subscriber{},
+		patternSubscribers: map[string][]Subscriber{},
+		recent:             make([]Envelope, maxRecent),
+		maxRecent:          maxRecent,
+		ctx:                ctx,
+		cancel:             cancel,
 	}
 	bus.startListener()
 	return bus
@@ -85,17 +92,32 @@ func (b *RedisBus) Subscribe(pattern string, subscriber Subscriber) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.subscribers[pattern] = append(b.subscribers[pattern], subscriber)
+	if exactEventPattern(pattern) {
+		b.exactSubscribers[pattern] = appendSubscriber(b.exactSubscribers[pattern], subscriber)
+		return
+	}
+	if prefix, ok := prefixWildcardPattern(pattern); ok {
+		if prefix == "" {
+			b.allSubscribers = appendSubscriber(b.allSubscribers, subscriber)
+			return
+		}
+		b.prefixSubscribers[prefix] = appendSubscriber(b.prefixSubscribers[prefix], subscriber)
+		return
+	}
+	b.patternSubscribers[pattern] = appendSubscriber(b.patternSubscribers[pattern], subscriber)
 }
 
 func (b *RedisBus) Recent(limit int) []Envelope {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	if limit <= 0 || limit > len(b.recent) {
-		limit = len(b.recent)
+	if limit <= 0 || limit > b.recentCount {
+		limit = b.recentCount
 	}
 	out := make([]Envelope, limit)
-	copy(out, b.recent[len(b.recent)-limit:])
+	start := b.recentStart + b.recentCount - limit
+	for i := 0; i < limit; i++ {
+		out[i] = b.recent[(start+i)%b.maxRecent]
+	}
 	return out
 }
 
@@ -178,16 +200,38 @@ func (b *RedisBus) consumeLoop(msgs <-chan []byte) {
 func (b *RedisBus) record(envelope Envelope) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.recent = append(b.recent, envelope)
-	if len(b.recent) > b.maxRecent {
-		b.recent = b.recent[len(b.recent)-b.maxRecent:]
+	b.recordRecentLocked(envelope)
+}
+
+func (b *RedisBus) recordRecentLocked(envelope Envelope) {
+	if b.maxRecent <= 0 {
+		return
 	}
+	if b.recentCount < b.maxRecent {
+		index := (b.recentStart + b.recentCount) % b.maxRecent
+		b.recent[index] = envelope
+		b.recentCount++
+		return
+	}
+	b.recent[b.recentStart] = envelope
+	b.recentStart = (b.recentStart + 1) % b.maxRecent
 }
 
 func (b *RedisBus) dispatch(ctx context.Context, envelope Envelope) {
 	b.mu.RLock()
-	matching := make([]Subscriber, 0, 8)
-	for pattern, subs := range b.subscribers {
+	exact := b.exactSubscribers[envelope.EventType]
+	if len(b.allSubscribers) == 0 && len(b.prefixSubscribers) == 0 && len(b.patternSubscribers) == 0 {
+		b.mu.RUnlock()
+		for _, subscriber := range exact {
+			subscriber(ctx, envelope)
+		}
+		return
+	}
+	matching := make([]Subscriber, 0, len(exact)+len(b.allSubscribers)+8)
+	matching = append(matching, exact...)
+	matching = append(matching, b.allSubscribers...)
+	matching = appendPrefixSubscribers(matching, b.prefixSubscribers, envelope.EventType)
+	for pattern, subs := range b.patternSubscribers {
 		if Matches(pattern, envelope.EventType) {
 			matching = append(matching, subs...)
 		}

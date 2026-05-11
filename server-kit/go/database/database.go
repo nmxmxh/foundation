@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +19,35 @@ type MemoryDB struct {
 	mu      sync.RWMutex
 	closed  bool
 	records map[string]DomainRecord
+	byScope map[recordScope]map[string]struct{}
+	byOrg   map[string]map[string]struct{}
+	byField map[fieldIndex]map[string]struct{}
+
+	nextVersion  uint64
+	versions     map[string]uint64
+	byScopeOrder map[recordScope][]recordOrderEntry
+	byFieldOrder map[fieldIndex][]recordOrderEntry
 }
+
+type recordScope struct {
+	domain         string
+	collection     string
+	organizationID string
+}
+
+type fieldIndex struct {
+	scope recordScope
+	field string
+	kind  byte
+	value string
+}
+
+type recordOrderEntry struct {
+	key     string
+	version uint64
+}
+
+var emptyRecordKeys = map[string]struct{}{}
 
 const (
 	DriverMemory   = "memory"
@@ -27,12 +56,14 @@ const (
 
 // PoolOptions controls pgxpool sizing and timeout behavior.
 type PoolOptions struct {
-	MaxConns          int
-	MinConns          int
-	HealthCheckPeriod time.Duration
-	ConnectTimeout    time.Duration
-	QueryTimeout      time.Duration
-	AcquireTimeout    time.Duration
+	MaxConns                 int
+	MinConns                 int
+	HealthCheckPeriod        time.Duration
+	ConnectTimeout           time.Duration
+	QueryTimeout             time.Duration
+	AcquireTimeout           time.Duration
+	StatementCacheCapacity   int
+	DescriptionCacheCapacity int
 }
 
 func DefaultPoolOptions() PoolOptions {
@@ -80,12 +111,14 @@ func DefaultPoolOptionsFor(lane RuntimeLane) PoolOptions {
 		queryTimeout = 5 * time.Second
 	}
 	return PoolOptions{
-		MaxConns:          maxConns,
-		MinConns:          minConns,
-		HealthCheckPeriod: 30 * time.Second,
-		ConnectTimeout:    10 * time.Second,
-		QueryTimeout:      queryTimeout,
-		AcquireTimeout:    100 * time.Millisecond,
+		MaxConns:                 maxConns,
+		MinConns:                 minConns,
+		HealthCheckPeriod:        30 * time.Second,
+		ConnectTimeout:           10 * time.Second,
+		QueryTimeout:             queryTimeout,
+		AcquireTimeout:           100 * time.Millisecond,
+		StatementCacheCapacity:   512,
+		DescriptionCacheCapacity: 128,
 	}
 }
 
@@ -111,6 +144,12 @@ func normalizePoolOptions(opts PoolOptions) PoolOptions {
 	}
 	if opts.AcquireTimeout <= 0 {
 		opts.AcquireTimeout = defaults.AcquireTimeout
+	}
+	if opts.StatementCacheCapacity <= 0 {
+		opts.StatementCacheCapacity = defaults.StatementCacheCapacity
+	}
+	if opts.DescriptionCacheCapacity < 0 {
+		opts.DescriptionCacheCapacity = defaults.DescriptionCacheCapacity
 	}
 	return opts
 }
@@ -157,7 +196,15 @@ func normalizeDriver(driver string) string {
 }
 
 func NewMemoryDB() *MemoryDB {
-	return &MemoryDB{records: map[string]DomainRecord{}}
+	return &MemoryDB{
+		records:      map[string]DomainRecord{},
+		byScope:      map[recordScope]map[string]struct{}{},
+		byOrg:        map[string]map[string]struct{}{},
+		byField:      map[fieldIndex]map[string]struct{}{},
+		versions:     map[string]uint64{},
+		byScopeOrder: map[recordScope][]recordOrderEntry{},
+		byFieldOrder: map[fieldIndex][]recordOrderEntry{},
+	}
 }
 
 func (db *MemoryDB) Close() {
@@ -173,11 +220,25 @@ func (db *MemoryDB) Exec(ctx context.Context, _ string, _ ...any) error {
 	return nil
 }
 
+func (db *MemoryDB) ExecResult(ctx context.Context, _ string, _ ...any) (CommandResult, error) {
+	if err := db.ensureReady(ctx); err != nil {
+		return nil, err
+	}
+	return commandResult{rowsAffected: 0}, nil
+}
+
 func (db *MemoryDB) QueryRow(ctx context.Context, _ string, _ ...any) RowScanner {
 	if err := db.ensureReady(ctx); err != nil {
 		return memoryRow{err: err}
 	}
 	return memoryRow{err: errors.New("no rows in memory database")}
+}
+
+func (db *MemoryDB) Query(ctx context.Context, _ string, _ ...any) (Rows, error) {
+	if err := db.ensureReady(ctx); err != nil {
+		return nil, err
+	}
+	return memoryRows{}, nil
 }
 
 func (db *MemoryDB) QueryMaps(ctx context.Context, _ string, _ ...any) ([]map[string]any, error) {
@@ -232,11 +293,15 @@ func (db *MemoryDB) UpsertRecord(ctx context.Context, rec DomainRecord) (DomainR
 	}
 	if existing, ok := db.records[key]; ok {
 		rec.CreatedAt = existing.CreatedAt
+		db.removeRecordIndexesLocked(key, existing)
 	} else {
 		rec.CreatedAt = now
 	}
 	rec.UpdatedAt = now
+	db.nextVersion++
+	db.versions[key] = db.nextVersion
 	db.records[key] = rec
+	db.addRecordIndexesLocked(key, rec)
 	return copyRecord(rec), nil
 }
 
@@ -265,49 +330,136 @@ func (db *MemoryDB) ListRecords(ctx context.Context, domain, collection, organiz
 	organizationID = strings.TrimSpace(organizationID)
 
 	db.mu.RLock()
-	candidates := make([]DomainRecord, 0, len(db.records))
-	for _, rec := range db.records {
-		if ctx != nil {
-			if err := ctx.Err(); err != nil {
+	ordered := db.orderedCandidatesLocked(domain, collection, organizationID, filters)
+	keys := db.candidateKeysLocked(domain, collection, organizationID, filters)
+	candidateCap := len(db.records)
+	if limit > 0 && len(ordered) > 0 {
+		candidateCap = limit
+	} else if keys != nil {
+		candidateCap = len(keys)
+	}
+	if limit > 0 && candidateCap > limit {
+		candidateCap = limit
+	}
+	candidates := make([]DomainRecord, 0, candidateCap)
+	if limit > 0 && len(ordered) > 0 {
+		for i := len(ordered) - 1; i >= 0 && len(candidates) < limit; i-- {
+			rec, ok := db.recordForOrderEntryLocked(ordered[i])
+			if !ok {
+				continue
+			}
+			if err := ctxErr(ctx); err != nil {
 				db.mu.RUnlock()
 				return nil, err
 			}
+			if recordMatches(rec, domain, collection, organizationID, filters) {
+				candidates = append(candidates, rec)
+			}
 		}
-		if domain != "" && rec.Domain != domain {
-			continue
+	} else if keys != nil {
+		for key := range keys {
+			rec, ok := db.records[key]
+			if !ok {
+				continue
+			}
+			if err := ctxErr(ctx); err != nil {
+				db.mu.RUnlock()
+				return nil, err
+			}
+			if recordMatches(rec, domain, collection, organizationID, filters) {
+				candidates = appendListCandidate(candidates, rec, limit)
+			}
 		}
-		if collection != "" && rec.Collection != collection {
-			continue
+	} else {
+		for _, rec := range db.records {
+			if err := ctxErr(ctx); err != nil {
+				db.mu.RUnlock()
+				return nil, err
+			}
+			if recordMatches(rec, domain, collection, organizationID, filters) {
+				candidates = appendListCandidate(candidates, rec, limit)
+			}
 		}
-		if organizationID != "" && rec.OrganizationID != organizationID {
-			continue
-		}
-		if !matchesFilter(rec.Data, filters) {
-			continue
-		}
-		candidates = append(candidates, copyRecord(rec))
 	}
 	db.mu.RUnlock()
 
-	sort.Slice(candidates, func(i, j int) bool {
-		if candidates[i].UpdatedAt.Equal(candidates[j].UpdatedAt) {
-			return candidates[i].RecordID < candidates[j].RecordID
-		}
-		return candidates[i].UpdatedAt.After(candidates[j].UpdatedAt)
-	})
-
-	if limit > 0 && len(candidates) > limit {
-		candidates = candidates[:limit]
+	if limit <= 0 || len(candidates) > 1 {
+		sort.Slice(candidates, func(i, j int) bool {
+			return recordBefore(candidates[i], candidates[j])
+		})
 	}
-	return candidates, nil
+	out := make([]DomainRecord, len(candidates))
+	for i, rec := range candidates {
+		out[i] = copyRecord(rec)
+	}
+	return out, nil
+}
+
+func appendListCandidate(candidates []DomainRecord, rec DomainRecord, limit int) []DomainRecord {
+	if limit <= 0 {
+		return append(candidates, rec)
+	}
+	insertAt := sort.Search(len(candidates), func(i int) bool {
+		return recordBefore(rec, candidates[i])
+	})
+	if insertAt >= limit {
+		return candidates
+	}
+	if len(candidates) < limit {
+		candidates = append(candidates, DomainRecord{})
+		copy(candidates[insertAt+1:], candidates[insertAt:])
+		candidates[insertAt] = rec
+		return candidates
+	}
+	copy(candidates[insertAt+1:], candidates[insertAt:len(candidates)-1])
+	candidates[insertAt] = rec
+	return candidates
+}
+
+func recordBefore(left, right DomainRecord) bool {
+	if left.UpdatedAt.Equal(right.UpdatedAt) {
+		return left.RecordID < right.RecordID
+	}
+	return left.UpdatedAt.After(right.UpdatedAt)
 }
 
 func (db *MemoryDB) CountRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any) (int64, error) {
-	items, err := db.ListRecords(ctx, domain, collection, organizationID, filters, 0)
-	if err != nil {
+	if err := db.ensureReady(ctx); err != nil {
 		return 0, err
 	}
-	return int64(len(items)), nil
+	filters = copyMap(filters)
+	domain = strings.TrimSpace(domain)
+	collection = strings.TrimSpace(collection)
+	organizationID = strings.TrimSpace(organizationID)
+
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+	var count int64
+	keys := db.candidateKeysLocked(domain, collection, organizationID, filters)
+	if keys != nil {
+		for key := range keys {
+			rec, ok := db.records[key]
+			if !ok {
+				continue
+			}
+			if err := ctxErr(ctx); err != nil {
+				return 0, err
+			}
+			if recordMatches(rec, domain, collection, organizationID, filters) {
+				count++
+			}
+		}
+		return count, nil
+	}
+	for _, rec := range db.records {
+		if err := ctxErr(ctx); err != nil {
+			return 0, err
+		}
+		if recordMatches(rec, domain, collection, organizationID, filters) {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (db *MemoryDB) EstimateCount(ctx context.Context, domain, collection, organizationID string) (int64, error) {
@@ -322,7 +474,11 @@ func (db *MemoryDB) DeleteRecord(ctx context.Context, domain, collection, organi
 	key := recordKey(domain, collection, organizationID, recordID)
 	db.mu.Lock()
 	defer db.mu.Unlock()
+	if rec, ok := db.records[key]; ok {
+		db.removeRecordIndexesLocked(key, rec)
+	}
 	delete(db.records, key)
+	delete(db.versions, key)
 	return nil
 }
 
@@ -338,13 +494,18 @@ func (db *MemoryDB) DeleteRecordsByOrganization(ctx context.Context, organizatio
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	var removed int64
-	for key, rec := range db.records {
-		if rec.OrganizationID != organizationID {
+	keys := db.byOrg[organizationID]
+	for key := range keys {
+		rec, ok := db.records[key]
+		if !ok {
 			continue
 		}
 		delete(db.records, key)
+		delete(db.versions, key)
+		db.removeRecordIndexesLocked(key, rec)
 		removed++
 	}
+	delete(db.byOrg, organizationID)
 	return removed, nil
 }
 
@@ -400,8 +561,221 @@ func (r memoryRow) Scan(_ ...any) error {
 	return errors.New("no rows in memory database")
 }
 
+type memoryRows struct{}
+
+func (memoryRows) Close() {}
+
+func (memoryRows) Next() bool { return false }
+
+func (memoryRows) Scan(_ ...any) error {
+	return errors.New("no rows in memory database")
+}
+
+func (memoryRows) Err() error { return nil }
+
+type commandResult struct {
+	rowsAffected int64
+}
+
+func (r commandResult) RowsAffected() int64 {
+	return r.rowsAffected
+}
+
 func recordKey(domain, collection, organizationID, recordID string) string {
 	return strings.TrimSpace(domain) + "|" + strings.TrimSpace(collection) + "|" + strings.TrimSpace(organizationID) + "|" + strings.TrimSpace(recordID)
+}
+
+func scopeKey(domain, collection, organizationID string) recordScope {
+	return recordScope{
+		domain:         strings.TrimSpace(domain),
+		collection:     strings.TrimSpace(collection),
+		organizationID: strings.TrimSpace(organizationID),
+	}
+}
+
+func (db *MemoryDB) addRecordIndexesLocked(key string, rec DomainRecord) {
+	scope := scopeKey(rec.Domain, rec.Collection, rec.OrganizationID)
+	if db.byScope[scope] == nil {
+		db.byScope[scope] = map[string]struct{}{}
+	}
+	db.byScope[scope][key] = struct{}{}
+	entry := recordOrderEntry{key: key, version: db.versions[key]}
+	db.byScopeOrder[scope] = append(db.byScopeOrder[scope], entry)
+	if rec.OrganizationID != "" {
+		if db.byOrg[rec.OrganizationID] == nil {
+			db.byOrg[rec.OrganizationID] = map[string]struct{}{}
+		}
+		db.byOrg[rec.OrganizationID][key] = struct{}{}
+	}
+	forEachRecordFieldIndex(rec, func(field string, kind byte, value string) {
+		index := fieldIndex{scope: scope, field: field, kind: kind, value: value}
+		if db.byField[index] == nil {
+			db.byField[index] = map[string]struct{}{}
+		}
+		db.byField[index][key] = struct{}{}
+		db.byFieldOrder[index] = append(db.byFieldOrder[index], entry)
+	})
+}
+
+func (db *MemoryDB) removeRecordIndexesLocked(key string, rec DomainRecord) {
+	scope := scopeKey(rec.Domain, rec.Collection, rec.OrganizationID)
+	delete(db.byScope[scope], key)
+	if len(db.byScope[scope]) == 0 {
+		delete(db.byScope, scope)
+	}
+	if rec.OrganizationID != "" {
+		delete(db.byOrg[rec.OrganizationID], key)
+		if len(db.byOrg[rec.OrganizationID]) == 0 {
+			delete(db.byOrg, rec.OrganizationID)
+		}
+	}
+	forEachRecordFieldIndex(rec, func(field string, kind byte, value string) {
+		index := fieldIndex{scope: scope, field: field, kind: kind, value: value}
+		delete(db.byField[index], key)
+		if len(db.byField[index]) == 0 {
+			delete(db.byField, index)
+		}
+	})
+}
+
+func (db *MemoryDB) orderedCandidatesLocked(domain, collection, organizationID string, filters map[string]any) []recordOrderEntry {
+	if domain == "" || collection == "" || organizationID == "" {
+		return nil
+	}
+	scope := scopeKey(domain, collection, organizationID)
+	var selected []recordOrderEntry
+	selectedCount := 0
+	consider := func(entries []recordOrderEntry, liveCount int) {
+		if liveCount <= 0 {
+			return
+		}
+		if selected == nil || liveCount < selectedCount {
+			selected = entries
+			selectedCount = liveCount
+		}
+	}
+	consider(db.byScopeOrder[scope], len(db.byScope[scope]))
+	for field, expected := range filters {
+		kind, value, ok := indexableFieldValue(expected)
+		if !ok {
+			continue
+		}
+		index := fieldIndex{scope: scope, field: field, kind: kind, value: value}
+		consider(db.byFieldOrder[index], len(db.byField[index]))
+	}
+	return selected
+}
+
+func (db *MemoryDB) recordForOrderEntryLocked(entry recordOrderEntry) (DomainRecord, bool) {
+	if db.versions[entry.key] != entry.version {
+		return DomainRecord{}, false
+	}
+	rec, ok := db.records[entry.key]
+	return rec, ok
+}
+
+func (db *MemoryDB) candidateKeysLocked(domain, collection, organizationID string, filters map[string]any) map[string]struct{} {
+	var selected map[string]struct{}
+	haveCandidate := false
+	consider := func(keys map[string]struct{}) {
+		haveCandidate = true
+		if selected == nil || len(keys) < len(selected) {
+			selected = keys
+		}
+	}
+
+	if domain != "" && collection != "" && organizationID != "" {
+		scope := scopeKey(domain, collection, organizationID)
+		consider(db.byScope[scope])
+		for field, expected := range filters {
+			kind, value, ok := indexableFieldValue(expected)
+			if !ok {
+				continue
+			}
+			consider(db.byField[fieldIndex{scope: scope, field: field, kind: kind, value: value}])
+		}
+		if selected == nil {
+			return emptyRecordKeys
+		}
+		return selected
+	}
+	if organizationID != "" {
+		consider(db.byOrg[organizationID])
+	}
+	if haveCandidate {
+		if selected == nil {
+			return emptyRecordKeys
+		}
+		return selected
+	}
+	return nil
+}
+
+func forEachRecordFieldIndex(rec DomainRecord, fn func(field string, kind byte, value string)) {
+	for field, value := range rec.Data {
+		if field == "organization_id" {
+			continue
+		}
+		kind, indexValue, ok := indexableFieldValue(value)
+		if !ok {
+			continue
+		}
+		fn(field, kind, indexValue)
+	}
+}
+
+func indexableFieldValue(value any) (byte, string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return 's', typed, true
+	case bool:
+		if typed {
+			return 'b', "1", true
+		}
+		return 'b', "0", true
+	case int:
+		return 'i', strconv.Itoa(typed), true
+	case int8:
+		return 'i', strconv.FormatInt(int64(typed), 10), true
+	case int16:
+		return 'i', strconv.FormatInt(int64(typed), 10), true
+	case int32:
+		return 'i', strconv.FormatInt(int64(typed), 10), true
+	case int64:
+		return 'i', strconv.FormatInt(typed, 10), true
+	case uint:
+		return 'u', strconv.FormatUint(uint64(typed), 10), true
+	case uint8:
+		return 'u', strconv.FormatUint(uint64(typed), 10), true
+	case uint16:
+		return 'u', strconv.FormatUint(uint64(typed), 10), true
+	case uint32:
+		return 'u', strconv.FormatUint(uint64(typed), 10), true
+	case uint64:
+		return 'u', strconv.FormatUint(typed, 10), true
+	default:
+		return 0, "", false
+	}
+}
+
+func ctxErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
+}
+
+func recordMatches(rec DomainRecord, domain, collection, organizationID string, filters map[string]any) bool {
+	if domain != "" && rec.Domain != domain {
+		return false
+	}
+	if collection != "" && rec.Collection != collection {
+		return false
+	}
+	if organizationID != "" && rec.OrganizationID != organizationID {
+		return false
+	}
+	return matchesFilter(rec.Data, filters)
 }
 
 func copyRecord(in DomainRecord) DomainRecord {
@@ -412,7 +786,7 @@ func copyRecord(in DomainRecord) DomainRecord {
 
 func copyMap(in map[string]any) map[string]any {
 	if len(in) == 0 {
-		return map[string]any{}
+		return nil
 	}
 	out := make(map[string]any, len(in))
 	for k, v := range in {
@@ -438,7 +812,41 @@ func matchesFilter(record map[string]any, filters map[string]any) bool {
 }
 
 func equalValue(actual any, expected any) bool {
-	as := strings.TrimSpace(fmt.Sprintf("%v", actual))
-	es := strings.TrimSpace(fmt.Sprintf("%v", expected))
-	return as == es
+	as, aok := comparableString(actual)
+	es, eok := comparableString(expected)
+	if aok && eok {
+		return as == es
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", actual)) == strings.TrimSpace(fmt.Sprintf("%v", expected))
+}
+
+func comparableString(value any) (string, bool) {
+	switch v := value.(type) {
+	case string:
+		return strings.TrimSpace(v), true
+	case int:
+		return strconv.Itoa(v), true
+	case int8:
+		return strconv.FormatInt(int64(v), 10), true
+	case int16:
+		return strconv.FormatInt(int64(v), 10), true
+	case int32:
+		return strconv.FormatInt(int64(v), 10), true
+	case int64:
+		return strconv.FormatInt(v, 10), true
+	case uint:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint8:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint16:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint32:
+		return strconv.FormatUint(uint64(v), 10), true
+	case uint64:
+		return strconv.FormatUint(v, 10), true
+	case bool:
+		return strconv.FormatBool(v), true
+	default:
+		return "", false
+	}
 }

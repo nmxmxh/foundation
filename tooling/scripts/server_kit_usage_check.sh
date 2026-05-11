@@ -71,6 +71,8 @@ check_exists "server-kit worker engine" "$kit/worker/engine.go"
 check_file_contains "server-kit exposes direct frame client" "$kit/grpcsvc/grpcsvc.go" "NewDirectFrameClient"
 check_file_contains "server-kit exposes binary frame registration" "$kit/grpcsvc/grpcsvc.go" "RegisterFrame"
 check_file_contains "server-kit exposes borrowed frame views" "$kit/grpcsvc/grpcsvc.go" "UnmarshalFrameView"
+check_file_contains "server-kit exposes typed frame projection" "$kit/bootstrap/frame_handlers.go" "RegisterTypedFrameHandlers"
+check_file_contains "server-kit runtime initializes frame router" "$kit/startup/runtime.go" "FrameRouter"
 
 if [[ -f "$target/.foundation" && -d "$target/internal" ]]; then
   startup_file=""

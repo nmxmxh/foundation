@@ -49,6 +49,16 @@ func TestResolveRouteReturnsMatchingRoute(t *testing.T) {
 	if ResolveRoute(routes, "missing:event") != nil {
 		t.Fatal("expected missing route to resolve nil")
 	}
+	index := NewRouteIndex(routes)
+	if route := index.Resolve("media:probe:requested"); route == nil || route.Path != "/media/probe" {
+		t.Fatalf("RouteIndex.Resolve() = %+v, want media route", route)
+	}
+	if index.Resolve("missing:event") != nil {
+		t.Fatal("expected missing indexed route to resolve nil")
+	}
+	if (*RouteIndex)(nil).Resolve("media:probe:requested") != nil {
+		t.Fatal("nil route index should resolve nil")
+	}
 }
 
 func TestCanDispatchAuthorizationMatrix(t *testing.T) {

@@ -116,6 +116,101 @@ check_any_startup_contains() {
   fi
 }
 
+check_typed_proto_plane() {
+  local proto_root="$target/api/protos"
+  [[ -d "$proto_root" ]] || return 0
+
+  local has_domain_proto="false"
+  local proto_file
+  while IFS= read -r proto_file; do
+    case "$proto_file" in
+      */_template/*|*/common/*|*/transport/*) continue ;;
+    esac
+    if grep -Eq '^[[:space:]]*(service|message)[[:space:]]+' "$proto_file"; then
+      has_domain_proto="true"
+      break
+    fi
+  done < <(find "$proto_root" -type f -name '*.proto' 2>/dev/null)
+
+  [[ "$has_domain_proto" == "true" ]] || return 0
+
+  local typed_found="false"
+  local search_root
+  for search_root in "$target/internal" "$target/backend/internal"; do
+    [[ -d "$search_root" ]] || continue
+    if rg -n 'typedHandler|GetTypedHandlers|BuildTypedServiceHandlers|func \(s \*Service\) [A-Za-z0-9_]+V1\(ctx context\.Context, req \*.*v1\.[A-Za-z0-9_]+Request\)' "$search_root" \
+      --glob '*.go' \
+      --glob '!**/*test.go' >/dev/null 2>&1; then
+      typed_found="true"
+      break
+    fi
+  done
+
+  if [[ "$typed_found" == "true" ]]; then
+    echo "[OK] protobuf contracts project onto typed frame plane"
+  else
+    echo "[FAIL] protobuf contracts project onto typed frame plane"
+    echo "  add real generated-protobuf typed handlers; empty AllTypedHandlers maps are not acceptable"
+    failed=1
+  fi
+
+  local typed_adapter_violation="false"
+  for search_root in "$target/internal/bootstrap" "$target/backend/internal/bootstrap"; do
+    [[ -d "$search_root" ]] || continue
+    if rg -n 'Execute\(ctx|map\[string\]any|DecodeRequestMap|ResponseFromMap' "$search_root" \
+      --glob 'typed*.go' \
+      --glob '!**/*test.go' >/dev/null 2>&1; then
+      typed_adapter_violation="true"
+      break
+    fi
+  done
+
+  if [[ "$typed_adapter_violation" == "true" ]]; then
+    echo "[FAIL] typed frame handlers use protobuf-native service methods"
+    echo "  typed bootstrap must call generated-protobuf service methods directly; do not bridge through map executors"
+    failed=1
+  else
+    echo "[OK] typed frame handlers use protobuf-native service methods"
+  fi
+}
+
+check_repository_boundaries() {
+  local service_root=""
+  if [[ -d "$target/internal/service" ]]; then
+    service_root="$target/internal/service"
+  elif [[ -d "$target/backend/internal/service" ]]; then
+    service_root="$target/backend/internal/service"
+  fi
+  [[ -n "$service_root" ]] || return 0
+
+  local legacy_sql
+  legacy_sql="$(rg -n '(^|[[:space:]])"database/sql"|\*sql\.|sql\.(DB|Tx|Rows|Row|ErrNoRows|Null)' "$service_root" \
+    --glob '*.go' \
+    --glob '!**/*test.go' \
+    --glob '!**/testutil/**' 2>/dev/null || true)"
+  if [[ -n "$legacy_sql" ]]; then
+    echo "[FAIL] service repositories avoid database/sql"
+    echo "  use Foundation/pgx executor interfaces for app repositories; database/sql stays out of service code"
+    echo "$legacy_sql" | sed 's/^/  /' | head -20
+    failed=1
+  else
+    echo "[OK] service repositories avoid database/sql"
+  fi
+
+  local service_sql
+  service_sql="$(rg -n '(^|[^A-Za-z0-9_])(s|svc)\.db\.(BeginTx|QueryRow|Query|Exec)\(' "$service_root" \
+    --glob 'service.go' \
+    --glob '!**/*test.go' 2>/dev/null || true)"
+  if [[ -n "$service_sql" ]]; then
+    echo "[FAIL] service handlers avoid embedded SQL"
+    echo "  move SQL and transaction bodies into repository methods; service.go should orchestrate domain behavior"
+    echo "$service_sql" | sed 's/^/  /' | head -20
+    failed=1
+  else
+    echo "[OK] service handlers avoid embedded SQL"
+  fi
+}
+
 if [[ ! -f "$foundation_file" ]]; then
   echo "[FAIL] foundation metadata missing"
   exit 1
@@ -148,6 +243,8 @@ check_absent "stale vendored foundation initializer" "$target/foundation/init.sh
 check_absent "stale vendored foundation updater" "$target/foundation/scripts/update-project.sh"
 check_absent "unowned root pkg directory" "$target/pkg"
 check_absent "legacy internal domain directory" "$target/internal/domain"
+check_typed_proto_plane
+check_repository_boundaries
 
 if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "server command" "$target/cmd/server/main.go"
@@ -185,8 +282,13 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "foundation direct frame dispatch client" "$target/foundation/server-kit/go/grpcsvc/grpcsvc.go" "NewDirectFrameClient"
   check_file_contains "foundation binary frame registration" "$target/foundation/server-kit/go/grpcsvc/grpcsvc.go" "RegisterFrame"
   check_file_contains "foundation borrowed frame view" "$target/foundation/server-kit/go/grpcsvc/grpcsvc.go" "UnmarshalFrameView"
+  check_file_contains "foundation typed frame handler projection" "$target/foundation/server-kit/go/bootstrap/frame_handlers.go" "RegisterTypedFrameHandlers"
+  check_file_contains "foundation runtime initializes frame router" "$target/foundation/server-kit/go/startup/runtime.go" "FrameRouter"
   check_file_contains "foundation lane-aware DB pool defaults" "$target/foundation/server-kit/go/database/database.go" "DefaultPoolOptionsFor"
   check_file_contains "foundation Redis sharded client options" "$target/foundation/server-kit/go/redis/client.go" "ConnectWithOptions"
+  check_file_contains "foundation worker cascades use bounded detached context" "$target/foundation/server-kit/go/worker/engine.go" "DetachedContextWithTimeout"
+  check_file_contains "foundation worker bridge injects correlation" "$target/foundation/server-kit/go/worker/engine.go" "contextWithJobCorrelation"
+  check_file_contains "foundation River job metadata cascades with jobs" "$target/foundation/server-kit/sql/river_setup.up.sql" "job_id bigint primary key references river_job(id) on delete cascade"
   check_exists "foundation performance check script" "$target/foundation/tooling/scripts/performance_check.sh"
   check_exists "foundation parallel chain module" "$target/foundation/server-kit/go/chain/chain.go"
   check_exists "foundation chaos module" "$target/foundation/server-kit/go/chaos/chaos.go"
@@ -242,6 +344,9 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then
   frontend_root="$target/frontend"
   if [[ "${PROFILE:-}" == "frontend" ]]; then
     frontend_root="$target"
+    if [[ -f "$target/frontend/package.json" ]]; then
+      frontend_root="$target/frontend"
+    fi
   fi
   check_exists "frontend package" "$frontend_root/package.json"
   check_exists "frontend tsconfig" "$frontend_root/tsconfig.json"
@@ -288,6 +393,9 @@ if [[ "${WITH_WASM:-false}" == "true" ]]; then
   check_exists "runtime shared arena schema" "$target/foundation/runtime-sdk/protocols/system/v1/runtime_shared_arena.capnp"
   check_exists "runtime shared arena host API" "$target/foundation/runtime-sdk/ts/browser-host/src/arena.ts"
   check_exists "runtime payload router API" "$target/foundation/runtime-sdk/ts/browser-host/src/payloadRouter.ts"
+  check_file_contains "runtime ffi macro exports ovrt-core" "$target/foundation/runtime-sdk/rust/crates/ovrt-ffi/src/lib.rs" "pub use ovrt_core;"
+  check_file_contains "runtime ffi pool reuses fixed buffer" "$target/foundation/runtime-sdk/go/runtimehost/ffi_unix.go" "bufferPool"
+  check_file_contains "runtime ffi pool reuses error buffer" "$target/foundation/runtime-sdk/go/runtimehost/ffi_unix.go" "errBufPool"
   check_exists "runtime transport compression API" "$target/foundation/runtime-transport/ts/src/compression.ts"
   check_exists "runtime offline queue API" "$target/foundation/runtime-transport/ts/src/offlineQueue.ts"
   check_exists "wasm entry" "$target/wasm/main.go"

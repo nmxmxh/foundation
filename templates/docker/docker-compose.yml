@@ -65,7 +65,7 @@ services:
       REDIS_MAX_RETRIES: "${REDIS_MAX_RETRIES:-1}"
       REDIS_PREFIX: "${REDIS_PREFIX:-{{PROJECT_NAME}}}"
       JWT_SECRET: "${JWT_SECRET:-dev-change-me}"
-      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-${JWT_SECRET:-dev-change-me}}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-change-me}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       # Tracing (optional)

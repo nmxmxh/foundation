@@ -83,6 +83,26 @@ func TestInMemoryBus_PrefixWildcard(t *testing.T) {
 	}
 }
 
+func TestInMemoryBus_MixedPrefixAndComplexWildcard(t *testing.T) {
+	bus := NewInMemoryBus(100)
+	var broad, tenant, complex atomic.Int32
+
+	bus.Subscribe("tenant:*", func(_ context.Context, _ Envelope) {
+		broad.Add(1)
+	})
+	bus.Subscribe("tenant:org_0042:*", func(_ context.Context, _ Envelope) {
+		tenant.Add(1)
+	})
+	bus.Subscribe("tenant:*:signal:success", func(_ context.Context, _ Envelope) {
+		complex.Add(1)
+	})
+
+	_ = bus.Publish(context.Background(), makeTestEnvelope("tenant:org_0042:signal:success", "c1"))
+	if broad.Load() != 1 || tenant.Load() != 1 || complex.Load() != 1 {
+		t.Fatalf("deliveries broad=%d tenant=%d complex=%d, want 1/1/1", broad.Load(), tenant.Load(), complex.Load())
+	}
+}
+
 func TestInMemoryBus_MultipleSubscribers(t *testing.T) {
 	bus := NewInMemoryBus(100)
 	var count1, count2 atomic.Int32
@@ -116,6 +136,12 @@ func TestInMemoryBus_Recent(t *testing.T) {
 	recent3 := bus.Recent(3)
 	if len(recent3) != 3 {
 		t.Fatalf("expected 3 recent, got %d", len(recent3))
+	}
+	for i, env := range recent3 {
+		want := fmt.Sprintf("c-%d", i+7)
+		if env.CorrelationID != want {
+			t.Fatalf("recent[%d] correlation = %q, want %q", i, env.CorrelationID, want)
+		}
 	}
 }
 
@@ -212,6 +238,52 @@ func TestInMemoryBus_ConcurrentPublish(t *testing.T) {
 	expected := int64(goroutines * messagesPerGoroutine)
 	if totalReceived.Load() != expected {
 		t.Fatalf("expected %d deliveries, got %d", expected, totalReceived.Load())
+	}
+}
+
+func TestInMemoryBusFanoutPressureIsSynchronousAndIsolated(t *testing.T) {
+	bus := NewInMemoryBus(64)
+	const messages = 256
+	var all, tenantA, tenantB atomic.Int64
+
+	bus.Subscribe("*", func(_ context.Context, _ Envelope) {
+		all.Add(1)
+	})
+	bus.Subscribe("tenant:a:*", func(_ context.Context, env Envelope) {
+		if env.Metadata["organization_id"] != "org_a" {
+			t.Errorf("tenant a metadata leaked: %+v", env.Metadata)
+		}
+		tenantA.Add(1)
+	})
+	bus.Subscribe("tenant:b:*", func(_ context.Context, env Envelope) {
+		if env.Metadata["organization_id"] != "org_b" {
+			t.Errorf("tenant b metadata leaked: %+v", env.Metadata)
+		}
+		tenantB.Add(1)
+	})
+
+	for i := 0; i < messages; i++ {
+		org := "org_a"
+		eventType := "tenant:a:signal:requested"
+		if i%2 == 1 {
+			org = "org_b"
+			eventType = "tenant:b:signal:requested"
+		}
+		env := makeTestEnvelope(eventType, fmt.Sprintf("corr-%03d", i))
+		env.Metadata["organization_id"] = org
+		if err := bus.Publish(context.Background(), env); err != nil {
+			t.Fatalf("publish %d: %v", i, err)
+		}
+	}
+
+	if all.Load() != messages {
+		t.Fatalf("all deliveries = %d, want %d", all.Load(), messages)
+	}
+	if tenantA.Load() != messages/2 || tenantB.Load() != messages/2 {
+		t.Fatalf("tenant deliveries a=%d b=%d, want %d each", tenantA.Load(), tenantB.Load(), messages/2)
+	}
+	if recent := bus.Recent(0); len(recent) != 64 {
+		t.Fatalf("recent length = %d, want bounded 64", len(recent))
 	}
 }
 

@@ -117,10 +117,11 @@ The book repeatedly emphasizes choosing the right abstraction and grain of atomi
 
 1. A WebSocket message send is usually one action; TCP packet movement is not.
 2. A DB command handler may be one action only if the transaction is the behavior boundary.
-3. A batch ingest is not one action when per-record diagnostics, partial failure, or retry semantics matter.
-4. Runtime buffer exchange should separate `write input`, `execute unit`, `write output`, and `advance epoch` when debugging parity or races.
-5. Transport fallback should model `try lane`, `observe failure`, and `fallback` separately so cache/replay/idempotency behavior is visible.
-6. Queue enqueue and dequeue are separate actions unless the system truly guarantees synchronous handoff.
+3. Repository helpers should preserve one visible transition per operation: command, single-row query, bounded stream/list query, or transaction. Do not hide external network calls or unbounded waits inside database helper closures.
+4. A batch ingest is not one action when per-record diagnostics, partial failure, or retry semantics matter.
+5. Runtime buffer exchange should separate `write input`, `execute unit`, `write output`, and `advance epoch` when debugging parity or races.
+6. Transport fallback should model `try lane`, `observe failure`, and `fallback` separately so cache/replay/idempotency behavior is visible.
+7. Queue enqueue and dequeue are separate actions unless the system truly guarantees synchronous handoff.
 
 Performance rule: coarser atomicity makes docs and code simpler, but can hide race conditions, backpressure, and latency. Choose the coarsest step that still exposes the failure modes we care about.
 
@@ -164,6 +165,7 @@ Every high-risk component should name invariants explicitly. These are examples 
 4. `RetryBudgetBounded`: retries never exceed `max_attempts` or deadline.
 5. `IdempotentRetry`: retrying a job does not duplicate durable side effects.
 6. `PerRecordDiagnosis`: batch failures retain record key/index and stage.
+7. `CascadingDurability`: a worker that accepts a required child job must persist that child enqueue with a bounded detached context so parent cancellation does not erase the next enabled action.
 
 ### WebSocket
 
@@ -262,10 +264,14 @@ For Ovasabi, each runtime lane must refine the same command/event contract:
 1. Direct typed dispatch refines the command contract.
 2. Binary frame dispatch refines direct dispatch by preserving metadata and payload bytes.
 3. Generated protobuf refines binary semantic contracts with schema.
-4. gRPC refines cross-host delivery with network failure modes.
-5. WebSocket refines realtime client delivery with auth/topic/lifecycle constraints.
-6. HTTP fallback refines request/response semantics with explicit retry/replay boundaries.
-7. JSON compatibility refines the same contract only at boundaries and must not add hidden semantics.
+4. Typed frame registration refines the same typed protobuf contract into the
+   internal synchronous plane. One service binding must be sufficient to prove
+   registry dispatch and frame dispatch are behaviorally equivalent after hiding
+   transport variables such as frame payload bytes and router lookup state.
+5. gRPC refines cross-host delivery with network failure modes.
+6. WebSocket refines realtime client delivery with auth/topic/lifecycle constraints.
+7. HTTP fallback refines request/response semantics with explicit retry/replay boundaries.
+8. JSON compatibility refines the same contract only at boundaries and must not add hidden semantics.
 
 For each lane, document:
 

@@ -50,6 +50,25 @@ func BenchmarkBufferInputBytesOwned1KB(b *testing.B) {
 	}
 }
 
+func BenchmarkBufferInputBytesView1KB(b *testing.B) {
+	buffer := benchmarkBuffer(b)
+	payload := bytes.Repeat([]byte{17}, int(generated.INPUT_MAX_BYTES))
+	if err := buffer.SetInputBytes(payload); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		got, err := buffer.InputBytesView()
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(got) != len(payload) {
+			b.Fatalf("input length = %d, want %d", len(got), len(payload))
+		}
+	}
+}
+
 func BenchmarkBufferSetOutputBytes2KB(b *testing.B) {
 	buffer := benchmarkBuffer(b)
 	payload := bytes.Repeat([]byte{29}, int(generated.OUTPUT_MAX_BYTES))
@@ -72,6 +91,25 @@ func BenchmarkBufferOutputBytesOwned2KB(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		got, err := buffer.OutputBytes()
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(got) != len(payload) {
+			b.Fatalf("output length = %d, want %d", len(got), len(payload))
+		}
+	}
+}
+
+func BenchmarkBufferOutputBytesView2KB(b *testing.B) {
+	buffer := benchmarkBuffer(b)
+	payload := bytes.Repeat([]byte{29}, int(generated.OUTPUT_MAX_BYTES))
+	if err := buffer.SetOutputBytes(payload); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		got, err := buffer.OutputBytesView()
 		if err != nil {
 			b.Fatal(err)
 		}

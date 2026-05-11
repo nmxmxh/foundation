@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -33,14 +35,44 @@ type postgresTx struct {
 	tx pgx.Tx
 }
 
+type postgresCommandResult struct {
+	tag pgconn.CommandTag
+}
+
+func (r postgresCommandResult) RowsAffected() int64 {
+	return r.tag.RowsAffected()
+}
+
 type budgetedRow struct {
 	row    RowScanner
+	cancel context.CancelFunc
+}
+
+type budgetedRows struct {
+	rows   pgx.Rows
 	cancel context.CancelFunc
 }
 
 func (r budgetedRow) Scan(dest ...any) error {
 	defer r.cancel()
 	return r.row.Scan(dest...)
+}
+
+func (r budgetedRows) Close() {
+	r.rows.Close()
+	r.cancel()
+}
+
+func (r budgetedRows) Next() bool {
+	return r.rows.Next()
+}
+
+func (r budgetedRows) Scan(dest ...any) error {
+	return r.rows.Scan(dest...)
+}
+
+func (r budgetedRows) Err() error {
+	return r.rows.Err()
 }
 
 func newPostgresDB(ctx context.Context, databaseURL string, opts PoolOptions) (*PostgresDB, error) {
@@ -61,6 +93,9 @@ func newPostgresDB(ctx context.Context, databaseURL string, opts PoolOptions) (*
 	cfg.MinConns = clampInt32(opts.MinConns)
 	cfg.HealthCheckPeriod = opts.HealthCheckPeriod
 	cfg.ConnConfig.ConnectTimeout = opts.ConnectTimeout
+	cfg.ConnConfig.StatementCacheCapacity = opts.StatementCacheCapacity
+	cfg.ConnConfig.DescriptionCacheCapacity = opts.DescriptionCacheCapacity
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheStatement
 	if cfg.ConnConfig.RuntimeParams == nil {
 		cfg.ConnConfig.RuntimeParams = make(map[string]string, 1)
 	}
@@ -75,6 +110,18 @@ func newPostgresDB(ctx context.Context, databaseURL string, opts PoolOptions) (*
 		return nil, err
 	}
 	return &PostgresDB{pool: pool, opts: opts}, nil
+}
+
+// WrapPostgresPool projects an existing pgx pool into Foundation's RuntimeStore
+// surface. This is the migration lane for scaffolded projects that still need
+// the raw pool for River, health checks, or provider-specific hooks while new
+// repositories move onto DBTX, RowQueryer, ResultExecutor, and StateStore.
+func WrapPostgresPool(pool *pgxpool.Pool, options ...PoolOptions) *PostgresDB {
+	opts := DefaultPoolOptions()
+	if len(options) > 0 {
+		opts = normalizePoolOptions(options[0])
+	}
+	return &PostgresDB{pool: pool, opts: opts}
 }
 
 func clampInt32(value int) int32 {
@@ -119,6 +166,20 @@ func (db *PostgresDB) Exec(ctx context.Context, query string, args ...any) error
 	return err
 }
 
+func (db *PostgresDB) ExecResult(ctx context.Context, query string, args ...any) (CommandResult, error) {
+	if db == nil || db.pool == nil {
+		return nil, errors.New("postgres pool is nil")
+	}
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	defer cancel()
+	tag, err := db.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return postgresCommandResult{tag: tag}, nil
+}
+
 func (db *PostgresDB) QueryRow(ctx context.Context, query string, args ...any) RowScanner {
 	if db == nil || db.pool == nil {
 		return memoryRow{err: errors.New("postgres pool is nil")}
@@ -126,6 +187,20 @@ func (db *PostgresDB) QueryRow(ctx context.Context, query string, args ...any) R
 	var cancel context.CancelFunc
 	ctx, cancel = QueryBudgetContext(ctx, db.opts)
 	return budgetedRow{row: db.pool.QueryRow(ctx, query, args...), cancel: cancel}
+}
+
+func (db *PostgresDB) Query(ctx context.Context, query string, args ...any) (Rows, error) {
+	if db == nil || db.pool == nil {
+		return nil, errors.New("postgres pool is nil")
+	}
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	rows, err := db.pool.Query(ctx, query, args...)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return budgetedRows{rows: rows, cancel: cancel}, nil
 }
 
 func (db *PostgresDB) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
@@ -167,11 +242,29 @@ func (tx *postgresTx) Exec(ctx context.Context, query string, args ...any) error
 	return err
 }
 
+func (tx *postgresTx) ExecResult(ctx context.Context, query string, args ...any) (CommandResult, error) {
+	if tx == nil || tx.tx == nil {
+		return nil, errors.New("postgres tx is nil")
+	}
+	tag, err := tx.tx.Exec(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return postgresCommandResult{tag: tag}, nil
+}
+
 func (tx *postgresTx) QueryRow(ctx context.Context, query string, args ...any) RowScanner {
 	if tx == nil || tx.tx == nil {
 		return memoryRow{err: errors.New("postgres tx is nil")}
 	}
 	return tx.tx.QueryRow(ctx, query, args...)
+}
+
+func (tx *postgresTx) Query(ctx context.Context, query string, args ...any) (Rows, error) {
+	if tx == nil || tx.tx == nil {
+		return nil, errors.New("postgres tx is nil")
+	}
+	return tx.tx.Query(ctx, query, args...)
 }
 
 func (tx *postgresTx) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
@@ -244,6 +337,9 @@ func (db *PostgresDB) UpsertRecord(ctx context.Context, rec DomainRecord) (Domai
 		createdAt time.Time
 		updatedAt time.Time
 	)
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	defer cancel()
 	err = db.pool.QueryRow(ctx, `
 		INSERT INTO governance_state_records (domain, collection_name, organization_id, record_id, data)
 		VALUES ($1, $2, $3, $4, $5::jsonb)
@@ -275,6 +371,9 @@ func (db *PostgresDB) GetRecord(ctx context.Context, domain, collection, organiz
 		createdAt time.Time
 		updatedAt time.Time
 	)
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	defer cancel()
 	err := db.pool.QueryRow(ctx, `
 		SELECT data, created_at, updated_at
 		FROM governance_state_records
@@ -315,28 +414,7 @@ func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organ
 	collection = strings.TrimSpace(collection)
 	organizationID = strings.TrimSpace(organizationID)
 
-	args := make([]any, 0, 4)
-	clauses := make([]string, 0, 3)
-	argPos := 1
-	if domain != "" {
-		clauses = append(clauses, fmt.Sprintf("domain = $%d", argPos))
-		args = append(args, domain)
-		argPos++
-	}
-	if collection != "" {
-		clauses = append(clauses, fmt.Sprintf("collection_name = $%d", argPos))
-		args = append(args, collection)
-		argPos++
-	}
-	if organizationID != "" {
-		clauses = append(clauses, fmt.Sprintf("organization_id = $%d", argPos))
-		args = append(args, organizationID)
-		argPos++
-	}
-	where := "TRUE"
-	if len(clauses) > 0 {
-		where = strings.Join(clauses, " AND ")
-	}
+	where, args, pushedAllFilters := buildPostgresRecordWhere(domain, collection, organizationID, filters, 1)
 
 	query := `
 		SELECT domain, collection_name, organization_id, record_id, data, created_at, updated_at
@@ -344,11 +422,14 @@ func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organ
 		WHERE ` + where + `
 		ORDER BY updated_at DESC, record_id ASC
 	`
-	if limit > 0 {
-		query += fmt.Sprintf(" LIMIT $%d", argPos)
+	if limit > 0 && pushedAllFilters {
+		query += fmt.Sprintf(" LIMIT $%d", len(args)+1)
 		args = append(args, limit)
 	}
 
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	defer cancel()
 	rows, err := db.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -377,6 +458,9 @@ func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organ
 		rec.CreatedAt = created.UTC()
 		rec.UpdatedAt = updated.UTC()
 		records = append(records, rec)
+		if limit > 0 && !pushedAllFilters && len(records) >= limit {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -393,37 +477,20 @@ func (db *PostgresDB) CountRecords(ctx context.Context, domain, collection, orga
 	collection = strings.TrimSpace(collection)
 	organizationID = strings.TrimSpace(organizationID)
 
-	args := make([]any, 0, 3)
-	clauses := make([]string, 0, 3)
-	argPos := 1
-	if domain != "" {
-		clauses = append(clauses, fmt.Sprintf("domain = $%d", argPos))
-		args = append(args, domain)
-		argPos++
+	where, args, pushedAllFilters := buildPostgresRecordWhere(domain, collection, organizationID, copyMap(filters), 1)
+	if !pushedAllFilters {
+		items, err := db.ListRecords(ctx, domain, collection, organizationID, filters, 0)
+		if err != nil {
+			return 0, err
+		}
+		return int64(len(items)), nil
 	}
-	if collection != "" {
-		clauses = append(clauses, fmt.Sprintf("collection_name = $%d", argPos))
-		args = append(args, collection)
-		argPos++
-	}
-	if organizationID != "" {
-		clauses = append(clauses, fmt.Sprintf("organization_id = $%d", argPos))
-		args = append(args, organizationID)
-		argPos++
-	}
-
-	where := "TRUE"
-	if len(clauses) > 0 {
-		where = strings.Join(clauses, " AND ")
-	}
-
-	query := `SELECT COUNT(*) FROM governance_state_records WHERE ` + where
-
-	// Note: filters are handled app-side in ListRecords, but for native count
-	// we should ideally push them to SQL. For now, we optimize the base count.
-	// Future: implement JSONB path filter pushdown.
 
 	var count int64
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	defer cancel()
+	query := `SELECT COUNT(*) FROM governance_state_records WHERE ` + where
 	err := db.pool.QueryRow(ctx, query, args...).Scan(&count)
 	return count, err
 }
@@ -440,6 +507,9 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 	// If no filters, use the fastest catalog-based estimate
 	if domain == "" && collection == "" && organizationID == "" {
 		var estimate int64
+		var cancel context.CancelFunc
+		ctx, cancel = QueryBudgetContext(ctx, db.opts)
+		defer cancel()
 		err := db.pool.QueryRow(ctx, `
 			SELECT reltuples::bigint 
 			FROM pg_class 
@@ -470,6 +540,9 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 
 	query := `EXPLAIN SELECT 1 FROM governance_state_records WHERE ` + strings.Join(clauses, " AND ")
 	var plan string
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	defer cancel()
 	err := db.pool.QueryRow(ctx, query, args...).Scan(&plan)
 	if err != nil {
 		return 0, err
@@ -491,10 +564,14 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 	fmt.Sscanf(plan[start:start+end], "%d", &count)
 	return count, nil
 }
+
 func (db *PostgresDB) DeleteRecord(ctx context.Context, domain, collection, organizationID, recordID string) error {
 	if db == nil || db.pool == nil {
 		return errors.New("postgres pool is nil")
 	}
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	defer cancel()
 	_, err := db.pool.Exec(ctx, `
 		DELETE FROM governance_state_records
 		WHERE domain = $1
@@ -510,6 +587,9 @@ func (db *PostgresDB) DeleteRecordsByOrganization(ctx context.Context, organizat
 	if db == nil || db.pool == nil {
 		return 0, errors.New("postgres pool is nil")
 	}
+	var cancel context.CancelFunc
+	ctx, cancel = QueryBudgetContext(ctx, db.opts)
+	defer cancel()
 	commandTag, err := db.pool.Exec(ctx, `
 		DELETE FROM governance_state_records
 		WHERE organization_id = $1
@@ -518,6 +598,65 @@ func (db *PostgresDB) DeleteRecordsByOrganization(ctx context.Context, organizat
 		return 0, err
 	}
 	return commandTag.RowsAffected(), nil
+}
+
+func buildPostgresRecordWhere(domain, collection, organizationID string, filters map[string]any, startArg int) (string, []any, bool) {
+	args := make([]any, 0, 3+len(filters)*2)
+	clauses := make([]string, 0, 3+len(filters))
+	argPos := startArg
+	addClause := func(clause string, values ...any) {
+		clauses = append(clauses, clause)
+		args = append(args, values...)
+		argPos += len(values)
+	}
+	if domain != "" {
+		addClause(fmt.Sprintf("domain = $%d", argPos), domain)
+	}
+	if collection != "" {
+		addClause(fmt.Sprintf("collection_name = $%d", argPos), collection)
+	}
+	if organizationID != "" {
+		addClause(fmt.Sprintf("organization_id = $%d", argPos), organizationID)
+	}
+
+	pushedAllFilters := true
+	filterKeys := make([]string, 0, len(filters))
+	for field := range filters {
+		filterKeys = append(filterKeys, field)
+	}
+	sort.Strings(filterKeys)
+	for _, field := range filterKeys {
+		value, ok := postgresScalarFilterText(filters[field])
+		if !ok {
+			pushedAllFilters = false
+			continue
+		}
+		expr := "btrim(data ->> " + quoteSQLString(field) + ")"
+		addClause(fmt.Sprintf("%s = $%d", expr, argPos), value)
+	}
+
+	if len(clauses) == 0 {
+		return "TRUE", args, pushedAllFilters
+	}
+	return strings.Join(clauses, " AND "), args, pushedAllFilters
+}
+
+func postgresScalarFilterText(value any) (string, bool) {
+	if text, ok := comparableString(value); ok {
+		return strings.TrimSpace(text), true
+	}
+	switch typed := value.(type) {
+	case float32:
+		return strings.TrimSpace(fmt.Sprintf("%v", typed)), true
+	case float64:
+		return strings.TrimSpace(fmt.Sprintf("%v", typed)), true
+	default:
+		return "", false
+	}
+}
+
+func quoteSQLString(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func validateDomainRecord(rec *DomainRecord) error {

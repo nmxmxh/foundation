@@ -9,6 +9,7 @@ echo "== foundation Go performance guards =="
   cd "$ROOT/server-kit/go"
   go test -tags=perf ./grpcsvc ./chain
   go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFrameClientDispatch|RouterDispatchFrameDirect|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$|BenchmarkRunParallel$' -benchmem ./grpcsvc ./chain
+  go test -bench='BenchmarkTypedFrameAdapterDispatch$' -benchmem -run='^$' ./bootstrap
   go test -bench='BenchmarkAppLane_' -benchmem -run='^$' ./appbench
   go test -bench='BenchmarkRouter' -benchmem -run='^$' ./wsrouting
   if [[ "${PROFILE:-0}" == "1" ]]; then

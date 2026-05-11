@@ -199,6 +199,19 @@ func TestRouterValidationAndDirectFrameErrors(t *testing.T) {
 	if _, err := client.DispatchFrame(context.Background(), Frame{EventType: "order:create:v1:frame", CorrelationID: "too-long"}); err == nil {
 		t.Fatalf("expected correlation bound error")
 	}
+	bound, err := NewBoundFrameClient(router, "order:create:v1:frame", ServerOptions{MaxCorrelationBytes: 3})
+	if err != nil {
+		t.Fatalf("NewBoundFrameClient() error = %v", err)
+	}
+	if _, err := bound.DispatchFrame(context.Background(), Frame{EventType: "missing"}); err == nil {
+		t.Fatalf("expected bound client event mismatch")
+	}
+	if _, err := bound.DispatchFrame(context.Background(), Frame{EventType: "order:create:v1:frame", CorrelationID: "too-long"}); err == nil {
+		t.Fatalf("expected bound client correlation bound error")
+	}
+	if _, err := NewBoundFrameClient(router, "missing", ServerOptions{}); err == nil {
+		t.Fatalf("expected missing bound route error")
+	}
 }
 
 func TestDispatchHandlersDecodeRouterAndInterceptorPaths(t *testing.T) {
@@ -315,6 +328,28 @@ func TestUnmarshalFrameViewSharesBackingBytes(t *testing.T) {
 	}
 }
 
+func TestFrameStringTableBoundsControlVocabulary(t *testing.T) {
+	table := newFrameStringTable(1)
+	if got := table.internBytes(nil); got != "" {
+		t.Fatalf("empty interned string = %q", got)
+	}
+	if got := table.internBytes([]byte("schema-v1")); got != "schema-v1" {
+		t.Fatalf("interned string = %q", got)
+	}
+	if got := len(table.values.Load().(map[string]string)); got != 1 {
+		t.Fatalf("intern table size = %d, want 1", got)
+	}
+	if got := table.internBytes([]byte("schema-v1")); got != "schema-v1" {
+		t.Fatalf("reused interned string = %q", got)
+	}
+	if got := table.internBytes([]byte("overflow")); got != "overflow" {
+		t.Fatalf("overflow string = %q", got)
+	}
+	if got := len(table.values.Load().(map[string]string)); got != 1 {
+		t.Fatalf("bounded intern table size = %d, want 1", got)
+	}
+}
+
 func BenchmarkDispatchOverBufconn(b *testing.B) {
 	conn, cleanup := startTestServer(b, ServerOptions{AuthToken: "secret", MaxMessageBytes: 64 * 1024})
 	defer cleanup()
@@ -402,6 +437,46 @@ func BenchmarkDirectFrameClientDispatch(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if _, err := client.DispatchFrame(context.Background(), req); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBoundFrameClientDispatch(b *testing.B) {
+	client, err := NewBoundFrameClient(testRouter(b), "order:create:v1:frame", ServerOptions{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	req := Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_1"}`),
+		CorrelationID: "corr_1",
+		SchemaVersion: "1.0",
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := client.DispatchFrame(context.Background(), req); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBoundFrameClientDispatchTrusted(b *testing.B) {
+	client, err := NewBoundFrameClient(testRouter(b), "order:create:v1:frame", ServerOptions{})
+	if err != nil {
+		b.Fatal(err)
+	}
+	req := Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_1"}`),
+		CorrelationID: "corr_1",
+		SchemaVersion: "1.0",
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := client.DispatchFrameTrusted(context.Background(), req); err != nil {
 			b.Fatal(err)
 		}
 	}

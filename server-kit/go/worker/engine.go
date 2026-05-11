@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	defaultQueueCapacity = 1024
-	queueScaleThreshold  = defaultQueueCapacity / 2
-	maxAdaptiveWorkers   = 64
-	maxDedupeEntries     = 100000
+	defaultQueueCapacity      = 1024
+	queueScaleThreshold       = defaultQueueCapacity / 2
+	maxAdaptiveWorkers        = 64
+	maxDedupeEntries          = 100000
+	defaultRiverInsertTimeout = 5 * time.Second
 )
 
 var errQueueFull = errors.New("worker queue full")
@@ -287,7 +288,9 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 			}
 			jobID = res.Job.ID
 		} else {
-			res, err := client.Insert(ctx, job, opts)
+			insertCtx, cancel := DetachedContextWithTimeout(ctx, defaultRiverInsertTimeout)
+			defer cancel()
+			res, err := client.Insert(insertCtx, job, opts)
 			if err != nil {
 				return fmt.Errorf("failed to insert job into river: %w", err)
 			}
@@ -487,6 +490,25 @@ func contextWithJobCorrelation(ctx context.Context, job Job) context.Context {
 	return tracing.WithCorrelationID(ctx, job.CorrelationID)
 }
 
+// DetachedContextWithTimeout returns a bounded child context for durable follow-up
+// operations such as cascading job enqueue, failure persistence, and audit writes.
+// It preserves request values when possible, but detaches from cancellation when the
+// parent is already cancelled or has less time remaining than the required budget.
+func DetachedContextWithTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		timeout = defaultRiverInsertTimeout
+	}
+	if parent == nil {
+		return context.WithTimeout(context.Background(), timeout)
+	}
+	if err := parent.Err(); err == nil {
+		if deadline, ok := parent.Deadline(); !ok || time.Until(deadline) > timeout {
+			return context.WithTimeout(parent, timeout)
+		}
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), timeout)
+}
+
 func dedupeKey(job Job) string {
 	if job.IdempotencyKey != "" {
 		return job.Kind() + ":" + job.IdempotencyKey
@@ -536,5 +558,8 @@ type Bridge struct {
 }
 
 func (b *Bridge) Work(ctx context.Context, job *river.Job[Job]) error {
-	return b.Processor.Handle(ctx, job.Args)
+	args := job.Args
+	args.Normalize()
+	runCtx := contextWithJobCorrelation(ctx, args)
+	return b.Processor.Handle(runCtx, args)
 }

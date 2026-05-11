@@ -3,7 +3,6 @@ package runtimehost
 import (
 	"encoding/binary"
 	"fmt"
-	"strings"
 	"sync/atomic"
 	"unsafe"
 
@@ -88,6 +87,16 @@ func (b *Buffer) SetInputBytes(payload []byte) error {
 }
 
 func (b *Buffer) InputBytes() ([]byte, error) {
+	view, err := b.InputBytesView()
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), view...), nil
+}
+
+// InputBytesView returns a borrowed view into the runtime buffer input region.
+// Callers must not retain the returned slice after the buffer can be reused or mutated.
+func (b *Buffer) InputBytesView() ([]byte, error) {
 	length, err := b.HeaderInt(generated.INT_IDX_INPUT_LENGTH)
 	if err != nil {
 		return nil, err
@@ -97,7 +106,7 @@ func (b *Buffer) InputBytes() ([]byte, error) {
 	}
 	start := generated.OFFSET_INPUT_BYTES
 	end := start + uint32(length)
-	return append([]byte(nil), b.raw[start:end]...), nil
+	return b.raw[start:end], nil
 }
 
 func (b *Buffer) SetOutputBytes(payload []byte) error {
@@ -110,6 +119,16 @@ func (b *Buffer) SetOutputBytes(payload []byte) error {
 }
 
 func (b *Buffer) OutputBytes() ([]byte, error) {
+	view, err := b.OutputBytesView()
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte(nil), view...), nil
+}
+
+// OutputBytesView returns a borrowed view into the runtime buffer output region.
+// Callers must not retain the returned slice after the buffer can be reused or mutated.
+func (b *Buffer) OutputBytesView() ([]byte, error) {
 	length, err := b.HeaderInt(generated.INT_IDX_OUTPUT_LENGTH)
 	if err != nil {
 		return nil, err
@@ -119,7 +138,7 @@ func (b *Buffer) OutputBytes() ([]byte, error) {
 	}
 	start := generated.OFFSET_OUTPUT_BYTES
 	end := start + uint32(length)
-	return append([]byte(nil), b.raw[start:end]...), nil
+	return b.raw[start:end], nil
 }
 
 func (b *Buffer) Initialize(moduleVersion int32) error {
@@ -160,5 +179,9 @@ func (b *Buffer) SetDiagnosticsText(message string) error {
 
 func (b *Buffer) DiagnosticsText() string {
 	payload := b.raw[generated.OFFSET_DIAGNOSTIC_BYTES : generated.OFFSET_DIAGNOSTIC_BYTES+generated.DIAGNOSTIC_MAX_BYTES]
-	return strings.TrimRight(string(payload), "\x00")
+	length := len(payload)
+	for length > 0 && payload[length-1] == 0 {
+		length--
+	}
+	return string(payload[:length])
 }

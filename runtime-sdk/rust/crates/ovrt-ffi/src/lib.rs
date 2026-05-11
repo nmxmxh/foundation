@@ -5,6 +5,8 @@ use std::slice;
 
 use ovrt_native::{process_runtime_buffer_in_place, NativeRuntimeHost};
 
+pub use ovrt_core;
+
 pub const ABI_VERSION: u32 = 1;
 
 /// # Safety

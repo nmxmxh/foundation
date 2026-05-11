@@ -16,6 +16,12 @@ func TestNormalizePoolOptionsDefaults(t *testing.T) {
 	if opts.ConnectTimeout <= 0 {
 		t.Fatalf("expected default connect timeout")
 	}
+	if opts.StatementCacheCapacity <= 0 {
+		t.Fatalf("expected statement cache capacity")
+	}
+	if opts.DescriptionCacheCapacity < 0 {
+		t.Fatalf("expected non-negative description cache capacity")
+	}
 }
 
 func TestNormalizePoolOptionsClampMinToMax(t *testing.T) {

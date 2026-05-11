@@ -10,6 +10,32 @@ type RowScanner interface {
 	Scan(dest ...any) error
 }
 
+// Rows abstracts streaming row iteration without binding application
+// repositories to a concrete database driver.
+type Rows interface {
+	Close()
+	Next() bool
+	Scan(dest ...any) error
+	Err() error
+}
+
+// RowQueryer is the opt-in interface for repositories that need streaming rows.
+// Keep it separate from DBTX so command-only fakes and state stores stay small.
+type RowQueryer interface {
+	Query(context.Context, string, ...any) (Rows, error)
+}
+
+// CommandResult is the driver-neutral surface for command metadata.
+type CommandResult interface {
+	RowsAffected() int64
+}
+
+// ResultExecutor is the opt-in interface for repositories that need command
+// metadata such as rows affected.
+type ResultExecutor interface {
+	ExecResult(context.Context, string, ...any) (CommandResult, error)
+}
+
 // DBTX is the minimal database contract shared by services and transactional helpers.
 type DBTX interface {
 	Exec(context.Context, string, ...any) error
@@ -54,13 +80,13 @@ type StateStore interface {
 
 // StoreStats provides operational metrics about the database connection pool.
 type StoreStats struct {
-	TotalConns          int32
-	IdleConns           int32
-	ActiveConns         int32
-	AcquireCount        int64
-	AcquireDuration     time.Duration
-	MaxConns            int32
-	ConstructedAt       time.Time
+	TotalConns      int32
+	IdleConns       int32
+	ActiveConns     int32
+	AcquireCount    int64
+	AcquireDuration time.Duration
+	MaxConns        int32
+	ConstructedAt   time.Time
 }
 
 // RuntimeStore is the concrete runtime persistence contract.

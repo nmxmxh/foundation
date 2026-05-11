@@ -84,7 +84,7 @@ deps:
 proto:
 	@echo "Generating Go protobuf code..."
 	@[ -d $(PROTO_PATH) ] || exit 0
-	@for proto_dir in $$(find $(PROTO_PATH) -mindepth 1 -maxdepth 1 -type d); do \
+	@set -e; for proto_dir in $$(find $(PROTO_PATH) -mindepth 1 -maxdepth 1 -type d); do \
 		latest_version_dir=$$(ls -d $$proto_dir/v*/ 2>/dev/null | sort -V | tail -n 1); \
 		if [ -d "$$latest_version_dir" ]; then \
 			echo "Processing protos in $$latest_version_dir..."; \
@@ -235,14 +235,30 @@ test-unit:
 		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
 		if [ -z "$$packages" ]; then echo "No Go packages found"; exit 0; fi; \
 		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -race -count=1 -timeout $(GO_TEST_TIMEOUT) $$packages; \
+	elif [ -f backend/go.mod ]; then \
+		mkdir -p "$(GO_CACHE_DIR)"; \
+		cd backend && \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		if [ -z "$$packages" ]; then echo "No backend Go packages found"; exit 0; fi; \
+		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -race -count=1 -timeout $(GO_TEST_TIMEOUT) $$packages; \
 	else \
 		echo "No Go module; skipping Go tests"; \
 	fi
 
 test-integration:
 	@set -e; \
-	if [ ! -f go.mod ]; then \
+	go_dir="."; \
+	test_pkg="./tests/integration/..."; \
+	if [ ! -f go.mod ] && [ -f backend/go.mod ]; then \
+		go_dir="backend"; \
+		test_pkg="./tests/integration/..."; \
+	fi; \
+	if [ ! -f "$$go_dir/go.mod" ]; then \
 		echo "No Go module; skipping integration tests"; \
+		exit 0; \
+	fi; \
+	if [ ! -d "$$go_dir/tests/integration" ]; then \
+		echo "No tests/integration package; skipping integration tests"; \
 		exit 0; \
 	fi; \
 	if [ -z "$$CI" ]; then \
@@ -264,15 +280,21 @@ test-integration:
 	TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 	REDIS_URL="$(TEST_REDIS_URL)" \
 	REDIS_PREFIX="test_$(PROJECT_NAME):" \
-	$(GOTEST) -race -count=1 -timeout $(GO_TEST_TIMEOUT) -tags=integration ./tests/integration/...
+	$(GOTEST) -C "$$go_dir" -race -count=1 -timeout $(GO_TEST_TIMEOUT) -tags=integration "$$test_pkg"
 
 test-load:
 	@set -e; \
-	if [ ! -f go.mod ]; then \
+	go_dir="."; \
+	load_pkg="./tests/load/..."; \
+	if [ ! -f go.mod ] && [ -f backend/go.mod ]; then \
+		go_dir="backend"; \
+		load_pkg="./tests/load/..."; \
+	fi; \
+	if [ ! -f "$$go_dir/go.mod" ]; then \
 		echo "No Go module; skipping load tests"; \
 		exit 0; \
 	fi; \
-	if [ ! -d tests/load ]; then \
+	if [ ! -d "$$go_dir/tests/load" ]; then \
 		echo "No tests/load package; skipping load tests"; \
 		exit 0; \
 	fi; \
@@ -296,13 +318,19 @@ test-load:
 	TEST_REDIS_URL="$(TEST_REDIS_URL)" \
 	REDIS_URL="$(TEST_REDIS_URL)" \
 	REDIS_PREFIX="test_$(PROJECT_NAME):" \
-	$(GOTEST) $(LOAD_RACE_FLAG) -v -count=1 -timeout "$${LOAD_TEST_TIMEOUT:-10m}" ./tests/load/...
+	$(GOTEST) -C "$$go_dir" $(LOAD_RACE_FLAG) -v -count=1 -timeout "$${LOAD_TEST_TIMEOUT:-10m}" "$$load_pkg"
 
 test-bench:
 	@if [ -f go.mod ]; then \
 		mkdir -p "$(GO_CACHE_DIR)"; \
 		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
 		if [ -z "$$packages" ]; then echo "No Go packages found"; exit 0; fi; \
+		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -run '^$$' -bench "$${BENCH_PATTERN:-.}" -benchmem -count "$${BENCH_COUNT:-3}" -timeout "$${BENCH_TIMEOUT:-20m}" $$packages; \
+	elif [ -f backend/go.mod ]; then \
+		mkdir -p "$(GO_CACHE_DIR)"; \
+		cd backend && \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		if [ -z "$$packages" ]; then echo "No backend Go packages found"; exit 0; fi; \
 		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -run '^$$' -bench "$${BENCH_PATTERN:-.}" -benchmem -count "$${BENCH_COUNT:-3}" -timeout "$${BENCH_TIMEOUT:-20m}" $$packages; \
 	else \
 		echo "No Go module; skipping benchmarks"; \
@@ -326,6 +354,8 @@ test-env-up:
 	TEST_DB_PASSWORD="$(TEST_DB_PASSWORD)" \
 	TEST_DB_NAME="$(TEST_DB_NAME)" \
 	TEST_DB_PORT="$(TEST_DB_PORT)" \
+	POSTGRES_VERSION="$(POSTGRES_VERSION)" \
+	TEST_POSTGRES_IMAGE="$(TEST_POSTGRES_IMAGE)" \
 	TEST_REDIS_PORT="$(TEST_REDIS_PORT)" \
 	TEST_REDIS_PASSWORD="$(TEST_REDIS_PASSWORD)" \
 	$(DOCKER_COMPOSE_TEST) up -d test-postgres test-redis
@@ -346,6 +376,8 @@ migrate-test:
 		TEST_DB_USER="$(TEST_DB_USER)" \
 		TEST_DB_PASSWORD="$(TEST_DB_PASSWORD)" \
 		TEST_DB_NAME="$(TEST_DB_NAME)" \
+		POSTGRES_VERSION="$(POSTGRES_VERSION)" \
+		TEST_POSTGRES_IMAGE="$(TEST_POSTGRES_IMAGE)" \
 		$(DOCKER_COMPOSE_TEST) run --rm test-migrate; \
 	elif command -v migrate >/dev/null 2>&1; then \
 		migrate -path migrations -database "$(TEST_DATABASE_URL)" up; \

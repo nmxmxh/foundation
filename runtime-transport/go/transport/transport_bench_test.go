@@ -1,6 +1,9 @@
 package transport
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 func BenchmarkCreateEnvelopeJSON(b *testing.B) {
 	payload := map[string]any{
@@ -30,6 +33,43 @@ func BenchmarkResolveRouteLinear16(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		if ResolveRoute(routes, target) == nil {
+			b.Fatal("route not resolved")
+		}
+	}
+}
+
+func BenchmarkResolveRouteLinear1024(b *testing.B) {
+	routes := make([]Route, 1024)
+	for i := range routes {
+		routes[i] = Route{
+			Method:    "POST",
+			Path:      "/runtime/dispatch",
+			EventType: "runtime:event_" + strconv.Itoa(i) + ":v1:requested",
+		}
+	}
+	target := routes[len(routes)-1].EventType
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if ResolveRoute(routes, target) == nil {
+			b.Fatal("route not resolved")
+		}
+	}
+}
+
+func BenchmarkRouteIndexResolve1024(b *testing.B) {
+	routes := make([]Route, 1024)
+	for i := range routes {
+		routes[i] = Route{
+			Method:    "POST",
+			Path:      "/runtime/dispatch",
+			EventType: "runtime:event_" + strconv.Itoa(i) + ":v1:requested",
+		}
+	}
+	index := NewRouteIndex(routes)
+	target := routes[len(routes)-1].EventType
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if index.Resolve(target) == nil {
 			b.Fatal("route not resolved")
 		}
 	}

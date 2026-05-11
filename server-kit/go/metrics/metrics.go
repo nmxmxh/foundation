@@ -1,8 +1,8 @@
 package metrics
 
 import (
-	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,25 +55,55 @@ func Histogram(name string, tags Tags, value float64) {
 	Default().Histogram(name, tags, value)
 }
 
+// MetricKey builds the stable sanitized key for a metric name and tag set.
+// Precompute it for hot paths where the same name/tags are recorded repeatedly.
+func MetricKey(name string, tags Tags) string {
+	return metricKey(name, tags)
+}
+
 func (r *Registry) Counter(name string, tags Tags, delta ...float64) {
 	if r == nil {
 		return
 	}
-	amount := 1.0
-	if len(delta) > 0 {
-		amount = delta[0]
+	r.addCounter(metricKey(name, tags), metricDelta(delta))
+}
+
+// CounterKey records a counter using a key produced by MetricKey.
+func (r *Registry) CounterKey(key string, delta ...float64) {
+	if r == nil {
+		return
 	}
+	r.addCounter(metricKeyFromPrecomputed(key), metricDelta(delta))
+}
+
+func (r *Registry) addCounter(key string, amount float64) {
 	r.mu.Lock()
-	r.counters[metricKey(name, tags)] += amount
+	r.counters[key] += amount
 	r.mu.Unlock()
+}
+
+func metricDelta(delta []float64) float64 {
+	if len(delta) > 0 {
+		return delta[0]
+	}
+	return 1
 }
 
 func (r *Registry) Gauge(name string, tags Tags, value float64) {
 	if r == nil {
 		return
 	}
+	r.GaugeKey(metricKey(name, tags), value)
+}
+
+// GaugeKey records a gauge using a key produced by MetricKey.
+func (r *Registry) GaugeKey(key string, value float64) {
+	if r == nil {
+		return
+	}
+	key = metricKeyFromPrecomputed(key)
 	r.mu.Lock()
-	r.gauges[metricKey(name, tags)] = value
+	r.gauges[key] = value
 	r.mu.Unlock()
 }
 
@@ -81,7 +111,15 @@ func (r *Registry) Histogram(name string, tags Tags, value float64) {
 	if r == nil {
 		return
 	}
-	key := metricKey(name, tags)
+	r.HistogramKey(metricKey(name, tags), value)
+}
+
+// HistogramKey records a histogram sample using a key produced by MetricKey.
+func (r *Registry) HistogramKey(key string, value float64) {
+	if r == nil {
+		return
+	}
+	key = metricKeyFromPrecomputed(key)
 	r.mu.Lock()
 	current := r.histograms[key]
 	if current.Count == 0 || value < current.Min {
@@ -94,6 +132,13 @@ func (r *Registry) Histogram(name string, tags Tags, value float64) {
 	current.Sum += value
 	r.histograms[key] = current
 	r.mu.Unlock()
+}
+
+func metricKeyFromPrecomputed(key string) string {
+	if key == "" {
+		return "unknown"
+	}
+	return key
 }
 
 func (r *Registry) Snapshot() Snapshot {
@@ -122,21 +167,25 @@ func (r *Registry) Reset() {
 }
 
 func (r *Registry) Prometheus() string {
-	snapshot := r.Snapshot()
+	if r == nil {
+		return ""
+	}
 	var b strings.Builder
-	writeFloatMetrics(&b, "counter", snapshot.Counters)
-	writeFloatMetrics(&b, "gauge", snapshot.Gauges)
-	keys := make([]string, 0, len(snapshot.Histograms))
-	for key := range snapshot.Histograms {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	writeFloatMetrics(&b, r.counters)
+	writeFloatMetrics(&b, r.gauges)
+	keys := make([]string, 0, len(r.histograms))
+	for key := range r.histograms {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		h := snapshot.Histograms[key]
-		fmt.Fprintf(&b, "%s_count %d\n", key, h.Count)
-		fmt.Fprintf(&b, "%s_sum %g\n", key, h.Sum)
-		fmt.Fprintf(&b, "%s_min %g\n", key, h.Min)
-		fmt.Fprintf(&b, "%s_max %g\n", key, h.Max)
+		h := r.histograms[key]
+		writeIntMetricLine(&b, key+"_count", h.Count)
+		writeFloatMetricLine(&b, key+"_sum", h.Sum)
+		writeFloatMetricLine(&b, key+"_min", h.Min)
+		writeFloatMetricLine(&b, key+"_max", h.Max)
 	}
 	return b.String()
 }
@@ -151,11 +200,16 @@ func metricKey(name string, tags Tags) string {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
+	var b strings.Builder
+	b.Grow(len(clean) + len(keys)*12)
+	b.WriteString(clean)
 	for _, key := range keys {
-		parts = append(parts, sanitize(key)+"_"+sanitize(tags[key]))
+		b.WriteByte('_')
+		b.WriteString(sanitize(key))
+		b.WriteByte('_')
+		b.WriteString(sanitize(tags[key]))
 	}
-	return clean + "_" + strings.Join(parts, "_")
+	return b.String()
 }
 
 func sanitize(value string) string {
@@ -163,7 +217,19 @@ func sanitize(value string) string {
 	if value == "" {
 		return "unknown"
 	}
+	clean := true
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == ':' {
+			continue
+		}
+		clean = false
+		break
+	}
+	if clean {
+		return value
+	}
 	var b strings.Builder
+	b.Grow(len(value))
 	for _, r := range value {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == ':' {
 			b.WriteRune(r)
@@ -174,15 +240,29 @@ func sanitize(value string) string {
 	return b.String()
 }
 
-func writeFloatMetrics(b *strings.Builder, _ string, values map[string]float64) {
+func writeFloatMetrics(b *strings.Builder, values map[string]float64) {
 	keys := make([]string, 0, len(values))
 	for key := range values {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		fmt.Fprintf(b, "%s %g\n", key, values[key])
+		writeFloatMetricLine(b, key, values[key])
 	}
+}
+
+func writeFloatMetricLine(b *strings.Builder, key string, value float64) {
+	b.WriteString(key)
+	b.WriteByte(' ')
+	b.WriteString(strconv.FormatFloat(value, 'g', -1, 64))
+	b.WriteByte('\n')
+}
+
+func writeIntMetricLine(b *strings.Builder, key string, value int64) {
+	b.WriteString(key)
+	b.WriteByte(' ')
+	b.WriteString(strconv.FormatInt(value, 10))
+	b.WriteByte('\n')
 }
 
 func cloneFloatMap(in map[string]float64) map[string]float64 {

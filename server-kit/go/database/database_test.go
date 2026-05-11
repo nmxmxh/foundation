@@ -3,6 +3,9 @@ package database
 import (
 	"context"
 	"errors"
+	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -127,6 +130,58 @@ func TestMemoryDBQueryDeleteAtomicAndClosedPaths(t *testing.T) {
 	}
 	if err := db.QueryRow(ctx, "").Scan(); err == nil {
 		t.Fatal("expected closed db query row to fail")
+	}
+}
+
+func TestMemoryDBConcurrentTenantIsolationUnderPressure(t *testing.T) {
+	db := NewMemoryDB()
+	ctx := context.Background()
+	const tenants = 8
+	const perTenant = 64
+
+	var wg sync.WaitGroup
+	wg.Add(tenants)
+	for tenant := 0; tenant < tenants; tenant++ {
+		go func(tenant int) {
+			defer wg.Done()
+			orgID := fmt.Sprintf("org_%02d", tenant)
+			for i := 0; i < perTenant; i++ {
+				_, err := db.UpsertRecord(ctx, DomainRecord{
+					Domain:         "signals",
+					Collection:     "ticks",
+					OrganizationID: orgID,
+					RecordID:       fmt.Sprintf("tick_%03d", i),
+					Data: map[string]any{
+						"tenant": orgID,
+						"bucket": i % 4,
+					},
+				})
+				if err != nil {
+					t.Errorf("upsert %s/%d: %v", orgID, i, err)
+				}
+			}
+		}(tenant)
+	}
+	wg.Wait()
+
+	for tenant := 0; tenant < tenants; tenant++ {
+		orgID := fmt.Sprintf("org_%02d", tenant)
+		count, err := db.CountRecords(ctx, "signals", "ticks", orgID, nil)
+		if err != nil {
+			t.Fatalf("CountRecords %s: %v", orgID, err)
+		}
+		if count != perTenant {
+			t.Fatalf("CountRecords %s = %d, want %d", orgID, count, perTenant)
+		}
+		items, err := db.ListRecords(ctx, "signals", "ticks", orgID, map[string]any{"bucket": 2}, perTenant)
+		if err != nil {
+			t.Fatalf("ListRecords %s: %v", orgID, err)
+		}
+		for _, item := range items {
+			if item.OrganizationID != orgID || item.Data["organization_id"] != orgID {
+				t.Fatalf("tenant isolation breach for %s: %+v", orgID, item)
+			}
+		}
 	}
 }
 
@@ -261,6 +316,85 @@ func TestAtomicWithBeginnerCommitRollback(t *testing.T) {
 	}
 }
 
+func benchmarkMemoryDBWithTenants(b *testing.B, tenants, perTenant int) *MemoryDB {
+	b.Helper()
+	db := NewMemoryDB()
+	ctx := context.Background()
+	for tenant := 0; tenant < tenants; tenant++ {
+		orgID := fmt.Sprintf("org_%02d", tenant)
+		for i := 0; i < perTenant; i++ {
+			if _, err := db.UpsertRecord(ctx, DomainRecord{
+				Domain:         "signals",
+				Collection:     "ticks",
+				OrganizationID: orgID,
+				RecordID:       fmt.Sprintf("tick_%05d", i),
+				Data: map[string]any{
+					"bucket": i % 8,
+					"kind":   "tick",
+				},
+			}); err != nil {
+				b.Fatalf("UpsertRecord() error = %v", err)
+			}
+		}
+	}
+	return db
+}
+
+func BenchmarkMemoryDBCountRecordsTenantScoped(b *testing.B) {
+	db := benchmarkMemoryDBWithTenants(b, 32, 256)
+	ctx := context.Background()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		count, err := db.CountRecords(ctx, "signals", "ticks", "org_07", nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if count != 256 {
+			b.Fatalf("count = %d, want 256", count)
+		}
+	}
+}
+
+func BenchmarkMemoryDBListRecordsTenantScopedFiltered(b *testing.B) {
+	db := benchmarkMemoryDBWithTenants(b, 32, 256)
+	ctx := context.Background()
+	filter := map[string]any{"bucket": 3}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		items, err := db.ListRecords(ctx, "signals", "ticks", "org_07", filter, 64)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(items) != 32 {
+			b.Fatalf("items = %d, want 32", len(items))
+		}
+	}
+}
+
+func BenchmarkMemoryDBUpsertTenantScopedParallel(b *testing.B) {
+	db := NewMemoryDB()
+	var index atomic.Int64
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			n := index.Add(1)
+			orgID := fmt.Sprintf("org_%02d", n%32)
+			if _, err := db.UpsertRecord(context.Background(), DomainRecord{
+				Domain:         "signals",
+				Collection:     "ticks",
+				OrganizationID: orgID,
+				RecordID:       fmt.Sprintf("tick_%09d", n),
+				Data:           map[string]any{"kind": "tick"},
+			}); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
 type fakeBeginner struct {
 	tx       Tx
 	beginErr error
@@ -269,6 +403,9 @@ type fakeBeginner struct {
 func (f *fakeBeginner) Exec(context.Context, string, ...any) error { return nil }
 func (f *fakeBeginner) QueryRow(context.Context, string, ...any) RowScanner {
 	return memoryRow{}
+}
+func (f *fakeBeginner) Query(context.Context, string, ...any) (Rows, error) {
+	return memoryRows{}, nil
 }
 func (f *fakeBeginner) QueryMaps(context.Context, string, ...any) ([]map[string]any, error) {
 	return nil, nil
@@ -288,6 +425,9 @@ type fakeTx struct {
 func (f *fakeTx) Exec(context.Context, string, ...any) error { return nil }
 func (f *fakeTx) QueryRow(context.Context, string, ...any) RowScanner {
 	return memoryRow{}
+}
+func (f *fakeTx) Query(context.Context, string, ...any) (Rows, error) {
+	return memoryRows{}, nil
 }
 func (f *fakeTx) QueryMaps(context.Context, string, ...any) ([]map[string]any, error) {
 	return nil, nil
@@ -312,6 +452,9 @@ func TestPostgresNilAndHelperPaths(t *testing.T) {
 	}
 	if err := db.Exec(context.Background(), "select 1"); err == nil {
 		t.Fatalf("expected nil Exec error")
+	}
+	if _, err := db.ExecResult(context.Background(), "select 1"); err == nil {
+		t.Fatalf("expected nil ExecResult error")
 	}
 	if err := db.QueryRow(context.Background(), "select 1").Scan(); err == nil {
 		t.Fatalf("expected nil QueryRow scan error")
@@ -348,6 +491,13 @@ func TestPostgresNilAndHelperPaths(t *testing.T) {
 	}
 	if _, err := newPostgresDB(context.Background(), "", PoolOptions{}); err == nil {
 		t.Fatalf("expected empty postgres URL error")
+	}
+	wrapped := WrapPostgresPool(nil, PoolOptions{StatementCacheCapacity: 16})
+	if wrapped == nil || wrapped.Pool() != nil {
+		t.Fatalf("wrapped nil pool should preserve a nil raw pool")
+	}
+	if wrapped.opts.StatementCacheCapacity != 16 {
+		t.Fatalf("wrapped statement cache capacity = %d, want 16", wrapped.opts.StatementCacheCapacity)
 	}
 
 	var tx *postgresTx
@@ -397,6 +547,42 @@ func TestPostgresRecordValidationAndJSONParsing(t *testing.T) {
 	}
 	if _, err := parseDataJSON([]byte(`bad`)); err == nil {
 		t.Fatalf("expected invalid JSON error")
+	}
+}
+
+func TestPostgresRecordWhereMatchesStateStoreShape(t *testing.T) {
+	where, args, pushed := buildPostgresRecordWhere("d", "c", "o", map[string]any{
+		"active":   true,
+		"owner'id": " user_1 ",
+		"shard":    7,
+	}, 1)
+	if !pushed {
+		t.Fatalf("expected scalar filters to push down")
+	}
+	expectedWhere := "domain = $1 AND collection_name = $2 AND organization_id = $3 AND btrim(data ->> 'active') = $4 AND btrim(data ->> 'owner''id') = $5 AND btrim(data ->> 'shard') = $6"
+	if where != expectedWhere {
+		t.Fatalf("where = %q, want %q", where, expectedWhere)
+	}
+	expectedArgs := []any{"d", "c", "o", "true", "user_1", "7"}
+	if len(args) != len(expectedArgs) {
+		t.Fatalf("args = %#v, want %#v", args, expectedArgs)
+	}
+	for i := range args {
+		if args[i] != expectedArgs[i] {
+			t.Fatalf("args[%d] = %#v, want %#v", i, args[i], expectedArgs[i])
+		}
+	}
+}
+
+func TestPostgresRecordWhereLeavesNestedFiltersForStoreRecheck(t *testing.T) {
+	where, args, pushed := buildPostgresRecordWhere("", "", "", map[string]any{
+		"nested": map[string]any{"k": "v"},
+	}, 3)
+	if pushed {
+		t.Fatalf("expected nested filter to remain app-side")
+	}
+	if where != "TRUE" || len(args) != 0 {
+		t.Fatalf("where=%q args=%#v, want TRUE and no args", where, args)
 	}
 }
 

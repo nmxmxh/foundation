@@ -39,6 +39,36 @@ type Route struct {
 	TransportOrder     []string `json:"transport_order"`
 }
 
+type RouteIndex struct {
+	routes      []Route
+	byEventType map[string]int
+}
+
+func NewRouteIndex(routes []Route) *RouteIndex {
+	copied := append([]Route(nil), routes...)
+	index := &RouteIndex{
+		routes:      copied,
+		byEventType: make(map[string]int, len(copied)),
+	}
+	for i := range copied {
+		if _, exists := index.byEventType[copied[i].EventType]; !exists {
+			index.byEventType[copied[i].EventType] = i
+		}
+	}
+	return index
+}
+
+func (r *RouteIndex) Resolve(eventType string) *Route {
+	if r == nil {
+		return nil
+	}
+	index, ok := r.byEventType[eventType]
+	if !ok {
+		return nil
+	}
+	return &r.routes[index]
+}
+
 func CreateEnvelope(eventType string, payload map[string]any, extra map[string]interface{}) Envelope {
 	now := time.Now().UTC()
 	correlationID := NewCorrelationID()

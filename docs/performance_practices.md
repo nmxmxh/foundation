@@ -84,15 +84,17 @@ Ovasabi uses a transport ladder. Pick the lowest layer that preserves the requir
 1. Same-process hot dispatch uses direct typed calls, direct frame dispatch, worker channels, or runtime buffer dispatch. It must not use gRPC, HTTP, Redis, or JSON for convenience.
 2. Same-host trusted native compute may use `ffi`; isolated same-host compute may use `shm`; portable process boundaries may use framed `stdio`.
 3. Cross-host or polyglot service boundaries use generated protobuf or `grpcsvc.Frame`; `grpcsvc.Envelope` and JSON maps are compatibility paths.
-4. Browser runtime lanes use `sab -> wasm -> transferable -> ws -> http -> postMessage` according to availability and observed failure.
-5. Long-lived sockets must enforce read limits, deadlines, ping/pong health, write queue bounds, topic authorization, auth expiry handling, and cleanup on close.
-6. Backpressure is part of the contract. Use queue depth limits, acquire timeouts, load shedding, circuit breakers, and graceful rejection before overload becomes memory growth.
-7. Connection lifecycle observability should cover DNS, dial, TLS handshake, protocol negotiation, read/write latency, disconnect cause, and retry path for external dependencies.
-8. Use buffered readers/writers for high-volume stream I/O where it reduces syscalls without delaying latency-sensitive flushes.
-9. Batch small operations across network and storage boundaries when correctness allows it. Preserve per-item diagnostics inside the batch.
-10. Tune socket options only after profiling shows the need. `TCP_NODELAY`, keepalive, receive/send buffers, backlog, and reuse settings are operational choices, not defaults to cargo-cult.
-11. Optimize TLS with session resumption, ALPN correctness, modern cipher defaults, and cert-chain hygiene. Do not trade away security for small handshake gains.
-12. Treat DNS as a latency source. Use resolver metrics, dialer instrumentation, and explicit caching/pre-resolution only when failure modes are understood.
+4. A typed service binding must feed both registry protobuf dispatch and frame dispatch when the service has typed contracts. Use `bootstrap.RegisterTypedHandlers` for ingress/event/lifecycle dispatch and `bootstrap.RegisterTypedFrameHandlers` for synchronous internal calls.
+5. Benchmark the raw lane and the adapter lane separately. Raw frame dispatch tracks router and binary codec cost; typed frame adapter benchmarks include protobuf decode/encode plus bounded handler execution.
+6. Browser runtime lanes use `sab -> wasm -> transferable -> ws -> http -> postMessage` according to availability and observed failure.
+7. Long-lived sockets must enforce read limits, deadlines, ping/pong health, write queue bounds, topic authorization, auth expiry handling, and cleanup on close.
+8. Backpressure is part of the contract. Use queue depth limits, acquire timeouts, load shedding, circuit breakers, and graceful rejection before overload becomes memory growth.
+9. Connection lifecycle observability should cover DNS, dial, TLS handshake, protocol negotiation, read/write latency, disconnect cause, and retry path for external dependencies.
+10. Use buffered readers/writers for high-volume stream I/O where it reduces syscalls without delaying latency-sensitive flushes.
+11. Batch small operations across network and storage boundaries when correctness allows it. Preserve per-item diagnostics inside the batch.
+12. Tune socket options only after profiling shows the need. `TCP_NODELAY`, keepalive, receive/send buffers, backlog, and reuse settings are operational choices, not defaults to cargo-cult.
+13. Optimize TLS with session resumption, ALPN correctness, modern cipher defaults, and cert-chain hygiene. Do not trade away security for small handshake gains.
+14. Treat DNS as a latency source. Use resolver metrics, dialer instrumentation, and explicit caching/pre-resolution only when failure modes are understood.
 
 ## PostgreSQL performance
 
@@ -103,11 +105,12 @@ The database rules in `database_practices.md` remain authoritative. The synthesi
 3. Use the narrowest index that matches the actual query shape: compound, partial, expression, covering, GIN, or BRIN as appropriate.
 4. Avoid `SELECT *`, runtime casts/functions on indexed columns, and large `OFFSET` pagination in runtime paths.
 5. Batch writes with `COPY`, `pgx.CopyFrom`, or driver-native batch primitives instead of per-row loops.
-6. Use materialized views, summary tables, Redis counters, or background refresh for repeated heavy joins and dashboards.
-7. Tune `work_mem` locally for specific heavy sorts/joins; do not globally inflate it without concurrency math.
-8. Treat autovacuum and bloat as production concerns. Track dead tuples, table/index bloat, vacuum lag, and index usage.
-9. Use PgBouncer transaction pooling before allowing app replicas to create broad direct connection fanout.
-10. Partition only when it matches access patterns such as time, tenant, or append-only history, and confirm pruning with `EXPLAIN`.
+6. Keep pgx statement caching enabled for repeated repository SQL; Foundation `PostgresDB` forces `QueryExecModeCacheStatement` and exposes cache capacity through `PoolOptions`.
+7. Use materialized views, summary tables, Redis counters, or background refresh for repeated heavy joins and dashboards.
+8. Tune `work_mem` locally for specific heavy sorts/joins; do not globally inflate it without concurrency math.
+9. Treat autovacuum and bloat as production concerns. Track dead tuples, table/index bloat, vacuum lag, and index usage.
+10. Use PgBouncer transaction pooling before allowing app replicas to create broad direct connection fanout.
+11. Partition only when it matches access patterns such as time, tenant, or append-only history, and confirm pruning with `EXPLAIN`.
 11. Read replicas can protect the primary from read load, but consistency expectations must be explicit in the feature contract.
 
 ## Rust and native compute

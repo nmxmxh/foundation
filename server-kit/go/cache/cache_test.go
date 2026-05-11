@@ -150,6 +150,54 @@ func TestCache_GetOrSet(t *testing.T) {
 	}
 }
 
+func TestCache_GetOrSetCoalescesConcurrentMiss(t *testing.T) {
+	c := New(Config{
+		Backend:    NewMemoryBackend(),
+		DefaultTTL: time.Minute,
+	})
+	ctx := context.Background()
+	const callers = 128
+	var computes atomic.Int32
+	release := make(chan struct{})
+
+	var wg sync.WaitGroup
+	errs := make(chan error, callers)
+	for i := 0; i < callers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := GetOrSet(ctx, c, "tenant:org-1:hot-key", func() (string, error) {
+				computes.Add(1)
+				<-release
+				return "stable", nil
+			})
+			if err != nil {
+				errs <- err
+				return
+			}
+			if got != "stable" {
+				errs <- fmt.Errorf("got %q, want stable", got)
+			}
+		}()
+	}
+
+	for computes.Load() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	close(release)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := computes.Load(); got != 1 {
+		t.Fatalf("compute calls = %d, want 1", got)
+	}
+}
+
 func TestInvalidator_TagAndInvalidate(t *testing.T) {
 	c := New(Config{
 		Backend:    NewMemoryBackend(),
@@ -459,6 +507,34 @@ func BenchmarkGetOrSet(b *testing.B) {
 			return "should_not_compute", nil
 		})
 	}
+}
+
+func BenchmarkGetOrSet_ParallelHotHit(b *testing.B) {
+	c := New(Config{
+		Backend:    NewMemoryBackend(),
+		DefaultTTL: time.Minute,
+	})
+	ctx := context.Background()
+	if _, err := GetOrSet(ctx, c, "tenant:org-1:summary", func() (string, error) {
+		return "cached", nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			got, err := GetOrSet(ctx, c, "tenant:org-1:summary", func() (string, error) {
+				return "miss", nil
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			if got != "cached" {
+				b.Fatalf("got %q, want cached", got)
+			}
+		}
+	})
 }
 
 func BenchmarkCacheKey(b *testing.B) {
