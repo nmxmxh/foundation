@@ -55,6 +55,20 @@ check_value() {
   fi
 }
 
+check_regex() {
+  local label="$1"
+  local actual="$2"
+  local pattern="$3"
+  if printf '%s\n' "$actual" | grep -Eq "$pattern"; then
+    echo "[OK] $label"
+  else
+    echo "[FAIL] $label"
+    echo "  expected pattern: $pattern"
+    echo "  actual: ${actual:-<unset>}"
+    failed=1
+  fi
+}
+
 check_file_contains() {
   local label="$1"
   local file="$2"
@@ -221,7 +235,8 @@ source "$foundation_file"
 set +a
 
 check_exists "foundation metadata" "$foundation_file"
-check_value "manifest baseline generation" "${BASELINE_GENERATION:-}" "manifest-v3"
+check_value "manifest baseline generation" "${BASELINE_GENERATION:-}" "manifest-v4"
+check_regex "native project identifier format" "${PROJECT_IDENTIFIER:-com.ovasabi.foundation-app}" '^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*){2,}$'
 check_not_symlink "foundation directory is local" "$target/foundation"
 check_exists "cursor rules" "$target/.cursorrules"
 check_exists "agents guide" "$target/.agents/DOMAIN_GUIDE.md"
@@ -233,11 +248,18 @@ check_exists "post quantum security posture" "$target/docs/foundation/post_quant
 check_exists "golangci baseline" "$target/.golangci.yml"
 check_file_contains "golangci resource lint baseline" "$target/.golangci.yml" "gocognit"
 check_exists "coding practices check" "$target/scripts/checks/coding_practices_check.sh"
+check_exists "go concurrency practices check" "$target/scripts/checks/go_concurrency_practices_check.sh"
 check_exists "river practices check" "$target/scripts/checks/river_practices_check.sh"
 check_exists "server-kit usage check" "$target/scripts/checks/server_kit_usage_check.sh"
 check_exists "project scaffold check" "$target/scripts/checks/project_scaffold_check.sh"
 check_exists "ci workflow" "$target/.github/workflows/ci.yml"
 check_exists "security workflow" "$target/.github/workflows/security.yml"
+check_exists "operations bootstrap" "$target/docs/operations/README.md"
+check_exists "incident record template" "$target/docs/operations/incident_record_template.md"
+check_file_contains "ci uses Go 1.25 baseline" "$target/.github/workflows/ci.yml" 'GO_VERSION: "1.25"'
+check_file_contains "security workflow uses Go 1.25 baseline" "$target/.github/workflows/security.yml" 'go-version: "1.25"'
+check_file_contains "ci captures delivery metrics" "$target/.github/workflows/ci.yml" "ci_delivery_metrics.mjs"
+check_file_contains "ci uploads delivery metrics artifact" "$target/.github/workflows/ci.yml" "delivery-metrics/ci-event.json"
 
 check_absent "stale vendored foundation initializer" "$target/foundation/init.sh"
 check_absent "stale vendored foundation updater" "$target/foundation/scripts/update-project.sh"
@@ -274,9 +296,11 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "env Postgres 18 baseline" "$target/.env.example" "POSTGRES_VERSION=18"
   check_file_contains "env Redis pool budget" "$target/.env.example" "REDIS_POOL_SIZE"
   check_file_contains "env Redis shard extension" "$target/.env.example" "REDIS_SHARD_URLS"
+  check_file_contains "env Redis read timeout" "$target/.env.example" "REDIS_READ_TIMEOUT"
   check_file_contains "env runtime shared memory mode" "$target/.env.example" "RUNTIME_SHARED_MEMORY"
   check_file_contains "env post quantum TLS mode" "$target/.env.example" "POST_QUANTUM_TLS_HYBRID_KEM"
   check_exists "foundation server-kit" "$target/foundation/server-kit/go/go.mod"
+  check_absent "foundation service-backed core harness" "$target/foundation/server-kit/go/servicebacked"
   check_exists "foundation metrics module" "$target/foundation/server-kit/go/metrics/metrics.go"
   check_exists "foundation grpc service module" "$target/foundation/server-kit/go/grpcsvc/grpcsvc.go"
   check_file_contains "foundation direct frame dispatch client" "$target/foundation/server-kit/go/grpcsvc/grpcsvc.go" "NewDirectFrameClient"
@@ -288,30 +312,55 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "foundation Redis sharded client options" "$target/foundation/server-kit/go/redis/client.go" "ConnectWithOptions"
   check_file_contains "foundation worker cascades use bounded detached context" "$target/foundation/server-kit/go/worker/engine.go" "DetachedContextWithTimeout"
   check_file_contains "foundation worker bridge injects correlation" "$target/foundation/server-kit/go/worker/engine.go" "contextWithJobCorrelation"
+  check_file_contains "foundation pgx pool options helper" "$target/foundation/server-kit/go/database/postgres.go" "ApplyPoolOptions"
+  check_file_contains "foundation trace handler" "$target/foundation/server-kit/go/observability/http.go" "TraceHandler"
+  check_exists "foundation delivery metrics practice" "$target/docs/foundation/delivery_metrics_practices.md"
+  check_exists "delivery metrics collector" "$target/scripts/checks/ci_delivery_metrics.mjs"
   check_file_contains "foundation River job metadata cascades with jobs" "$target/foundation/server-kit/sql/river_setup.up.sql" "job_id bigint primary key references river_job(id) on delete cascade"
   check_exists "foundation performance check script" "$target/foundation/tooling/scripts/performance_check.sh"
+  check_exists "foundation lifecycle contract generator" "$target/foundation/tooling/scripts/generate_lifecycle_contract_tests.mjs"
   check_exists "foundation parallel chain module" "$target/foundation/server-kit/go/chain/chain.go"
   check_exists "foundation chaos module" "$target/foundation/server-kit/go/chaos/chaos.go"
   check_exists "foundation contract testing module" "$target/foundation/server-kit/go/contracttest/event_contract.go"
   check_exists "foundation profiling module" "$target/foundation/server-kit/go/profiling/profiling.go"
   check_exists "foundation SLO module" "$target/foundation/server-kit/go/slo/slo.go"
   check_file_contains "make server-kit usage check target" "$target/Makefile" "check-server-kit-usage:"
+  check_file_contains "make Go concurrency review target" "$target/Makefile" "check-go-concurrency-practices:"
   check_file_contains "coding check enforces internal frame/protobuf lane" "$target/scripts/checks/coding_practices_check.sh" "CP internal Go avoids JSON gRPC compatibility dispatch"
   check_file_contains "server-kit check rejects internal JSON grpc dispatch" "$target/scripts/checks/server_kit_usage_check.sh" "internal code avoids JSON gRPC compatibility dispatch"
   check_any_startup_contains "startup initializes server-kit resilience" "resilience.New"
   check_any_startup_contains "startup registers server-kit resilience dependencies" "RegisterDependency("
   check_file_contains "server-kit usage check in foundation lint" "$target/Makefile" "check-server-kit-usage"
+  check_file_contains "make lifecycle contract generation target" "$target/Makefile" "lifecycle-contracts:"
+  check_file_contains "make delivery metrics target" "$target/Makefile" "delivery-metrics:"
+  check_file_contains "worker uses foundation pool options" "$target/cmd/worker/main.go" "database.ApplyPoolOptions"
+  check_file_contains "worker uses background DB lane" "$target/cmd/worker/main.go" "RuntimeLaneBackground"
+  check_file_contains "worker propagates DB acquire timeout" "$target/cmd/worker/main.go" "DBAcquireTimeout"
+  check_file_contains "worker default queue concurrency is configurable" "$target/internal/worker/registry.go" "QUEUE_WORKERS_DEFAULT"
+  check_file_contains "worker processing queue concurrency is configurable" "$target/internal/worker/registry.go" "QUEUE_WORKERS_PROCESSING"
+  check_file_contains "worker scheduled queue concurrency is configurable" "$target/internal/worker/registry.go" "QUEUE_WORKERS_SCHEDULED"
+  check_file_contains "server exposes correlation trace endpoint" "$target/internal/server/server.go" "/metricsz/trace"
+  check_file_contains "server uses configured CORS origins" "$target/internal/server/server.go" "security.CORS(s.allowedOrigins)"
+  check_file_not_contains "server avoids wildcard CORS default" "$target/internal/server/server.go" 'security.CORS([]string{"*"})'
+  check_file_contains "server protects operational endpoints" "$target/internal/server/server.go" "operationalHandler"
+  check_file_contains "config loads allowed origins" "$target/internal/config/config.go" "ALLOWED_ORIGINS"
+  check_file_contains "config defaults auth on in production" "$target/internal/config/config.go" 'env == "production"'
+  check_file_contains "env documents operational endpoint protection" "$target/.env.example" "PROTECT_OPERATIONAL_ENDPOINTS"
   check_exists "foundation runtime transport" "$target/foundation/runtime-transport/go/go.mod"
   check_exists "foundation config contracts" "$target/foundation/config-contracts/go/go.mod"
   check_exists "foundation tooling" "$target/foundation/tooling/docs/enforcement.md"
   check_exists "api README" "$target/api/README.md"
   check_exists "proto README" "$target/api/protos/README.md"
+  check_exists "common proto metadata" "$target/api/protos/common/v1/metadata.proto"
+  check_file_contains "proto README documents lifecycle generator" "$target/api/protos/README.md" "make lifecycle-contracts"
 fi
 
 if [[ "${WITH_DOCKER:-}" == "true" ]]; then
   check_exists "Dockerfile" "$target/Dockerfile"
   check_exists "docker-compose.yml" "$target/docker-compose.yml"
+  check_file_contains "compose Redis 8 baseline" "$target/docker-compose.yml" "redis:8-alpine"
   check_exists "docker-compose.dev.yml" "$target/docker-compose.dev.yml"
+  check_file_contains "dev Postgres 18 mounts parent data directory" "$target/docker-compose.dev.yml" "/var/lib/postgresql"
   check_file_not_contains "dev Postgres 18 avoids legacy data mount" "$target/docker-compose.dev.yml" "/var/lib/postgresql/data"
   check_exists "docker ignore" "$target/.dockerignore"
   check_file_contains "compose Docker cache namespace" "$target/docker-compose.yml" "DOCKER_CACHE_NAMESPACE"
@@ -325,6 +374,8 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     check_exists "Dockerfile.migrate" "$target/Dockerfile.migrate"
     check_exists "docker-compose.test.yml" "$target/docker-compose.test.yml"
     check_file_contains "test Postgres image override" "$target/docker-compose.test.yml" "TEST_POSTGRES_IMAGE"
+    check_file_contains "test Redis image override" "$target/docker-compose.test.yml" "TEST_REDIS_IMAGE"
+    check_file_contains "test Postgres 18 mounts parent data directory" "$target/docker-compose.test.yml" "/var/lib/postgresql"
     check_file_not_contains "test Postgres 18 avoids legacy data mount" "$target/docker-compose.test.yml" "/var/lib/postgresql/data"
     check_file_contains "shared Docker Go module cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gomod'
     check_file_contains "shared Docker Go build cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gobuild'
@@ -337,6 +388,7 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     check_file_contains "postgres I/O observability baseline" "$target/config/postgresql.conf" "track_io_timing"
     check_file_contains "redis LFU eviction guardrail" "$target/config/redis.conf" "maxmemory-policy allkeys-lfu"
     check_file_contains "redis io thread baseline" "$target/config/redis.conf" "io-threads"
+    check_file_contains "redis ephemeral persistence baseline" "$target/config/redis.conf" "appendonly no"
   fi
 fi
 
@@ -400,6 +452,44 @@ if [[ "${WITH_WASM:-false}" == "true" ]]; then
   check_exists "runtime offline queue API" "$target/foundation/runtime-transport/ts/src/offlineQueue.ts"
   check_exists "wasm entry" "$target/wasm/main.go"
   check_file_contains "wasm runtime-transport shim" "$target/wasm/main.go" "__OVASABI_RUNTIME_TRANSPORT"
+fi
+
+if [[ "${WITH_NATIVE:-false}" == "true" ]]; then
+  check_exists "foundation runtime-native Rust crate" "$target/foundation/runtime-native/rust/Cargo.toml"
+  check_exists "foundation runtime-native TS package" "$target/foundation/runtime-native/ts/package.json"
+  check_file_contains "runtime transport supports native lane" "$target/foundation/runtime-transport/ts/src/index.ts" '"native"'
+  check_exists "native package" "$target/native/package.json"
+  check_exists "native Tauri config" "$target/native/src-tauri/tauri.conf.json"
+  check_exists "native Tauri dev config" "$target/native/src-tauri/tauri.dev.conf.json"
+  check_exists "native Tauri prod config" "$target/native/src-tauri/tauri.prod.conf.json"
+  check_exists "native Tauri Rust manifest" "$target/native/src-tauri/Cargo.toml"
+  check_exists "native Tauri capability" "$target/native/src-tauri/capabilities/main.json"
+  check_exists "native capability examples" "$target/native/src-tauri/capabilities/examples.md"
+  check_file_contains "native active capability list is explicit" "$target/native/src-tauri/tauri.conf.json" '"capabilities": ["main"]'
+  check_file_contains "native dev uses config overlay" "$target/native/package.json" 'tauri dev --config src-tauri/tauri.dev.conf.json'
+  check_file_contains "native build uses prod config overlay" "$target/native/package.json" 'tauri build --config src-tauri/tauri.prod.conf.json'
+  check_file_contains "native dev CSP allows Vite websocket" "$target/native/src-tauri/tauri.dev.conf.json" 'ws://127.0.0.1:5173'
+  check_file_contains "native dev CSP allows inline styles" "$target/native/src-tauri/tauri.dev.conf.json" "'unsafe-inline'"
+  check_file_not_contains "native prod CSP forbids Vite websocket" "$target/native/src-tauri/tauri.prod.conf.json" 'ws://127.0.0.1:5173'
+  check_file_not_contains "native prod CSP forbids inline styles" "$target/native/src-tauri/tauri.prod.conf.json" "'unsafe-inline'"
+  check_file_contains "native README documents frontend layout" "$target/native/README.md" "../../frontend"
+  check_file_contains "native command dispatch" "$target/native/src-tauri/src/lib.rs" "foundation_runtime_dispatch"
+  check_file_contains "native secure store get" "$target/native/src-tauri/src/lib.rs" "foundation_secure_store_get"
+  check_file_contains "native uses runtime-native crate" "$target/native/src-tauri/Cargo.toml" "ovasabi-runtime-native"
+  check_file_contains "native scaffold pins Tauri" "$target/native/src-tauri/Cargo.toml" '=2.11.1'
+  check_file_contains "make native dev target" "$target/Makefile" "native-dev:"
+  check_file_contains "make native benchmark target" "$target/Makefile" "native-bench:"
+  check_exists "native benchmark script" "$target/scripts/checks/native_benchmark.sh"
+  if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then
+    frontend_root="$target/frontend"
+    if [[ "${PROFILE:-}" == "frontend" ]]; then
+      frontend_root="$target"
+      if [[ -f "$target/frontend/package.json" ]]; then
+        frontend_root="$target/frontend"
+      fi
+    fi
+    check_frontend_package_contains "frontend runtime native package" "$frontend_root/package.json" '"@ovasabi/runtime-native"'
+  fi
 fi
 
 if [[ "$failed" -ne 0 ]]; then

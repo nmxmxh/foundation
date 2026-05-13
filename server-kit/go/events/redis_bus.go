@@ -82,6 +82,7 @@ func (b *RedisBus) Publish(ctx context.Context, envelope Envelope) error {
 	localEnvelope := envelope
 	localEnvelope.SourceNodeID = ""
 	b.record(localEnvelope)
+	recordEventTrace("event.publish", localEnvelope)
 	b.dispatch(ctx, localEnvelope)
 	return nil
 }
@@ -142,10 +143,8 @@ func (b *RedisBus) startListener() {
 		defer b.wg.Done()
 		backoff := time.Second
 		for {
-			select {
-			case <-b.ctx.Done():
+			if b.ctx.Err() != nil {
 				return
-			default:
 			}
 
 			msgs, cancel, err := b.client.Subscribe(b.ctx, b.channel)
@@ -176,6 +175,9 @@ func (b *RedisBus) consumeLoop(msgs <-chan []byte) {
 			if !ok {
 				return
 			}
+			if b.ctx.Err() != nil {
+				return
+			}
 			envelope, err := Decode(raw)
 			if err != nil {
 				b.logger.Warn("invalid event envelope from redis", zap.Error(err))
@@ -192,6 +194,7 @@ func (b *RedisBus) consumeLoop(msgs <-chan []byte) {
 			delete(envelope.Metadata, "_bus_node_id")
 			envelope.SourceNodeID = ""
 			b.record(envelope)
+			recordEventTrace("event.receive", envelope)
 			b.dispatch(b.ctx, envelope)
 		}
 	}

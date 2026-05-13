@@ -68,6 +68,10 @@ Rules:
 10. Group repeated cache writes/invalidations into bounded pipeline batches. Large pipelines must be chunked so queued replies do not become the memory problem.
 11. Use `allkeys-lfu` for generic cache nodes unless the workload demands TTL-only eviction. LFU adapts better to mixed hot/cold cache traffic than pure recency.
 12. Keep Redis timeouts shorter than the app lane budget. A failed cache read should fall through quickly; a Redis stall must not consume a full API request budget.
+13. The Foundation memory Redis driver is a contract test double, not a production store. It should preserve Redis-like semantics for copied values, TTLs, locks, streams, and pub/sub patterns so tests catch drift, but production throughput claims still require service-backed Redis benchmarks.
+14. Redis clients should be initialized through `ConnectWithOptions` so pool size, min-idle, retry, shard URL, dial, read, and write budgets are inherited from config instead of being silently discarded.
+15. Use `redis.BatchClient` for multi-key cache hydration and write-through paths. `SetMany`, `GetMany`, and `SetGetMany` keep app code on Foundation boundaries while still using Redis pipelining underneath.
+16. Do not benchmark a busy loop of sequential single-key calls as the target shape. Measure it as a baseline, then compare parallel, pipelined, and batch-per-key costs.
 
 ## Concurrency and scale controls
 
@@ -80,6 +84,7 @@ Rules:
 7. Use `REDIS_POOL_SIZE`, `REDIS_MIN_IDLE`, and bounded retries from the scaffold defaults instead of app-local hardcoded clients.
 8. Use `REDIS_SHARD_URLS` for coarse application-level sharding when one Redis node becomes a CPU/memory hotspot. Stable key hashing keeps single-key operations local to one shard; cross-key analytics should move to Postgres/read models instead of Redis-wide fanout.
 9. Use Redis Streams only for ephemeral or coordination-heavy event lanes. Durable business workflows still need Postgres/River/outbox as the replayable source.
+10. The scaffold Redis config disables RDB/AOF persistence by default. Re-enable persistence only if an app explicitly makes Redis part of its recovery contract and has tests for restart/replay semantics.
 
 ## Safety and security
 

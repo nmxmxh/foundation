@@ -8,7 +8,7 @@
 services:
   # Redis Cache
   app-redis:
-    image: redis:7-alpine
+    image: ${REDIS_IMAGE:-redis:8-alpine}
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-redis
     expose:
       - "6379"
@@ -63,6 +63,9 @@ services:
       REDIS_POOL_SIZE: "${REDIS_POOL_SIZE:-32}"
       REDIS_MIN_IDLE: "${REDIS_MIN_IDLE:-4}"
       REDIS_MAX_RETRIES: "${REDIS_MAX_RETRIES:-1}"
+      REDIS_DIAL_TIMEOUT: "${REDIS_DIAL_TIMEOUT:-2s}"
+      REDIS_READ_TIMEOUT: "${REDIS_READ_TIMEOUT:-500ms}"
+      REDIS_WRITE_TIMEOUT: "${REDIS_WRITE_TIMEOUT:-500ms}"
       REDIS_PREFIX: "${REDIS_PREFIX:-{{PROJECT_NAME}}}"
       JWT_SECRET: "${JWT_SECRET:-dev-change-me}"
       JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-change-me}"

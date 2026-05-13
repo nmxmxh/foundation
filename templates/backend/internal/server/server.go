@@ -42,6 +42,8 @@ type Server struct {
 
 	// Auth configuration
 	requireAuthForDispatch bool
+	protectOperational     bool
+	allowedOrigins         []string
 
 	// Rate limiting
 	apiRateLimitEnabled  bool
@@ -116,7 +118,9 @@ func New(cfg *config.Config, reg *registry.ServiceRegistry, handler ...*graceful
 		wsUnauthenticatedAllowset: map[string]struct{}{
 			"identity:ping:v1:requested": {},
 		},
-		ws: newWSRuntime(),
+		protectOperational: cfg != nil && cfg.ProtectOperationalEndpoints,
+		allowedOrigins:     configuredAllowedOrigins(cfg),
+		ws:                 newWSRuntime(),
 	}
 
 	return s
@@ -195,6 +199,20 @@ func (s *Server) ConfigureHealthChecks(health, liveness, readiness http.Handler)
 	s.readinessHandler = readiness
 }
 
+func configuredAllowedOrigins(cfg *config.Config) []string {
+	if cfg == nil || len(cfg.AllowedOrigins) == 0 {
+		return nil
+	}
+	origins := make([]string, 0, len(cfg.AllowedOrigins))
+	for _, origin := range cfg.AllowedOrigins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed != "" {
+			origins = append(origins, trimmed)
+		}
+	}
+	return origins
+}
+
 // Handler returns the configured HTTP handler with all middleware
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -204,11 +222,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health", s.healthz)
 	mux.HandleFunc("/health/live", s.liveness)
 	mux.HandleFunc("/health/ready", s.readiness)
-	mux.HandleFunc("/metricsz", s.metrics)
+	mux.Handle("/metricsz", s.operationalHandler(http.HandlerFunc(s.metrics)))
+	mux.Handle("/metricsz/trace", s.operationalHandler(observability.TraceHandler(observability.Default())))
 
 	// Event dispatch endpoint
 	mux.HandleFunc("/v1/dispatch", s.dispatch)
-	mux.HandleFunc("/v1/events/recent", s.recentEvents)
+	mux.Handle("/v1/events/recent", s.operationalHandler(http.HandlerFunc(s.recentEvents)))
 
 	// WebSocket endpoint
 	if s.wsEnabled {
@@ -223,7 +242,7 @@ func (s *Server) Handler() http.Handler {
 	handler := security.SecurityHeaders(mux)
 	handler = kitcompress.HTTPRequestDecompressionMiddleware(true, 10*1024*1024)(handler)
 	handler = security.InputValidation(handler)
-	handler = security.CORS([]string{"*"})(handler)
+	handler = security.CORS(s.allowedOrigins)(handler)
 
 	if s.apiRateLimitEnabled {
 		if s.apiRedisClient != nil {
@@ -383,6 +402,60 @@ func (s *Server) readiness(w http.ResponseWriter, r *http.Request) {
 func (s *Server) metrics(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(s.log, w, observability.Default().Snapshot())
+}
+
+func (s *Server) operationalHandler(next http.Handler) http.Handler {
+	if next == nil {
+		return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	}
+	if !s.protectOperational {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextRequest, err := s.authenticateOperationalRequest(r)
+		if err != nil {
+			domainerr.WriteHTTP(w, err, domainerr.ResponseOptions{})
+			return
+		}
+		next.ServeHTTP(w, nextRequest)
+	})
+}
+
+func (s *Server) authenticateOperationalRequest(r *http.Request) (*http.Request, error) {
+	if r == nil {
+		return r, domainerr.Unauthorized("authorization_required", "authorization required")
+	}
+	if strings.TrimSpace(security.GetUserIDFromContext(r.Context())) != "" {
+		return r, s.authorizeOperationalContext(r.Context())
+	}
+	if s.jwt == nil {
+		return r, domainerr.Unauthorized("authorization_required", "authorization required")
+	}
+	token, err := auth.ParseBearerToken(r.Header.Get("Authorization"))
+	if err != nil {
+		return r, domainerr.Unauthorized("authorization_required", "authorization required")
+	}
+	claims, err := s.jwt.ValidateToken(token)
+	if err != nil {
+		return r, domainerr.Unauthorized("authorization_invalid", "invalid authorization")
+	}
+	ctx := r.Context()
+	ctx = security.ContextWithUserID(ctx, claims.UserID)
+	ctx = security.ContextWithOrganizationID(ctx, claims.OrganizationID)
+	ctx = security.ContextWithRole(ctx, claims.Role)
+	ctx = security.ContextWithCapabilities(ctx, claims.Capabilities)
+	ctx = security.ContextWithSessionID(ctx, claims.SessionID)
+	if err := s.authorizeOperationalContext(ctx); err != nil {
+		return r, err
+	}
+	return r.WithContext(ctx), nil
+}
+
+func (s *Server) authorizeOperationalContext(ctx context.Context) error {
+	if s.rbac == nil {
+		return nil
+	}
+	return s.rbac.RequireAccess(ctx, "ops.metrics", security.PermissionView)
 }
 
 func (s *Server) recentEvents(w http.ResponseWriter, _ *http.Request) {

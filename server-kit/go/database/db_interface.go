@@ -68,6 +68,18 @@ type DomainRecord struct {
 	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
+// RawDomainRecord is the byte-preserving state-store shape for handlers that
+// already own canonical JSON and do not need immediate map mutation.
+type RawDomainRecord struct {
+	Domain         string    `json:"domain"`
+	Collection     string    `json:"collection"`
+	OrganizationID string    `json:"organization_id"`
+	RecordID       string    `json:"record_id"`
+	DataJSON       []byte    `json:"data_json"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
 // StateStore is a persistence abstraction used by domain services.
 type StateStore interface {
 	UpsertRecord(context.Context, DomainRecord) (DomainRecord, error)
@@ -76,6 +88,12 @@ type StateStore interface {
 	CountRecords(context.Context, string, string, string, map[string]any) (int64, error)
 	EstimateCount(ctx context.Context, domain, collection, organizationID string) (int64, error)
 	DeleteRecord(context.Context, string, string, string, string) error
+}
+
+// RawStateStore is an optional extension for byte-preserving JSON state paths.
+type RawStateStore interface {
+	UpsertRecordJSON(context.Context, RawDomainRecord) (RawDomainRecord, error)
+	GetRecordJSON(context.Context, string, string, string, string) (RawDomainRecord, bool, error)
 }
 
 // StoreStats provides operational metrics about the database connection pool.

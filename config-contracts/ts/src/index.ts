@@ -113,6 +113,9 @@ export type PostQuantumConfig = {
 };
 
 export type ServerSecurityConfig = {
+  requireAuth?: boolean;
+  protectOperationalEndpoints?: boolean;
+  corsAllowedOrigins?: string[];
   postQuantum?: PostQuantumConfig;
 };
 
@@ -360,11 +363,23 @@ export const validateServerSecurityConfig = (value: unknown): value is ServerSec
   if (!isRecord(value)) {
     return false;
   }
+  const requireAuth = value.requireAuth ?? value.require_auth;
+  const protectOperationalEndpoints = value.protectOperationalEndpoints ?? value.protect_operational_endpoints;
+  const corsAllowedOrigins = value.corsAllowedOrigins ?? value.cors_allowed_origins;
   const postQuantum = readRecord(value, "postQuantum", "post_quantum");
-  if (postQuantum === undefined) {
-    return true;
+  if (requireAuth !== undefined && typeof requireAuth !== "boolean") {
+    return false;
   }
-  return validatePostQuantumConfig(postQuantum);
+  if (protectOperationalEndpoints !== undefined && typeof protectOperationalEndpoints !== "boolean") {
+    return false;
+  }
+  if (
+    corsAllowedOrigins !== undefined &&
+    (!Array.isArray(corsAllowedOrigins) || corsAllowedOrigins.some((origin) => typeof origin !== "string" || origin.trim() === "" || origin.trim() === "*"))
+  ) {
+    return false;
+  }
+  return postQuantum === undefined || validatePostQuantumConfig(postQuantum);
 };
 
 export const validatePostQuantumConfig = (value: unknown): value is PostQuantumConfig => {

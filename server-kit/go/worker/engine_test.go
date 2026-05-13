@@ -202,7 +202,9 @@ func TestEngineRecordsObservabilityStates(t *testing.T) {
 		JobKind:        "operations_lifecycle",
 		Queue:          "operations_core",
 		MaxAttempts:    2,
+		CorrelationID:  "corr_worker_obs",
 		IdempotencyKey: "idem_obs_1",
+		Metadata:       map[string]any{"organization_id": "org_obs"},
 	}); err != nil {
 		t.Fatalf("enqueue failed: %v", err)
 	}
@@ -213,6 +215,10 @@ func TestEngineRecordsObservabilityStates(t *testing.T) {
 		worker, _ := snapshot["worker"].(map[string]any)
 		count, _ := worker["count"].(map[string]int64)
 		if count["operations_lifecycle|operations_core|succeeded"] >= 1 {
+			trace := observability.Default().Trace("corr_worker_obs", 0)
+			if len(trace) == 0 {
+				t.Fatalf("expected worker trace events")
+			}
 			return
 		}
 		time.Sleep(20 * time.Millisecond)

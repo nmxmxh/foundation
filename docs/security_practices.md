@@ -89,6 +89,7 @@ Every exposed feature should add tests for the vulnerability families it touches
 7. Keep secrets out of query strings, logs, analytics, crash reports, and client-readable storage.
 8. Treat production security headers, CORS, origin validation, rate limiting, and content-type enforcement as middleware baselines, not optional route features.
 9. Preserve an inventory of exposed routes, API versions, queue topics, webhook receivers, public buckets, DNS records, and package entrypoints.
+10. Generated production scaffolds must default to authentication enabled, exact allowed origins, and protected operational endpoints. `/metricsz`, `/metricsz/trace`, and operational event views are not public production surfaces.
 
 ## Review Checklist
 

@@ -180,6 +180,9 @@ func (r *ServiceRegistry) Listen(ctx context.Context, patterns ...string) error 
 					if !ok {
 						return
 					}
+					if ctx.Err() != nil {
+						return
+					}
 					select {
 					case payloadCh <- payload:
 					case <-ctx.Done():
@@ -191,16 +194,19 @@ func (r *ServiceRegistry) Listen(ctx context.Context, patterns ...string) error 
 	}
 
 	for workerIndex := 0; workerIndex < r.dispatchWorkers; workerIndex++ {
-		go func() {
+		go func(workerIndex int) {
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				case payload := <-payloadCh:
+					if ctx.Err() != nil {
+						return
+					}
 					r.dispatchEnvelope(ctx, payload)
 				}
 			}
-		}()
+		}(workerIndex)
 	}
 
 	go func() {

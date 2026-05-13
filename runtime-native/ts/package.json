@@ -1,0 +1,23 @@
+{
+  "name": "@ovasabi/runtime-native",
+  "version": "0.1.0",
+  "license": "UNLICENSED",
+  "type": "module",
+  "dependencies": {
+    "@ovasabi/runtime-transport": "file:../../runtime-transport/ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "node ./node_modules/typescript/bin/tsc --noEmit -p tsconfig.json",
+    "test": "node ./node_modules/vitest/dist/cli.js run",
+    "bench": "node ./node_modules/vitest/dist/cli.js bench"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

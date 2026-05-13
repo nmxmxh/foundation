@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FOUNDATION_DIR="$(dirname "$SCRIPT_DIR")"
 MANIFEST="$FOUNDATION_DIR/templates/scaffold.manifest.tsv"
 failed=0
+shopt -s nocasematch
 
 fail() {
     echo "[FAIL] $1" >&2
@@ -40,7 +41,7 @@ while IFS=$'\t' read -r source dest profiles feature mode extra; do
     esac
 
     case "$feature" in
-        always|docker|wasm) ;;
+        always|docker|wasm|native) ;;
         *) fail "line $line_no invalid feature: $feature" ;;
     esac
 
@@ -52,7 +53,21 @@ while IFS=$'\t' read -r source dest profiles feature mode extra; do
     if [[ "$dest" == pkg || "$dest" == pkg/* ]]; then
         fail "line $line_no must not generate root pkg/: $dest"
     fi
+
+    case "$source $dest" in
+        *service-backed*|*service_backed*|*servicebacked*)
+            fail "line $line_no must not scaffold service-backed core test assets: $source -> $dest"
+            ;;
+    esac
 done < "$MANIFEST"
+
+if find "$FOUNDATION_DIR/tooling/scripts" -maxdepth 1 -type f -iname '*service*backed*' | rg . >/dev/null; then
+    fail "service-backed benchmark scripts must not live in tooling/scripts because scaffold copies that directory into project scripts/checks"
+fi
+
+if find "$FOUNDATION_DIR/templates" -type f -iname '*service*backed*' | rg . >/dev/null; then
+    fail "service-backed core test assets must not live under templates because scaffolded projects only inherit project runtime files"
+fi
 
 if [[ "$failed" -ne 0 ]]; then
     echo "scaffold manifest test failed" >&2

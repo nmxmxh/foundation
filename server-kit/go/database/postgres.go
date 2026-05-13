@@ -1,6 +1,7 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 )
 
 const maxInt32Value = 2_147_483_647
@@ -44,23 +46,36 @@ func (r postgresCommandResult) RowsAffected() int64 {
 }
 
 type budgetedRow struct {
-	row    RowScanner
-	cancel context.CancelFunc
+	row     RowScanner
+	cancel  context.CancelFunc
+	release func()
+	start   time.Time
 }
 
 type budgetedRows struct {
-	rows   pgx.Rows
-	cancel context.CancelFunc
+	rows    pgx.Rows
+	cancel  context.CancelFunc
+	release func()
+	start   time.Time
 }
 
 func (r budgetedRow) Scan(dest ...any) error {
 	defer r.cancel()
-	return r.row.Scan(dest...)
+	if r.release != nil {
+		defer r.release()
+	}
+	err := r.row.Scan(dest...)
+	recordDatabaseOperation("query_row", r.start, err)
+	return err
 }
 
 func (r budgetedRows) Close() {
 	r.rows.Close()
+	if r.release != nil {
+		r.release()
+	}
 	r.cancel()
+	recordDatabaseOperation("query", r.start, r.rows.Err())
 }
 
 func (r budgetedRows) Next() bool {
@@ -89,6 +104,27 @@ func newPostgresDB(ctx context.Context, databaseURL string, opts PoolOptions) (*
 	if err != nil {
 		return nil, err
 	}
+	ApplyPoolOptions(cfg, opts)
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return &PostgresDB{pool: pool, opts: opts}, nil
+}
+
+// ApplyPoolOptions applies Foundation pool sizing, cache, and timeout settings
+// to a pgxpool.Config. It lets scaffolded workers use the same budget defaults
+// as RuntimeStore without duplicating environment parsing or raw pgx tuning.
+func ApplyPoolOptions(cfg *pgxpool.Config, opts PoolOptions) {
+	if cfg == nil {
+		return
+	}
+	opts = normalizePoolOptions(opts)
 	cfg.MaxConns = clampInt32(opts.MaxConns)
 	cfg.MinConns = clampInt32(opts.MinConns)
 	cfg.HealthCheckPeriod = opts.HealthCheckPeriod
@@ -100,16 +136,6 @@ func newPostgresDB(ctx context.Context, databaseURL string, opts PoolOptions) (*
 		cfg.ConnConfig.RuntimeParams = make(map[string]string, 1)
 	}
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = fmt.Sprintf("%d", opts.QueryTimeout.Milliseconds())
-
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		return nil, err
-	}
-	return &PostgresDB{pool: pool, opts: opts}, nil
 }
 
 // WrapPostgresPool projects an existing pgx pool into Foundation's RuntimeStore
@@ -148,8 +174,14 @@ func (db *PostgresDB) BeginTx(ctx context.Context) (Tx, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	tx, err := db.pool.BeginTx(ctx, pgx.TxOptions{})
+	acquireCtx, cancel := AcquireBudgetContext(ctx, db.opts)
+	defer cancel()
+	start := time.Now()
+	tx, err := db.pool.BeginTx(acquireCtx, pgx.TxOptions{})
 	if err != nil {
+		err = normalizeAcquireError(acquireCtx.Err(), err)
+		recordDatabaseOperation("begin_tx_acquire", start, err)
+		db.recordPoolPressure()
 		return nil, err
 	}
 	return &postgresTx{tx: tx}, nil
@@ -159,10 +191,16 @@ func (db *PostgresDB) Exec(ctx context.Context, query string, args ...any) error
 	if db == nil || db.pool == nil {
 		return errors.New("postgres pool is nil")
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	_, err := db.pool.Exec(ctx, query, args...)
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "exec")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	_, err = conn.Exec(queryCtx, query, args...)
+	recordDatabaseOperation("exec", start, err)
 	return err
 }
 
@@ -170,10 +208,16 @@ func (db *PostgresDB) ExecResult(ctx context.Context, query string, args ...any)
 	if db == nil || db.pool == nil {
 		return nil, errors.New("postgres pool is nil")
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	tag, err := db.pool.Exec(ctx, query, args...)
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "exec_result")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	tag, err := conn.Exec(queryCtx, query, args...)
+	recordDatabaseOperation("exec_result", start, err)
 	if err != nil {
 		return nil, err
 	}
@@ -184,38 +228,52 @@ func (db *PostgresDB) QueryRow(ctx context.Context, query string, args ...any) R
 	if db == nil || db.pool == nil {
 		return memoryRow{err: errors.New("postgres pool is nil")}
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	return budgetedRow{row: db.pool.QueryRow(ctx, query, args...), cancel: cancel}
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "query_row")
+	if err != nil {
+		return memoryRow{err: err}
+	}
+	return budgetedRow{row: conn.QueryRow(queryCtx, query, args...), cancel: cancel, release: conn.Release, start: start}
 }
 
 func (db *PostgresDB) Query(ctx context.Context, query string, args ...any) (Rows, error) {
 	if db == nil || db.pool == nil {
 		return nil, errors.New("postgres pool is nil")
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	rows, err := db.pool.Query(ctx, query, args...)
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "query")
 	if err != nil {
-		cancel()
 		return nil, err
 	}
-	return budgetedRows{rows: rows, cancel: cancel}, nil
+	rows, err := conn.Query(queryCtx, query, args...)
+	if err != nil {
+		conn.Release()
+		cancel()
+		recordDatabaseOperation("query", start, err)
+		return nil, err
+	}
+	return budgetedRows{rows: rows, cancel: cancel, release: conn.Release, start: start}, nil
 }
 
 func (db *PostgresDB) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
 	if db == nil || db.pool == nil {
 		return nil, errors.New("postgres pool is nil")
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	rows, err := db.pool.Query(ctx, query, args...)
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "query_maps")
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	rows, err := conn.Query(queryCtx, query, args...)
+	if err != nil {
+		recordDatabaseOperation("query_maps", start, err)
+		return nil, err
+	}
 	defer rows.Close()
-	return scanToMaps(rows)
+	result, err := scanToMaps(rows)
+	recordDatabaseOperation("query_maps", start, err)
+	return result, err
 }
 
 func (db *PostgresDB) Stats() StoreStats {
@@ -223,6 +281,7 @@ func (db *PostgresDB) Stats() StoreStats {
 		return StoreStats{}
 	}
 	s := db.pool.Stat()
+	recordDatabasePoolPressure(db.pool)
 	return StoreStats{
 		TotalConns:      s.TotalConns(),
 		IdleConns:       s.IdleConns(),
@@ -232,6 +291,70 @@ func (db *PostgresDB) Stats() StoreStats {
 		MaxConns:        s.MaxConns(),
 		ConstructedAt:   time.Now(), // Approx as pgxpool doesn't track this directly
 	}
+}
+
+func (db *PostgresDB) recordPoolPressure() {
+	if db == nil || db.pool == nil {
+		return
+	}
+	recordDatabasePoolPressure(db.pool)
+}
+
+func (db *PostgresDB) acquireConn(ctx context.Context, operation string) (*pgxpool.Conn, context.Context, func(), time.Time, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	acquireCtx, acquireCancel := AcquireBudgetContext(ctx, db.opts)
+	start := time.Now()
+	conn, err := db.pool.Acquire(acquireCtx)
+	acquireErr := acquireCtx.Err()
+	acquireCancel()
+	if err != nil {
+		err = normalizeAcquireError(acquireErr, err)
+		recordDatabaseOperation(operation+"_acquire", start, err)
+		db.recordPoolPressure()
+		return nil, nil, nil, start, err
+	}
+	queryCtx, queryCancel := QueryBudgetContext(ctx, db.opts)
+	cancel := func() {
+		queryCancel()
+		db.recordPoolPressure()
+	}
+	return conn, queryCtx, cancel, start, nil
+}
+
+func normalizeAcquireError(ctxErr error, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctxErr, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %v", ErrPoolAcquireTimeout, err)
+	}
+	return err
+}
+
+func recordDatabasePoolPressure(pool *pgxpool.Pool) {
+	if pool == nil {
+		return
+	}
+	s := pool.Stat()
+	observability.Default().RecordDatabasePool(
+		"postgres",
+		s.TotalConns()-s.IdleConns(),
+		s.IdleConns(),
+		s.TotalConns(),
+		s.MaxConns(),
+		s.AcquireCount(),
+		s.AcquireDuration(),
+	)
+}
+
+func recordDatabaseOperation(operation string, start time.Time, err error) {
+	state := "success"
+	if err != nil {
+		state = "error"
+	}
+	observability.Default().RecordDatabaseOperation(operation, state, time.Since(start))
 }
 
 func (tx *postgresTx) Exec(ctx context.Context, query string, args ...any) error {
@@ -333,29 +456,77 @@ func (db *PostgresDB) UpsertRecord(ctx context.Context, rec DomainRecord) (Domai
 	}
 
 	var (
-		dataRaw   []byte
 		createdAt time.Time
 		updatedAt time.Time
 	)
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	err = db.pool.QueryRow(ctx, `
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "upsert_record")
+	if err != nil {
+		return DomainRecord{}, err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	err = conn.QueryRow(queryCtx, `
 		INSERT INTO governance_state_records (domain, collection_name, organization_id, record_id, data)
 		VALUES ($1, $2, $3, $4, $5::jsonb)
 		ON CONFLICT (domain, collection_name, organization_id, record_id)
 		DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
-		RETURNING data, created_at, updated_at
-	`, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload).Scan(&dataRaw, &createdAt, &updatedAt)
+		RETURNING created_at, updated_at
+	`, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload).Scan(&createdAt, &updatedAt)
+	recordDatabaseOperation("upsert_record", start, err)
 	if err != nil {
 		return DomainRecord{}, err
 	}
 
-	parsed, err := parseDataJSON(dataRaw)
-	if err != nil {
-		return DomainRecord{}, err
+	rec.CreatedAt = createdAt.UTC()
+	rec.UpdatedAt = updatedAt.UTC()
+	return rec, nil
+}
+
+func (db *PostgresDB) UpsertRecordJSON(ctx context.Context, rec RawDomainRecord) (RawDomainRecord, error) {
+	if db == nil || db.pool == nil {
+		return RawDomainRecord{}, errors.New("postgres pool is nil")
 	}
-	rec.Data = parsed
+	payload, err := validateRawDomainRecord(&rec)
+	if err != nil {
+		return RawDomainRecord{}, err
+	}
+
+	var (
+		createdAt time.Time
+		updatedAt time.Time
+	)
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "upsert_record_json")
+	if err != nil {
+		return RawDomainRecord{}, err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	err = conn.QueryRow(queryCtx, `
+		INSERT INTO governance_state_records (domain, collection_name, organization_id, record_id, data)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			CASE
+				WHEN $6::text = '' THEN $5::jsonb
+				ELSE $5::jsonb || jsonb_build_object('organization_id', $6::text)
+			END
+		)
+		ON CONFLICT (domain, collection_name, organization_id, record_id)
+		DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+		RETURNING created_at, updated_at
+	`, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload, rec.OrganizationID).Scan(&createdAt, &updatedAt)
+	recordDatabaseOperation("upsert_record_json", start, err)
+	if err != nil {
+		return RawDomainRecord{}, err
+	}
+
+	rec.DataJSON = payload
 	rec.CreatedAt = createdAt.UTC()
 	rec.UpdatedAt = updatedAt.UTC()
 	return rec, nil
@@ -365,40 +536,69 @@ func (db *PostgresDB) GetRecord(ctx context.Context, domain, collection, organiz
 	if db == nil || db.pool == nil {
 		return DomainRecord{}, false, errors.New("postgres pool is nil")
 	}
+	raw, found, err := db.GetRecordJSON(ctx, domain, collection, organizationID, recordID)
+	if err != nil || !found {
+		return DomainRecord{}, found, err
+	}
+	data, err := parseDataJSON(raw.DataJSON)
+	if err != nil {
+		return DomainRecord{}, false, err
+	}
+	return DomainRecord{
+		Domain:         raw.Domain,
+		Collection:     raw.Collection,
+		OrganizationID: raw.OrganizationID,
+		RecordID:       raw.RecordID,
+		Data:           data,
+		CreatedAt:      raw.CreatedAt,
+		UpdatedAt:      raw.UpdatedAt,
+	}, true, nil
+}
+
+func (db *PostgresDB) GetRecordJSON(ctx context.Context, domain, collection, organizationID, recordID string) (RawDomainRecord, bool, error) {
+	if db == nil || db.pool == nil {
+		return RawDomainRecord{}, false, errors.New("postgres pool is nil")
+	}
 
 	var (
 		dataRaw   []byte
 		createdAt time.Time
 		updatedAt time.Time
 	)
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	err := db.pool.QueryRow(ctx, `
-		SELECT data, created_at, updated_at
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "get_record_json")
+	if err != nil {
+		return RawDomainRecord{}, false, err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	domain = strings.TrimSpace(domain)
+	collection = strings.TrimSpace(collection)
+	organizationID = strings.TrimSpace(organizationID)
+	recordID = strings.TrimSpace(recordID)
+	err = conn.QueryRow(queryCtx, `
+		SELECT data::text, created_at, updated_at
 		FROM governance_state_records
 		WHERE domain = $1
 		  AND collection_name = $2
 		  AND organization_id = $3
 		  AND record_id = $4
-	`, strings.TrimSpace(domain), strings.TrimSpace(collection), strings.TrimSpace(organizationID), strings.TrimSpace(recordID)).Scan(&dataRaw, &createdAt, &updatedAt)
+	`, domain, collection, organizationID, recordID).Scan(&dataRaw, &createdAt, &updatedAt)
+	recordDatabaseOperation("get_record_json", start, err)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return DomainRecord{}, false, nil
+			return RawDomainRecord{}, false, nil
 		}
-		return DomainRecord{}, false, err
+		return RawDomainRecord{}, false, err
 	}
 
-	data, err := parseDataJSON(dataRaw)
-	if err != nil {
-		return DomainRecord{}, false, err
-	}
-	return DomainRecord{
-		Domain:         strings.TrimSpace(domain),
-		Collection:     strings.TrimSpace(collection),
-		OrganizationID: strings.TrimSpace(organizationID),
-		RecordID:       strings.TrimSpace(recordID),
-		Data:           data,
+	return RawDomainRecord{
+		Domain:         domain,
+		Collection:     collection,
+		OrganizationID: organizationID,
+		RecordID:       recordID,
+		DataJSON:       append([]byte(nil), dataRaw...),
 		CreatedAt:      createdAt.UTC(),
 		UpdatedAt:      updatedAt.UTC(),
 	}, true, nil
@@ -427,14 +627,24 @@ func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organ
 		args = append(args, limit)
 	}
 
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	rows, err := db.pool.Query(ctx, query, args...)
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "list_records")
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	rows, err := conn.Query(queryCtx, query, args...)
+	if err != nil {
+		conn.Release()
+		cancel()
+		recordDatabaseOperation("list_records", start, err)
+		return nil, err
+	}
+	var opErr error
+	defer func() {
+		rows.Close()
+		conn.Release()
+		cancel()
+		recordDatabaseOperation("list_records", start, opErr)
+	}()
 
 	records := make([]DomainRecord, 0, 64)
 	for rows.Next() {
@@ -445,10 +655,12 @@ func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organ
 			updated time.Time
 		)
 		if err := rows.Scan(&rec.Domain, &rec.Collection, &rec.OrganizationID, &rec.RecordID, &dataRaw, &created, &updated); err != nil {
+			opErr = err
 			return nil, err
 		}
 		data, err := parseDataJSON(dataRaw)
 		if err != nil {
+			opErr = err
 			return nil, err
 		}
 		if !matchesFilter(data, filters) {
@@ -463,6 +675,7 @@ func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organ
 		}
 	}
 	if err := rows.Err(); err != nil {
+		opErr = err
 		return nil, err
 	}
 	return records, nil
@@ -487,11 +700,17 @@ func (db *PostgresDB) CountRecords(ctx context.Context, domain, collection, orga
 	}
 
 	var count int64
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "count_records")
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
 	query := `SELECT COUNT(*) FROM governance_state_records WHERE ` + where
-	err := db.pool.QueryRow(ctx, query, args...).Scan(&count)
+	err = conn.QueryRow(queryCtx, query, args...).Scan(&count)
+	recordDatabaseOperation("count_records", start, err)
 	return count, err
 }
 
@@ -507,14 +726,20 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 	// If no filters, use the fastest catalog-based estimate
 	if domain == "" && collection == "" && organizationID == "" {
 		var estimate int64
-		var cancel context.CancelFunc
-		ctx, cancel = QueryBudgetContext(ctx, db.opts)
-		defer cancel()
-		err := db.pool.QueryRow(ctx, `
+		conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "estimate_count")
+		if err != nil {
+			return 0, err
+		}
+		defer func() {
+			conn.Release()
+			cancel()
+		}()
+		err = conn.QueryRow(queryCtx, `
 			SELECT reltuples::bigint 
 			FROM pg_class 
 			WHERE oid = 'governance_state_records'::regclass
 		`).Scan(&estimate)
+		recordDatabaseOperation("estimate_count", start, err)
 		return estimate, err
 	}
 
@@ -540,28 +765,34 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 
 	query := `EXPLAIN SELECT 1 FROM governance_state_records WHERE ` + strings.Join(clauses, " AND ")
 	var plan string
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	err := db.pool.QueryRow(ctx, query, args...).Scan(&plan)
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "estimate_count")
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	err = conn.QueryRow(queryCtx, query, args...).Scan(&plan)
+	recordDatabaseOperation("estimate_count", start, err)
 	if err != nil {
 		return 0, err
 	}
 
 	// Parse "rows=X" from the EXPLAIN output
 	// Example: Seq Scan on governance_state_records  (cost=0.00..12.75 rows=110 width=4)
-	start := strings.Index(plan, "rows=")
-	if start == -1 {
+	rowsStart := strings.Index(plan, "rows=")
+	if rowsStart == -1 {
 		return 0, nil
 	}
-	start += 5
-	end := strings.Index(plan[start:], " ")
+	rowsStart += 5
+	end := strings.Index(plan[rowsStart:], " ")
 	if end == -1 {
-		end = len(plan[start:])
+		end = len(plan[rowsStart:])
 	}
 
 	var count int64
-	fmt.Sscanf(plan[start:start+end], "%d", &count)
+	fmt.Sscanf(plan[rowsStart:rowsStart+end], "%d", &count)
 	return count, nil
 }
 
@@ -569,16 +800,22 @@ func (db *PostgresDB) DeleteRecord(ctx context.Context, domain, collection, orga
 	if db == nil || db.pool == nil {
 		return errors.New("postgres pool is nil")
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	_, err := db.pool.Exec(ctx, `
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "delete_record")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	_, err = conn.Exec(queryCtx, `
 		DELETE FROM governance_state_records
 		WHERE domain = $1
 		  AND collection_name = $2
 		  AND organization_id = $3
 		  AND record_id = $4
 	`, strings.TrimSpace(domain), strings.TrimSpace(collection), strings.TrimSpace(organizationID), strings.TrimSpace(recordID))
+	recordDatabaseOperation("delete_record", start, err)
 	return err
 }
 
@@ -587,13 +824,19 @@ func (db *PostgresDB) DeleteRecordsByOrganization(ctx context.Context, organizat
 	if db == nil || db.pool == nil {
 		return 0, errors.New("postgres pool is nil")
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	commandTag, err := db.pool.Exec(ctx, `
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "delete_records_by_organization")
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	commandTag, err := conn.Exec(queryCtx, `
 		DELETE FROM governance_state_records
 		WHERE organization_id = $1
 	`, strings.TrimSpace(organizationID))
+	recordDatabaseOperation("delete_records_by_organization", start, err)
 	if err != nil {
 		return 0, err
 	}
@@ -657,6 +900,40 @@ func postgresScalarFilterText(value any) (string, bool) {
 
 func quoteSQLString(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func validateRawDomainRecord(rec *RawDomainRecord) ([]byte, error) {
+	if rec == nil {
+		return nil, errors.New("record is required")
+	}
+	rec.Domain = strings.TrimSpace(rec.Domain)
+	rec.Collection = strings.TrimSpace(rec.Collection)
+	rec.OrganizationID = strings.TrimSpace(rec.OrganizationID)
+	rec.RecordID = strings.TrimSpace(rec.RecordID)
+	if rec.Domain == "" {
+		return nil, errors.New("domain is required")
+	}
+	if rec.Collection == "" {
+		return nil, errors.New("collection is required")
+	}
+	if rec.RecordID == "" {
+		return nil, errors.New("record id is required")
+	}
+	return normalizeDataJSON(rec.DataJSON)
+}
+
+func normalizeDataJSON(data []byte) ([]byte, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		trimmed = []byte("{}")
+	}
+	if !json.Valid(trimmed) {
+		return nil, errors.New("data json is invalid")
+	}
+	if len(trimmed) < 2 || trimmed[0] != '{' || trimmed[len(trimmed)-1] != '}' {
+		return nil, errors.New("data json must be an object")
+	}
+	return append([]byte(nil), trimmed...), nil
 }
 
 func validateDomainRecord(rec *DomainRecord) error {

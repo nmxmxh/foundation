@@ -124,10 +124,11 @@ type Config struct {
 
 // Manager manages feature flags.
 type Manager struct {
-	config Config
-	flags  map[string]Flag
-	mu     sync.RWMutex
-	stopCh chan struct{}
+	config   Config
+	flags    map[string]Flag
+	mu       sync.RWMutex
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 // New creates a new feature flag manager.
@@ -174,7 +175,10 @@ func (m *Manager) watchChanges() {
 		select {
 		case <-m.stopCh:
 			return
-		case newFlags := <-changes:
+		case newFlags, ok := <-changes:
+			if !ok {
+				return
+			}
 			if newFlags != nil {
 				m.updateFlags(newFlags)
 			}
@@ -201,7 +205,12 @@ func (m *Manager) updateFlags(newFlags map[string]Flag) {
 
 // Stop stops the flag manager.
 func (m *Manager) Stop() {
-	close(m.stopCh)
+	if m == nil {
+		return
+	}
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+	})
 }
 
 // IsEnabled checks if a feature flag is enabled for the given context.
@@ -478,6 +487,7 @@ func (s *MemorySource) Set(flag Flag) {
 	select {
 	case s.changes <- current:
 	default:
+		// concurrency: drop stale notification; periodic refresh reconciles latest snapshot.
 	}
 }
 
@@ -494,5 +504,6 @@ func (s *MemorySource) Delete(name string) {
 	select {
 	case s.changes <- current:
 	default:
+		// concurrency: drop stale notification; periodic refresh reconciles latest snapshot.
 	}
 }

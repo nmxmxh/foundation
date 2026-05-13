@@ -9,6 +9,7 @@ PROFILE_DIR="${TMPDIR:-/tmp}/ovasabi-foundation-local-profiles"
 echo "== foundation local integration: scaffold/enforcement =="
 "$FOUNDATION_DIR/tests/scaffold_manifest_test.sh"
 "$FOUNDATION_DIR/tests/coding_practices_check_test.sh"
+"$FOUNDATION_DIR/tests/lifecycle_contract_generator_test.sh"
 "$FOUNDATION_DIR/tooling/scripts/server_kit_usage_check.sh" "$FOUNDATION_DIR"
 
 echo "== foundation local integration: server-kit correctness =="
@@ -61,6 +62,13 @@ mkdir -p "$PROFILE_DIR"
 
 if [[ -d "$FOUNDATION_DIR/runtime-sdk/ts/browser-host/node_modules" ]]; then
   (cd "$FOUNDATION_DIR/runtime-sdk/ts/browser-host" && npm run bench)
+fi
+
+if [[ "${RUN_SERVICE_BACKED_TESTS:-0}" == "1" ]]; then
+  echo "== foundation local integration: docker-backed redis/postgres =="
+  "$FOUNDATION_DIR/tests/service_backed_foundation_test.sh"
+else
+  echo "skip service-backed docker tests: set RUN_SERVICE_BACKED_TESTS=1"
 fi
 
 echo "profiles written to $PROFILE_DIR"

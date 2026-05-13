@@ -10,6 +10,32 @@ foundation_escape() {
     printf '%q' "$1"
 }
 
+foundation_project_identifier() {
+    if [[ -n "${PROJECT_IDENTIFIER:-}" ]]; then
+        echo "$PROJECT_IDENTIFIER"
+        return
+    fi
+    local raw="${PROJECT_NAME:-foundation-app}"
+    local normalized
+    normalized="$(echo "$raw" | tr '[:upper:]_' '[:lower:].' | sed -E 's/[^a-z0-9.-]+/-/g; s/^[.-]+//; s/[.-]+$//')"
+    if [[ -z "$normalized" ]]; then
+        normalized="foundation-app"
+    fi
+    if [[ ! "$normalized" =~ ^[a-z] ]]; then
+        normalized="app-$normalized"
+    fi
+    echo "com.ovasabi.$normalized"
+}
+
+foundation_validate_project_identifier() {
+    local identifier="$1"
+    if ! printf '%s\n' "$identifier" | grep -Eq '^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*){2,}$'; then
+        foundation_log_error "Native app identifier must use reverse-domain notation such as com.ovasabi.trotters"
+        foundation_log_error "Actual identifier: ${identifier:-<empty>}"
+        return 1
+    fi
+}
+
 foundation_sed_in_place() {
     local expression="$1"
     local file="$2"
@@ -21,6 +47,7 @@ foundation_render_file() {
     [[ -f "$file" ]] || return 0
 
     foundation_sed_in_place "s|{{PROJECT_NAME}}|${PROJECT_NAME}|g" "$file"
+    foundation_sed_in_place "s|{{PROJECT_IDENTIFIER}}|$(foundation_project_identifier)|g" "$file"
     foundation_sed_in_place "s|{{MODULE_PATH}}|${GO_MODULE}|g" "$file"
     foundation_sed_in_place "s|{{FOUNDATION_VERSION}}|${FOUNDATION_VERSION}|g" "$file"
     foundation_sed_in_place "s|{{TIMESTAMP}}|$(date -u +"%Y-%m-%dT%H:%M:%SZ")|g" "$file"
@@ -115,8 +142,10 @@ LAST_UPDATED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 PROFILE=$PROFILE
 PROJECT_NAME=$PROJECT_NAME
 GO_MODULE=$GO_MODULE
+PROJECT_IDENTIFIER=$(foundation_project_identifier)
 WITH_DOCKER=$WITH_DOCKER
 WITH_WASM=$WITH_WASM
-BASELINE_GENERATION=manifest-v3
+WITH_NATIVE=${WITH_NATIVE:-false}
+BASELINE_GENERATION=manifest-v4
 EOF
 }

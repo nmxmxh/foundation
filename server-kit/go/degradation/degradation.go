@@ -77,14 +77,14 @@ const (
 
 // Dependency tracks the state of an external dependency.
 type Dependency struct {
-	Name              string
-	Config            Config
-	Mode              Mode
-	ConsecutiveFails  int
+	Name               string
+	Config             Config
+	Mode               Mode
+	ConsecutiveFails   int
 	ConsecutiveSuccess int
-	LastCheck         time.Time
-	LastError         error
-	mu                sync.RWMutex
+	LastCheck          time.Time
+	LastError          error
+	mu                 sync.RWMutex
 }
 
 // Manager manages multiple dependencies and their degradation states.
@@ -92,6 +92,7 @@ type Manager struct {
 	dependencies map[string]*Dependency
 	mu           sync.RWMutex
 	stopCh       chan struct{}
+	stopOnce     sync.Once
 	wg           sync.WaitGroup
 }
 
@@ -206,7 +207,12 @@ func (m *Manager) checkHealth(dep *Dependency) {
 
 // Stop stops all health checks.
 func (m *Manager) Stop() {
-	close(m.stopCh)
+	if m == nil {
+		return
+	}
+	m.stopOnce.Do(func() {
+		close(m.stopCh)
+	})
 	m.wg.Wait()
 }
 

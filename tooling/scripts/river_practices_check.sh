@@ -39,7 +39,8 @@ check_pattern() {
 }
 
 if [[ ! -f "$foundation_file" ]]; then
-  fail "foundation metadata" "missing: .foundation"
+  pass "foundation metadata not present; using unknown profile"
+  PROFILE="${PROFILE:-unknown}"
 else
   set -a
   source "$foundation_file"

@@ -42,7 +42,7 @@ func RunParallel[T any](ctx context.Context, operations []Operation[T]) []Result
 	for index, operation := range operations {
 		results[index].Name = operation.Name
 		wg.Add(1)
-		go func() {
+		go func(index int, operation Operation[T]) {
 			defer wg.Done()
 			if operation.Run == nil {
 				results[index].Error = errors.New("operation run function is nil")
@@ -57,7 +57,7 @@ func RunParallel[T any](ctx context.Context, operations []Operation[T]) []Result
 			if err != nil && operation.Critical {
 				cancel()
 			}
-		}()
+		}(index, operation)
 	}
 	wg.Wait()
 	return results

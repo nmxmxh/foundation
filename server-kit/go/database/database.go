@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"time"
 )
+
+var ErrPoolAcquireTimeout = errors.New("database pool acquire timeout")
 
 // MemoryDB is a concurrency-safe in-memory database adapter.
 // It provides deterministic persistence semantics for services and tests,
@@ -162,6 +165,14 @@ func QueryBudgetContext(ctx context.Context, opts PoolOptions) (context.Context,
 	return context.WithTimeout(ctx, opts.QueryTimeout)
 }
 
+func AcquireBudgetContext(ctx context.Context, opts PoolOptions) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	opts = normalizePoolOptions(opts)
+	return context.WithTimeout(ctx, opts.AcquireTimeout)
+}
+
 func clampInt(value, low, high int) int {
 	if value < low {
 		return low
@@ -305,6 +316,37 @@ func (db *MemoryDB) UpsertRecord(ctx context.Context, rec DomainRecord) (DomainR
 	return copyRecord(rec), nil
 }
 
+func (db *MemoryDB) UpsertRecordJSON(ctx context.Context, rec RawDomainRecord) (RawDomainRecord, error) {
+	if err := db.ensureReady(ctx); err != nil {
+		return RawDomainRecord{}, err
+	}
+	payload, err := validateRawDomainRecord(&rec)
+	if err != nil {
+		return RawDomainRecord{}, err
+	}
+	data, err := parseDataJSON(payload)
+	if err != nil {
+		return RawDomainRecord{}, err
+	}
+	if rec.OrganizationID != "" {
+		data["organization_id"] = rec.OrganizationID
+	}
+	typed, err := db.UpsertRecord(ctx, DomainRecord{
+		Domain:         rec.Domain,
+		Collection:     rec.Collection,
+		OrganizationID: rec.OrganizationID,
+		RecordID:       rec.RecordID,
+		Data:           data,
+	})
+	if err != nil {
+		return RawDomainRecord{}, err
+	}
+	rec.DataJSON = payload
+	rec.CreatedAt = typed.CreatedAt
+	rec.UpdatedAt = typed.UpdatedAt
+	return rec, nil
+}
+
 func (db *MemoryDB) GetRecord(ctx context.Context, domain, collection, organizationID, recordID string) (DomainRecord, bool, error) {
 	if err := db.ensureReady(ctx); err != nil {
 		return DomainRecord{}, false, err
@@ -318,6 +360,26 @@ func (db *MemoryDB) GetRecord(ctx context.Context, domain, collection, organizat
 		return DomainRecord{}, false, nil
 	}
 	return copyRecord(rec), true, nil
+}
+
+func (db *MemoryDB) GetRecordJSON(ctx context.Context, domain, collection, organizationID, recordID string) (RawDomainRecord, bool, error) {
+	rec, found, err := db.GetRecord(ctx, domain, collection, organizationID, recordID)
+	if err != nil || !found {
+		return RawDomainRecord{}, found, err
+	}
+	payload, err := json.Marshal(rec.Data)
+	if err != nil {
+		return RawDomainRecord{}, false, err
+	}
+	return RawDomainRecord{
+		Domain:         rec.Domain,
+		Collection:     rec.Collection,
+		OrganizationID: rec.OrganizationID,
+		RecordID:       rec.RecordID,
+		DataJSON:       payload,
+		CreatedAt:      rec.CreatedAt,
+		UpdatedAt:      rec.UpdatedAt,
+	}, true, nil
 }
 
 func (db *MemoryDB) ListRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any, limit int) ([]DomainRecord, error) {

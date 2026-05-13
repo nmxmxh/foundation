@@ -28,6 +28,8 @@ Options:
   --no-docker         Disable Docker scaffold and metadata
   --with-wasm         Enable WASM scaffold and runtime-sdk metadata
   --no-wasm           Disable WASM scaffold and runtime-sdk metadata
+  --with-native       Enable native/Tauri scaffold and runtime-native metadata
+  --no-native         Disable native/Tauri scaffold and runtime-native metadata
   --help, -h          Show this help message
 EOF
 }
@@ -61,6 +63,7 @@ PROFILE_OVERRIDE=""
 GO_MODULE_OVERRIDE=""
 WITH_DOCKER_OVERRIDE=""
 WITH_WASM_OVERRIDE=""
+WITH_NATIVE_OVERRIDE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -113,6 +116,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-wasm)
             WITH_WASM_OVERRIDE="false"
+            shift
+            ;;
+        --with-native)
+            WITH_NATIVE_OVERRIDE="true"
+            shift
+            ;;
+        --no-native)
+            WITH_NATIVE_OVERRIDE="false"
             shift
             ;;
         -*)
@@ -172,10 +183,32 @@ if [[ "$PROFILE" == "full" && "$WITH_WASM" != "true" ]]; then
     WITH_WASM="true"
 fi
 
+native_default="false"
+if [[ "$PROFILE" == "full" || -d "$PROJECT_PATH/native" || -d "$PROJECT_PATH/foundation/runtime-native" ]]; then
+    native_default="true"
+fi
+WITH_NATIVE="${WITH_NATIVE_OVERRIDE:-$(foundation_infer_flag WITH_NATIVE "$native_default")}"
+
+if [[ "$PROFILE" == "full" && "$WITH_NATIVE" != "true" ]]; then
+    foundation_log_warn "Full profile standardizes WITH_NATIVE=true; updating metadata and scaffold"
+    WITH_NATIVE="true"
+fi
+
+if [[ "$WITH_NATIVE" == "true" && "$WITH_WASM" != "true" ]]; then
+    foundation_log_warn "Native scaffold uses runtime-sdk; updating WITH_WASM=true"
+    WITH_WASM="true"
+fi
+
+if [[ "$WITH_NATIVE" == "true" ]]; then
+    foundation_validate_project_identifier "$(foundation_project_identifier)" || exit 1
+fi
+
 foundation_log_info "Project: $PROJECT_PATH"
 foundation_log_info "Profile: $PROFILE"
 foundation_log_info "Go module: $GO_MODULE"
 foundation_log_info "Foundation version: $FOUNDATION_VERSION"
+foundation_log_info "Native scaffold: $WITH_NATIVE"
+[[ "$WITH_NATIVE" == "true" ]] && foundation_log_info "Native identifier: $(foundation_project_identifier)"
 
 foundation_write_metadata
 

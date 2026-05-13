@@ -28,6 +28,9 @@ const requiredDependencies = [
   'styled-components',
   'zustand',
 ]
+const requiredNativeDependencies = [
+  '@ovasabi/runtime-native',
+]
 const requiredDevDependencies = [
   '@testing-library/jest-dom',
   '@testing-library/react',
@@ -40,6 +43,7 @@ const pinnedDependencyVersions = new Set([
   '@ovasabi/runtime-transport',
   '@ovasabi/frontend-kit',
   '@ovasabi/ui-minimal',
+  '@ovasabi/runtime-native',
   'framer-motion',
 ])
 const pinnedDevDependencyVersions = new Set(['ts-proto'])
@@ -63,6 +67,18 @@ for (const key of requiredDependencies) {
   if (value && (!target.dependencies[key] || (pinnedDependencyVersions.has(key) && target.dependencies[key] !== value))) {
     target.dependencies[key] = value
     changed = true
+  }
+}
+
+if (process.env.WITH_NATIVE === 'true') {
+  for (const key of requiredNativeDependencies) {
+    const value = key === '@ovasabi/runtime-native'
+      ? 'file:../foundation/runtime-native/ts'
+      : template.dependencies?.[key]
+    if (value && (!target.dependencies[key] || (pinnedDependencyVersions.has(key) && target.dependencies[key] !== value))) {
+      target.dependencies[key] = value
+      changed = true
+    }
   }
 }
 

@@ -1,0 +1,72 @@
+name: foundation-service-backed
+
+services:
+  service-postgres:
+    image: ${SERVICE_BACKED_POSTGRES_IMAGE:-postgres:18-alpine}
+    environment:
+      POSTGRES_USER: ${SERVICE_BACKED_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${SERVICE_BACKED_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${SERVICE_BACKED_DB_NAME:-foundation_service_test}
+    ports:
+      - "${SERVICE_BACKED_POSTGRES_PORT:-55432}:5432"
+    command:
+      - postgres
+      - -c
+      - max_connections=120
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - max_wal_size=1GB
+      - -c
+      - wal_compression=on
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - jit=off
+      - -c
+      - synchronous_commit=${SERVICE_BACKED_POSTGRES_SYNCHRONOUS_COMMIT:-on}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-foundation_service_test}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    tmpfs:
+      - /var/lib/postgresql:size=768m
+
+  service-redis:
+    image: ${SERVICE_BACKED_REDIS_IMAGE:-redis:8-alpine}
+    ports:
+      - "${SERVICE_BACKED_REDIS_PORT:-56379}:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lfu
+      - --io-threads
+      - "2"
+      - --io-threads-do-reads
+      - "yes"
+      - --hz
+      - "20"
+      - --tcp-backlog
+      - "1024"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

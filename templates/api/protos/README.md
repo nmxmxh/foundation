@@ -60,9 +60,13 @@ make proto-ts
 # Regenerate app and foundation communication bindings together
 make communication-contracts
 
+# Generate proto-derived VerifyCommandLifecycle tests
+make lifecycle-contracts
+
 # Output locations
 api/protos/<domain>/v1/<domain>.pb.go
 frontend/src/types/protos/<domain>/v1/<domain>.ts
+tests/contract/generated_lifecycle_test.go
 ```
 
 ## Event Type Mapping
@@ -73,8 +77,16 @@ Proto messages map to event types:
 |---------|------------|
 | `CreateFooRequest` | `foo:create:v1:requested` |
 | `CreateFooResponse` | `foo:create:v1:success` |
+| `UpdateFooRequest` | `foo:update:v1:requested` |
+| `UpdateFooResponse` | `foo:update:v1:success` |
+| `DeleteFooRequest` | `foo:delete:v1:requested` |
+| `DeleteFooResponse` | `foo:delete:v1:success` |
 | `GetFooRequest` | `foo:get:v1:requested` |
 | `ListFooRequest` | `foo:list:v1:requested` |
+
+Mutating request/response pairs also generate lifecycle contract vectors for `:success` and `:failed`.
+Those generated tests call `server-kit/go/contracttest.VerifyCommandLifecycle` so correlation,
+tenant, idempotency, worker metadata, and terminal-event refinement are enforced by the scaffold.
 
 ## Example Domain
 

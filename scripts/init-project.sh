@@ -29,6 +29,8 @@ Options:
   --with-docker         Include Docker scaffold
   --no-wasm             Skip WASM scaffold and runtime-sdk
   --with-wasm           Include WASM scaffold and runtime-sdk
+  --no-native           Skip native/Tauri scaffold and runtime-native
+  --with-native         Include native/Tauri scaffold and runtime-native
   --dry-run             Preview without creating files
   --update              Update an existing project-owned checkout with current vendored foundation modules, docs, tooling, and frontend manifest contract
   --skip-deps           Skip dependency verification
@@ -128,6 +130,7 @@ check_dependencies() {
 
     [[ "$WITH_DOCKER" == "true" ]] && optional="$optional docker"
     [[ "$WITH_WASM" == "true" ]] && optional="$optional cargo"
+    [[ "${WITH_NATIVE:-false}" == "true" ]] && optional="$optional cargo"
 
     foundation_log_info "Checking environment..."
 
@@ -168,6 +171,7 @@ PROJECT_DIR=""
 GO_MODULE=""
 WITH_DOCKER="true"
 WITH_WASM=""
+WITH_NATIVE=""
 DRY_RUN="false"
 SKIP_DEPS="false"
 FORCE="false"
@@ -207,6 +211,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --with-wasm)
             WITH_WASM="true"
+            shift
+            ;;
+        --no-native)
+            WITH_NATIVE="false"
+            shift
+            ;;
+        --with-native)
+            WITH_NATIVE="true"
             shift
             ;;
         --dry-run)
@@ -258,6 +270,23 @@ if [[ -z "$WITH_WASM" ]]; then
     fi
 fi
 
+if [[ -z "$WITH_NATIVE" ]]; then
+    if [[ "$PROFILE" == "full" ]]; then
+        WITH_NATIVE="true"
+    else
+        WITH_NATIVE="false"
+    fi
+fi
+
+if [[ "$WITH_NATIVE" == "true" && "$WITH_WASM" != "true" ]]; then
+    foundation_log_warn "Native scaffold uses runtime-sdk; enabling WITH_WASM=true"
+    WITH_WASM="true"
+fi
+
+if [[ "$WITH_NATIVE" == "true" ]]; then
+    foundation_validate_project_identifier "$(foundation_project_identifier)" || exit 1
+fi
+
 if [[ "$PROFILE" == "minimal" ]]; then
     WITH_DOCKER="false"
 fi
@@ -278,6 +307,8 @@ foundation_log_info "Path: $PROJECT_PATH"
 [[ "$PROFILE" == "full" || "$PROFILE" == "backend" ]] && foundation_log_info "Go module: $GO_MODULE"
 foundation_log_info "Docker: $WITH_DOCKER"
 foundation_log_info "WASM: $WITH_WASM"
+foundation_log_info "Native: $WITH_NATIVE"
+[[ "$WITH_NATIVE" == "true" ]] && foundation_log_info "Native identifier: $(foundation_project_identifier)"
 [[ "$UPDATE_EXISTING" == "true" ]] && foundation_log_info "Mode: update existing project"
 
 if [[ "$DRY_RUN" == "true" ]]; then

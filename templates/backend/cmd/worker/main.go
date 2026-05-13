@@ -6,11 +6,11 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
@@ -34,10 +34,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to parse database config: %v", err)
 	}
-	dbConfig.MaxConns = safeInt32FromEnvOrDefault("DB_MAX_CONNS", 25)
-	dbConfig.MinConns = safeInt32FromEnvOrDefault("DB_MIN_CONNS", 5)
-	dbConfig.HealthCheckPeriod = envDurationSeconds("DB_HEALTHCHECK_PERIOD_SECONDS", 30)
-	dbConfig.ConnConfig.ConnectTimeout = envDurationSeconds("DB_CONNECT_TIMEOUT_SECONDS", 5)
+	database.ApplyPoolOptions(dbConfig, workerPoolOptions(cfg))
 
 	dbPool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
@@ -115,30 +112,17 @@ func workerLogLevel() slog.Level {
 	}
 }
 
-func envInt(key string, fallback int) int {
-	raw := os.Getenv(key)
-	if raw == "" {
-		return fallback
+func workerPoolOptions(cfg *config.Config) database.PoolOptions {
+	opts := database.DefaultPoolOptionsFor(database.RuntimeLaneBackground)
+	if cfg.DBMaxConns > 0 {
+		opts.MaxConns = cfg.DBMaxConns
 	}
-	value, err := strconv.Atoi(raw)
-	if err != nil || value <= 0 {
-		return fallback
+	if cfg.DBMinConns > 0 {
+		opts.MinConns = cfg.DBMinConns
 	}
-	return value
-}
-
-func safeInt32FromEnvOrDefault(key string, fallback int32) int32 {
-	raw := os.Getenv(key)
-	if raw == "" {
-		return fallback
-	}
-	value, err := strconv.ParseInt(raw, 10, 32)
-	if err != nil || value <= 0 {
-		return fallback
-	}
-	return int32(value)
-}
-
-func envDurationSeconds(key string, fallback int) time.Duration {
-	return time.Duration(envInt(key, fallback)) * time.Second
+	opts.HealthCheckPeriod = cfg.DBHealthCheckPeriod
+	opts.ConnectTimeout = cfg.DBConnectTimeout
+	opts.QueryTimeout = cfg.DBQueryTimeout
+	opts.AcquireTimeout = cfg.DBAcquireTimeout
+	return opts
 }

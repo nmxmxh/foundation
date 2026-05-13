@@ -33,6 +33,13 @@ describe("performance-first transport defaults", () => {
         throw new Error("wasm unavailable");
       },
     };
+    const native: TransportStrategy = {
+      kind: "native",
+      async dispatch() {
+        attempts.push("native");
+        throw new Error("native unavailable");
+      },
+    };
     const ws: TransportStrategy = {
       kind: "ws",
       async dispatch() {
@@ -49,12 +56,12 @@ describe("performance-first transport defaults", () => {
     };
     const bus = createCommandBus({
       registry,
-      strategies: [http, ws, wasm],
+      strategies: [http, ws, native, wasm],
       grantedCapabilities: ["*"],
       hasPolicyAccess: () => true,
     });
     await expect(bus.dispatch(createEnvelope({ eventType: "media:process_asset:v1:requested", payload: {} }))).resolves.toBe("ok");
-    expect(attempts).toEqual(["wasm", "ws"]);
+    expect(attempts).toEqual(["wasm", "native", "ws"]);
   });
 
   it("preserves request identity in diagnostics across fallback attempts", async () => {
@@ -105,5 +112,17 @@ describe("performance-first transport defaults", () => {
       ["http", "corr_keep", "req_keep", "idem_keep"],
     ]);
     expect(diagnostics[0]?.error).toContain("sab unavailable");
+  });
+
+  it("places native after WASM and before network fallbacks", () => {
+    expect(PERFORMANCE_TRANSPORT_ORDER).toEqual([
+      "sab",
+      "wasm",
+      "native",
+      "transferable",
+      "ws",
+      "http",
+      "postMessage",
+    ]);
   });
 });

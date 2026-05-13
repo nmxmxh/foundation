@@ -77,6 +77,16 @@
     "security": {
       "type": "object",
       "properties": {
+        "requireAuth": { "type": "boolean" },
+        "protectOperationalEndpoints": { "type": "boolean" },
+        "corsAllowedOrigins": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "not": { "const": "*" }
+          }
+        },
         "postQuantum": {
           "type": "object",
           "required": ["tlsHybridKEM", "signatureAlgorithm", "cryptoInventoryRequired", "longLivedArtifactSigning"],

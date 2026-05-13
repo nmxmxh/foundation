@@ -105,7 +105,10 @@ type PostQuantumConfig struct {
 }
 
 type ServerSecurityConfig struct {
-	PostQuantum PostQuantumConfig `json:"post_quantum,omitempty"`
+	RequireAuth                 bool              `json:"require_auth,omitempty"`
+	ProtectOperationalEndpoints bool              `json:"protect_operational_endpoints,omitempty"`
+	CORSAllowedOrigins          []string          `json:"cors_allowed_origins,omitempty"`
+	PostQuantum                 PostQuantumConfig `json:"post_quantum,omitempty"`
 }
 
 type ServerRuntimeConfig struct {

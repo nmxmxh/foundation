@@ -18,6 +18,7 @@ Related docs:
 - `foundation/docs/database_practices.md`
 - `foundation/docs/websocket_scaling.md`
 - `foundation/docs/coding_practices.md`
+- `foundation/docs/go_concurrency_bug_practices.md`
 
 ## Core translation
 
@@ -40,6 +41,15 @@ For Ovasabi, this maps to:
 4. Liveness/fairness: queued work drains, authenticated sockets get terminal responses, runtime epochs advance, pending DB jobs either complete or fail visibly.
 5. Real-time bounds: deadlines, acquire timeouts, p95/p99 budgets, ping intervals, TTLs, circuit-breaker windows, retry backoff ceilings.
 6. Refinement: JSON compatibility adapters, protobuf frames, direct dispatch, `ffi`, `shm`, `stdio`, WebSocket, and HTTP must preserve the same domain contract.
+
+## Go concurrency bug taxonomy
+
+The Go concurrency study in `go_concurrency_bug_practices.md` adds a practical taxonomy for Foundation specs:
+
+1. Behavior dimension: `blocking` means at least one required goroutine cannot make progress, even if the whole process is not deadlocked; `non-blocking` means all goroutines may finish but the visible state, order, or side effect is wrong.
+2. Cause dimension: `shared memory` covers locks, RWMutex, atomics, WaitGroup, Cond, shared variables, and mutable values shared through contexts or channels; `message passing` covers channels, select, context cancellation channels, timers/tickers, Pipe-like streams, and mixed channel/lock paths.
+
+Modeling implication: `DeadlockFree` is too weak for Foundation. We also need `NoPartialHang`, terminal-state reachability, goroutine ownership, channel ownership, cancellation observation, and shutdown-priority invariants for worker, runtime, registry, Redis, WebSocket, and event paths.
 
 ## First-principles performance reading
 
@@ -166,6 +176,13 @@ Every high-risk component should name invariants explicitly. These are examples 
 5. `IdempotentRetry`: retrying a job does not duplicate durable side effects.
 6. `PerRecordDiagnosis`: batch failures retain record key/index and stage.
 7. `CascadingDurability`: a worker that accepts a required child job must persist that child enqueue with a bounded detached context so parent cancellation does not erase the next enabled action.
+8. `GoroutineOwned`: every goroutine has an owner, cancellation source, bounded wait/send behavior, and a terminal observation path.
+9. `NoPartialHang`: a component is unhealthy if required goroutines are blocked, even when unrelated goroutines still run.
+10. `ChannelOwnerKnown`: send ownership, receive ownership, close authority, buffer capacity, and overflow policy are defined for every channel.
+11. `WaitGroupAddBeforeWait`: all intended `Add` transitions occur before a waiter can observe completion, unless a skipped add is the documented behavior.
+12. `NoLockAcrossBlockingMessage`: lock ownership cannot depend on a channel operation, Cond wait, WaitGroup wait, network call, or unbounded callback.
+13. `ContextCancelObserved`: cancel/timeout eventually unblocks owned listener, worker, runtime, and transport goroutines.
+14. `SelectShutdownWins`: terminal shutdown/cancel actions cannot indefinitely lose to ready work actions.
 
 ### WebSocket
 
@@ -330,6 +347,9 @@ Good candidates:
 4. Runtime epoch protocol.
 5. Outbox exactly-once/idempotent publication model.
 6. Transport fallback and replay safety.
+7. Go channel/lock handoff where one action owns shared state and another action owns message delivery.
+8. WaitGroup producer/waiter ordering for worker pools and fanout chains.
+9. Select shutdown priority for tickers, registry listeners, and long-lived pub/sub loops.
 
 Model with small finite sets:
 
@@ -373,6 +393,8 @@ The book's model-checking chapter is itself a performance guide. Apply these tec
 4. `MCSingleflightCache`: two callers, one key, producer success/failure, invalidation during in-flight work.
 5. `MCTransportFallback`: direct/protobuf/ws/http lanes, retry/stutter steps, metadata preservation, controlled failure.
 6. `MCOutbox`: DB write, outbox enqueue, publish, retry, idempotent terminal state.
+7. `MCGoChannelShutdown`: sender, receiver, close owner, buffer capacity one, cancellation, and overflow/drop policy.
+8. `MCGoWaitGroupFanout`: producer loop, two child goroutines, waiter, Add/Done ordering, and cancellation.
 
 ## Documentation tracking
 

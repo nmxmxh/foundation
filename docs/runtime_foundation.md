@@ -4,6 +4,8 @@ Date: 2026-04-24
 
 This document records the runtime foundation posture for this scaffold.
 
+For the end-to-end command/event/worker/realtime lifecycle, see `foundation/docs/foundation_nervous_system.md`. That document is the canonical substrate contract; this file describes the runtime lanes that must refine it. For Go-specific concurrency bug taxonomy and watch points, see `foundation/docs/go_concurrency_bug_practices.md`.
+
 ## Control-plane foundations
 
 1. Go owns HTTP ingress, orchestration, schedule/publish workflow state, queue registration, and OpenAPI generation.
@@ -14,6 +16,16 @@ This document records the runtime foundation posture for this scaffold.
 6. Service-registry listeners should fan in Redis/pubsub traffic to blocking worker pools instead of using sleep-based polling loops.
 7. Handler registration should apply bounded concurrency through a shared execution controller so saturation behavior is explicit and measurable.
 8. Externally reachable handlers must fail closed on missing identity, organization scope, integrity metadata, or route contract validation.
+
+## Go concurrency posture
+
+1. Runtime, registry, Redis, WebSocket, worker, and event-bus goroutines must be owned by a component with a cancellation source, shutdown order, and terminal observation path.
+2. Channels must document send ownership, receive ownership, close authority, capacity, and overflow behavior. Unbuffered channels are rendezvous points; buffered channels are bounded queues.
+3. Do not hold `Mutex` or `RWMutex` locks across blocking channel operations, WaitGroup waits, Cond waits, context waits, external calls, or callbacks.
+4. `WaitGroup.Add` must occur before launched goroutines can call `Done` and before a waiter can observe the group. Fanout loops should launch all intended work before waiting unless serial execution is deliberate.
+5. Select loops must handle shutdown and cancellation explicitly. If a shutdown signal must win, give it a pre-check or priority structure instead of relying on random select choice when multiple cases are ready.
+6. Timer and ticker lifecycles must be explicit. Avoid zero-duration placeholder timers, stop owned timers/tickers, and avoid retaining timer channels beyond their owning context.
+7. Partial hangs are runtime failures even when the Go process is not globally deadlocked. Long-lived lanes should expose active worker/listener counts, queue depth, blocked/rejected sends, cancellation, and terminal shutdown signals where meaningful.
 
 ## Hostile-environment security posture
 
@@ -105,6 +117,7 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
    - `ffi`: trusted in-process ABI for the fastest host path
    - `stdio`: portable framed-stdio buffer exchange
    - `shm`: Linux-first shared-file transport under `/dev/shm`, with control frames over stdio and the runtime buffer living in shared memory
+   - `runtime-native`: Tauri-backed binary dispatch for desktop/mobile shell control, measured separately from the hot runtime lanes
 7. The shared-memory lane is foundation-owned and app-agnostic:
    - Go chooses it through runtimehost transport options
    - Rust host selects it through `OVRT_RUNTIME_TRANSPORT=shm`
@@ -117,6 +130,7 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
    - `stdio` for safest portability
    - `shm` for isolated Linux-first throughput
    - `ffi` for trusted zero-copy control-buffer execution and maximum per-core throughput
+   - `runtime-native` for desktop/mobile shell access, secure storage, capability discovery, and device plugin control
 10. `ffi` is a trusted-only lane. Do not load arbitrary runtime libraries or allow user-controlled module/unit selection.
 11. `shm` and `stdio` lanes must enforce frame-size limits, same-host permissions, and explicit allowlists for callable units.
 12. FFI diagnostics must remain C-compatible and UTF-8 safe. Truncated error buffers must end on a character boundary and always be null-terminated when capacity is non-zero.
@@ -170,7 +184,7 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
 9. `grpcsvc.Envelope` is a JSON compatibility path only. New hot service-to-service calls should use generated protobuf messages or `grpcsvc.Frame`, which carries typed event metadata plus raw payload bytes through a compact binary codec.
 10. Dynamic `map[string]any` JSON decoding is treated as a boundary adapter cost. Domain code may still accept JSON bytes for compatibility, but runtime transport should keep payloads as bytes until the owning handler validates and decodes them.
 11. Registry dispatch keeps protobuf request bytes through typed handlers and defaults typed protobuf responses back to protobuf bytes. HTTP protobuf requests default to protobuf responses when `Accept` is absent.
-12. Frontend route dispatch defaults to the performance ladder: `sab -> wasm -> transferable -> ws -> http -> postMessage`, skipping unavailable strategies and falling back only after observable failure.
+12. Frontend route dispatch defaults to the performance ladder: `sab -> wasm -> native -> transferable -> ws -> http -> postMessage`, skipping unavailable strategies and falling back only after observable failure. `native` is a measured local control lane; direct FFI, shared-memory, and WASM/SAB remain the hot compute lanes.
 13. Same-process hot dispatch must use direct frame dispatch (`grpcsvc.NewDirectFrameClient` or equivalent typed in-process call), not gRPC. Current guardrail target is zero allocations for direct dispatch; gRPC is a network/polyglot boundary with materially higher stack cost.
 14. Frame codecs expose owned decode and borrowed `FrameView` decode. Use borrowed views for synchronous hot paths that do not retain frame data; use owned `Frame` decode when values escape the incoming buffer lifetime.
 15. A typed service binding has two first-class projections: registry protobuf dispatch for ingress/event/lifecycle paths, and `bootstrap.RegisterTypedFrameHandlers` for internal synchronous `grpcsvc.Frame` dispatch. App startup must register the same binding map into both when typed contracts exist.
@@ -183,16 +197,17 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
 22. Timestamping is a lane diagnostic, not visible domain behavior. Software monotonic timestamps are always available; hardware/NIC timestamps may be attached by an adapter when supported, but fallback lanes must preserve command/event semantics even when timestamp precision changes.
 23. Garbage-collector avoidance means keeping hot payload movement out of runtime heap object creation. Direct, packet-ring, FFI, and shared-memory lanes should reuse slabs/descriptors/views, return borrowed views for synchronous work, and avoid JSON/map/object materialization until the owning domain boundary needs it. This reduces allocator cost, GC scan work, cache churn, and tail-latency spikes; it does not remove GC from the whole application.
 24. Deadline-sensitive frontend work must call the lane planner before choosing WebGPU, workers, HTTP, or direct SAB/WASM access. Sub-millisecond browser operations should prefer SAB/WASM or transferable workers; WebGPU is reserved for batches large enough to amortize adapter, pipeline, dispatch, and readback costs.
-25. Parallel operation chains should use `server-kit/go/chain`: independent operations run concurrently, non-critical failures do not block movement, and critical failures cancel the operation context for the rest of the chain.
-26. The frontend runtime client uses an authenticated websocket upgrade path that fits the existing allowset model:
+25. Device streams follow the same rule. WebView media APIs are compatibility lanes. Native camera frames, microphone PCM, and sensor samples must enter through Swift/Kotlin plugins, Rust validation, and Foundation binary buffers/descriptors before reaching FFI, shared-memory, WASM/SAB, or GPU lanes.
+26. Parallel operation chains should use `server-kit/go/chain`: independent operations run concurrently, non-critical failures do not block movement, and critical failures cancel the operation context for the rest of the chain.
+27. The frontend runtime client uses an authenticated websocket upgrade path that fits the existing allowset model:
 
     - guest socket opens and receives `identity:connection_open:v1:ack`
     - if a session access token exists, the client sends `identity:authenticate_connection:v1:requested` over that socket
     - once the socket is authenticated, route transport preference can safely switch to `ws -> http` for mutation paths without opening broad guest access
 
-25. Socket authentication is not sufficient on its own. Privileged subscriptions, commands, and topic joins must re-authorize against current session, user, and organization state after connect.
-26. Websocket upgrades must validate allowed origins and close or downgrade sessions when auth state changes or expires.
-27. Event envelopes and payload bodies must enforce schema validation, size limits, and replay/idempotency windows before handler dispatch.
+28. Socket authentication is not sufficient on its own. Privileged subscriptions, commands, and topic joins must re-authorize against current session, user, and organization state after connect.
+29. Websocket upgrades must validate allowed origins and close or downgrade sessions when auth state changes or expires.
+30. Event envelopes and payload bodies must enforce schema validation, size limits, and replay/idempotency windows before handler dispatch.
 
 ## Borrowed patterns
 

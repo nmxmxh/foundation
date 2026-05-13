@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -17,30 +18,40 @@ type Config struct {
 	Port     int
 	LogLevel string
 
+	// Ingress security
+	AllowedOrigins              []string
+	RequireAuth                 bool
+	ProtectOperationalEndpoints bool
+
 	// Database
-	DatabaseURL      string
-	StateStore       string
-	DBHost           string
-	DBPort           int
-	DBUser           string
-	DBPassword       string
-	DBName           string
-	DBSSLMode        string
-	DBMaxConns       int
-	DBMinConns       int
-	DBAcquireTimeout time.Duration
-	DBQueryTimeout   time.Duration
-	DBHotReadTimeout time.Duration
-	DBShardCount     int
+	DatabaseURL         string
+	StateStore          string
+	DBHost              string
+	DBPort              int
+	DBUser              string
+	DBPassword          string
+	DBName              string
+	DBSSLMode           string
+	DBMaxConns          int
+	DBMinConns          int
+	DBHealthCheckPeriod time.Duration
+	DBConnectTimeout    time.Duration
+	DBAcquireTimeout    time.Duration
+	DBQueryTimeout      time.Duration
+	DBHotReadTimeout    time.Duration
+	DBShardCount        int
 
 	// Redis
-	RedisURL        string
-	RedisShardURLs  string
-	RedisPrefix     string
-	RedisPoolSize   int
-	RedisMinIdle    int
-	RedisMaxRetries int
-	EventBus        string
+	RedisURL          string
+	RedisShardURLs    string
+	RedisPrefix       string
+	RedisPoolSize     int
+	RedisMinIdle      int
+	RedisMaxRetries   int
+	RedisDialTimeout  time.Duration
+	RedisReadTimeout  time.Duration
+	RedisWriteTimeout time.Duration
+	EventBus          string
 
 	// JWT
 	JWTSecret     string
@@ -65,10 +76,14 @@ type Config struct {
 
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
+	env := getEnv("APP_ENV", "development")
 	cfg := &Config{
-		Env:                                 getEnv("APP_ENV", "development"),
+		Env:                                 env,
 		Port:                                getEnvInt("PORT", 8080),
 		LogLevel:                            getEnv("LOG_LEVEL", "info"),
+		AllowedOrigins:                      splitCSV(getEnv("ALLOWED_ORIGINS", defaultAllowedOrigins(env))),
+		RequireAuth:                         getEnvBool("REQUIRE_AUTH", env == "production"),
+		ProtectOperationalEndpoints:         getEnvBool("PROTECT_OPERATIONAL_ENDPOINTS", env == "production"),
 		DatabaseURL:                         getEnv("DATABASE_URL", ""),
 		StateStore:                          getEnv("STATE_STORE_DRIVER", "postgres"),
 		DBHost:                              getEnv("DB_HOST", ""),
@@ -79,6 +94,8 @@ func Load() (*Config, error) {
 		DBSSLMode:                           getEnv("DB_SSLMODE", "disable"),
 		DBMaxConns:                          getEnvInt("DB_MAX_CONNS", 0),
 		DBMinConns:                          getEnvInt("DB_MIN_CONNS", 0),
+		DBHealthCheckPeriod:                 getEnvDuration("DB_HEALTHCHECK_PERIOD", time.Duration(getEnvInt("DB_HEALTHCHECK_PERIOD_SECONDS", 30))*time.Second),
+		DBConnectTimeout:                    getEnvDuration("DB_CONNECT_TIMEOUT", time.Duration(getEnvInt("DB_CONNECT_TIMEOUT_SECONDS", 10))*time.Second),
 		DBAcquireTimeout:                    getEnvDuration("DB_ACQUIRE_TIMEOUT", 100*time.Millisecond),
 		DBQueryTimeout:                      getEnvDuration("DB_QUERY_TIMEOUT", 250*time.Millisecond),
 		DBHotReadTimeout:                    getEnvDuration("DB_HOT_READ_TIMEOUT", 50*time.Millisecond),
@@ -89,6 +106,9 @@ func Load() (*Config, error) {
 		RedisPoolSize:                       getEnvInt("REDIS_POOL_SIZE", 32),
 		RedisMinIdle:                        getEnvInt("REDIS_MIN_IDLE", 4),
 		RedisMaxRetries:                     getEnvInt("REDIS_MAX_RETRIES", 1),
+		RedisDialTimeout:                    getEnvDuration("REDIS_DIAL_TIMEOUT", 2*time.Second),
+		RedisReadTimeout:                    getEnvDuration("REDIS_READ_TIMEOUT", 500*time.Millisecond),
+		RedisWriteTimeout:                   getEnvDuration("REDIS_WRITE_TIMEOUT", 500*time.Millisecond),
 		EventBus:                            getEnv("EVENT_BUS_DRIVER", "redis"),
 		JWTSecret:                           getEnv("JWT_SECRET", ""),
 		JWTExpiration:                       getEnvDuration("JWT_EXPIRATION", 24*time.Hour),
@@ -149,17 +169,31 @@ func (c *Config) validate() error {
 	if c.JWTSecret == "" && c.Env == "production" {
 		return fmt.Errorf("JWT_SECRET is required in production")
 	}
+	if c.RequireAuth && c.JWTSecret == "" {
+		return fmt.Errorf("JWT_SECRET is required when REQUIRE_AUTH is true")
+	}
+	if c.IsProduction() && len(c.AllowedOrigins) == 0 {
+		return fmt.Errorf("ALLOWED_ORIGINS must contain explicit origins in production")
+	}
+	for _, origin := range c.AllowedOrigins {
+		if origin == "*" && c.IsProduction() {
+			return fmt.Errorf("ALLOWED_ORIGINS cannot contain wildcard origins in production")
+		}
+	}
 	if c.DBMaxConns < 0 || c.DBMinConns < 0 || c.DBShardCount < 0 {
 		return fmt.Errorf("database pool and shard settings must be zero or greater")
 	}
 	if c.DBMaxConns > 0 && c.DBMinConns > c.DBMaxConns {
 		return fmt.Errorf("DB_MIN_CONNS cannot exceed DB_MAX_CONNS")
 	}
-	if c.DBAcquireTimeout <= 0 || c.DBQueryTimeout <= 0 || c.DBHotReadTimeout <= 0 {
+	if c.DBHealthCheckPeriod <= 0 || c.DBConnectTimeout <= 0 || c.DBAcquireTimeout <= 0 || c.DBQueryTimeout <= 0 || c.DBHotReadTimeout <= 0 {
 		return fmt.Errorf("database timeout settings must be positive")
 	}
 	if c.RedisPoolSize < 0 || c.RedisMinIdle < 0 || c.RedisMaxRetries < 0 {
 		return fmt.Errorf("redis pool settings must be zero or greater")
+	}
+	if c.RedisDialTimeout <= 0 || c.RedisReadTimeout <= 0 || c.RedisWriteTimeout <= 0 {
+		return fmt.Errorf("redis timeout settings must be positive")
 	}
 	if !oneOf(c.RuntimeSharedMemory, "off", "auto", "required") {
 		return fmt.Errorf("RUNTIME_SHARED_MEMORY must be off, auto, or required")
@@ -217,6 +251,25 @@ func getEnvDuration(key string, fallback time.Duration) time.Duration {
 		}
 	}
 	return fallback
+}
+
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func defaultAllowedOrigins(env string) string {
+	if env == "production" {
+		return ""
+	}
+	return "http://localhost:3000,http://localhost:5173,http://localhost:8080"
 }
 
 func oneOf(value string, allowed ...string) bool {

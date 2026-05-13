@@ -114,32 +114,55 @@ func (e *Engine) Register(processor Processor) error {
 
 func (e *Engine) Start(ctx context.Context) error {
 	e.mu.RLock()
-	defer e.mu.RUnlock()
-
 	if len(e.processors) == 0 {
+		e.mu.RUnlock()
 		return errors.New("no processors registered")
 	}
-
-	// In-memory queue runners
+	runners := make([]struct {
+		queue       string
+		jobs        <-chan Job
+		workerCount int
+	}, 0, len(e.queues))
 	for queue, jobs := range e.queues {
 		workerCount := e.workers[queue]
 		if workerCount <= 0 {
 			workerCount = 1
 		}
-		for i := 0; i < workerCount; i++ {
-			e.wg.Add(1)
+		runners = append(runners, struct {
+			queue       string
+			jobs        <-chan Job
+			workerCount int
+		}{queue: queue, jobs: jobs, workerCount: workerCount})
+	}
+	e.mu.RUnlock()
+
+	totalWorkers := 2
+	for _, runner := range runners {
+		totalWorkers += runner.workerCount
+	}
+	e.wg.Add(totalWorkers)
+
+	// In-memory queue runners
+	for _, runner := range runners {
+		for i := 0; i < runner.workerCount; i++ {
 			go func(queue string, jobs <-chan Job, index int) {
 				defer e.wg.Done()
 				e.runQueue(ctx, queue, jobs, index)
-			}(queue, jobs, i+1)
+			}(runner.queue, runner.jobs, i+1)
 		}
 	}
 
 	// Start adaptive scaling controller
-	go e.adaptiveScaler(ctx)
+	go func() {
+		defer e.wg.Done()
+		e.adaptiveScaler(ctx)
+	}()
 
 	// Start dedupe cleanup
-	go e.dedupeCleaner(ctx)
+	go func() {
+		defer e.wg.Done()
+		e.dedupeCleaner(ctx)
+	}()
 
 	return nil
 }
@@ -323,6 +346,7 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 				}
 			}
 		}
+		recordJobTrace(job, "worker.enqueue", "enqueued", "river insert accepted")
 		return nil
 	}
 
@@ -346,26 +370,33 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 	case queueCh <- job:
 		observability.Default().RecordWorker(job.Kind(), job.Queue, "enqueued")
 		observability.Default().RecordQueueDepth(job.Queue, len(queueCh))
+		recordJobTrace(job, "worker.enqueue", "enqueued", "memory queue accepted")
 		return nil
 	default:
 		err := fmt.Errorf("%w: %s depth=%d capacity=%d", errQueueFull, job.Queue, len(queueCh), cap(queueCh))
 		e.recordHealth(job, JobHealthRejectedQueueFull, err, time.Time{}, time.Now().UTC())
 		observability.Default().RecordWorker(job.Kind(), job.Queue, "rejected_queue_full")
 		observability.Default().RecordQueueDepth(job.Queue, len(queueCh))
+		recordJobTrace(job, "worker.enqueue", "rejected_queue_full", err.Error())
 		return err
 	}
 }
 
 func (e *Engine) spawnWorkers(ctx context.Context, queue string, jobs <-chan Job, count int) {
+	indices := make([]int, 0, count)
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	for i := 0; i < count; i++ {
 		e.workers[queue]++
+		indices = append(indices, e.workers[queue])
+	}
+	e.mu.Unlock()
+
+	for _, index := range indices {
 		e.wg.Add(1)
 		go func(q string, j <-chan Job, idx int) {
 			defer e.wg.Done()
 			e.runQueue(ctx, q, j, idx)
-		}(queue, jobs, e.workers[queue])
+		}(queue, jobs, index)
 	}
 }
 
@@ -378,6 +409,10 @@ func (e *Engine) runQueue(ctx context.Context, queue string, jobs <-chan Job, wo
 			e.log.Info("worker queue runner stopped", zap.String("queue", queue), zap.Int("worker", workerIndex))
 			return
 		case job := <-jobs:
+			if ctx.Err() != nil {
+				e.log.Info("worker queue runner stopped", zap.String("queue", queue), zap.Int("worker", workerIndex))
+				return
+			}
 			e.handleJob(ctx, queue, workerIndex, job)
 		}
 	}
@@ -422,6 +457,7 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 	defer cancel()
 	runCtx = contextWithJobCorrelation(runCtx, job)
 	observability.Default().RecordWorker(job.Kind(), queue, "processing")
+	recordJobTrace(job, "worker.process", "processing", "")
 
 	err := processor.Handle(runCtx, job)
 	if err != nil {
@@ -440,6 +476,7 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 		if job.Attempt >= job.MaxAttempts {
 			e.log.Error("job exhausted retries", zap.String("kind", job.Kind()), zap.String("queue", queue))
 			observability.Default().RecordWorker(job.Kind(), queue, "failed_exhausted")
+			recordJobTrace(job, "worker.process", "failed_exhausted", err.Error())
 			if timedOut {
 				e.recordHealth(job, JobHealthTimedOut, err, startedAt, finishedAt)
 			} else {
@@ -450,6 +487,7 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 		backoff := job.NextBackoff()
 		job.ScheduledAt = time.Now().UTC().Add(backoff)
 		observability.Default().RecordWorker(job.Kind(), queue, "retry_scheduled")
+		recordJobTrace(job, "worker.process", "retry_scheduled", err.Error())
 		e.recordHealth(job, JobHealthRetryScheduled, err, startedAt, finishedAt)
 		timer := time.NewTimer(backoff)
 		defer timer.Stop()
@@ -477,7 +515,25 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 		zap.Int("worker", workerIndex),
 	)
 	observability.Default().RecordWorker(job.Kind(), queue, "succeeded")
+	recordJobTrace(job, "worker.process", "succeeded", "")
 	e.recordHealth(job, JobHealthSucceeded, nil, startedAt, time.Now().UTC())
+}
+
+func recordJobTrace(job Job, stage, state, detail string) {
+	if job.CorrelationID == "" {
+		return
+	}
+	fields := map[string]string{
+		"kind":  job.Kind(),
+		"queue": job.Queue,
+	}
+	if job.IdempotencyKey != "" {
+		fields["idempotency_key"] = job.IdempotencyKey
+	}
+	if orgID, ok := job.Metadata["organization_id"].(string); ok && orgID != "" {
+		fields["organization_id"] = orgID
+	}
+	observability.Default().RecordTrace(job.CorrelationID, stage, "", state, detail, fields)
 }
 
 func contextWithJobCorrelation(ctx context.Context, job Job) context.Context {

@@ -244,16 +244,53 @@ func acquireSlot(ctx context.Context, sem chan struct{}, timeout time.Duration) 
 }
 
 type tokenBucketLimiter struct {
-	tokens chan struct{}
+	mu          sync.Mutex
+	tokens      float64
+	burst       float64
+	refillEvery time.Duration
+	lastRefill  time.Time
 }
 
 func (l *tokenBucketLimiter) Wait(ctx context.Context) error {
-	select {
-	case <-l.tokens:
+	if l == nil {
 		return nil
-	case <-ctx.Done():
-		return ctx.Err()
 	}
+	waitCtx := ctx
+	if waitCtx == nil {
+		waitCtx = context.Background()
+	}
+	for {
+		delay := l.reserveDelay(time.Now())
+		if delay <= 0 {
+			return nil
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-waitCtx.Done():
+			timer.Stop()
+			return waitCtx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (l *tokenBucketLimiter) reserveDelay(now time.Time) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if elapsed := now.Sub(l.lastRefill); elapsed > 0 {
+		l.tokens += float64(elapsed) / float64(l.refillEvery)
+		if l.tokens > l.burst {
+			l.tokens = l.burst
+		}
+		l.lastRefill = now
+	}
+	if l.tokens >= 1 {
+		l.tokens--
+		return 0
+	}
+	missing := 1 - l.tokens
+	return time.Duration(missing * float64(l.refillEvery))
 }
 
 func newTokenBucketLimiter(opts ConcurrencyOptions) *tokenBucketLimiter {
@@ -279,24 +316,12 @@ func newTokenBucketLimiter(opts ConcurrencyOptions) *tokenBucketLimiter {
 		refillEvery = time.Millisecond
 	}
 
-	tb := &tokenBucketLimiter{
-		tokens: make(chan struct{}, burst),
+	return &tokenBucketLimiter{
+		tokens:      float64(burst),
+		burst:       float64(burst),
+		refillEvery: refillEvery,
+		lastRefill:  time.Now(),
 	}
-	for i := 0; i < burst; i++ {
-		tb.tokens <- struct{}{}
-	}
-
-	ticker := time.NewTicker(refillEvery)
-	go func() {
-		for range ticker.C {
-			select {
-			case tb.tokens <- struct{}{}:
-			default:
-			}
-		}
-	}()
-
-	return tb
 }
 
 // InMemoryRegistry is a simple registry used by server and tests.

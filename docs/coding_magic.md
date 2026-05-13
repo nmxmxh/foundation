@@ -725,7 +725,7 @@ TLA+ names this discipline with ordinary mathematical tools:
 - real-time bounds
 - refinement mappings
 
-### Why it feels magical
+### Why it feels magical (4)
 
 A system can change its internal machinery completely and still behave the same from the outside.
 
@@ -771,6 +771,8 @@ These are the magical ideas that map directly to our foundation work.
 - correlation IDs as lineage threads
 - queues and outboxes as delayed ritual execution
 - `SKIP LOCKED` and bounded concurrency as controlled summoning
+- goroutine ownership as a lifecycle seal: every launched worker needs a cancel path and terminal observation
+- channels as local law, not proof of safety: send, receive, close, buffer, and shutdown priority must be named
 
 ### TypeScript / runtime-transport
 

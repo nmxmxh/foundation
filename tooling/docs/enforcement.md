@@ -9,6 +9,7 @@ It does not replace app-specific CI, but it sets the baseline for:
 3. redis practices
 4. migration structure
 5. contract drift
+6. delivery metrics and operational scaffold posture
 
 Contract drift is expected to fail hard when:
 
@@ -36,7 +37,7 @@ Native tool mapping:
 1. Go: `golangci-lint` owns unchecked errors, context use, body closing, security scans, static analysis, complexity, and allocation hints.
 2. Rust: `cargo fmt` and `cargo clippy -D warnings` own formatting, unwrap/expect/panic discipline, and warning-free runtime code.
 3. TypeScript/React: ESLint owns React hooks, import boundaries, observer exceptions, blocking atomics, and app-local raw WebSocket construction. TypeScript owns generated contract shape through `typecheck`.
-4. CP scripts own foundation-specific communication and performance rules: no oversized runtime control buffer, no hot-path dynamic JSON envelopes in foundation runtime lanes, no compatibility gRPC envelope as a default, no app-internal JSON gRPC dispatch, and no checked-in build artifacts.
+4. CP scripts own foundation-specific communication and performance rules: no oversized runtime control buffer, no hot-path dynamic JSON envelopes in foundation runtime lanes, no compatibility gRPC envelope as a default, no app-internal JSON gRPC dispatch, low-noise Go concurrency bug guards, and no checked-in build artifacts.
 
 ## Communication Lane Enforcement
 
@@ -50,12 +51,28 @@ Foundation-generated apps inherit a boundary policy:
 
 The generated checks fail app-internal `grpcsvc.Dispatch(...)` and `grpcsvc.Envelope` usage outside vendored foundation code and tests. If a project needs a compatibility adapter, keep it in a clearly named external boundary package and document the reason before adding an allowlist.
 
+The generated checks also fail the Go concurrency patterns extracted from `docs/go_concurrency_bug_practices.md` when they are precise enough for a shell gate: zero-duration timer placeholders, select-default channel close guards, and likely `WaitGroup.Add` calls inside launched goroutines.
+
+Broader risks such as lock/channel interleavings, select default behavior, timer/ticker ownership, anonymous goroutine closure inputs, and channel close ownership are surfaced by `go_concurrency_practices_check.sh` as `[REVIEW]` output. This script is copied into generated projects and called by `lint-foundation`. It is report-only by default and fails when `GO_CONCURRENCY_STRICT=1` is set.
+
 The reason this is not all custom linter code:
 
 1. stock linters are faster to maintain and track language evolution
 2. Go custom analyzers and ESLint custom plugins are useful only when AST precision is needed beyond built-in rules
 3. shell checks remain acceptable for repo-structure and forbidden-boundary checks because they are transparent, cheap, and easy to scaffold into apps
 4. frontend rules intentionally avoid foundation-runtime strictness because React UI code often needs local composition, adapters, and gradual migration paths
+
+## Delivery and Operational Enforcement
+
+Generated projects inherit a lightweight delivery metrics collector rather than a central dashboard. CI runs `scripts/checks/ci_delivery_metrics.mjs`, uploads the JSON event artifact, and leaves aggregation to the app deployment platform.
+
+Project scaffold checks verify:
+
+1. Go 1.25 CI baseline
+2. delivery-metrics artifact capture
+3. operations runbook templates
+4. configured CORS origins instead of wildcard scaffold defaults
+5. protected operational endpoints for production posture
 
 ## Coverage and hotspot baseline
 

@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest test test-unit test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-coding-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-coding-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -13,6 +13,7 @@ BROTLI ?= brotli
 RUST_TARGET ?= wasm32-unknown-unknown
 RUST_WASM_PROFILE ?= release
 RUST_WASM_DIR ?= rust
+NATIVE_DIR ?= native
 
 ifneq (,$(wildcard .env))
 include .env
@@ -130,8 +131,21 @@ foundation-transport-proto:
 		echo "Runtime transport binding generator not found; skipping"; \
 	fi
 
-communication-contracts: proto proto-ts foundation-transport-proto runtime-bindings
+communication-contracts: proto proto-ts lifecycle-contracts foundation-transport-proto runtime-bindings
 	@echo "Communication contracts generated"
+
+lifecycle-contracts:
+	@echo "Generating lifecycle contract tests..."
+	@[ -d $(PROTO_PATH) ] || exit 0
+	@if [ -f scripts/checks/generate_lifecycle_contract_tests.mjs ]; then \
+		node scripts/checks/generate_lifecycle_contract_tests.mjs --proto-root "$(PROTO_PATH)" --out "tests/contract/generated_lifecycle_test.go"; \
+	elif [ -f foundation/tooling/scripts/generate_lifecycle_contract_tests.mjs ]; then \
+		node foundation/tooling/scripts/generate_lifecycle_contract_tests.mjs --proto-root "$(PROTO_PATH)" --out "tests/contract/generated_lifecycle_test.go"; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -f "$(FOUNDATION_PATH)/tooling/scripts/generate_lifecycle_contract_tests.mjs" ]; then \
+		node "$(FOUNDATION_PATH)/tooling/scripts/generate_lifecycle_contract_tests.mjs" --proto-root "$(PROTO_PATH)" --out "tests/contract/generated_lifecycle_test.go"; \
+	else \
+		echo "Lifecycle contract generator not found; skipping"; \
+	fi
 
 build: build-server build-frontend
 
@@ -225,6 +239,58 @@ wasm-manifest:
 		node "$(FOUNDATION_PATH)/tooling/scripts/wasm_manifest.mjs" --public-dir "$(WASM_PUBLIC_DIR)" --out "$(WASM_MANIFEST)"; \
 	else \
 		echo "WASM manifest generator not found; skipping"; \
+	fi
+
+native-dev:
+	@if [ -f "$(NATIVE_DIR)/package.json" ]; then \
+		cd "$(NATIVE_DIR)" && npm run dev; \
+	else \
+		echo "No native package; skipping native dev"; \
+	fi
+
+native-build: build-runtime build-frontend
+	@if [ -f "$(NATIVE_DIR)/package.json" ]; then \
+		cd "$(NATIVE_DIR)" && npm run build; \
+	else \
+		echo "No native package; skipping native build"; \
+	fi
+
+native-mobile-init:
+	@if [ -f "$(NATIVE_DIR)/package.json" ]; then \
+		cd "$(NATIVE_DIR)" && npm run mobile:init; \
+	else \
+		echo "No native package; skipping mobile init"; \
+	fi
+
+native-bench:
+	@if [ -x scripts/checks/native_benchmark.sh ]; then \
+		scripts/checks/native_benchmark.sh .; \
+	elif [ -x foundation/tooling/scripts/native_benchmark.sh ]; then \
+		foundation/tooling/scripts/native_benchmark.sh .; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -x "$(FOUNDATION_PATH)/tooling/scripts/native_benchmark.sh" ]; then \
+		"$(FOUNDATION_PATH)/tooling/scripts/native_benchmark.sh" .; \
+	elif [ -f "$(NATIVE_DIR)/package.json" ]; then \
+		cd "$(NATIVE_DIR)" && npm run bench; \
+	else \
+		echo "No native benchmark target found; skipping"; \
+	fi
+
+native-doctor:
+	@if [ -f "$(NATIVE_DIR)/package.json" ]; then \
+		cd "$(NATIVE_DIR)" && npm run doctor; \
+	else \
+		echo "No native package; skipping native doctor"; \
+	fi
+
+delivery-metrics:
+	@if [ -f scripts/checks/ci_delivery_metrics.mjs ]; then \
+		node scripts/checks/ci_delivery_metrics.mjs --out delivery-metrics/local-event.json; \
+	elif [ -f foundation/tooling/scripts/ci_delivery_metrics.mjs ]; then \
+		node foundation/tooling/scripts/ci_delivery_metrics.mjs --out delivery-metrics/local-event.json; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -f "$(FOUNDATION_PATH)/tooling/scripts/ci_delivery_metrics.mjs" ]; then \
+		node "$(FOUNDATION_PATH)/tooling/scripts/ci_delivery_metrics.mjs" --out delivery-metrics/local-event.json; \
+	else \
+		echo "Delivery metrics collector not found; skipping"; \
 	fi
 
 test: test-unit test-frontend
@@ -437,10 +503,13 @@ lint-frontend:
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-lint-foundation: check-coding-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
+lint-foundation: check-coding-practices check-go-concurrency-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
 
 check-coding-practices:
 	@./scripts/checks/coding_practices_check.sh .
+
+check-go-concurrency-practices:
+	@./scripts/checks/go_concurrency_practices_check.sh .
 
 check-database-practices:
 	@./scripts/checks/database_practices_check.sh .
@@ -540,7 +609,14 @@ help:
 	@echo "  foundation-update - Sync project-managed scaffold from foundation"
 	@echo "  foundation-status - Print foundation metadata"
 	@echo "  runtime-bindings  - Regenerate runtime-sdk buffer bindings"
+	@echo "  lifecycle-contracts - Generate proto-derived VerifyCommandLifecycle tests"
 	@echo "  wasm-manifest     - Emit frontend runtime/WASM artifact manifest"
+	@echo "  native-dev        - Start the Tauri native shell against the frontend dev server"
+	@echo "  native-build      - Build runtime, frontend, and native shell"
+	@echo "  native-bench      - Run report-only native/runtime benchmark slices"
+	@echo "  native-mobile-init - Initialize Tauri Android and iOS projects"
+	@echo "  native-doctor     - Print native/Tauri environment diagnostics"
+	@echo "  delivery-metrics  - Emit a local DORA/incident collection event"
 	@echo ""
 	@echo "Checks:"
 	@echo "  check-coding-practices"

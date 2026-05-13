@@ -51,6 +51,12 @@ func TestFlagEvaluationRulesAndSources(t *testing.T) {
 	}
 }
 
+func TestManagerStopIsIdempotent(t *testing.T) {
+	m := New(Config{})
+	m.Stop()
+	m.Stop()
+}
+
 func TestMemoryEnvJSONSourcesAndMiddleware(t *testing.T) {
 	source := NewMemorySource()
 	source.Set(Flag{Name: "beta", Enabled: true})

@@ -1,4 +1,4 @@
-export type TransportKind = "postMessage" | "transferable" | "sab" | "ws" | "http" | "wasm";
+export type TransportKind = "postMessage" | "transferable" | "sab" | "native" | "ws" | "http" | "wasm";
 export type PayloadEncoding = "json" | "protobuf";
 export type ProtobufCodec<TPayload> = {
   encode: (payload: TPayload) => Uint8Array;
@@ -100,6 +100,7 @@ const terminalStates = new Set(["requested", "success", "failed", "ack"]);
 export const PERFORMANCE_TRANSPORT_ORDER: readonly TransportKind[] = Object.freeze([
   "sab",
   "wasm",
+  "native",
   "transferable",
   "ws",
   "http",

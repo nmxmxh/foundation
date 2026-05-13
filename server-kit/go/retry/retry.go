@@ -143,14 +143,14 @@ func (p *Policy) calculateDelay(attempt int) time.Duration {
 
 // Do executes a function with retries according to the policy.
 func (p *Policy) Do(ctx context.Context, fn func() error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var lastErr error
 
 	for attempt := 1; attempt <= p.config.MaxAttempts; attempt++ {
-		// Check context before attempting
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		err := fn()
@@ -192,14 +192,15 @@ func (p *Policy) Do(ctx context.Context, fn func() error) error {
 
 // DoWithResult executes a function that returns a value with retries.
 func (p *Policy) DoWithResult(ctx context.Context, fn func() (interface{}, error)) (interface{}, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var result interface{}
 	var lastErr error
 
 	for attempt := 1; attempt <= p.config.MaxAttempts; attempt++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 
 		res, err := fn()
@@ -235,13 +236,11 @@ func (p *Policy) DoWithResult(ctx context.Context, fn func() (interface{}, error
 }
 
 func waitDelay(ctx context.Context, delay time.Duration) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if delay <= 0 {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-			return nil
-		}
+		return ctx.Err()
 	}
 	timer := time.NewTimer(delay)
 	defer timer.Stop()

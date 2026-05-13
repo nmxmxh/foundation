@@ -9,7 +9,7 @@
 
 ## Architecture
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                        Clients                               │
 │              (Web, Mobile, External Services)                │
@@ -65,4 +65,5 @@ touch api/protos/<domain>/v1/<domain>.proto
 make communication-contracts
 ```
 
+`make communication-contracts` also emits proto-derived lifecycle tests for mutating commands.
 See `api/protos/README.md` for contract rules and `.agents/DOMAIN_GUIDE.md` for detailed patterns.

@@ -17,6 +17,7 @@ feature_matches() {
         always) return 0 ;;
         docker) [[ "${WITH_DOCKER:-false}" == "true" ]] ;;
         wasm) [[ "${WITH_WASM:-false}" == "true" ]] ;;
+        native) [[ "${WITH_NATIVE:-false}" == "true" ]] ;;
         *) return 1 ;;
     esac
 }
@@ -106,7 +107,7 @@ scaffold_sync_frontend_manifest_contract() {
         return 0
     fi
 
-    node "$sync_script" "$template_manifest" "$target_manifest"
+    WITH_NATIVE="${WITH_NATIVE:-false}" node "$sync_script" "$template_manifest" "$target_manifest"
 }
 
 scaffold_apply_manifest() {
@@ -187,7 +188,33 @@ scaffold_sync_foundation_modules() {
         fi
     fi
 
+    if [[ "${WITH_NATIVE:-false}" == "true" ]]; then
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            foundation_log_info "[DRY RUN] Would refresh foundation/runtime-native"
+        else
+            mkdir -p "$PROJECT_PATH/foundation"
+            rm -rf "$PROJECT_PATH/foundation/runtime-native"
+            cp -R "$FOUNDATION_DIR/runtime-native" "$PROJECT_PATH/foundation/"
+        fi
+    fi
+
+    scaffold_prune_foundation_core_only_assets
     foundation_log_success "Foundation modules synchronized"
+}
+
+scaffold_prune_foundation_core_only_assets() {
+    local core_only_paths=(
+        "$PROJECT_PATH/foundation/server-kit/go/servicebacked"
+    )
+
+    local path
+    for path in "${core_only_paths[@]}"; do
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+            foundation_log_info "[DRY RUN] Would exclude core-only asset ${path#$PROJECT_PATH/}"
+            continue
+        fi
+        [[ -e "$path" ]] && rm -rf "$path"
+    done
 }
 
 scaffold_sync_docs() {

@@ -1,0 +1,18 @@
+[package]
+name = "ovasabi-runtime-native"
+version = "0.1.0"
+edition = "2021"
+license = "UNLICENSED"
+
+[dependencies]
+ovrt-core = { path = "../../runtime-sdk/rust/crates/ovrt-core" }
+ovrt-native = { path = "../../runtime-sdk/rust/crates/ovrt-native" }
+ovrt-unit = { path = "../../runtime-sdk/rust/crates/ovrt-unit" }
+
+[[bin]]
+name = "native_bench"
+path = "src/bin/native_bench.rs"
+
+[[bin]]
+name = "native_flow_sim"
+path = "src/bin/native_flow_sim.rs"

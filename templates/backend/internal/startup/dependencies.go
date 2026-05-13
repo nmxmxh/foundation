@@ -118,8 +118,8 @@ func initDatabase(ctx context.Context, cfg *config.Config) (database.RuntimeStor
 	db, err := database.Connect(ctx, cfg.DatabaseURL, cfg.StateStore, database.PoolOptions{
 		MaxConns:          cfg.DBMaxConns,
 		MinConns:          cfg.DBMinConns,
-		HealthCheckPeriod: 30 * time.Second,
-		ConnectTimeout:    5 * time.Second,
+		HealthCheckPeriod: cfg.DBHealthCheckPeriod,
+		ConnectTimeout:    cfg.DBConnectTimeout,
 		QueryTimeout:      cfg.DBQueryTimeout,
 		AcquireTimeout:    cfg.DBAcquireTimeout,
 	})
@@ -140,13 +140,36 @@ func initEventBus(cfg *config.Config) (rediskit.Client, events.Bus, func() error
 		return nil, bus, nil, nil
 	}
 
-	redisClient, err := rediskit.Connect(cfg.RedisURL, cfg.RedisPrefix, rediskit.DriverRedis)
+	redisClient, err := rediskit.ConnectWithOptions(rediskit.Options{
+		URL:          cfg.RedisURL,
+		URLs:         splitCSV(cfg.RedisShardURLs),
+		Prefix:       cfg.RedisPrefix,
+		Driver:       rediskit.DriverRedis,
+		PoolSize:     cfg.RedisPoolSize,
+		MinIdle:      cfg.RedisMinIdle,
+		MaxRetries:   cfg.RedisMaxRetries,
+		DialTimeout:  cfg.RedisDialTimeout,
+		ReadTimeout:  cfg.RedisReadTimeout,
+		WriteTimeout: cfg.RedisWriteTimeout,
+	})
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	bus := events.NewRedisBus(redisClient, "events", 200, nil)
 	slog.Info("redis event bus connected", "prefix", cfg.RedisPrefix)
 	return redisClient, bus, bus.Close, nil
+}
+
+func splitCSV(raw string) []string {
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func initHealthChecker(db database.RuntimeStore, redisClient rediskit.Client) *healthcheck.HealthChecker {

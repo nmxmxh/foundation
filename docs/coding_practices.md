@@ -14,11 +14,13 @@ Primary references used for synthesis:
 
 - `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/JSF-AV-rules.pdf`
 - `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/P10.pdf`
+- `/Users/okhai/Desktop/go-study.pdf` (Go concurrency bug taxonomy and mitigation synthesis)
 - `/Users/okhai/Desktop/Real-World Bug Hunting - A Field Guide to Web Hacking by Peter Yaworski.pdf` (defensive vulnerability taxonomy synthesis; no exploit payloads embedded)
 
 Related architecture blueprint:
 
 - `/Users/okhai/Desktop/OVASABI STUDIOS/blueprint/standalone_apps_architecture_blueprint.md`
+- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/go_concurrency_bug_practices.md`
 
 Related frontend practice docs:
 
@@ -133,11 +135,15 @@ Requirements:
 1. Declare data at the smallest practical scope.
 2. Avoid unencapsulated global mutable state.
 3. Shared state access must be synchronized or isolated by design.
+4. Goroutine closures must not accidentally share mutable loop, request, tenant, or correlation state. Pass values as parameters or copy them locally when the value is part of the concurrency contract.
+5. Values passed through channels, contexts, worker args, or library objects can still point to mutable shared state. Passing a pointer through a channel is not data privatization.
+6. Channel, goroutine, timer, ticker, and context ownership must be explicit in code structure: identify who sends, receives, closes, cancels, stops, and observes terminal failure.
 
 Enforcement:
 
 - Reviewer gate on package-level mutable variables.
 - Concurrency-focused tests where shared state exists.
+- Reviewer gate on goroutine closures and channel/context handoffs that carry mutable references.
 
 ### CP-07: Apply allocation discipline in hot paths
 
@@ -269,11 +275,20 @@ Requirements:
 2. In hot loops, replace repeated `defer` with explicit cleanup only when profiling or allocation/latency evidence shows the deferred calls matter. Keep the explicit cleanup mechanically simple and covered by tests.
 3. Do not hold locks, DB transactions, or file descriptors across network calls, unbounded waits, or callbacks into user-controlled logic.
 4. In Rust, prefer RAII guards for symmetric cleanup such as counters, locks, temporary state, and FFI handles. Avoid duplicated decrement/release branches that can drift during later edits.
+5. Do not hold `Mutex`/`RWMutex` locks across blocking channel sends/receives, `WaitGroup.Wait`, `Cond.Wait`, context waits, or select cases that can block.
+6. `sync.WaitGroup.Add` must happen before a goroutine can call `Done` and before another goroutine can observe `Wait`. Do not call `Wait` inside the same loop that is still launching the group unless serial execution is explicitly intended.
+7. Channel close ownership must be single and visible. If multiple call paths can close a channel, guard with `sync.Once` or move close responsibility to a single owner.
+8. Do not use `select { default: close(ch) }` as a close guard; it is a check-then-act race and can still double-close.
+9. Avoid `time.NewTimer(0)` placeholder timers. Create timeout channels only when the timeout is enabled, and stop timers/tickers on every exit path when they own resources.
+10. Avoid re-entering the same `sync.RWMutex` with `RLock` when a writer may be pending. Go's writer-preference behavior can block read re-entry.
 
 Enforcement:
 
 - Reviewer gate for missing `defer`/RAII cleanup after resource acquisition.
 - Reviewer gate for explicit cleanup in loops without a hot-path rationale.
+- Automated CP checks for known dangerous timer and channel-close guard patterns.
+- Broad `go_concurrency_practices_check.sh` review output for lock/channel/select/timer/close ownership risks; use `GO_CONCURRENCY_STRICT=1` during hardening passes.
+- Reviewer gate on mixed lock/channel/wait code paths and `WaitGroup` Add/Wait ordering.
 
 ### CP-12: Keep documentation and traceability current
 
@@ -354,12 +369,17 @@ Requirements:
 4. Saturation behavior must emit measurable signals (timeouts, queue depth, retries, rejects).
 5. Acquire-timeout saturation must surface an explicit concurrency-limit error instead of silently collapsing into a generic deadline path.
 6. Listener and dispatch loops must prefer blocking fan-in worker pools over sleep-based busy polling.
+7. Every goroutine launched for request, event, worker, registry, Redis, or runtime work must have a cancellation path and a terminal observation path.
+8. Channel operations in long-lived loops must handle shutdown/cancellation explicitly. If shutdown must win over ready work, structure the select loop so nondeterministic selection cannot publish or mutate after terminal cancellation.
+9. Unbuffered channels and buffered channels must both be intentional. Unbuffered channels are rendezvous points; buffered channels are bounded queues and require capacity and overflow policy.
 
 Enforcement:
 
 - Review gate on hardcoded throttle values in runtime code.
 - Benchmark/load evidence for hot path changes.
 - Config and runbook updates in the same PR when limits change.
+- Leak/blocking tests for long-lived goroutine owners where shutdown or backpressure behavior changes.
+- Scaffolded projects inherit `check-go-concurrency-practices` so broad lifecycle risks stay visible in project lint output.
 
 ### CP-17: Frontend realtime architecture must stay contract-first and minimal
 
@@ -660,19 +680,25 @@ Requirements:
 
 1. New externally reachable handlers and workers must record low-cardinality counters, latency histograms, and queue/depth gauges where meaningful.
 2. Services with production traffic must define SLO thresholds for dispatch p99 latency, worker success rate, and event delivery lag.
-3. New queue, Redis, database, or runtime integration paths must include at least one negative-path or chaos/fault-injection test.
-4. Runtime payload movement changes must include unit tests and benchmark coverage for control, arena, and streaming lanes.
-5. Profiling endpoints must be disabled by default and protected by admin capability or equivalent authorization when enabled.
-6. gRPC service-to-service lanes must enforce auth metadata, message-size limits, deadline propagation, and bufconn contract tests.
-7. Parallel chains must distinguish critical and non-critical failures; critical failures must cancel dependent work through context cancellation.
-8. gRPC hot lanes must include allocation budget tests under the `perf` build tag when they introduce or alter serialization codecs.
-9. gRPC allocation budgets are boundary budgets, not hot-path budgets. Same-process frame dispatch must have a zero-allocation or explicitly justified near-zero-allocation benchmark.
-10. Frame codec changes must benchmark owned decode, append-buffer decode, borrowed view decode, generated protobuf `MarshalAppend`, and RPC boundary cost separately.
+3. Services with production deployments must collect DORA-ready delivery events: change lead time, deployment frequency, failed deployment recovery time, change fail rate, and deployment rework rate.
+4. Production incidents, failed deployments, rollbacks, and hotfixes must have incident records that link commit SHA, CI run, deployment run, correlation IDs, and remediation follow-up.
+5. New queue, Redis, database, or runtime integration paths must include at least one negative-path or chaos/fault-injection test.
+6. Runtime payload movement changes must include unit tests and benchmark coverage for control, arena, and streaming lanes.
+7. Profiling and operational endpoints must be disabled by default or protected by admin/operator capability in production.
+8. gRPC service-to-service lanes must enforce auth metadata, message-size limits, deadline propagation, and bufconn contract tests.
+9. Parallel chains must distinguish critical and non-critical failures; critical failures must cancel dependent work through context cancellation.
+10. gRPC hot lanes must include allocation budget tests under the `perf` build tag when they introduce or alter serialization codecs.
+11. gRPC allocation budgets are boundary budgets, not hot-path budgets. Same-process frame dispatch must have a zero-allocation or explicitly justified near-zero-allocation benchmark.
+12. Frame codec changes must benchmark owned decode, append-buffer decode, borrowed view decode, generated protobuf `MarshalAppend`, and RPC boundary cost separately.
+13. Go concurrency changes must include targeted evidence beyond a clean runtime deadlock detector. Partial hangs, goroutine leaks, missed cancellation, and blocked sends can occur while unrelated goroutines keep running.
+14. Shared-memory concurrency changes should run `go test -race`, but a clean race run is not proof for order violations, select nondeterminism, channel close panics, or message-passing liveness bugs.
+15. Long-lived goroutine owners must expose low-cardinality signals for active workers/listeners, queue depth, blocked/rejected sends, cancellation, and terminal shutdown where meaningful.
 
 Enforcement:
 
 - `server-kit/go/metrics`, `slo`, `chaos`, `contracttest`, and `profiling` unit coverage.
-- Scaffold checks for runtime streaming/arena APIs, performance guard tooling, and config-contract SLO support.
+- Scaffold checks for runtime streaming/arena APIs, performance guard tooling, config-contract SLO support, secure operational endpoints, and CI delivery metrics capture.
+- Race, leak, blocking, or fault-injection tests for Go concurrency primitives that own worker, runtime, Redis, WebSocket, queue, or registry lifecycles.
 
 ### CP-35: River / Background Job Reliability and Scaling
 

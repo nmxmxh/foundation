@@ -126,6 +126,9 @@ func ValidateServer(cfg ServerRuntimeConfig) error {
 			return err
 		}
 	}
+	if err := ValidateServerSecurity(cfg.Security); err != nil {
+		return err
+	}
 	if len(cfg.Queues) == 0 {
 		return fmt.Errorf("at least one queue configuration is required")
 	}
@@ -135,6 +138,19 @@ func ValidateServer(cfg ServerRuntimeConfig) error {
 		}
 		if queue.MaxRetries < 0 {
 			return fmt.Errorf("queue %s max_retries must be zero or greater", name)
+		}
+	}
+	return nil
+}
+
+func ValidateServerSecurity(cfg ServerSecurityConfig) error {
+	for _, origin := range cfg.CORSAllowedOrigins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed == "" {
+			return fmt.Errorf("security.cors_allowed_origins cannot contain blank origins")
+		}
+		if trimmed == "*" {
+			return fmt.Errorf("security.cors_allowed_origins must use explicit origins")
 		}
 	}
 	return nil

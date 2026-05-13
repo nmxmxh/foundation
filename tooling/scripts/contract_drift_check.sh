@@ -64,6 +64,39 @@ check_generated_if_present() {
   echo "[OK] $generated_relative"
 }
 
+check_lifecycle_contracts() {
+  [[ -d "$target/api/protos" ]] || return 0
+
+  local generator=""
+  if [[ -f "$target/scripts/checks/generate_lifecycle_contract_tests.mjs" ]]; then
+    generator="$target/scripts/checks/generate_lifecycle_contract_tests.mjs"
+  elif generator="$(resolve_path "foundation/tooling/scripts/generate_lifecycle_contract_tests.mjs" 2>/dev/null)"; then
+    :
+  elif generator="$(resolve_path "tooling/scripts/generate_lifecycle_contract_tests.mjs" 2>/dev/null)"; then
+    :
+  else
+    echo "[FAIL] lifecycle contract generator present"
+    echo "  missing: foundation/tooling/scripts/generate_lifecycle_contract_tests.mjs"
+    failed=1
+    return 0
+  fi
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "[FAIL] lifecycle contract generator requires node"
+    failed=1
+    return 0
+  fi
+
+  if node "$generator" \
+    --proto-root "$target/api/protos" \
+    --out "$target/tests/contract/generated_lifecycle_test.go" \
+    --check; then
+    :
+  else
+    failed=1
+  fi
+}
+
 check_exists "runtime transport proto present" "foundation/runtime-transport/protos/transport/v1/envelope.proto"
 check_exists "runtime transport generation script present" "foundation/runtime-transport/scripts/generate_bindings.sh"
 
@@ -93,6 +126,7 @@ fi
 if [[ -d "$target/api/protos" ]]; then
   while IFS= read -r proto_file; do
     [[ "$proto_file" == */transport/v1/* ]] && continue
+    [[ "$proto_file" == */common/v*/* ]] && continue
     [[ "$proto_file" == */_template/* ]] && continue
     app_proto_count=$((app_proto_count + 1))
     generated="${proto_file%.proto}.pb.go"
@@ -108,6 +142,8 @@ if [[ -d "$target/api/protos" ]]; then
 else
   echo "[OK] no app protobuf directory"
 fi
+
+check_lifecycle_contracts
 
 if [[ "$app_proto_count" -gt 0 && -d "$target/internal" ]]; then
   startup_hits="$(rg -n "RegisterTypedPlanes|RegisterTypedFrameHandlers" "$target/internal" "$target/cmd" \

@@ -1,0 +1,23 @@
+// Shared request and response metadata for Foundation app contracts.
+syntax = "proto3";
+
+package common.v1;
+
+option go_package = "github.com/ovasabi/{{PROJECT_NAME}}/api/protos/common/v1;commonv1";
+
+import "google/protobuf/timestamp.proto";
+
+message RequestMetadata {
+  string correlation_id = 1;
+  string idempotency_key = 2;
+  string device_id = 3;
+  string user_id = 4;
+  string organization_id = 5;
+  google.protobuf.Timestamp timestamp = 6;
+}
+
+message ResponseMetadata {
+  string correlation_id = 1;
+  string request_id = 2;
+  int64 processing_time_ms = 3;
+}

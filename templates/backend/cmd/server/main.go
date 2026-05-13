@@ -8,6 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
+
 	"{{MODULE_PATH}}/internal/config"
 	"{{MODULE_PATH}}/internal/server"
 	"{{MODULE_PATH}}/internal/startup"
@@ -48,6 +51,13 @@ func run(ctx context.Context) error {
 
 	// Create and start server
 	srv := server.New(cfg, deps.Registry, deps.Handler)
+	if cfg.RequireAuth || cfg.ProtectOperationalEndpoints {
+		jwtManager, err := auth.NewJWTManager(cfg.JWTSecret)
+		if err != nil {
+			return fmt.Errorf("init jwt manager: %w", err)
+		}
+		srv.ConfigureAuth(jwtManager, security.NewAuthorizer(nil), cfg.RequireAuth)
+	}
 	if deps.Resilience != nil {
 		srv.ConfigureHealthChecks(
 			deps.Resilience.HealthHandler(),

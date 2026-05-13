@@ -1,0 +1,19 @@
+{
+  "name": "{{PROJECT_NAME}}-native",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "build": "tauri build --config src-tauri/tauri.prod.conf.json",
+    "mobile:init": "tauri android init && tauri ios init",
+    "doctor": "tauri info",
+    "bench": "cargo run --manifest-path ../foundation/runtime-native/rust/Cargo.toml --release --bin native_bench"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.1"
+  }
+}

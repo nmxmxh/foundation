@@ -1,8 +1,8 @@
 # Optimization Points
 
-Date: 2026-05-09
+Date: 2026-05-11
 
-This document tracks the deliberate performance and architecture carryovers folded into the scaffold after reviewing `fintech_v1` history and the current performance synthesis. For cross-cutting Go, networking, PostgreSQL, Rust, benchmarking, and documentation-tracking practices, see `foundation/docs/performance_practices.md`. For TLA+/`Specifying Systems` state-machine, invariant, liveness, real-time bound, composition, and refinement practices, see `foundation/docs/tla_architecture_practices.md`. For deep-dives into legendary computer science optimization tricks, see [Coding Magic](file:///Users/okhai/Desktop/OVASABI%20STUDIOS/reframe_v1/foundation/docs/coding_magic.md).
+This document tracks the deliberate performance and architecture carryovers folded into the scaffold after reviewing `fintech_v1` history and the current performance synthesis. For cross-cutting Go, networking, PostgreSQL, Rust, benchmarking, and documentation-tracking practices, see `foundation/docs/performance_practices.md`. For TLA+/`Specifying Systems` state-machine, invariant, liveness, real-time bound, composition, and refinement practices, see `foundation/docs/tla_architecture_practices.md`. For Go concurrency bug taxonomy and practices extracted from `go-study.pdf`, see `foundation/docs/go_concurrency_bug_practices.md`. For deep-dives into legendary computer science optimization tricks, see [Coding Magic](file:///Users/okhai/Desktop/OVASABI%20STUDIOS/reframe_v1/foundation/docs/coding_magic.md).
 
 ## Adopted immediately
 
@@ -40,6 +40,15 @@ This document tracks the deliberate performance and architecture carryovers fold
 32. Colon-delimited event names are not arbitrary strings in hot paths. Exact subscriptions should use direct maps, prefix wildcards such as `tenant:org_0042:*` should use prefix buckets, and complex wildcard scans should stay off product fanout lanes.
 33. Store indexes must match both predicate and result order. For bounded list reads, the right shape is scoped/filter candidate selection plus order-aware early stop at `LIMIT`, not "scan broad state, sort everything, then trim".
 34. Binary frame control fields have different cardinality. `EventType` and `SchemaVersion` are bounded vocabularies and can be interned in owned compatibility decode; `CorrelationID` and payload bytes are per-message data and must remain owned or borrowed according to lifetime.
+35. The local Redis memory driver must behave like a real coordination substrate for tests: copied values, TTL expiry, token-checked locks, pattern pub/sub, approximate-cardinality API shape, and monotonic stream group read/ack semantics. Placeholder success paths hide contract drift.
+36. Correlation tracing should start as a bounded local substrate: record compact per-correlation lifecycle events in a ring-like collector, then build debug endpoints/UI on top. Do not make trace introspection an unbounded event store.
+37. Proto definitions are now a compiler input for nervous-system checks. Mutating request/response pairs should generate lifecycle contract vectors and call `VerifyCommandLifecycle`, so event naming, terminal refinement, idempotency, tenant scope, and worker metadata stay generated behavior.
+38. Runtime pressure needs first-class local signals before service-backed load tests: event publish/receive trace, worker enqueue/process trace, Redis op latency/error counts, database op latency, pgx pool pressure, acquire-timeout errors, and queue depth. Service-backed benchmark configs and processes stay foundation-only; scaffolded projects inherit only minimal runtime budgets and debug endpoints.
+39. Goroutine creation is a performance and liveness budget, not just syntax. Hot fanout, registry dispatch, Redis listeners, runtime workers, and batch ingestion must prefer bounded owners over unbounded per-item launches.
+40. Message passing is not automatically safer than shared memory. Channel ownership, close authority, buffer capacity, select shutdown priority, and send/receive cancellation are part of the hot-path contract.
+41. Timer/ticker usage belongs in the same lifecycle discipline as goroutines and channels. Avoid zero-duration placeholder timers, stop owned timers/tickers, and test timeout/cancel paths under load-shaped shutdown.
+42. Go runtime deadlock and race detectors are evidence, not proof. Performance-sensitive concurrency work needs explicit leak/blocking tests, race runs where shared memory exists, and targeted select/channel/WaitGroup negative tests.
+43. Mixed lock/channel/wait paths are high-risk optimization zones. Do not hold mutexes across blocking message operations, waits, or callbacks; when a fast path needs both shared state and messages, model the ownership boundary first.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 
@@ -61,7 +70,7 @@ This document tracks the deliberate performance and architecture carryovers fold
 - **MemoryDB Filter/Order Index**: scalar `Data` filters narrow tenant-list candidates and order-aware index logs let bounded reads stop at `LIMIT` before broad materialization.
 - **Scale Harness**: `appbench` now exercises DB pressure, Redis fanout, WebSocket churn, cache stampedes, queue saturation, config convergence, and mixed p95/p99 latency without external services.
 - **1M Scale Slice**: `BenchmarkScale1M_*` validates 1M record/connection/subscription shapes with fixed benchmark iteration counts.
-- **Postgres State Store Alignment**: scalar JSONB filters push down before `LIMIT`, state-store methods use query budgets, and the scaffold migration creates `governance_state_records` plus scoped indexes.
+- **Postgres State Store Alignment**: scalar JSONB filters push down before `LIMIT`, state-store methods use acquire/query budgets, raw JSON writes preserve bytes when map mutation is unnecessary, and the scaffold migration creates `governance_state_records` plus scoped indexes.
 
 ## Deferred behind stubs
 
@@ -79,3 +88,4 @@ This document tracks the deliberate performance and architecture carryovers fold
 5. Promote parser hot-path helpers for regex/date caching into shared utilities once two apps converge on the same fixtures.
 6. Add a recurring benchmark/profile review note for runtime lanes, database hot queries, WebSocket saturation paths, and worker queues.
 7. Add a docs-tracking check in PR review templates for optimization changes that alter defaults, budgets, or benchmark expectations.
+8. Add a Go concurrency review helper that flags risky `WaitGroup`, channel-close, timer, select, and lock/message combinations, then promote only low-noise patterns into hard CP checks.

@@ -15,6 +15,7 @@ Related docs:
 - `foundation/docs/coding_practices.md`
 - `foundation/docs/database_practices.md`
 - `foundation/docs/foundation_benchmarks.md`
+- `foundation/docs/go_concurrency_bug_practices.md`
 - `foundation/docs/runtime_foundation.md`
 - `foundation/docs/tla_architecture_practices.md`
 - `foundation/docs/websocket_scaling.md`
@@ -52,6 +53,8 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 2. Use `go test -bench ... -benchmem` for micro-level decisions such as allocation shape, parser changes, frame codecs, batching helpers, and lock strategy.
 3. Capture p50, p95, p99, error rate, pool acquire latency, queue depth, and rejection counts during networked tests.
 4. Treat `runtime.convT2I`, `runtime.assertI2T`, high allocation counts, mutex wait, and goroutine growth as signals to inspect, not automatic refactor triggers.
+5. For Go concurrency changes, capture active goroutines by component, queue depth/capacity, blocked or rejected channel sends, shutdown drain duration, work-after-cancel count, and block/mutex profile samples.
+6. A passing race run or absent runtime deadlock is not enough performance evidence. Pair `go test -race` with explicit leak/blocking tests and metrics for the specific goroutine/channel/lock boundary.
 
 ### Allocation discipline
 
@@ -76,6 +79,9 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 7. Share immutable snapshots freely across goroutines. Mutable shared state needs explicit ownership, synchronization, or copy-on-write semantics.
 8. Every goroutine spawned from a request, socket, worker job, or ingestion batch must receive cancellation through `context.Context` or an equivalent lifecycle boundary.
 9. In containers, validate `GOMAXPROCS` against cgroup CPU limits. Prefer an automatic setting such as `automaxprocs` where deployment does not already enforce this.
+10. Prefer the primitive that matches ownership: locks for short critical sections, channels for handoff/order/ownership transfer, and atomics for narrow counters or flags.
+11. Use Foundation observability concurrency signals for long-lived owners: `RecordConcurrency`, `RecordConcurrencyGauge`, and `RecordConcurrencyDuration` with low-cardinality `component`, `primitive`, `operation`, and `state` values.
+12. Treat channel close, timer/ticker lifecycle, and shutdown select priority as performance concerns. Leaks and partial hangs show up as tail latency, queue lag, and failed drain behavior before they show up as obvious crashes.
 
 ## Network and transport performance
 

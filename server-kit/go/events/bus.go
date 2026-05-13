@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"sync"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 )
 
 // Subscriber receives published envelopes.
@@ -56,6 +58,7 @@ func (b *InMemoryBus) Publish(ctx context.Context, envelope Envelope) error {
 	exact := b.exactSubscribers[envelope.EventType]
 	if len(b.allSubscribers) == 0 && len(b.prefixSubscribers) == 0 && len(b.patternSubscribers) == 0 {
 		b.mu.Unlock()
+		recordEventTrace("event.publish", envelope)
 		for _, subscriber := range exact {
 			subscriber(ctx, envelope)
 		}
@@ -71,11 +74,26 @@ func (b *InMemoryBus) Publish(ctx context.Context, envelope Envelope) error {
 		}
 	}
 	b.mu.Unlock()
+	recordEventTrace("event.publish", envelope)
 
 	for _, subscriber := range matching {
 		subscriber(ctx, envelope)
 	}
 	return nil
+}
+
+func recordEventTrace(stage string, envelope Envelope) {
+	if envelope.CorrelationID == "" {
+		return
+	}
+	observability.Default().RecordTrace(
+		envelope.CorrelationID,
+		stage,
+		envelope.EventType,
+		TerminalState(envelope.EventType),
+		"",
+		nil,
+	)
 }
 
 func (b *InMemoryBus) Subscribe(pattern string, subscriber Subscriber) {

@@ -70,6 +70,9 @@ func TestValidateServerRuntimeConfig(t *testing.T) {
 			EventDeliveryLagMS:   500,
 		},
 		Security: ServerSecurityConfig{
+			RequireAuth:                 true,
+			ProtectOperationalEndpoints: true,
+			CORSAllowedOrigins:          []string{"https://app.example.com"},
 			PostQuantum: PostQuantumConfig{
 				TLSHybridKEM:             "auto",
 				SignatureAlgorithm:       "classical",
@@ -179,6 +182,7 @@ func TestValidateServerRejectsCriticalRuntimeFields(t *testing.T) {
 		{name: "jwt secret", mutate: func(cfg *ServerRuntimeConfig) { cfg.JWT.Secret = "" }},
 		{name: "runtime budget", mutate: func(cfg *ServerRuntimeConfig) { cfg.RuntimeBudgets.DispatchMaxConcurrent = 0 }},
 		{name: "slo", mutate: func(cfg *ServerRuntimeConfig) { cfg.SLOs.WorkerSuccessRate = 2 }},
+		{name: "cors wildcard", mutate: func(cfg *ServerRuntimeConfig) { cfg.Security.CORSAllowedOrigins = []string{"*"} }},
 		{name: "post quantum", mutate: func(cfg *ServerRuntimeConfig) { cfg.Security.PostQuantum.TLSHybridKEM = "unknown" }},
 		{name: "queues missing", mutate: func(cfg *ServerRuntimeConfig) { cfg.Queues = nil }},
 		{name: "queue concurrency", mutate: func(cfg *ServerRuntimeConfig) { cfg.Queues["media_probe"] = QueueConfig{} }},

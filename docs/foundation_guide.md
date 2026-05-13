@@ -14,6 +14,7 @@ Primary performance companions:
 * `tla_architecture_practices.md`: state-machine, invariant, liveness, real-time bound, composition, and refinement practices from `Specifying Systems`.
 * `foundation_benchmarks.md`: benchmark commands, reference results, and allocation guardrails.
 * `database_practices.md`: PostgreSQL schema, query, pool, migration, and operational standards.
+* `delivery_metrics_practices.md`: DORA delivery signals, CI collection, and incident records.
 
 ---
 
@@ -100,6 +101,7 @@ Primary performance companions:
 * Treat browser state, route params, websocket frames, uploaded files, webhook payloads, queue messages, and third-party responses as untrusted input.
 * Model at least these attacker classes: anonymous user, authenticated user, tenant adversary, malicious integration/API consumer, and insider with partial infrastructure access.
 * Every new exposed capability should define its trust boundary, sensitive assets, abuse controls, and audit expectations before implementation.
+* Production scaffolds must keep authentication enabled, use exact CORS origins, and protect operational endpoints such as `/metricsz` and `/metricsz/trace`.
 
 ### 5. Change-Risk Hotspot Rule
 
@@ -135,6 +137,9 @@ Primary performance companions:
 * Performance-sensitive frontend code must call the runtime lane planner before choosing a transport/compute path. Treat the planner output as the contract: `copyBudget`, `allocationBudget`, `expectedLatencyClass`, `deadlineRisk`, and `requiresCrossOriginIsolation` decide whether a feature uses SAB/WASM, transferable workers, WebGPU, WebSocket, or HTTP.
 * Keep UI thread work on control and render duties. Do not decode large JSON maps, spin on SAB epochs, or dispatch WebGPU compute from React render paths. Workers own compute, SAB waits, transfer fallback, and GPU dispatch orchestration.
 * Use WebGPU only for wide homogeneous batches where dispatch/readback is amortized. Use SAB/WASM or transferable workers for small bounded payloads, and keep hot domain payloads as typed bytes/views until the owning adapter must materialize objects.
+* Use `@ovasabi/runtime-native` only for native shell dispatch and capability detection. Tauri IPC is a measured control boundary; hot compute stays on runtime-sdk lanes.
+* Device APIs split into two lanes. WebView APIs such as `getUserMedia` are compatibility lanes for preview/simple capture. Performance-sensitive camera, microphone, and sensor streams must use native Swift/Kotlin plugins that route bytes or typed slots through `runtime-native` into `runtime-sdk`.
+* Official Tauri device plugins such as geolocation, biometric auth, NFC, haptics, barcode scanning, notifications, filesystem, and shell access are enabled per app through explicit dependencies, capabilities, and platform privacy/permission entries. Foundation scaffold defaults stay minimal.
 
 ### 9. Backend Runtime Binding Rule
 
@@ -143,9 +148,17 @@ Primary performance companions:
 * Route HTTP and WebSocket ingress through `registry`, `httpapi`, `metadata`, `graceful`, `security`, `compress`, `observability`, `wsrouting`, and `wsmetrics` before app handlers receive payloads.
 * Keep scalar request validation in-process when it is already allocation-free and nanosecond-scale. Use `runtimehost`/Rust only when deterministic compute is large enough to amortize the FFI, stdio, shm, or WASM boundary.
 * App Rust compute must expose a Foundation runtime descriptor and stable schema names before services depend on it. The service contract should remain the same whether the selected lane is direct Go, native Rust, shared-memory Rust, or WASM.
+* Native shells must use `foundation/runtime-native` for binary native frames and secure storage surfaces. Do not store native session tokens in frontend `localStorage`.
+* Custom native plugins must preserve Foundation frame discipline: bounded buffers, descriptor allowlists, schema/version validation, correlation metadata where commands mutate state, and controlled errors for permission-denied, canceled, malformed, stale, oversized, and backpressured frames.
 * Financial kernels must use integer minor units and checked arithmetic only. Floats are not allowed for ledger balances, merchant settlement, fee calculation, stablecoin reserve math, or compliance thresholds.
 * Keep worker throughput bounded through server-kit queue configuration and chain helpers instead of ad-hoc goroutine fan-out.
 * Run `make lint-foundation` or `scripts/checks/server_kit_usage_check.sh .` after scaffold sync. `.foundation` projects receive deep wiring checks; intentionally custom apps should either adopt the scaffold profile or remain explicitly outside that contract.
+
+### 10. Delivery Metrics Rule
+
+* Runtime health and delivery health are separate signals. Keep DORA-style delivery events for change lead time, deployment frequency, failed deployment recovery time, change fail rate, and deployment rework rate.
+* Generated projects inherit `make delivery-metrics` and CI artifact capture. Treat those records as collection events; app deployment platforms own aggregation, dashboards, and alert policies.
+* Production incidents, failed deployments, rollbacks, and hotfixes should have incident records that tie CI run, deployment run, commit SHA, correlation IDs, and remediation follow-up together.
 
 ---
 

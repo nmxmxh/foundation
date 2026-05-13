@@ -61,12 +61,16 @@ project/
 ## Critical Rules (Mandatory)
 
 ### 1. Foundation Dependency Boundary
+
 **NEVER** import or alias raw source files from `foundation/*/ts/src` or internal Go packages.
+
 - **Frontend**: Consume foundation logic via package boundaries: `@ovasabi/runtime-transport`, `@ovasabi/frontend-kit`, `@ovasabi/ui-minimal`.
 - **Backend**: Use the `server-kit` module exports.
 
 ### 2. Correlation ID Propagation
+
 Every mutating command MUST carry a `correlationId`. Trace it through all workers, events, and logs.
+
 ```go
 // CORRECT
 ctx = metadata.WithCorrelationID(ctx, envelope.CorrelationID)
@@ -74,18 +78,23 @@ bus.Publish(ctx, "domain:action:requested", payload)
 ```
 
 ### 3. Event Contract Lifecycle
+
 All domain events follow `<domain>:<action>:<state>` pattern:
+
 - `:requested` - Command received, validation passed
 - `:success` - Operation completed
 - `:failed` - Operation failed with reason
 
 ### 4. Tenant Isolation
+
 Never trust client-supplied `organization_id`. Always derive from authenticated context via `auth.OrgIDFromContext(ctx)`.
 
 ### 5. Error Handling
+
 Use the foundation error taxonomy (`foundation/server-kit/go/errors`). Never panic in request handlers.
 
 ### 6. Bounded Operations
+
 All loops, retries, and external calls MUST have explicit bounds (timeouts, max attempts).
 
 ## Commands
@@ -125,25 +134,29 @@ make migrate-up              # Run DB migrations
 ## Frontend & High-Performance
 
 ### Transport Layer
+
 Use `@ovasabi/runtime-transport` for all backend communication. It handles binary envelopes, WebSocket routing, and automatic request deduplication.
 
 ### UI Primitives (`ui-minimal`)
+
 Check `foundation/ui-minimal` before creating local components. Use `MinimalButton`, `MinimalInput`, `MinimalAppShell`, etc. App-level components should be thin wrappers.
 
 ### Runtime SDK (`runtime-sdk`)
+
 The bridge for Rust/WASM execution. It uses a 4KB control-buffer contract for high-performance communication between the JS event loop and the WASM guest.
 
 ### Cognitive Wire (`cw`)
+
 A stealth extension for shared AI compute, providing binary-optimized CWF (Cognitive Wire Format) transport and edge-native state replication.
 
 ## Communicative Connections
 
 The Foundation modules are linked through a unified "Nervous System":
 
-1.  **Envelopes**: Every message (HTTP, WS, Redis) is wrapped in a `RuntimeEnvelope` (`runtime-transport`).
-2.  **Resilience Runtime**: The `server-kit/go/resilience` module coordinates health, circuits, and degradation across all backend modules.
-3.  **WASM Kernel**: `runtime-sdk` provides the 4KB high-speed buffer for JS/Rust communication.
-4.  **Config Sync**: `config-contracts` ensures frontend and backend use the same validated schema.
+1. **Envelopes**: Every message (HTTP, WS, Redis) is wrapped in a `RuntimeEnvelope` (`runtime-transport`).
+2. **Resilience Runtime**: The `server-kit/go/resilience` module coordinates health, circuits, and degradation across all backend modules.
+3. **WASM Kernel**: `runtime-sdk` provides the 4KB high-speed buffer for JS/Rust communication.
+4. **Config Sync**: `config-contracts` ensures frontend and backend use the same validated schema.
 
 ## Development Context
 
@@ -155,10 +168,10 @@ The Foundation modules are linked through a unified "Nervous System":
 
 ## Next Steps (Core Roadmap)
 
-1.  **Stability**: Finalize `policy` and `redis` modules for 1.1.0 release.
-2.  **Observability**: Integrate Prometheus metrics and OTel trace exporters by default.
-3.  **Performance**: Optimize the 4KB WASM control plane for high-frequency signal processing.
-4.  **Security**: Standardize Post-Quantum TLS helpers across all ingress points.
+1. **Stability**: Finalize `policy` and `redis` modules for 1.1.0 release.
+2. **Observability**: Integrate Prometheus metrics, OTel trace exporters, DORA delivery metrics, and incident records by default.
+3. **Performance**: Optimize the 4KB WASM control plane for high-frequency signal processing.
+4. **Security**: Standardize Post-Quantum TLS helpers across all ingress points.
 
 ## Gotchas and Anti-Patterns
 
@@ -168,13 +181,14 @@ The Foundation modules are linked through a unified "Nervous System":
 4. **Don't skip error wrapping**: Use `errors.Wrap(err, "context")` to preserve stack traces.
 
 ## Testing Requirements
+
 - **Unit tests**: ≥80% Line Coverage, ≥60% Branch Coverage.
 - **Integration**: Mandatory for event contracts and critical flows.
 - **E2E**: Required for auth guards and core user journeys.
 
 ## Coding Practice Rules (CP-*)
 
-The foundation enforces 31 coding practices. Key ones to remember:
+The foundation enforces 35 coding practices. Key ones to remember:
 
 | Rule | Summary |
 | ------ | --------- |
@@ -202,6 +216,7 @@ For deeper context, read these files (`docs/foundation/` in generated apps, `doc
 | Redis patterns | `docs/foundation/redis_practices.md` or `docs/redis_practices.md` |
 | Migration rules | `docs/foundation/migration_practices.md` or `docs/migration_practices.md` |
 | Performance | `docs/foundation/optimization_points.md` or `docs/optimization_points.md` |
+| Delivery metrics | `docs/foundation/delivery_metrics_practices.md` or `docs/delivery_metrics_practices.md` |
 | Runtime architecture | `docs/foundation/runtime_foundation.md` or `docs/runtime_foundation.md` |
 | Foundation guide | `docs/foundation/foundation_guide.md` or `docs/foundation_guide.md` |
 | Styling and motion | `docs/foundation/styling_design_practices.md` or `docs/styling_design_practices.md` |
@@ -211,6 +226,7 @@ For deeper context, read these files (`docs/foundation/` in generated apps, `doc
 ## Security Checklist
 
 Before merging any PR, verify:
+
 - [ ] No secrets in code or logs
 - [ ] Input validation at all boundaries
 - [ ] Authorization checks on target objects (not just routes)
@@ -219,4 +235,4 @@ Before merging any PR, verify:
 - [ ] Correlation IDs propagated for audit trails
 
 ---
-*Version: 1.1.0 | Last updated: 2026-05-03*
+Version: 1.1.0 | Last updated: 2026-05-03

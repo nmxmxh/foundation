@@ -66,6 +66,28 @@ check_no_match() {
   fi
 }
 
+check_no_match_multiline() {
+  local label="$1"
+  local pattern="$2"
+  shift 2
+  if rg -n -U \
+    --glob '!**/generated/**' \
+    --glob '!**/*test*' \
+    --glob '!**/node_modules/**' \
+    --glob '!**/dist/**' \
+    --glob '!**/target/**' \
+    --glob '!**/tooling/scripts/**' \
+    --glob '!**/docs/**' \
+    --glob '!**/data/**' \
+    "$pattern" "$@" >"$tmp_output" 2>/dev/null; then
+    echo "[FAIL] $label"
+    cat "$tmp_output"
+    failed=1
+  else
+    echo "[OK] $label"
+  fi
+}
+
 check_absent_path() {
   local label="$1"
   local path="$2"
@@ -91,6 +113,9 @@ check_no_match "CP no direct MutationObserver construction" "\\bnew\\s+([A-Za-z0
 check_no_match "CP no transition-all in frontend motion" "transition\\s*:\\s*['\"]?all\\b|transition-all" "$target" --glob '*.ts' --glob '*.tsx' --glob '*.css'
 check_no_match "CP no large runtime buffer expansion" "runtime.{0,32}buffer.{0,32}(8192|16384|32768|65536)|buffer.{0,32}runtime.{0,32}(8192|16384|32768|65536)" "$target" --glob '*.go' --glob '*.rs' --glob '*.ts' --glob '*.tsx'
 check_no_match "CP internal Go avoids JSON gRPC compatibility dispatch" "grpcsvc\\.Dispatch\\s*\\(|grpcsvc\\.Envelope\\b" "$target" --glob '*.go' --glob '!**/foundation/**' --glob '!**/server-kit/go/grpcsvc/**'
+check_no_match "CP no zero-duration Go timer placeholders" "\\btime\\.NewTimer\\s*\\(\\s*0\\s*\\)|\\bNewTimer\\s*\\(\\s*0\\s*\\)" "$target" --glob '*.go'
+check_no_match_multiline "CP channel close must not use select-default race guard" "select\\s*\\{[\\s\\S]{0,240}default:\\s*\\n\\s*close\\s*\\(" "$target" --glob '*.go'
+check_no_match_multiline "CP WaitGroup Add must happen before goroutine launch" "go\\s+func[\\s\\S]{0,240}\\b([A-Za-z0-9_]*wg|wg|group)\\.Add\\s*\\(" "$target" --glob '*.go'
 
 if [[ "$strict_foundation" == "true" ]]; then
   check_no_match "CP foundation runtime SDK hot path avoids JSON materialization" "JSON\\.(parse|stringify)|map\\[string\\](any|interface\\{\\})" "$target/runtime-sdk" --glob '*.go' --glob '*.rs' --glob '*.ts' --glob '*.tsx'

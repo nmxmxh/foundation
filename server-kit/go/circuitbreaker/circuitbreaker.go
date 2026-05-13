@@ -110,13 +110,13 @@ type CircuitBreaker struct {
 	name   string
 	config Config
 
-	mu               sync.Mutex
-	state            int32 // atomic State
-	failures         uint32
-	successes        uint32
-	halfOpenCalls    uint32
-	lastFailureTime  time.Time
-	lastStateChange  time.Time
+	mu              sync.Mutex
+	state           int32 // atomic State
+	failures        uint32
+	successes       uint32
+	halfOpenCalls   uint32
+	lastFailureTime time.Time
+	lastStateChange time.Time
 }
 
 // New creates a new circuit breaker with the given name and configuration.
@@ -173,11 +173,10 @@ func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() (interface{}, e
 		return nil, err
 	}
 
-	// Check context cancellation
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 
 	result, err := fn()
@@ -309,13 +308,13 @@ func (cb *CircuitBreaker) Reset() {
 
 // Stats returns statistics about the circuit breaker.
 type Stats struct {
-	Name            string        `json:"name"`
-	State           string        `json:"state"`
-	Failures        uint32        `json:"failures"`
-	Successes       uint32        `json:"successes"`
-	LastStateChange time.Time     `json:"last_state_change"`
-	LastFailureTime time.Time     `json:"last_failure_time"`
-	Config          ConfigStats   `json:"config"`
+	Name            string      `json:"name"`
+	State           string      `json:"state"`
+	Failures        uint32      `json:"failures"`
+	Successes       uint32      `json:"successes"`
+	LastStateChange time.Time   `json:"last_state_change"`
+	LastFailureTime time.Time   `json:"last_failure_time"`
+	Config          ConfigStats `json:"config"`
 }
 
 type ConfigStats struct {

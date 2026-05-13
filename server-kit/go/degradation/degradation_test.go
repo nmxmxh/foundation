@@ -64,6 +64,12 @@ func TestManagerStateAndFallbacks(t *testing.T) {
 	}
 }
 
+func TestManagerStopIsIdempotent(t *testing.T) {
+	m := NewManager()
+	m.Stop()
+	m.Stop()
+}
+
 func TestWithFallbackAndSentinel(t *testing.T) {
 	m := NewManager()
 	defer m.Stop()

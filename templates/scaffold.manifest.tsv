@@ -8,6 +8,8 @@ templates/.dockerignore	.dockerignore	all	always	overwrite
 templates/.env.example	.env.example	all	always	force
 templates/Makefile	Makefile	all	always	force
 templates/NEXT_STEPS.md	NEXT_STEPS.md	all	always	create
+templates/ops/README.md	docs/operations/README.md	all	always	create
+templates/ops/incident_record_template.md	docs/operations/incident_record_template.md	all	always	create
 templates/github/workflows/ci.yml	.github/workflows/ci.yml	all	always	overwrite
 templates/github/workflows/security.yml	.github/workflows/security.yml	all	always	overwrite
 templates/agents/POST_INIT.md	.agents/POST_INIT.md	all	always	create
@@ -50,6 +52,7 @@ templates/backend/tests/testutil/fixtures.go	tests/testutil/fixtures.go	full,bac
 templates/backend/tests/testutil/storage.go	tests/testutil/storage.go	full,backend	always	create
 templates/api/README.md	api/README.md	full,backend	always	create
 templates/api/protos/README.md	api/protos/README.md	full,backend	always	create
+templates/api/protos/common/v1/metadata.proto	api/protos/common/v1/metadata.proto	full,backend	always	create
 templates/api/protos/_template/v1/example.proto	api/protos/_template/v1/example.proto	full,backend	always	create
 templates/frontend/package.json	{{FRONTEND_ROOT}}/package.json	full,frontend	always	create
 templates/frontend/tsconfig.json	{{FRONTEND_ROOT}}/tsconfig.json	full,frontend	always	create
@@ -76,5 +79,16 @@ templates/frontend/src/test/setup.ts	{{FRONTEND_ROOT}}/src/test/setup.ts	full,fr
 templates/frontend/src/App.test.tsx	{{FRONTEND_ROOT}}/src/App.test.tsx	full,frontend	always	create
 templates/frontend/src/types/index.ts	{{FRONTEND_ROOT}}/src/types/index.ts	full,frontend	always	create
 templates/frontend/src/vite-env.d.ts	{{FRONTEND_ROOT}}/src/vite-env.d.ts	full,frontend	always	create
+templates/native/README.md	native/README.md	full,frontend	native	create
+templates/native/package.json	native/package.json	full,frontend	native	create
+templates/native/src-tauri/Cargo.toml	native/src-tauri/Cargo.toml	full,frontend	native	create
+templates/native/src-tauri/build.rs	native/src-tauri/build.rs	full,frontend	native	create
+templates/native/src-tauri/tauri.conf.json	native/src-tauri/tauri.conf.json	full,frontend	native	create
+templates/native/src-tauri/tauri.dev.conf.json	native/src-tauri/tauri.dev.conf.json	full,frontend	native	create
+templates/native/src-tauri/tauri.prod.conf.json	native/src-tauri/tauri.prod.conf.json	full,frontend	native	create
+templates/native/src-tauri/capabilities/main.json	native/src-tauri/capabilities/main.json	full,frontend	native	create
+templates/native/src-tauri/capabilities/examples.md	native/src-tauri/capabilities/examples.md	full,frontend	native	create
+templates/native/src-tauri/src/main.rs	native/src-tauri/src/main.rs	full,frontend	native	create
+templates/native/src-tauri/src/lib.rs	native/src-tauri/src/lib.rs	full,frontend	native	create
 templates/wasm/main.go	wasm/main.go	all	wasm	force
 templates/wasm/README.md	wasm/README.md	all	wasm	force

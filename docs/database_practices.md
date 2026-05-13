@@ -105,6 +105,15 @@ matches the lane:
 3. Single `INSERT ... RETURNING` / `UPDATE ... RETURNING` through `QueryOne`.
 4. Repeated one-row writes with independent commits.
 
+Service-backed benchmarks must show all relevant lanes, not only the slowest
+single-row path. For Foundation state-store writes, compare:
+
+1. single `UpsertRecord` for semantic cost;
+2. `RawStateStore.UpsertRecordJSON` for byte-preserving handlers that already own canonical JSON and do not need immediate map mutation;
+3. parallel `UpsertRecord` for pool/concurrency behavior;
+4. `SendBatch` for independent per-row diagnostics with fewer round trips;
+5. `CopyFromRows` for append/import workloads that do not need per-row upsert semantics.
+
 `DBTX` intentionally remains small so command-only fakes, transactional helpers,
 and state stores are easy to test. Repositories that need streamed rows should
 opt into `RowQueryer` instead of widening every fake and store. This keeps the
@@ -208,17 +217,18 @@ State-machine candidates that deserve table-driven/property-style tests:
 4. Introduce PgBouncer transaction pooling before large horizontal fanout.
 5. Monitor pool acquire latency and timeout rate as saturation signals.
 6. **Observability**: Export native `pgxpool` stats (Total, Idle, Active, Acquire Duration) to the Foundation's observability bridge. Alert on high acquire duration or connection exhaustion.
-7. **Zero-Allocation Scanning**: In high-throughput paths, use manual `rows.Scan()` or the Foundation's optimized `QueryMaps` bridge to avoid reflection and redundant allocations.
-8. **Count Optimization**: Exact `COUNT(*)` is an O(N) operation in Postgres due to MVCC.
+7. Pool saturation must fail under an explicit acquire budget and error class. Tests should simulate `MaxConns` exhaustion with concurrent callers and assert bounded wait, `ErrPoolAcquireTimeout`, and visible pool pressure metrics.
+8. **Zero-Allocation Scanning**: In high-throughput paths, use manual `rows.Scan()` or the Foundation's optimized `QueryMaps` bridge to avoid reflection and redundant allocations.
+9. **Count Optimization**: Exact `COUNT(*)` is an O(N) operation in Postgres due to MVCC.
     * **Small Sets**: Exact count with index is acceptable.
     * **Large Sets**: Use `EstimateCount` (via `EXPLAIN` plan analysis or `reltuples` catalog statistics) for UI indicators and non-critical analytics.
     * **Hot Counters**: Use a dedicated counter cache table or Redis if exact, high-frequency counting is required.
-9. **Index Overhead**: While missing indexes cause slow reads, excessive indexes cause slow writes and increased VACUUM pressure. Audit indexes regularly for usage.
-10. Use read models or materialized views for dashboard, feed, search, and analytics reads that would otherwise join many live transactional tables.
-11. Use partitioned append tables for high-volume events, audit logs, outbox history, and time/campaign-heavy telemetry. Partition by time, tenant/campaign, or hash only when query pruning and retention policy are explicit.
-12. Use `pgx.CopyFrom` or batched statements for high-volume writes. Per-row loops are acceptable only for small control-plane writes.
-13. Use `EXPLAIN (ANALYZE, BUFFERS, WAL, VERBOSE)` for slow or important queries on PostgreSQL 18 so CPU, memory, buffer, and WAL costs are visible.
-14. Enable `pg_stat_statements` in production and treat top total-time queries as optimization priorities, even if individual latency looks modest.
+10. **Index Overhead**: While missing indexes cause slow reads, excessive indexes cause slow writes and increased VACUUM pressure. Audit indexes regularly for usage.
+11. Use read models or materialized views for dashboard, feed, search, and analytics reads that would otherwise join many live transactional tables.
+12. Use partitioned append tables for high-volume events, audit logs, outbox history, and time/campaign-heavy telemetry. Partition by time, tenant/campaign, or hash only when query pruning and retention policy are explicit.
+13. Use `pgx.CopyFrom` or batched statements for high-volume writes. Per-row loops are acceptable only for small control-plane writes.
+14. Use `EXPLAIN (ANALYZE, BUFFERS, WAL, VERBOSE)` for slow or important queries on PostgreSQL 18 so CPU, memory, buffer, and WAL costs are visible.
+15. Enable `pg_stat_statements` in production and treat top total-time queries as optimization priorities, even if individual latency looks modest.
 
 ## Security and compliance
 
@@ -251,8 +261,9 @@ State-machine candidates that deserve table-driven/property-style tests:
 3. A single merchant-wide counter row can become a write-contention point during shared-merchant bursts. If exact hot counters are required, shard them by deterministic business key and sum a bounded shard set on read.
 4. Do not add synchronous read-model writes to command paths unless the visible state truly requires them. Invoice creation should stay minimal; terminal payment transitions may update operational counters.
 5. Load harnesses must propagate pool settings into the actual startup path. `TEST_DB_MAX_CONNS` is not useful if `DB_MAX_CONNS` remains pinned to a smaller runtime default.
-6. Failed load steps must report a bounded sample error. A percentage without the representative SQLSTATE or timeout class is not enough to correct the architecture.
-7. Deadlock, lock-wait, pool-acquire, and query-timeout failures are different signals. Preserve their error classes in tests and logs.
+6. Scaffolded workers should apply `database.ApplyPoolOptions` to raw `pgxpool.Config` values so River and app RuntimeStore paths share the same connection, cache, and statement-timeout budgets.
+7. Failed load steps must report a bounded sample error. A percentage without the representative SQLSTATE or timeout class is not enough to correct the architecture.
+8. Deadlock, lock-wait, pool-acquire, and query-timeout failures are different signals. Preserve their error classes in tests and logs.
 
 ## Ingestion observations (2026-03-26)
 

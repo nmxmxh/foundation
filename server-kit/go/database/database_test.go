@@ -1,6 +1,7 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -53,6 +54,34 @@ func TestMemoryDBUpsertGetListCount(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("expected count=1")
+	}
+}
+
+func TestMemoryDBRawJSONStateStore(t *testing.T) {
+	db := NewMemoryDB()
+	raw, err := db.UpsertRecordJSON(context.Background(), RawDomainRecord{
+		Domain:         "workspace",
+		Collection:     "brand_kits",
+		OrganizationID: "org_1",
+		RecordID:       "brand_raw",
+		DataJSON:       []byte(`{"brand_kit_id":"brand_raw"}`),
+	})
+	if err != nil {
+		t.Fatalf("UpsertRecordJSON() error = %v", err)
+	}
+	if !bytes.Equal(raw.DataJSON, []byte(`{"brand_kit_id":"brand_raw"}`)) {
+		t.Fatalf("UpsertRecordJSON() data = %s", string(raw.DataJSON))
+	}
+	got, ok, err := db.GetRecordJSON(context.Background(), "workspace", "brand_kits", "org_1", "brand_raw")
+	if err != nil || !ok {
+		t.Fatalf("GetRecordJSON() ok=%v err=%v", ok, err)
+	}
+	if !bytes.Contains(got.DataJSON, []byte(`"organization_id"`)) {
+		t.Fatalf("GetRecordJSON() did not stamp organization: %s", string(got.DataJSON))
+	}
+	typed, ok, err := db.GetRecord(context.Background(), "workspace", "brand_kits", "org_1", "brand_raw")
+	if err != nil || !ok || typed.Data["organization_id"] != "org_1" {
+		t.Fatalf("GetRecord() after raw upsert = %+v ok=%v err=%v", typed, ok, err)
 	}
 }
 
@@ -547,6 +576,25 @@ func TestPostgresRecordValidationAndJSONParsing(t *testing.T) {
 	}
 	if _, err := parseDataJSON([]byte(`bad`)); err == nil {
 		t.Fatalf("expected invalid JSON error")
+	}
+
+	raw := RawDomainRecord{Domain: " d ", Collection: " c ", OrganizationID: " o ", RecordID: " r ", DataJSON: []byte(`{"state":"ready"}`)}
+	payload, err := validateRawDomainRecord(&raw)
+	if err != nil {
+		t.Fatalf("validateRawDomainRecord() error = %v", err)
+	}
+	if raw.Domain != "d" || raw.Collection != "c" || raw.OrganizationID != "o" || raw.RecordID != "r" {
+		t.Fatalf("raw record identity normalization failed: %+v", raw)
+	}
+	parsed, err = parseDataJSON(payload)
+	if err != nil || parsed["organization_id"] != nil || parsed["state"] != "ready" {
+		t.Fatalf("raw payload = %s parsed=%+v err=%v", string(payload), parsed, err)
+	}
+	if _, err := normalizeDataJSON([]byte(`[1]`)); err == nil {
+		t.Fatalf("expected non-object raw JSON error")
+	}
+	if _, err := normalizeDataJSON([]byte(`bad`)); err == nil {
+		t.Fatalf("expected invalid raw JSON error")
 	}
 }
 

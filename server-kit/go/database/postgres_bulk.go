@@ -26,10 +26,17 @@ func (db *PostgresDB) CopyFromSource(ctx context.Context, tablePath []string, co
 	if source == nil {
 		return 0, errors.New("copy source is required")
 	}
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	return db.pool.CopyFrom(ctx, pgx.Identifier(tablePath), columns, source)
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "copy_from")
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	copied, err := conn.Conn().CopyFrom(queryCtx, pgx.Identifier(tablePath), columns, source)
+	recordDatabaseOperation("copy_from", start, err)
+	return copied, err
 }
 
 // CopyFromRows bulk-loads an in-memory row slice through PostgreSQL COPY.
@@ -54,10 +61,17 @@ func (db *PostgresDB) SendBatch(ctx context.Context, build func(*pgx.Batch), con
 	}
 	var batch pgx.Batch
 	build(&batch)
-	var cancel context.CancelFunc
-	ctx, cancel = QueryBudgetContext(ctx, db.opts)
-	defer cancel()
-	results := db.pool.SendBatch(ctx, &batch)
+	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "send_batch")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		conn.Release()
+		cancel()
+	}()
+	results := conn.Conn().SendBatch(queryCtx, &batch)
 	defer results.Close()
-	return consume(results)
+	err = consume(results)
+	recordDatabaseOperation("send_batch", start, err)
+	return err
 }

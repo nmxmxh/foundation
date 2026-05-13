@@ -20,6 +20,23 @@ The benchmark suite exists to prove that ladder stays honest. The fastest lane s
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
 
+## 2026-05-11 cohesive substrate synthesis
+
+The current direction is to make Foundation a small, coherent substrate rather than a broad collection of optional helpers. The sources reviewed point to the same rule from different angles:
+
+1. Cerebras CS-2: large gains come from system-level co-design. For Foundation, the co-designed path is contract -> metadata -> dispatch -> event -> worker/cache/Redis -> realtime projection -> frontend store, with no layer inventing its own lifecycle.
+2. Go concurrency: useful parallelism starts by partitioning work, doing local computation, and merging with bounded synchronization. For Foundation, this means tenant/key partitioning, exact fanout indexes, bounded worker queues, and channel/select timeouts rather than unbounded goroutines or sleeps.
+3. Rust performance engineering: benchmark first, profile the actual hot path, optimize locality/allocation shape, then prove the delta. For Foundation, this means every new substrate claim gets a local test, a benchmark, and a doc entry before becoming a default.
+4. The referenced Redis implementation: the useful shape is not the toy parser itself, but the command boundary, per-connection state, blocking waits via channels, TTLs, locks, and monotonic stream IDs. Foundation keeps Redis as ephemeral speed/coordination, but the local Redis memory driver must be real enough to test those contracts without external services.
+
+Minimal plan:
+
+1. Keep the canonical substrate narrow: typed/binary envelopes, correlation metadata, tenant scope, event lifecycle, bounded queues, Redis coordination, and realtime routing.
+2. Prefer strengthening existing primitives over adding new packages. A generated app should inherit the correct lifecycle by default.
+3. Use local proof harnesses before service-backed load tests. Memory Redis, in-memory event bus, MemoryDB, WebSocket routing, and worker queues should catch shape regressions quickly.
+4. Promote external-service benchmarks only after the local shape is correct: real Redis Streams/pubsub lag, Postgres query plans, WebSocket slow-client pressure, and p95/p99 request budgets.
+5. Treat generic wildcard/pattern matching as compatibility/observability unless a benchmark proves it is safe for product hot paths. Exact and colon-prefix routes remain the hot fanout shape.
+
 ## Measurement taxonomy
 
 1. Correctness properties: invariants, allowed transitions, terminal states, metadata preservation, tenant isolation, and refinement/parity.
@@ -27,6 +44,27 @@ The benchmark suite does not replace architecture invariants. TLA-style rules li
 3. Statistical performance properties: ns/op, B/op, allocs/op, RPS, p50/p95/p99 latency, CPU profiles, heap profiles, and cache-hit ratios.
 
 Benchmarks primarily cover the third category. Performance PRs that alter the runtime ladder must also include tests or contract checks for the first two categories.
+
+## Go concurrency silver-lining metrics
+
+The Go concurrency study in `docs/go_concurrency_bug_practices.md` gives Foundation a positive measurement checklist, not only a bug checklist.
+
+Study signals to preserve:
+
+1. Goroutines are shorter-lived and created more frequently than traditional threads. Use them for finite, owned work; measure active goroutines, start/stop counts, and shutdown drain time.
+2. Mutexes are still the most common primitive in production Go, and channels are also heavily used. Benchmark the actual primitive boundary instead of assuming one is faster or safer.
+3. Message passing caused more blocking bugs, while shared-memory misuse caused most non-blocking bugs. Measure both liveness and race/order safety.
+4. Most blocking fixes were small synchronization changes. Keep code structured so the sync boundary is visible enough for review, tests, and future static checks.
+5. Built-in detector coverage was incomplete. Race/deadlock runs are evidence, but leak tests, block/mutex profiles, queue metrics, and shutdown metrics are the performance guardrails.
+
+Recommended benchmark and load-test additions for goroutine-owning code:
+
+1. `steady`: active goroutines and queue depth stay bounded under target load.
+2. `burst`: buffered channel or queue saturation produces measured reject/drop behavior, not unbounded heap growth.
+3. `cancel`: request/job cancellation unblocks result goroutines and records cancellation propagation duration.
+4. `shutdown`: long-lived listeners and workers drain or stop within the documented bound.
+5. `profile`: goroutine, block, and mutex profiles are captured for hot fanout paths.
+6. `race`: shared-memory packages run with `go test -race`, plus explicit tests for order/select/channel behavior that the race detector cannot see.
 
 ## How to run
 
@@ -89,6 +127,142 @@ Environment:
 | `BenchmarkDispatchOverBufconn` | 39989 | 12653 | 212 | slower/noisy | JSON compatibility lane remains most expensive |
 
 The important signal is unchanged: same-process and borrowed binary lanes are nanosecond paths, while gRPC/JSON lanes are microsecond boundary paths. Use benchmark deltas here as local evidence only; laptops, battery state, scheduler noise, and dependency versions can move these numbers by double-digit percentages.
+
+### 2026-05-11 Redis memory substrate check
+
+This pass replaced placeholder behavior in the local Redis memory driver with deterministic semantics for `Set`/`Get`/`Del`, TTL expiry, token-checked locks, pattern pub/sub, exact HyperLogLog-style cardinality, and basic stream group read/ack. The goal is not to emulate every Redis edge; it is to make local Foundation tests catch coordination and ephemeral-state drift before real Redis enters the loop.
+
+Correctness tests added:
+
+1. Pattern subscriptions match qualified channels and reject unrelated channels.
+2. `Set`/`Get` returns copies and honors TTL expiry.
+3. Locks reject concurrent holders, require matching unlock tokens, and expire.
+4. Streams produce unique monotonic IDs, advance per consumer group, and accept ack calls.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -run=^$ -bench='BenchmarkMemoryClient' -benchmem ./redis
+```
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkMemoryClientGetHit` | 215.0 | 56 | 4 | Local copied `Get` is sub-microsecond; allocation is intentional ownership protection. |
+| `BenchmarkMemoryClientPublish1KSubscribers` | 3145 | 58 | 3 | Exact pub/sub fanout to 1k local subscribers is microsecond-class. |
+| `BenchmarkMemoryClientPSubscribePrefix1K` | 28277 | 64 | 3 | Generic Redis-style pattern fanout scans patterns; use Foundation exact/prefix event routing for hot product fanout. |
+| `BenchmarkMemoryClientStreamXAddReadAck` | 1136 | 1015 | 17 | Local stream add/read/ack is now measurable and useful for contract tests, not a replacement for real Redis Streams load tests. |
+| `BenchmarkMemoryClientLockUnlock` | 515.0 | 120 | 8 | Token lock/unlock is cheap locally; real Redis lock budgets still need network timeout and fencing-token checks. |
+
+Follow-up benchmark gap: add service-backed Redis checks for stream group lag, pub/sub fanout loss under slow consumers, lock contention with TTL expiry, and pipeline chunk sizing once the dev stack is available. The first Docker-backed lane was added on 2026-05-11; keep this local memory harness as the fast regression net before running it.
+
+### 2026-05-11 Lifecycle generator check
+
+This pass makes proto definitions a compiler input for the Foundation nervous system. `tooling/scripts/generate_lifecycle_contract_tests.mjs` scans mutating request/response pairs and emits `tests/contract/generated_lifecycle_test.go` cases that call `VerifyCommandLifecycle`.
+
+The scaffold example proto is now the reference fixture:
+
+1. `CreateExampleRequest`/`CreateExampleResponse`
+2. `UpdateExampleRequest`/`UpdateExampleResponse`
+3. `DeleteExampleRequest`/`DeleteExampleResponse`
+
+Each pair generates `:requested -> :success` and `:requested -> :failed` contract vectors with preserved correlation ID, idempotency key, tenant metadata, and worker job metadata.
+
+Correctness checks:
+
+```bash
+node --check tooling/scripts/generate_lifecycle_contract_tests.mjs
+tests/lifecycle_contract_generator_test.sh
+tooling/scripts/contract_drift_check.sh .
+tests/init_project_test.sh
+cd server-kit/go && go test ./...
+cd server-kit/go && go test -race ./contracttest ./observability ./redis
+```
+
+Result: generator syntax passed, the example proto generated six lifecycle vectors, contract drift checks passed, scaffold init generated the lifecycle test file in a fresh project, and server-kit tests/race checks passed.
+
+### 2026-05-11 observed lifecycle and pressure substrate
+
+This pass adds the implementation-test half of the lifecycle compiler path:
+
+1. `contracttest.LifecycleRecorder` wraps a real `events.Bus`, records real worker jobs, and produces `LifecycleObservation` for `VerifyCommandLifecycle`.
+2. Generated lifecycle tests now expose `verifyGeneratedLifecycleObservation` so app tests can bind observed handler output to proto-derived contracts.
+3. `observability.Collector` records event trace entries, worker enqueue/process trace entries, Redis operation latency/error counts, database operation latency, pgx pool pressure, and queue depth.
+4. The scaffold exposes a local correlation trace endpoint at `/metricsz/trace?correlation_id=<id>`.
+5. Redis and worker startup now use inherited pool/timeout budgets instead of silently ignoring shard and timeout config.
+
+Scaffold boundary: no new service-backed benchmark compose files, daemons, or test processes were added to generated projects. Service-backed Redis/Postgres benchmark assets now live under root `tests/` only, with a scaffold manifest guard preventing accidental inheritance.
+
+Trace-retention guardrail benchmark:
+
+```bash
+cd foundation/server-kit/go
+GOCACHE=/private/tmp/ovasabi-go-build-cache go test -run=^$ -bench='BenchmarkInMemoryBus_Publish_(NoSubscribers|1Subscriber|10Subscribers)$' -benchmem ./events
+```
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkInMemoryBus_Publish_NoSubscribers` | 305.9 | 48 | 1 | Bounded per-correlation trace ring avoids post-cap slice copying. |
+| `BenchmarkInMemoryBus_Publish_1Subscriber` | 312.4 | 48 | 1 | One exact subscriber adds little over trace/event validation. |
+| `BenchmarkInMemoryBus_Publish_10Subscribers` | 362.0 | 48 | 1 | Synchronous local fanout remains sub-microsecond for small exact sets. |
+
+### 2026-05-11 service-backed Docker substrate check
+
+This pass adds `tests/service_backed_foundation_test.sh`, a Foundation-only live harness that starts isolated Redis 8 and Postgres 18 containers, waits for bounded health checks, runs tagged Go race tests against real services, then runs live benchmarks and tears the stack down.
+
+The harness deliberately stays outside `templates/` and `tooling/scripts` so scaffolded projects do not inherit core benchmark processes or compose files. `tests/scaffold_manifest_test.sh` now fails if service-backed assets appear in the scaffold manifest, template tree, or scaffold-copied tooling script directory.
+
+Live correctness covered:
+
+1. Redis `Set`/`Get` ownership, TTL expiry, `Incr`/`Expire`, token locks, exact pub/sub, pattern pub/sub, stream group read/ack, HyperLogLog cardinality, and Redis operation metrics.
+2. Postgres 18 state-store schema compatibility, scoped upsert/get/list/count, query-budget enforcement with `pg_sleep`, transaction rollback, `ExecResult`, pgx pool pressure, and database operation metrics.
+3. Postgres pool saturation with `MaxConns=1` and eight concurrent callers, verifying bounded acquire wait, `ErrPoolAcquireTimeout`, pgx pool pressure visibility, and no unbounded queueing.
+4. Postgres raw JSON state-store writes, verifying byte preservation at the handler boundary and server-side tenant stamping in stored JSONB.
+5. Redis-backed `events.Bus` lifecycle flow using `LifecycleRecorder` and `VerifyCommandLifecycle`, including correlation ID, tenant metadata, idempotency key, worker job metadata, and trace capture.
+
+Commands:
+
+```bash
+bash tests/service_backed_foundation_test.sh
+cd foundation/server-kit/go
+go test -tags=servicebacked -race -count=1 -timeout 5m ./servicebacked
+go test -tags=servicebacked -run '^$' -bench=BenchmarkServiceBacked -benchmem -benchtime 1s -count 1 ./servicebacked
+```
+
+Research alignment:
+
+1. Redis pipelining exists to amortize request/response RTT and socket syscall overhead. A sequential `SET` followed by `GET` is intentionally the slow comparison point; use `BatchClient.SetMany`, `GetMany`, or `SetGetMany` for multi-key cache hydration/write-through lanes.
+2. PostgreSQL bulk guidance favors one transaction, prepared/batched statements, and `COPY` over repeated independent inserts. Foundation exposes those lanes through `PostgresDB.SendBatch` and `CopyFromRows`.
+3. Docker volumes/tmpfs avoid the writable-layer penalty for database-like state. The service-backed harness uses tmpfs for Postgres and disables Redis persistence because Redis is not Foundation's durable recovery lane.
+
+Local result:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkServiceBackedRedisSetGet` | 512362 | 888 | 26 | Two sequential host-to-container round trips; this is the pessimistic baseline, not the target hot lane. |
+| `BenchmarkServiceBackedRedisSet` | 230824 | 464 | 13 | One Redis round trip on Docker Desktop/localhost. |
+| `BenchmarkServiceBackedRedisGet` | 319656 | 408 | 12 | One Redis round trip plus copied ownership boundary. |
+| `BenchmarkServiceBackedRedisSetGetParallel` | 135454 | 1022 | 29 | Pool/concurrency hides some RTT; still one command pair per operation. |
+| `BenchmarkServiceBackedRedisSetManyGetMany64` | 933156 | 51521 | 1053 | Two batch round trips for 64 keys, about 14.6us/key. |
+| `BenchmarkServiceBackedRedisSetGetMany64` | 685292 | 49479 | 793 | One pipelined write/read batch for 64 keys, about 10.7us/key. |
+| `BenchmarkServiceBackedRedisRawPipelineSetGet64` | 619035 | 31768 | 657 | Raw go-redis pipeline baseline, about 9.7us/key in this Docker run. |
+| `BenchmarkServiceBackedPostgresUpsert` | 250843 | 3149 | 51 | Full `StateStore` semantics: JSONB payload, unique identity, timestamps, acquire budget, query budget, pool pressure. |
+| `BenchmarkServiceBackedPostgresUpsertRawJSON` | 250273 | 2188 | 40 | Byte-preserving JSON write path for handlers that do not need map mutation; tenant key is stamped in JSONB by SQL. |
+| `BenchmarkServiceBackedPostgresUpsertParallel` | 67960 | 3184 | 51 | Pool concurrency amortizes latency for independent tenant-scoped writes. |
+| `BenchmarkServiceBackedPostgresSendBatchUpsert64` | 2639219 | 73451 | 938 | Batched upsert is about 41.2us/row. Keep diagnostics per row when using this lane. |
+| `BenchmarkServiceBackedPostgresCopyFrom64` | 630576 | 39487 | 378 | COPY ingest is about 9.9us/row for append/import workloads. |
+
+Implementation delta from live parity:
+
+- Real Redis `GET` now returns `(nil, nil)` for missing keys to match the memory driver contract.
+- Real Redis stream group reads now auto-create missing groups with `XGROUP CREATE ... MKSTREAM` and retry once on `NOGROUP`.
+- The Postgres 18 service-backed compose file mounts tmpfs at `/var/lib/postgresql`, matching the official image layout for major-version-specific data directories.
+- Redis `BatchClient` adds `SetMany`, `GetMany`, and `SetGetMany` so Foundation projects can use pipelined/cache-batch lanes without importing raw go-redis.
+- Postgres `UpsertRecord` no longer round-trips and reparses the JSONB payload it just wrote; it returns timestamps only and keeps the normalized in-memory payload.
+- Postgres state-store and bulk lanes now acquire explicit connections under `AcquireTimeout`, so `MaxConns` saturation produces bounded `ErrPoolAcquireTimeout` failures instead of silent pgxpool queueing.
+- `RawStateStore.UpsertRecordJSON` adds a byte-preserving JSON path for handlers that already own canonical JSON. In this run it reduced state-store write allocation from 3149 B/51 allocs to 2188 B/40 allocs while keeping tenant stamping server-side in JSONB.
+- Service-backed concurrent smoke tests now enforce p95 and p99 latency budgets for Redis and Postgres instead of p95 alone.
+- Scaffold Redis now defaults to Redis 8 and disables RDB/AOF persistence because Redis is an ephemeral speed/coordination substrate; durable recovery belongs to Postgres/River/outbox.
 
 ### 2026-05-09 Core Tuning Check
 
@@ -286,8 +460,65 @@ The next runtime benchmark target should compare:
 3. stdio framed runtime buffer
 4. shared-memory transport on Linux
 5. browser worker/WASM where available
+6. Tauri-backed `runtime-native` IPC frame dispatch as a measured control boundary
 
 Each run should report latency, bytes copied at transport boundaries, allocations where the language runtime exposes them, and failure-path behavior.
+
+`runtime-native` benchmark entrypoint:
+
+```bash
+foundation/tooling/scripts/native_benchmark.sh .
+```
+
+The native benchmark is report-only until at least three stable local baselines exist. Its result must be compared against the existing same-process, FFI, shared-memory, WASM/SAB, WebSocket, and HTTP ladder before any native IPC path becomes a default.
+
+The same script also runs `native_flow_sim`, which models communication-flow
+copy budgets without requiring Tauri, Android, or iOS SDKs. It compares:
+
+1. full-payload native control frames,
+2. descriptor-only control frames that represent external native payloads,
+3. the `runtime-sdk` fixed-buffer in-place path.
+
+This simulation is part of the Foundation communication contract. It proves the
+shape before platform SDKs enter the loop: control messages may copy small
+binary frames, but hot payloads must stay in native buffers, shared arenas,
+packet rings, or fixed runtime buffers.
+
+2026-05-12 local Apple M1 Pro run:
+
+| Lane slice | Payload | Mean | p50 | p95 | p99 | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `runtime-native` dispatch frame | 4KB | 639.73 ns | 583 ns | 625 ns | 667 ns | In-process Rust bridge benchmark; Tauri IPC not included |
+| `runtime-native` dispatch frame | 64KB | 10.18 us | 8.04 us | 12.83 us | 91.67 us | One tail outlier in this run; still report-only |
+| `runtime-native` dispatch frame | 1MB | 111.99 us | 114.38 us | 134.83 us | 171.92 us | Copies payload through frame encode/decode and echo unit |
+| native TS frame encode | ~1KB envelope | 1,000,386 ops/s | 1.0 us mean | 3.5 us p99 | 4.1 us p99.5 | Browser/JS frame construction cost |
+| native TS response decode | ~1KB envelope | 3,248,841 ops/s | 0.3 us mean | 0.4 us p99 | 0.9 us p99.5 | Header validation and payload view |
+| runtime-sdk Rust buffer output borrowed view | 2KB | 3.65 ns/op | n/a | n/a | n/a | Hot lane reference: no owned output copy |
+| runtime-sdk Rust buffer fast output write | 2KB | 16.33 ns/op | n/a | n/a | n/a | Hot lane reference: trusted copy-only write |
+| direct Go frame dispatch | control frame | 17.49-22.07 ns/op | n/a | n/a | n/a | Hot same-process control reference |
+| bufconn dispatch | control frame | 20.33-24.83 us/op | n/a | n/a | n/a | Local RPC-style boundary reference |
+
+Interpretation: `runtime-native` frame dispatch is viable as a local native control lane when the shell needs device access, platform lifecycle, secure storage, or mobile/desktop packaging. It is not the top of the performance ladder. Direct same-process frame dispatch, `runtime-sdk` fixed-buffer views, FFI, shared memory, and WASM/SAB remain the hot compute lanes when payloads are frequent or latency budgets are sub-microsecond.
+
+2026-05-13 communication-flow simulation:
+
+| Simulated lane | Represented payload | Mean | p50 | p95 | p99 | Modeled copy budget |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| full-payload native frame | 4KB | 659.63 ns | 625 ns | 750 ns | 833 ns | ~20KB/call, 5x payload |
+| full-payload native frame | 64KB | 15.42 us | 15.04 us | 19.58 us | 28.33 us | ~320KB/call, 5x payload |
+| full-payload native frame | 1MB | 149.20 us | 144.54 us | 174.17 us | 253.29 us | ~5MB/call, 5x payload |
+| descriptor control frame | 4KB external | 381.21 ns | 333 ns | 375 ns | 458 ns | 0 hot-payload bytes; ~480B control |
+| descriptor control frame | 64KB external | 323.30 ns | 292 ns | 334 ns | 416 ns | 0 hot-payload bytes; ~480B control |
+| descriptor control frame | 1MB external | 323.16 ns | 292 ns | 334 ns | 375 ns | 0 hot-payload bytes; ~480B control |
+| runtime buffer in-place | 1KB input | 144.52 ns | 125 ns | 167 ns | 167 ns | input view is zero-copy; current echo copies output and clears output region |
+
+Interpretation: full-payload native control frames are linear in payload size and
+should stay out of device hot streams. Descriptor control frames are effectively
+constant with respect to represented payload size, which is the desired
+Foundation shape for camera frames, microphone PCM chunks, sensor samples,
+market ticks, and other packet-like streams. The control plane moves ownership,
+schema, epoch, and buffer descriptors; the data plane stays in fixed buffers,
+arena slabs, shared memory, WASM/SAB, or native packet rings.
 
 Runtime lane planning now has explicit scheduling inputs: payload size, workload class, trust, locality, batch size, deadline, unit capabilities, and available hardware/runtime features. The planner must preserve the runtime contract while selecting the cheapest physical lane:
 

@@ -35,7 +35,7 @@ services:
       - test-network
 
   test-redis:
-    image: redis:7-alpine
+    image: ${TEST_REDIS_IMAGE:-redis:8-alpine}
     container_name: "{{PROJECT_NAME}}-test-redis"
     environment:
       TEST_REDIS_PASSWORD: ${TEST_REDIS_PASSWORD:-}

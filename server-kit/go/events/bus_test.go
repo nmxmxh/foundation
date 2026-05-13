@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 )
 
 func makeTestEnvelope(eventType, correlationID string) Envelope {
@@ -27,6 +29,7 @@ func makeTestEnvelope(eventType, correlationID string) Envelope {
 // ---------------------------------------------------------------------------
 
 func TestInMemoryBus_PublishSubscribe(t *testing.T) {
+	observability.Default().Reset()
 	bus := NewInMemoryBus(100)
 	var received atomic.Int32
 
@@ -41,6 +44,9 @@ func TestInMemoryBus_PublishSubscribe(t *testing.T) {
 
 	if received.Load() != 1 {
 		t.Fatalf("expected 1 delivery, got %d", received.Load())
+	}
+	if trace := observability.Default().Trace("corr-1", 1); len(trace) != 1 || trace[0].EventType != "media:upload:requested" {
+		t.Fatalf("expected publish trace, got %+v", trace)
 	}
 }
 
