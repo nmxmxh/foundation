@@ -370,7 +370,7 @@ func normalizeHostForHostRun(host string) string {
 	}
 }
 
-func skipOrFailInfra(t *testing.T, format string, args ...interface{}) {
+func skipOrFailInfra(t *testing.T, format string, args ...any) {
 	t.Helper()
 	message := fmt.Sprintf(format, args...)
 	if boolFromEnv("TEST_INFRA_REQUIRED") {

@@ -47,7 +47,7 @@ EOF
 "$FOUNDATION_DIR/scripts/update-project.sh" "$PROJECT_DIR" >/dev/null
 
 assert_contains ".foundation" "^WITH_WASM=true$"
-assert_contains ".foundation" "^BASELINE_GENERATION=manifest-v3$"
+assert_contains ".foundation" "^BASELINE_GENERATION=manifest-v4$"
 assert_file ".cursorrules"
 assert_file "cmd/worker/main.go"
 assert_file "cmd/docgen/main.go"

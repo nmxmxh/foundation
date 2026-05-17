@@ -36,11 +36,16 @@ check_no_project_match() {
   shift 2
   local output
   if output="$(rg -n "$pattern" "$@" \
+    --glob '*.go' \
     --glob '!foundation/**' \
     --glob '!docs/**' \
     --glob '!scripts/checks/**' \
+    --glob '!**/generated/**' \
     --glob '!**/*test*' \
     --glob '!**/testdata/**' \
+    --glob '!**/.cache/**' \
+    --glob '!**/dist/**' \
+    --glob '!**/build/**' \
     --glob '!**/node_modules/**' \
     --glob '!**/vendor/**' 2>/dev/null)"; then
     echo "[FAIL] $label"

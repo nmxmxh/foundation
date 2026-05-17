@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -138,9 +139,7 @@ func (b *RedisBus) startListener() {
 	if b.client == nil {
 		return
 	}
-	b.wg.Add(1)
-	go func() {
-		defer b.wg.Done()
+	b.wg.Go(func() {
 		backoff := time.Second
 		for {
 			if b.ctx.Err() != nil {
@@ -163,7 +162,7 @@ func (b *RedisBus) startListener() {
 			b.consumeLoop(msgs)
 			cancel()
 		}
-	}()
+	})
 }
 
 func (b *RedisBus) consumeLoop(msgs <-chan []byte) {
@@ -262,8 +261,6 @@ func copyMap(in map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }

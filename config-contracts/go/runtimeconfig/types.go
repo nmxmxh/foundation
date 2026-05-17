@@ -33,7 +33,7 @@ type PublicRuntimeConfig struct {
 	FeatureFlags        map[string]bool     `json:"feature_flags"`
 	TransportTimeoutsMS TransportTimeouts   `json:"transport_timeouts_ms"`
 	WASMAssets          WASMAssets          `json:"wasm_assets"`
-	RuntimeMemory       RuntimeMemoryConfig `json:"runtime_memory,omitempty"`
+	RuntimeMemory       RuntimeMemoryConfig `json:"runtime_memory,omitzero"`
 	DiagnosticsEnabled  bool                `json:"diagnostics_enabled"`
 	LocaleDefaults      LocaleDefaults      `json:"locale_defaults"`
 }
@@ -108,7 +108,7 @@ type ServerSecurityConfig struct {
 	RequireAuth                 bool              `json:"require_auth,omitempty"`
 	ProtectOperationalEndpoints bool              `json:"protect_operational_endpoints,omitempty"`
 	CORSAllowedOrigins          []string          `json:"cors_allowed_origins,omitempty"`
-	PostQuantum                 PostQuantumConfig `json:"post_quantum,omitempty"`
+	PostQuantum                 PostQuantumConfig `json:"post_quantum,omitzero"`
 }
 
 type ServerRuntimeConfig struct {
@@ -119,8 +119,8 @@ type ServerRuntimeConfig struct {
 	ObjectStorage  ObjectStorageConfig    `json:"object_storage"`
 	JWT            JWTConfig              `json:"jwt"`
 	RuntimeBudgets RuntimeBudgetConfig    `json:"runtime_budgets"`
-	SLOs           SLOConfig              `json:"slos,omitempty"`
+	SLOs           SLOConfig              `json:"slos,omitzero"`
 	Compression    CompressionConfig      `json:"compression"`
-	Security       ServerSecurityConfig   `json:"security,omitempty"`
+	Security       ServerSecurityConfig   `json:"security,omitzero"`
 	Queues         map[string]QueueConfig `json:"queues"`
 }

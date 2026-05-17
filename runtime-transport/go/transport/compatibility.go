@@ -2,6 +2,7 @@ package transport
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -19,9 +20,7 @@ type EnvelopeCompatibilityMatrix struct {
 
 func GetEnvelopeCompatibilityMatrix() EnvelopeCompatibilityMatrix {
 	aliases := make(map[string]string, len(envelopeSchemaAliases))
-	for key, value := range envelopeSchemaAliases {
-		aliases[key] = value
-	}
+	maps.Copy(aliases, envelopeSchemaAliases)
 	return EnvelopeCompatibilityMatrix{
 		Current:   EnvelopeSchemaVersion,
 		Supported: []string{EnvelopeSchemaVersion},

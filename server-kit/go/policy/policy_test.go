@@ -26,7 +26,7 @@ func TestEvaluateAllowDenyPriorityAndConditions(t *testing.T) {
 		},
 		Conditions: []Condition{
 			{Field: "resource.attributes.classification", Operator: OpNotEquals, Value: "restricted"},
-			{Field: "context.region", Operator: OpIn, Value: []interface{}{"ng", "us"}},
+			{Field: "context.region", Operator: OpIn, Value: []any{"ng", "us"}},
 			{Field: "principal.attributes.department", Operator: OpExists},
 		},
 	})
@@ -39,10 +39,10 @@ func TestEvaluateAllowDenyPriorityAndConditions(t *testing.T) {
 	})
 
 	req := Request{
-		Principal: Principal{ID: "u1", Type: "User", Roles: []string{"editor"}, Attributes: map[string]interface{}{"department": "media"}},
+		Principal: Principal{ID: "u1", Type: "User", Roles: []string{"editor"}, Attributes: map[string]any{"department": "media"}},
 		Action:    "document:read",
-		Resource:  Resource{ID: "doc1", Type: "Document", Owner: "u1", OrgID: "org_1", Attributes: map[string]interface{}{"classification": "internal"}},
-		Context:   map[string]interface{}{"region": "ng"},
+		Resource:  Resource{ID: "doc1", Type: "Document", Owner: "u1", OrgID: "org_1", Attributes: map[string]any{"classification": "internal"}},
+		Context:   map[string]any{"region": "ng"},
 	}
 	if got := engine.Evaluate(context.Background(), req); got.Decision != DecisionAllow || got.PolicyID != "allow-owner" {
 		t.Fatalf("allow decision = %+v", got)
@@ -66,7 +66,7 @@ func TestPrincipalResourceAndConditionOperators(t *testing.T) {
 			Type:   "User",
 			Roles:  []string{"editor", "reviewer"},
 			Groups: []string{"media"},
-			Attributes: map[string]interface{}{
+			Attributes: map[string]any{
 				"tags":   []string{"trusted", "beta"},
 				"email":  "person@example.com",
 				"active": true,
@@ -74,7 +74,7 @@ func TestPrincipalResourceAndConditionOperators(t *testing.T) {
 		},
 		Action:   "asset:update",
 		Resource: Resource{ID: "asset_1", Type: "Asset", Owner: "u1", OrgID: "org_1"},
-		Context:  map[string]interface{}{"tier": "gold"},
+		Context:  map[string]any{"tier": "gold"},
 	}
 	policy := Policy{
 		ID: "matrix",
@@ -89,7 +89,7 @@ func TestPrincipalResourceAndConditionOperators(t *testing.T) {
 		Conditions: []Condition{
 			{Field: "principal.attributes.tags", Operator: OpContains, Value: "trusted"},
 			{Field: "principal.attributes.email", Operator: OpMatches, Value: `@example\.com$`},
-			{Field: "context.tier", Operator: OpNotIn, Value: []interface{}{"free"}},
+			{Field: "context.tier", Operator: OpNotIn, Value: []any{"free"}},
 			{Field: "action", Operator: OpEquals, Value: "asset:update"},
 		},
 	}

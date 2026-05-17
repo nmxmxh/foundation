@@ -41,7 +41,9 @@ lint:
 	@tests/scaffold_manifest_test.sh
 	@tests/lifecycle_contract_generator_test.sh
 	@tooling/scripts/contract_drift_check.sh .
+	@tooling/scripts/go_fix_check.sh .
 	@tooling/scripts/coding_practices_check.sh .
+	@tooling/scripts/testing_practices_check.sh .
 	@tooling/scripts/go_concurrency_practices_check.sh .
 	@tooling/scripts/database_practices_check.sh .
 	@tooling/scripts/redis_practices_check.sh .

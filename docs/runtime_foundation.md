@@ -141,6 +141,29 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
 17. Financial runtime units must use integer minor units, checked arithmetic, stable text/binary schemas, and explicit rejection of ambiguous decimal inputs. Float semantics are not permitted for ledger, settlement, fee, or stablecoin accounting paths.
 18. Backend projects that add app Rust compute must include a runtimehost integration test for at least one native lane. FFI is the preferred proof for trusted same-process kernels; stdio is the portability/isolation proof. A Rust crate without a backend runtimehost test is not yet operationally integrated.
 
+## Go SIMD posture
+
+Go 1.26 adds experimental `simd/archsimd` access through
+`GOEXPERIMENT=simd`. Foundation treats it as an opt-in CPU lane, not a new
+default substrate.
+
+1. It is architecture-specific and currently practical only for amd64 builds;
+   Foundation must keep portable scalar or Rust/WASM/native fallbacks.
+2. The API is experimental and not covered by the Go 1 compatibility promise,
+   so `archsimd` types must not appear in public Foundation APIs or generated
+   app contracts.
+3. SIMD candidates are contiguous, batched, arithmetic or byte-processing loops:
+   scoring vectors, signal windows, image/audio kernels, checksums/hashing
+   helpers where allowed, telemetry compression primitives, or bounded
+   normalization passes.
+4. SIMD is not appropriate for request orchestration, auth, tenant checks,
+   database calls, event lifecycle logic, or small scalar validation.
+5. Promotion requires scalar parity tests, architecture-gated build tags,
+   `GOEXPERIMENT=simd` CI coverage, benchmarks versus scalar Go and Rust/native
+   lanes, and documented fallback behavior.
+6. The lane planner may classify SIMD-capable Go kernels as `cpu-simd`, but the
+   visible command/event contract must remain unchanged.
+
 ## Runtime parity posture
 
 1. `ParityHarness` compares outputs for the same unit input and reports the first mismatch offset for faster drift diagnosis.
@@ -164,7 +187,7 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
 ## Change-risk posture
 
 1. Complexity limits are necessary but insufficient; app CI should pair complexity with coverage to identify CRAP-style hotspots before merges.
-2. New code should target line coverage >= 80%, branch coverage >= 60%, and hotspot scores below the high-risk threshold where the stack can calculate them.
+2. New and changed production code should target line coverage >= 95%, branch coverage >= 90%, and hotspot scores below the high-risk threshold where the stack can calculate them.
 3. Hot-path changes are not complete until both regression tests and hotspot review show the code is safe to modify.
 
 ## Binary event transport posture
@@ -208,6 +231,60 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
 28. Socket authentication is not sufficient on its own. Privileged subscriptions, commands, and topic joins must re-authorize against current session, user, and organization state after connect.
 29. Websocket upgrades must validate allowed origins and close or downgrade sessions when auth state changes or expires.
 30. Event envelopes and payload bodies must enforce schema validation, size limits, and replay/idempotency windows before handler dispatch.
+
+## Virtual-memory and columnar data-plane posture
+
+The runtime arena is intentionally shaped like a virtual-memory-aware data
+plane: a small fixed control buffer, page-aligned slabs for larger payloads,
+borrowed views for synchronous work, and explicit descriptor ownership. Treat
+page faults, page-cache behavior, TLB/cache locality, NUMA placement, and
+copy-on-write effects as measurable runtime behavior for native/shared-memory
+lanes.
+
+1. Keep the 4KB control buffer for command/status/epoch metadata. Do not expand
+   it to carry report, media, telemetry, or model batches.
+2. Use arena descriptors for payloads that need page-aligned slabs, ownership
+   transfer, or reuse across workers/native lanes.
+3. Prefer column-shaped payloads for scan-heavy batches: one descriptor for
+   schema/metadata, then separate descriptors for validity, offsets, and typed
+   value buffers when the workload benefits from contiguous column access.
+4. Align future columnar batch descriptors with Apache Arrow concepts where
+   practical: record batch, field arrays, validity bitmap, offsets buffer,
+   values buffer, row count, null count, and dictionary references. Full Arrow
+   IPC support is optional; layout compatibility and zero-copy interop are the
+   design target.
+5. Row-oriented protobuf/Cap'n Proto messages remain the command/event
+   contract. Columnar batches are internal analytical/runtime payloads and must
+   refine the same visible command/event semantics.
+6. Large analytical or media batches must expose copy budget, allocation budget,
+   descriptor count, byte count, and fallback behavior in lane-plan diagnostics.
+7. Native/shared-memory benchmark runs should record cold and warm page-cache
+   behavior separately. For Linux hosts, include minor/major page faults and
+   RSS/PSS where available; NUMA placement belongs in production evidence for
+   multi-socket deployments.
+
+## FFI ABI conformance posture
+
+The FFI boundary is a calling-convention contract, not just a function pointer.
+Any Rust, C, or Go participant must agree on exported symbol names, integer
+widths, pointer lifetimes, buffer mutability, error-buffer semantics, alignment,
+schema version, and ownership of host handles.
+
+1. ABI version mismatch must fail closed before host creation.
+2. Public FFI functions must use C-compatible scalar types and opaque pointers
+   only. Do not expose Go, Rust, Cap'n Proto, Arrow, slice, string, trait, or
+   interface types across the raw ABI.
+3. FFI callees must validate null pointers, lengths, UTF-8 unit IDs, writable
+   buffers, and error-buffer capacity before dereference.
+4. Error buffers must be null-terminated when capacity is non-zero and must not
+   split UTF-8 code points.
+5. The host must treat runtime buffers as borrowed for the call duration unless
+   the ABI explicitly transfers ownership.
+6. Conformance tests should exercise ABI version mismatch, nil host, nil unit
+   ID pointer, nil buffer pointer, oversized/invalid lengths, invalid UTF-8,
+   diagnostic truncation, non-zero status, and concurrent calls.
+7. Parity tests must compare FFI output against at least one non-FFI lane for
+   product runtime units before the lane is considered operational.
 
 ## Borrowed patterns
 

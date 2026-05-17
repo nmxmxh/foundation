@@ -1,6 +1,8 @@
 package runtimeconfig
 
 import (
+	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -236,6 +238,35 @@ func TestDerivePublicNormalizesSchemaVersion(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigJSONOmitsZeroStructFields(t *testing.T) {
+	publicJSON, err := json.Marshal(PublicRuntimeConfig{})
+	if err != nil {
+		t.Fatalf("Marshal(PublicRuntimeConfig{}) error = %v", err)
+	}
+	if strings.Contains(string(publicJSON), `"runtime_memory"`) {
+		t.Fatalf("zero runtime memory should be omitted: %s", publicJSON)
+	}
+
+	securityJSON, err := json.Marshal(ServerSecurityConfig{})
+	if err != nil {
+		t.Fatalf("Marshal(ServerSecurityConfig{}) error = %v", err)
+	}
+	if strings.Contains(string(securityJSON), `"post_quantum"`) {
+		t.Fatalf("zero post quantum config should be omitted: %s", securityJSON)
+	}
+
+	serverJSON, err := json.Marshal(ServerRuntimeConfig{})
+	if err != nil {
+		t.Fatalf("Marshal(ServerRuntimeConfig{}) error = %v", err)
+	}
+	encoded := string(serverJSON)
+	for _, field := range []string{`"slos"`, `"security"`} {
+		if strings.Contains(encoded, field) {
+			t.Fatalf("zero struct field %s should be omitted: %s", field, serverJSON)
+		}
+	}
+}
+
 func TestRuntimeConfigValidationConvergesAcrossConcurrentReaders(t *testing.T) {
 	cfg := validServerConfigForTest()
 	cfg.SchemaVersion = "v1"
@@ -252,10 +283,8 @@ func TestRuntimeConfigValidationConvergesAcrossConcurrentReaders(t *testing.T) {
 	const readers = 64
 	var wg sync.WaitGroup
 	errs := make(chan error, readers)
-	for i := 0; i < readers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range readers {
+		wg.Go(func() {
 			if err := ValidateServer(cfg); err != nil {
 				errs <- err
 				return
@@ -264,7 +293,7 @@ func TestRuntimeConfigValidationConvergesAcrossConcurrentReaders(t *testing.T) {
 			if public.SchemaVersion != RuntimeConfigSchemaVersion {
 				errs <- ValidateSchemaVersion(public.SchemaVersion)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

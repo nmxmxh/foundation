@@ -77,7 +77,7 @@ type Request struct {
 	Method  string
 	Path    string
 	Headers map[string]string
-	Body    interface{}
+	Body    any
 	Query   map[string]string
 }
 
@@ -240,7 +240,7 @@ func (c *HTTPClient) Get(ctx context.Context, path string, headers map[string]st
 }
 
 // Post performs a POST request.
-func (c *HTTPClient) Post(ctx context.Context, path string, body interface{}, headers map[string]string) (*Response, error) {
+func (c *HTTPClient) Post(ctx context.Context, path string, body any, headers map[string]string) (*Response, error) {
 	return c.Do(ctx, Request{
 		Method:  http.MethodPost,
 		Path:    path,
@@ -250,7 +250,7 @@ func (c *HTTPClient) Post(ctx context.Context, path string, body interface{}, he
 }
 
 // Put performs a PUT request.
-func (c *HTTPClient) Put(ctx context.Context, path string, body interface{}, headers map[string]string) (*Response, error) {
+func (c *HTTPClient) Put(ctx context.Context, path string, body any, headers map[string]string) (*Response, error) {
 	return c.Do(ctx, Request{
 		Method:  http.MethodPut,
 		Path:    path,
@@ -269,7 +269,7 @@ func (c *HTTPClient) Delete(ctx context.Context, path string, headers map[string
 }
 
 // DecodeJSON decodes the response body as JSON.
-func (r *Response) DecodeJSON(dest interface{}) error {
+func (r *Response) DecodeJSON(dest any) error {
 	if err := json.Unmarshal(r.Body, dest); err != nil {
 		return errors.Internal("failed to decode response").WithCause(err)
 	}

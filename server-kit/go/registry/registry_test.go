@@ -342,8 +342,7 @@ func TestListenValidationAndMemoryDispatch(t *testing.T) {
 		t.Fatalf("Register() error = %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := registry.Listen(ctx, "orders:create:v1:requested"); err != nil {
 		t.Fatalf("Listen() error = %v", err)
 	}

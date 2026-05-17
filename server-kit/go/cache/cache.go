@@ -61,18 +61,18 @@ type Config struct {
 
 // Serializer handles value encoding/decoding.
 type Serializer interface {
-	Marshal(v interface{}) ([]byte, error)
-	Unmarshal(data []byte, v interface{}) error
+	Marshal(v any) ([]byte, error)
+	Unmarshal(data []byte, v any) error
 }
 
 // JSONSerializer is the default JSON serializer.
 type JSONSerializer struct{}
 
-func (JSONSerializer) Marshal(v interface{}) ([]byte, error) {
+func (JSONSerializer) Marshal(v any) ([]byte, error) {
 	return json.Marshal(v)
 }
 
-func (JSONSerializer) Unmarshal(data []byte, v interface{}) error {
+func (JSONSerializer) Unmarshal(data []byte, v any) error {
 	return json.Unmarshal(data, v)
 }
 
@@ -98,7 +98,7 @@ func (c *Cache) key(k string) string {
 }
 
 // Get retrieves a value from cache.
-func (c *Cache) Get(ctx context.Context, key string, dest interface{}) error {
+func (c *Cache) Get(ctx context.Context, key string, dest any) error {
 	data, err := c.config.Backend.Get(ctx, c.key(key))
 	if err != nil {
 		if c.config.OnError != nil {
@@ -122,7 +122,7 @@ func (c *Cache) Get(ctx context.Context, key string, dest interface{}) error {
 }
 
 // Set stores a value in cache with optional TTL.
-func (c *Cache) Set(ctx context.Context, key string, value interface{}, ttl ...time.Duration) error {
+func (c *Cache) Set(ctx context.Context, key string, value any, ttl ...time.Duration) error {
 	data, err := c.config.Serializer.Marshal(value)
 	if err != nil {
 		return err
@@ -163,7 +163,7 @@ func GetOrSet[T any](ctx context.Context, c *Cache, key string, compute func() (
 	}
 
 	// Cache miss or error - compute value with singleflight protection
-	val, err, _ := c.sf.Do(key, func() (interface{}, error) {
+	val, err, _ := c.sf.Do(key, func() (any, error) {
 		// Double check cache inside singleflight to handle race conditions
 		var innerResult T
 		if err := c.Get(ctx, key, &innerResult); err == nil {
@@ -377,7 +377,7 @@ func DefaultTTLPolicy() TTLPolicy {
 }
 
 // CacheKey generates a cache key from parts.
-func CacheKey(parts ...interface{}) string {
+func CacheKey(parts ...any) string {
 	strs := make([]string, len(parts))
 	for i, p := range parts {
 		strs[i] = fmt.Sprintf("%v", p)
@@ -389,9 +389,10 @@ func stringJoin(strs []string, sep string) string {
 	if len(strs) == 0 {
 		return ""
 	}
-	result := strs[0]
+	var result strings.Builder
+	result.WriteString(strs[0])
 	for i := 1; i < len(strs); i++ {
-		result += sep + strs[i]
+		result.WriteString(sep + strs[i])
 	}
-	return result
+	return result.String()
 }

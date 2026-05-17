@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -267,16 +268,12 @@ func writeIntMetricLine(b *strings.Builder, key string, value int64) {
 
 func cloneFloatMap(in map[string]float64) map[string]float64 {
 	out := make(map[string]float64, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
+	maps.Copy(out, in)
 	return out
 }
 
 func cloneHistogramMap(in map[string]HistogramSnapshot) map[string]HistogramSnapshot {
 	out := make(map[string]HistogramSnapshot, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
+	maps.Copy(out, in)
 	return out
 }

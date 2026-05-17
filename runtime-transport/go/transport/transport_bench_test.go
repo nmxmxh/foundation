@@ -10,7 +10,7 @@ func BenchmarkCreateEnvelopeJSON(b *testing.B) {
 		"workspace_id": "ws_1",
 		"body":         "runtime-transport-go-payload",
 	}
-	extra := map[string]interface{}{"source": "bench"}
+	extra := map[string]any{"source": "bench"}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		envelope := CreateEnvelope("workspace:create:v1:requested", payload, extra)

@@ -41,11 +41,11 @@ const (
 
 // CheckResult is the result of a health check.
 type CheckResult struct {
-	Status    Status                 `json:"status"`
-	Message   string                 `json:"message,omitempty"`
-	Duration  time.Duration          `json:"duration_ms"`
-	Timestamp time.Time              `json:"timestamp"`
-	Details   map[string]interface{} `json:"details,omitempty"`
+	Status    Status         `json:"status"`
+	Message   string         `json:"message,omitempty"`
+	Duration  time.Duration  `json:"duration_ms"`
+	Timestamp time.Time      `json:"timestamp"`
+	Details   map[string]any `json:"details,omitempty"`
 }
 
 // CheckFunc is a function that performs a health check.
@@ -77,11 +77,11 @@ type Config struct {
 
 // HealthChecker manages health checks.
 type HealthChecker struct {
-	config   Config
-	checks   []Check
-	mu       sync.RWMutex
-	cache    map[string]cachedResult
-	cacheMu  sync.RWMutex
+	config  Config
+	checks  []Check
+	mu      sync.RWMutex
+	cache   map[string]cachedResult
+	cacheMu sync.RWMutex
 }
 
 type cachedResult struct {
@@ -91,12 +91,12 @@ type cachedResult struct {
 
 // HealthResponse is the response returned by health endpoints.
 type HealthResponse struct {
-	Status         Status                  `json:"status"`
-	ServiceName    string                  `json:"service_name"`
-	ServiceVersion string                  `json:"service_version,omitempty"`
-	Timestamp      time.Time               `json:"timestamp"`
-	Duration       time.Duration           `json:"duration_ms"`
-	Checks         map[string]CheckResult  `json:"checks,omitempty"`
+	Status         Status                 `json:"status"`
+	ServiceName    string                 `json:"service_name"`
+	ServiceVersion string                 `json:"service_version,omitempty"`
+	Timestamp      time.Time              `json:"timestamp"`
+	Duration       time.Duration          `json:"duration_ms"`
+	Checks         map[string]CheckResult `json:"checks,omitempty"`
 }
 
 // New creates a new health checker.
@@ -313,7 +313,7 @@ func DatabaseCheck(db *sql.DB) CheckFunc {
 
 			// Get stats
 			stats := db.Stats()
-			result.Details = map[string]interface{}{
+			result.Details = map[string]any{
 				"open_connections": stats.OpenConnections,
 				"in_use":           stats.InUse,
 				"idle":             stats.Idle,
@@ -380,7 +380,7 @@ func HTTPCheck(url string) CheckFunc {
 				result.Status = StatusUnhealthy
 				result.Message = fmt.Sprintf("HTTP %d", resp.StatusCode)
 			}
-			result.Details = map[string]interface{}{
+			result.Details = map[string]any{
 				"status_code": resp.StatusCode,
 			}
 		}
@@ -433,7 +433,7 @@ func DiskSpaceCheck(path string, minFreeBytes uint64) CheckFunc {
 		freeBytes := stat.Bavail * uint64(stat.Bsize)
 		totalBytes := stat.Blocks * uint64(stat.Bsize)
 
-		result.Details = map[string]interface{}{
+		result.Details = map[string]any{
 			"path":        path,
 			"free_bytes":  freeBytes,
 			"total_bytes": totalBytes,
@@ -464,7 +464,7 @@ func MemoryCheck(maxUsedPct float64) CheckFunc {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 
-		result.Details = map[string]interface{}{
+		result.Details = map[string]any{
 			"alloc_mb":       m.Alloc / 1024 / 1024,
 			"total_alloc_mb": m.TotalAlloc / 1024 / 1024,
 			"sys_mb":         m.Sys / 1024 / 1024,
@@ -498,4 +498,3 @@ func CustomCheck(name string, fn func(ctx context.Context) error) CheckFunc {
 		return result
 	}
 }
-

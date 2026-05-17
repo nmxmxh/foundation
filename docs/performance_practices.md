@@ -118,6 +118,67 @@ The database rules in `database_practices.md` remain authoritative. The synthesi
 10. Use PgBouncer transaction pooling before allowing app replicas to create broad direct connection fanout.
 11. Partition only when it matches access patterns such as time, tenant, or append-only history, and confirm pruning with `EXPLAIN`.
 11. Read replicas can protect the primary from read load, but consistency expectations must be explicit in the feature contract.
+12. Optimize like a query engine: push projections, predicates, limits, and
+    partition keys as close to the scan as possible; then materialize wide rows
+    only after scope, filter, and order have reduced the candidate set.
+13. Read important plans as physical execution, not just SQL text. Identify
+    scan type, join algorithm, sort/materialization nodes, rows removed by
+    filter, heap fetches, temp files, WAL records, and buffer read/write/hit
+    counts before changing indexes or code.
+14. Treat SSD write amplification as a cross-layer metric. Minimize needless
+    heap rewrites, index maintenance, WAL full-page images, checkpoint bursts,
+    vacuum churn, row-by-row deletes, and wide JSONB updates before tuning the
+    storage device.
+15. HOT-update eligibility, table `fillfactor`, TOAST behavior, WAL compression,
+    checkpoint sizing, and insert-triggered autovacuum are performance tools,
+    but each changes a different bottleneck and must be validated with
+    service-backed measurements.
+
+## Columnar analytics performance
+
+Columnar storage and column-shaped runtime buffers are optimization lanes for
+wide scans, analytical grouping, reports, telemetry, and batch compute. They are
+not replacements for Postgres transactional truth.
+
+1. Start from query shape: columnar wins when the workload reads a few columns
+   across many rows, filters whole chunks/partitions, or runs vectorized math.
+2. Keep mutations and uniqueness in the row store. Project append-only facts
+   into columnar/read-model lanes through bounded workers with replayable
+   fingerprints.
+3. Prefer compact read models or materialized views for hot dashboards before
+   introducing a separate OLAP engine.
+4. Use Parquet/Arrow/object-storage exports, DuckDB, ClickHouse, or warehouse
+   jobs for report/export workloads that would otherwise scan transactional
+   tables under product traffic.
+5. Runtime columnar batches should use structure-of-arrays layouts: contiguous
+   typed value buffers, optional validity bitmaps, offsets for variable-width
+   data, and small metadata descriptors.
+6. Benchmark row-oriented, materialized-view, and columnar/export paths against
+   the same semantic result. Include bytes read, allocations, page-cache state,
+   p95/p99, and projection lag.
+7. Late materialization is a review principle: filter/prune on compact columns
+   before constructing wide row objects, JSON maps, React state, or response
+   DTOs.
+
+## Virtual-memory-aware profiling
+
+For native runtime, shared-memory, ingest, and analytical paths, process memory
+behavior is part of the performance contract.
+
+1. Measure cold-cache and warm-cache runs separately when page cache materially
+   changes latency.
+2. Track minor and major page faults for native/shared-memory benchmarks where
+   available.
+3. Inspect RSS/PSS and mmap regions for long-running processes that reuse
+   arenas, shared segments, memory-mapped files, or large object buffers.
+4. Watch TLB/cache behavior with platform tools when a supposedly contiguous
+   loop underperforms despite low allocation counts.
+5. On multi-socket Linux hosts, treat NUMA placement as evidence for large
+   native/columnar workloads. Thread and memory locality can dominate the
+   algorithmic improvement.
+6. Prefer page-aligned slabs and descriptor reuse for hot arenas. Repeatedly
+   allocating and discarding large backing regions can trade heap pressure for
+   page-fault pressure.
 
 ## Rust and native compute
 
@@ -131,6 +192,37 @@ Rust/WASM/native paths are reserved for compute locality and runtime parity, not
 6. Add `#[inline]` only for small, frequently called functions after measurement or clear compiler-boundary reasoning.
 7. Preserve runtime parity across direct, `ffi`, `stdio`, `shm`, and browser/WASM lanes where the product uses those lanes.
 8. Use PGO only after representative profiles exist. It is a release optimization, not a substitute for better algorithms or boundaries.
+
+### FFI ABI discipline
+
+1. Treat FFI as a versioned protocol with a calling convention, not as ordinary
+   in-process function calls.
+2. Keep exported ABI surfaces C-compatible: scalar integers, lengths, raw byte
+   buffers, opaque handles, and explicit error buffers.
+3. Never pass language-owned strings, slices, trait objects, Go interfaces,
+   Cap'n Proto builders, Arrow objects, or allocator-owned ownership across the
+   raw ABI.
+4. Validate pointers, lengths, UTF-8, schema versions, and writable ranges
+   before use on the callee side.
+5. Add conformance and parity tests for every product FFI runtime unit before
+   treating the lane as production-capable.
+
+## Go SIMD
+
+Go 1.26's experimental `simd/archsimd` package is useful for carefully bounded
+CPU kernels, but it is not a general replacement for Go orchestration or Rust
+runtime lanes.
+
+1. Build with `GOEXPERIMENT=simd` only in explicit benchmark/test jobs.
+2. Keep SIMD code behind internal packages, build tags, and scalar fallbacks.
+3. Benchmark before and after with realistic payload sizes; SIMD startup,
+   alignment, masking, and tail-handling costs can erase gains on small inputs.
+4. Prefer structure-of-arrays or contiguous typed slices so the compiler and
+   hardware can amortize vector loads/stores.
+5. Do not use experimental SIMD for public APIs, generated contracts, tenant
+   isolation, authorization, database semantics, or event lifecycle behavior.
+6. Compare against existing Foundation lanes: direct scalar Go, Rust FFI,
+   shared-memory Rust, WASM/SAB, and WebGPU where the workload is batch-wide.
 
 ## Documentation and tracking workflow
 

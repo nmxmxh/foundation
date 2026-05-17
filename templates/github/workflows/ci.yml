@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  GO_VERSION: "1.25"
+  GO_VERSION: "1.26"
   POSTGRES_VERSION: "18"
   # Customize these for your project
   PROJECT_NAME: "{{PROJECT_NAME}}"
@@ -95,6 +95,7 @@ jobs:
           JWT_SECRET: test-secret-key
         run: |
           make test-unit
+          make test-coverage
           make test-integration
 
       - name: Upload coverage

@@ -137,8 +137,8 @@ func joinVary(existing, value string) string {
 	if existing == "" {
 		return value
 	}
-	parts := strings.Split(existing, ",")
-	for _, part := range parts {
+	parts := strings.SplitSeq(existing, ",")
+	for part := range parts {
 		if strings.EqualFold(strings.TrimSpace(part), value) {
 			return existing
 		}

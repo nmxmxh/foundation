@@ -28,8 +28,7 @@ func (p *benchProcessor) Handle(_ context.Context, _ Job) error {
 func BenchmarkEngine_Enqueue_InMemory(b *testing.B) {
 	engine := NewEngine(map[string]int{"bench": 1}, benchmarkLogger(b))
 	_ = engine.Register(&benchProcessor{kind: "bench_kind", queue: "bench"})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	_ = engine.Start(ctx) // Start workers to drain the queue
 
 	job := Job{
@@ -48,8 +47,7 @@ func BenchmarkEngine_Enqueue_InMemory(b *testing.B) {
 func BenchmarkEngine_Enqueue_RawPayload(b *testing.B) {
 	engine := NewEngine(map[string]int{"bench": 1}, benchmarkLogger(b))
 	_ = engine.Register(&benchProcessor{kind: "bench_kind", queue: "bench"})
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	_ = engine.Start(ctx)
 
 	// Pre-serialized payload (e.g. Cap'n Proto or Protobuf)
@@ -74,8 +72,7 @@ func BenchmarkEngine_Processing_Throughput(b *testing.B) {
 	engine := NewEngine(map[string]int{"bench": 64}, benchmarkLogger(b)) // Large pool for throughput
 	_ = engine.Register(&benchProcessor{kind: "bench_kind", queue: "bench", wg: &wg})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	_ = engine.Start(ctx)
 
 	job := Job{

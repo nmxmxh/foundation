@@ -1,91 +1,75 @@
-# Cognitive Wire (CW) Practices
+# AI Runtime Practices
 
-Status: v1  
-Date: 2026-05-01  
+Status: baseline
+Date: 2026-05-13
 Owner: Platform Architecture
 
-## 1. The Cognitive Wire (CW) Vision
+## Purpose
 
-Cognitive Wire is a **stealth extension** of the Foundation architecture. It moves AI compute and state delivery "close to the sender," creating a truly serverless, low-latency intelligence layer.
-CW is not a new platform layer, service mesh, or alternate event bus.
-It begins as a narrow Foundation hot-path capability for high-volume AI claim exchange.
+This document keeps AI-related runtime work inside the existing Foundation
+contract. AI features are product capabilities, not a separate platform layer,
+transport fabric, or event lifecycle.
 
-### 1.1 Shared AI Compute
-Compute is not locked on the server. The **Foundation Runtime** distributes inference and verification tasks between the client (Browser WASM) and the server (Native Rust) over the **Cognitive Wire.**
-- **Local-First**: Execute light inference and initial verification on the client.
-- **Server-Supported**: Delegate heavy computation or global knowledge retrieval to the server via **CWF (Cognitive Wire Format).**
+AI execution must refine the same substrate described in
+`docs/foundation_nervous_system.md`: typed contracts, trusted metadata,
+tenant scope, idempotency, bounded work, observable terminal states, and
+frontend projections.
 
-### 1.2 Binary-Optimized CWF
-While CWF began as a text format for token efficiency, the **Foundation Hot-Path** uses a binary-optimized version for:
-- **Claim Extraction**: Moving structured assertions at memory speed.
-- **Adversarial Consensus**: Rapid "Attack/Verify" rounds between model units.
-- **Epoch Signaling**: Coordinating AI state transitions across the wire without JSON overhead.
+## Contract
 
-Execution contracts should use existing schema tooling.
-Protobuf or Cap'n Proto definitions are the source of truth for generated Go, Rust, and TypeScript readers/writers.
-Text CWF remains valid for prompts, logs, debugging, and human/agent context exchange.
-Binary CWF is the runtime format for the hot path.
+1. Use generated Protobuf or Cap'n Proto schemas for AI request, result,
+   evidence, scoring, and verdict payloads.
+2. Keep prompt text, model responses, embeddings, logs, and evidence bodies out
+   of hot control frames. Move large bodies behind object-store references,
+   shared arena descriptors, or explicit streams with backpressure.
+3. Preserve correlation ID, idempotency key, user, session, organization,
+   schema version, locale, and trace fields through AI workers and runtime lanes.
+4. Treat model output, tool output, retrieved documents, partner responses, and
+   generated code as untrusted input until validated by the owning domain.
+5. PostgreSQL remains the durable source of truth for accepted decisions,
+   audit records, manifests, billing/economy settlement, model promotion state,
+   and long-lived lineage.
+6. Redis may hold ephemeral routing, presence, short replay windows, bounded
+   idempotency windows, and low-latency coordination state. Redis is never the
+   authority for accepted truth.
 
-## 2. Edge-Native State Distribution
+## Runtime Lanes
 
-To achieve "close to sender" delivery, CW may replicate ephemeral coordination state closer to the user.
+1. Keep small control payloads on direct/binary/runtime-buffer lanes.
+2. Use `RuntimeSharedArena`, transferable buffers, object references, or stream
+   chunks for large evidence and model-output payloads.
+3. Use browser WASM only for bounded local work that preserves the product
+   security model and does not expose secrets or privileged tenant data.
+4. Use native Rust/FFI/shared-memory lanes for deterministic batched scoring,
+   canonical hashing, verification kernels, and parity-sensitive compute.
+5. Use Go/server-kit for orchestration, authorization, policy checks, database
+   transactions, worker scheduling, and durable audit writes.
+6. JSON text is allowed at human/debug boundaries. Hot runtime paths must keep
+   typed or binary payloads until the owning handler validates and decodes them.
 
-### 2.1 Redis-Only Edge State
-- **Local Ephemeral Replication**: Redis may hold hot coordination state on the local node or nearest edge hub.
-- **Allowed State**: Connection routing, claim/attack exchange buffers, recent verification events, presence, subscriptions, short replay windows, idempotency windows, and route/model warm-state hints.
-- **Durable Boundary**: PostgreSQL remains the durable source of truth for verdicts, audit records, manifests, billing/economy settlement, model promotion state, and long-lived lineage.
-- **No Early Distributed Writes**: Do not introduce multi-region durable writes or DB sharding until measured traffic proves the requirement and the conflict model is explicit.
-- **Source of Truth**: Edge Redis accelerates delivery; it does not become the authority for accepted truth.
+## Verification
 
-## 3. The AI Orchestra (Refined)
+1. AI mutating flows must emit the same `requested -> success/failed` lifecycle
+   as other Foundation commands.
+2. Each accepted AI workflow must define bounded retries, maximum payload size,
+   maximum tool/model calls, timeout budget, and failure class.
+3. Model and tool calls require negative tests for malformed output, oversized
+   output, missing citations or evidence references where required, timeout,
+   cancellation, and tenant-scope mismatch.
+4. Verification/scoring lanes must include parity tests across every lane the
+   product actually uses.
+5. Benchmarks must report payload size, copy budget, allocation budget, p95/p99,
+   error rate, and fallback behavior before a runtime lane becomes a default.
 
-The orchestra now operates over the Cognitive Wire:
-- **Geomantic Routing (Odù)**: Uses compact binary routing keys to route queries to specialized knowledge shards and model capabilities.
-- **Adversarial Consensus**: Debate rounds happen over CWF binary envelopes, ensuring that only verified claims survive to the UI.
-- **Narrow Frame Set**: The first CW frame family is limited to inference request, candidate, claim, attack, verify, and verdict exchange.
+## Research Tracks
 
-Initial CW frames:
+The following ideas remain research until benchmarked and tied to a product
+contract:
 
-1. `InferenceRequestFrame`
-2. `CandidateFrame`
-3. `ClaimFrame`
-4. `AttackFrame`
-5. `VerifyFrame`
-6. `VerdictFrame`
-
-## 4. Operational Discipline
-
-1. **Fastest Path First**: Always attempt local WASM inference/verification before escalating to the server.
-2. **Size Out**: Design payloads to "size out" of the network—if data is too large, move it through the **SharedArena** or stream chunks.
-3. **Stealth Integration**: CW capabilities should be transparently available via the `foundation/runtime-sdk` and `foundation/runtime-transport` without adding new architectural layers.
-4. **No Overhead**: Maintain the "Zero-Allocation" and "Zero-Waste" discipline. AI computation must not bloat the transport.
-5. **Schema First**: Hot-path payloads must use generated schema readers/writers, not pipe parsing or dynamic maps.
-6. **References Over Bulk Text**: Large outputs, evidence bodies, logs, and artifacts should move behind references; CW frames carry bounded control data.
-
-## 5. Later Research Tracks
-
-### 5.1 Route Class Hints
-Odù-inspired route classes may be carried as compact metadata inside CW frames.
-They are routing and scoring hints only; they must not determine truth or bypass verification.
-
-Route-class rules:
-
-1. keep the initial class space bounded,
-2. version classifier, class table, and fitness profile together,
-3. record entropy seeds for replay,
-4. fall back to generic routing when confidence is low,
-5. measure quality, cost, latency, and verifier success against a no-class baseline.
-
-### 5.2 Quantized Vector References
-TurboQuant-style work suggests a later CW extension for compressed vector references.
-This should remain outside the immediate frame contract until benchmarks prove value.
-
-Potential uses:
-
-1. KV-cache compression for long-context local runners,
-2. compressed vector-search indices for evidence and prior verdict retrieval,
-3. compact SharedArena summaries of high-dimensional state,
-4. lower-bandwidth transfer of trusted intermediate vectors.
+1. compact route-class hints for model or tool selection;
+2. quantized vector references for memory/bandwidth reduction;
+3. local-first verification for low-risk, bounded inference tasks;
+4. multi-model critique or consensus flows.
 
 Promotion gates:
 

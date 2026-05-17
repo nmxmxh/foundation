@@ -25,7 +25,7 @@ func TestCreateEnvelopeIncludesRequiredMetadata(t *testing.T) {
 }
 
 func TestCreateEnvelopeNormalizesNilPayload(t *testing.T) {
-	envelope := CreateEnvelope("workspace.v1.created", nil, map[string]interface{}{"source": "test"})
+	envelope := CreateEnvelope("workspace.v1.created", nil, map[string]any{"source": "test"})
 	if envelope.Payload == nil {
 		t.Fatal("expected nil payload to be normalized to an empty map")
 	}

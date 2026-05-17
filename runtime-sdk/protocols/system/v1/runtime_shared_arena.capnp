@@ -55,6 +55,11 @@ const ARENA_DESCRIPTOR_TYPE_CAPNP :UInt32 = 1;
 const ARENA_DESCRIPTOR_TYPE_TEXT :UInt32 = 2;
 const ARENA_DESCRIPTOR_TYPE_IMAGE :UInt32 = 3;
 const ARENA_DESCRIPTOR_TYPE_MEDIA :UInt32 = 4;
+const ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH :UInt32 = 5;
+const ARENA_DESCRIPTOR_TYPE_COLUMNAR_FIELD :UInt32 = 6;
+const ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALUES :UInt32 = 7;
+const ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALIDITY :UInt32 = 8;
+const ARENA_DESCRIPTOR_TYPE_COLUMNAR_OFFSETS :UInt32 = 9;
 
 # Queue slots carry descriptor IDs and small routing metadata. Payload bytes
 # stay in slabs; queue entries should never carry large application data.
@@ -74,3 +79,71 @@ const ARENA_DIAGNOSTIC_BYTES :UInt32 = 4096;
 # and to preserve room for future foundation-owned control structures.
 const ARENA_OFFSET_PAGES :UInt32 = 131072;
 const ARENA_PAGE_BYTES :UInt32 = 4096;
+
+# Columnar batch descriptor payload.
+#
+# This is intentionally a compact Foundation metadata slab rather than full
+# Arrow IPC. It follows Arrow's useful physical-model vocabulary: record batch,
+# fields with the same row count, validity buffers, offsets buffers, values
+# buffers, optional dictionary/aux buffers, and 64-byte alignment for SIMD/cache
+# friendliness. A descriptor of type ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH points
+# at a payload with this header followed by fixed-size field descriptors.
+#
+# Header u32 slots, little-endian:
+# 0 magic, 1 schema version, 2 row count, 3 column count, 4 flags,
+# 5 metadata descriptor id, 6 dictionary descriptor id, 7 reserved.
+#
+# Field descriptor u32 slots, little-endian:
+# 0 field id, 1 logical type, 2 physical type, 3 flags, 4 length,
+# 5 null count, 6 validity descriptor id, 7 offsets descriptor id,
+# 8 values descriptor id, 9 auxiliary descriptor id, 10 byte width,
+# 11 scale, 12 precision, 13 timezone hash, 14 dictionary id, 15 reserved.
+const COLUMNAR_BATCH_SCHEMA_VERSION :UInt32 = 1;
+const COLUMNAR_BATCH_MAGIC :UInt32 = 1129460291; # "OVRC" little-endian
+const COLUMNAR_BATCH_ALIGNMENT_BYTES :UInt32 = 64;
+const COLUMNAR_BATCH_MAX_COLUMNS :UInt32 = 1024;
+const COLUMNAR_BATCH_HEADER_BYTES :UInt32 = 32;
+const COLUMNAR_FIELD_DESCRIPTOR_BYTES :UInt32 = 64;
+const COLUMNAR_BATCH_HEADER_IDX_MAGIC :UInt32 = 0;
+const COLUMNAR_BATCH_HEADER_IDX_SCHEMA_VERSION :UInt32 = 1;
+const COLUMNAR_BATCH_HEADER_IDX_ROW_COUNT :UInt32 = 2;
+const COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT :UInt32 = 3;
+const COLUMNAR_BATCH_HEADER_IDX_FLAGS :UInt32 = 4;
+const COLUMNAR_BATCH_HEADER_IDX_METADATA_DESCRIPTOR_ID :UInt32 = 5;
+const COLUMNAR_BATCH_HEADER_IDX_DICTIONARY_DESCRIPTOR_ID :UInt32 = 6;
+const COLUMNAR_BATCH_HEADER_IDX_RESERVED :UInt32 = 7;
+const COLUMNAR_FIELD_IDX_FIELD_ID :UInt32 = 0;
+const COLUMNAR_FIELD_IDX_LOGICAL_TYPE :UInt32 = 1;
+const COLUMNAR_FIELD_IDX_PHYSICAL_TYPE :UInt32 = 2;
+const COLUMNAR_FIELD_IDX_FLAGS :UInt32 = 3;
+const COLUMNAR_FIELD_IDX_LENGTH :UInt32 = 4;
+const COLUMNAR_FIELD_IDX_NULL_COUNT :UInt32 = 5;
+const COLUMNAR_FIELD_IDX_VALIDITY_DESCRIPTOR_ID :UInt32 = 6;
+const COLUMNAR_FIELD_IDX_OFFSETS_DESCRIPTOR_ID :UInt32 = 7;
+const COLUMNAR_FIELD_IDX_VALUES_DESCRIPTOR_ID :UInt32 = 8;
+const COLUMNAR_FIELD_IDX_AUX_DESCRIPTOR_ID :UInt32 = 9;
+const COLUMNAR_FIELD_IDX_BYTE_WIDTH :UInt32 = 10;
+const COLUMNAR_FIELD_IDX_SCALE :UInt32 = 11;
+const COLUMNAR_FIELD_IDX_PRECISION :UInt32 = 12;
+const COLUMNAR_FIELD_IDX_TIMEZONE_HASH :UInt32 = 13;
+const COLUMNAR_FIELD_IDX_DICTIONARY_ID :UInt32 = 14;
+const COLUMNAR_FIELD_IDX_RESERVED :UInt32 = 15;
+const COLUMNAR_DESCRIPTOR_ID_NONE :UInt32 = 4294967295;
+const COLUMNAR_LOGICAL_TYPE_NULL :UInt32 = 0;
+const COLUMNAR_LOGICAL_TYPE_BOOL :UInt32 = 1;
+const COLUMNAR_LOGICAL_TYPE_INT :UInt32 = 2;
+const COLUMNAR_LOGICAL_TYPE_UINT :UInt32 = 3;
+const COLUMNAR_LOGICAL_TYPE_FLOAT :UInt32 = 4;
+const COLUMNAR_LOGICAL_TYPE_DECIMAL :UInt32 = 5;
+const COLUMNAR_LOGICAL_TYPE_TIMESTAMP :UInt32 = 6;
+const COLUMNAR_LOGICAL_TYPE_BINARY :UInt32 = 7;
+const COLUMNAR_LOGICAL_TYPE_UTF8 :UInt32 = 8;
+const COLUMNAR_LOGICAL_TYPE_DICTIONARY :UInt32 = 9;
+const COLUMNAR_PHYSICAL_TYPE_NULL :UInt32 = 0;
+const COLUMNAR_PHYSICAL_TYPE_FIXED_WIDTH :UInt32 = 1;
+const COLUMNAR_PHYSICAL_TYPE_VARIABLE_BINARY :UInt32 = 2;
+const COLUMNAR_PHYSICAL_TYPE_DICTIONARY_INDEX :UInt32 = 3;
+const COLUMNAR_FIELD_FLAG_NULLABLE :UInt32 = 1;
+const COLUMNAR_FIELD_FLAG_DICTIONARY_ENCODED :UInt32 = 2;
+const COLUMNAR_FIELD_FLAG_SORTED_ASC :UInt32 = 4;
+const COLUMNAR_FIELD_FLAG_SORTED_DESC :UInt32 = 8;

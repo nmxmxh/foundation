@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"slices"
 	"strings"
@@ -704,9 +705,7 @@ func (t *frameStringTable) internBytes(value []byte) string {
 		return owned
 	}
 	next := make(map[string]string, len(values)+1)
-	for key, interned := range values {
-		next[key] = interned
-	}
+	maps.Copy(next, values)
 	next[owned] = owned
 	t.values.Store(next)
 	return owned

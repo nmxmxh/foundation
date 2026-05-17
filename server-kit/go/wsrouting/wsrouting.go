@@ -467,10 +467,7 @@ func (r *Router) ForEachTargetBatch(ctx context.Context, target TargetedDelivery
 		}
 	case "broadcast":
 		for start := 0; start < len(r.order); start += batchSize {
-			end := start + batchSize
-			if end > len(r.order) {
-				end = len(r.order)
-			}
+			end := min(start+batchSize, len(r.order))
 			if !emit(r.order[start:end]) {
 				return count, contextError(ctx)
 			}

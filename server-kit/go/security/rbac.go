@@ -129,8 +129,8 @@ func capabilityGranted(granted, required string) bool {
 	if granted == "*" || granted == required {
 		return true
 	}
-	if strings.HasSuffix(granted, ".*") {
-		prefix := strings.TrimSuffix(granted, ".*")
+	if before, ok := strings.CutSuffix(granted, ".*"); ok {
+		prefix := before
 		return strings.HasPrefix(required, prefix+".")
 	}
 	return false

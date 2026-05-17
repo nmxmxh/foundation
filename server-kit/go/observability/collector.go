@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"maps"
 	"sort"
 	"sync"
 	"time"
@@ -435,9 +436,7 @@ func cloneStringMap(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
+	maps.Copy(out, in)
 	return out
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -170,11 +171,11 @@ func TestMemoryDBConcurrentTenantIsolationUnderPressure(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(tenants)
-	for tenant := 0; tenant < tenants; tenant++ {
+	for tenant := range tenants {
 		go func(tenant int) {
 			defer wg.Done()
 			orgID := fmt.Sprintf("org_%02d", tenant)
-			for i := 0; i < perTenant; i++ {
+			for i := range perTenant {
 				_, err := db.UpsertRecord(ctx, DomainRecord{
 					Domain:         "signals",
 					Collection:     "ticks",
@@ -193,7 +194,7 @@ func TestMemoryDBConcurrentTenantIsolationUnderPressure(t *testing.T) {
 	}
 	wg.Wait()
 
-	for tenant := 0; tenant < tenants; tenant++ {
+	for tenant := range tenants {
 		orgID := fmt.Sprintf("org_%02d", tenant)
 		count, err := db.CountRecords(ctx, "signals", "ticks", orgID, nil)
 		if err != nil {
@@ -349,9 +350,9 @@ func benchmarkMemoryDBWithTenants(b *testing.B, tenants, perTenant int) *MemoryD
 	b.Helper()
 	db := NewMemoryDB()
 	ctx := context.Background()
-	for tenant := 0; tenant < tenants; tenant++ {
+	for tenant := range tenants {
 		orgID := fmt.Sprintf("org_%02d", tenant)
-		for i := 0; i < perTenant; i++ {
+		for i := range perTenant {
 			if _, err := db.UpsertRecord(ctx, DomainRecord{
 				Domain:         "signals",
 				Collection:     "ticks",
@@ -631,6 +632,54 @@ func TestPostgresRecordWhereLeavesNestedFiltersForStoreRecheck(t *testing.T) {
 	}
 	if where != "TRUE" || len(args) != 0 {
 		t.Fatalf("where=%q args=%#v, want TRUE and no args", where, args)
+	}
+}
+
+func TestPostgresRecheckBudgetOptions(t *testing.T) {
+	if normalizedRecheckRowBudget(0) != defaultPostgresRecheckRowBudget {
+		t.Fatalf("default recheck budget = %d", normalizedRecheckRowBudget(0))
+	}
+	if normalizedRecheckRowBudget(maxPostgresRecheckRowBudget+1) != maxPostgresRecheckRowBudget {
+		t.Fatalf("max recheck budget = %d", normalizedRecheckRowBudget(maxPostgresRecheckRowBudget+1))
+	}
+	var db *PostgresDB
+	if _, err := db.ListRecordsWithOptions(context.Background(), "d", "c", "o", map[string]any{"nested": map[string]any{"k": "v"}}, StateListOptions{RequirePushdown: true}); err == nil {
+		t.Fatal("expected nil postgres list to fail before pushdown option")
+	}
+	db = &PostgresDB{}
+	if _, err := db.ListRecordsWithOptions(context.Background(), "d", "c", "o", map[string]any{"nested": map[string]any{"k": "v"}}, StateListOptions{RequirePushdown: true}); !errors.Is(err, ErrUnsupportedFilterShape) {
+		t.Fatalf("require-pushdown list error = %v", err)
+	}
+	if _, err := db.CountRecordsWithOptions(context.Background(), "d", "c", "o", map[string]any{"nested": map[string]any{"k": "v"}}, StateCountOptions{RequirePushdown: true}); !errors.Is(err, ErrUnsupportedFilterShape) {
+		t.Fatalf("require-pushdown count error = %v", err)
+	}
+}
+
+func TestPostgresUpsertSQLAvoidsNoopJSONRewrites(t *testing.T) {
+	for name, query := range map[string]string{
+		"typed": upsertRecordSQL,
+		"raw":   upsertRecordJSONSQL,
+	} {
+		if !strings.Contains(query, "IS DISTINCT FROM EXCLUDED.data") {
+			t.Fatalf("%s upsert query should skip no-op JSON rewrites: %s", name, query)
+		}
+		if !strings.Contains(query, "UNION ALL") || !strings.Contains(query, "NOT EXISTS (SELECT 1 FROM upsert)") {
+			t.Fatalf("%s upsert query should return existing timestamps on no-op conflict: %s", name, query)
+		}
+	}
+}
+
+func TestParseExplainPlanRows(t *testing.T) {
+	count, err := parseExplainPlanRows([]byte(`[{"Plan":{"Node Type":"Index Scan","Plan Rows":42}}]`))
+	if err != nil || count != 42 {
+		t.Fatalf("parseExplainPlanRows() = %d err=%v", count, err)
+	}
+	count, err = parseExplainPlanRows(nil)
+	if err != nil || count != 0 {
+		t.Fatalf("parseExplainPlanRows(nil) = %d err=%v", count, err)
+	}
+	if _, err := parseExplainPlanRows([]byte(`bad`)); err == nil {
+		t.Fatal("expected invalid explain JSON to fail")
 	}
 }
 

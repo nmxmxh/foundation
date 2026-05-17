@@ -29,9 +29,9 @@ type ProcessWorkerSnapshot struct {
 	Busy         bool                 `json:"busy"`
 	RestartCount uint32               `json:"restart_count"`
 	LastError    string               `json:"last_error,omitempty"`
-	LastStarted  time.Time            `json:"last_started,omitempty"`
-	LastSuccess  time.Time            `json:"last_success,omitempty"`
-	LastFailure  time.Time            `json:"last_failure,omitempty"`
+	LastStarted  time.Time            `json:"last_started,omitzero"`
+	LastSuccess  time.Time            `json:"last_success,omitzero"`
+	LastFailure  time.Time            `json:"last_failure,omitzero"`
 }
 
 type ProcessPoolDiagnostics struct {

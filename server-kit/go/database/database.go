@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"runtime"
 	"sort"
 	"strconv"
@@ -14,6 +15,8 @@ import (
 )
 
 var ErrPoolAcquireTimeout = errors.New("database pool acquire timeout")
+var ErrQueryLimitReached = errors.New("database query row limit reached")
+var ErrUnsupportedFilterShape = errors.New("database filter shape cannot be pushed down")
 
 // MemoryDB is a concurrency-safe in-memory database adapter.
 // It provides deterministic persistence semantics for services and tests,
@@ -85,17 +88,8 @@ const (
 
 func DefaultPoolOptionsFor(lane RuntimeLane) PoolOptions {
 	cpus := runtime.GOMAXPROCS(0)
-	maxConns := cpus * 2
-	if maxConns < 8 {
-		maxConns = 8
-	}
-	if maxConns > 64 {
-		maxConns = 64
-	}
-	minConns := maxConns / 4
-	if minConns < 2 {
-		minConns = 2
-	}
+	maxConns := min(max(cpus*2, 8), 64)
+	minConns := max(maxConns/4, 2)
 	queryTimeout := 250 * time.Millisecond
 	switch lane {
 	case RuntimeLaneHotRead:
@@ -851,9 +845,7 @@ func copyMap(in map[string]any) map[string]any {
 		return nil
 	}
 	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 

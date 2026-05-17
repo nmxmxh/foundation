@@ -136,6 +136,40 @@ func TestBufferBoundsAndReset(t *testing.T) {
 	}
 }
 
+func TestColumnarArenaDescriptorContract(t *testing.T) {
+	if generated.ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH != 5 {
+		t.Fatalf("columnar batch descriptor type = %d, want 5", generated.ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH)
+	}
+	if generated.COLUMNAR_BATCH_HEADER_BYTES != 32 {
+		t.Fatalf("columnar batch header bytes = %d, want 32", generated.COLUMNAR_BATCH_HEADER_BYTES)
+	}
+	if generated.COLUMNAR_FIELD_DESCRIPTOR_BYTES != 64 {
+		t.Fatalf("columnar field descriptor bytes = %d, want 64", generated.COLUMNAR_FIELD_DESCRIPTOR_BYTES)
+	}
+	if generated.COLUMNAR_BATCH_ALIGNMENT_BYTES != 64 {
+		t.Fatalf("columnar alignment bytes = %d, want 64", generated.COLUMNAR_BATCH_ALIGNMENT_BYTES)
+	}
+	if generated.COLUMNAR_BATCH_HEADER_BYTES%4 != 0 || generated.COLUMNAR_FIELD_DESCRIPTOR_BYTES%4 != 0 {
+		t.Fatal("columnar descriptor units must stay u32-aligned")
+	}
+
+	columnCount := uint32(2)
+	payloadBytes := generated.COLUMNAR_BATCH_HEADER_BYTES + columnCount*generated.COLUMNAR_FIELD_DESCRIPTOR_BYTES
+	if payloadBytes%generated.COLUMNAR_BATCH_ALIGNMENT_BYTES != 32 {
+		t.Fatalf("unexpected unpadded payload modulo: %d", payloadBytes%generated.COLUMNAR_BATCH_ALIGNMENT_BYTES)
+	}
+	paddedBytes := ((payloadBytes + generated.COLUMNAR_BATCH_ALIGNMENT_BYTES - 1) / generated.COLUMNAR_BATCH_ALIGNMENT_BYTES) * generated.COLUMNAR_BATCH_ALIGNMENT_BYTES
+	if paddedBytes != 192 {
+		t.Fatalf("padded columnar descriptor bytes = %d, want 192", paddedBytes)
+	}
+	if generated.COLUMNAR_FIELD_IDX_VALUES_DESCRIPTOR_ID != 8 {
+		t.Fatalf("values descriptor slot = %d, want 8", generated.COLUMNAR_FIELD_IDX_VALUES_DESCRIPTOR_ID)
+	}
+	if generated.COLUMNAR_DESCRIPTOR_ID_NONE != ^uint32(0) {
+		t.Fatalf("none descriptor sentinel = %d, want max uint32", generated.COLUMNAR_DESCRIPTOR_ID_NONE)
+	}
+}
+
 func TestRuntimeUnitDescriptorValidation(t *testing.T) {
 	descriptor := RuntimeUnitDescriptor{
 		UnitID:               "preview.compute",

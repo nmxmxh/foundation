@@ -16,7 +16,9 @@ import (
 	"context"
 	"encoding/json"
 	"hash/fnv"
+	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,7 +56,7 @@ type Flag struct {
 	EndTime *time.Time `json:"end_time,omitempty"`
 
 	// Metadata contains additional flag metadata.
-	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Metadata map[string]any `json:"metadata,omitempty"`
 }
 
 // EvaluationContext holds context for evaluating a feature flag.
@@ -62,7 +64,7 @@ type EvaluationContext struct {
 	UserID      string
 	OrgID       string
 	Environment string
-	Attributes  map[string]interface{}
+	Attributes  map[string]any
 }
 
 // Option is a function that modifies EvaluationContext.
@@ -90,10 +92,10 @@ func WithEnvironment(env string) Option {
 }
 
 // WithAttribute sets a custom attribute for evaluation.
-func WithAttribute(key string, value interface{}) Option {
+func WithAttribute(key string, value any) Option {
 	return func(ctx *EvaluationContext) {
 		if ctx.Attributes == nil {
-			ctx.Attributes = make(map[string]interface{})
+			ctx.Attributes = make(map[string]any)
 		}
 		ctx.Attributes[key] = value
 	}
@@ -247,9 +249,7 @@ func (m *Manager) AllFlags() map[string]Flag {
 	defer m.mu.RUnlock()
 
 	result := make(map[string]Flag, len(m.flags))
-	for k, v := range m.flags {
-		result[k] = v
-	}
+	maps.Copy(result, m.flags)
 	return result
 }
 
@@ -278,13 +278,7 @@ func (m *Manager) evaluate(flag Flag, ctx *EvaluationContext) bool {
 
 	// Check environment constraints
 	if len(flag.Environments) > 0 && ctx.Environment != "" {
-		found := false
-		for _, env := range flag.Environments {
-			if env == ctx.Environment {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(flag.Environments, ctx.Environment)
 		if !found {
 			return false
 		}
@@ -292,28 +286,22 @@ func (m *Manager) evaluate(flag Flag, ctx *EvaluationContext) bool {
 
 	// Check denied users (takes precedence)
 	if ctx.UserID != "" && len(flag.DeniedUsers) > 0 {
-		for _, denied := range flag.DeniedUsers {
-			if denied == ctx.UserID {
-				return false
-			}
+		if slices.Contains(flag.DeniedUsers, ctx.UserID) {
+			return false
 		}
 	}
 
 	// Check allowed users
 	if ctx.UserID != "" && len(flag.AllowedUsers) > 0 {
-		for _, allowed := range flag.AllowedUsers {
-			if allowed == ctx.UserID {
-				return true
-			}
+		if slices.Contains(flag.AllowedUsers, ctx.UserID) {
+			return true
 		}
 	}
 
 	// Check allowed orgs
 	if ctx.OrgID != "" && len(flag.AllowedOrgs) > 0 {
-		for _, allowed := range flag.AllowedOrgs {
-			if allowed == ctx.OrgID {
-				return true
-			}
+		if slices.Contains(flag.AllowedOrgs, ctx.OrgID) {
+			return true
 		}
 	}
 
@@ -463,9 +451,7 @@ func (s *MemorySource) Load(ctx context.Context) (map[string]Flag, error) {
 	defer s.mu.RUnlock()
 
 	result := make(map[string]Flag, len(s.flags))
-	for k, v := range s.flags {
-		result[k] = v
-	}
+	maps.Copy(result, s.flags)
 	return result, nil
 }
 
@@ -479,9 +465,7 @@ func (s *MemorySource) Set(flag Flag) {
 	s.mu.Lock()
 	s.flags[flag.Name] = flag
 	current := make(map[string]Flag, len(s.flags))
-	for k, v := range s.flags {
-		current[k] = v
-	}
+	maps.Copy(current, s.flags)
 	s.mu.Unlock()
 
 	select {
@@ -496,9 +480,7 @@ func (s *MemorySource) Delete(name string) {
 	s.mu.Lock()
 	delete(s.flags, name)
 	current := make(map[string]Flag, len(s.flags))
-	for k, v := range s.flags {
-		current[k] = v
-	}
+	maps.Copy(current, s.flags)
 	s.mu.Unlock()
 
 	select {

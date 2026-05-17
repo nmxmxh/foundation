@@ -44,7 +44,7 @@ func TestCodeHTTPStatusAndClassification(t *testing.T) {
 
 func TestErrorWrappingDetailsAndAPIResponse(t *testing.T) {
 	base := New(CodeNotFound, "missing").WithField("id", "123").WithRequestID("req_1")
-	wrapped := Wrap(base, CodeDependency, "lookup failed").WithFields(map[string]interface{}{"dep": "db"})
+	wrapped := Wrap(base, CodeDependency, "lookup failed").WithFields(map[string]any{"dep": "db"})
 	if wrapped == nil || !stderrors.Is(wrapped, base) {
 		t.Fatal("expected wrapped error to preserve cause")
 	}

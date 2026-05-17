@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 
@@ -263,9 +264,7 @@ func (e *Engine) HealthSnapshot() map[string]JobHealthSnapshot {
 	defer e.mu.RUnlock()
 
 	snapshot := make(map[string]JobHealthSnapshot, len(e.jobHealth))
-	for key, value := range e.jobHealth {
-		snapshot[key] = value
-	}
+	maps.Copy(snapshot, e.jobHealth)
 	return snapshot
 }
 
@@ -385,7 +384,7 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 func (e *Engine) spawnWorkers(ctx context.Context, queue string, jobs <-chan Job, count int) {
 	indices := make([]int, 0, count)
 	e.mu.Lock()
-	for i := 0; i < count; i++ {
+	for range count {
 		e.workers[queue]++
 		indices = append(indices, e.workers[queue])
 	}

@@ -44,8 +44,8 @@ func TestCircuitBreaker_ClosedToOpen(t *testing.T) {
 		t.Fatalf("expected closed, got %s", cb.State())
 	}
 
-	for i := 0; i < 3; i++ {
-		_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	for range 3 {
+		_, _ = cb.Execute(context.Background(), func() (any, error) {
 			return nil, errFake
 		})
 	}
@@ -64,11 +64,11 @@ func TestCircuitBreaker_OpenRejectsRequests(t *testing.T) {
 	})
 
 	// Trip the breaker
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 
-	_, err := cb.Execute(context.Background(), func() (interface{}, error) {
+	_, err := cb.Execute(context.Background(), func() (any, error) {
 		return "should-not-reach", nil
 	})
 	if !errors.Is(err, ErrCircuitOpen) {
@@ -85,7 +85,7 @@ func TestCircuitBreaker_OpenToHalfOpen(t *testing.T) {
 	})
 
 	// Trip the breaker
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 	if cb.State() != StateOpen {
@@ -96,7 +96,7 @@ func TestCircuitBreaker_OpenToHalfOpen(t *testing.T) {
 	clock.Advance(6 * time.Second)
 
 	// Next call should transition to half-open and succeed
-	result, err := cb.Execute(context.Background(), func() (interface{}, error) {
+	result, err := cb.Execute(context.Background(), func() (any, error) {
 		return "recovered", nil
 	})
 	if err != nil {
@@ -118,7 +118,7 @@ func TestCircuitBreaker_HalfOpenToClosed(t *testing.T) {
 	})
 
 	// Trip breaker
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 
@@ -126,8 +126,8 @@ func TestCircuitBreaker_HalfOpenToClosed(t *testing.T) {
 	clock.Advance(6 * time.Second)
 
 	// Succeed enough times in half-open
-	for i := 0; i < 2; i++ {
-		_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	for range 2 {
+		_, _ = cb.Execute(context.Background(), func() (any, error) {
 			return "ok", nil
 		})
 	}
@@ -148,14 +148,14 @@ func TestCircuitBreaker_HalfOpenBackToOpen(t *testing.T) {
 	})
 
 	// Trip breaker
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 
 	clock.Advance(6 * time.Second)
 
 	// Fail in half-open
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 
@@ -167,7 +167,7 @@ func TestCircuitBreaker_HalfOpenBackToOpen(t *testing.T) {
 func TestCircuitBreaker_Reset(t *testing.T) {
 	cb := New("test-svc", Config{FailureThreshold: 1})
 
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 	if cb.State() != StateOpen {
@@ -184,14 +184,14 @@ func TestCircuitBreaker_ExecuteWithFallback(t *testing.T) {
 	cb := New("test-svc", Config{FailureThreshold: 1})
 
 	// Trip
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 
 	result, err := cb.ExecuteWithFallback(
 		context.Background(),
-		func() (interface{}, error) { return nil, errFake },
-		func(err error) (interface{}, error) { return "fallback_value", nil },
+		func() (any, error) { return nil, errFake },
+		func(err error) (any, error) { return "fallback_value", nil },
 	)
 	if err != nil {
 		t.Fatalf("expected fallback success, got %v", err)
@@ -206,7 +206,7 @@ func TestCircuitBreaker_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := cb.Execute(ctx, func() (interface{}, error) {
+	_, err := cb.Execute(ctx, func() (any, error) {
 		return nil, nil
 	})
 	if !errors.Is(err, context.Canceled) {
@@ -219,7 +219,7 @@ func TestCircuitBreaker_Stats(t *testing.T) {
 	if cb.Name() != "my-service" {
 		t.Fatalf("Name() = %q", cb.Name())
 	}
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 	failures, successes := cb.Counts()
@@ -249,7 +249,7 @@ func TestCircuitBreaker_DefaultsAndCustomFailureClassifier(t *testing.T) {
 			return errors.Is(err, errFake)
 		},
 	})
-	_, err := cb.Execute(context.Background(), func() (interface{}, error) {
+	_, err := cb.Execute(context.Background(), func() (any, error) {
 		return nil, errors.New("ignored")
 	})
 	if err == nil {
@@ -258,7 +258,7 @@ func TestCircuitBreaker_DefaultsAndCustomFailureClassifier(t *testing.T) {
 	if cb.State() != StateClosed {
 		t.Fatalf("ignored error should not open circuit")
 	}
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 	if cb.State() != StateOpen {
@@ -275,18 +275,18 @@ func TestCircuitBreaker_HalfOpenMaxCalls(t *testing.T) {
 		SuccessThreshold: 3,
 		Clock:            clock,
 	})
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 	clock.Advance(2 * time.Second)
 
-	_, err := cb.Execute(context.Background(), func() (interface{}, error) {
+	_, err := cb.Execute(context.Background(), func() (any, error) {
 		return "first", nil
 	})
 	if err != nil {
 		t.Fatalf("first half-open call error = %v", err)
 	}
-	_, err = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, err = cb.Execute(context.Background(), func() (any, error) {
 		return "second", nil
 	})
 	if !errors.Is(err, ErrTooManyRequests) {
@@ -313,7 +313,7 @@ func TestCircuitBreaker_OnStateChange(t *testing.T) {
 		},
 	})
 
-	_, _ = cb.Execute(context.Background(), func() (interface{}, error) {
+	_, _ = cb.Execute(context.Background(), func() (any, error) {
 		return nil, errFake
 	})
 
@@ -346,11 +346,11 @@ func TestCircuitBreaker_ConcurrentExecutions(t *testing.T) {
 	var successCount, failCount atomic.Int64
 
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < opsPerGoroutine; i++ {
-				_, err := cb.Execute(context.Background(), func() (interface{}, error) {
+			for range opsPerGoroutine {
+				_, err := cb.Execute(context.Background(), func() (any, error) {
 					if id%3 == 0 {
 						return nil, errFake
 					}
@@ -383,7 +383,7 @@ func BenchmarkCircuitBreaker_Execute_Closed(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, _ = cb.Execute(ctx, func() (interface{}, error) {
+		_, _ = cb.Execute(ctx, func() (any, error) {
 			return "ok", nil
 		})
 	}
@@ -394,14 +394,14 @@ func BenchmarkCircuitBreaker_Execute_Open(b *testing.B) {
 	ctx := context.Background()
 
 	// Trip the circuit
-	_, _ = cb.Execute(ctx, func() (interface{}, error) {
+	_, _ = cb.Execute(ctx, func() (any, error) {
 		return nil, errFake
 	})
 
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_, _ = cb.Execute(ctx, func() (interface{}, error) {
+		_, _ = cb.Execute(ctx, func() (any, error) {
 			return "should-not-reach", nil
 		})
 	}
@@ -415,7 +415,7 @@ func BenchmarkCircuitBreaker_Execute_Parallel(b *testing.B) {
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_, _ = cb.Execute(ctx, func() (interface{}, error) {
+			_, _ = cb.Execute(ctx, func() (any, error) {
 				return "ok", nil
 			})
 		}

@@ -68,6 +68,7 @@ check_lifecycle_contracts() {
   [[ -d "$target/api/protos" ]] || return 0
 
   local generator=""
+  local generator_timeout_sec="${LIFECYCLE_CONTRACT_CHECK_TIMEOUT_SEC:-60}"
   if [[ -f "$target/scripts/checks/generate_lifecycle_contract_tests.mjs" ]]; then
     generator="$target/scripts/checks/generate_lifecycle_contract_tests.mjs"
   elif generator="$(resolve_path "foundation/tooling/scripts/generate_lifecycle_contract_tests.mjs" 2>/dev/null)"; then
@@ -87,13 +88,63 @@ check_lifecycle_contracts() {
     return 0
   fi
 
-  if node "$generator" \
-    --proto-root "$target/api/protos" \
-    --out "$target/tests/contract/generated_lifecycle_test.go" \
-    --check; then
+  if run_with_timeout "$generator_timeout_sec" node "$generator" \
+      --proto-root "$target/api/protos" \
+      --out "$target/tests/contract/generated_lifecycle_test.go" \
+      --check; then
     :
   else
     failed=1
+  fi
+}
+
+run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+
+  if command -v perl >/dev/null 2>&1; then
+    perl -e '
+      use strict;
+      use warnings;
+
+      my $timeout = shift @ARGV;
+      my @cmd = @ARGV;
+      my $pid = fork();
+      die "fork failed: $!\n" unless defined $pid;
+
+      if ($pid == 0) {
+        setpgrp(0, 0) or die "setpgrp failed: $!\n";
+        exec @cmd or die "exec failed: $!\n";
+      }
+
+      my $timed_out = 0;
+      local $SIG{ALRM} = sub {
+        $timed_out = 1;
+        kill "TERM", -$pid;
+        select(undef, undef, undef, 0.5);
+        kill "KILL", -$pid;
+      };
+
+      alarm $timeout;
+      waitpid($pid, 0);
+      my $status = $?;
+      alarm 0;
+
+      if ($timed_out) {
+        print STDERR "command timed out after ${timeout}s\n";
+        exit 124;
+      }
+      if ($status == -1) {
+        print STDERR "waitpid failed: $!\n";
+        exit 1;
+      }
+      if ($status & 127) {
+        exit 128 + ($status & 127);
+      }
+      exit($status >> 8);
+    ' "$timeout_sec" "$@"
+  else
+    "$@"
   fi
 }
 

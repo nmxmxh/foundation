@@ -110,7 +110,7 @@ func TestVersionsHandlerParseAndCompare(t *testing.T) {
 	v := New(Config{SupportedVersions: []string{"v2", "v1"}})
 	rec := httptest.NewRecorder()
 	v.VersionsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/versions", nil))
-	var body map[string]interface{}
+	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode versions body: %v", err)
 	}

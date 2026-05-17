@@ -72,6 +72,30 @@ func TestQueryAllCollectsTypedRows(t *testing.T) {
 	}
 }
 
+func TestQueryAllLimitStopsRetainingRows(t *testing.T) {
+	rows := &executorFakeRows{items: 5}
+	db := &fakeRowQueryer{rows: rows}
+	got, err := QueryAllLimit(context.Background(), db, 2, "SELECT id", func(r Rows) (int, error) {
+		var id int
+		if err := r.Scan(&id); err != nil {
+			return 0, err
+		}
+		return id, nil
+	})
+	if err != nil {
+		t.Fatalf("QueryAllLimit error = %v", err)
+	}
+	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("QueryAllLimit = %#v", got)
+	}
+	if !rows.closed {
+		t.Fatal("rows were not closed after limit")
+	}
+	if _, err := QueryAllLimit[int](context.Background(), db, -1, "SELECT id", func(Rows) (int, error) { return 0, nil }); err == nil {
+		t.Fatal("expected negative limit to fail")
+	}
+}
+
 func TestQueryEachReturnsRowsErr(t *testing.T) {
 	errBoom := errors.New("rows")
 	db := &fakeRowQueryer{rows: &executorFakeRows{items: 1, err: errBoom}}

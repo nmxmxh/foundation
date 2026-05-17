@@ -81,7 +81,7 @@ Every exposed feature should add tests for the vulnerability families it touches
 ## Required Implementation Defaults
 
 1. Use `server-kit/go/security` helpers for redirect, outbound URL, duplicate query parameter, and path containment checks.
-2. Use `security.CSRFProtection` for browser cookie mutation surfaces on Go 1.25+ and keep explicit origin checks for websocket upgrades.
+2. Use `security.CSRFProtection` for browser cookie mutation surfaces on Go 1.26+ and keep explicit origin checks for websocket upgrades.
 3. Use resilient HTTP clients with encoded query construction, bounded response bodies, per-call timeouts, and outbound URL policy for partner/webhook egress.
 4. Reject ambiguous input early with foundation `domainerr.Validation` errors.
 5. Prefer exact allowlists over blocklists. Host suffix checks are not authorization.

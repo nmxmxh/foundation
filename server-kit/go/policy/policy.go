@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -47,20 +48,20 @@ const (
 
 // Principal represents an entity making a request.
 type Principal struct {
-	ID         string                 `json:"id"`
-	Type       string                 `json:"type"`
-	Roles      []string               `json:"roles,omitempty"`
-	Groups     []string               `json:"groups,omitempty"`
-	Attributes map[string]interface{} `json:"attributes,omitempty"`
+	ID         string         `json:"id"`
+	Type       string         `json:"type"`
+	Roles      []string       `json:"roles,omitempty"`
+	Groups     []string       `json:"groups,omitempty"`
+	Attributes map[string]any `json:"attributes,omitempty"`
 }
 
 // Resource represents the target of an action.
 type Resource struct {
-	ID         string                 `json:"id"`
-	Type       string                 `json:"type"`
-	Owner      string                 `json:"owner,omitempty"`
-	OrgID      string                 `json:"org_id,omitempty"`
-	Attributes map[string]interface{} `json:"attributes,omitempty"`
+	ID         string         `json:"id"`
+	Type       string         `json:"type"`
+	Owner      string         `json:"owner,omitempty"`
+	OrgID      string         `json:"org_id,omitempty"`
+	Attributes map[string]any `json:"attributes,omitempty"`
 }
 
 // Condition represents a policy condition.
@@ -70,7 +71,7 @@ type Condition struct {
 	// Operator is the comparison operator.
 	Operator ConditionOperator `json:"operator"`
 	// Value is the value to compare against.
-	Value interface{} `json:"value"`
+	Value any `json:"value"`
 }
 
 // ConditionOperator represents a condition comparison operator.
@@ -117,11 +118,11 @@ type Policy struct {
 
 // PrincipalMatcher defines criteria for matching principals.
 type PrincipalMatcher struct {
-	Type       string   `json:"type,omitempty"`
-	IDs        []string `json:"ids,omitempty"`
-	Roles      []string `json:"roles,omitempty"`
-	Groups     []string `json:"groups,omitempty"`
-	AnyOf      bool     `json:"any_of,omitempty"` // If true, match any; if false, match all
+	Type   string   `json:"type,omitempty"`
+	IDs    []string `json:"ids,omitempty"`
+	Roles  []string `json:"roles,omitempty"`
+	Groups []string `json:"groups,omitempty"`
+	AnyOf  bool     `json:"any_of,omitempty"` // If true, match any; if false, match all
 }
 
 // ResourceMatcher defines criteria for matching resources.
@@ -134,18 +135,18 @@ type ResourceMatcher struct {
 
 // Request represents an authorization request.
 type Request struct {
-	Principal Principal              `json:"principal"`
-	Action    string                 `json:"action"`
-	Resource  Resource               `json:"resource"`
-	Context   map[string]interface{} `json:"context,omitempty"`
+	Principal Principal      `json:"principal"`
+	Action    string         `json:"action"`
+	Resource  Resource       `json:"resource"`
+	Context   map[string]any `json:"context,omitempty"`
 }
 
 // Result represents the result of policy evaluation.
 type Result struct {
-	Decision     Decision `json:"decision"`
-	PolicyID     string   `json:"policy_id,omitempty"`
-	Reason       string   `json:"reason,omitempty"`
-	Diagnostics  []string `json:"diagnostics,omitempty"`
+	Decision    Decision `json:"decision"`
+	PolicyID    string   `json:"policy_id,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
+	Diagnostics []string `json:"diagnostics,omitempty"`
 }
 
 // Engine evaluates policies.
@@ -428,10 +429,8 @@ func (e *Engine) evaluateCondition(cond Condition, req Request) bool {
 
 	case OpContains:
 		if arr, ok := value.([]string); ok {
-			for _, v := range arr {
-				if v == fmt.Sprintf("%v", cond.Value) {
-					return true
-				}
+			if slices.Contains(arr, fmt.Sprintf("%v", cond.Value)) {
+				return true
 			}
 		}
 		if str, ok := value.(string); ok {
@@ -440,7 +439,7 @@ func (e *Engine) evaluateCondition(cond Condition, req Request) bool {
 		return false
 
 	case OpIn:
-		if arr, ok := cond.Value.([]interface{}); ok {
+		if arr, ok := cond.Value.([]any); ok {
 			strVal := fmt.Sprintf("%v", value)
 			for _, v := range arr {
 				if fmt.Sprintf("%v", v) == strVal {
@@ -451,7 +450,7 @@ func (e *Engine) evaluateCondition(cond Condition, req Request) bool {
 		return false
 
 	case OpNotIn:
-		if arr, ok := cond.Value.([]interface{}); ok {
+		if arr, ok := cond.Value.([]any); ok {
 			strVal := fmt.Sprintf("%v", value)
 			for _, v := range arr {
 				if fmt.Sprintf("%v", v) == strVal {
@@ -478,16 +477,16 @@ func (e *Engine) evaluateCondition(cond Condition, req Request) bool {
 }
 
 // resolveField resolves a field path to a value.
-func (e *Engine) resolveField(field string, req Request) interface{} {
+func (e *Engine) resolveField(field string, req Request) any {
 	parts := strings.Split(field, ".")
 	if len(parts) == 0 {
 		return nil
 	}
 
-	var current interface{}
+	var current any
 	switch parts[0] {
 	case "principal":
-		current = map[string]interface{}{
+		current = map[string]any{
 			"id":         req.Principal.ID,
 			"type":       req.Principal.Type,
 			"roles":      req.Principal.Roles,
@@ -495,7 +494,7 @@ func (e *Engine) resolveField(field string, req Request) interface{} {
 			"attributes": req.Principal.Attributes,
 		}
 	case "resource":
-		current = map[string]interface{}{
+		current = map[string]any{
 			"id":         req.Resource.ID,
 			"type":       req.Resource.Type,
 			"owner":      req.Resource.Owner,
@@ -511,7 +510,7 @@ func (e *Engine) resolveField(field string, req Request) interface{} {
 	}
 
 	for _, part := range parts[1:] {
-		if m, ok := current.(map[string]interface{}); ok {
+		if m, ok := current.(map[string]any); ok {
 			current = m[part]
 		} else {
 			return nil
@@ -564,4 +563,3 @@ func PrincipalFromContext(ctx context.Context) *Principal {
 	}
 	return nil
 }
-

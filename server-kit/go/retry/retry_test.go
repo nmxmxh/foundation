@@ -113,7 +113,7 @@ func TestPolicy_DoWithResult(t *testing.T) {
 		InitialDelay: 1 * time.Millisecond,
 	})
 
-	res, err := policy.DoWithResult(ctx, func() (interface{}, error) {
+	res, err := policy.DoWithResult(ctx, func() (any, error) {
 		return "success", nil
 	})
 
@@ -154,7 +154,7 @@ func TestRetryDefaultsDelayContextAndConveniences(t *testing.T) {
 	if err := Do(context.Background(), func() error { return nil }); err != nil {
 		t.Fatalf("Do() error = %v", err)
 	}
-	if got, err := DoWithResult(context.Background(), func() (interface{}, error) { return "ok", nil }); err != nil || got != "ok" {
+	if got, err := DoWithResult(context.Background(), func() (any, error) { return "ok", nil }); err != nil || got != "ok" {
 		t.Fatalf("DoWithResult() = %v err=%v", got, err)
 	}
 	for _, p := range []*Policy{AggressiveRetry(), GentleRetry(), NoRetry(), HTTPRetry(), DatabaseRetry()} {
@@ -175,7 +175,7 @@ func TestRetryDefaultsDelayContextAndConveniences(t *testing.T) {
 func TestDoWithResultExhaustionAndNonRetryable(t *testing.T) {
 	policy := NewPolicy(Config{MaxAttempts: 2, InitialDelay: time.Millisecond})
 	var attempts int
-	got, err := policy.DoWithResult(context.Background(), func() (interface{}, error) {
+	got, err := policy.DoWithResult(context.Background(), func() (any, error) {
 		attempts++
 		return "last", errors.New("fail")
 	})
@@ -183,7 +183,7 @@ func TestDoWithResultExhaustionAndNonRetryable(t *testing.T) {
 		t.Fatalf("DoWithResult exhaustion got=%v err=%v attempts=%d", got, err, attempts)
 	}
 	policy = NewPolicy(Config{MaxAttempts: 3, RetryIf: func(error) bool { return false }})
-	got, err = policy.DoWithResult(context.Background(), func() (interface{}, error) {
+	got, err = policy.DoWithResult(context.Background(), func() (any, error) {
 		return "ignored", errors.New("fatal")
 	})
 	if got != nil || err == nil || err.Error() != "fatal" {

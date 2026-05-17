@@ -1,6 +1,7 @@
 package circuitbreaker
 
 import (
+	"maps"
 	"sync"
 )
 
@@ -78,9 +79,7 @@ func (r *Registry) All() map[string]*CircuitBreaker {
 	defer r.mu.RUnlock()
 
 	result := make(map[string]*CircuitBreaker, len(r.breakers))
-	for k, v := range r.breakers {
-		result[k] = v
-	}
+	maps.Copy(result, r.breakers)
 	return result
 }
 

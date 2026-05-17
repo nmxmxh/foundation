@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -40,7 +41,7 @@ type Client interface {
 	PSubscribe(context.Context, ...string) ([]<-chan []byte, func(), error)
 
 	// Streams (Reliable event delivery)
-	XAdd(ctx context.Context, stream string, values map[string]interface{}) (string, error)
+	XAdd(ctx context.Context, stream string, values map[string]any) (string, error)
 	XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error)
 	XAck(ctx context.Context, stream, group string, ids ...string) error
 
@@ -51,11 +52,11 @@ type Client interface {
 	Unlock(ctx context.Context, key, token string) (bool, error)
 
 	// Analytics & Cardinality (HyperLogLog)
-	PFAdd(ctx context.Context, key string, els ...interface{}) (int64, error)
+	PFAdd(ctx context.Context, key string, els ...any) (int64, error)
 	PFCount(ctx context.Context, keys ...string) (int64, error)
 
 	// Primitives
-	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	Set(ctx context.Context, key string, value any, ttl time.Duration) error
 	Get(ctx context.Context, key string) ([]byte, error)
 	Del(ctx context.Context, keys ...string) error
 	Close() error
@@ -65,15 +66,15 @@ type Client interface {
 // hydration and write-through paths. Callers should use it when several
 // independent Redis keys cross the network boundary together.
 type BatchClient interface {
-	SetMany(ctx context.Context, values map[string]interface{}, ttl time.Duration) error
+	SetMany(ctx context.Context, values map[string]any, ttl time.Duration) error
 	GetMany(ctx context.Context, keys ...string) (map[string][]byte, error)
-	SetGetMany(ctx context.Context, values map[string]interface{}, ttl time.Duration) (map[string][]byte, error)
+	SetGetMany(ctx context.Context, values map[string]any, ttl time.Duration) (map[string][]byte, error)
 }
 
 // StreamMessage represents a message read from a Redis stream.
 type StreamMessage struct {
 	ID     string
-	Values map[string]interface{}
+	Values map[string]any
 }
 
 // Connect creates a redis pub/sub client using the selected driver.
@@ -302,7 +303,7 @@ func (c *memoryClient) Expire(_ context.Context, key string, ttl time.Duration) 
 	return true, nil
 }
 
-func (c *memoryClient) XAdd(_ context.Context, stream string, values map[string]interface{}) (string, error) {
+func (c *memoryClient) XAdd(_ context.Context, stream string, values map[string]any) (string, error) {
 	qualified := c.qualify(stream)
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -392,7 +393,7 @@ func (c *memoryClient) Unlock(_ context.Context, key, token string) (bool, error
 	return true, nil
 }
 
-func (c *memoryClient) Set(_ context.Context, key string, value interface{}, ttl time.Duration) error {
+func (c *memoryClient) Set(_ context.Context, key string, value any, ttl time.Duration) error {
 	qualified := c.qualify(key)
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -408,7 +409,7 @@ func (c *memoryClient) Set(_ context.Context, key string, value interface{}, ttl
 	return nil
 }
 
-func (c *memoryClient) SetMany(_ context.Context, values map[string]interface{}, ttl time.Duration) error {
+func (c *memoryClient) SetMany(_ context.Context, values map[string]any, ttl time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -462,7 +463,7 @@ func (c *memoryClient) GetMany(_ context.Context, keys ...string) (map[string][]
 	return out, nil
 }
 
-func (c *memoryClient) SetGetMany(_ context.Context, values map[string]interface{}, ttl time.Duration) (map[string][]byte, error) {
+func (c *memoryClient) SetGetMany(_ context.Context, values map[string]any, ttl time.Duration) (map[string][]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -497,7 +498,7 @@ func (c *memoryClient) Del(_ context.Context, keys ...string) error {
 	return nil
 }
 
-func (c *memoryClient) PFAdd(_ context.Context, key string, els ...interface{}) (int64, error) {
+func (c *memoryClient) PFAdd(_ context.Context, key string, els ...any) (int64, error) {
 	qualified := c.qualify(key)
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -648,7 +649,7 @@ func publishMemoryPayload(sub chan []byte, payload []byte) {
 	}
 }
 
-func bytesFromValue(value interface{}) []byte {
+func bytesFromValue(value any) []byte {
 	switch v := value.(type) {
 	case nil:
 		return nil
@@ -657,7 +658,7 @@ func bytesFromValue(value interface{}) []byte {
 	case string:
 		return []byte(v)
 	default:
-		return []byte(fmt.Sprint(v))
+		return fmt.Append(nil, v)
 	}
 }
 
@@ -668,11 +669,9 @@ func cloneStreamMessage(message StreamMessage) StreamMessage {
 	}
 }
 
-func copyInterfaceMap(in map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+func copyInterfaceMap(in map[string]any) map[string]any {
+	out := make(map[string]any, len(in))
+	maps.Copy(out, in)
 	return out
 }
 
@@ -884,7 +883,7 @@ func (c *redisClient) Expire(ctx context.Context, key string, ttl time.Duration)
 	return result, err
 }
 
-func (c *redisClient) XAdd(ctx context.Context, stream string, values map[string]interface{}) (string, error) {
+func (c *redisClient) XAdd(ctx context.Context, stream string, values map[string]any) (string, error) {
 	start := time.Now()
 	result, err := c.client.XAdd(ctx, &goredis.XAddArgs{
 		Stream: c.qualify(stream),
@@ -977,7 +976,7 @@ func (c *redisClient) Unlock(ctx context.Context, key, token string) (bool, erro
 	return res == 1, err
 }
 
-func (c *redisClient) PFAdd(ctx context.Context, key string, els ...interface{}) (int64, error) {
+func (c *redisClient) PFAdd(ctx context.Context, key string, els ...any) (int64, error) {
 	start := time.Now()
 	result, err := c.client.PFAdd(ctx, c.qualify(key), els...).Result()
 	recordRedisOperation("pfadd", start, err)
@@ -998,14 +997,14 @@ func (c *redisClient) PFCount(ctx context.Context, keys ...string) (int64, error
 	return result, err
 }
 
-func (c *redisClient) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+func (c *redisClient) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
 	start := time.Now()
 	err := c.client.Set(ctx, c.qualify(key), value, ttl).Err()
 	recordRedisOperation("set", start, err)
 	return err
 }
 
-func (c *redisClient) SetMany(ctx context.Context, values map[string]interface{}, ttl time.Duration) error {
+func (c *redisClient) SetMany(ctx context.Context, values map[string]any, ttl time.Duration) error {
 	if len(values) == 0 {
 		return nil
 	}
@@ -1054,14 +1053,14 @@ func (c *redisClient) GetMany(ctx context.Context, keys ...string) (map[string][
 		case []byte:
 			out[keys[i]] = append([]byte(nil), typed...)
 		default:
-			out[keys[i]] = []byte(fmt.Sprint(typed))
+			out[keys[i]] = fmt.Append(nil, typed)
 		}
 	}
 	recordRedisOperation("get_many", start, nil)
 	return out, nil
 }
 
-func (c *redisClient) SetGetMany(ctx context.Context, values map[string]interface{}, ttl time.Duration) (map[string][]byte, error) {
+func (c *redisClient) SetGetMany(ctx context.Context, values map[string]any, ttl time.Duration) (map[string][]byte, error) {
 	if len(values) == 0 {
 		return map[string][]byte{}, nil
 	}
@@ -1163,7 +1162,7 @@ func (c *shardedClient) PSubscribe(ctx context.Context, patterns ...string) ([]<
 	return c.shards[0].PSubscribe(ctx, patterns...)
 }
 
-func (c *shardedClient) XAdd(ctx context.Context, stream string, values map[string]interface{}) (string, error) {
+func (c *shardedClient) XAdd(ctx context.Context, stream string, values map[string]any) (string, error) {
 	return c.shard(stream).XAdd(ctx, stream, values)
 }
 
@@ -1191,7 +1190,7 @@ func (c *shardedClient) Unlock(ctx context.Context, key, token string) (bool, er
 	return c.shard(key).Unlock(ctx, key, token)
 }
 
-func (c *shardedClient) PFAdd(ctx context.Context, key string, els ...interface{}) (int64, error) {
+func (c *shardedClient) PFAdd(ctx context.Context, key string, els ...any) (int64, error) {
 	return c.shard(key).PFAdd(ctx, key, els...)
 }
 
@@ -1202,19 +1201,19 @@ func (c *shardedClient) PFCount(ctx context.Context, keys ...string) (int64, err
 	return c.shard(keys[0]).PFCount(ctx, keys...)
 }
 
-func (c *shardedClient) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+func (c *shardedClient) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
 	return c.shard(key).Set(ctx, key, value, ttl)
 }
 
-func (c *shardedClient) SetMany(ctx context.Context, values map[string]interface{}, ttl time.Duration) error {
+func (c *shardedClient) SetMany(ctx context.Context, values map[string]any, ttl time.Duration) error {
 	if len(values) == 0 {
 		return nil
 	}
-	grouped := make(map[*redisClient]map[string]interface{}, len(c.shards))
+	grouped := make(map[*redisClient]map[string]any, len(c.shards))
 	for key, value := range values {
 		shard := c.shard(key)
 		if grouped[shard] == nil {
-			grouped[shard] = map[string]interface{}{}
+			grouped[shard] = map[string]any{}
 		}
 		grouped[shard][key] = value
 	}
@@ -1245,22 +1244,20 @@ func (c *shardedClient) GetMany(ctx context.Context, keys ...string) (map[string
 			firstErr = err
 			continue
 		}
-		for key, value := range values {
-			out[key] = value
-		}
+		maps.Copy(out, values)
 	}
 	return out, firstErr
 }
 
-func (c *shardedClient) SetGetMany(ctx context.Context, values map[string]interface{}, ttl time.Duration) (map[string][]byte, error) {
+func (c *shardedClient) SetGetMany(ctx context.Context, values map[string]any, ttl time.Duration) (map[string][]byte, error) {
 	if len(values) == 0 {
 		return map[string][]byte{}, nil
 	}
-	grouped := make(map[*redisClient]map[string]interface{}, len(c.shards))
+	grouped := make(map[*redisClient]map[string]any, len(c.shards))
 	for key, value := range values {
 		shard := c.shard(key)
 		if grouped[shard] == nil {
-			grouped[shard] = map[string]interface{}{}
+			grouped[shard] = map[string]any{}
 		}
 		grouped[shard][key] = value
 	}
@@ -1272,9 +1269,7 @@ func (c *shardedClient) SetGetMany(ctx context.Context, values map[string]interf
 			firstErr = err
 			continue
 		}
-		for key, value := range values {
-			out[key] = value
-		}
+		maps.Copy(out, values)
 	}
 	return out, firstErr
 }

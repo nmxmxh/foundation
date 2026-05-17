@@ -2,10 +2,23 @@ import { describe, expect, it, vi } from "vitest";
 import {
   RuntimeSharedArena,
   clampRuntimeArenaBytes,
+  decodeRuntimeColumnarBatchDescriptor,
+  encodeRuntimeColumnarBatchDescriptor,
   negotiateRuntimeMemory,
   type RuntimeArenaQueueEntry,
 } from "./arena";
 import {
+  ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH,
+  ARENA_DESCRIPTOR_TYPE_COLUMNAR_OFFSETS,
+  ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALUES,
+  COLUMNAR_BATCH_ALIGNMENT_BYTES,
+  COLUMNAR_BATCH_SCHEMA_VERSION,
+  COLUMNAR_DESCRIPTOR_ID_NONE,
+  COLUMNAR_FIELD_FLAG_NULLABLE,
+  COLUMNAR_LOGICAL_TYPE_INT,
+  COLUMNAR_LOGICAL_TYPE_UTF8,
+  COLUMNAR_PHYSICAL_TYPE_FIXED_WIDTH,
+  COLUMNAR_PHYSICAL_TYPE_VARIABLE_BINARY,
   ARENA_DEFAULT_BYTES,
   ARENA_DESCRIPTOR_COUNT,
   ARENA_DESCRIPTOR_STATE_CONSUMED,
@@ -109,6 +122,98 @@ describe("RuntimeSharedArena", () => {
     expect(drained.entries).toBe(scratch);
     expect(drained.entries.map((entry) => entry.descriptorId)).toEqual(ids);
     expect(drained.entries.every((entry) => entry.correlationHash === 9)).toBe(true);
+  });
+
+  it("encodes columnar batch descriptors as 64-byte aligned metadata slabs", () => {
+    const payload = encodeRuntimeColumnarBatchDescriptor({
+      schemaVersion: COLUMNAR_BATCH_SCHEMA_VERSION,
+      rowCount: 3,
+      columnCount: 2,
+      flags: 0,
+      metadataDescriptorId: COLUMNAR_DESCRIPTOR_ID_NONE,
+      dictionaryDescriptorId: COLUMNAR_DESCRIPTOR_ID_NONE,
+      fields: [
+        {
+          fieldId: 1,
+          logicalType: COLUMNAR_LOGICAL_TYPE_INT,
+          physicalType: COLUMNAR_PHYSICAL_TYPE_FIXED_WIDTH,
+          length: 3,
+          valuesDescriptorId: 11,
+          byteWidth: 8,
+        },
+        {
+          fieldId: 2,
+          logicalType: COLUMNAR_LOGICAL_TYPE_UTF8,
+          physicalType: COLUMNAR_PHYSICAL_TYPE_VARIABLE_BINARY,
+          flags: COLUMNAR_FIELD_FLAG_NULLABLE,
+          length: 3,
+          nullCount: 1,
+          validityDescriptorId: 12,
+          offsetsDescriptorId: 13,
+          valuesDescriptorId: 14,
+        },
+      ],
+    });
+
+    expect(payload.byteLength % COLUMNAR_BATCH_ALIGNMENT_BYTES).toBe(0);
+    const decoded = decodeRuntimeColumnarBatchDescriptor(payload);
+    expect(decoded.rowCount).toBe(3);
+    expect(decoded.fields.map((field) => field.valuesDescriptorId)).toEqual([11, 14]);
+    expect(decoded.fields[1].offsetsDescriptorId).toBe(13);
+  });
+
+  it("publishes columnar batch descriptors through the arena queue", () => {
+    const arena = RuntimeSharedArena.create({ arenaBytes: ARENA_MIN_BYTES });
+    const values = arena.allocate(24, ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALUES);
+    const offsets = arena.allocate(16, ARENA_DESCRIPTOR_TYPE_COLUMNAR_OFFSETS);
+    arena.writeSlabReady(values.id, new Uint8Array(24));
+    arena.writeSlabReady(offsets.id, new Uint8Array(16));
+
+    const batch = arena.writeColumnarBatchDescriptor(
+      [
+        {
+          fieldId: 7,
+          logicalType: COLUMNAR_LOGICAL_TYPE_UTF8,
+          physicalType: COLUMNAR_PHYSICAL_TYPE_VARIABLE_BINARY,
+          length: 3,
+          offsetsDescriptorId: offsets.id,
+          valuesDescriptorId: values.id,
+        },
+      ],
+      { rowCount: 3, correlationHash: 99 }
+    );
+
+    expect(batch.type).toBe(ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH);
+    expect(arena.dequeue()?.descriptorId).toBe(batch.id);
+    expect(arena.readColumnarBatchDescriptor(batch.id).fields[0]).toMatchObject({
+      fieldId: 7,
+      length: 3,
+      offsetsDescriptorId: offsets.id,
+      valuesDescriptorId: values.id,
+    });
+  });
+
+  it("rejects columnar descriptors whose field lengths do not match the row count", () => {
+    expect(() =>
+      encodeRuntimeColumnarBatchDescriptor({
+        schemaVersion: COLUMNAR_BATCH_SCHEMA_VERSION,
+        rowCount: 2,
+        columnCount: 1,
+        flags: 0,
+        metadataDescriptorId: COLUMNAR_DESCRIPTOR_ID_NONE,
+        dictionaryDescriptorId: COLUMNAR_DESCRIPTOR_ID_NONE,
+        fields: [
+          {
+            fieldId: 1,
+            logicalType: COLUMNAR_LOGICAL_TYPE_INT,
+            physicalType: COLUMNAR_PHYSICAL_TYPE_FIXED_WIDTH,
+            length: 3,
+            valuesDescriptorId: 1,
+            byteWidth: 4,
+          },
+        ],
+      })
+    ).toThrow(/does not match row count/);
   });
 
   it("reuses released descriptors through a disciplined free-list", () => {

@@ -1,43 +1,44 @@
 # Handover Note: Codex
 
-**Project**: Ovasabi Foundation & Cognitive Wire (CW)  
-**Architect**: Sovereign Architect (Abuja, Nigeria)  
-**Status**: Stealth / High-Performance Runtime  
+**Project**: Ovasabi Foundation
+**Status**: Production scaffold and runtime substrate
 
-## 1. History & Context
-Ovasabi Studios is an Abuja-based engineering lab focused on technical sovereignty and hyper-performance. The ecosystem evolved from `fintech_v1` (ledger/sensor reference) and `inos_v1` (distributed mesh research) into a unified, agent-optimized **Foundation**.
+## Context
 
-## 2. Core Achievements
-- **16ns Dispatch**: Zero-allocation same-process communication.
-- **Zero-Copy Pipeline**: `SAB -> Rust (Compute) -> Go (Logic) -> TS (Render)` using SharedArrayBuffer and atomic signaling.
-- **Performance Ladder**: Automated transport detection (`ffi -> shm -> stdio -> ws -> http`).
-- **CWF (Cognitive Wire Format)**: A token-efficient, pipe-delimited serialization format designed for AI context exchange.
+Ovasabi Foundation is a shared scaffold for tenant-isolated, event-driven,
+realtime applications. It combines Go backend orchestration, TypeScript/React
+frontends, Rust/WASM/native runtime lanes, PostgreSQL durability, Redis
+ephemeral coordination, and River-backed worker execution.
 
-## 3. The Shift: Cognitive Wire (CW)
-We are moving away from traditional "Centralized API" models towards **Shared AI Compute.**
-- **Stealth Extension**: CW is not a new layer; it is an extension of the Foundation's existing transport.
-- **Redis-Local State**: Redis may be sharded/replicated close to the sender for ephemeral coordination, recent claim exchange, connection routing, and short replay windows.
-- **Durable Truth Boundary**: PostgreSQL remains the authoritative system of record for verdicts, audits, manifests, billing/economy settlement, model promotion, and long-lived lineage.
-- **Binary-First CWF**: Optimizing the text-based CWF spec into Protobuf/Cap'n Proto-backed binary-wire contracts for the "hot-path."
+## Core Achievements
 
-## 4. Architectural Pillars
-- **Adversarial Consensus**: Multi-model debate loops where verified claims survive and hallucinations are killed early.
-- **Geomantic Routing (Odù)**: Compact binary routing keys for routing queries to specialized knowledge shards and model capabilities.
-- **Agent-Optimized**: Blueprints are "Machine-Readable Instructions." The system is maintained by AI Agents under the Sovereign Architect's supervision.
+1. Same-process direct frame dispatch with zero-allocation benchmark targets.
+2. A canonical command lifecycle:
+   `RuntimeEnvelope -> auth/tenant/correlation/idempotency validation -> requested event -> success/failed event -> frontend projection`.
+3. A performance ladder that separates direct calls, binary frames, protobuf,
+   gRPC, JSON compatibility, FFI, shared memory, stdio, WASM/SAB, WebSocket,
+   HTTP, and native shell control lanes.
+4. Generated lifecycle contract tests from mutating protobuf request/response
+   pairs.
+5. Strict scaffold checks for package boundaries, bounded work, Redis/Postgres
+   semantics, Go concurrency ownership, and server-kit runtime usage.
 
-## 5. The Plan (Immediate Action)
-1. **Extend Foundation**: Implement CW as a narrow "stealth" hot-path capability inside `runtime-transport` and `runtime-sdk`, not as a separate platform.
-2. **Shard Ephemeral State**: Replicate Redis state locally/close to sender for connection routing, claim/attack buffers, recent verification events, presence, subscriptions, and replay/idempotency windows.
-3. **CWF Optimization**: Promote CWF to schema-backed binary contracts for high-volume `InferenceRequest`, `Candidate`, `Claim`, `Attack`, `Verify`, and `Verdict` exchange.
+## Current Priorities
 
-Out of current focus: standalone product rollout should wait until the CW frame contracts and local bounded orchestration path are proven.
+1. Keep the scaffold slim: platform modules provide runtime primitives;
+   generated apps own product behavior.
+2. Raise testing standards toward 95% coverage for new and changed production
+   code, with Docker-backed integration tests for app-owned Postgres/Redis/River
+   flows.
+3. Keep service-backed Foundation Core benchmarks outside generated projects;
+   scaffolded apps inherit test targets and checks, not core benchmark daemons.
+4. Align template versions with current supported toolchains and keep local
+   module directives pinned only to installed toolchains that can be verified.
+5. Treat AI/runtime extensions as ordinary product capabilities inside the
+   existing Foundation lifecycle, not as a separate platform layer.
 
-## 6. Later Plan
-- **Model Bootstrap**: Start with a builder/coding open model class for implementation and a reasoning/critic model class for attack/verdict work. Add smaller extractor and embedding models only after the frame contracts are stable.
-- **DB Distribution**: Postpone durable DB sharding or multi-region writes until measured traffic proves the need and conflict resolution is explicitly designed.
-- **Mesh/Economy/Population**: Treat mesh inference, economy settlement, and open-model population management as later phases after local bounded orchestration works end to end.
+## Operating Rule
 
-## 7. Strategic Intent
-The goal is **Technical Sovereignty.** By combining low-cost bare-metal (Hetzner), self-hosted orchestration (Coolify), and the CW engine, the architect wields the power of a global software firm from a single room in Abuja.
-
-**Codex Instructions**: Maintain the "Zero-Allocation" discipline. Every byte matters. Every nanosecond is a battleground. Follow the "Golden Path" blueprints exactly.
+Prefer small, measured improvements over broad new abstractions. Every runtime
+claim should have a contract, a test, a benchmark where relevant, and a clear
+fallback path.

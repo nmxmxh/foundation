@@ -1,10 +1,9 @@
-//nolint:gosec // Load tests use math/rand for traffic mix only; no security decisions depend on it.
 package load
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"math/rand"
 	"os"
 	"runtime"
 	"strconv"
@@ -65,8 +64,8 @@ func TestRecurringInfrastructureLoad(t *testing.T) {
 	profile := inferLoadProfile()
 
 	steps := loadStepsFromEnv(profile.Steps)
-	if cap := loadMaxConcurrencyCapFromEnv(0); cap > 0 {
-		steps = clampStepsToCap(steps, cap)
+	if concurrencyCap := loadMaxConcurrencyCapFromEnv(0); concurrencyCap > 0 {
+		steps = clampStepsToCap(steps, concurrencyCap)
 	}
 	stepDuration := loadStepDurationFromEnv(profile.StepDuration)
 	thinkTime := loadThinkTimeFromEnv(profile.ThinkTime)
@@ -82,7 +81,7 @@ func TestRecurringInfrastructureLoad(t *testing.T) {
 	fmt.Printf("Mix weights: db_read=%d db_write=%d redis=%d queue=%d\n", mix.DBReadWeight, mix.DBWriteWeight, mix.RedisWeight, mix.QueueWeight)
 
 	for _, concurrency := range steps {
-		runLoadStep(t, ctx, env, concurrency, stepDuration, thinkTime, opTimeout, mix)
+		runLoadStep(ctx, t, env, concurrency, stepDuration, thinkTime, opTimeout, mix)
 	}
 
 	fmt.Println("\n--- Scaffold Recurring Infrastructure Load Test Complete ---")
@@ -95,7 +94,22 @@ type loadMix struct {
 	QueueWeight   int
 }
 
-func runLoadStep(t *testing.T, ctx context.Context, env *testutil.RealTestEnv, concurrency int, duration, thinkTime, opTimeout time.Duration, mix loadMix) {
+type loadStepReport struct {
+	Elapsed       float64
+	TotalOps      int64
+	RPS           float64
+	AvgLatencyMs  float64
+	ErrorRate     float64
+	QueueBefore   map[string]int64
+	QueueAfter    map[string]int64
+	RedisBefore   time.Duration
+	RedisAfter    time.Duration
+	Attempts      [opCount]int64
+	Errors        [opCount]int64
+	LatencyMicros [opCount]int64
+}
+
+func runLoadStep(ctx context.Context, t *testing.T, env *testutil.RealTestEnv, concurrency int, duration, thinkTime, opTimeout time.Duration, mix loadMix) {
 	t.Helper()
 	fmt.Printf("\n[Scaffold Step] Concurrency: %d\n", concurrency)
 
@@ -116,11 +130,11 @@ func runLoadStep(t *testing.T, ctx context.Context, env *testutil.RealTestEnv, c
 
 	start := time.Now()
 	wg := sync.WaitGroup{}
-	for i := 0; i < concurrency; i++ {
+	for i := range concurrency {
 		wg.Add(1)
 		go func(workerIdx int) {
 			defer wg.Done()
-			rnd := rand.New(rand.NewSource(time.Now().UnixNano() + int64(workerIdx)*1009))
+			var workerAttempts int64
 			for {
 				select {
 				case <-stop:
@@ -128,10 +142,12 @@ func runLoadStep(t *testing.T, ctx context.Context, env *testutil.RealTestEnv, c
 				default:
 				}
 
-				op := chooseOperation(rnd, mix)
+				workerAttempts++
+				sequence := workerAttempts + int64(workerIdx)*1009
+				op := chooseOperation(sequence, mix)
 				opCtx, cancel := context.WithTimeout(ctx, opTimeout)
 				opStart := time.Now()
-				err := executeOperation(opCtx, env, rnd, op)
+				err := executeOperation(opCtx, env, sequence, op)
 				cancel()
 
 				durationMicros := time.Since(opStart).Microseconds()
@@ -165,37 +181,54 @@ func runLoadStep(t *testing.T, ctx context.Context, env *testutil.RealTestEnv, c
 	avgLatencyMs := float64(totalLatency) / float64(totalOps) / 1000.0
 	errorRate := float64(totalError) / float64(totalOps) * 100.0
 
-	fmt.Printf("  Duration: %.2fs\n", elapsed)
-	fmt.Printf("  Total Ops: %d\n", totalOps)
-	fmt.Printf("  RPS: %.2f\n", rps)
-	fmt.Printf("  Avg Latency: %.2f ms\n", avgLatencyMs)
-	fmt.Printf("  Error Rate: %.2f%%\n", errorRate)
-	for op := operation(0); op < opCount; op++ {
-		opAttempts := atomic.LoadInt64(&attempts[op])
-		if opAttempts == 0 {
-			continue
-		}
-		opErrors := atomic.LoadInt64(&errors[op])
-		opLatencyMs := float64(atomic.LoadInt64(&latencyMicros[op])) / float64(opAttempts) / 1000.0
-		opErrorRate := float64(opErrors) / float64(opAttempts) * 100.0
-		fmt.Printf("    - %-8s ops=%-6d avg=%.2fms err=%.2f%%\n", operationNames[op], opAttempts, opLatencyMs, opErrorRate)
-	}
-	fmt.Printf(
-		"  River state delta: available=%+d running=%+d completed=%+d retryable=%+d discarded=%+d\n",
-		queueAfter["available"]-queueBefore["available"],
-		queueAfter["running"]-queueBefore["running"],
-		queueAfter["completed"]-queueBefore["completed"],
-		queueAfter["retryable"]-queueBefore["retryable"],
-		queueAfter["discarded"]-queueBefore["discarded"],
-	)
-	fmt.Printf("  Redis ping latency: before=%s after=%s\n", redisBefore, redisAfter)
+	reportLoadStep(loadStepReport{
+		Elapsed:       elapsed,
+		TotalOps:      totalOps,
+		RPS:           rps,
+		AvgLatencyMs:  avgLatencyMs,
+		ErrorRate:     errorRate,
+		QueueBefore:   queueBefore,
+		QueueAfter:    queueAfter,
+		RedisBefore:   redisBefore,
+		RedisAfter:    redisAfter,
+		Attempts:      attempts,
+		Errors:        errors,
+		LatencyMicros: latencyMicros,
+	})
 
 	if errorRate > loadMaxErrorRateFromEnv(2.0) {
 		t.Errorf("high error rate at concurrency %d: %.2f%%", concurrency, errorRate)
 	}
 }
 
-func executeOperation(ctx context.Context, env *testutil.RealTestEnv, rnd *rand.Rand, op operation) error {
+func reportLoadStep(report loadStepReport) {
+	fmt.Printf("  Duration: %.2fs\n", report.Elapsed)
+	fmt.Printf("  Total Ops: %d\n", report.TotalOps)
+	fmt.Printf("  RPS: %.2f\n", report.RPS)
+	fmt.Printf("  Avg Latency: %.2f ms\n", report.AvgLatencyMs)
+	fmt.Printf("  Error Rate: %.2f%%\n", report.ErrorRate)
+	for op := range opCount {
+		opAttempts := atomic.LoadInt64(&report.Attempts[op])
+		if opAttempts == 0 {
+			continue
+		}
+		opErrors := atomic.LoadInt64(&report.Errors[op])
+		opLatencyMs := float64(atomic.LoadInt64(&report.LatencyMicros[op])) / float64(opAttempts) / 1000.0
+		opErrorRate := float64(opErrors) / float64(opAttempts) * 100.0
+		fmt.Printf("    - %-8s ops=%-6d avg=%.2fms err=%.2f%%\n", operationNames[op], opAttempts, opLatencyMs, opErrorRate)
+	}
+	fmt.Printf(
+		"  River state delta: available=%+d running=%+d completed=%+d retryable=%+d discarded=%+d\n",
+		report.QueueAfter["available"]-report.QueueBefore["available"],
+		report.QueueAfter["running"]-report.QueueBefore["running"],
+		report.QueueAfter["completed"]-report.QueueBefore["completed"],
+		report.QueueAfter["retryable"]-report.QueueBefore["retryable"],
+		report.QueueAfter["discarded"]-report.QueueBefore["discarded"],
+	)
+	fmt.Printf("  Redis ping latency: before=%s after=%s\n", report.RedisBefore, report.RedisAfter)
+}
+
+func executeOperation(ctx context.Context, env *testutil.RealTestEnv, sequence int64, op operation) error {
 	switch op {
 	case opDBRead:
 		var now time.Time
@@ -206,13 +239,15 @@ func executeOperation(ctx context.Context, env *testutil.RealTestEnv, rnd *rand.
 			return err
 		}
 		defer func() {
-			_ = tx.Rollback(ctx)
+			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+				return
+			}
 		}()
 		_, err = tx.Exec(ctx, "CREATE TEMP TABLE IF NOT EXISTS scaffold_load_events (id BIGSERIAL PRIMARY KEY, worker_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()) ON COMMIT PRESERVE ROWS")
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, "INSERT INTO scaffold_load_events (worker_key) VALUES ($1)", fmt.Sprintf("w-%d", rnd.Intn(1024)))
+		_, err = tx.Exec(ctx, "INSERT INTO scaffold_load_events (worker_key) VALUES ($1)", fmt.Sprintf("w-%d", sequence%1024))
 		if err != nil {
 			return err
 		}
@@ -221,7 +256,7 @@ func executeOperation(ctx context.Context, env *testutil.RealTestEnv, rnd *rand.
 		if env.Redis == nil {
 			return nil
 		}
-		key := fmt.Sprintf("load:scaffold:%d", rnd.Intn(256))
+		key := fmt.Sprintf("load:scaffold:%d", sequence%256)
 		value := strconv.FormatInt(time.Now().UnixNano(), 10)
 		if err := env.Redis.Set(ctx, key, value, 2*time.Minute).Err(); err != nil {
 			return err
@@ -230,6 +265,8 @@ func executeOperation(ctx context.Context, env *testutil.RealTestEnv, rnd *rand.
 		return err
 	case opQueueInspect:
 		_ = fetchRiverStateCounts(ctx, env)
+		return nil
+	case opCount:
 		return nil
 	default:
 		return nil
@@ -246,7 +283,7 @@ func fetchRiverStateCounts(ctx context.Context, env *testutil.RealTestEnv) map[s
 	}
 	rows, err := env.DB.Query(ctx, "SELECT state, COUNT(*) FROM river_job GROUP BY state")
 	if err != nil {
-		if strings.Contains(err.Error(), "does not exist") || err == pgx.ErrNoRows {
+		if strings.Contains(err.Error(), "does not exist") || errors.Is(err, pgx.ErrNoRows) {
 			return counts
 		}
 		return counts
@@ -275,12 +312,12 @@ func fetchRedisPingLatency(ctx context.Context, env *testutil.RealTestEnv) time.
 	return time.Since(start)
 }
 
-func chooseOperation(r *rand.Rand, mix loadMix) operation {
+func chooseOperation(sequence int64, mix loadMix) operation {
 	total := mix.DBReadWeight + mix.DBWriteWeight + mix.RedisWeight + mix.QueueWeight
 	if total <= 0 {
 		return opDBRead
 	}
-	pick := r.Intn(total)
+	pick := int(sequence % int64(total))
 	if pick < mix.DBReadWeight {
 		return opDBRead
 	}
@@ -319,14 +356,7 @@ func inferLoadDBMaxConns(cores int) int {
 	if cores <= 0 {
 		cores = 1
 	}
-	value := cores * 8
-	if value < 16 {
-		value = 16
-	}
-	if value > 120 {
-		value = 120
-	}
-	return value
+	return min(max(cores*8, 16), 120)
 }
 
 func loadMixFromEnv() loadMix {

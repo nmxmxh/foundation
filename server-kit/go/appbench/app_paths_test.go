@@ -200,7 +200,7 @@ func BenchmarkAppLane_CircuitBreaker_ClosedSuccess(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := cb.Execute(ctx, func() (interface{}, error) { return nil, nil }); err != nil {
+		if _, err := cb.Execute(ctx, func() (any, error) { return nil, nil }); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -212,8 +212,7 @@ func BenchmarkAppLane_Worker_EnqueueWithBackpressureAndDrain(b *testing.B) {
 	if err := engine.Register(&appProcessor{kind: "app.email.send", queue: "app", wg: &wg}); err != nil {
 		b.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 	if err := engine.Start(ctx); err != nil {
 		b.Fatal(err)
 	}
@@ -239,7 +238,7 @@ func BenchmarkAppLane_Worker_RejectFullQueue(b *testing.B) {
 	}
 	ctx := context.Background()
 	job := worker.Job{JobKind: "app.email.send", Queue: "app", RawPayload: []byte(`{"to":"user@example.com"}`)}
-	for i := 0; i < 1024; i++ {
+	for i := range 1024 {
 		if err := engine.Enqueue(ctx, job); err != nil {
 			b.Fatalf("prefill queue at %d: %v", i, err)
 		}

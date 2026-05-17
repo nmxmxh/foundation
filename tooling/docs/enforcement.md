@@ -38,6 +38,17 @@ Native tool mapping:
 2. Rust: `cargo fmt` and `cargo clippy -D warnings` own formatting, unwrap/expect/panic discipline, and warning-free runtime code.
 3. TypeScript/React: ESLint owns React hooks, import boundaries, observer exceptions, blocking atomics, and app-local raw WebSocket construction. TypeScript owns generated contract shape through `typecheck`.
 4. CP scripts own foundation-specific communication and performance rules: no oversized runtime control buffer, no hot-path dynamic JSON envelopes in foundation runtime lanes, no compatibility gRPC envelope as a default, no app-internal JSON gRPC dispatch, low-noise Go concurrency bug guards, and no checked-in build artifacts.
+5. Performance reviews must now classify scan-heavy work into the correct lane:
+   row-store transactional, compact read model/materialized view, columnar
+   export/analytics, or runtime arena batch. The check is architectural rather
+   than a shell gate because the right answer depends on query shape and product
+   consistency semantics.
+
+Go toolchain modernization is part of the lint baseline. `go_fix_check.sh` runs
+`go fix -diff ./...` against each project Go module using a repo-local
+`GOCACHE`; any suggested rewrite fails `lint-foundation` until it is applied and
+covered. Schema-affecting suggestions such as `json:",omitzero"` require tests
+that prove the before/after JSON contract intentionally changed.
 
 ## Communication Lane Enforcement
 
@@ -62,13 +73,33 @@ The reason this is not all custom linter code:
 3. shell checks remain acceptable for repo-structure and forbidden-boundary checks because they are transparent, cheap, and easy to scaffold into apps
 4. frontend rules intentionally avoid foundation-runtime strictness because React UI code often needs local composition, adapters, and gradual migration paths
 
+## Columnar, VM, and ABI review baseline
+
+Columnar storage, virtual-memory-aware arenas, and FFI calling conventions are
+review obligations for performance-sensitive work.
+
+Required review questions:
+
+1. Does the workload mutate authoritative state, or is it append/read/report
+   oriented? Mutating truth stays in Postgres row storage.
+2. Does the query read many rows but few columns? Consider compact read models,
+   materialized views, or columnar export before scanning transactional tables.
+3. Does the runtime batch benefit from contiguous typed buffers? Prefer
+   arena/column descriptors over row-object or JSON materialization.
+4. Does the optimization depend on mmap/shared memory/large slabs? Include
+   cold/warm page-cache evidence, page-fault counts where available, RSS/PSS,
+   and descriptor reuse behavior.
+5. Does the code cross FFI? Require ABI version checks, C-compatible exported
+   signatures, pointer/length validation, UTF-8-safe diagnostics, and parity
+   against a non-FFI lane.
+
 ## Delivery and Operational Enforcement
 
 Generated projects inherit a lightweight delivery metrics collector rather than a central dashboard. CI runs `scripts/checks/ci_delivery_metrics.mjs`, uploads the JSON event artifact, and leaves aggregation to the app deployment platform.
 
 Project scaffold checks verify:
 
-1. Go 1.25 CI baseline
+1. Go 1.26 CI baseline
 2. delivery-metrics artifact capture
 3. operations runbook templates
 4. configured CORS origins instead of wildcard scaffold defaults
@@ -80,9 +111,9 @@ The foundation baseline treats change risk as complexity plus coverage together,
 
 Recommended app-level thresholds:
 
-1. new code line coverage >= 80%
-2. new code branch coverage >= 60%
-3. legacy code should improve toward 60% line / 40% branch at minimum when touched
+1. new and changed production code line coverage >= 95%
+2. new and changed production code branch coverage >= 90%
+3. legacy code should improve toward 95% line / 90% branch when touched
 4. CRAP-style hotspot scores above 30 should trigger tests or refactoring before merge
 
 Recommended reporting posture:

@@ -7,6 +7,11 @@ import {
   ARENA_DESCRIPTOR_STATE_FREE,
   ARENA_DESCRIPTOR_STATE_READY,
   ARENA_DESCRIPTOR_TYPE_BYTES,
+  ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH,
+  ARENA_DESCRIPTOR_TYPE_COLUMNAR_FIELD,
+  ARENA_DESCRIPTOR_TYPE_COLUMNAR_OFFSETS,
+  ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALIDITY,
+  ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALUES,
   ARENA_DIAGNOSTIC_BYTES,
   ARENA_HEADER_IDX_ALLOCATED_BYTES,
   ARENA_HEADER_IDX_CAPACITY_BYTES,
@@ -38,6 +43,35 @@ import {
   ARENA_QUEUE_SLOT_SIZE,
   ARENA_SCHEMA_VERSION,
   BUFFER_TOTAL_BYTES,
+  COLUMNAR_BATCH_ALIGNMENT_BYTES,
+  COLUMNAR_BATCH_HEADER_BYTES,
+  COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT,
+  COLUMNAR_BATCH_HEADER_IDX_DICTIONARY_DESCRIPTOR_ID,
+  COLUMNAR_BATCH_HEADER_IDX_FLAGS,
+  COLUMNAR_BATCH_HEADER_IDX_MAGIC,
+  COLUMNAR_BATCH_HEADER_IDX_METADATA_DESCRIPTOR_ID,
+  COLUMNAR_BATCH_HEADER_IDX_ROW_COUNT,
+  COLUMNAR_BATCH_HEADER_IDX_SCHEMA_VERSION,
+  COLUMNAR_BATCH_MAGIC,
+  COLUMNAR_BATCH_MAX_COLUMNS,
+  COLUMNAR_BATCH_SCHEMA_VERSION,
+  COLUMNAR_DESCRIPTOR_ID_NONE,
+  COLUMNAR_FIELD_DESCRIPTOR_BYTES,
+  COLUMNAR_FIELD_IDX_AUX_DESCRIPTOR_ID,
+  COLUMNAR_FIELD_IDX_BYTE_WIDTH,
+  COLUMNAR_FIELD_IDX_DICTIONARY_ID,
+  COLUMNAR_FIELD_IDX_FIELD_ID,
+  COLUMNAR_FIELD_IDX_FLAGS,
+  COLUMNAR_FIELD_IDX_LENGTH,
+  COLUMNAR_FIELD_IDX_LOGICAL_TYPE,
+  COLUMNAR_FIELD_IDX_NULL_COUNT,
+  COLUMNAR_FIELD_IDX_OFFSETS_DESCRIPTOR_ID,
+  COLUMNAR_FIELD_IDX_PHYSICAL_TYPE,
+  COLUMNAR_FIELD_IDX_PRECISION,
+  COLUMNAR_FIELD_IDX_SCALE,
+  COLUMNAR_FIELD_IDX_TIMEZONE_HASH,
+  COLUMNAR_FIELD_IDX_VALIDITY_DESCRIPTOR_ID,
+  COLUMNAR_FIELD_IDX_VALUES_DESCRIPTOR_ID,
 } from "./generated/runtimeBuffer";
 import { getRuntimeCapabilities } from "./pulse/runtimeCaps";
 import type { RuntimeCapabilities } from "./types";
@@ -56,7 +90,12 @@ export type RuntimeDescriptorType =
   | 1
   | 2
   | 3
-  | 4;
+  | 4
+  | typeof ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH
+  | typeof ARENA_DESCRIPTOR_TYPE_COLUMNAR_FIELD
+  | typeof ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALUES
+  | typeof ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALIDITY
+  | typeof ARENA_DESCRIPTOR_TYPE_COLUMNAR_OFFSETS;
 
 export type RuntimeMemoryOptions = {
   sharedMemory?: RuntimeSharedMemoryMode;
@@ -130,6 +169,34 @@ export type RuntimeArenaInvariantSnapshot = {
   invalidDescriptors: number;
 };
 
+export type RuntimeColumnarFieldDescriptor = {
+  fieldId: number;
+  logicalType: number;
+  physicalType: number;
+  flags?: number;
+  length: number;
+  nullCount?: number;
+  validityDescriptorId?: number;
+  offsetsDescriptorId?: number;
+  valuesDescriptorId: number;
+  auxiliaryDescriptorId?: number;
+  byteWidth?: number;
+  scale?: number;
+  precision?: number;
+  timezoneHash?: number;
+  dictionaryId?: number;
+};
+
+export type RuntimeColumnarBatchDescriptor = {
+  schemaVersion: number;
+  rowCount: number;
+  columnCount: number;
+  flags: number;
+  metadataDescriptorId: number;
+  dictionaryDescriptorId: number;
+  fields: RuntimeColumnarFieldDescriptor[];
+};
+
 const descriptorOffset = (id: number): number =>
   ARENA_OFFSET_DESCRIPTOR_TABLE + id * ARENA_DESCRIPTOR_SIZE;
 
@@ -138,6 +205,28 @@ const queueSlotOffset = (slot: number): number =>
 
 const alignToPage = (value: number): number =>
   Math.ceil(value / ARENA_PAGE_BYTES) * ARENA_PAGE_BYTES;
+
+const alignToColumnar = (value: number): number =>
+  Math.ceil(value / COLUMNAR_BATCH_ALIGNMENT_BYTES) * COLUMNAR_BATCH_ALIGNMENT_BYTES;
+
+const columnarFieldOffset = (index: number): number =>
+  COLUMNAR_BATCH_HEADER_BYTES + index * COLUMNAR_FIELD_DESCRIPTOR_BYTES;
+
+const columnarPayloadBytes = (columnCount: number): number =>
+  alignToColumnar(COLUMNAR_BATCH_HEADER_BYTES + columnCount * COLUMNAR_FIELD_DESCRIPTOR_BYTES);
+
+const assertUint32 = (label: string, value: number): void => {
+  if (!Number.isInteger(value) || value < 0 || value > 0xffffffff) {
+    throw new Error(`${label} must be a uint32: ${value}`);
+  }
+};
+
+const optionalDescriptorId = (value: number | undefined): number => {
+  if (value === undefined || value < 0) {
+    return COLUMNAR_DESCRIPTOR_ID_NONE;
+  }
+  return value;
+};
 
 const arenaBytesForProfile = (profile: RuntimeArenaProfile | undefined): number => {
   switch (profile) {
@@ -462,6 +551,39 @@ export class RuntimeSharedArena {
     return { descriptors, enqueued };
   }
 
+  writeColumnarBatchDescriptor(
+    fields: readonly RuntimeColumnarFieldDescriptor[],
+    options: {
+      rowCount: number;
+      flags?: number;
+      metadataDescriptorId?: number;
+      dictionaryDescriptorId?: number;
+      correlationHash?: number;
+    }
+  ): RuntimeArenaDescriptor {
+    const payload = encodeRuntimeColumnarBatchDescriptor({
+      schemaVersion: COLUMNAR_BATCH_SCHEMA_VERSION,
+      rowCount: options.rowCount,
+      columnCount: fields.length,
+      flags: options.flags ?? 0,
+      metadataDescriptorId: optionalDescriptorId(options.metadataDescriptorId),
+      dictionaryDescriptorId: optionalDescriptorId(options.dictionaryDescriptorId),
+      fields: [...fields],
+    });
+    const descriptor = this.allocate(payload.byteLength, ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH, options.flags ?? 0);
+    this.writeSlabReady(descriptor.id, payload);
+    this.enqueueDescriptorReady(descriptor.id, options.correlationHash ?? 0);
+    return this.readDescriptor(descriptor.id);
+  }
+
+  readColumnarBatchDescriptor(descriptorId: number): RuntimeColumnarBatchDescriptor {
+    const descriptor = this.readDescriptor(descriptorId);
+    if (descriptor.type !== ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH) {
+      throw new Error(`runtime arena descriptor ${descriptorId} is not a columnar batch`);
+    }
+    return decodeRuntimeColumnarBatchDescriptor(this.readSlabView(descriptorId));
+  }
+
   dequeue(): RuntimeArenaQueueEntry | null {
     while (true) {
       const head = Atomics.load(this.epochs, ARENA_IDX_QUEUE_HEAD);
@@ -662,6 +784,158 @@ export class RuntimeSharedArena {
     }
   }
 }
+
+export const encodeRuntimeColumnarBatchDescriptor = (
+  batch: RuntimeColumnarBatchDescriptor
+): Uint8Array => {
+  if (batch.schemaVersion !== COLUMNAR_BATCH_SCHEMA_VERSION) {
+    throw new Error(`unsupported columnar batch schema version: ${batch.schemaVersion}`);
+  }
+  assertUint32("rowCount", batch.rowCount);
+  assertUint32("flags", batch.flags);
+  assertUint32("metadataDescriptorId", batch.metadataDescriptorId);
+  assertUint32("dictionaryDescriptorId", batch.dictionaryDescriptorId);
+  if (batch.columnCount !== batch.fields.length) {
+    throw new Error(`columnCount ${batch.columnCount} does not match fields ${batch.fields.length}`);
+  }
+  if (batch.columnCount <= 0 || batch.columnCount > COLUMNAR_BATCH_MAX_COLUMNS) {
+    throw new Error(`invalid columnar batch column count: ${batch.columnCount}`);
+  }
+  const payload = new Uint8Array(columnarPayloadBytes(batch.columnCount));
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  view.setUint32(COLUMNAR_BATCH_HEADER_IDX_MAGIC * 4, COLUMNAR_BATCH_MAGIC, true);
+  view.setUint32(COLUMNAR_BATCH_HEADER_IDX_SCHEMA_VERSION * 4, batch.schemaVersion, true);
+  view.setUint32(COLUMNAR_BATCH_HEADER_IDX_ROW_COUNT * 4, batch.rowCount, true);
+  view.setUint32(COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT * 4, batch.columnCount, true);
+  view.setUint32(COLUMNAR_BATCH_HEADER_IDX_FLAGS * 4, batch.flags, true);
+  view.setUint32(COLUMNAR_BATCH_HEADER_IDX_METADATA_DESCRIPTOR_ID * 4, batch.metadataDescriptorId, true);
+  view.setUint32(COLUMNAR_BATCH_HEADER_IDX_DICTIONARY_DESCRIPTOR_ID * 4, batch.dictionaryDescriptorId, true);
+  batch.fields.forEach((field, index) => {
+    writeColumnarField(view, index, field, batch.rowCount);
+  });
+  return payload;
+};
+
+export const decodeRuntimeColumnarBatchDescriptor = (
+  payload: Uint8Array
+): RuntimeColumnarBatchDescriptor => {
+  if (payload.byteLength < COLUMNAR_BATCH_HEADER_BYTES) {
+    throw new Error(`columnar batch descriptor too small: ${payload.byteLength}`);
+  }
+  const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
+  const magic = view.getUint32(COLUMNAR_BATCH_HEADER_IDX_MAGIC * 4, true);
+  if (magic !== COLUMNAR_BATCH_MAGIC) {
+    throw new Error(`invalid columnar batch magic: ${magic}`);
+  }
+  const schemaVersion = view.getUint32(COLUMNAR_BATCH_HEADER_IDX_SCHEMA_VERSION * 4, true);
+  if (schemaVersion !== COLUMNAR_BATCH_SCHEMA_VERSION) {
+    throw new Error(`unsupported columnar batch schema version: ${schemaVersion}`);
+  }
+  const rowCount = view.getUint32(COLUMNAR_BATCH_HEADER_IDX_ROW_COUNT * 4, true);
+  const columnCount = view.getUint32(COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT * 4, true);
+  if (columnCount <= 0 || columnCount > COLUMNAR_BATCH_MAX_COLUMNS) {
+    throw new Error(`invalid columnar batch column count: ${columnCount}`);
+  }
+  const requiredBytes = columnarPayloadBytes(columnCount);
+  if (payload.byteLength < requiredBytes) {
+    throw new Error(`columnar batch descriptor truncated: ${payload.byteLength} < ${requiredBytes}`);
+  }
+  const fields: RuntimeColumnarFieldDescriptor[] = [];
+  for (let index = 0; index < columnCount; index += 1) {
+    fields.push(readColumnarField(view, index, rowCount));
+  }
+  return {
+    schemaVersion,
+    rowCount,
+    columnCount,
+    flags: view.getUint32(COLUMNAR_BATCH_HEADER_IDX_FLAGS * 4, true),
+    metadataDescriptorId: view.getUint32(COLUMNAR_BATCH_HEADER_IDX_METADATA_DESCRIPTOR_ID * 4, true),
+    dictionaryDescriptorId: view.getUint32(COLUMNAR_BATCH_HEADER_IDX_DICTIONARY_DESCRIPTOR_ID * 4, true),
+    fields,
+  };
+};
+
+const writeColumnarField = (
+  view: DataView,
+  index: number,
+  field: RuntimeColumnarFieldDescriptor,
+  rowCount: number
+): void => {
+  const values = [
+    ["fieldId", field.fieldId],
+    ["logicalType", field.logicalType],
+    ["physicalType", field.physicalType],
+    ["flags", field.flags ?? 0],
+    ["length", field.length],
+    ["nullCount", field.nullCount ?? 0],
+    ["validityDescriptorId", optionalDescriptorId(field.validityDescriptorId)],
+    ["offsetsDescriptorId", optionalDescriptorId(field.offsetsDescriptorId)],
+    ["valuesDescriptorId", field.valuesDescriptorId],
+    ["auxiliaryDescriptorId", optionalDescriptorId(field.auxiliaryDescriptorId)],
+    ["byteWidth", field.byteWidth ?? 0],
+    ["scale", field.scale ?? 0],
+    ["precision", field.precision ?? 0],
+    ["timezoneHash", field.timezoneHash ?? 0],
+    ["dictionaryId", field.dictionaryId ?? COLUMNAR_DESCRIPTOR_ID_NONE],
+  ] as const;
+  for (const [label, value] of values) {
+    assertUint32(label, value);
+  }
+  if (field.length !== rowCount) {
+    throw new Error(`columnar field ${field.fieldId} length ${field.length} does not match row count ${rowCount}`);
+  }
+  if ((field.nullCount ?? 0) > field.length) {
+    throw new Error(`columnar field ${field.fieldId} null count exceeds length`);
+  }
+  const offset = columnarFieldOffset(index);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_FIELD_ID * 4, field.fieldId, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_LOGICAL_TYPE * 4, field.logicalType, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_PHYSICAL_TYPE * 4, field.physicalType, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_FLAGS * 4, field.flags ?? 0, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_LENGTH * 4, field.length, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_NULL_COUNT * 4, field.nullCount ?? 0, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_VALIDITY_DESCRIPTOR_ID * 4, optionalDescriptorId(field.validityDescriptorId), true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_OFFSETS_DESCRIPTOR_ID * 4, optionalDescriptorId(field.offsetsDescriptorId), true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_VALUES_DESCRIPTOR_ID * 4, field.valuesDescriptorId, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_AUX_DESCRIPTOR_ID * 4, optionalDescriptorId(field.auxiliaryDescriptorId), true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_BYTE_WIDTH * 4, field.byteWidth ?? 0, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_SCALE * 4, field.scale ?? 0, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_PRECISION * 4, field.precision ?? 0, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_TIMEZONE_HASH * 4, field.timezoneHash ?? 0, true);
+  view.setUint32(offset + COLUMNAR_FIELD_IDX_DICTIONARY_ID * 4, field.dictionaryId ?? COLUMNAR_DESCRIPTOR_ID_NONE, true);
+};
+
+const readColumnarField = (
+  view: DataView,
+  index: number,
+  rowCount: number
+): RuntimeColumnarFieldDescriptor => {
+  const offset = columnarFieldOffset(index);
+  const field: RuntimeColumnarFieldDescriptor = {
+    fieldId: view.getUint32(offset + COLUMNAR_FIELD_IDX_FIELD_ID * 4, true),
+    logicalType: view.getUint32(offset + COLUMNAR_FIELD_IDX_LOGICAL_TYPE * 4, true),
+    physicalType: view.getUint32(offset + COLUMNAR_FIELD_IDX_PHYSICAL_TYPE * 4, true),
+    flags: view.getUint32(offset + COLUMNAR_FIELD_IDX_FLAGS * 4, true),
+    length: view.getUint32(offset + COLUMNAR_FIELD_IDX_LENGTH * 4, true),
+    nullCount: view.getUint32(offset + COLUMNAR_FIELD_IDX_NULL_COUNT * 4, true),
+    validityDescriptorId: view.getUint32(offset + COLUMNAR_FIELD_IDX_VALIDITY_DESCRIPTOR_ID * 4, true),
+    offsetsDescriptorId: view.getUint32(offset + COLUMNAR_FIELD_IDX_OFFSETS_DESCRIPTOR_ID * 4, true),
+    valuesDescriptorId: view.getUint32(offset + COLUMNAR_FIELD_IDX_VALUES_DESCRIPTOR_ID * 4, true),
+    auxiliaryDescriptorId: view.getUint32(offset + COLUMNAR_FIELD_IDX_AUX_DESCRIPTOR_ID * 4, true),
+    byteWidth: view.getUint32(offset + COLUMNAR_FIELD_IDX_BYTE_WIDTH * 4, true),
+    scale: view.getUint32(offset + COLUMNAR_FIELD_IDX_SCALE * 4, true),
+    precision: view.getUint32(offset + COLUMNAR_FIELD_IDX_PRECISION * 4, true),
+    timezoneHash: view.getUint32(offset + COLUMNAR_FIELD_IDX_TIMEZONE_HASH * 4, true),
+    dictionaryId: view.getUint32(offset + COLUMNAR_FIELD_IDX_DICTIONARY_ID * 4, true),
+  };
+  if (field.length !== rowCount) {
+    throw new Error(`columnar field ${field.fieldId} length ${field.length} does not match row count ${rowCount}`);
+  }
+  if ((field.nullCount ?? 0) > field.length) {
+    throw new Error(`columnar field ${field.fieldId} null count exceeds length`);
+  }
+  return field;
+};
 
 export const negotiateRuntimeMemory = (options: RuntimeMemoryOptions = {}): RuntimeMemorySelection => {
   const capabilities = getRuntimeCapabilities();

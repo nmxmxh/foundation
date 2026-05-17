@@ -54,8 +54,7 @@ func TestEngineRetriesAndSucceeds(t *testing.T) {
 		t.Fatalf("register failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("start failed: %v", err)
 	}
@@ -70,10 +69,9 @@ func TestEngineRetriesAndSucceeds(t *testing.T) {
 		t.Fatalf("enqueue failed: %v", err)
 	}
 
-	time.Sleep(1200 * time.Millisecond)
-	if processor.calls.Load() < 2 {
-		t.Fatalf("expected retry execution")
-	}
+	waitForWorkerCondition(t, 2*time.Second, func() bool {
+		return processor.calls.Load() >= 2
+	}, "retry execution")
 }
 
 func TestEngineDedupesByIdempotencyKey(t *testing.T) {
@@ -87,13 +85,12 @@ func TestEngineDedupesByIdempotencyKey(t *testing.T) {
 		t.Fatalf("register failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("start failed: %v", err)
 	}
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		err := engine.Enqueue(ctx, Job{
 			JobKind:        "operations_lifecycle",
 			Queue:          "operations_core",
@@ -105,10 +102,10 @@ func TestEngineDedupesByIdempotencyKey(t *testing.T) {
 		}
 	}
 
-	time.Sleep(500 * time.Millisecond)
-	if processor.calls.Load() != 1 {
-		t.Fatalf("expected one call due to dedupe, got %d", processor.calls.Load())
-	}
+	waitForWorkerCondition(t, 2*time.Second, func() bool {
+		snapshot := engine.HealthSnapshot()["idem:idem_same"]
+		return snapshot.State == JobHealthDeduped && processor.calls.Load() == 1
+	}, "dedupe terminal state")
 }
 
 func TestEngineInjectsJobCorrelationIntoProcessorContext(t *testing.T) {
@@ -125,8 +122,7 @@ func TestEngineInjectsJobCorrelationIntoProcessorContext(t *testing.T) {
 		t.Fatalf("register failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("start failed: %v", err)
 	}
@@ -192,8 +188,7 @@ func TestEngineRecordsObservabilityStates(t *testing.T) {
 		t.Fatalf("register failed: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("start failed: %v", err)
 	}
@@ -259,7 +254,7 @@ func TestEngineRejectsFullInMemoryQueue(t *testing.T) {
 		t.Fatalf("register failed: %v", err)
 	}
 
-	for i := 0; i < defaultQueueCapacity; i++ {
+	for i := range defaultQueueCapacity {
 		err := engine.Enqueue(context.Background(), Job{
 			JobKind:        "operations_lifecycle",
 			Queue:          "operations_core",
@@ -298,7 +293,7 @@ func TestEngineAcceptsAfterQueueFullBackpressureClears(t *testing.T) {
 		t.Fatalf("register failed: %v", err)
 	}
 
-	for i := 0; i < defaultQueueCapacity; i++ {
+	for i := range defaultQueueCapacity {
 		err := engine.Enqueue(context.Background(), Job{
 			JobKind:        "operations_lifecycle",
 			Queue:          "operations_core",
@@ -325,8 +320,7 @@ func TestEngineAcceptsAfterQueueFullBackpressureClears(t *testing.T) {
 		t.Fatalf("state = %s, want %s", snapshot.State, JobHealthRejectedQueueFull)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := engine.Start(ctx); err != nil {
 		t.Fatalf("start failed: %v", err)
 	}
@@ -395,6 +389,22 @@ func TestEngineSettersPruneSpawnAndWait(t *testing.T) {
 	engine.Wait()
 	if engine.workers["operations_core"] != 3 {
 		t.Fatalf("workers = %d, want 3", engine.workers["operations_core"])
+	}
+}
+
+func waitForWorkerCondition(t *testing.T, timeout time.Duration, condition func() bool, label string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if condition() {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", label)
+		}
+		<-ticker.C
 	}
 }
 

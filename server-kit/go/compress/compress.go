@@ -214,7 +214,7 @@ func CanGzip(acceptEncoding string) bool {
 
 func parseEncodingQValues(acceptEncoding string) map[string]float64 {
 	values := map[string]float64{}
-	for _, item := range strings.Split(strings.ToLower(strings.TrimSpace(acceptEncoding)), ",") {
+	for item := range strings.SplitSeq(strings.ToLower(strings.TrimSpace(acceptEncoding)), ",") {
 		item = strings.TrimSpace(item)
 		if item == "" {
 			continue
@@ -238,8 +238,6 @@ func parseEncodingQValues(acceptEncoding string) map[string]float64 {
 	}
 	return values
 }
-
-
 
 func normalizeBrotliLevel(level int) int {
 	switch {

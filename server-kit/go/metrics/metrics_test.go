@@ -104,7 +104,7 @@ func BenchmarkRegistryCounterPrecomputedKey(b *testing.B) {
 
 func BenchmarkRegistrySnapshotPrometheus1024(b *testing.B) {
 	registry := NewRegistry()
-	for i := 0; i < 1024; i++ {
+	for i := range 1024 {
 		registry.Counter("runtime.dispatch.accepted", Tags{"tenant": "org", "route": fmt.Sprintf("route_%04d", i)})
 	}
 	b.ReportAllocs()

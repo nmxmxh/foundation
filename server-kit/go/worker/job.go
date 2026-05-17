@@ -20,9 +20,9 @@ type Job struct {
 	IdempotencyKey  string             `json:"idempotency_key"`
 	Attempt         int                `json:"attempt"`
 	MaxAttempts     int                `json:"max_attempts"`
-	ScheduledAt     time.Time          `json:"scheduled_at"`
-	CreatedAt       time.Time          `json:"created_at"`
-	ExecutionPolicy JobExecutionPolicy `json:"execution_policy,omitempty"`
+	ScheduledAt     time.Time          `json:"scheduled_at,omitzero"`
+	CreatedAt       time.Time          `json:"created_at,omitzero"`
+	ExecutionPolicy JobExecutionPolicy `json:"execution_policy,omitzero"`
 }
 
 // Kind implements river.JobArgs.

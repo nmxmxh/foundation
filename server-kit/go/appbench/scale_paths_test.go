@@ -3,7 +3,7 @@ package appbench
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -59,7 +59,7 @@ func TestScaleHarness_LocalDistributedPressure(t *testing.T) {
 	if len(broadcastTargets) != 10000 {
 		t.Fatalf("broadcast target count = %d, want 10000", len(broadcastTargets))
 	}
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		connID := fmt.Sprintf("conn-%04d-00", i)
 		if err := router.Unregister(ctx, connID); err != nil {
 			t.Fatalf("unregister churn conn %d: %v", i, err)
@@ -361,7 +361,7 @@ func BenchmarkScale1M_WebSocketUserResolve(b *testing.B) {
 func BenchmarkScale_EventExactDispatch100KSubscriptions(b *testing.B) {
 	bus := events.NewInMemoryBus(1024)
 	var deliveries atomic.Int64
-	for i := 0; i < 100000; i++ {
+	for i := range 100000 {
 		eventType := fmt.Sprintf("tenant:org_%05d:signal:success", i)
 		bus.Subscribe(eventType, func(_ context.Context, _ events.Envelope) {
 			deliveries.Add(1)
@@ -386,7 +386,7 @@ func BenchmarkScale_EventExactDispatch100KSubscriptions(b *testing.B) {
 func BenchmarkScale1M_EventExactDispatchSubscriptions(b *testing.B) {
 	bus := events.NewInMemoryBus(1024)
 	var deliveries atomic.Int64
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		eventType := fmt.Sprintf("tenant:org_%06d:signal:success", i)
 		bus.Subscribe(eventType, func(_ context.Context, _ events.Envelope) {
 			deliveries.Add(1)
@@ -411,7 +411,7 @@ func BenchmarkScale1M_EventExactDispatchSubscriptions(b *testing.B) {
 func BenchmarkScale_EventWildcardDispatch1KSubscriptions(b *testing.B) {
 	bus := events.NewInMemoryBus(1024)
 	var deliveries atomic.Int64
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		bus.Subscribe(fmt.Sprintf("tenant:org_%04d:*", i), func(_ context.Context, _ events.Envelope) {
 			deliveries.Add(1)
 		})
@@ -435,7 +435,7 @@ func BenchmarkScale_EventWildcardDispatch1KSubscriptions(b *testing.B) {
 func BenchmarkScale_EventPrefixWildcardDispatch100KSubscriptions(b *testing.B) {
 	bus := events.NewInMemoryBus(1024)
 	var deliveries atomic.Int64
-	for i := 0; i < 100000; i++ {
+	for i := range 100000 {
 		bus.Subscribe(fmt.Sprintf("tenant:org_%05d:*", i), func(_ context.Context, _ events.Envelope) {
 			deliveries.Add(1)
 		})
@@ -522,9 +522,9 @@ func seedScaleDB(tb testing.TB, tenants, recordsPerTenant int) *database.MemoryD
 	tb.Helper()
 	db := database.NewMemoryDB()
 	ctx := context.Background()
-	for tenant := 0; tenant < tenants; tenant++ {
+	for tenant := range tenants {
 		orgID := fmt.Sprintf("org-%04d", tenant)
-		for rec := 0; rec < recordsPerTenant; rec++ {
+		for rec := range recordsPerTenant {
 			state := "idle"
 			if rec%2 == 0 {
 				state = "active"
@@ -552,7 +552,7 @@ func seedDenseScaleDB(tb testing.TB, records int) *database.MemoryDB {
 	tb.Helper()
 	db := database.NewMemoryDB()
 	ctx := context.Background()
-	for rec := 0; rec < records; rec++ {
+	for rec := range records {
 		state := "idle"
 		if rec%2 == 0 {
 			state = "active"
@@ -579,8 +579,8 @@ func seedScaleRouter(tb testing.TB, users, connsPerUser int) *wsrouting.Router {
 	tb.Helper()
 	router := wsrouting.NewRouter(nil, "scale-node-1")
 	ctx := context.Background()
-	for user := 0; user < users; user++ {
-		for conn := 0; conn < connsPerUser; conn++ {
+	for user := range users {
+		for conn := range connsPerUser {
 			err := router.Register(ctx, wsrouting.ConnectionInfo{
 				ConnectionID: fmt.Sprintf("conn-%04d-%02d", user, conn),
 				DeviceID:     fmt.Sprintf("device-%04d-%02d", user, conn),
@@ -606,7 +606,7 @@ func assertScaleCacheStampede(t *testing.T, ctx context.Context, callers int) {
 	var wg sync.WaitGroup
 
 	wg.Add(callers)
-	for i := 0; i < callers; i++ {
+	for range callers {
 		go func() {
 			defer wg.Done()
 			<-start
@@ -653,7 +653,7 @@ func assertScaleEventFanoutIsolation(t *testing.T, ctx context.Context, subscrib
 	t.Helper()
 	bus := events.NewInMemoryBus(1024)
 	var org42, org99 atomic.Int64
-	for i := 0; i < subscribers; i++ {
+	for range subscribers {
 		bus.Subscribe("tenant:org_0042:signal:success", func(_ context.Context, env events.Envelope) {
 			if env.Metadata["organization_id"] != "org-0042" {
 				t.Errorf("org-0042 metadata leak: %+v", env.Metadata)
@@ -683,7 +683,7 @@ func assertScaleRedisFanout(t *testing.T, ctx context.Context, subscribers int) 
 	defer func() { _ = client.Close() }()
 	cancelFns := make([]func(), 0, subscribers)
 	channels := make([]<-chan []byte, 0, subscribers)
-	for i := 0; i < subscribers; i++ {
+	for i := range subscribers {
 		ch, cancel, err := client.Subscribe(ctx, "tenant:org_0042:fanout")
 		if err != nil {
 			t.Fatalf("redis subscribe %d: %v", i, err)
@@ -727,7 +727,7 @@ func assertScaleQueueSaturation(t *testing.T, ctx context.Context) {
 		CorrelationID: "corr-scale",
 		MaxAttempts:   1,
 	}
-	for i := 0; i < 1024; i++ {
+	for i := range 1024 {
 		job.ID = fmt.Sprintf("job-%04d", i)
 		if err := engine.Enqueue(ctx, job); err != nil {
 			t.Fatalf("prefill queue at %d: %v", i, err)
@@ -749,7 +749,7 @@ func assertScaleConfigConvergence(t *testing.T, goroutines int) {
 	var failures atomic.Int32
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
 			if err := runtimeconfig.ValidateServer(cfg); err != nil {
@@ -871,9 +871,7 @@ func reportPercentiles(b *testing.B, samples []int64) {
 	if len(samples) == 0 {
 		return
 	}
-	sort.Slice(samples, func(i, j int) bool {
-		return samples[i] < samples[j]
-	})
+	slices.Sort(samples)
 	b.ReportMetric(float64(percentile(samples, 0.50)), "p50-ns/op")
 	b.ReportMetric(float64(percentile(samples, 0.95)), "p95-ns/op")
 	b.ReportMetric(float64(percentile(samples, 0.99)), "p99-ns/op")
@@ -883,10 +881,7 @@ func percentile(samples []int64, quantile float64) int64 {
 	if len(samples) == 0 {
 		return 0
 	}
-	index := int(float64(len(samples)-1) * quantile)
-	if index < 0 {
-		index = 0
-	}
+	index := max(int(float64(len(samples)-1)*quantile), 0)
 	if index >= len(samples) {
 		index = len(samples) - 1
 	}

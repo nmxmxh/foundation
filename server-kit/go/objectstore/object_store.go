@@ -45,11 +45,11 @@ type Store struct {
 	Endpoint        string
 	PresignEndpoint string
 	Region          string
-	Bucket    string
-	AccessKey string
-	SecretKey string
-	UseTLS    bool
-	Strict    bool
+	Bucket          string
+	AccessKey       string
+	SecretKey       string
+	UseTLS          bool
+	Strict          bool
 
 	memory bool
 	mu     sync.RWMutex
@@ -67,11 +67,11 @@ func New(cfg runtimeconfig.ObjectStorageConfig) *Store {
 		Endpoint:        strings.TrimSpace(cfg.Endpoint),
 		PresignEndpoint: strings.TrimSpace(cfg.PresignEndpoint),
 		Region:          strings.TrimSpace(cfg.Region),
-		Bucket:    strings.TrimSpace(cfg.Bucket),
-		AccessKey: strings.TrimSpace(cfg.AccessKey),
-		SecretKey: strings.TrimSpace(cfg.SecretKey),
-		UseTLS:    cfg.UseTLS,
-		Strict:    cfg.Strict,
+		Bucket:          strings.TrimSpace(cfg.Bucket),
+		AccessKey:       strings.TrimSpace(cfg.AccessKey),
+		SecretKey:       strings.TrimSpace(cfg.SecretKey),
+		UseTLS:          cfg.UseTLS,
+		Strict:          cfg.Strict,
 	}
 	if isMemoryEndpoint(store.Endpoint) {
 		store.memory = true
@@ -139,10 +139,10 @@ func (s *Store) PutBytes(ctx context.Context, key string, payload []byte, opts P
 		return Object{}, err
 	}
 	input := &s3.PutObjectInput{
-		Bucket:      aws.String(s.Bucket),
-		Key:         aws.String(key),
+		Bucket:      new(s.Bucket),
+		Key:         new(key),
 		Body:        bytes.NewReader(payload),
-		ContentType: aws.String(contentType),
+		ContentType: new(contentType),
 		Metadata:    aws.StringMap(cloneMetadata(opts.Metadata)),
 	}
 	output, err := client.PutObjectWithContext(ctxOrBackground(ctx), input)
@@ -182,9 +182,9 @@ func (s *Store) PresignPut(ctx context.Context, key, contentType string, expiry 
 		return "", err
 	}
 	req, _ := client.PutObjectRequest(&s3.PutObjectInput{
-		Bucket:      aws.String(s.Bucket),
-		Key:         aws.String(key),
-		ContentType: aws.String(contentType),
+		Bucket:      new(s.Bucket),
+		Key:         new(key),
+		ContentType: new(contentType),
 	})
 	return req.Presign(expiry)
 }
@@ -206,8 +206,8 @@ func (s *Store) PresignGet(ctx context.Context, key string, expiry time.Duration
 		return "", err
 	}
 	req, _ := client.GetObjectRequest(&s3.GetObjectInput{
-		Bucket: aws.String(s.Bucket),
-		Key:    aws.String(key),
+		Bucket: new(s.Bucket),
+		Key:    new(key),
 	})
 	return req.Presign(expiry)
 }
@@ -253,10 +253,10 @@ func (s *Store) PutFile(ctx context.Context, key, localPath string, opts PutOpti
 		return Object{}, err
 	}
 	output, err := client.PutObjectWithContext(ctxOrBackground(ctx), &s3.PutObjectInput{
-		Bucket:      aws.String(s.Bucket),
-		Key:         aws.String(key),
+		Bucket:      new(s.Bucket),
+		Key:         new(key),
 		Body:        file,
-		ContentType: aws.String(contentType),
+		ContentType: new(contentType),
 		Metadata:    aws.StringMap(cloneMetadata(opts.Metadata)),
 	})
 	if err != nil {
@@ -296,8 +296,8 @@ func (s *Store) ReadBytes(ctx context.Context, key string) ([]byte, error) {
 		return nil, err
 	}
 	output, err := client.GetObjectWithContext(ctxOrBackground(ctx), &s3.GetObjectInput{
-		Bucket: aws.String(s.Bucket),
-		Key:    aws.String(key),
+		Bucket: new(s.Bucket),
+		Key:    new(key),
 	})
 	if err != nil {
 		return nil, err
@@ -387,10 +387,10 @@ func (s *Store) s3Client() (*s3.S3, error) {
 
 	sess, err := session.NewSession(&aws.Config{
 		Credentials:      credentials.NewStaticCredentials(s.AccessKey, s.SecretKey, ""),
-		DisableSSL:       aws.Bool(!s.UseTLS),
-		Endpoint:         aws.String(s.Endpoint),
-		Region:           aws.String(s.Region),
-		S3ForcePathStyle: aws.Bool(true),
+		DisableSSL:       new(!s.UseTLS),
+		Endpoint:         new(s.Endpoint),
+		Region:           new(s.Region),
+		S3ForcePathStyle: new(true),
 	})
 	if err != nil {
 		return nil, err
@@ -419,10 +419,10 @@ func (s *Store) getPresignClient() (*s3.S3, error) {
 
 	sess, err := session.NewSession(&aws.Config{
 		Credentials:      credentials.NewStaticCredentials(s.AccessKey, s.SecretKey, ""),
-		DisableSSL:       aws.Bool(!s.UseTLS),
-		Endpoint:         aws.String(s.PresignEndpoint),
-		Region:           aws.String(s.Region),
-		S3ForcePathStyle: aws.Bool(true),
+		DisableSSL:       new(!s.UseTLS),
+		Endpoint:         new(s.PresignEndpoint),
+		Region:           new(s.Region),
+		S3ForcePathStyle: new(true),
 	})
 	if err != nil {
 		return nil, err

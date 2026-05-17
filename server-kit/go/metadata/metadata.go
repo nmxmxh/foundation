@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 	"time"
@@ -274,9 +275,7 @@ func PrepareForEmit(ctx context.Context, raw map[string]any) map[string]any {
 
 func mergeMaps(base, overrides map[string]any) map[string]any {
 	result := map[string]any{}
-	for k, v := range base {
-		result[k] = v
-	}
+	maps.Copy(result, base)
 	for k, v := range overrides {
 		if str, ok := v.(string); ok && str == "" {
 			continue
@@ -608,9 +607,7 @@ func copyStringMap(values map[string]string) map[string]string {
 		return map[string]string{}
 	}
 	out := make(map[string]string, len(values))
-	for key, value := range values {
-		out[key] = value
-	}
+	maps.Copy(out, values)
 	return out
 }
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-THRESHOLD="${COVERAGE_THRESHOLD:-90.0}"
+THRESHOLD="${COVERAGE_THRESHOLD:-95.0}"
 OUT_DIR="${COVERAGE_DIR:-$ROOT_DIR/test-results/coverage}"
 mkdir -p "$OUT_DIR"
 

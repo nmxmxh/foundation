@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-coding-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-go-fix check-coding-practices check-testing-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -26,6 +26,7 @@ GOTEST := $(GOCMD) test
 GO_TEST_TIMEOUT ?= 120s
 GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
 GO_PACKAGE_EXCLUDE_RE ?= /node_modules/|/api/protos/
+GO_COVERAGE_THRESHOLD ?= 95.0
 LOAD_RACE ?= 1
 ifeq ($(LOAD_RACE),0)
 LOAD_RACE_FLAG :=
@@ -311,6 +312,26 @@ test-unit:
 		echo "No Go module; skipping Go tests"; \
 	fi
 
+test-coverage:
+	@set -e; \
+	root_dir="$$(pwd)"; \
+	go_dir="."; \
+	if [ ! -f go.mod ] && [ -f backend/go.mod ]; then go_dir="backend"; fi; \
+	if [ ! -f "$$go_dir/go.mod" ]; then \
+		echo "No Go module; skipping Go coverage"; \
+		exit 0; \
+	fi; \
+	mkdir -p coverage "$(GO_CACHE_DIR)"; \
+	( cd "$$go_dir" && \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		if [ -z "$$packages" ]; then echo "No Go packages found"; exit 0; fi; \
+		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -race -count=1 -covermode=atomic -coverprofile="$$root_dir/coverage/go.raw.out" -timeout $(GO_TEST_TIMEOUT) $$packages; \
+	); \
+	awk 'NR == 1 { print; next } $$0 !~ /\/generated\// && $$0 !~ /\.pb\.go:/' coverage/go.raw.out > coverage/go.owned.out; \
+	go tool cover -func=coverage/go.owned.out | tee coverage/go.summary.txt; \
+	coverage=$$(awk '/^total:/ { gsub("%", "", $$3); print $$3 }' coverage/go.summary.txt); \
+	awk -v coverage="$$coverage" -v threshold="$(GO_COVERAGE_THRESHOLD)" 'BEGIN { if (coverage + 0 < threshold + 0) { printf("coverage gate failed: %.1f%% < %.1f%%\n", coverage, threshold) > "/dev/stderr"; exit 1 } }'
+
 test-integration:
 	@set -e; \
 	go_dir="."; \
@@ -503,10 +524,33 @@ lint-frontend:
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-lint-foundation: check-coding-practices check-go-concurrency-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
+FOUNDATION_LINT_CHECKS := check-go-fix check-coding-practices check-testing-practices check-go-concurrency-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
+FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 180
+
+lint-foundation:
+	@tmp_log=$$(mktemp "$${TMPDIR:-/tmp}/foundation-lint.XXXXXX"); \
+	trap 'rm -f "$$tmp_log"' EXIT; \
+	runner="./scripts/checks/foundation_lint_check_runner.sh"; \
+	for check in $(FOUNDATION_LINT_CHECKS); do \
+		printf '[RUN] %s\n' "$$check"; \
+		if zsh "$$runner" "$$tmp_log" "$(MAKE)" --no-print-directory "$$check"; then \
+			printf '[OK] %s\n' "$$check"; \
+			: >"$$tmp_log"; \
+		else \
+			cat "$$tmp_log"; \
+			exit 1; \
+		fi; \
+	done; \
+	echo "foundation lint passed"
+
+check-go-fix:
+	@./scripts/checks/go_fix_check.sh .
 
 check-coding-practices:
 	@./scripts/checks/coding_practices_check.sh .
+
+check-testing-practices:
+	@./scripts/checks/testing_practices_check.sh .
 
 check-go-concurrency-practices:
 	@./scripts/checks/go_concurrency_practices_check.sh .

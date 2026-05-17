@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"runtime"
 	"strings"
@@ -106,7 +107,7 @@ type Error struct {
 	Message string `json:"message"`
 
 	// Details provides additional context.
-	Details map[string]interface{} `json:"details,omitempty"`
+	Details map[string]any `json:"details,omitempty"`
 
 	// Cause is the underlying error (not serialized).
 	Cause error `json:"-"`
@@ -126,17 +127,17 @@ func New(code Code, message string) *Error {
 	return &Error{
 		Code:    code,
 		Message: message,
-		Details: make(map[string]interface{}),
+		Details: make(map[string]any),
 		Stack:   captureStack(2),
 	}
 }
 
 // Newf creates a new Error with a formatted message.
-func Newf(code Code, format string, args ...interface{}) *Error {
+func Newf(code Code, format string, args ...any) *Error {
 	return &Error{
 		Code:    code,
 		Message: fmt.Sprintf(format, args...),
-		Details: make(map[string]interface{}),
+		Details: make(map[string]any),
 		Stack:   captureStack(2),
 	}
 }
@@ -150,23 +151,21 @@ func Wrap(err error, code Code, message string) *Error {
 	e := &Error{
 		Code:    code,
 		Message: message,
-		Details: make(map[string]interface{}),
+		Details: make(map[string]any),
 		Cause:   err,
 		Stack:   captureStack(2),
 	}
 
 	// Inherit details from wrapped Error
 	if appErr, ok := err.(*Error); ok {
-		for k, v := range appErr.Details {
-			e.Details[k] = v
-		}
+		maps.Copy(e.Details, appErr.Details)
 	}
 
 	return e
 }
 
 // Wrapf wraps an error with a formatted message.
-func Wrapf(err error, code Code, format string, args ...interface{}) *Error {
+func Wrapf(err error, code Code, format string, args ...any) *Error {
 	return Wrap(err, code, fmt.Sprintf(format, args...))
 }
 
@@ -184,16 +183,14 @@ func (e *Error) Unwrap() error {
 }
 
 // WithField adds a detail field to the error.
-func (e *Error) WithField(key string, value interface{}) *Error {
+func (e *Error) WithField(key string, value any) *Error {
 	e.Details[key] = value
 	return e
 }
 
 // WithFields adds multiple detail fields to the error.
-func (e *Error) WithFields(fields map[string]interface{}) *Error {
-	for k, v := range fields {
-		e.Details[k] = v
-	}
+func (e *Error) WithFields(fields map[string]any) *Error {
+	maps.Copy(e.Details, fields)
 	return e
 }
 
@@ -234,10 +231,10 @@ type APIResponse struct {
 }
 
 type APIError struct {
-	Code      string                 `json:"code"`
-	Message   string                 `json:"message"`
-	Details   map[string]interface{} `json:"details,omitempty"`
-	RequestID string                 `json:"request_id,omitempty"`
+	Code      string         `json:"code"`
+	Message   string         `json:"message"`
+	Details   map[string]any `json:"details,omitempty"`
+	RequestID string         `json:"request_id,omitempty"`
 }
 
 // ToAPIResponse converts to an API-safe response.

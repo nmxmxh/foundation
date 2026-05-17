@@ -191,11 +191,11 @@ func (p *Policy) Do(ctx context.Context, fn func() error) error {
 }
 
 // DoWithResult executes a function that returns a value with retries.
-func (p *Policy) DoWithResult(ctx context.Context, fn func() (interface{}, error)) (interface{}, error) {
+func (p *Policy) DoWithResult(ctx context.Context, fn func() (any, error)) (any, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var result interface{}
+	var result any
 	var lastErr error
 
 	for attempt := 1; attempt <= p.config.MaxAttempts; attempt++ {
@@ -279,7 +279,7 @@ func DoWithConfig(ctx context.Context, cfg Config, fn func() error) error {
 }
 
 // DoWithResult executes a function that returns a value with the default retry policy.
-func DoWithResult(ctx context.Context, fn func() (interface{}, error)) (interface{}, error) {
+func DoWithResult(ctx context.Context, fn func() (any, error)) (any, error) {
 	return NewPolicy(DefaultConfig()).DoWithResult(ctx, fn)
 }
 

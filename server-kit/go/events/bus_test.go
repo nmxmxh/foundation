@@ -130,7 +130,7 @@ func TestInMemoryBus_MultipleSubscribers(t *testing.T) {
 func TestInMemoryBus_Recent(t *testing.T) {
 	bus := NewInMemoryBus(5)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		_ = bus.Publish(context.Background(), makeTestEnvelope("media:upload:requested", fmt.Sprintf("c-%d", i)))
 	}
 
@@ -228,10 +228,10 @@ func TestInMemoryBus_ConcurrentPublish(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < messagesPerGoroutine; i++ {
+			for i := range messagesPerGoroutine {
 				_ = bus.Publish(context.Background(), makeTestEnvelope(
 					"media:upload:requested",
 					fmt.Sprintf("corr-%d-%d", id, i),
@@ -268,7 +268,7 @@ func TestInMemoryBusFanoutPressureIsSynchronousAndIsolated(t *testing.T) {
 		tenantB.Add(1)
 	})
 
-	for i := 0; i < messages; i++ {
+	for i := range messages {
 		org := "org_a"
 		eventType := "tenant:a:signal:requested"
 		if i%2 == 1 {
@@ -300,7 +300,7 @@ func TestInMemoryBus_ConcurrentSubscribePublish(t *testing.T) {
 	var wg sync.WaitGroup
 	// Add subscribers concurrently
 	wg.Add(10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			defer wg.Done()
 			bus.Subscribe("*", func(_ context.Context, _ Envelope) {
@@ -311,7 +311,7 @@ func TestInMemoryBus_ConcurrentSubscribePublish(t *testing.T) {
 	wg.Wait()
 
 	// Now publish
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		_ = bus.Publish(context.Background(), makeTestEnvelope("media:upload:requested", fmt.Sprintf("c-%d", i)))
 	}
 
@@ -350,7 +350,7 @@ func BenchmarkInMemoryBus_Publish_1Subscriber(b *testing.B) {
 
 func BenchmarkInMemoryBus_Publish_10Subscribers(b *testing.B) {
 	bus := NewInMemoryBus(100)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		bus.Subscribe("media:upload:requested", func(_ context.Context, _ Envelope) {})
 	}
 	env := makeTestEnvelope("media:upload:requested", "bench-corr")

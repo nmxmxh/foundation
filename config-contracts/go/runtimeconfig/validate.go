@@ -2,6 +2,7 @@ package runtimeconfig
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -189,12 +190,7 @@ func DerivePublic(cfg ServerRuntimeConfig) PublicRuntimeConfig {
 }
 
 func oneOf(value string, allowed ...string) bool {
-	for _, item := range allowed {
-		if value == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowed, value)
 }
 
 func runtimeMemoryConfigIsZero(cfg RuntimeMemoryConfig) bool {

@@ -528,6 +528,12 @@ Runtime lane planning now has explicit scheduling inputs: payload size, workload
 4. WebGPU for wide data-parallel batches large enough to amortize dispatch,
 5. transfer or stream fallbacks when SAB/GPU lanes are unavailable.
 
+Go SIMD note: Go 1.26 exposes experimental `simd/archsimd` behind
+`GOEXPERIMENT=simd`. Treat Foundation Go SIMD benchmarks as opt-in architecture
+lane checks. They should report scalar Go, Go SIMD, Rust FFI/native, and
+WASM/SAB comparisons for the same input contract before a Go SIMD path becomes
+eligible for default lane planning.
+
 For financial applications, Rust is the deterministic math lane, not the database orchestration lane. Use Rust for exact minor-unit conversion, checked integer arithmetic, fee/basis-point kernels, route scoring, settlement simulation, canonical payload hashing, and proof-adjacent state machines. Keep provider calls, Postgres transactions, policy lookups, audit writes, and request orchestration in Go/server-kit. A Rust boundary is justified when it removes floating-point ambiguity, batch-computes enough work to amortize the call, or needs parity across native/WASM/browser lanes.
 
 GPU batch layouts should be benchmarked separately from descriptor-ring traffic. The browser-host helper packs batch regions on 256-byte boundaries by default so storage-buffer style workloads can move through the arena without per-item ad hoc layout decisions.

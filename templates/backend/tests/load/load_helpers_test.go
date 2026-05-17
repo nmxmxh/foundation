@@ -76,9 +76,13 @@ func withEnv(t *testing.T, key, value string) {
 	}
 	t.Cleanup(func() {
 		if had {
-			_ = os.Setenv(key, prev)
+			if err := os.Setenv(key, prev); err != nil {
+				t.Fatalf("restore env %s: %v", key, err)
+			}
 		} else {
-			_ = os.Unsetenv(key)
+			if err := os.Unsetenv(key); err != nil {
+				t.Fatalf("unset env %s: %v", key, err)
+			}
 		}
 	})
 }
@@ -171,28 +175,28 @@ func durationFromEnvMillis(key string, defaultValue time.Duration, allowZero boo
 	return time.Duration(value) * time.Millisecond
 }
 
-func clampStepsToCap(steps []int, cap int) []int {
-	if cap <= 0 {
+func clampStepsToCap(steps []int, limit int) []int {
+	if limit <= 0 {
 		return steps
 	}
 	out := make([]int, 0, len(steps))
 	for _, s := range steps {
-		if s <= cap {
+		if s <= limit {
 			out = append(out, s)
 		}
 	}
 	if len(out) == 0 {
-		out = append(out, cap)
+		out = append(out, limit)
 	}
 	return out
 }
 
 func maxStep(steps []int) int {
-	max := 0
+	maximum := 0
 	for _, v := range steps {
-		if v > max {
-			max = v
+		if v > maximum {
+			maximum = v
 		}
 	}
-	return max
+	return maximum
 }

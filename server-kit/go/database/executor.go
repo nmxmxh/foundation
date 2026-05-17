@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // ExecCommand runs a bounded command through the minimal DBTX contract.
@@ -105,11 +106,25 @@ func QueryAll[T any](ctx context.Context, db RowQueryer, query string, scan func
 	// Definition: bounded list lane. Best for first-page reads, dashboards, and
 	// small result sets. It keeps scans typed while centralizing row closure and
 	// error checking.
+	return QueryAllLimit(ctx, db, 0, query, scan, args...)
+}
+
+// QueryAllLimit collects at most limit rows into a typed slice. The SQL should
+// still push LIMIT to the database boundary; this helper is the retention
+// guardrail for callers that stream from a broad source or stop early.
+func QueryAllLimit[T any](ctx context.Context, db RowQueryer, limit int, query string, scan func(Rows) (T, error), args ...any) ([]T, error) {
 	if scan == nil {
 		return nil, errors.New("row scanner function is required")
 	}
-	items := make([]T, 0)
+	if limit < 0 {
+		return nil, fmt.Errorf("query row limit must be non-negative: %d", limit)
+	}
+	capacity := max(limit, 0)
+	items := make([]T, 0, capacity)
 	err := QueryEach(ctx, db, query, func(rows Rows) error {
+		if limit > 0 && len(items) >= limit {
+			return ErrQueryLimitReached
+		}
 		item, err := scan(rows)
 		if err != nil {
 			return err
@@ -117,7 +132,7 @@ func QueryAll[T any](ctx context.Context, db RowQueryer, query string, scan func
 		items = append(items, item)
 		return nil
 	}, args...)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrQueryLimitReached) {
 		return nil, err
 	}
 	return items, nil

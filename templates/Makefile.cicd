@@ -11,6 +11,7 @@
 PROJECT_NAME ?= my_project
 DOCKER_COMPOSE ?= docker compose
 GO_TEST_TIMEOUT ?= 10m
+COVERAGE_THRESHOLD ?= 95.0
 DEPLOY_BRANCH ?= main
 
 # Ports (from .env or defaults)
@@ -63,6 +64,9 @@ test-coverage:
 	@echo "Running tests with coverage..."
 	go test -v -race -coverprofile=coverage.out -timeout $(GO_TEST_TIMEOUT) ./...
 	go tool cover -html=coverage.out -o coverage.html
+	go tool cover -func=coverage.out | tee coverage.summary.txt
+	@coverage=$$(awk '/^total:/ { gsub("%", "", $$3); print $$3 }' coverage.summary.txt); \
+	awk -v coverage="$$coverage" -v threshold="$(COVERAGE_THRESHOLD)" 'BEGIN { if (coverage + 0 < threshold + 0) { printf("coverage gate failed: %.1f%% < %.1f%%\n", coverage, threshold) > "/dev/stderr"; exit 1 } }'
 	@echo "Coverage report: coverage.html"
 
 ## test-all: Run all tests including integration

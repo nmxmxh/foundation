@@ -250,7 +250,7 @@ func (r *Runtime) Execute(ctx context.Context, name string, fn func() error) err
 		return r.DefaultRetry.Do(ctx, fn)
 	}
 
-	_, err := cb.Execute(ctx, func() (interface{}, error) {
+	_, err := cb.Execute(ctx, func() (any, error) {
 		return nil, r.DefaultRetry.Do(ctx, fn)
 	})
 	return err
@@ -262,19 +262,19 @@ func ExecuteWithResult[T any](r *Runtime, ctx context.Context, name string, fn f
 	var zero T
 
 	// Wrap the typed function to return interface{}
-	wrappedFn := func() (interface{}, error) {
+	wrappedFn := func() (any, error) {
 		return fn()
 	}
 
 	cb := r.GetCircuitBreaker(name)
-	var result interface{}
+	var result any
 	var err error
 
 	if cb == nil {
 		// No circuit breaker registered, execute directly with retry
 		result, err = r.DefaultRetry.DoWithResult(ctx, wrappedFn)
 	} else {
-		result, err = cb.Execute(ctx, func() (interface{}, error) {
+		result, err = cb.Execute(ctx, func() (any, error) {
 			return r.DefaultRetry.DoWithResult(ctx, wrappedFn)
 		})
 	}
@@ -340,12 +340,12 @@ func (r *Runtime) StartSpanWithOptions(ctx context.Context, name string, opts ..
 }
 
 // CacheGet retrieves a value from cache.
-func (r *Runtime) CacheGet(ctx context.Context, key string, dest interface{}) error {
+func (r *Runtime) CacheGet(ctx context.Context, key string, dest any) error {
 	return r.Cache.Get(ctx, key, dest)
 }
 
 // CacheSet stores a value in cache with the given TTL.
-func (r *Runtime) CacheSet(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+func (r *Runtime) CacheSet(ctx context.Context, key string, value any, ttl time.Duration) error {
 	return r.Cache.Set(ctx, key, value, ttl)
 }
 
@@ -428,5 +428,5 @@ type CircuitBreakerStatus struct {
 	State       string    `json:"state"`
 	Failures    int64     `json:"failures"`
 	Successes   int64     `json:"successes"`
-	LastFailure time.Time `json:"last_failure,omitempty"`
+	LastFailure time.Time `json:"last_failure"`
 }

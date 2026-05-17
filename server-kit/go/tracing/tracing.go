@@ -187,7 +187,7 @@ func SetError(ctx context.Context, err error) {
 }
 
 // SetAttribute sets an attribute on the current span.
-func SetAttribute(ctx context.Context, key string, value interface{}) {
+func SetAttribute(ctx context.Context, key string, value any) {
 	span := trace.SpanFromContext(ctx)
 	switch v := value.(type) {
 	case string:

@@ -168,7 +168,7 @@ func (cb *CircuitBreaker) Counts() (failures, successes uint32) {
 // Execute runs the given function if the circuit breaker allows it.
 // Returns ErrCircuitOpen if the circuit is open, or ErrTooManyRequests
 // if too many requests are being made in half-open state.
-func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() (interface{}, error)) (interface{}, error) {
+func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() (any, error)) (any, error) {
 	if err := cb.beforeRequest(); err != nil {
 		return nil, err
 	}
@@ -188,9 +188,9 @@ func (cb *CircuitBreaker) Execute(ctx context.Context, fn func() (interface{}, e
 // if the circuit is open or the primary function fails.
 func (cb *CircuitBreaker) ExecuteWithFallback(
 	ctx context.Context,
-	fn func() (interface{}, error),
-	fallback func(error) (interface{}, error),
-) (interface{}, error) {
+	fn func() (any, error),
+	fallback func(error) (any, error),
+) (any, error) {
 	result, err := cb.Execute(ctx, fn)
 	if err != nil {
 		return fallback(err)

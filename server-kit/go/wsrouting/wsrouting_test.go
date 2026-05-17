@@ -350,7 +350,7 @@ func TestForEachTarget(t *testing.T) {
 func TestForEachTargetBatch(t *testing.T) {
 	r := NewRouter(nil, "server-1")
 	ctx := context.Background()
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if err := r.Register(ctx, ConnectionInfo{
 			ConnectionID: fmt.Sprintf("conn-%d", i),
 			DeviceID:     fmt.Sprintf("device-%d", i),
@@ -404,7 +404,7 @@ func TestRouterConcurrentChurnMaintainsLocalOwnership(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(connections)
-	for i := 0; i < connections; i++ {
+	for i := range connections {
 		go func(i int) {
 			defer wg.Done()
 			id := fmt.Sprintf("conn-%03d", i)
@@ -423,7 +423,7 @@ func TestRouterConcurrentChurnMaintainsLocalOwnership(t *testing.T) {
 		t.Fatalf("LocalConnectionCount after register = %d, want %d", got, connections)
 	}
 
-	for u := 0; u < 16; u++ {
+	for u := range 16 {
 		ids, err := r.ResolveTargets(ctx, TargetedDelivery{TargetType: "user", TargetID: fmt.Sprintf("user-%02d", u)})
 		if err != nil {
 			t.Fatalf("ResolveTargets user-%02d: %v", u, err)
@@ -434,7 +434,7 @@ func TestRouterConcurrentChurnMaintainsLocalOwnership(t *testing.T) {
 	}
 
 	wg.Add(connections / 2)
-	for i := 0; i < connections/2; i++ {
+	for i := range connections / 2 {
 		go func(i int) {
 			defer wg.Done()
 			if err := r.Unregister(ctx, fmt.Sprintf("conn-%03d", i)); err != nil {
@@ -513,7 +513,7 @@ func BenchmarkRouterRegisterLocalOnly(b *testing.B) {
 func BenchmarkRouterResolveTargetsUserLocal(b *testing.B) {
 	router := NewRouter(nil, "bench-server")
 	ctx := context.Background()
-	for i := 0; i < 1024; i++ {
+	for i := range 1024 {
 		id := strconv.Itoa(i)
 		err := router.Register(ctx, ConnectionInfo{
 			ConnectionID: "conn-" + id,
@@ -541,7 +541,7 @@ func BenchmarkRouterResolveTargetsUserLocal(b *testing.B) {
 func BenchmarkRouterResolveTargetsUserSparseLocal(b *testing.B) {
 	router := NewRouter(nil, "bench-server")
 	ctx := context.Background()
-	for i := 0; i < 16384; i++ {
+	for i := range 16384 {
 		id := strconv.Itoa(i)
 		err := router.Register(ctx, ConnectionInfo{
 			ConnectionID: "conn-" + id,
@@ -569,7 +569,7 @@ func BenchmarkRouterResolveTargetsUserSparseLocal(b *testing.B) {
 func BenchmarkRouterResolveTargetsDeviceLocal(b *testing.B) {
 	router := NewRouter(nil, "bench-server")
 	ctx := context.Background()
-	for i := 0; i < 16384; i++ {
+	for i := range 16384 {
 		id := strconv.Itoa(i)
 		err := router.Register(ctx, ConnectionInfo{
 			ConnectionID: "conn-" + id,
@@ -597,7 +597,7 @@ func BenchmarkRouterResolveTargetsDeviceLocal(b *testing.B) {
 func BenchmarkRouterForEachLocal1024(b *testing.B) {
 	router := NewRouter(nil, "bench-server")
 	ctx := context.Background()
-	for i := 0; i < 1024; i++ {
+	for i := range 1024 {
 		id := strconv.Itoa(i)
 		err := router.Register(ctx, ConnectionInfo{
 			ConnectionID: "conn-" + id,

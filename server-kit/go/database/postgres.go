@@ -18,6 +18,78 @@ import (
 
 const maxInt32Value = 2_147_483_647
 
+const upsertRecordSQL = `
+	WITH upsert AS (
+		INSERT INTO governance_state_records (domain, collection_name, organization_id, record_id, data)
+		VALUES ($1, $2, $3, $4, $5::jsonb)
+		ON CONFLICT (domain, collection_name, organization_id, record_id)
+		DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+		WHERE governance_state_records.data IS DISTINCT FROM EXCLUDED.data
+		RETURNING created_at, updated_at
+	)
+	SELECT created_at, updated_at FROM upsert
+	UNION ALL
+	SELECT created_at, updated_at
+	FROM governance_state_records
+	WHERE domain = $1
+	  AND collection_name = $2
+	  AND organization_id = $3
+	  AND record_id = $4
+	  AND NOT EXISTS (SELECT 1 FROM upsert)
+	LIMIT 1
+`
+
+const upsertRecordJSONSQL = `
+	WITH incoming AS (
+		SELECT
+			$1::text AS domain,
+			$2::text AS collection_name,
+			$3::text AS organization_id,
+			$4::text AS record_id,
+			CASE
+				WHEN $6::text = '' THEN $5::jsonb
+				ELSE $5::jsonb || jsonb_build_object('organization_id', $6::text)
+			END AS data
+	),
+	upsert AS (
+		INSERT INTO governance_state_records (domain, collection_name, organization_id, record_id, data)
+		SELECT domain, collection_name, organization_id, record_id, data
+		FROM incoming
+		ON CONFLICT (domain, collection_name, organization_id, record_id)
+		DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+		WHERE governance_state_records.data IS DISTINCT FROM EXCLUDED.data
+		RETURNING created_at, updated_at
+	)
+	SELECT created_at, updated_at FROM upsert
+	UNION ALL
+	SELECT g.created_at, g.updated_at
+	FROM governance_state_records g
+	JOIN incoming i
+	  ON g.domain = i.domain
+	 AND g.collection_name = i.collection_name
+	 AND g.organization_id = i.organization_id
+	 AND g.record_id = i.record_id
+	WHERE NOT EXISTS (SELECT 1 FROM upsert)
+	LIMIT 1
+`
+
+const (
+	defaultPostgresRecheckRowBudget = 1024
+	maxPostgresRecheckRowBudget     = 10000
+)
+
+type StateListOptions struct {
+	Limit             int
+	RecheckRowBudget  int
+	RequirePushdown   bool
+	ProjectionColumns []string
+}
+
+type StateCountOptions struct {
+	RecheckRowBudget int
+	RequirePushdown  bool
+}
+
 // PostgresDB is a pgx-backed runtime adapter for DBTX + StateStore.
 type PostgresDB struct {
 	pool *pgxpool.Pool
@@ -414,7 +486,7 @@ func scanToMaps(rows pgx.Rows) ([]map[string]any, error) {
 		}
 
 		item := make(map[string]any, numFields)
-		for i := 0; i < numFields; i++ {
+		for i := range numFields {
 			val := values[i]
 			if b, ok := val.([]byte); ok {
 				item[fields[i].Name] = string(b)
@@ -467,13 +539,7 @@ func (db *PostgresDB) UpsertRecord(ctx context.Context, rec DomainRecord) (Domai
 		conn.Release()
 		cancel()
 	}()
-	err = conn.QueryRow(queryCtx, `
-		INSERT INTO governance_state_records (domain, collection_name, organization_id, record_id, data)
-		VALUES ($1, $2, $3, $4, $5::jsonb)
-		ON CONFLICT (domain, collection_name, organization_id, record_id)
-		DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
-		RETURNING created_at, updated_at
-	`, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload).Scan(&createdAt, &updatedAt)
+	err = conn.QueryRow(queryCtx, upsertRecordSQL, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload).Scan(&createdAt, &updatedAt)
 	recordDatabaseOperation("upsert_record", start, err)
 	if err != nil {
 		return DomainRecord{}, err
@@ -505,22 +571,7 @@ func (db *PostgresDB) UpsertRecordJSON(ctx context.Context, rec RawDomainRecord)
 		conn.Release()
 		cancel()
 	}()
-	err = conn.QueryRow(queryCtx, `
-		INSERT INTO governance_state_records (domain, collection_name, organization_id, record_id, data)
-		VALUES (
-			$1,
-			$2,
-			$3,
-			$4,
-			CASE
-				WHEN $6::text = '' THEN $5::jsonb
-				ELSE $5::jsonb || jsonb_build_object('organization_id', $6::text)
-			END
-		)
-		ON CONFLICT (domain, collection_name, organization_id, record_id)
-		DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
-		RETURNING created_at, updated_at
-	`, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload, rec.OrganizationID).Scan(&createdAt, &updatedAt)
+	err = conn.QueryRow(queryCtx, upsertRecordJSONSQL, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload, rec.OrganizationID).Scan(&createdAt, &updatedAt)
 	recordDatabaseOperation("upsert_record_json", start, err)
 	if err != nil {
 		return RawDomainRecord{}, err
@@ -605,16 +656,29 @@ func (db *PostgresDB) GetRecordJSON(ctx context.Context, domain, collection, org
 }
 
 func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any, limit int) ([]DomainRecord, error) {
-	if db == nil || db.pool == nil {
-		return nil, errors.New("postgres pool is nil")
-	}
+	return db.ListRecordsWithOptions(ctx, domain, collection, organizationID, filters, StateListOptions{Limit: limit})
+}
 
+func (db *PostgresDB) ListRecordsWithOptions(ctx context.Context, domain, collection, organizationID string, filters map[string]any, options StateListOptions) ([]DomainRecord, error) {
 	filters = copyMap(filters)
 	domain = strings.TrimSpace(domain)
 	collection = strings.TrimSpace(collection)
 	organizationID = strings.TrimSpace(organizationID)
 
 	where, args, pushedAllFilters := buildPostgresRecordWhere(domain, collection, organizationID, filters, 1)
+	if !pushedAllFilters && options.RequirePushdown {
+		return nil, ErrUnsupportedFilterShape
+	}
+	if db == nil || db.pool == nil {
+		return nil, errors.New("postgres pool is nil")
+	}
+
+	limit := options.Limit
+	recheckBudget := normalizedRecheckRowBudget(options.RecheckRowBudget)
+	queryLimit := limit
+	if !pushedAllFilters {
+		queryLimit = recheckBudget
+	}
 
 	query := `
 		SELECT domain, collection_name, organization_id, record_id, data, created_at, updated_at
@@ -622,9 +686,9 @@ func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organ
 		WHERE ` + where + `
 		ORDER BY updated_at DESC, record_id ASC
 	`
-	if limit > 0 && pushedAllFilters {
+	if queryLimit > 0 {
 		query += fmt.Sprintf(" LIMIT $%d", len(args)+1)
-		args = append(args, limit)
+		args = append(args, queryLimit)
 	}
 
 	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "list_records")
@@ -646,8 +710,14 @@ func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organ
 		recordDatabaseOperation("list_records", start, opErr)
 	}()
 
-	records := make([]DomainRecord, 0, 64)
+	recordCap := 64
+	if limit > 0 && limit < recordCap {
+		recordCap = limit
+	}
+	records := make([]DomainRecord, 0, recordCap)
+	scanned := 0
 	for rows.Next() {
+		scanned++
 		var (
 			rec     DomainRecord
 			dataRaw []byte
@@ -678,25 +748,41 @@ func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organ
 		opErr = err
 		return nil, err
 	}
+	if !pushedAllFilters && scanned >= recheckBudget && (limit <= 0 || len(records) < limit) {
+		opErr = ErrQueryLimitReached
+		return nil, fmt.Errorf("%w: scanned %d rows for unsupported filter shape", ErrQueryLimitReached, scanned)
+	}
 	return records, nil
 }
 
 func (db *PostgresDB) CountRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any) (int64, error) {
-	if db == nil || db.pool == nil {
-		return 0, errors.New("postgres pool is nil")
-	}
+	return db.CountRecordsWithOptions(ctx, domain, collection, organizationID, filters, StateCountOptions{})
+}
 
+func (db *PostgresDB) CountRecordsWithOptions(ctx context.Context, domain, collection, organizationID string, filters map[string]any, options StateCountOptions) (int64, error) {
 	domain = strings.TrimSpace(domain)
 	collection = strings.TrimSpace(collection)
 	organizationID = strings.TrimSpace(organizationID)
 
 	where, args, pushedAllFilters := buildPostgresRecordWhere(domain, collection, organizationID, copyMap(filters), 1)
 	if !pushedAllFilters {
-		items, err := db.ListRecords(ctx, domain, collection, organizationID, filters, 0)
+		if options.RequirePushdown {
+			return 0, ErrUnsupportedFilterShape
+		}
+		if db == nil || db.pool == nil {
+			return 0, errors.New("postgres pool is nil")
+		}
+		items, err := db.ListRecordsWithOptions(ctx, domain, collection, organizationID, filters, StateListOptions{
+			Limit:            normalizedRecheckRowBudget(options.RecheckRowBudget),
+			RecheckRowBudget: options.RecheckRowBudget,
+		})
 		if err != nil {
 			return 0, err
 		}
 		return int64(len(items)), nil
+	}
+	if db == nil || db.pool == nil {
+		return 0, errors.New("postgres pool is nil")
 	}
 
 	var count int64
@@ -763,8 +849,8 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 		argPos++
 	}
 
-	query := `EXPLAIN SELECT 1 FROM governance_state_records WHERE ` + strings.Join(clauses, " AND ")
-	var plan string
+	query := `EXPLAIN (FORMAT JSON) SELECT 1 FROM governance_state_records WHERE ` + strings.Join(clauses, " AND ")
+	var planJSON []byte
 	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "estimate_count")
 	if err != nil {
 		return 0, err
@@ -773,27 +859,32 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 		conn.Release()
 		cancel()
 	}()
-	err = conn.QueryRow(queryCtx, query, args...).Scan(&plan)
+	err = conn.QueryRow(queryCtx, query, args...).Scan(&planJSON)
 	recordDatabaseOperation("estimate_count", start, err)
 	if err != nil {
 		return 0, err
 	}
+	return parseExplainPlanRows(planJSON)
+}
 
-	// Parse "rows=X" from the EXPLAIN output
-	// Example: Seq Scan on governance_state_records  (cost=0.00..12.75 rows=110 width=4)
-	rowsStart := strings.Index(plan, "rows=")
-	if rowsStart == -1 {
+type explainJSONPlan struct {
+	Plan struct {
+		PlanRows int64 `json:"Plan Rows"`
+	} `json:"Plan"`
+}
+
+func parseExplainPlanRows(planJSON []byte) (int64, error) {
+	if len(bytes.TrimSpace(planJSON)) == 0 {
 		return 0, nil
 	}
-	rowsStart += 5
-	end := strings.Index(plan[rowsStart:], " ")
-	if end == -1 {
-		end = len(plan[rowsStart:])
+	var plans []explainJSONPlan
+	if err := json.Unmarshal(planJSON, &plans); err != nil {
+		return 0, err
 	}
-
-	var count int64
-	fmt.Sscanf(plan[rowsStart:rowsStart+end], "%d", &count)
-	return count, nil
+	if len(plans) == 0 {
+		return 0, nil
+	}
+	return plans[0].Plan.PlanRows, nil
 }
 
 func (db *PostgresDB) DeleteRecord(ctx context.Context, domain, collection, organizationID, recordID string) error {
@@ -882,6 +973,16 @@ func buildPostgresRecordWhere(domain, collection, organizationID string, filters
 		return "TRUE", args, pushedAllFilters
 	}
 	return strings.Join(clauses, " AND "), args, pushedAllFilters
+}
+
+func normalizedRecheckRowBudget(value int) int {
+	if value <= 0 {
+		return defaultPostgresRecheckRowBudget
+	}
+	if value > maxPostgresRecheckRowBudget {
+		return maxPostgresRecheckRowBudget
+	}
+	return value
 }
 
 func postgresScalarFilterText(value any) (string, bool) {

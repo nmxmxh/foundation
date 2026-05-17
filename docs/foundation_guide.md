@@ -14,6 +14,7 @@ Primary performance companions:
 * `tla_architecture_practices.md`: state-machine, invariant, liveness, real-time bound, composition, and refinement practices from `Specifying Systems`.
 * `foundation_benchmarks.md`: benchmark commands, reference results, and allocation guardrails.
 * `database_practices.md`: PostgreSQL schema, query, pool, migration, and operational standards.
+* `testing_practices.md`: `TE-*` testing rules, adequacy expectations, contract checks, and test lint guidance.
 * `delivery_metrics_practices.md`: DORA delivery signals, CI collection, and incident records.
 
 ---
@@ -106,7 +107,7 @@ Primary performance companions:
 ### 5. Change-Risk Hotspot Rule
 
 * Treat complexity plus low coverage as change risk. If a touched method is a hotspot candidate, add tests or simplify it before layering more behavior onto it.
-* New code should aim for line coverage >= 80%, branch coverage >= 60%, and CRAP-style hotspot scores below the high-risk threshold where the stack can calculate them.
+* New and changed production code should aim for line coverage >= 95%, branch coverage >= 90%, and CRAP-style hotspot scores below the high-risk threshold where the stack can calculate them.
 
 ### 6. DOM Observation Rule
 

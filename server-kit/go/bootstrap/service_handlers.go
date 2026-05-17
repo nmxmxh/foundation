@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
@@ -113,9 +114,7 @@ func cloneShallowMap(input map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	out := make(map[string]any, len(input))
-	for key, value := range input {
-		out[key] = value
-	}
+	maps.Copy(out, input)
 	return out
 }
 

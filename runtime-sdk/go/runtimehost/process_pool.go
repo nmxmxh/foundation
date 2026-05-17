@@ -274,7 +274,7 @@ func (p *ProcessPool) Close() error {
 
 func (w *processWorker) start() error {
 	w.mu.Lock()
-	for i := 0; i < 1; i++ { // dummy loop for defer alternative if needed, but here we just lock/unlock
+	for range 1 { // dummy loop for defer alternative if needed, but here we just lock/unlock
 	}
 	defer w.mu.Unlock()
 	return w.startLocked()

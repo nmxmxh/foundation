@@ -9,7 +9,7 @@
 # - Source changes rebuild the binary, but do not re-download Go modules.
 # =============================================================================
 
-ARG GO_VERSION=1.25
+ARG GO_VERSION=1.26
 ARG ALPINE_VERSION=3.23
 ARG CACHE_NAMESPACE=ovasabi-foundation-v1
 
@@ -42,16 +42,20 @@ COPY foundation/server-kit/go/go.sum ./foundation/server-kit/go/
 COPY foundation/runtime-transport/go/go.mod ./foundation/runtime-transport/go/
 COPY foundation/runtime-transport/go/go.sum ./foundation/runtime-transport/go/
 COPY foundation/config-contracts/go/go.mod ./foundation/config-contracts/go/
+COPY foundation/runtime-sdk/go/go.mod ./foundation/runtime-sdk/go/
+COPY foundation/runtime-sdk/go/go.sum ./foundation/runtime-sdk/go/
 
 RUN --mount=type=cache,id=${CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,id=${CACHE_NAMESPACE}-gobuild,target=/root/.cache/go-build,sharing=locked \
-    go mod download && touch /tmp/deps-ready
+    set -eux; \
+    go env GOMOD GOWORK GOPROXY; \
+    find . -path '*/go.mod' -maxdepth 5 -print | sort; \
+    touch /tmp/deps-ready
 
 # --- Build Stage ---
 FROM go-base AS builder
 
 ARG CACHE_NAMESPACE
-ARG PROJECT_NAME=server
 ARG VERSION=dev
 ARG CGO_ENABLED=0
 
@@ -65,17 +69,15 @@ COPY . .
 # foundation projects on the same Docker builder.
 RUN --mount=type=cache,id=${CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,id=${CACHE_NAMESPACE}-gobuild,target=/root/.cache/go-build,sharing=locked \
-    CGO_ENABLED=${CGO_ENABLED} go build \
+    CGO_ENABLED="${CGO_ENABLED:-0}" go build \
     -trimpath \
-    -ldflags="-s -w -X main.Version=${VERSION}" \
-    -o /bin/${PROJECT_NAME} ./cmd/server
+    -ldflags="-s -w -X main.Version=${VERSION:-dev}" \
+    -o /bin/server ./cmd/server
 
 # --- Final Stage ---
 FROM alpine:${ALPINE_VERSION} AS final
 
 ARG CACHE_NAMESPACE
-ARG PROJECT_NAME=server
-
 WORKDIR /srv
 
 RUN --mount=type=cache,id=${CACHE_NAMESPACE}-apk-final,target=/var/cache/apk,sharing=locked \
@@ -83,7 +85,7 @@ RUN --mount=type=cache,id=${CACHE_NAMESPACE}-apk-final,target=/var/cache/apk,sha
 
 RUN addgroup -S app && adduser -S app -G app
 
-COPY --from=builder /bin/${PROJECT_NAME} ./server
+COPY --from=builder /bin/server ./server
 
 # Copy additional assets if the application needs them.
 # COPY --from=builder /app/assets ./assets
@@ -110,6 +112,7 @@ WORKDIR /app
 COPY foundation/runtime-transport/ts/package.json ./foundation/runtime-transport/ts/
 COPY foundation/frontend-kit/ts/package.json ./foundation/frontend-kit/ts/
 COPY foundation/ui-minimal/ts/package.json ./foundation/ui-minimal/ts/
+COPY foundation/runtime-native/ts/package.json ./foundation/runtime-native/ts/
 COPY frontend/package.json frontend/package-lock.json* ./frontend/
 
 # Install dependencies using the shared npm cache
@@ -120,6 +123,7 @@ RUN --mount=type=cache,id=${CACHE_NAMESPACE}-npm,target=/root/.npm,sharing=locke
 COPY foundation/runtime-transport/ts ./foundation/runtime-transport/ts
 COPY foundation/frontend-kit/ts ./foundation/frontend-kit/ts
 COPY foundation/ui-minimal/ts ./foundation/ui-minimal/ts
+COPY foundation/runtime-native/ts ./foundation/runtime-native/ts
 
 # Copy frontend source code
 COPY frontend/ ./frontend/

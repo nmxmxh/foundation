@@ -48,7 +48,7 @@ func TestShardedClientChoosesStableShard(t *testing.T) {
 		shards: []*redisClient{{prefix: "app"}, {prefix: "app"}, {prefix: "app"}},
 	}
 	first := client.shard("tenant:123")
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if got := client.shard("tenant:123"); got != first {
 			t.Fatal("same key should choose the same shard")
 		}
@@ -151,7 +151,7 @@ func TestMemoryClientPubSubAndPrimitives(t *testing.T) {
 	if got, err := client.Incr(context.Background(), "count"); err != nil || got != 1 {
 		t.Fatalf("expired Incr() = %d err=%v", got, err)
 	}
-	if id, err := client.XAdd(context.Background(), "stream", map[string]interface{}{"x": 1}); err != nil || id == "" {
+	if id, err := client.XAdd(context.Background(), "stream", map[string]any{"x": 1}); err != nil || id == "" {
 		t.Fatalf("XAdd() = %q err=%v", id, err)
 	}
 	msgs, err := client.XReadGroup(context.Background(), "stream", "group", "consumer", 1)
@@ -264,7 +264,7 @@ func TestMemoryClientSetManyGetMany(t *testing.T) {
 	if !ok {
 		t.Fatal("memory client should implement BatchClient")
 	}
-	err := batch.SetMany(context.Background(), map[string]interface{}{
+	err := batch.SetMany(context.Background(), map[string]any{
 		"cache:a": []byte("alpha"),
 		"cache:b": "beta",
 	}, time.Second)
@@ -283,11 +283,11 @@ func TestMemoryClientSetManyGetMany(t *testing.T) {
 	if err != nil || string(got["cache:a"]) != "alpha" {
 		t.Fatalf("GetMany() copy = %#v err=%v", got, err)
 	}
-	got, err = batch.SetGetMany(context.Background(), map[string]interface{}{"cache:c": "gamma"}, time.Second)
+	got, err = batch.SetGetMany(context.Background(), map[string]any{"cache:c": "gamma"}, time.Second)
 	if err != nil || string(got["cache:c"]) != "gamma" {
 		t.Fatalf("SetGetMany() = %#v err=%v", got, err)
 	}
-	if err := batch.SetMany(context.Background(), map[string]interface{}{"cache:ttl": "gone"}, time.Nanosecond); err != nil {
+	if err := batch.SetMany(context.Background(), map[string]any{"cache:ttl": "gone"}, time.Nanosecond); err != nil {
 		t.Fatalf("SetMany(ttl) error = %v", err)
 	}
 	time.Sleep(time.Millisecond)
@@ -324,11 +324,11 @@ func TestMemoryClientLocksRequireMatchingTokenAndExpire(t *testing.T) {
 
 func TestMemoryClientStreamsReadGroupsAreMonotonicAndAckable(t *testing.T) {
 	client := NewMemoryClient("app")
-	firstID, err := client.XAdd(context.Background(), "events", map[string]interface{}{"n": 1})
+	firstID, err := client.XAdd(context.Background(), "events", map[string]any{"n": 1})
 	if err != nil {
 		t.Fatalf("XAdd(first) error = %v", err)
 	}
-	secondID, err := client.XAdd(context.Background(), "events", map[string]interface{}{"n": 2})
+	secondID, err := client.XAdd(context.Background(), "events", map[string]any{"n": 2})
 	if err != nil {
 		t.Fatalf("XAdd(second) error = %v", err)
 	}
@@ -425,9 +425,9 @@ func BenchmarkMemoryClientSetManyGetMany64(b *testing.B) {
 	client := NewMemoryClient("bench")
 	batch := client.(BatchClient)
 	ctx := context.Background()
-	values := make(map[string]interface{}, 64)
+	values := make(map[string]any, 64)
 	keys := make([]string, 0, 64)
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		key := fmt.Sprintf("cache:%d", i)
 		values[key] = []byte("value")
 		keys = append(keys, key)
@@ -462,10 +462,10 @@ func BenchmarkMemoryClientSetGetMany64(b *testing.B) {
 	}
 }
 
-func memoryBatchValues(size int) (map[string]interface{}, []string) {
-	values := make(map[string]interface{}, size)
+func memoryBatchValues(size int) (map[string]any, []string) {
+	values := make(map[string]any, size)
 	keys := make([]string, 0, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		key := fmt.Sprintf("cache:%d", i)
 		values[key] = []byte("value")
 		keys = append(keys, key)
@@ -477,7 +477,7 @@ func BenchmarkMemoryClientPublish1KSubscribers(b *testing.B) {
 	client := NewMemoryClient("bench")
 	ctx := context.Background()
 	cancelFns := make([]func(), 0, 1000)
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		_, cancel, err := client.Subscribe(ctx, "events")
 		if err != nil {
 			b.Fatal(err)
@@ -504,7 +504,7 @@ func BenchmarkMemoryClientPSubscribePrefix1K(b *testing.B) {
 	client := NewMemoryClient("bench")
 	ctx := context.Background()
 	cancelFns := make([]func(), 0, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		_, cancel, err := client.PSubscribe(ctx, fmt.Sprintf("tenant:org_%04d:*", i))
 		if err != nil {
 			b.Fatal(err)
@@ -534,7 +534,7 @@ func BenchmarkMemoryClientStreamXAddReadAck(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		id, err := client.XAdd(ctx, "events", map[string]interface{}{"n": i})
+		id, err := client.XAdd(ctx, "events", map[string]any{"n": i})
 		if err != nil {
 			b.Fatal(err)
 		}

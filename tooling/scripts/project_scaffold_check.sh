@@ -244,10 +244,13 @@ check_exists "post-init checklist" "$target/.agents/POST_INIT.md"
 check_exists "foundation guide" "$target/docs/foundation/foundation_guide.md"
 check_exists "foundation architecture contract" "$target/docs/foundation/foundation_architecture_contract.md"
 check_exists "coding practices" "$target/docs/foundation/coding_practices.md"
+check_exists "testing practices" "$target/docs/foundation/testing_practices.md"
 check_exists "post quantum security posture" "$target/docs/foundation/post_quantum_security.md"
 check_exists "golangci baseline" "$target/.golangci.yml"
 check_file_contains "golangci resource lint baseline" "$target/.golangci.yml" "gocognit"
 check_exists "coding practices check" "$target/scripts/checks/coding_practices_check.sh"
+check_exists "testing practices check" "$target/scripts/checks/testing_practices_check.sh"
+check_exists "go fix modernization check" "$target/scripts/checks/go_fix_check.sh"
 check_exists "go concurrency practices check" "$target/scripts/checks/go_concurrency_practices_check.sh"
 check_exists "river practices check" "$target/scripts/checks/river_practices_check.sh"
 check_exists "server-kit usage check" "$target/scripts/checks/server_kit_usage_check.sh"
@@ -256,8 +259,9 @@ check_exists "ci workflow" "$target/.github/workflows/ci.yml"
 check_exists "security workflow" "$target/.github/workflows/security.yml"
 check_exists "operations bootstrap" "$target/docs/operations/README.md"
 check_exists "incident record template" "$target/docs/operations/incident_record_template.md"
-check_file_contains "ci uses Go 1.25 baseline" "$target/.github/workflows/ci.yml" 'GO_VERSION: "1.25"'
-check_file_contains "security workflow uses Go 1.25 baseline" "$target/.github/workflows/security.yml" 'go-version: "1.25"'
+check_file_contains "ci uses Go 1.26 baseline" "$target/.github/workflows/ci.yml" 'GO_VERSION: "1.26"'
+check_file_contains "security workflow uses Go 1.26 baseline" "$target/.github/workflows/security.yml" 'go-version: "1.26"'
+check_file_contains "ci runs Go coverage gate" "$target/.github/workflows/ci.yml" "make test-coverage"
 check_file_contains "ci captures delivery metrics" "$target/.github/workflows/ci.yml" "ci_delivery_metrics.mjs"
 check_file_contains "ci uploads delivery metrics artifact" "$target/.github/workflows/ci.yml" "delivery-metrics/ci-event.json"
 
@@ -270,21 +274,39 @@ check_repository_boundaries
 
 if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "server command" "$target/cmd/server/main.go"
+  check_exists "Go workspace" "$target/go.work"
+  check_file_contains "Go workspace includes project module" "$target/go.work" "."
+  check_file_contains "Go workspace includes foundation server-kit" "$target/go.work" "./foundation/server-kit/go"
+  check_file_contains "Go workspace includes foundation runtime transport" "$target/go.work" "./foundation/runtime-transport/go"
+  check_file_contains "Go workspace includes foundation config contracts" "$target/go.work" "./foundation/config-contracts/go"
   check_exists "worker command" "$target/cmd/worker/main.go"
   check_exists "docgen command" "$target/cmd/docgen/main.go"
+  check_exists "docgen helper tests" "$target/cmd/docgen/helpers_test.go"
+  check_exists "worker helper tests" "$target/cmd/worker/helpers_test.go"
   check_exists "startup package" "$target/internal/startup"
+  check_exists "startup smoke tests" "$target/internal/startup/startup_test.go"
   check_exists "bootstrap services container" "$target/internal/bootstrap/services.go"
+  check_exists "config scaffold tests" "$target/internal/config/config_test.go"
+  check_exists "server scaffold tests" "$target/internal/server/server_test.go"
+  check_exists "server middleware scaffold tests" "$target/internal/server/middleware/middleware_test.go"
   check_exists "river worker registry" "$target/internal/worker/registry.go"
+  check_exists "river worker helper tests" "$target/internal/worker/registry_helpers_test.go"
+  check_exists "river worker registry tests" "$target/internal/worker/registry_test.go"
   check_exists "river periodic jobs" "$target/internal/worker/periodic_jobs.go"
   check_exists "integration infra test" "$target/tests/integration/infra_test.go"
   check_file_contains "managed test env defaults" "$target/tests/testutil/env.go" "ApplyTestEnvDefaults"
   check_file_contains "managed test infra required flag" "$target/tests/testutil/env.go" "TEST_INFRA_REQUIRED"
+  check_exists "testutil scaffold tests" "$target/tests/testutil/storage_env_test.go"
   check_exists "managed recurring load test harness" "$target/tests/load/load_test.go"
   check_file_contains "load tests are opt-in" "$target/tests/load/load_test.go" "RUN_LOAD_TESTS"
   check_file_contains "load tests cover Redis path" "$target/tests/load/load_test.go" "opRedis"
   check_file_contains "load tests cover DB write path" "$target/tests/load/load_test.go" "opDBWrite"
   check_file_contains "load tests expose River queue state" "$target/tests/load/load_test.go" "fetchRiverStateCounts"
+  check_file_not_contains "load tests avoid nolint suppressions" "$target/tests/load/load_test.go" "nolint"
+  check_file_not_contains "load tests avoid weak random traffic mix" "$target/tests/load/load_test.go" "math/rand"
   check_file_contains "make integration target" "$target/Makefile" "test-integration"
+  check_file_contains "make coverage target" "$target/Makefile" "test-coverage:"
+  check_file_contains "make coverage threshold" "$target/Makefile" "GO_COVERAGE_THRESHOLD ?= 95.0"
   check_file_contains "make load target" "$target/Makefile" "test-load:"
   check_file_contains "make benchmark target" "$target/Makefile" "test-bench:"
   check_file_contains "make test database URL" "$target/Makefile" "TEST_DATABASE_URL"
@@ -326,7 +348,10 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "foundation SLO module" "$target/foundation/server-kit/go/slo/slo.go"
   check_file_contains "make server-kit usage check target" "$target/Makefile" "check-server-kit-usage:"
   check_file_contains "make Go concurrency review target" "$target/Makefile" "check-go-concurrency-practices:"
+  check_file_contains "make testing practices target" "$target/Makefile" "check-testing-practices:"
   check_file_contains "coding check enforces internal frame/protobuf lane" "$target/scripts/checks/coding_practices_check.sh" "CP internal Go avoids JSON gRPC compatibility dispatch"
+  check_file_contains "testing check blocks focused TypeScript tests" "$target/scripts/checks/testing_practices_check.sh" "TE no focused TypeScript tests"
+  check_file_contains "lint-foundation includes go fix modernization" "$target/Makefile" "check-go-fix"
   check_file_contains "server-kit check rejects internal JSON grpc dispatch" "$target/scripts/checks/server_kit_usage_check.sh" "internal code avoids JSON gRPC compatibility dispatch"
   check_any_startup_contains "startup initializes server-kit resilience" "resilience.New"
   check_any_startup_contains "startup registers server-kit resilience dependencies" "RegisterDependency("
@@ -358,6 +383,12 @@ fi
 if [[ "${WITH_DOCKER:-}" == "true" ]]; then
   check_exists "Dockerfile" "$target/Dockerfile"
   check_exists "docker-compose.yml" "$target/docker-compose.yml"
+  if [[ -n "$(find "$target" -path "$target/foundation" -prune -o -name Dockerfile -type f -exec grep -Fq "fholzer/nginx-brotli" {} \; -print -quit 2>/dev/null)" ]]; then
+    echo "[FAIL] Dockerfiles avoid removed nginx-brotli image"
+    failed=1
+  else
+    echo "[OK] Dockerfiles avoid removed nginx-brotli image"
+  fi
   check_file_contains "compose Redis 8 baseline" "$target/docker-compose.yml" "redis:8-alpine"
   check_exists "docker-compose.dev.yml" "$target/docker-compose.dev.yml"
   check_file_contains "dev Postgres 18 mounts parent data directory" "$target/docker-compose.dev.yml" "/var/lib/postgresql"
@@ -380,6 +411,18 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     check_file_contains "shared Docker Go module cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gomod'
     check_file_contains "shared Docker Go build cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gobuild'
     check_file_contains "Docker dependency stage" "$target/Dockerfile" "AS go-deps"
+    if grep -Fq '=> ./foundation/runtime-sdk/go' "$target/go.mod"; then
+      check_file_contains "Docker deps copy runtime-sdk go.mod" "$target/Dockerfile" "COPY foundation/runtime-sdk/go/go.mod"
+    fi
+    if [[ -f "$target/api/protos/go.mod" ]] && grep -Fq '=> ./api/protos' "$target/go.mod"; then
+      check_file_contains "Docker deps copy api protos go.mod" "$target/Dockerfile" "COPY api/protos/go.mod ./api/protos/"
+    fi
+    if [[ -f "$target/frontend/package.json" ]] && grep -Fq '"@ovasabi/runtime-native"' "$target/frontend/package.json"; then
+      check_file_contains "Docker copies runtime-native package manifest" "$target/Dockerfile" "COPY foundation/runtime-native/ts/package.json"
+      check_file_contains "Docker copies runtime-native source" "$target/Dockerfile" "COPY foundation/runtime-native/ts ./foundation/runtime-native/ts"
+      check_file_contains "frontend lock includes runtime-native" "$target/frontend/package-lock.json" '"@ovasabi/runtime-native"'
+      check_file_contains "frontend lock links runtime-native workspace package" "$target/frontend/package-lock.json" '"node_modules/@ovasabi/runtime-native"'
+    fi
     check_exists "postgresql config" "$target/config/postgresql.conf"
     check_exists "redis config" "$target/config/redis.conf"
     check_file_contains "postgres timeout guardrail" "$target/config/postgresql.conf" "statement_timeout"

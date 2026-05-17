@@ -1,6 +1,6 @@
 module github.com/nmxmxh/ovasabi_foundation/server-kit/go
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/andybalholm/brotli v1.2.1

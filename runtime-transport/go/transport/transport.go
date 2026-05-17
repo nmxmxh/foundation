@@ -3,17 +3,18 @@ package transport
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"slices"
 	"strings"
 	"time"
 )
 
 type EnvelopeMetadata struct {
-	CorrelationID  string                 `json:"correlation_id"`
-	RequestID      string                 `json:"request_id"`
-	IdempotencyKey string                 `json:"idempotency_key"`
-	SchemaVersion  string                 `json:"schema_version"`
-	Timestamp      time.Time              `json:"timestamp"`
-	Extra          map[string]interface{} `json:"extra,omitempty"`
+	CorrelationID  string         `json:"correlation_id"`
+	RequestID      string         `json:"request_id"`
+	IdempotencyKey string         `json:"idempotency_key"`
+	SchemaVersion  string         `json:"schema_version"`
+	Timestamp      time.Time      `json:"timestamp"`
+	Extra          map[string]any `json:"extra,omitempty"`
 }
 
 type PayloadEncoding string
@@ -69,7 +70,7 @@ func (r *RouteIndex) Resolve(eventType string) *Route {
 	return &r.routes[index]
 }
 
-func CreateEnvelope(eventType string, payload map[string]any, extra map[string]interface{}) Envelope {
+func CreateEnvelope(eventType string, payload map[string]any, extra map[string]any) Envelope {
 	now := time.Now().UTC()
 	correlationID := NewCorrelationID()
 	if payload == nil {
@@ -136,10 +137,8 @@ func CanDispatch(route *Route, grantedCapabilities []string, hasPolicyAccess fun
 	if domain == "" {
 		return false
 	}
-	for _, capability := range grantedCapabilities {
-		if capability == domain+".*" {
-			return true
-		}
+	if slices.Contains(grantedCapabilities, domain+".*") {
+		return true
 	}
 	switch route.Permission {
 	case "view":
@@ -155,10 +154,8 @@ func CanDispatch(route *Route, grantedCapabilities []string, hasPolicyAccess fun
 			}
 		}
 	default:
-		for _, capability := range grantedCapabilities {
-			if capability == domain+".admin" {
-				return true
-			}
+		if slices.Contains(grantedCapabilities, domain+".admin") {
+			return true
 		}
 	}
 	return false

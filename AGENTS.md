@@ -19,7 +19,7 @@ This is an **Ovasabi Foundation** project - a production-grade full-stack applic
 
 | Layer | Technology | Version |
 | ------- | ------------ | --------- |
-| Backend | Go | 1.25+ |
+| Backend | Go | 1.26+ |
 | Frontend | TypeScript, React | 5.9+, 19.2+ |
 | High-Performance | Rust, WASM | 1.95+ |
 | Database | PostgreSQL | 18+ |
@@ -131,6 +131,16 @@ make migrate-up              # Run DB migrations
 | `healthcheck` | Liveness/Readiness probes for all dependencies. |
 | `worker` | River-based background job handling. |
 
+## Go SIMD Posture
+
+Go 1.26 includes experimental `simd/archsimd` support behind `GOEXPERIMENT=simd`. Treat this as a measured, architecture-specific optimization lane:
+
+- Do not expose `archsimd` vector types in public APIs.
+- Keep scalar Go and Rust/WASM/FFI fallbacks for every SIMD path.
+- Use only for bounded, benchmark-proven loops over contiguous numeric or byte data.
+- Keep it out of tenant/auth/orchestration code and request handlers unless a benchmark proves the boundary cost is worth it.
+- Gate CI/build use explicitly with `GOEXPERIMENT=simd`; ordinary builds must remain portable.
+
 ## Frontend & High-Performance
 
 ### Transport Layer
@@ -144,10 +154,6 @@ Check `foundation/ui-minimal` before creating local components. Use `MinimalButt
 ### Runtime SDK (`runtime-sdk`)
 
 The bridge for Rust/WASM execution. It uses a 4KB control-buffer contract for high-performance communication between the JS event loop and the WASM guest.
-
-### Cognitive Wire (`cw`)
-
-A stealth extension for shared AI compute, providing binary-optimized CWF (Cognitive Wire Format) transport and edge-native state replication.
 
 ## Communicative Connections
 
@@ -182,7 +188,7 @@ The Foundation modules are linked through a unified "Nervous System":
 
 ## Testing Requirements
 
-- **Unit tests**: ≥80% Line Coverage, ≥60% Branch Coverage.
+- **Unit tests**: ≥95% Line Coverage for new/changed production code; legacy modules must improve toward 95% when touched and cannot regress without an approved exception.
 - **Integration**: Mandatory for event contracts and critical flows.
 - **E2E**: Required for auth guards and core user journeys.
 

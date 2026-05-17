@@ -65,7 +65,7 @@ func TestMemoryBackend_DeletePattern(t *testing.T) {
 	backend := NewMemoryBackend()
 	ctx := context.Background()
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		_ = backend.Set(ctx, fmt.Sprintf("user:%d", i), []byte("data"), time.Hour)
 	}
 	_ = backend.Set(ctx, "org:1", []byte("data"), time.Hour)
@@ -74,7 +74,7 @@ func TestMemoryBackend_DeletePattern(t *testing.T) {
 		t.Fatalf("DeletePattern failed: %v", err)
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		data, _ := backend.Get(ctx, fmt.Sprintf("user:%d", i))
 		if data != nil {
 			t.Fatalf("expected user:%d to be deleted", i)
@@ -162,10 +162,8 @@ func TestCache_GetOrSetCoalescesConcurrentMiss(t *testing.T) {
 
 	var wg sync.WaitGroup
 	errs := make(chan error, callers)
-	for i := 0; i < callers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range callers {
+		wg.Go(func() {
 			got, err := GetOrSet(ctx, c, "tenant:org-1:hot-key", func() (string, error) {
 				computes.Add(1)
 				<-release
@@ -178,7 +176,7 @@ func TestCache_GetOrSetCoalescesConcurrentMiss(t *testing.T) {
 			if got != "stable" {
 				errs <- fmt.Errorf("got %q, want stable", got)
 			}
-		}()
+		})
 	}
 
 	for computes.Load() == 0 {
@@ -337,11 +335,11 @@ func (b failingBackend) Exists(context.Context, string) (bool, error) {
 
 type failingSerializer struct{}
 
-func (failingSerializer) Marshal(interface{}) ([]byte, error) {
+func (failingSerializer) Marshal(any) ([]byte, error) {
 	return nil, errors.New("marshal failed")
 }
 
-func (failingSerializer) Unmarshal([]byte, interface{}) error {
+func (failingSerializer) Unmarshal([]byte, any) error {
 	return errors.New("unmarshal failed")
 }
 
@@ -394,12 +392,12 @@ func TestMemoryBackend_ConcurrentAccess(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for g := 0; g < goroutines; g++ {
+	for g := range goroutines {
 		go func(id int) {
 			defer wg.Done()
-			for i := 0; i < opsPerGoroutine; i++ {
+			for i := range opsPerGoroutine {
 				key := fmt.Sprintf("key:%d:%d", id, i%10)
-				_ = backend.Set(ctx, key, []byte(fmt.Sprintf("val:%d", i)), time.Minute)
+				_ = backend.Set(ctx, key, fmt.Appendf(nil, "val:%d", i), time.Minute)
 				_, _ = backend.Get(ctx, key)
 				_, _ = backend.Exists(ctx, key)
 				if i%5 == 0 {
@@ -422,7 +420,7 @@ func TestGetOrSet_ConcurrentStampede(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(goroutines)
-	for i := 0; i < goroutines; i++ {
+	for range goroutines {
 		go func() {
 			defer wg.Done()
 			_, _ = GetOrSet(ctx, c, "stampede-key", func() (string, error) {
@@ -552,7 +550,7 @@ func BenchmarkMemoryBackend_DeletePattern(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		for j := 0; j < 100; j++ {
+		for j := range 100 {
 			_ = backend.Set(ctx, fmt.Sprintf("prefix:%d", j), []byte("data"), time.Hour)
 		}
 		b.StartTimer()

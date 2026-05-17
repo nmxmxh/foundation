@@ -33,6 +33,53 @@ Foundation scaffolds now default local/test Postgres to version 18 because the r
 
 Production Postgres must still be sized from workload evidence: memory, WAL, autovacuum, partition strategy, and connection pool limits should be derived from p95/p99 latency, write rate, table growth, and EXPLAIN plans.
 
+## Query-engine optimization posture
+
+Foundation repository code should be written so PostgreSQL's optimizer can do
+the same work a standalone analytical query engine would do explicitly:
+projection pushdown, predicate pushdown, limit pushdown, partition pruning,
+late materialization, and bounded batch/stream execution.
+
+Design rules:
+
+1. Projection pushdown: every repository method must list only the columns it
+   needs. This keeps heap/TOAST reads out of paths that only need identifiers,
+   states, timestamps, counters, or display summaries.
+2. Predicate pushdown: tenant scope, authorization scope, time windows, state,
+   cursor bounds, and report mode must be inside the SQL predicate, not applied
+   after fetching rows.
+3. Limit pushdown: first-page and compact dashboard reads must include finite
+   `LIMIT` values at the database boundary. Do not fetch a broad candidate set
+   and slice it in Go.
+4. Partition pruning: partition keys must appear as simple predicates that the
+   planner can recognize. Avoid wrapping partition/index columns in functions
+   or casts in hot queries.
+5. Late materialization: filter and order on compact indexed columns before
+   reading wide JSONB, text, binary, or joined detail payloads.
+6. Batch execution: use `QueryEach` for bounded streaming reads and `QueryAll`
+   only for small, deliberately retained result sets. Report/export paths must
+   process in batches instead of constructing one process-wide row slice.
+7. Physical-plan review: important query changes must include `EXPLAIN
+   (ANALYZE, BUFFERS, WAL, VERBOSE)` evidence and call out whether the plan
+   uses index scan, index-only scan, bitmap heap scan, seq scan, partition
+   pruning, sort, hash aggregate, nested loop, hash join, or materialization.
+
+Index rules from this posture:
+
+1. Hot first-page reads should have one index whose leading columns match scope
+   and equality predicates, followed by range/order columns.
+2. Covering indexes with `INCLUDE` are allowed only for measured hot reads where
+   index-only scans are realistic and the extra index bytes do not hurt write
+   lanes more than they help reads.
+3. Partial indexes must match the query predicate text closely enough for the
+   planner to prove implication. If the predicate is not stable in query code,
+   do not rely on the partial index.
+4. Query plans that sort after scanning many rows are suspect for runtime
+   endpoints. Prefer order-aware indexes or materialized read models.
+5. If an optimizer cannot push a predicate through a CTE, view, function,
+   window, or JSON expression, rewrite the repository query or add a read model
+   rather than assuming the planner will recover the intended shape.
+
 ## Non-negotiable rules
 
 1. PostgreSQL is the system of record for durable business state.
@@ -166,6 +213,65 @@ Rules:
 5. Prefer batched writes for child-row inserts. Use `COPY`/`CopyFrom` or batched statements for child rows, association rows, and other repeated inserts.
 6. Document-ingestion flows should distinguish re-upload dedupe from legitimate recurring records. Repeated records from valid recurring processes must not be collapsed just because key fields or timestamps are similar.
 
+## SSD and write-amplification posture
+
+The SSD paper's storage-engine recommendation is clear: database engines that
+own page placement can reduce total write amplification with out-of-place
+writes, page packing, hot/cold grouping by expected deathtime, ZNS/FDP
+placement, and GC-unit alignment. Foundation does not own PostgreSQL's storage
+engine, so we cannot retrofit those mechanics into heap pages. We can still
+reduce the write pattern that Postgres and the SSD observe.
+
+Foundation write-amplification rules:
+
+1. Treat total write amplification as a product metric: logical domain writes
+   produce heap writes, index writes, WAL writes, checkpoint writes, vacuum
+   work, and finally SSD-internal writes.
+2. Minimize indexes on write-heavy tables. Each index improves some reads but
+   adds write, WAL, vacuum, cache, and SSD pressure to every relevant mutation.
+3. Prefer append-only fact tables and partition drop/attach retention for event,
+   audit, telemetry, outbox history, and report facts. Deleting old ranges row
+   by row is a write-amplification bug.
+4. Separate hot mutable columns from cold/wide detail payloads. Do not update a
+   large JSONB or TOAST-heavy row when the command only changes compact state,
+   counters, timestamps, or lifecycle metadata.
+5. For update-heavy tables, design for HOT updates: avoid indexing frequently
+   updated columns unless the read path proves it, and set table `fillfactor`
+   below 100 only after measuring the update rate, row width, and bloat trend.
+6. Use virtual generated columns when recomputation on read is cheaper than
+   stored write amplification. Use `STORED` generated columns only for proven
+   hot predicates/projections.
+7. Tune checkpoints from evidence. Frequent checkpoints increase full-page WAL
+   images after each checkpoint; oversized checkpoint windows can increase
+   recovery time and dirty-buffer pressure. Track `pg_stat_wal`, `pg_stat_io`,
+   checkpoint logs, and WAL bytes per business operation.
+8. Keep `full_page_writes` on unless storage guarantees and recovery posture are
+   formally reviewed. It protects against torn pages; disabling it is not a
+   normal Foundation optimization.
+9. Consider WAL compression for write-heavy workloads with high full-page image
+   volume, but benchmark CPU cost and replica/archive behavior first.
+10. For SSD/NVMe hosts, random-page-cost tuning should be evidence-based and
+    paired with plan review. Lower random I/O cost can make index access more
+    attractive, but a bad index still creates write amplification.
+11. For high-volume ingest, use `COPY`, batched statements, staging tables, and
+    set-based merge/upsert. Per-row command loops multiply parse, round-trip,
+    WAL, and index maintenance cost.
+12. For append-only and insert-mostly tables, configure insert-triggered vacuum
+    and analyze thresholds when index-only scans, visibility maps, or planner
+    estimates matter.
+
+SSD evidence to collect on service-backed load tests:
+
+1. WAL bytes and full-page image ratio per operation family.
+2. `pg_stat_io` read/write/extend/fsync counts and timings by backend type.
+3. Checkpoint frequency, checkpoint write/sync time, and checkpoint-trigger
+   reason.
+4. Autovacuum/analyze duration, dead tuples, index bloat, table bloat, and HOT
+   update ratio for mutable tables.
+5. Host-level disk write bytes and utilization; on managed/cloud SSDs, track
+   volume write IOPS/throughput, latency, burst-credit exhaustion, and device
+   wear/endurance metrics where exposed.
+
 ## Database state-machine invariants
 
 Use `foundation/docs/tla_architecture_practices.md` for high-risk DB workflows where concurrency, retries, or performance optimizations can change behavior.
@@ -229,6 +335,59 @@ State-machine candidates that deserve table-driven/property-style tests:
 13. Use `pgx.CopyFrom` or batched statements for high-volume writes. Per-row loops are acceptable only for small control-plane writes.
 14. Use `EXPLAIN (ANALYZE, BUFFERS, WAL, VERBOSE)` for slow or important queries on PostgreSQL 18 so CPU, memory, buffer, and WAL costs are visible.
 15. Enable `pg_stat_statements` in production and treat top total-time queries as optimization priorities, even if individual latency looks modest.
+
+## Columnar and analytical lane
+
+Postgres remains the authoritative row store for commands, constraints,
+idempotency, outbox state, and tenant-scoped transactional reads. Columnar
+storage is a separate analytical lane for scan-heavy, append-oriented, or
+export-oriented data where the query usually touches a subset of columns across
+many rows.
+
+Use the analytical lane for:
+
+1. High-volume telemetry, audit/event history, pricing ticks, media metrics,
+   behavioral events, delivery metrics, and report/export facts.
+2. Dashboard or cohort reads that scan time windows, group by dimensions, or
+   repeatedly recompute aggregates from many transactional rows.
+3. ML/signal/vector workloads where the compute path benefits from contiguous
+   typed columns, SIMD, GPU buffers, or Rust/WASM/native batch execution.
+
+Do not use the analytical lane for:
+
+1. Hot command validation, balance/ledger mutation, idempotency enforcement, or
+   authorization checks.
+2. Small single-row lookups where row storage and B-tree indexes already match
+   the access path.
+3. Any path where eventual projection lag would change visible product
+   semantics.
+
+Recommended projection shape:
+
+1. Write durable command state and outbox records in Postgres first.
+2. Project append-only facts through a bounded worker using correlation ID,
+   organization ID, source event type, schema version, and deterministic
+   idempotency/fingerprint fields.
+3. Keep compact Postgres read models or materialized views for hot dashboards.
+4. Export cold or large analytical partitions to object storage as Parquet or
+   another columnar file when report workloads no longer belong on the primary.
+5. Use DuckDB, ClickHouse, warehouse jobs, or app-owned Rust/Arrow readers only
+   behind report/export/background boundaries unless a benchmark justifies a
+   product runtime path.
+
+Columnar-read design rules:
+
+1. Store facts in append-friendly partitions by time and, when query pruning
+   proves it, tenant/campaign/hash. Confirm pruning with `EXPLAIN`.
+2. Use BRIN for naturally ordered append tables, B-tree for hot dimensions and
+   first-page reads, GIN only for indexed JSONB containment/search, and
+   materialized summaries for recurring dashboards.
+3. Preserve per-record diagnostics when batching projection work. Batching may
+   change transport cost, not visible failure identity.
+4. Keep projections replayable: the same source event should converge on the
+   same fact row or controlled duplicate outcome.
+5. Measure warm-cache and cold-cache report runs separately. Page-cache effects
+   are part of the lane contract, not noise to hide.
 
 ## Security and compliance
 

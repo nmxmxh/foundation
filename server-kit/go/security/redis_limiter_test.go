@@ -12,7 +12,7 @@ import (
 
 func TestRedisRateLimiter(t *testing.T) {
 	client := redis.NewMemoryClient("")
-	limiter := NewRedisRateLimiter(client, 2, time.Second)
+	limiter := NewRedisRateLimiter(client, 2, 20*time.Millisecond)
 
 	handler := limiter.Limit(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -42,8 +42,7 @@ func TestRedisRateLimiter(t *testing.T) {
 		t.Errorf("expected status 429, got %d", rr3.Code)
 	}
 
-	// Wait for window to pass
-	time.Sleep(1100 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 
 	// Request 4: Allow again
 	req4 := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -62,7 +61,7 @@ func TestRedisRateLimiter_Fallback(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		rr := httptest.NewRecorder()
 		handler.ServeHTTP(rr, req)
 		if rr.Code != http.StatusOK {
@@ -73,7 +72,7 @@ func TestRedisRateLimiter_Fallback(t *testing.T) {
 
 func TestRedisRateLimiter_Allow(t *testing.T) {
 	client := redis.NewMemoryClient("")
-	limiter := NewRedisRateLimiter(client, 1, time.Second)
+	limiter := NewRedisRateLimiter(client, 1, 20*time.Millisecond)
 
 	if !limiter.Allow(context.Background(), "test-key") {
 		t.Error("expected first allow to be true")
@@ -82,7 +81,7 @@ func TestRedisRateLimiter_Allow(t *testing.T) {
 		t.Error("expected second allow to be false")
 	}
 
-	time.Sleep(1100 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 	if !limiter.Allow(context.Background(), "test-key") {
 		t.Error("expected allow after window to be true")
 	}

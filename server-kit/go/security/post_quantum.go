@@ -3,6 +3,7 @@ package security
 import (
 	"crypto/tls"
 	"fmt"
+	"slices"
 )
 
 type PostQuantumTLSMode string
@@ -66,10 +67,5 @@ func removeCurve(curves []tls.CurveID, curve tls.CurveID) []tls.CurveID {
 }
 
 func hasCurve(curves []tls.CurveID, curve tls.CurveID) bool {
-	for _, item := range curves {
-		if item == curve {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(curves, curve)
 }

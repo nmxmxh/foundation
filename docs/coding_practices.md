@@ -172,6 +172,12 @@ Requirements:
 19. Initial dashboard and bootstrap summaries must request the smallest useful projection: explicit compact/light metadata, bounded recent items, and expensive sections disabled unless the first viewport actually renders them.
 20. Frontend cache keys for summary/list hot paths must be semantic and stable. Include filters that change the response; exclude volatile metadata such as correlation IDs, timestamps, trace IDs, and retry markers.
 21. Do not log full summary/list payloads in store setters, reducers, or render-adjacent code. Hot UI paths may log compact counters/keys only behind a development guard.
+22. Scan-heavy analytical flows should use compact projections, materialized views, or columnar/export lanes before scanning wide transactional tables in product traffic.
+23. Runtime batches that operate over many records should prefer structure-of-arrays layouts and shared arena descriptors over arrays of row objects when benchmarks show scan/vector locality matters.
+24. FFI surfaces must remain C-compatible and versioned: scalar integers, lengths, raw byte buffers, opaque handles, and explicit diagnostics only.
+25. Repository SQL must be pushdown-friendly: select only needed columns, keep tenant/auth/time/state predicates inside SQL, push `LIMIT` to the database boundary, and keep partition/index columns in simple comparable forms.
+26. Update-heavy tables must not index every mutable field by default. Indexes on frequently updated columns require query-plan evidence and a write-amplification review.
+27. Large JSONB/text/binary payloads must not sit in the same hot mutable row when compact state updates dominate the workload. Use sidecar/detail tables or append facts when that preserves the domain contract.
 
 Enforcement:
 
@@ -191,6 +197,12 @@ Requirements:
 3. Optimized lanes must refine the original behavior. Direct dispatch, binary frames, gRPC, WebSocket, HTTP fallback, `ffi`, `shm`, `stdio`, and JSON compatibility paths must preserve canonical metadata, payload semantics, terminal events, and controlled error classes.
 4. Coarsening an operation into a larger atomic step requires a commutativity check: reordering must not change visible state, authorization, idempotency, capacity, deadlines, or diagnostics.
 5. No-op/stuttering behavior such as retries, duplicate suppression, cache hits, empty polls, and reconnect attempts must be explicitly safe for the visible contract.
+6. Columnar projections must define replay, lag, and freshness semantics. Projection lag must not alter command acceptance, authorization, or security-critical reads.
+7. Native/shared-memory performance changes must state whether cold page cache, warm page cache, page faults, mmap footprint, or NUMA placement affect the benchmark result.
+8. Database performance changes must state whether the improvement comes from
+   projection pushdown, predicate pushdown, limit pushdown, partition pruning,
+   index-only scan, join selection, batching, WAL/checkpoint reduction, HOT
+   updates, or materialized/read-model projection.
 
 Enforcement:
 
@@ -207,10 +219,12 @@ Requirements:
 1. Compile with strict warning settings and keep warnings at zero for supported toolchains.
 2. Run static analysis/lint checks in CI on every PR.
 3. Treat analyzer confusion as code clarity debt; simplify code when needed.
+4. Run Go modernization checks after each Go toolchain bump. `go fix -diff ./...` is a lint signal; schema-affecting suggestions such as `json:",omitzero"` require tests that lock the intended JSON shape.
 
 Enforcement:
 
 - CI gates for `go test`, `golangci-lint`, Rust `fmt`/`clippy`, frontend ESLint, TypeScript checks, and scaffolded `scripts/checks/*`.
+- Foundation `lint` / scaffold `lint-foundation` run `go_fix_check.sh`, which fails when `go fix -diff` finds unapplied language modernizations.
 - Foundation runtime, transport, server-kit, and SDK lanes use the strictest CP automation because resource leaks, compatibility envelopes, or dynamic JSON materialization become platform-wide costs.
 - Project and frontend lanes inherit the same boundary checks, but React complexity and app-composition rules may start as ESLint warnings when strictness would create migration noise rather than better resource behavior.
 - Managed `.foundation` projects must pass `server_kit_usage_check.sh`, which verifies that generated backend startup/server/worker paths actually bind server-kit runtime surfaces instead of merely carrying vendored packages.
@@ -608,10 +622,10 @@ Level: `Mandatory`
 Requirements:
 
 1. Coverage alone is not enough; changed methods/functions with meaningful branching must be reviewed as hotspot candidates using complexity plus coverage together.
-2. New code should target line coverage >= 80%, branch coverage >= 60%, and CRAP-style hotspot scores < 30 where the stack/tooling can calculate them.
-3. Changed methods with projected hotspot scores > 30, or with high complexity and near-zero coverage, must gain tests or lose complexity before feature work continues unless an exception is documented.
+2. New and changed production code should target line coverage >= 95%, branch coverage >= 90%, and CRAP-style hotspot scores < 30 where the stack/tooling can calculate them.
+3. Changed methods with projected hotspot scores > 30, or with high complexity and coverage below the module threshold, must gain tests or lose complexity before feature work continues unless an exception is documented.
 4. Coverage collection must exclude test projects, benchmarks, migrations, generated files, and similarly non-production artifacts so hotspot signals remain useful.
-5. Legacy code can phase in lower thresholds, but touching high-risk methods must improve either coverage or complexity; do not leave both risk factors untouched.
+5. Legacy code can phase in lower thresholds, but touching high-risk methods must improve either coverage or complexity; do not leave both risk factors untouched, and do not reduce module coverage without an approved exception.
 6. CI should publish machine-readable coverage output and a human-readable hotspot summary for changed modules where the app stack supports it.
 
 Enforcement:
@@ -734,7 +748,7 @@ Enforcement:
 | `CP-05` | Unit/integration tests | Partial | No (unless safety-critical path) |
 | `CP-06` | Review + concurrency tests | Partial | Yes |
 | `CP-07` | Bench/load checks | Contextual | Contextual |
-| `CP-08` | CI static/lint/compile checks | Strong | Yes |
+| `CP-08` | CI static/lint/compile/go-fix checks | Strong | Yes |
 | `CP-09` | Search + ADR + review | Partial | Yes |
 | `CP-10` | Contract/integration/e2e tests | Strong | Yes |
 | `CP-11` | CI tests + review evidence | Strong | Yes |

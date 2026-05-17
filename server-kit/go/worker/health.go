@@ -26,8 +26,8 @@ type JobHealthSnapshot struct {
 	TimeoutMS     int            `json:"timeout_ms"`
 	CorrelationID string         `json:"correlation_id,omitempty"`
 	LastError     string         `json:"last_error,omitempty"`
-	ScheduledAt   time.Time      `json:"scheduled_at,omitempty"`
-	StartedAt     time.Time      `json:"started_at,omitempty"`
-	FinishedAt    time.Time      `json:"finished_at,omitempty"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	ScheduledAt   time.Time      `json:"scheduled_at,omitzero"`
+	StartedAt     time.Time      `json:"started_at,omitzero"`
+	FinishedAt    time.Time      `json:"finished_at,omitzero"`
+	UpdatedAt     time.Time      `json:"updated_at,omitzero"`
 }

@@ -225,6 +225,11 @@ else
     foundation_log_info "Syncing managed scaffold..."
     scaffold_apply_manifest
     foundation_log_success "Managed scaffold synchronized"
+    if [[ -x "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" ]]; then
+        foundation_log_info "Applying managed scaffold patches..."
+        "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" "$PROJECT_PATH"
+        foundation_log_success "Managed scaffold patches applied"
+    fi
 fi
 
 foundation_log_success "Project synchronized to foundation v$FOUNDATION_VERSION"

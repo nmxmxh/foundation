@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,6 +50,30 @@ func TestJobNormalizeValidateTimeoutAndHealthKey(t *testing.T) {
 		positiveIntFromMetadata(map[string]any{"a": int64(4)}, "a") != 4 ||
 		positiveIntFromMetadata(map[string]any{"a": -1}, "a") != 0 {
 		t.Fatal("positiveIntFromMetadata failed")
+	}
+}
+
+func TestJobJSONOmitsZeroStructFields(t *testing.T) {
+	jobJSON, err := json.Marshal(Job{})
+	if err != nil {
+		t.Fatalf("Marshal(Job{}) error = %v", err)
+	}
+	encodedJob := string(jobJSON)
+	for _, field := range []string{`"scheduled_at"`, `"created_at"`, `"execution_policy"`} {
+		if strings.Contains(encodedJob, field) {
+			t.Fatalf("zero job field %s should be omitted: %s", field, jobJSON)
+		}
+	}
+
+	healthJSON, err := json.Marshal(JobHealthSnapshot{})
+	if err != nil {
+		t.Fatalf("Marshal(JobHealthSnapshot{}) error = %v", err)
+	}
+	encodedHealth := string(healthJSON)
+	for _, field := range []string{`"scheduled_at"`, `"started_at"`, `"finished_at"`, `"updated_at"`} {
+		if strings.Contains(encodedHealth, field) {
+			t.Fatalf("zero health field %s should be omitted: %s", field, healthJSON)
+		}
 	}
 }
 
@@ -109,7 +134,7 @@ func TestTrendPredictorSuggestsWorkersOnlyForRisingDepth(t *testing.T) {
 	if got := predictor.Predict(context.Background(), "operations_core", 400, 64); got != 0 {
 		t.Fatalf("expected max worker cap to suppress scaling, got %d", got)
 	}
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		predictor.Predict(context.Background(), "operations_core", i, 1)
 	}
 	if len(predictor.history["operations_core"]) != 10 {

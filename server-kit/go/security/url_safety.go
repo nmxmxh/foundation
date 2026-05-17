@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -33,7 +34,7 @@ type OutboundURLPolicy struct {
 // network paths, and suffix-style host tricks.
 func ValidateRedirectTarget(raw string, allowedHosts []string) (*url.URL, error) {
 	candidate := strings.TrimSpace(raw)
-	if candidate == "" || containsControl(candidate) || containsEscapedControl(candidate) || strings.Contains(candidate, `\`) {
+	if candidate == "" || containsControl(candidate) || containsEscapedControl(candidate) || strings.Contains(candidate, "\\") {
 		return nil, ErrUnsafeURL
 	}
 	if strings.HasPrefix(candidate, "//") {
@@ -86,10 +87,8 @@ func ValidateOutboundURL(ctx context.Context, raw string, policy OutboundURLPoli
 	if err != nil || len(ips) == 0 {
 		return nil, ErrUnsafeURL
 	}
-	for _, ip := range ips {
-		if isPrivateOrLocalIP(ip) {
-			return nil, ErrUnsafeURL
-		}
+	if slices.ContainsFunc(ips, isPrivateOrLocalIP) {
+		return nil, ErrUnsafeURL
 	}
 	return parsed, nil
 }

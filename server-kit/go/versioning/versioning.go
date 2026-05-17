@@ -335,7 +335,7 @@ func (v *Versioner) AllVersions() []Version {
 func (v *Versioner) VersionsHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		if err := json.NewEncoder(w).Encode(map[string]any{
 			"versions":        v.AllVersions(),
 			"current_version": v.config.DefaultVersion,
 		}); err != nil {

@@ -13,7 +13,6 @@ These are shared modules that should be versioned, tested, and rarely edited ins
 - `runtime-transport`: envelope contracts, protobuf transport, websocket/event conventions, and generated transport helpers.
 - `runtime-sdk`: browser/WASM runtime bridge, 4KB control-buffer contract, and optional shared-arena helpers.
 - `runtime-native`: Tauri-backed native shell bridge, binary native dispatch frames, secure storage surfaces, and native runtime capability discovery.
-- `cognitive-wire (cw)`: stealth extension for shared AI compute, binary-optimized CWF transport, and edge-native state replication.
 - `config-contracts`: configuration schema contracts and examples shared by generated apps.
 
 If logic is needed by multiple apps, move it into a platform module instead of adding root `pkg/` code to an app.

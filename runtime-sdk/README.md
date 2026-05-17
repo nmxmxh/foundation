@@ -49,3 +49,26 @@ impl RuntimeUnit for MyUnit {
 ## RuntimeSharedArena
 
 `RuntimeSharedArena` is an optional SharedArrayBuffer data plane for large payloads. It provides page-aligned slabs, a descriptor table, a ring queue, diagnostics, and epoch counters. Main-thread code should render only; workers own WASM execution and blocking waits. If SAB or shared WebAssembly memory is unavailable, callers must fall back to transferable buffers or postMessage through `negotiateRuntimeMemory`.
+
+### Columnar Batch Descriptors
+
+Scan-heavy runtime work can publish a descriptor of type
+`ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH`. The descriptor's slab contains a compact
+metadata payload:
+
+1. a 32-byte batch header with magic, schema version, row count, column count,
+   flags, and optional metadata/dictionary descriptor IDs;
+2. one 64-byte field descriptor per column;
+3. descriptor IDs for validity, offsets, values, and auxiliary buffers.
+
+This layout borrows the useful physical model from Apache Arrow: a record batch
+has fields with the same row count, fixed-width values can live in contiguous
+typed buffers, variable-width values use offsets plus values buffers, nulls use
+validity buffers, and metadata is separate from the raw column bytes. It is not
+full Arrow IPC. The goal is a small Foundation-native descriptor that can be
+adapted to Arrow-compatible readers later without forcing command/event paths to
+carry analytical payloads.
+
+Use this lane only for analytical, telemetry, media, model, or signal batches
+where contiguous column access is measurable. Row-oriented Cap'n Proto/protobuf
+messages remain the visible command/event contract.

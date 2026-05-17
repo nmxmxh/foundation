@@ -1,0 +1,599 @@
+# Ovasabi Testing Practices
+
+Status: v1.0
+Date: 2026-05-14
+Owner: Platform Architecture
+
+## Purpose and scope
+
+This document defines the Foundation testing standard for Go backend modules, TypeScript/React clients, Rust/WASM runtime units, PostgreSQL/Redis infrastructure, WebSocket/runtime-transport contracts, and River workers.
+
+The standard is deliberately practical: tests must expose faults early, preserve architecture contracts, and stay cheap enough to run continuously. Coverage is required, but coverage alone is not evidence of adequacy.
+
+Primary references used for synthesis:
+
+- `/Users/okhai/Desktop/Software Testing and Analysis by Mauro Pezze,Michal Young (z-lib.org).pdf`
+- `/Users/okhai/Desktop/testing.pdf`
+- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/coding_practices.md`
+- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/database_practices.md`
+- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/tla_architecture_practices.md`
+- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/runtime_foundation.md`
+
+The source review used five passes over each testing document:
+
+1. Overall test-process and quality-assurance posture.
+2. Test case selection, equivalence partitioning, boundary values, and duplicates.
+3. Adequacy criteria: functional, structural, data-flow, model-based, and regression coverage.
+4. Test execution machinery: scaffolding, stubs, mocks, oracles, automation, and documentation.
+5. Foundation-specific mapping to event lifecycles, tenant isolation, correlation IDs, runtime envelopes, workers, Postgres, Redis, WASM, frontend stores, and high-performance lanes.
+
+## Rule levels
+
+- `Mandatory`: required for merge unless a documented exception is approved.
+- `Recommended`: strong default; deviations require rationale in PR notes.
+- `Contextual`: apply when the condition is present.
+
+## Testing vocabulary
+
+| Term | Foundation meaning |
+| :--- | :--- |
+| **Test oracle** | Code or data that decides whether observed behavior is correct. Assertions, contract verifiers, invariant checks, golden frames, and query result checks are all oracles. |
+| **Scaffolding** | Test-only harness code needed to isolate or drive a unit, component, service, worker, transport lane, browser view, or runtime guest. |
+| **Adequacy** | Evidence that the test suite exercises relevant behavior classes, not just a raw line-coverage percentage. |
+| **Functional test** | Black-box test derived from the public contract: API, event, proto, schema, command, UI workflow, or runtime unit spec. |
+| **Structural test** | White-box test derived from code structure: branch, loop, error path, data-flow, race, or optimized-lane behavior. |
+| **Regression test** | A durable test added or updated because a defect was found, a contract changed, or a risky interaction was identified. |
+| **Contract test** | A test that verifies compatibility across a boundary: producer/consumer events, proto schemas, envelopes, DB migrations, frontend transport, worker payloads, WASM host/guest buffers, or generated scaffold behavior. |
+
+## Rules (`TE-*`)
+
+### TE-01: Treat tests as part of the architecture contract
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Every changed production behavior must have a test at the same architectural level as the risk.
+2. Tests must verify visible behavior, not only implementation details.
+3. Boundary contracts must be tested from both sides when a producer and consumer can drift.
+4. Test files are subject to the same bounded-operation, error-handling, and clarity rules as production code unless this document gives a narrower exception.
+
+Enforcement:
+
+- Reviewer gate on changed production code without tests or a documented exception.
+- `make test`, `make lint`, and `tooling/scripts/testing_practices_check.sh`.
+
+### TE-02: Use black-box tests before structural tests
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Public behavior must first be tested from the specification: command input/output, event lifecycle, API response, DB effect, UI behavior, or runtime frame.
+2. Structural tests may then add branch, loop, error-path, race, and optimization coverage.
+3. Do not replace a public contract test with a test that mirrors the current implementation.
+
+Enforcement:
+
+- Reviewer gate on tests that assert private implementation details while leaving the public behavior unverified.
+
+### TE-03: Define an oracle for every test
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Every test must have explicit expected behavior.
+2. Tests must not only assert "no panic" or "no error" when visible state, emitted event, response body, metric, persisted row, or terminal failure class can be checked.
+3. Error tests must check error class, message shape, or sentinel wrapping where the contract promises it.
+4. Worker and event tests must check terminal `:success` or `:failed` outcomes where the command lifecycle reaches them.
+
+Enforcement:
+
+- Review of assertions and failure checks.
+- Contract test helpers for lifecycle events.
+
+### TE-04: Select cases by equivalence classes, boundaries, and duplicates
+
+Level: `Mandatory`
+
+Requirements:
+
+1. For each changed contract, identify meaningful input classes and test at least one representative per class.
+2. Test minimum, maximum, empty, nil/null, single-item, many-item, and just-over-limit cases where the domain has boundaries.
+3. Test duplicate, replay, aliasing, and repeated-call behavior when the system accepts identifiers, slices, maps, object references, idempotency keys, jobs, messages, files, or external callbacks.
+4. Boundary tests must include both accepted and rejected values.
+
+Enforcement:
+
+- Reviewer gate for validators, parsers, pagination, retry, rate-limit, queue, migration, and runtime-buffer changes.
+
+### TE-05: Cross-product only where interactions matter
+
+Level: `Recommended`
+
+Requirements:
+
+1. Combine partitions when behavior depends on interaction between variables.
+2. Use pairwise/combinatorial cases for config matrices, feature flags, transport lanes, auth modes, queue options, DB drivers, Redis drivers, and browser/native targets.
+3. Avoid exhaustive cross-products when independent factors can be tested separately.
+
+Enforcement:
+
+- Test plan review for feature flags, multi-lane runtime code, and infra matrix changes.
+
+### TE-06: Coverage is a floor, not proof
+
+Level: `Mandatory`
+
+Requirements:
+
+1. New or changed production code targets at least 95% line coverage.
+2. Coverage reports must not be used as the only adequacy argument.
+3. Missing coverage in error handling, tenant denial, retry exhaustion, cancellation, and timeout paths is a correctness gap.
+4. Coverage drops in touched legacy modules require an approved exception.
+
+Enforcement:
+
+- `scripts/coverage-go.sh` and package-level TypeScript/Rust coverage where configured.
+- Reviewer gate on untested critical branches.
+
+### TE-07: Test loops and retries at zero, one, two, many, and exhausted
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Loop behavior must cover zero iterations, one iteration, multiple iterations, and the configured maximum where practical.
+2. Retry behavior must cover immediate success, success-after-retry, permanent failure, cancellation, timeout, and max-attempt exhaustion.
+3. Tests must not rely on unbounded sleeps to observe eventual behavior.
+
+Enforcement:
+
+- Static check for extreme sleeps in test files.
+- Reviewer gate for retry, worker, poller, reconnect, and backoff changes.
+
+### TE-08: Every mutating test command carries correlation and idempotency evidence
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Tests for commands, events, workers, and transport frames must set or verify `correlationId`.
+2. Retryable mutation tests must include idempotency keys or deterministic duplicate prevention.
+3. Tests must verify correlation propagation into emitted events, worker metadata, logs, traces, or response envelopes when that surface is available.
+
+Enforcement:
+
+- Contract tests for lifecycle envelopes.
+- Reviewer gate on mutating command tests.
+
+### TE-09: Tenant isolation tests must be negative as well as positive
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Tests for org-scoped reads and writes must include same-tenant success and cross-tenant denial/not-found behavior.
+2. Tests must derive organization identity through authenticated context or server-side metadata helpers.
+3. Tests must not normalize a client-supplied `organization_id` into trusted server identity.
+
+Enforcement:
+
+- Integration tests for repositories, handlers, workers, and policies.
+- Security review for auth and object-access changes.
+
+### TE-10: Event lifecycle tests are required for domain flows
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Domain command flows must test `<domain>:<action>:requested`, `:success`, and `:failed` where the service owns the lifecycle.
+2. Tests must verify event type, version when present, payload schema, correlation ID, idempotency identity, organization scope, and failure reason shape.
+3. Consumers must reject malformed, unknown, wrong-version, and cross-tenant events deterministically.
+
+Enforcement:
+
+- `contracttest` helpers and generated lifecycle tests.
+- `tooling/scripts/generate_lifecycle_contract_tests.mjs --check`.
+
+### TE-11: Runtime envelope and binary-frame parity must be tested
+
+Level: `Mandatory`
+
+Requirements:
+
+1. HTTP, WebSocket, Redis, gRPC, direct frame, and WASM/native lanes must preserve canonical metadata and payload semantics.
+2. Optimized lanes must have parity/refinement tests against the canonical behavior.
+3. Compatibility JSON lanes must not become the only tested path for performance-sensitive communication.
+
+Enforcement:
+
+- Runtime transport and server-kit contract tests.
+- Reviewer gate for transport/router/runtime changes.
+
+### TE-12: Database tests must prove constraints, not only app prechecks
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Repository tests must verify unique constraints, tenant predicates, row-count semantics, transaction rollback, and not-found/conflict behavior.
+2. Migration tests must verify schema shape, indexes, seed idempotency, down migrations, and Foundation state-store availability.
+3. Tests for security-critical uniqueness must include concurrent or repeated attempts.
+4. Tests must execute queries under bounded context budgets.
+
+Enforcement:
+
+- Integration tests against Postgres for migration and repository contracts.
+- `database_practices_check.sh` and `migration_structure_check.sh`.
+
+### TE-13: Redis and cache tests must distinguish ephemeral state from truth
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Cache tests must verify miss, hit, stale/expired, invalidated, and source-of-truth fallback behavior.
+2. Redis lock tests must verify token ownership, TTL expiry, unlock failure for wrong token, and bounded wait.
+3. Pub/sub and stream tests must verify delivery, ack, redelivery, lag, cancellation, and duplicate handling where used.
+
+Enforcement:
+
+- Memory and service-backed Redis tests.
+- Reviewer gate for cache, lock, pub/sub, and stream changes.
+
+### TE-14: Worker tests must prove idempotency and bounded progress
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Worker tests must cover enqueue, execution, retry, terminal success, terminal failure, cancellation, and metadata persistence.
+2. Job handlers must be idempotent under duplicate delivery and retry.
+3. Queue concurrency, max attempts, backoff, and timeout behavior must be tested when changed.
+4. Worker tests must verify correlation and tenant metadata propagation.
+
+Enforcement:
+
+- Unit tests with in-memory stores.
+- Integration tests for River-backed critical workers.
+
+### TE-15: Frontend tests must exercise user-visible behavior and transport state
+
+Level: `Mandatory`
+
+Requirements:
+
+1. React tests must prefer semantic queries and user events over implementation selectors.
+2. Store tests must verify transport envelopes, deduplication, error states, offline queue behavior, and subscription cleanup.
+3. UI tests must include loading, empty, success, error, permission-denied, and reconnect states when the component can render them.
+4. Tests must not import raw `foundation/*/ts/src` internals from generated projects.
+
+Enforcement:
+
+- ESLint, Vitest, Testing Library, and scaffold checks.
+
+### TE-16: WASM/Rust runtime tests must prove host/guest contract safety
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Runtime tests must verify 4KB control-buffer layout, payload routing, bounds checks, deterministic errors, and fallback behavior.
+2. Rust tests must reject `unwrap`, `expect`, `todo!`, and panic-driven correctness in runtime paths.
+3. Host tests must verify unsupported shared-memory or FFI lanes degrade predictably.
+4. Financial or scoring kernels must test integer/checked arithmetic, overflow rejection, and deterministic serialization.
+
+Enforcement:
+
+- Rust `fmt`, `clippy`, Go runtimehost tests, TypeScript browser-host tests.
+
+### TE-17: Concurrency tests must make ownership and termination observable
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Tests for goroutines, channels, timers, tickers, queues, sockets, workers, and subscriptions must verify cancellation and cleanup.
+2. Race-prone code must have `go test -race` coverage where feasible.
+3. Concurrency tests must use bounded contexts, channels, fake clocks, or polling helpers instead of long fixed sleeps.
+4. Tests must verify that senders, receivers, closers, and cancellers have clear ownership.
+
+Enforcement:
+
+- `go_concurrency_practices_check.sh`.
+- Race test lane for concurrency-sensitive packages.
+
+### TE-18: Performance tests must separate hard bounds from statistical targets
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Hard correctness bounds such as max attempts, queue capacity, acquire timeout, payload size, and page limit must be asserted as behavior.
+2. Statistical targets such as p95/p99 latency, RPS, heap, CPU, and allocation counts belong in benchmarks/load tests.
+3. Benchmarks must include representative fixtures and must not silently skip the hot path they claim to measure.
+4. Load tests must define request mix, duration, concurrency, think time, error budget, and pass/fail threshold.
+
+Enforcement:
+
+- `foundation_benchmarks.md`, `performance_check.sh`, and load-test targets.
+
+### TE-19: Security tests must target trust boundaries
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Tests must cover unauthenticated, unauthorized, wrong-org, malformed, replayed, oversized, and expired inputs at exposed boundaries.
+2. Authorization must be tested on the target object or aggregate, not only the route.
+3. Tests must verify secrets are redacted from logs, errors, traces, and frontend state.
+4. Rate limiting, CORS, CSRF/session, signed URL, upload, and webhook surfaces require negative tests when touched.
+
+Enforcement:
+
+- Security middleware, policy, auth, objectstore, and frontend guard tests.
+
+### TE-20: Regression tests are mandatory for repaired defects
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Every bug fix must include a regression test that fails before the fix unless an exception is documented.
+2. The regression test should encode the smallest stable reproduction at the correct boundary.
+3. Do not delete regression tests because implementation changed; rewrite them at the preserved contract level.
+
+Enforcement:
+
+- Reviewer gate on bug-fix PRs.
+
+### TE-21: Integration tests must own their environment
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Integration tests must declare required services and ports through test config, not hidden developer machine state.
+2. Setup and teardown must be deterministic and idempotent.
+3. Tests must isolate DB schemas, Redis keys, queues, object-store keys, tenants, and correlation IDs.
+4. External network dependencies must be faked, recorded with approval, or gated behind explicit opt-in.
+
+Enforcement:
+
+- `make docker-up`, `make test-env-up`, test fixtures, and service-backed test helpers.
+
+### TE-22: Stubs, mocks, and fakes must preserve the contract they replace
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Fakes must implement failure, cancellation, timeout, duplicate, and boundary behavior needed by the tested code.
+2. Mocks must not assert incidental call order unless order is the contract.
+3. Shared fakes for Foundation modules must be contract-tested against the real implementation when feasible.
+4. Test doubles must not create behavior that production cannot exhibit.
+
+Enforcement:
+
+- Contract tests for MemoryDB/Postgres, memory/Redis, transport adapters, and worker stores.
+
+### TE-23: Test data must be explicit, minimal, and domain-shaped
+
+Level: `Recommended`
+
+Requirements:
+
+1. Fixtures should use meaningful IDs such as `org_1`, `corr_1`, `idem_1`, and domain-specific refs.
+2. Avoid anonymous blobs unless the test is specifically about binary payload shape.
+3. Use builders for repeated domain setup, but keep expected values visible in each test.
+4. Golden files must be stable, small, and reviewed as contract artifacts.
+
+Enforcement:
+
+- Reviewer gate on opaque fixtures and broad snapshots.
+
+### TE-24: Tests must not hide failures behind broad skips
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Skips must state the missing capability or explicit opt-in variable.
+2. Required CI tests must not skip because a local service is absent unless that lane is explicitly optional.
+3. Long, load, destructive, or external tests must use explicit `RUN_*` gates.
+
+Enforcement:
+
+- Reviewer gate on `t.Skip`, `test.skip`, and environment-gated tests.
+
+### TE-25: Generated contracts must be checked for drift
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Generated proto, Cap'n Proto, lifecycle, runtime, and frontend manifest artifacts must be either committed or verified stale-free by CI.
+2. Contract generators must support `--check` or equivalent dry-run comparison.
+3. Tests must fail when generated producer/consumer contracts are missing or stale.
+
+Enforcement:
+
+- `contract_drift_check.sh`.
+- `generate_lifecycle_contract_tests.mjs --check`.
+
+### TE-26: Test documentation must explain risk, not restate code
+
+Level: `Recommended`
+
+Requirements:
+
+1. Complex tests should briefly name the invariant, bug class, or boundary being protected.
+2. PR notes should list intentionally untested risk when coverage is incomplete.
+3. Test names should read as behavior claims.
+
+Enforcement:
+
+- Review of test names and comments.
+
+### TE-27: Test files must stay deterministic
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Avoid wall-clock, random, unordered map, network, filesystem, and scheduler assumptions unless explicitly controlled.
+2. Random/property tests must log or fix seeds on failure.
+3. Time-dependent tests should use fake clocks or bounded polling helpers where available.
+4. Tests must be safe to run in parallel unless they explicitly own isolated global resources.
+
+Enforcement:
+
+- Static checks for focused tests and extreme sleeps.
+- Reviewer gate for nondeterministic tests.
+
+### TE-28: Acceptance and E2E tests must cover core journeys
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Auth guards and core user journeys require E2E coverage.
+2. E2E tests must verify visible UI behavior plus the backend state or event effect when feasible.
+3. E2E tests should avoid brittle visual-only assertions unless the change is visual.
+4. Browser tests must run against a known local server or file target and capture diagnostics on failure.
+
+Enforcement:
+
+- Frontend and E2E CI lanes.
+
+### TE-29: Model-based tests are required for stateful protocols
+
+Level: `Contextual`
+
+Requirements:
+
+1. Stateful flows such as workers, retries, websocket reconnects, offline queues, runtime lane selection, and lifecycle events should have transition-model tests.
+2. Tests must cover illegal transitions and terminal states.
+3. Optimized implementations must refine the same model.
+
+Enforcement:
+
+- Reviewer gate for protocol/state-machine changes.
+- `tla_architecture_practices.md` for high-risk models.
+
+### TE-30: Fault-based tests must target likely Foundation bug classes
+
+Level: `Contextual`
+
+Requirements:
+
+1. Tests should inject malformed envelopes, missing metadata, wrong tenant, duplicate events, stale cache, Redis timeout, DB conflict, serialization failure, worker retry, and cancelled contexts.
+2. Mutation-style thinking should be used for validators and security checks: each important guard should have at least one test that fails when the guard is removed.
+3. Chaos/fault injection belongs behind bounded and repeatable test harnesses.
+
+Enforcement:
+
+- Review of critical validation and resilience changes.
+
+### TE-31: Test suites must be organized by speed and dependency
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Unit tests must run without Docker or network dependencies.
+2. Integration tests may depend on local Postgres/Redis/object-store services and must be under explicit targets.
+3. Load and benchmark tests must be separate from default unit tests unless intentionally lightweight.
+4. CI should run fast tests first, then integration/load/benchmark lanes.
+
+Enforcement:
+
+- `make test-unit`, `make test-integration`, `make test-frontend`, `make test-load`, `make test-bench`, and `make test-all`.
+
+### TE-32: Test failures must preserve diagnostics
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Test failures must identify the operation, record, stage, event type, correlation ID, organization ID, or fixture where practical.
+2. Batch tests must report per-record failures rather than collapsing all diagnostics into one boolean.
+3. Load tests must emit request counts, error rates, latency summaries, and first failure samples.
+
+Enforcement:
+
+- Reviewer gate on low-signal assertions and swallowed errors.
+
+### TE-33: Test automation must be reproducible locally
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Every CI test/lint lane must have a local make target or script.
+2. Scripts must use explicit roots and avoid hidden global state.
+3. Test scripts must be copied into generated projects through scaffold sync.
+
+Enforcement:
+
+- Makefile targets and scaffold manifest checks.
+
+### TE-34: Testing checks are linted as part of Foundation
+
+Level: `Mandatory`
+
+Requirements:
+
+1. `tooling/scripts/testing_practices_check.sh` must run from `make lint`.
+2. Generated projects must receive the same script as `scripts/checks/testing_practices_check.sh`.
+3. The check must remain conservative: fail on high-confidence test hazards and leave nuanced adequacy judgments to review.
+
+Enforcement:
+
+- `make lint`.
+- Scaffold sync.
+
+### TE-35: Update this document when test strategy changes
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Add or revise `TE-*` rules when the Foundation introduces a new runtime lane, storage adapter, protocol boundary, test target, or defect class.
+2. Update checks and templates in the same change when a rule becomes mechanically enforceable.
+3. Record intentionally deferred automation as a test gap.
+
+Enforcement:
+
+- Reviewer gate for new testing infrastructure and critical defect postmortems.
+
+## Foundation test checks
+
+The conservative automated check set is:
+
+1. No focused TypeScript tests: `.only(`, `describe.only`, `it.only`, or `test.only`.
+2. No disabled TypeScript tests without review: `describe.skip`, `it.skip`, or `test.skip`.
+3. No extreme fixed sleeps in Go tests: `time.Sleep` with seconds or minutes outside load tests.
+4. No long fixed waits in TypeScript tests: `setTimeout`/promise sleeps above one second outside explicit E2E/load paths.
+5. Domain lifecycle tests must exist when generated lifecycle contract tests are present.
+6. Frontend scaffold tests must keep Testing Library, jsdom, and user-event dependencies.
+7. Generated project lint must run the testing-practices check.
+
+These checks intentionally do not try to infer whether every test has a strong oracle or adequate partitions. Those are review obligations under `TE-02` through `TE-06`.
+
+## PR testing checklist
+
+- [ ] Changed behavior has functional tests from the public contract.
+- [ ] Structural/error tests cover branch, timeout, cancellation, retry, and failure paths that matter.
+- [ ] Boundary, empty, duplicate/replay, and just-over-limit cases are included.
+- [ ] Mutating flows verify correlation ID, idempotency, and terminal lifecycle events.
+- [ ] Tenant-scoped flows include cross-tenant negative tests.
+- [ ] DB changes include migration, constraint, rollback, and query-budget evidence.
+- [ ] Redis/cache/queue changes include expiry, duplicate, cancellation, and failure tests.
+- [ ] Frontend changes include loading, empty, success, error, permission, and reconnect states where applicable.
+- [ ] Runtime/WASM/native changes include parity/refinement tests across lanes.
+- [ ] Bug fixes include regression tests.
+- [ ] Long, service-backed, load, or external tests are under explicit targets/gates.
