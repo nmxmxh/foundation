@@ -82,7 +82,19 @@ func (b *Buffer) SetInputBytes(payload []byte) error {
 		return fmt.Errorf("input payload too large: %d > %d", len(payload), generated.INPUT_MAX_BYTES)
 	}
 	clear(b.raw[generated.OFFSET_INPUT_BYTES : generated.OFFSET_INPUT_BYTES+generated.INPUT_MAX_BYTES])
-	copy(b.raw[generated.OFFSET_INPUT_BYTES:], payload)
+	return b.SetInputBytesFast(payload)
+}
+
+// SetInputBytesFast copies input bytes and updates the declared input length
+// without clearing the unused tail. Use only when the buffer was just reset or
+// the consumer is trusted to obey the declared length.
+func (b *Buffer) SetInputBytesFast(payload []byte) error {
+	if len(payload) > int(generated.INPUT_MAX_BYTES) {
+		return fmt.Errorf("input payload too large: %d > %d", len(payload), generated.INPUT_MAX_BYTES)
+	}
+	start := generated.OFFSET_INPUT_BYTES
+	end := start + uint32(len(payload))
+	copy(b.raw[start:end], payload)
 	return b.SetHeaderInt(generated.INT_IDX_INPUT_LENGTH, int32(len(payload)))
 }
 
@@ -114,7 +126,19 @@ func (b *Buffer) SetOutputBytes(payload []byte) error {
 		return fmt.Errorf("output payload too large: %d > %d", len(payload), generated.OUTPUT_MAX_BYTES)
 	}
 	clear(b.raw[generated.OFFSET_OUTPUT_BYTES : generated.OFFSET_OUTPUT_BYTES+generated.OUTPUT_MAX_BYTES])
-	copy(b.raw[generated.OFFSET_OUTPUT_BYTES:], payload)
+	return b.SetOutputBytesFast(payload)
+}
+
+// SetOutputBytesFast copies output bytes and updates the declared output length
+// without clearing the unused tail. Use only for trusted hot paths where stale
+// bytes beyond the declared length are not observable.
+func (b *Buffer) SetOutputBytesFast(payload []byte) error {
+	if len(payload) > int(generated.OUTPUT_MAX_BYTES) {
+		return fmt.Errorf("output payload too large: %d > %d", len(payload), generated.OUTPUT_MAX_BYTES)
+	}
+	start := generated.OFFSET_OUTPUT_BYTES
+	end := start + uint32(len(payload))
+	copy(b.raw[start:end], payload)
 	return b.SetHeaderInt(generated.INT_IDX_OUTPUT_LENGTH, int32(len(payload)))
 }
 

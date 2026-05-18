@@ -286,28 +286,46 @@ export const canDispatch = (
   if (!route.requiredCapability) {
     return true;
   }
-  if (grantedCapabilities.includes("*") || grantedCapabilities.includes(route.requiredCapability)) {
-    return true;
+  for (let index = 0; index < grantedCapabilities.length; index += 1) {
+    const capability = grantedCapabilities[index];
+    if (capability === "*" || capability === route.requiredCapability) {
+      return true;
+    }
   }
-  const domain = route.requiredCapability.split(".")[0] ?? "";
+  const dot = route.requiredCapability.indexOf(".");
+  const domain = dot > 0 ? route.requiredCapability.slice(0, dot) : route.requiredCapability;
   if (!domain) {
     return false;
   }
-  if (grantedCapabilities.includes(`${domain}.*`)) {
-    return true;
-  }
+  const wildcard = `${domain}.*`;
+  const view = `${domain}.view`;
+  const write = `${domain}.write`;
+  const admin = `${domain}.admin`;
   if (route.permission === "view") {
-    const view = `${domain}.view`;
-    const write = `${domain}.write`;
-    const admin = `${domain}.admin`;
-    return grantedCapabilities.some((capability) => capability === view || capability === write || capability === admin);
+    for (let index = 0; index < grantedCapabilities.length; index += 1) {
+      const capability = grantedCapabilities[index];
+      if (capability === wildcard || capability === view || capability === write || capability === admin) {
+        return true;
+      }
+    }
+    return false;
   }
   if (route.permission === "write") {
-    const write = `${domain}.write`;
-    const admin = `${domain}.admin`;
-    return grantedCapabilities.some((capability) => capability === write || capability === admin);
+    for (let index = 0; index < grantedCapabilities.length; index += 1) {
+      const capability = grantedCapabilities[index];
+      if (capability === wildcard || capability === write || capability === admin) {
+        return true;
+      }
+    }
+    return false;
   }
-  return grantedCapabilities.includes(`${domain}.admin`);
+  for (let index = 0; index < grantedCapabilities.length; index += 1) {
+    const capability = grantedCapabilities[index];
+    if (capability === wildcard || capability === admin) {
+      return true;
+    }
+  }
+  return false;
 };
 
 const dispatchWithTimeout = async <TPayload>(

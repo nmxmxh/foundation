@@ -73,8 +73,10 @@ type BoundFrameClient struct {
 }
 
 type Router struct {
-	handlers      map[string]Handler
-	frameHandlers map[string]FrameHandler
+	handlers         map[string]Handler
+	frameHandlers    map[string]FrameHandler
+	frameFastEvent   string
+	frameFastHandler FrameHandler
 }
 
 type ServerOptions struct {
@@ -144,16 +146,25 @@ func (r *Router) RegisterFrame(eventType string, handler FrameHandler) error {
 		return fmt.Errorf("duplicate grpc frame handler for %s", eventType)
 	}
 	r.frameHandlers[eventType] = handler
+	r.frameFastEvent = eventType
+	r.frameFastHandler = handler
 	return nil
 }
 
 func (r *Router) DispatchFrame(ctx context.Context, frame Frame) (Frame, error) {
 	if r != nil {
-		if h := r.frameHandlers[frame.EventType]; h != nil {
+		if h := r.lookupFrameHandler(frame.EventType); h != nil {
 			return h(ctx, frame)
 		}
 	}
 	return Frame{}, dispatchFrameError(r, frame.EventType)
+}
+
+func (r *Router) lookupFrameHandler(eventType string) FrameHandler {
+	if eventType == r.frameFastEvent {
+		return r.frameFastHandler
+	}
+	return r.frameHandlers[eventType]
 }
 
 func NewServer(router *Router, opts ServerOptions) *grpc.Server {
@@ -405,7 +416,7 @@ func dispatchFrameHandler(service any, ctx context.Context, decode func(any) err
 			return nil, errors.New("grpc router is nil")
 		}
 		req := request.(Frame)
-		h := svc.router.frameHandlers[req.EventType]
+		h := svc.router.lookupFrameHandler(req.EventType)
 		if h == nil {
 			return nil, fmt.Errorf("no grpc frame handler for %s", req.EventType)
 		}
@@ -552,12 +563,7 @@ func (binaryFrameCodec) Unmarshal(data []byte, v any) error {
 	if !ok || frame == nil {
 		return fmt.Errorf("foundation binary codec expects *grpcsvc.Frame, got %T", v)
 	}
-	decoded, err := unmarshalFrame(data)
-	if err != nil {
-		return err
-	}
-	*frame = decoded
-	return nil
+	return unmarshalFrameInto(data, frame)
 }
 
 func marshalFrame(frame Frame) []byte {
@@ -583,32 +589,39 @@ func AppendMarshalFrame(dst []byte, frame Frame) []byte {
 
 func unmarshalFrame(data []byte) (Frame, error) {
 	var frame Frame
+	if err := unmarshalFrameInto(data, &frame); err != nil {
+		return Frame{}, err
+	}
+	return frame, nil
+}
+
+func unmarshalFrameInto(data []byte, frame *Frame) error {
 	var eventType []byte
 	var err error
 	offset := 0
 	eventType, offset, err = readField(data, offset)
 	if err != nil {
-		return Frame{}, err
+		return err
 	}
 	frame.Payload, offset, err = readField(data, offset)
 	if err != nil {
-		return Frame{}, err
+		return err
 	}
 	correlationID, offset, err := readField(data, offset)
 	if err != nil {
-		return Frame{}, err
+		return err
 	}
 	schemaVersion, offset, err := readField(data, offset)
 	if err != nil {
-		return Frame{}, err
+		return err
 	}
 	if offset != len(data) {
-		return Frame{}, errors.New("trailing bytes in foundation binary frame")
+		return errors.New("trailing bytes in foundation binary frame")
 	}
 	frame.EventType = frameControlStrings.internBytes(eventType)
-	frame.CorrelationID = string(correlationID)
+	frame.CorrelationID = reuseString(frame.CorrelationID, correlationID)
 	frame.SchemaVersion = frameControlStrings.internBytes(schemaVersion)
-	return frame, nil
+	return nil
 }
 
 func UnmarshalFrameView(data []byte) (FrameView, error) {
@@ -661,6 +674,28 @@ func readField(data []byte, offset int) ([]byte, int, error) {
 		return nil, 0, errors.New("invalid foundation binary frame length")
 	}
 	return data[offset : offset+length], offset + length, nil
+}
+
+func reuseString(current string, value []byte) string {
+	if len(value) == 0 {
+		return ""
+	}
+	if stringEqualBytes(current, value) {
+		return current
+	}
+	return string(value)
+}
+
+func stringEqualBytes(current string, value []byte) bool {
+	if len(current) != len(value) {
+		return false
+	}
+	for i := range value {
+		if current[i] != value[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func first(values []string) string {

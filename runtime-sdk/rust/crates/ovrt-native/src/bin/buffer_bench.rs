@@ -54,6 +54,13 @@ fn main() {
         black_box(bytes);
     });
 
+    let mut output_reuse = Vec::with_capacity(output.len());
+    bench_ns("native read_output_bytes_into reused Vec", || {
+        buffer
+            .read_output_bytes_into(black_box(&mut output_reuse))
+            .expect("read into");
+    });
+
     bench_ns("native output_bytes_view borrowed", || {
         let bytes = buffer.output_bytes_view().expect("view");
         black_box(bytes);

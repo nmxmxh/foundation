@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
+	"google.golang.org/protobuf/proto"
 )
 
 // FrameRouterAdapter is the minimal frame registration interface used by
@@ -43,22 +46,37 @@ func RegisterTypedFrameHandlers(router FrameRouterAdapter, handlers TypedService
 		currentBinding := registration.Binding
 		controller := NewHandlerExecutionController(regOpts)
 		wrapped := controller.WrapTyped(registration.Handler)
+		var requestPool *sync.Pool
+		if currentBinding.AllowsProtobufDecodeReuse() {
+			requestPool = &sync.Pool{
+				New: func() any {
+					msg, err := currentBinding.NewRequest()
+					if err != nil {
+						return nil
+					}
+					return msg
+				},
+			}
+		}
 
 		if err := router.RegisterFrame(eventType, func(ctx context.Context, frame grpcsvc.Frame) (grpcsvc.Frame, error) {
-			request, err := currentBinding.DecodeRequestBytes(frame.Payload, frameMetadata(frame))
+			request, pooled, err := decodeFrameRequest(currentBinding, requestPool, frame.Payload, frameMetadata(frame))
 			if err != nil {
 				return grpcsvc.Frame{}, err
 			}
 
 			response, err := wrapped(ctx, request)
 			if err != nil {
+				releaseFrameRequest(requestPool, request, pooled)
 				return grpcsvc.Frame{}, err
 			}
 
 			payload, err := currentBinding.EncodeResponseBytes(response)
 			if err != nil {
+				releaseFrameRequest(requestPool, request, pooled)
 				return grpcsvc.Frame{}, err
 			}
+			releaseFrameRequest(requestPool, request, pooled)
 
 			return grpcsvc.Frame{
 				EventType:     frame.EventType,
@@ -88,4 +106,35 @@ func frameMetadata(frame grpcsvc.Frame) map[string]any {
 		return nil
 	}
 	return map[string]any{"correlation_id": correlationID}
+}
+
+func decodeFrameRequest(binding protoapi.Binding, requestPool *sync.Pool, payload []byte, metadata map[string]any) (proto.Message, bool, error) {
+	if requestPool == nil {
+		msg, err := binding.DecodeRequestBytes(payload, metadata)
+		return msg, false, err
+	}
+	request, ok := requestPool.Get().(proto.Message)
+	if !ok || request == nil {
+		var err error
+		request, err = binding.NewRequest()
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	msg, err := binding.DecodeRequestBytesInto(request, payload, metadata, protoapi.DecodeRequestBytesIntoOptions{
+		CompleteMessage: true,
+	})
+	if err != nil {
+		proto.Reset(request)
+		requestPool.Put(request)
+		return nil, false, err
+	}
+	return msg, true, nil
+}
+
+func releaseFrameRequest(requestPool *sync.Pool, request proto.Message, pooled bool) {
+	if !pooled || request == nil || requestPool == nil {
+		return
+	}
+	requestPool.Put(request)
 }

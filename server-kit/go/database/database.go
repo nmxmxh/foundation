@@ -380,7 +380,6 @@ func (db *MemoryDB) ListRecords(ctx context.Context, domain, collection, organiz
 	if err := db.ensureReady(ctx); err != nil {
 		return nil, err
 	}
-	filters = copyMap(filters)
 	domain = strings.TrimSpace(domain)
 	collection = strings.TrimSpace(collection)
 	organizationID = strings.TrimSpace(organizationID)
@@ -483,7 +482,6 @@ func (db *MemoryDB) CountRecords(ctx context.Context, domain, collection, organi
 	if err := db.ensureReady(ctx); err != nil {
 		return 0, err
 	}
-	filters = copyMap(filters)
 	domain = strings.TrimSpace(domain)
 	collection = strings.TrimSpace(collection)
 	organizationID = strings.TrimSpace(organizationID)
@@ -866,6 +864,56 @@ func matchesFilter(record map[string]any, filters map[string]any) bool {
 }
 
 func equalValue(actual any, expected any) bool {
+	switch a := actual.(type) {
+	case string:
+		if e, ok := expected.(string); ok {
+			return strings.TrimSpace(a) == strings.TrimSpace(e)
+		}
+	case bool:
+		if e, ok := expected.(bool); ok {
+			return a == e
+		}
+	case int:
+		if e, ok := expected.(int); ok {
+			return a == e
+		}
+	case int8:
+		if e, ok := expected.(int8); ok {
+			return a == e
+		}
+	case int16:
+		if e, ok := expected.(int16); ok {
+			return a == e
+		}
+	case int32:
+		if e, ok := expected.(int32); ok {
+			return a == e
+		}
+	case int64:
+		if e, ok := expected.(int64); ok {
+			return a == e
+		}
+	case uint:
+		if e, ok := expected.(uint); ok {
+			return a == e
+		}
+	case uint8:
+		if e, ok := expected.(uint8); ok {
+			return a == e
+		}
+	case uint16:
+		if e, ok := expected.(uint16); ok {
+			return a == e
+		}
+	case uint32:
+		if e, ok := expected.(uint32); ok {
+			return a == e
+		}
+	case uint64:
+		if e, ok := expected.(uint64); ok {
+			return a == e
+		}
+	}
 	as, aok := comparableString(actual)
 	es, eok := comparableString(expected)
 	if aok && eok {

@@ -79,6 +79,28 @@ func TestRunParallelSingleNilAndNilContextBranches(t *testing.T) {
 	}
 }
 
+func TestRunParallelIntoReusesCallerStorage(t *testing.T) {
+	ops := []Operation[int]{
+		{Name: "a", Critical: true, Run: func(context.Context) (int, error) { return 1, nil }},
+		{Name: "b", Run: func(context.Context) (int, error) { return 2, nil }},
+	}
+	results := make([]Result[int], 0, len(ops))
+	results = RunParallelInto(context.Background(), ops, results)
+	if len(results) != len(ops) || cap(results) != len(ops) {
+		t.Fatalf("result shape = len %d cap %d, want len/cap %d", len(results), cap(results), len(ops))
+	}
+	if results[0].Name != "a" || results[0].Value != 1 || results[0].Error != nil {
+		t.Fatalf("result[0] = %+v", results[0])
+	}
+	if results[1].Name != "b" || results[1].Value != 2 || results[1].Error != nil {
+		t.Fatalf("result[1] = %+v", results[1])
+	}
+	empty := RunParallelInto[int](context.Background(), nil, results)
+	if empty == nil || len(empty) != 0 || cap(empty) != cap(results) {
+		t.Fatalf("empty reused result shape = len %d cap %d", len(empty), cap(empty))
+	}
+}
+
 func BenchmarkRunParallel(b *testing.B) {
 	ops := []Operation[int]{
 		{Name: "a", Critical: true, Run: func(context.Context) (int, error) { return 1, nil }},
@@ -88,5 +110,18 @@ func BenchmarkRunParallel(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		RunParallel(context.Background(), ops)
+	}
+}
+
+func BenchmarkRunParallelInto(b *testing.B) {
+	ops := []Operation[int]{
+		{Name: "a", Critical: true, Run: func(context.Context) (int, error) { return 1, nil }},
+		{Name: "b", Critical: true, Run: func(context.Context) (int, error) { return 2, nil }},
+		{Name: "c", Run: func(context.Context) (int, error) { return 3, nil }},
+	}
+	results := make([]Result[int], 0, len(ops))
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		results = RunParallelInto(context.Background(), ops, results)
 	}
 }

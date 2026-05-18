@@ -262,6 +262,17 @@ lanes.
    behavior separately. For Linux hosts, include minor/major page faults and
    RSS/PSS where available; NUMA placement belongs in production evidence for
    multi-socket deployments.
+8. Treat cache-line locality as part of the arena contract. Descriptor slots,
+   ring cursors, producer/consumer ownership words, and columnar field
+   descriptors should remain fixed-width, contiguous, and naturally aligned so
+   hot loops count touched cache lines rather than chase pointers.
+9. Avoid false sharing in future runtime queues and packet rings. Contended
+   epoch slots, write cursors, read cursors, and per-worker counters must not be
+   packed next to unrelated hot atomics without a benchmark that proves the
+   layout is harmless.
+10. Runtime batch planners should choose batch sizes that fit useful L1/L2
+   working sets before escalating to SIMD, FFI, shared memory, or WebGPU. A
+   wider lane that repeatedly stalls on cache misses is not a better lane.
 
 ## FFI ABI conformance posture
 

@@ -18,12 +18,27 @@ const (
 
 type MessageFactory func() proto.Message
 
+type ProtobufDecodeReuseMode string
+
+const (
+	ProtobufDecodeReuseDisabled         ProtobufDecodeReuseMode = ""
+	ProtobufDecodeReuseCompleteMessages ProtobufDecodeReuseMode = "complete_messages"
+)
+
 type Binding struct {
-	Request  MessageFactory
-	Response MessageFactory
+	Request             MessageFactory
+	Response            MessageFactory
+	ProtobufDecodeReuse ProtobufDecodeReuseMode
 }
 
 type TypedHandlerFunc func(context.Context, proto.Message) (proto.Message, error)
+
+type DecodeRequestBytesIntoOptions struct {
+	// CompleteMessage enables protobuf Merge reuse. Only use it when the payload
+	// contract does not rely on absent fields clearing prior state, or after the
+	// caller has explicitly cleared every field that may be absent.
+	CompleteMessage bool
+}
 
 func (b Binding) Validate() error {
 	if b.Request == nil {
@@ -38,7 +53,16 @@ func (b Binding) Validate() error {
 	if b.Response() == nil {
 		return errors.New("response message factory returned nil")
 	}
+	switch b.ProtobufDecodeReuse {
+	case ProtobufDecodeReuseDisabled, ProtobufDecodeReuseCompleteMessages:
+	default:
+		return fmt.Errorf("unsupported protobuf decode reuse mode %q", b.ProtobufDecodeReuse)
+	}
 	return nil
+}
+
+func (b Binding) AllowsProtobufDecodeReuse() bool {
+	return b.ProtobufDecodeReuse == ProtobufDecodeReuseCompleteMessages
 }
 
 func (b Binding) NewRequest() (proto.Message, error) {
@@ -79,22 +103,36 @@ func (b Binding) DecodeRequestBytes(payload []byte, metadata map[string]any) (pr
 	if err != nil {
 		return nil, err
 	}
+	return b.DecodeRequestBytesInto(msg, payload, metadata, DecodeRequestBytesIntoOptions{})
+}
+
+func (b Binding) DecodeRequestBytesInto(target proto.Message, payload []byte, metadata map[string]any, opts DecodeRequestBytesIntoOptions) (proto.Message, error) {
+	if target == nil {
+		return nil, errors.New("target request message is required")
+	}
+	if !opts.CompleteMessage || len(payload) == 0 {
+		proto.Reset(target)
+	}
 	if len(payload) > 0 {
-		if err := proto.Unmarshal(payload, msg); err != nil {
+		if opts.CompleteMessage {
+			if err := (proto.UnmarshalOptions{Merge: true}).Unmarshal(payload, target); err != nil {
+				return nil, err
+			}
+		} else if err := proto.Unmarshal(payload, target); err != nil {
 			return nil, err
 		}
 	}
-	if len(metadata) == 0 || !hasMetadataField(msg) {
-		return msg, nil
+	if len(metadata) == 0 || !hasMetadataField(target) {
+		return target, nil
 	}
-	asMap, err := MessageToMap(msg)
+	asMap, err := MessageToMap(target)
 	if err != nil {
 		return nil, err
 	}
-	if err := decodeMapIntoMessage(msg, asMap, metadata); err != nil {
+	if err := decodeMapIntoMessage(target, asMap, metadata); err != nil {
 		return nil, err
 	}
-	return msg, nil
+	return target, nil
 }
 
 func (b Binding) EncodeResponseMap(msg proto.Message) (map[string]any, error) {

@@ -282,6 +282,25 @@ func (r *Router) ForEachLocal(fn func(*ConnectionInfo) bool) {
 	}
 }
 
+// ForEachLocalValue iterates over all local connections as value copies.
+// It avoids per-connection pointer escape allocation for hot read-only scans.
+func (r *Router) ForEachLocalValue(fn func(ConnectionInfo) bool) {
+	if fn == nil {
+		return
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, connectionID := range r.order {
+		info := r.connections[connectionID]
+		if info == nil {
+			continue
+		}
+		if !fn(*info) {
+			return
+		}
+	}
+}
+
 // TargetedDelivery represents a message delivery target.
 type TargetedDelivery struct {
 	// TargetType indicates what kind of target this is.

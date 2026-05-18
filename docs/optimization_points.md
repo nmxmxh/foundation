@@ -56,6 +56,14 @@ This document tracks the deliberate performance and architecture carryovers fold
 48. Query-engine thinking is now the default database review model: projection pushdown, predicate pushdown, limit pushdown, partition pruning, late materialization, and batch/stream execution must be visible in repository SQL and EXPLAIN evidence.
 49. SSD performance work must reason about total write amplification, not just query latency. Review heap rewrites, index count, WAL bytes, full-page images, checkpoint cadence, autovacuum churn, HOT update ratio, TOAST-heavy row updates, and retention deletes before tuning hardware.
 50. Postgres remains the row-store truth. Storage-engine ideas such as out-of-place page placement, hot/cold deathtime grouping, FDP/ZNS placement, and GC-unit alignment are useful mental models, but Foundation applies them through schema shape, append partitions, sidecar tables, retention drops, and measured WAL/vacuum/index pressure.
+51. CPU microarchitecture is now a review layer for hot paths. Runtime arenas,
+    database scans, websocket fanout, worker queues, and native kernels should
+    count cache lines, preserve contiguous scan layouts, avoid pointer chasing,
+    and isolate contended atomics before reaching for wider parallel lanes.
+52. Branch predictability and memory-level parallelism are measured properties,
+    not assumptions. Branchless rewrites, manual prefetch, SIMD, and higher
+    fanout require profiles or benchmarks that include cache misses, branch
+    misses, allocations, and p95/p99 behavior.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 

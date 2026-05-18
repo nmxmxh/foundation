@@ -178,6 +178,10 @@ Requirements:
 25. Repository SQL must be pushdown-friendly: select only needed columns, keep tenant/auth/time/state predicates inside SQL, push `LIMIT` to the database boundary, and keep partition/index columns in simple comparable forms.
 26. Update-heavy tables must not index every mutable field by default. Indexes on frequently updated columns require query-plan evidence and a write-amplification review.
 27. Large JSONB/text/binary payloads must not sit in the same hot mutable row when compact state updates dominate the workload. Use sidecar/detail tables or append facts when that preserves the domain contract.
+28. Hot loops must account for cache-line locality. Prefer contiguous typed buffers, structure-of-arrays layouts, borrowed frame views, and fixed-width descriptors over pointer-heavy graphs, dynamic maps, or per-record object materialization.
+29. Contended atomics, ring cursors, per-worker counters, and queue ownership words must be reviewed for false sharing. Padding, sharding, or ownership separation is required when benchmarks or profiles show cache-line bouncing.
+30. Branchless code, manual prefetch, SIMD, and alignment-specific layouts require benchmark evidence, scalar fallbacks, and parity tests. Do not introduce them into tenant/auth/orchestration paths as speculative cleanup.
+31. Batch-size changes in runtime, database, websocket, worker, or analytical paths must state the intended working-set budget: payload bytes, descriptor count, cache-line footprint, and downstream backpressure limit.
 
 Enforcement:
 

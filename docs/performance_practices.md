@@ -68,6 +68,38 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 8. Review struct layout when many instances are stored or scanned. Put larger fields before smaller fields when it materially reduces padding and cache waste.
 9. Use escape analysis (`go build -gcflags="-m"`) when a hot allocation is unexpected. Avoid contorting code unless the benchmark proves the heap move matters.
 
+### CPU microarchitecture posture
+
+Modern cores hide some latency with pipelining, speculation, out-of-order
+execution, caches, and SIMD, but Foundation hot paths still need layouts the
+hardware can feed predictably.
+
+1. Count cache lines, not just fields or bytes. Use 64-byte cache lines as the
+   default review budget unless target hardware proves otherwise.
+2. Prefer contiguous typed slices, byte buffers, and structure-of-arrays layouts
+   for scan-heavy or vector-capable loops. Avoid pointer-heavy object graphs,
+   map iteration, interface boxing, and JSON object materialization inside tight
+   loops unless a profile shows the cost is irrelevant.
+3. Keep independent hot counters, queue cursors, and ring slots away from false
+   sharing. Contended atomics and producer/consumer cursors should be sharded,
+   padded, or otherwise isolated when benchmarks show cache-line bouncing.
+4. Separate hot predictable paths from cold exceptional paths. Unpredictable
+   branches, polymorphic dispatch, and repeated type switches belong outside
+   per-record loops when a branch-miss profile shows pressure.
+5. Treat branchless code, manual prefetch, alignment tricks, and SIMD as
+   measured specializations, not style defaults. They require scalar parity
+   tests, realistic payload benchmarks, and tail-handling coverage.
+6. Batch sizes must fit the working set, not only network or API convenience.
+   For runtime/database scans, benchmark powers of two around L1/L2-friendly
+   windows and the product's real payload sizes.
+7. More goroutines or workers do not automatically create useful memory-level
+   parallelism. Parallel scans need independent memory streams, bounded fanout,
+   and cache-miss/branch-miss evidence; otherwise they can amplify cache and
+   scheduler pressure.
+8. Native/runtime benchmark reports for CPU-bound claims should include, where
+   available, cycles, instructions, IPC, cache misses, branch misses, TLB misses,
+   allocation counts, and p95/p99 latency.
+
 ### Concurrency discipline
 
 1. Use bounded worker pools for untrusted, bursty, or externally fed work. Do not create unbounded goroutines per event, socket, row, or upload.

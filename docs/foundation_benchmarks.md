@@ -45,6 +45,16 @@ Minimal plan:
 
 Benchmarks primarily cover the third category. Performance PRs that alter the runtime ladder must also include tests or contract checks for the first two categories.
 
+Metric meanings:
+
+1. `ns/op`: average nanoseconds per operation in Go/Rust benchmark output. Lower means less CPU time, less waiting, or both.
+2. `B/op`: heap bytes allocated per operation. Lower means less allocator and GC pressure.
+3. `allocs/op`: heap allocation count per operation. Lower usually improves tail latency and cache locality.
+4. `hz`: operations per second in Vitest benchmark output. Higher means more throughput.
+5. `mean`, `p75`, `p99`, `p995`, `p999`: Vitest latency distribution in milliseconds. Lower tail values matter more for realtime/runtime paths than a tiny mean-only win.
+6. `rme`: relative margin of error. Large values mean the result is noisy and should not be over-interpreted.
+7. `samples`: number of benchmark samples collected. More samples usually gives a steadier distribution, but only for the same machine/load shape.
+
 ## Go concurrency silver-lining metrics
 
 The Go concurrency study in `docs/go_concurrency_bug_practices.md` gives Foundation a positive measurement checklist, not only a bug checklist.
@@ -148,11 +158,13 @@ go test -run=^$ -bench='BenchmarkMemoryClient' -benchmem ./redis
 
 | Benchmark | ns/op | B/op | allocs/op | Interpretation |
 | --- | ---: | ---: | ---: | --- |
-| `BenchmarkMemoryClientGetHit` | 215.0 | 56 | 4 | Local copied `Get` is sub-microsecond; allocation is intentional ownership protection. |
-| `BenchmarkMemoryClientPublish1KSubscribers` | 3145 | 58 | 3 | Exact pub/sub fanout to 1k local subscribers is microsecond-class. |
-| `BenchmarkMemoryClientPSubscribePrefix1K` | 28277 | 64 | 3 | Generic Redis-style pattern fanout scans patterns; use Foundation exact/prefix event routing for hot product fanout. |
-| `BenchmarkMemoryClientStreamXAddReadAck` | 1136 | 1015 | 17 | Local stream add/read/ack is now measurable and useful for contract tests, not a replacement for real Redis Streams load tests. |
-| `BenchmarkMemoryClientLockUnlock` | 515.0 | 120 | 8 | Token lock/unlock is cheap locally; real Redis lock budgets still need network timeout and fencing-token checks. |
+| `BenchmarkMemoryClientGetHit` | 179.7 | 56 | 4 | Local copied `Get` is sub-microsecond; allocation is intentional ownership protection. |
+| `BenchmarkMemoryClientSetManyGetMany64` | 21319 | 12637 | 516 | Separate set-many/get-many batches still pay per-key/value ownership costs. |
+| `BenchmarkMemoryClientSetGetMany64` | 12570 | 9563 | 324 | Combined set/get-many reduces round-trip orchestration but still copies returned values. |
+| `BenchmarkMemoryClientPublish1KSubscribers` | 56012 | 47689 | 991 | Exact pub/sub fanout to 1k local subscribers is allocation-heavy; use budgeted fanout and slow-consumer controls. |
+| `BenchmarkMemoryClientPSubscribePrefix1K` | 28848 | 111 | 4 | Generic Redis-style pattern fanout scans patterns; use Foundation exact/prefix event routing for hot product fanout. |
+| `BenchmarkMemoryClientStreamXAddReadAck` | 1108 | 1015 | 17 | Local stream add/read/ack is now measurable and useful for contract tests, not a replacement for real Redis Streams load tests. |
+| `BenchmarkMemoryClientLockUnlock` | 449.4 | 120 | 8 | Token lock/unlock is cheap locally; real Redis lock budgets still need network timeout and fencing-token checks. |
 
 Follow-up benchmark gap: add service-backed Redis checks for stream group lag, pub/sub fanout loss under slow consumers, lock contention with TTL expiry, and pipeline chunk sizing once the dev stack is available. The first Docker-backed lane was added on 2026-05-11; keep this local memory harness as the fast regression net before running it.
 
@@ -202,9 +214,9 @@ GOCACHE=/private/tmp/ovasabi-go-build-cache go test -run=^$ -bench='BenchmarkInM
 
 | Benchmark | ns/op | B/op | allocs/op | Interpretation |
 | --- | ---: | ---: | ---: | --- |
-| `BenchmarkInMemoryBus_Publish_NoSubscribers` | 305.9 | 48 | 1 | Bounded per-correlation trace ring avoids post-cap slice copying. |
-| `BenchmarkInMemoryBus_Publish_1Subscriber` | 312.4 | 48 | 1 | One exact subscriber adds little over trace/event validation. |
-| `BenchmarkInMemoryBus_Publish_10Subscribers` | 362.0 | 48 | 1 | Synchronous local fanout remains sub-microsecond for small exact sets. |
+| `BenchmarkInMemoryBus_Publish_NoSubscribers` | 245.9 | 0 | 0 | Bounded per-correlation trace ring avoids post-cap slice copying, and terminal-state extraction is allocation-free. |
+| `BenchmarkInMemoryBus_Publish_1Subscriber` | 253.5 | 0 | 0 | One exact subscriber adds little over trace/event validation. |
+| `BenchmarkInMemoryBus_Publish_10Subscribers` | 289.2 | 0 | 0 | Synchronous local fanout remains sub-microsecond for small exact sets. |
 
 ### 2026-05-11 service-backed Docker substrate check
 
@@ -368,17 +380,17 @@ Interpretation: 1M local scale is not breaking the foundation data structures, b
 
 | Benchmark | ns/op | B/op | allocs/op | Role |
 | --- | ---: | ---: | ---: | --- |
-| `BenchmarkAppLane_DirectFrame_DomainCall` | 42.09 | 32 | 1 | App-shaped direct frame domain call |
-| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | 6865 | 9652 | 74 | HTTP JSON ingress to dispatch request |
-| `BenchmarkAppLane_Auth_ValidateToken` | 3860 | 2152 | 28 | JWT validation only |
-| `BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC` | 8335 | 11364 | 83 | HTTP middleware with auth, headers, validation, RBAC |
-| `BenchmarkAppLane_Cache_GetHit_JSONValue` | 58.11 | 0 | 0 | In-memory cache hit |
-| `BenchmarkAppLane_Retry_NoRetrySuccess` | 4.530 | 0 | 0 | No-retry success fast path |
-| `BenchmarkAppLane_CircuitBreaker_ClosedSuccess` | 62.21 | 0 | 0 | Healthy dependency safety wrapper |
-| `BenchmarkAppLane_Worker_EnqueueWithBackpressureAndDrain` | 5941 | 1368 | 26 | Accepted worker enqueue and drain |
-| `BenchmarkAppLane_Worker_RejectFullQueue` | 1734 | 803 | 19 | Bounded queue rejection path |
-| `BenchmarkAppLane_Worker_DropNoProcessor` | 1537 | 772 | 17 | Missing processor rejection path |
-| `BenchmarkAppLane_Retry_CanceledWait` | 87.83 | 96 | 2 | Canceled retry wait path |
+| `BenchmarkAppLane_DirectFrame_DomainCall` | 36.18 | 32 | 1 | App-shaped direct frame domain call |
+| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | 5329 | 9219 | 71 | HTTP JSON ingress to dispatch request |
+| `BenchmarkAppLane_Auth_ValidateToken` | 3415 | 2104 | 27 | JWT validation only |
+| `BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC` | 7751 | 11284 | 81 | HTTP middleware with auth, headers, validation, RBAC |
+| `BenchmarkAppLane_Cache_GetHit_JSONValue` | 53.34 | 0 | 0 | In-memory cache hit |
+| `BenchmarkAppLane_Retry_NoRetrySuccess` | 3.231 | 0 | 0 | No-retry success fast path |
+| `BenchmarkAppLane_CircuitBreaker_ClosedSuccess` | 61.66 | 0 | 0 | Healthy dependency safety wrapper |
+| `BenchmarkAppLane_Worker_EnqueueWithBackpressureAndDrain` | 4499 | 1267 | 24 | Accepted worker enqueue and drain |
+| `BenchmarkAppLane_Worker_RejectFullQueue` | 1566 | 734 | 17 | Bounded queue rejection path |
+| `BenchmarkAppLane_Worker_DropNoProcessor` | 1316 | 707 | 14 | Missing processor rejection path |
+| `BenchmarkAppLane_Retry_CanceledWait` | 94.77 | 96 | 2 | Canceled retry wait path |
 
 These app-lane results explain the practical architecture boundary: the foundation communication core remains far cheaper than real HTTP auth, route building, worker rejection, or domain persistence logic. Optimize product code by keeping hot internal calls on direct/binary lanes, then budgeting auth, DB, worker, and cache costs explicitly.
 
@@ -403,20 +415,20 @@ Local TLS 1.3 handshake benchmark:
 
 | Benchmark | ns/op | B/op | allocs/op | Role |
 | --- | ---: | ---: | ---: | --- |
-| `BenchmarkTLSHandshake_ClassicalX25519` | 406751 | 72159 | 813 | Classical TLS 1.3 local handshake |
-| `BenchmarkTLSHandshake_HybridX25519MLKEM768` | 576089 | 102632 | 829 | Hybrid post-quantum TLS 1.3 local handshake |
-| `BenchmarkApplyPostQuantumTLSAuto` | 196.6 | 964 | 3 | Config posture application |
+| `BenchmarkTLSHandshake_ClassicalX25519` | 420556 | 72599 | 817 | Classical TLS 1.3 local handshake |
+| `BenchmarkTLSHandshake_HybridX25519MLKEM768` | 576051 | 116436 | 838 | Hybrid post-quantum TLS 1.3 local handshake |
+| `BenchmarkApplyPostQuantumTLSAuto` | 217.6 | 964 | 3 | Config posture application |
 
-Hybrid post-quantum TLS adds about 169 microseconds in this local handshake benchmark. That cost belongs at connection/session establishment or the edge terminator, not inside per-request JWT validation, render loops, domain handlers, or worker hot loops. The foundation posture remains: use standardized hybrid TLS where supported, keep signatures for durable artifacts and compliance workflows, and benchmark before moving post-quantum signatures into any request path.
+Hybrid post-quantum TLS adds about 155 microseconds in this local handshake benchmark. That cost belongs at connection/session establishment or the edge terminator, not inside per-request JWT validation, render loops, domain handlers, or worker hot loops. The foundation posture remains: use standardized hybrid TLS where supported, keep signatures for durable artifacts and compliance workflows, and benchmark before moving post-quantum signatures into any request path.
 
 ### Phase 2 Core Utilities (Server-Kit)
 
 | Benchmark | ns/op | B/op | allocs/op | Role |
 | --- | ---: | ---: | ---: | --- |
-| `Cache.Get` (Memory) | 53.4 | 0 | 0 | Ultra-low latency cache read |
-| `Worker.MapJob` | 5.72 | 0 | 0 | Minimum engine overhead |
-| `CircuitBreaker.Execute` (Healthy) | 35.1 | 0 | 0 | Safety overhead per call |
-| `Events.Fanout` (3 Subs) | 284.1 | 64 | 2 | In-process delivery latency |
+| `BenchmarkMemoryBackend_Get` | 53.71 | 0 | 0 | Ultra-low latency cache read |
+| `BenchmarkJob_Normalize` | 4.850 | 0 | 0 | Minimum worker job normalization overhead |
+| `BenchmarkCircuitBreaker_Execute_Closed` | 61.24 | 0 | 0 | Safety overhead per healthy call |
+| `BenchmarkInMemoryBus_Publish_10Subscribers` | 289.2 | 0 | 0 | Trace-enabled in-process delivery latency |
 
 These numbers are local references, not universal budgets. CI and developer laptops vary. The important signal is the ordering and allocation shape.
 
@@ -644,6 +656,22 @@ Go runtimehost fixed-buffer results:
 
 The Go runtimehost hot write paths now clear fixed regions with `clear(...)` instead of allocating temporary zero slices. That preserves the security hygiene of clearing stale bytes while restoring the intended allocation-free control-plane write behavior.
 
+2026-05-17 microarchitecture follow-up: Go runtimehost now exposes explicit
+fast input/output setters for trusted pre-cleared buffers, and `ProcessPool` /
+`FFIPool` use borrowed output views so pooled-buffer responses copy active bytes
+only once. The stdio process transport now reads the returned 4KB control frame
+directly into the pooled buffer instead of allocating a temporary frame and
+copying it back.
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkBufferSetInputBytes1KB` | 29.46 | 0 | 0 | Defensive clear + copy input path |
+| `BenchmarkBufferSetInputBytesFast1KB` | 16.62 | 0 | 0 | Trusted pre-cleared input path, about 1.8x faster |
+| `BenchmarkBufferSetOutputBytes2KB` | 61.41 | 0 | 0 | Defensive clear + copy output path |
+| `BenchmarkBufferSetOutputBytesFast2KB` | 30.66 | 0 | 0 | Trusted output path, about 2.0x faster |
+| `BenchmarkBufferReadFrameAllocCopy4KB` | 712.6 | 4100 | 2 | Old stdio return shape: allocate frame, then copy |
+| `BenchmarkBufferReadFrameInto4KB` | 74.07 | 4 | 1 | New stdio return shape: read directly into pooled buffer |
+
 Browser shared-arena update:
 
 | Benchmark | mean ns | p99 ns | Interpretation |
@@ -661,10 +689,12 @@ Rust native buffer update:
 
 | Benchmark | ns/op | Interpretation |
 | --- | ---: | --- |
-| native read_output_bytes owned Vec | 53.11 | Owned read copy is faster than the prior local run |
-| native output_bytes_view borrowed | 3.73 | Borrowed native view remains the fastest runtime lane |
-| native write_output_bytes clear+copy | 39.59 | Defensive clear + copy improved |
-| native write_output_bytes_fast copy only | 16.65 | Fast write is the trusted hot path when stale bytes outside length are irrelevant |
+| native read_output_bytes owned Vec | 75.67 | Owned read copy pays allocation and payload copy |
+| native read_output_bytes_into reused Vec | 17.71 | Caller-owned `Vec` reuse removes repeated allocation |
+| native output_bytes_view borrowed | 3.74 | Borrowed native view remains the fastest runtime lane |
+| native write_output_bytes clear+copy | 39.86 | Defensive clear + copy remains allocation-free |
+| native write_output_bytes_fast copy only | 16.96 | Fast write is the trusted hot path when stale bytes outside length are irrelevant |
+| native process_runtime_buffer_in_place | 132.65 | Native in-place 4KB control-plane processing avoids cloned buffer traffic |
 
 2026-05-09 follow-up: `process_runtime_buffer_in_place` now operates directly on the caller-provided 4KB buffer instead of cloning the entire control plane into a temporary `Vec` and copying it back. The release benchmark reports `native process_runtime_buffer_in_place` at 143.44 ns/op for a 1KB echo unit on this machine. Public Go `ProcessResponse.Output` remains owned; FFI/process pools copy the active output before returning so pooled buffers cannot leak into caller-owned responses.
 
@@ -676,26 +706,132 @@ WebSocket routing local-load results:
 | `BenchmarkRouterResolveTargetsUserLocal` | 18758 | 59760 | 12 | Resolves 1024 local user targets without per-connection copy allocation |
 | `BenchmarkRouterForEachLocal1024` | 37044 | 98304 | 1024 | Public copy-safe iterator intentionally allocates per connection |
 
+2026-05-17 microarchitecture follow-up: `ForEachLocalValue` adds a value-copy
+iterator over the router's contiguous local order for read-only hot scans. The
+existing pointer iterator remains for compatibility and still returns isolated
+copies.
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkRouterForEachLocal1024` | 38738 | 98304 | 1024 | Pointer-copy compatibility iterator; each callback pointer escapes |
+| `BenchmarkRouterForEachLocalValue1024` | 17573 | 0 | 0 | Value-copy hot iterator; about 2.2x faster with zero allocation |
+
 The WebSocket routing improvement is behavioral-neutral: public read helpers still return copies, but `ResolveTargets` now resolves local user/broadcast targets under the router read lock and appends connection IDs directly. That keeps tenant/session safety semantics while removing avoidable per-connection object copies from realtime fanout.
+
+### 2026-05-17 Forced Microarchitecture Refinement Pass
+
+TLA-style refinement note:
+
+1. Visible state preserved: runtime `ProcessResponse`, arena queue progress,
+   transport allow/deny decisions, MemoryDB query results, and WebSocket
+   connection snapshots.
+2. Hidden state changed: fewer temporary frame buffers, fewer escaped
+   connection copies, direct arena descriptor-ID drains, reused Rust output
+   vectors, tighter capability scans, and no retained read-filter copies.
+3. Invariants preserved: `FrameSizeBound`, `OutputAfterInput`,
+   `OwnedDecodeLifetime`, `QueryBounded`, `ConnectionOwned`, and
+   `FallbackRefinement`.
+4. Liveness/bounds preserved: existing runtime exchange timeout, queue drain,
+   DB context checks, and router callback-stop behavior are unchanged.
+5. Test mapping: Go runtimehost, Go database, Go/TS transport, Rust native, and
+   TS arena tests cover the refined paths before benchmarks are accepted.
+
+Forced comparison summary:
+
+| Lane | Baseline metric | Refined metric | Meaning |
+| --- | ---: | ---: | --- |
+| Go runtime input write | `29.46 ns/op`, `0 B/op`, `0 allocs/op` | `16.62 ns/op`, `0 B/op`, `0 allocs/op` | Fast setter skips a redundant full-region clear after buffer reset; about 1.8x faster with the same declared-length contract. |
+| Go runtime output write | `61.41 ns/op`, `0 B/op`, `0 allocs/op` | `30.66 ns/op`, `0 B/op`, `0 allocs/op` | Trusted output setter preserves length semantics while avoiding defensive tail clearing; about 2.0x faster. |
+| Go stdio runtime return | `712.6 ns/op`, `4100 B/op`, `2 allocs/op` | `74.07 ns/op`, `4 B/op`, `1 alloc/op` | Reads the 4KB control frame directly into the pooled buffer instead of allocating a temporary frame and copying it back. |
+| WebSocket local scan | `38738 ns/op`, `98304 B/op`, `1024 allocs/op` | `17573 ns/op`, `0 B/op`, `0 allocs/op` | Value-copy iterator keeps copy safety while preventing one pointer escape per connection. |
+| Event publish tracing | `294.7 ns/op`, `48 B/op`, `1 alloc/op` | `253.5 ns/op`, `0 B/op`, `0 allocs/op` | Terminal-state extraction no longer splits the event type while recording traces; publish semantics and trace visibility are unchanged. |
+| Rust native output read | `75.67 ns/op` owned `Vec` | `17.71 ns/op` reused `Vec` | Caller-owned reuse avoids repeated allocation while still returning owned bytes. |
+| TS arena drain x8 | `0.5145 ms mean`, `0.6509 ms p99` | `0.4974 ms mean`, `0.6115 ms p99` | Descriptor-ID-only drain avoids queue-entry object construction when only IDs are needed. |
+| TS arena drain x32 | `0.4669 ms mean`, `0.5869 ms p99` | `0.4287 ms mean`, `0.5378 ms p99` | ID-only drain improves larger batch locality and object churn. |
+| TS arena drain x128 | `0.4483 ms mean`, `0.5741 ms p99` | `0.4093 ms mean`, `0.5113 ms p99` | ID-only drain is about 9% faster on the 128-descriptor batch path. |
+| TS transport admin fallback | `~5.39M hz` previous local run | `6.64M hz` | Capability check avoids transient array/callback paths; throughput improved while exact allow/deny semantics are unchanged. |
+| MemoryDB 100K filtered list | `29708 ns/op`, `33400 B/op`, `105 allocs/op` | `20598 ns/op`, `33400 B/op`, `105 allocs/op` | Read filters are no longer defensively copied and same-type scalar comparisons avoid formatting; response-copy cost remains intentional. |
+
+Expanded one-command coverage:
+
+`tooling/scripts/performance_check.sh` now includes the previously separate
+scale benchmarks, in-memory cache/circuit/compress/events/metrics/redis/retry
+and worker benchmarks, TLS/PQ handshake benchmarks, and service-backed
+Redis/Postgres benchmarks when `SERVICE_BACKED_DATABASE_URL` and
+`SERVICE_BACKED_REDIS_URL` are set. The 2026-05-17 run skipped only the
+service-backed Redis/Postgres lane because those URLs were not set.
+
+Final expanded-script highlights:
+
+| Area | Benchmark | Metric | Meaning |
+| --- | --- | ---: | --- |
+| Same-process dispatch | `BenchmarkBoundFrameClientDispatchTrusted` | `10.89 ns/op`, `0 B/op`, `0 allocs/op` | Lower bound for trusted in-process frame dispatch. |
+| gRPC boundary | `BenchmarkDispatchFrameOverBufconn` | `21645 ns/op`, `10933 B/op`, `179 allocs/op` | Binary frame saves work versus JSON but still pays gRPC stack cost. |
+| HTTP ingress | `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | `5329 ns/op`, `9219 B/op`, `71 allocs/op` | JSON compatibility ingress is microsecond-class and allocation-heavy relative to frame lanes. |
+| Auth middleware | `BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC` | `7751 ns/op`, `11284 B/op`, `81 allocs/op` | Full auth/security/RBAC middleware is a request-boundary cost, not a runtime hot-loop cost. |
+| Scale DB count | `BenchmarkScale_MemoryDBTenantCount100K` | `4899 ns/op`, `0 B/op`, `0 allocs/op` | Tenant count stays index-shaped. |
+| Scale DB list | `BenchmarkScale_MemoryDBTenantListFiltered100K` | `20598 ns/op`, `33400 B/op`, `105 allocs/op` | Filtered list now pays mostly intentional defensive record copies. |
+| Scale DB dense 1M | `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit` | `18380 ns/op`, `33400 B/op`, `105 allocs/op` | Dense tenant list stops at indexed `LIMIT`; no broad sort/materialization. |
+| WebSocket broadcast copy | `BenchmarkScale1M_WebSocketBroadcastResolveInto` | `509151 ns/op`, `0 B/op`, `0 allocs/op` | Materializing 1M IDs is dominated by slice header copy. |
+| WebSocket broadcast batch | `BenchmarkScale1M_WebSocketBroadcastBatch` | `772.1 ns/op`, `0 B/op`, `0 allocs/op` | Borrowed batch routing keeps broadcast routing effectively constant by batch count. |
+| Event exact fanout | `BenchmarkScale_EventExactDispatch100KSubscriptions` | `357.5 ns/op`, `0 B/op`, `0 allocs/op` | Exact fanout remains allocation-free after trace terminal-state fix. |
+| Event wildcard fanout | `BenchmarkScale_EventPrefixWildcardDispatch100KSubscriptions` | `472.9 ns/op`, `64 B/op`, `1 alloc/op` | Prefix wildcard is bucketed; remaining allocation is the matching subscriber slice. |
+| Local operation mix | `BenchmarkScale_LocalOperationMixLatency` | `8399 ns/op`, `p99 12750 ns/op`, `1986 B/op`, `21 allocs/op` | Mixed local DB count, WS route, cache hit, event publish, and config validation stays sub-13 us p99 locally. |
+| Cache hit | `BenchmarkMemoryBackend_Get` | `53.71 ns/op`, `0 B/op`, `0 allocs/op` | In-memory cache hit is not a bottleneck. |
+| Cache pattern delete | `BenchmarkMemoryBackend_DeletePattern` | `3705 ns/op`, `0 B/op`, `0 allocs/op` | Pattern deletion is scan-shaped but still allocation-free in this fixture. |
+| Circuit breaker | `BenchmarkCircuitBreaker_Execute_Closed` | `61.24 ns/op`, `0 B/op`, `0 allocs/op` | Closed-circuit guard is negligible next to network or DB work. |
+| Compression | `BenchmarkCompressLargeBatch/Brotli-Q4` | `6247026 ns/op`, `16246706 B/op`, `25 allocs/op` | Brotli is a batch/offline lane, not a realtime hot path. |
+| Compression | `BenchmarkCompressLargeBatch/Zstd-Fastest` | `186545 ns/op`, `1048576 B/op`, `1 alloc/op` | Zstd-fastest is the practical large-payload realtime candidate. |
+| Event bus | `BenchmarkInMemoryBus_Publish_1Subscriber` | `253.5 ns/op`, `0 B/op`, `0 allocs/op` | Trace-enabled exact publish is now allocation-free. |
+| Event envelope JSON | `BenchmarkEnvelope_ToJSON` | `3345 ns/op`, `2681 B/op`, `49 allocs/op` | JSON envelope conversion is compatibility, not hot internal dispatch. |
+| Event envelope binary | `BenchmarkEnvelope_ToBinary` | `2437 ns/op`, `2208 B/op`, `20 allocs/op` | Binary envelope is materially cheaper than JSON but still owned. |
+| Metrics counter | `BenchmarkRegistryCounterPrecomputedKey` | `21.04 ns/op`, `0 B/op`, `0 allocs/op` | Hot metrics should use precomputed keys. |
+| Metrics snapshot | `BenchmarkRegistrySnapshotPrometheus1024` | `171318 ns/op`, `230080 B/op`, `19 allocs/op` | Prometheus export is scrape-path work; do not put it in hot request loops. |
+| Redis memory batch | `BenchmarkMemoryClientSetGetMany64` | `12570 ns/op`, `9563 B/op`, `324 allocs/op` | Current in-memory batch API still allocates per-key/value ownership. |
+| Redis memory pubsub | `BenchmarkMemoryClientPublish1KSubscribers` | `56012 ns/op`, `47689 B/op`, `991 allocs/op` | Per-subscriber fanout remains allocation-heavy and should stay behind budgets. |
+| Retry success | `BenchmarkPolicy_Do_Success` | `3.554 ns/op`, `0 B/op`, `0 allocs/op` | No-retry success path is effectively free. |
+| Retry with retry | `BenchmarkPolicy_Do_Retry` | `298.6 ns/op`, `264 B/op`, `4 allocs/op` | Retry path pays timer/error bookkeeping and must stay bounded. |
+| Worker enqueue | `BenchmarkEngine_Enqueue_InMemory` | `2311 ns/op`, `940 B/op`, `19 allocs/op` | Worker enqueue remains a microsecond boundary with explicit ownership copies. |
+| TLS classical | `BenchmarkTLSHandshake_ClassicalX25519` | `420556 ns/op`, `72599 B/op`, `817 allocs/op` | Local TLS handshakes are hundreds of microseconds; connection reuse matters. |
+| TLS hybrid PQ | `BenchmarkTLSHandshake_HybridX25519MLKEM768` | `576051 ns/op`, `116436 B/op`, `838 allocs/op` | Hybrid KEM is about 1.37x slower in this run; use it deliberately at ingress boundaries. |
+| Runtime buffer read | `BenchmarkBufferInputBytesView1KB` | `3.060 ns/op`, `0 B/op`, `0 allocs/op` | Borrowed views are the correct internal runtime read lane. |
+| Runtime stdio frame | `BenchmarkBufferReadFrameInto4KB` | `74.07 ns/op`, `4 B/op`, `1 alloc/op` | Direct frame read into pooled control buffer removes the temporary 4KB allocation. |
+| Transport route index | `BenchmarkRouteIndexResolve1024` | `8.053 ns/op`, `0 B/op`, `0 allocs/op` | Generated/indexed route tables are the hot path for large route sets. |
+| Transport fallback | `BenchmarkCanDispatchWriteViaAdminFallback` | `65.34 ns/op`, `0 B/op`, `0 allocs/op` | Admin fallback is allocation-free but still slower than exact capability match. |
+
+Current database guard metrics after this pass:
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkMemoryDBCountRecordsTenantScoped` | 12528 | 0 | 0 | Count remains index-shaped and allocation-free. |
+| `BenchmarkMemoryDBListRecordsTenantScopedFiltered` | 13713 | 25304 | 69 | Small filtered list pays only typed response-copy cost. |
+| `BenchmarkMemoryDBUpsertTenantScopedParallel` | 3360 | 2030 | 12 | Parallel upsert still pays record/key/map ownership costs. |
+| `BenchmarkQueryAllFakeRows100` | 3376 | 4512 | 210 | Retained typed slice path; use streaming for broad reads. |
+| `BenchmarkExecCommandMemoryDB` | 32.37 | 24 | 1 | Command executor overhead is tiny relative to DB work. |
+| `BenchmarkExecRowsAffectedFake` | 32.69 | 24 | 1 | Rows-affected wrapper is a small typed-result cost. |
+| `BenchmarkQueryEachFakeRows100` | 2731 | 2472 | 202 | Streaming helper avoids retained result slice. |
 
 Runtime-transport Go results:
 
 | Benchmark | ns/op | B/op | allocs/op | Interpretation |
 | --- | ---: | ---: | ---: | --- |
-| `BenchmarkCreateEnvelopeJSON` | 356.7 | 96 | 2 | Creates correlation/request/idempotency metadata with crypto randomness |
-| `BenchmarkResolveRouteLinear16` | 33.37 | 0 | 0 | Small generated route tables are cheap even with linear lookup |
-| `BenchmarkCanDispatchExactCapability` | 5.353 | 0 | 0 | Capability guard is effectively free on exact match |
-| `BenchmarkSchemaRegistryNegotiate` | 31.15 | 0 | 0 | Schema negotiation is allocation-free for small accepted-version sets |
+| `BenchmarkCreateEnvelopeJSON` | 304.5 | 96 | 2 | Creates correlation/request/idempotency metadata with crypto randomness |
+| `BenchmarkResolveRouteLinear16` | 33.03 | 0 | 0 | Small generated route tables are cheap even with linear lookup |
+| `BenchmarkResolveRouteLinear1024` | 454.0 | 0 | 0 | Linear route lookup scales with route count; use `RouteIndex` for hot route tables |
+| `BenchmarkRouteIndexResolve1024` | 8.053 | 0 | 0 | Indexed route lookup is the hot generated route-table lane |
+| `BenchmarkCanDispatchExactCapability` | 4.849 | 0 | 0 | Capability guard is effectively free on exact match |
+| `BenchmarkCanDispatchWriteViaAdminFallback` | 65.34 | 0 | 0 | Admin fallback is allocation-free after the tightened scan |
+| `BenchmarkSchemaRegistryNegotiate` | 31.73 | 0 | 0 | Schema negotiation is allocation-free for small accepted-version sets |
 
 Runtime-transport TypeScript binary-envelope results:
 
 | Benchmark | mean ns | p99 ns | Interpretation |
 | --- | ---: | ---: | --- |
-| encode JSON envelope to protobuf bytes | 7100 | 13000 | JSON payload materialization dominates binary envelope encode |
-| decode JSON envelope from protobuf bytes | 2900 | 4300 | JSON payload decode is still microsecond-class |
-| encode protobuf envelope bytes | 3900 | 8900 | Typed/binary payloads avoid JSON payload stringify |
+| encode JSON envelope to protobuf bytes | 7100 | 14400 | JSON payload materialization dominates binary envelope encode |
+| decode JSON envelope from protobuf bytes | 2900 | 5600 | JSON payload decode is still microsecond-class |
+| encode protobuf envelope bytes | 3900 | 9400 | Typed/binary payloads avoid JSON payload stringify |
 | decode protobuf envelope bytes | 1700 | 2200 | Typed/binary decode is about 1.7x faster than JSON decode |
-| encode JSON compatibility envelope | 1400 | 1900 | Compatibility JSON string path is fast for already-object payloads, but less typed |
+| encode JSON compatibility envelope | 1400 | 2400 | Compatibility JSON string path is fast for already-object payloads, but less typed |
 | decode identity binary frame | 200 | 300 | Identity frame detection is effectively a header check |
 
 Runtime-transport TypeScript routing results:
@@ -705,9 +841,9 @@ Runtime-transport TypeScript routing results:
 | parse event type | 200 | 300 | Event contract validation is sub-microsecond |
 | create JSON envelope | 700 | 800 | Browser envelope creation is cheap when IDs are provided |
 | resolve route by event type | 100 | 100 | Precomputed route map lookup is effectively free |
-| resolve route by path | 200 | 300 | Method normalization + path map lookup remains sub-microsecond |
-| can dispatch exact capability | <100 | 100 | Exact capability fast path is extremely cheap |
-| can dispatch write via admin fallback | 200 | 300 | Admin fallback remains sub-microsecond after removing transient arrays |
+| resolve route by path | 200 | 200 | Method normalization + path map lookup remains sub-microsecond |
+| can dispatch exact capability | <100 | <100 | Exact capability fast path is extremely cheap |
+| can dispatch write via admin fallback | 100 | 200 | Admin fallback remains sub-microsecond after removing transient arrays |
 
 Transport improvement notes:
 
@@ -754,3 +890,290 @@ Interpretation: packet-ring mechanics are useful for packet-like streams where d
 5. Any benchmark improvement that changes behavior must land with correctness tests for malformed input, cancellation, oversized frames, and diagnostics.
 6. Any optimized lane must prove refinement against the higher-level lane it bypasses or replaces: same canonical metadata, same accepted payload semantics, same terminal event, and same controlled error class.
 7. Hard bounds such as queue depth, acquire timeout, write deadline, retry cap, and frame size are not benchmark targets; they are behavioral contracts and must have direct tests.
+
+## 2026-05-17 Server-Kit Table Refresh
+
+This section refreshes the older 2026-05-05 "Latest Local Check" server-kit
+table without rewriting its historical values. The old table remains useful as
+a baseline, but current update runs must append the new evidence here or in a
+new dated section after running the relevant benchmark lane.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|ClientDispatchFrameOverBufconn|RouterDispatchFrameDirect|DirectFrameClientDispatch|BoundFrameClientDispatch|BoundFrameClientDispatchTrusted|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$|BenchmarkRunParallel$' -benchmem -run='^$' ./grpcsvc ./chain
+```
+
+Current comparison against the 2026-05-05 table:
+
+| Benchmark | 2026-05-05 | 2026-05-17 | Allocation delta | Status | Meaning |
+| --- | ---: | ---: | ---: | --- | --- |
+| `BenchmarkRouterDispatchFrameDirect` | `18.59 ns/op`, `0 B/op`, `0 allocs/op` | `14.44 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | improved | Same-process router dispatch remains zero-allocation and is about 22% faster in this run. |
+| `BenchmarkDirectFrameClientDispatch` | `25.68 ns/op`, `0 B/op`, `0 allocs/op` | `22.35 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | improved | Validation facade remains zero-allocation; direct hot paths should use it instead of gRPC when process-local. |
+| `BenchmarkBoundFrameClientDispatch` | not tracked | `11.97 ns/op`, `0 B/op`, `0 allocs/op` | new row | best safe direct lane | Binding the route once removes map lookup from the hot call while preserving event-type validation. |
+| `BenchmarkBoundFrameClientDispatchTrusted` | not tracked | `10.78 ns/op`, `0 B/op`, `0 allocs/op` | new row | lower bound | Trusted bound dispatch is the minimum handler-call lane; use only after the caller has already validated the frame boundary. |
+| `BenchmarkBinaryFrameAppendViewRoundTrip` | `22.70 ns/op`, `0 B/op`, `0 allocs/op` | `19.55 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | improved | Borrowed frame views are still the right parser shape for synchronous routing and validation. |
+| `BenchmarkBinaryFrameAppendRoundTrip` | `62.25 ns/op`, `34 B/op`, `3 allocs/op` | `50.34 ns/op`, `8 B/op`, `1 alloc/op` | `-26 B/op`, `-2 allocs/op` | improved | Append marshal plus bounded control-string interning reduced owned binary decode cost. |
+| `BenchmarkBinaryFrameCodecRoundTrip` | `113.4 ns/op`, `178 B/op`, `5 allocs/op` | `100.0 ns/op`, `152 B/op`, `3 allocs/op` | `-26 B/op`, `-2 allocs/op` | improved | Codec-compatible owned path improved, but borrowed views remain the preferred hot lane. |
+| `BenchmarkGeneratedProtoMarshalAppendRoundTrip` | `386.9 ns/op`, `152 B/op`, `6 allocs/op` | `392.7 ns/op`, `152 B/op`, `6 allocs/op` | unchanged | noisy/slight regression | Generated protobuf is stable but owned; no action without a targeted protobuf decode change and parity tests. |
+| `BenchmarkRunParallel` | `1712 ns/op`, `592 B/op`, `8 allocs/op` | `1207 ns/op`, `640 B/op`, `11 allocs/op` | `+48 B/op`, `+3 allocs/op` | mixed | Faster wall time, but allocation count is higher than the older table. Current perf guard allows `<=12` allocs; optimize only with a new API shape such as caller-owned result storage. |
+| `BenchmarkDispatchFrameOverBufconn` | `31645 ns/op`, `10969 B/op`, `181 allocs/op` | `21482 ns/op`, `10937 B/op`, `179 allocs/op` | `-32 B/op`, `-2 allocs/op` | improved | Binary gRPC boundary is about 32% faster, but still a microsecond boundary compared with direct frame dispatch. |
+| `BenchmarkClientDispatchFrameOverBufconn` | not tracked | `21691 ns/op`, `11013 B/op`, `181 allocs/op` | new row | boundary reference | Cached client call options do not remove the gRPC stack cost; use direct clients for same-process hot paths. |
+| `BenchmarkDispatchOverBufconn` | `39989 ns/op`, `12653 B/op`, `212 allocs/op` | `26831 ns/op`, `12697 B/op`, `213 allocs/op` | `+44 B/op`, `+1 alloc/op` | mixed/noisy | JSON gRPC is faster in wall time but still the highest-allocation compatibility lane. Do not optimize product hot paths around it. |
+
+Regression interpretation:
+
+1. No zero-allocation same-process lane regressed. `RouterDispatchFrameDirect`,
+   `DirectFrameClientDispatch`, `BoundFrameClientDispatch`,
+   `BoundFrameClientDispatchTrusted`, and `BinaryFrameAppendViewRoundTrip` all
+   remain allocation-free.
+2. Owned binary decode improved materially. The learning is the same as the
+   runtimehost and arena passes: append into caller-owned buffers, borrow for
+   synchronous inspection, and only own the bytes/strings that must outlive the
+   source frame.
+3. `GeneratedProtoMarshalAppendRoundTrip` is effectively unchanged. This is a
+   schema-owned compatibility lane; improving it requires protobuf-specific
+   work, not generic loop rewrites.
+4. `RunParallel` is faster but allocates more than the old table. That is an
+   orchestration boundary with goroutines, `context.WithCancel`, and a returned
+   result slice. Do not hide allocation by pooling returned results unless the
+   API changes to make caller ownership explicit.
+5. `DispatchOverBufconn` improved in time but still allocates slightly more
+   than the old table. This remains acceptable as a JSON/gRPC compatibility
+   boundary, not as a same-process hot path.
+
+Recent implementation techniques that produced the improvements:
+
+1. Separate safe public APIs from trusted hot APIs. Examples:
+   `SetInputBytes` keeps defensive clearing; `SetInputBytesFast` is used only
+   after reset/preclear. `DispatchFrame` validates; `DispatchFrameTrusted` is
+   only for already-bound callers.
+2. Prefer borrowed views for synchronous inspection. Examples:
+   `UnmarshalFrameView`, runtimehost `InputBytesView`/`OutputBytesView`, and TS
+   arena descriptor-ID drains.
+3. Use caller-owned storage for repeated work. Examples:
+   `AppendMarshalFrame`, `readFrameInto`, Rust `read_output_bytes_into`, and
+   WebSocket `ForEachLocalValue`.
+4. Avoid transient arrays/callback helpers in hot authorization/routing paths.
+   The Go/TS capability fallback changes use explicit loops so the semantic
+   fallback remains allocation-free.
+5. Treat docs as benchmark ledgers, not prose rewrites. Every future update to
+   this file should identify the code path touched, the benchmark command, the
+   before/after metrics, and the semantic invariant that stayed true.
+
+Future update rule:
+
+1. Add or select the benchmark before changing code.
+2. Run the targeted benchmark before and after the change.
+3. Run `tooling/scripts/performance_check.sh` before closing the pass.
+4. Append a dated note with metric meaning, regression checks, and the learned
+   technique.
+5. If a zero-allocation lane gains an allocation, fix it or document the
+   behavior reason and add a guard test.
+6. If an optimized lane bypasses a safer lane, map it to the safer lane's
+   visible contract using the TLA refinement notes: same input contract, same
+   output semantics, same bounds, same controlled errors.
+
+## 2026-05-17 Server-Kit Lane Refinement Follow-Up
+
+After the table refresh above, the four highlighted lanes were checked against
+the recent implementation techniques from the runtimehost, arena, transport,
+database, event, and WebSocket passes:
+
+1. Avoid repeated map lookup when a route has a hot bound handler.
+2. Decode into caller-owned output structs instead of replacing the whole
+   result.
+3. Reuse already-owned low-cardinality/control strings when the next frame
+   carries the same bytes.
+4. Keep borrowed payload/view semantics explicit and covered by tests.
+5. Add perf guard tests when a zero-allocation lane is established.
+
+Applied changes:
+
+1. `Router.RegisterFrame` now records a hot frame-handler slot, and
+   `Router.DispatchFrame` / gRPC frame dispatch check it before the handler
+   map. This preserves the same missing-handler behavior and only changes
+   hidden lookup state.
+2. `binaryFrameCodec.Unmarshal` now decodes into the caller-provided `Frame`
+   and reuses an existing owned `CorrelationID` string when the incoming bytes
+   are identical. If the bytes differ, it still allocates a fresh owned string.
+3. Perf-tag tests now guard the binary append roundtrip at zero allocations and
+   the codec-compatible roundtrip at no more than two allocations.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|ClientDispatchFrameOverBufconn|RouterDispatchFrameDirect|DirectFrameClientDispatch|BoundFrameClientDispatch|BoundFrameClientDispatchTrusted|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$|BenchmarkRunParallel$' -benchmem -run='^$' ./grpcsvc ./chain
+```
+
+Follow-up deltas versus the first 2026-05-17 refresh:
+
+| Benchmark | First 2026-05-17 refresh | After lane refinement | Allocation delta | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkRouterDispatchFrameDirect` | `14.44 ns/op`, `0 B/op`, `0 allocs/op` | `11.02 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | Hot frame-handler slot removes the repeated map lookup for the common route. |
+| `BenchmarkDirectFrameClientDispatch` | `22.35 ns/op`, `0 B/op`, `0 allocs/op` | `18.84 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | Direct client inherits the router hot-handler lookup. |
+| `BenchmarkBoundFrameClientDispatch` | `11.97 ns/op`, `0 B/op`, `0 allocs/op` | `12.15 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | Bound safe dispatch is effectively flat/noisy; it was already near the handler-call floor. |
+| `BenchmarkBoundFrameClientDispatchTrusted` | `10.78 ns/op`, `0 B/op`, `0 allocs/op` | `10.97 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | Trusted bound dispatch is unchanged, as expected. |
+| `BenchmarkBinaryFrameAppendRoundTrip` | `50.34 ns/op`, `8 B/op`, `1 alloc/op` | `41.82 ns/op`, `0 B/op`, `0 allocs/op` | `-8 B/op`, `-1 alloc/op` | Caller-owned decode plus stable correlation reuse makes the append roundtrip zero-allocation. |
+| `BenchmarkBinaryFrameCodecRoundTrip` | `100.0 ns/op`, `152 B/op`, `3 allocs/op` | `85.97 ns/op`, `144 B/op`, `2 allocs/op` | `-8 B/op`, `-1 alloc/op` | Codec path still allocates its marshaled frame, but no longer reallocates stable correlation on decode. |
+| `BenchmarkBinaryFrameAppendViewRoundTrip` | `19.55 ns/op`, `0 B/op`, `0 allocs/op` | `19.98 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | Borrowed view path was already the floor for synchronous inspection. |
+| `BenchmarkDispatchFrameOverBufconn` | `21482 ns/op`, `10937 B/op`, `179 allocs/op` | `21528 ns/op`, `10926 B/op`, `179 allocs/op` | `-11 B/op`, unchanged allocs | gRPC/server stack dominates wall time; handler lookup changes are mostly hidden under gRPC overhead. |
+| `BenchmarkClientDispatchFrameOverBufconn` | `21691 ns/op`, `11013 B/op`, `181 allocs/op` | `21606 ns/op`, `10991 B/op`, `181 allocs/op` | `-22 B/op`, unchanged allocs | Client wrapper follows the same gRPC boundary pattern: tiny allocation-byte win, noisy wall time. |
+| `BenchmarkDispatchOverBufconn` | `26831 ns/op`, `12697 B/op`, `213 allocs/op` | `26764 ns/op`, `12645 B/op`, `213 allocs/op` | `-52 B/op`, unchanged allocs | JSON compatibility path is mostly unaffected; recent binary-frame techniques do not apply to JSON map materialization. |
+| `BenchmarkGeneratedProtoMarshalAppendRoundTrip` | `392.7 ns/op`, `152 B/op`, `6 allocs/op` | `398.0 ns/op`, `151 B/op`, `6 allocs/op` | effectively unchanged | Generated protobuf remains stable/noisy; future work here must be protobuf-specific. |
+| `BenchmarkRunParallel` | `1207 ns/op`, `640 B/op`, `11 allocs/op` | `1227 ns/op`, `640 B/op`, `11 allocs/op` | unchanged | Parallel chain is unchanged; improving it requires an explicit caller-owned result API or different orchestration contract. |
+
+Regression checks:
+
+1. Zero-allocation direct lanes stayed zero-allocation.
+2. Owned binary append roundtrip moved from one allocation to zero.
+3. gRPC binary frame paths gained a small allocated-byte improvement, but not a
+   reliable allocation-count or wall-time win. Treat gRPC as a boundary lane,
+   not the target for same-process hot dispatch.
+4. JSON gRPC, generated protobuf, and `RunParallel` did not benefit from the
+   binary-frame techniques. Their next improvements require separate benchmark
+   hypotheses: JSON payload shaping, protobuf decode strategy, or a new
+   caller-owned chain result API.
+
+Additional validation:
+
+```bash
+cd foundation/server-kit/go
+go test ./grpcsvc
+go test -tags=perf ./grpcsvc
+cd foundation
+tooling/scripts/performance_check.sh
+```
+
+## 2026-05-18 Open Lane Extension
+
+This section extends the recent optimization work to the bounded open lanes
+identified after the 2026-05-17 pass. These are not vague backlog items: each
+lane has either an implementation, a benchmark-only proof, or an explicit
+report-only status.
+
+### RunParallel Caller-Owned Results
+
+Applied implementation:
+
+1. `chain.RunParallelInto` lets callers provide reusable result storage.
+2. `chain.RunParallel` keeps the existing allocating API and behavior.
+3. The goroutine body moved to a helper function so both APIs avoid per-loop
+   closure allocations.
+4. Perf-tag tests now guard `RunParallel` at `<=8 allocs/run` and
+   `RunParallelInto` at `<=7 allocs/run`.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+GOCACHE=/tmp/ovasabi-foundation-go-build go test -bench='BenchmarkRunParallel' -benchmem -run='^$' ./chain
+```
+
+| Benchmark | Before | After | Meaning |
+| --- | ---: | ---: | --- |
+| `BenchmarkRunParallel` | `1227 ns/op`, `640 B/op`, `11 allocs/op` | `1172 ns/op`, `576 B/op`, `7 allocs/op` | Compatibility API improves from helper extraction; returned result slice is still owned by caller. |
+| `BenchmarkRunParallelInto` | not available | `1108 ns/op`, `448 B/op`, `6 allocs/op` | Caller-owned result storage avoids the result-slice allocation and is the preferred hot orchestration API. |
+
+Refinement note: visible result order, critical-failure cancellation, nil-run
+error behavior, and nil-context fallback are unchanged. Only result storage and
+goroutine helper shape changed.
+
+### Generated Protobuf Decode Strategy
+
+Applied implementation and benchmark proof:
+
+1. The existing roundtrip benchmark remains the compatibility baseline.
+2. A split reset+unmarshal benchmark isolates protobuf decode cost.
+3. A merge-into-reused-message benchmark measures the protobuf-specific local
+   win.
+4. `protoapi.Binding` now exposes an explicit
+   `ProtobufDecodeReuseCompleteMessages` opt-in.
+5. The typed registry and typed frame adapter wire that opt-in into
+   caller-owned request pooling. Default decode behavior remains
+   reset+unmarshal.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+GOCACHE=/tmp/ovasabi-foundation-go-build go test -bench='BenchmarkGeneratedProto' -benchmem -run='^$' ./grpcsvc
+GOCACHE=/tmp/ovasabi-foundation-go-build go test -bench='BenchmarkDecodeRequestBytesIntoCompleteReuse$' -benchmem -run='^$' ./protoapi
+GOCACHE=/tmp/ovasabi-foundation-go-build go test -bench='BenchmarkTypedFrameAdapterDispatch(NoMetadata|Reuse)?$' -benchmem -run='^$' ./bootstrap
+```
+
+| Benchmark | Metric | Meaning |
+| --- | ---: | --- |
+| `BenchmarkGeneratedProtoMarshalAppendRoundTrip` | `397.1 ns/op`, `152 B/op`, `6 allocs/op` | Full generated protobuf compatibility roundtrip is stable. |
+| `BenchmarkGeneratedProtoUnmarshalReset` | `242.4 ns/op`, `152 B/op`, `6 allocs/op` | Reset+unmarshal pays nested message/string ownership on every decode. |
+| `BenchmarkGeneratedProtoUnmarshalMergeReuse` | `167.7 ns/op`, `56 B/op`, `5 allocs/op` | Raw merge into caller-owned nested storage is faster, but only valid for explicitly reused complete-message decode lanes. |
+| `BenchmarkDecodeRequestBytesIntoCompleteReuse` | `251.1 ns/op`, `72 B/op`, `8 allocs/op` | Public protoapi helper exposes the valid reuse lane with binding/target checks. |
+| `BenchmarkTypedFrameAdapterDispatchNoMetadata` | `586.8 ns/op`, `536 B/op`, `10 allocs/op` | Product frame path with ordinary reset decode and no metadata overlay. |
+| `BenchmarkTypedFrameAdapterDispatchReuse` | `535.5 ns/op`, `424 B/op`, `9 allocs/op` | Product frame path with opt-in complete-message request pooling. |
+| `BenchmarkTypedFrameAdapterDispatch` | `6282 ns/op`, `3493 B/op`, `78 allocs/op` | Metadata overlay still dominates when frame correlation metadata must be merged into the request message. |
+
+Behavior warning: protobuf `Merge` preserves fields that are absent from later
+messages. Do not silently replace ordinary `Reset`+`Unmarshal` with merge reuse
+on partial/update messages. A product path may use merge reuse only when the
+contract says every decoded frame is complete or when the caller clears fields
+that may be absent. The pooled request object is returned after the typed
+handler returns, so opt-in handlers must not retain request pointers for async
+use.
+
+### Browser Shared-Arena And Packet-Ring
+
+Implementation already exists in `runtime-sdk/ts/browser-host`:
+
+1. `RuntimeSharedArena` owns aligned slabs, descriptor tables, fast batch queue
+   reservation, descriptor-ID drains, release/reallocate free-list reuse, and
+   columnar batch descriptors.
+2. `RuntimePacketRing` owns fixed packet descriptors, burst enqueue/dequeue,
+   view/complete/release lifecycle, and high-water/drop counters.
+3. `lanePlanner` can select `packet-ring` for packet-like same-host batches
+   when available.
+4. Packet-ring enqueue now mutates the preallocated timestamp record instead of
+   replacing it per packet.
+5. Packet-ring hot loops can drain descriptor IDs into caller-owned scratch
+   storage with `dequeueIdsBurstInto`.
+
+Reference numbers from the browser-host benchmark suite:
+
+| Path | Mean | p99 | Meaning |
+| --- | ---: | ---: | --- |
+| 4KB slab write/read | `1.4 us` | `4.7 us` | Owned control-sized slab copy. |
+| 4KB slab fast write/read view | `0.4 us` | `0.5 us` | Best browser-side control-buffer lane when borrowed views are acceptable. |
+| 64KB slab write/read | `10.1 us` | `48.2 us` | Medium payload copy; use views/descriptors for hot paths. |
+| 64KB slab fast write/read view | `2.9 us` | `3.3 us` | Descriptor/view route avoids copying the read side. |
+| 1024KB slab write/read | `121.4 us` | `758.5 us` | Linear payload movement; descriptor routing should avoid hot-payload copies. |
+| 1024KB slab fast write/read view | `43.3 us` | `63.6 us` | Large-payload view path removes the read copy but still pays write cost. |
+| descriptor-ready id batch x128 | `434.5 us` | `546.4 us` | ID-only control drain avoids queue-entry object construction. |
+| packet-ring x128 | `43.6 us` | `65.7 us` | Packet-like lifecycle is much cheaper than general descriptor orchestration for fixed packet flows. |
+| packet-ring id x128 | `42.6 us` | `63.6 us` | ID-only packet drain is a small mean and p99 win in this JS run; tail remains runtime-noise sensitive. |
+
+Implementation rule: use shared-arena slabs for owned payload movement, borrowed
+views for synchronous inspection, descriptor-ID drains for scheduling, and
+packet rings for fixed packet-like streams. Do not compare packet rings to HTTP
+or gRPC; compare them to descriptor-ring and arena lifecycle costs.
+
+### Native Runtime Lane
+
+Status: report-only until three stable local baselines exist.
+
+Current reference:
+
+| Lane | Payload | Mean | p99 | Notes |
+| --- | ---: | ---: | ---: | --- |
+| `runtime-native` dispatch frame | 4KB | `639 ns` | `667 ns` | In-process Rust bridge; Tauri IPC not included. |
+| `runtime-native` dispatch frame | 64KB | `10.18 us` | `91.67 us` | Tail noise; report-only. |
+| `runtime-native` dispatch frame | 1MB | `112 us` | `172 us` | Linear in payload size. |
+| descriptor control frame | represents 4KB | `381 ns` | `458 ns` | Copies zero hot-payload bytes. |
+| descriptor control frame | represents 64KB | `323 ns` | `416 ns` | Constant with represented payload size. |
+| descriptor control frame | represents 1MB | `323 ns` | `375 ns` | Desired native control/data split. |
+
+Implementation rule: native control frames may copy small control payloads, but
+hot camera/audio/sensor/market payloads should move by descriptor, shared
+memory, fixed runtime buffer, SAB, arena slab, or packet ring. Full-payload
+native frames are linear in payload size and must not become the default for
+device hot streams.

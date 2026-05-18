@@ -145,6 +145,11 @@ export type RuntimeArenaQueueDrain = {
   count: number;
 };
 
+export type RuntimeArenaDescriptorIdDrain = {
+  descriptorIds: number[];
+  count: number;
+};
+
 export type RuntimeArenaReleaseOptions = {
   force?: boolean;
 };
@@ -652,6 +657,29 @@ export class RuntimeSharedArena {
     return { entries: target, count: accepted };
   }
 
+  dequeueDescriptorReadyIdsFast(limit: number, target: number[] = []): RuntimeArenaDescriptorIdDrain {
+    const max = Math.max(0, Math.floor(limit));
+    target.length = 0;
+    if (max === 0) {
+      return { descriptorIds: target, count: 0 };
+    }
+    const head = Atomics.load(this.epochs, ARENA_IDX_QUEUE_HEAD);
+    const tail = Atomics.load(this.epochs, ARENA_IDX_QUEUE_TAIL);
+    const available = tail - head;
+    if (available <= 0) {
+      return { descriptorIds: target, count: 0 };
+    }
+    const accepted = Math.min(max, available);
+    if (Atomics.compareExchange(this.epochs, ARENA_IDX_QUEUE_HEAD, head, head + accepted) !== head) {
+      return this.dequeueDescriptorReadyIdsInto(max, target);
+    }
+    for (let index = 0; index < accepted; index += 1) {
+      const slotOffset = queueSlotOffset((head + index) % ARENA_QUEUE_SLOT_COUNT);
+      target.push(this.view.getUint32(slotOffset + 4, true));
+    }
+    return { descriptorIds: target, count: accepted };
+  }
+
   invariantSnapshot(): RuntimeArenaInvariantSnapshot {
     const head = Atomics.load(this.epochs, ARENA_IDX_QUEUE_HEAD);
     const tail = Atomics.load(this.epochs, ARENA_IDX_QUEUE_TAIL);
@@ -724,6 +752,18 @@ export class RuntimeSharedArena {
     }
     Atomics.add(this.epochs, ARENA_IDX_BACKPRESSURE, 1);
     throw new Error("runtime shared arena descriptor table is full");
+  }
+
+  private dequeueDescriptorReadyIdsInto(limit: number, target: number[]): RuntimeArenaDescriptorIdDrain {
+    target.length = 0;
+    while (target.length < limit) {
+      const entry = this.dequeue();
+      if (!entry) {
+        break;
+      }
+      target.push(entry.descriptorId);
+    }
+    return { descriptorIds: target, count: target.length };
   }
 
   private writeDescriptor(descriptor: RuntimeArenaDescriptor): void {

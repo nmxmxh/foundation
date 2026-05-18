@@ -318,6 +318,81 @@ func TestTypedDispatchDefaultsResponseToRequestEncoding(t *testing.T) {
 	}
 }
 
+func TestTypedDispatchOptInProtobufDecodeReuse(t *testing.T) {
+	registry := New(nil, nil, nil)
+	const eventType = "media:process_asset:v1:requested"
+	binding := protoapi.Binding{
+		Request: func() proto.Message {
+			return &testprotos.TestRequest{}
+		},
+		Response: func() proto.Message {
+			return &testprotos.TestResponse{}
+		},
+		ProtobufDecodeReuse: protoapi.ProtobufDecodeReuseCompleteMessages,
+	}
+	calls := 0
+	var firstRequest *testprotos.TestRequest
+	err := registry.RegisterTypedWithOptions(
+		eventType,
+		binding,
+		func(_ context.Context, request proto.Message) (proto.Message, error) {
+			typed := request.(*testprotos.TestRequest)
+			if calls == 0 {
+				firstRequest = typed
+				if typed.GetWorkspaceId() != "wrk_1" || typed.GetHash() != "sha256:one" {
+					t.Fatalf("first reused decode mismatch: %+v", typed)
+				}
+			} else {
+				if typed != firstRequest {
+					t.Fatalf("expected request pool to reuse caller-owned protobuf message")
+				}
+				if typed.GetWorkspaceId() != "wrk_2" || typed.GetHash() != "sha256:two" || typed.GetSize() != 32 {
+					t.Fatalf("second reused decode mismatch: %+v", typed)
+				}
+			}
+			calls++
+			return &testprotos.TestResponse{ResourceId: typed.GetWorkspaceId(), Status: "complete"}, nil
+		},
+		bootstrap.ConcurrencyOptions{MaxConcurrent: 1},
+	)
+	if err != nil {
+		t.Fatalf("RegisterTypedWithOptions() error = %v", err)
+	}
+	registry.mu.RLock()
+	if registry.methods[eventType].requestPool == nil {
+		t.Fatalf("expected request pool for protobuf decode reuse binding")
+	}
+	registry.mu.RUnlock()
+
+	firstPayload, err := proto.Marshal(&testprotos.TestRequest{
+		WorkspaceId: "wrk_1",
+		ContentType: "application/octet-stream",
+		Size:        16,
+		Hash:        "sha256:one",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() first error = %v", err)
+	}
+	secondPayload, err := proto.Marshal(&testprotos.TestRequest{
+		WorkspaceId: "wrk_2",
+		ContentType: "application/octet-stream",
+		Size:        32,
+		Hash:        "sha256:two",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() second error = %v", err)
+	}
+	if _, ok, err := registry.DispatchBytes(context.Background(), eventType, firstPayload, nil); err != nil || !ok {
+		t.Fatalf("first DispatchBytes() ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := registry.DispatchBytes(context.Background(), eventType, secondPayload, nil); err != nil || !ok {
+		t.Fatalf("second DispatchBytes() ok=%v err=%v", ok, err)
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d", calls)
+	}
+}
+
 func TestListenValidationAndMemoryDispatch(t *testing.T) {
 	registry := New(nil, nil, nil)
 	if err := registry.Listen(context.Background(), "orders:create:v1:requested"); err == nil {

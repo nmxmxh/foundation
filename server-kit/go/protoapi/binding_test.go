@@ -107,6 +107,9 @@ func TestBindingValidationAndNilResponses(t *testing.T) {
 	if err := (Binding{Request: valid.Request, Response: func() proto.Message { return nil }}).Validate(); err == nil {
 		t.Fatalf("expected nil response validation error")
 	}
+	if err := (Binding{Request: valid.Request, Response: valid.Response, ProtobufDecodeReuse: "bad"}).Validate(); err == nil {
+		t.Fatalf("expected unsupported protobuf decode reuse mode error")
+	}
 	if err := (Binding{Request: valid.Request}).Validate(); err == nil {
 		t.Fatalf("expected missing response factory error")
 	}
@@ -150,6 +153,109 @@ func TestDecodeByEncoding(t *testing.T) {
 	typed := msg.(*testprotos.TestRequest)
 	if typed.Metadata.GetCorrelationId() != "corr_bytes" || typed.Metadata.GetRequestId() != "req_bytes" {
 		t.Fatalf("unexpected metadata: %+v", typed.Metadata)
+	}
+}
+
+func TestDecodeRequestBytesIntoCompleteReuseOptIn(t *testing.T) {
+	binding := Binding{
+		Request:             factory(func() anyProto { return &testprotos.TestRequest{} }).toFactory(),
+		Response:            factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
+		ProtobufDecodeReuse: ProtobufDecodeReuseCompleteMessages,
+	}
+	first, err := proto.Marshal(&testprotos.TestRequest{
+		Metadata: &testprotos.Metadata{
+			CorrelationId: "corr_1",
+			RequestId:     "req_1",
+			Locale:        "en",
+			GlobalContext: &testprotos.GlobalContext{Source: "api", DeviceId: "device_1"},
+		},
+		WorkspaceId: "wrk_1",
+		ContentType: "application/octet-stream",
+		Size:        16,
+		Hash:        "sha256:one",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() first error = %v", err)
+	}
+	second, err := proto.Marshal(&testprotos.TestRequest{
+		Metadata: &testprotos.Metadata{
+			CorrelationId: "corr_2",
+			RequestId:     "req_2",
+			Locale:        "fr",
+			GlobalContext: &testprotos.GlobalContext{Source: "worker", DeviceId: "device_2"},
+		},
+		WorkspaceId: "wrk_2",
+		ContentType: "application/json",
+		Size:        32,
+		Hash:        "sha256:two",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() second error = %v", err)
+	}
+
+	target := &testprotos.TestRequest{Metadata: &testprotos.Metadata{GlobalContext: &testprotos.GlobalContext{}}}
+	msg, err := binding.DecodeRequestBytesInto(target, first, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true})
+	if err != nil {
+		t.Fatalf("DecodeRequestBytesInto() first error = %v", err)
+	}
+	if msg != target || target.GetMetadata().GetCorrelationId() != "corr_1" || target.GetHash() != "sha256:one" {
+		t.Fatalf("first decode mismatch: msg=%p target=%+v", msg, target)
+	}
+	msg, err = binding.DecodeRequestBytesInto(target, second, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true})
+	if err != nil {
+		t.Fatalf("DecodeRequestBytesInto() second error = %v", err)
+	}
+	if msg != target {
+		t.Fatalf("expected caller-owned target to be reused")
+	}
+	if target.GetMetadata().GetCorrelationId() != "corr_2" ||
+		target.GetMetadata().GetGlobalContext().GetDeviceId() != "device_2" ||
+		target.GetWorkspaceId() != "wrk_2" ||
+		target.GetContentType() != "application/json" ||
+		target.GetSize() != 32 ||
+		target.GetHash() != "sha256:two" {
+		t.Fatalf("second decode mismatch: %+v", target)
+	}
+}
+
+func TestDecodeRequestBytesIntoAbsentFieldCaveatAndResetLane(t *testing.T) {
+	binding := Binding{
+		Request:  factory(func() anyProto { return &testprotos.TestRequest{} }).toFactory(),
+		Response: factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
+	}
+	withHash, err := proto.Marshal(&testprotos.TestRequest{
+		WorkspaceId: "wrk_old",
+		Hash:        "sha256:old",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() withHash error = %v", err)
+	}
+	withoutHash, err := proto.Marshal(&testprotos.TestRequest{
+		WorkspaceId: "wrk_new",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() withoutHash error = %v", err)
+	}
+
+	target := &testprotos.TestRequest{}
+	if _, err := binding.DecodeRequestBytesInto(target, withHash, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true}); err != nil {
+		t.Fatalf("DecodeRequestBytesInto() withHash error = %v", err)
+	}
+	if _, err := binding.DecodeRequestBytesInto(target, withoutHash, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true}); err != nil {
+		t.Fatalf("DecodeRequestBytesInto() withoutHash merge error = %v", err)
+	}
+	if target.GetWorkspaceId() != "wrk_new" || target.GetHash() != "sha256:old" {
+		t.Fatalf("merge reuse caveat mismatch: %+v", target)
+	}
+
+	if _, err := binding.DecodeRequestBytesInto(target, withoutHash, nil, DecodeRequestBytesIntoOptions{}); err != nil {
+		t.Fatalf("DecodeRequestBytesInto() reset lane error = %v", err)
+	}
+	if target.GetWorkspaceId() != "wrk_new" || target.GetHash() != "" {
+		t.Fatalf("reset lane should clear absent hash: %+v", target)
+	}
+	if _, err := binding.DecodeRequestBytesInto(nil, withoutHash, nil, DecodeRequestBytesIntoOptions{}); err == nil {
+		t.Fatalf("expected nil target error")
 	}
 }
 
@@ -273,6 +379,37 @@ func TestGeneratedTestProtoAccessors(t *testing.T) {
 		t.Fatalf("nil response getters failed")
 	}
 	_, _ = (&testprotos.TestResponse{}).Descriptor()
+}
+
+func BenchmarkDecodeRequestBytesIntoCompleteReuse(b *testing.B) {
+	binding := Binding{
+		Request:             factory(func() anyProto { return &testprotos.TestRequest{} }).toFactory(),
+		Response:            factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
+		ProtobufDecodeReuse: ProtobufDecodeReuseCompleteMessages,
+	}
+	payload, err := proto.Marshal(&testprotos.TestRequest{
+		Metadata: &testprotos.Metadata{
+			CorrelationId: "corr_1",
+			RequestId:     "req_1",
+			Locale:        "en",
+			GlobalContext: &testprotos.GlobalContext{Source: "api", DeviceId: "device_1"},
+		},
+		WorkspaceId: "wrk_1",
+		ContentType: "application/octet-stream",
+		Size:        16,
+		Hash:        "sha256:abc",
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	target := &testprotos.TestRequest{Metadata: &testprotos.Metadata{GlobalContext: &testprotos.GlobalContext{}}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := binding.DecodeRequestBytesInto(target, payload, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true}); err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 type anyProto interface {

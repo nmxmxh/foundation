@@ -154,7 +154,6 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 
 	raw := p.bufferPool.Get().([]byte)
 	defer p.bufferPool.Put(raw)
-	clear(raw)
 	buffer, err := NewBuffer(raw)
 	if err != nil {
 		return ProcessResponse{}, err
@@ -166,7 +165,7 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 	if err := buffer.SetHeaderInt(generated.INT_IDX_CONTEXT_HASH, req.ContextHash); err != nil {
 		return ProcessResponse{}, err
 	}
-	if err := buffer.SetInputBytes(req.Input); err != nil {
+	if err := buffer.SetInputBytesFast(req.Input); err != nil {
 		return ProcessResponse{}, err
 	}
 	if _, err := buffer.AddEpoch(generated.IDX_INPUT_WRITTEN, 1); err != nil {
@@ -181,15 +180,15 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 		return ProcessResponse{}, errors.New("ffi runtime host is closed")
 	}
 
-	unitID := []byte(req.UnitID)
 	errBuf := p.errBufPool.Get().([]byte)
 	defer p.errBufPool.Put(errBuf)
 	clear(errBuf)
+	unitID := unsafe.StringData(req.UnitID)
 	status := int32(C.ovrt_call_process(
 		processFn,
 		host,
-		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(unitID))),
-		C.uintptr_t(len(unitID)),
+		(*C.uint8_t)(unsafe.Pointer(unitID)),
+		C.uintptr_t(len(req.UnitID)),
 		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(raw))),
 		C.uintptr_t(len(raw)),
 		(*C.char)(unsafe.Pointer(unsafe.SliceData(errBuf))),
@@ -207,7 +206,7 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 	if err != nil {
 		return ProcessResponse{}, err
 	}
-	output, err := buffer.OutputBytes()
+	output, err := buffer.OutputBytesView()
 	if err != nil {
 		return ProcessResponse{}, err
 	}

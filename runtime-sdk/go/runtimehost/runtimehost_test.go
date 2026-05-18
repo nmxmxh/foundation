@@ -71,6 +71,40 @@ func TestBufferRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBufferFastSettersUseDeclaredLength(t *testing.T) {
+	raw := make([]byte, generated.BUFFER_TOTAL_BYTES)
+	buffer, err := NewBuffer(raw)
+	if err != nil {
+		t.Fatalf("NewBuffer() error = %v", err)
+	}
+	buffer.Reset()
+	if err := buffer.Initialize(1); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+
+	if err := buffer.SetInputBytes(bytes.Repeat([]byte{'x'}, 16)); err != nil {
+		t.Fatalf("SetInputBytes() error = %v", err)
+	}
+	if err := buffer.SetInputBytesFast([]byte("in")); err != nil {
+		t.Fatalf("SetInputBytesFast() error = %v", err)
+	}
+	input, err := buffer.InputBytesView()
+	if err != nil || string(input) != "in" {
+		t.Fatalf("InputBytesView() = %q err=%v", string(input), err)
+	}
+
+	if err := buffer.SetOutputBytes(bytes.Repeat([]byte{'y'}, 16)); err != nil {
+		t.Fatalf("SetOutputBytes() error = %v", err)
+	}
+	if err := buffer.SetOutputBytesFast([]byte("out")); err != nil {
+		t.Fatalf("SetOutputBytesFast() error = %v", err)
+	}
+	output, err := buffer.OutputBytesView()
+	if err != nil || string(output) != "out" {
+		t.Fatalf("OutputBytesView() = %q err=%v", string(output), err)
+	}
+}
+
 func TestBufferBoundsAndReset(t *testing.T) {
 	if _, err := NewBuffer(make([]byte, generated.BUFFER_TOTAL_BYTES-1)); err == nil {
 		t.Fatal("expected undersized buffer to fail")
@@ -106,8 +140,14 @@ func TestBufferBoundsAndReset(t *testing.T) {
 	if err := buffer.SetInputBytes(make([]byte, generated.INPUT_MAX_BYTES+1)); err == nil {
 		t.Fatal("expected oversized input to fail")
 	}
+	if err := buffer.SetInputBytesFast(make([]byte, generated.INPUT_MAX_BYTES+1)); err == nil {
+		t.Fatal("expected oversized fast input to fail")
+	}
 	if err := buffer.SetOutputBytes(make([]byte, generated.OUTPUT_MAX_BYTES+1)); err == nil {
 		t.Fatal("expected oversized output to fail")
+	}
+	if err := buffer.SetOutputBytesFast(make([]byte, generated.OUTPUT_MAX_BYTES+1)); err == nil {
+		t.Fatal("expected oversized fast output to fail")
 	}
 	if err := buffer.SetHeaderInt(generated.INT_IDX_INPUT_LENGTH, -1); err != nil {
 		t.Fatalf("SetHeaderInt(input length) error = %v", err)
@@ -451,6 +491,32 @@ func TestFrameHelpersAndStringTrim(t *testing.T) {
 	}
 	if _, err := readFrame(strings.NewReader("\x05\x00")); err == nil {
 		t.Fatal("expected short frame to fail")
+	}
+	frame.Reset()
+	if err := writeStringFrame(&frame, "runtime.echo"); err != nil {
+		t.Fatalf("writeStringFrame() error = %v", err)
+	}
+	payload, err = readFrame(&frame)
+	if err != nil || string(payload) != "runtime.echo" {
+		t.Fatalf("readFrame(string) = %q err=%v", string(payload), err)
+	}
+	frame.Reset()
+	if err := writeFrame(&frame, []byte("abcd")); err != nil {
+		t.Fatalf("writeFrame() error = %v", err)
+	}
+	var dst [4]byte
+	if err := readFrameInto(&frame, dst[:]); err != nil {
+		t.Fatalf("readFrameInto() error = %v", err)
+	}
+	if string(dst[:]) != "abcd" {
+		t.Fatalf("readFrameInto dst = %q, want abcd", string(dst[:]))
+	}
+	frame.Reset()
+	if err := writeFrame(&frame, []byte("toolong")); err != nil {
+		t.Fatalf("writeFrame() error = %v", err)
+	}
+	if err := readFrameInto(&frame, dst[:]); err == nil {
+		t.Fatal("expected readFrameInto length mismatch")
 	}
 	if stringsTrim(" \n\tvalue\r ") != "value" {
 		t.Fatal("stringsTrim failed")

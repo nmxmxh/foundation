@@ -121,11 +121,15 @@ func ParseEventType(eventType string) (ParsedEventType, error) {
 }
 
 func TerminalState(eventType string) string {
-	parsed, err := ParseEventType(eventType)
-	if err != nil {
+	et := strings.TrimSpace(eventType)
+	if err := ValidateEventType(et); err != nil {
 		return ""
 	}
-	return parsed.State
+	lastColon := strings.LastIndexByte(et, ':')
+	if lastColon <= 0 || lastColon == len(et)-1 {
+		return ""
+	}
+	return et[lastColon+1:]
 }
 
 func EnsureTerminalState(eventType, terminal string) string {

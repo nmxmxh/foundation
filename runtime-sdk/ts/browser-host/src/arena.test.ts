@@ -122,6 +122,14 @@ describe("RuntimeSharedArena", () => {
     expect(drained.entries).toBe(scratch);
     expect(drained.entries.map((entry) => entry.descriptorId)).toEqual(ids);
     expect(drained.entries.every((entry) => entry.correlationHash === 9)).toBe(true);
+
+    expect(arena.enqueueDescriptorReadyBatchFast(ids, 11)).toBe(8);
+    const idScratch: number[] = [];
+    const idDrain = arena.dequeueDescriptorReadyIdsFast(8, idScratch);
+
+    expect(idDrain.count).toBe(8);
+    expect(idDrain.descriptorIds).toBe(idScratch);
+    expect(idDrain.descriptorIds).toEqual(ids);
   });
 
   it("encodes columnar batch descriptors as 64-byte aligned metadata slabs", () => {

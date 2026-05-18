@@ -16,6 +16,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 // ConcurrencyOptions defines event registration throttling.
@@ -25,6 +26,7 @@ type registeredMethod struct {
 	handler      bootstrap.HandlerFunc
 	typedHandler bootstrap.TypedHandlerFunc
 	binding      *protoapi.Binding
+	requestPool  *sync.Pool
 }
 
 type DispatchInput struct {
@@ -137,12 +139,25 @@ func (r *ServiceRegistry) RegisterTypedWithOptions(eventType string, binding pro
 	currentBinding := binding
 	controller := bootstrap.NewHandlerExecutionController(opts)
 	wrapped := controller.WrapTyped(handler)
+	var requestPool *sync.Pool
+	if currentBinding.AllowsProtobufDecodeReuse() {
+		requestPool = &sync.Pool{
+			New: func() any {
+				msg, err := currentBinding.NewRequest()
+				if err != nil {
+					return nil
+				}
+				return msg
+			},
+		}
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.methods[eventType] = registeredMethod{
 		typedHandler: wrapped,
 		binding:      &currentBinding,
+		requestPool:  requestPool,
 	}
 	r.log.Info("registered typed handler", zap.String("event_type", eventType))
 	return nil
@@ -246,12 +261,13 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 	ctx = metadata.NewContext(ctx, metaMap)
 
 	if method.typedHandler != nil && method.binding != nil {
-		req, err := protoapi.DecodeByEncoding(*method.binding, env.PayloadEncoding, env.Payload, env.PayloadBytes, metaMap)
+		req, pooled, err := method.decodeRequest(env.PayloadEncoding, env.Payload, env.PayloadBytes, metaMap)
 		if err != nil {
 			r.log.Error("failed to decode typed payload", zap.String("event_type", env.EventType), zap.Error(err))
 			return
 		}
 		_, err = method.typedHandler(ctx, req)
+		method.releaseRequest(req, pooled)
 		if err != nil && r.handler != nil {
 			r.handler.Error(ctx, strings.TrimSuffix(env.EventType, ":requested"), "event processing failed", err, metaMap, "")
 		}
@@ -303,12 +319,13 @@ func (r *ServiceRegistry) DispatchInput(ctx context.Context, eventType string, i
 
 	if method.typedHandler != nil && method.binding != nil {
 		input.ResponseEncoding = normalizeResponseEncoding(input.ResponseEncoding, input.PayloadEncoding)
-		request, err := protoapi.DecodeByEncoding(*method.binding, input.PayloadEncoding, input.Payload, input.PayloadBytes, input.Metadata)
+		request, pooled, err := method.decodeRequest(input.PayloadEncoding, input.Payload, input.PayloadBytes, input.Metadata)
 		if err != nil {
 			return DispatchResult{}, true, err
 		}
 		response, err := method.typedHandler(ctx, request)
 		if err != nil {
+			method.releaseRequest(request, pooled)
 			return DispatchResult{}, true, err
 		}
 		result := DispatchResult{
@@ -317,16 +334,20 @@ func (r *ServiceRegistry) DispatchInput(ctx context.Context, eventType string, i
 		if input.ResponseEncoding == protoapi.PayloadEncodingProtobuf {
 			payloadBytes, err := method.binding.EncodeResponseBytes(response)
 			if err != nil {
+				method.releaseRequest(request, pooled)
 				return DispatchResult{}, true, err
 			}
+			method.releaseRequest(request, pooled)
 			result.PayloadBytes = payloadBytes
 			result.PayloadEncoding = protoapi.PayloadEncodingProtobuf
 			return result, true, nil
 		}
 		payloadMap, err := method.binding.EncodeResponseMap(response)
 		if err != nil {
+			method.releaseRequest(request, pooled)
 			return DispatchResult{}, true, err
 		}
+		method.releaseRequest(request, pooled)
 		result.Payload = payloadMap
 		return result, true, nil
 	}
@@ -390,4 +411,35 @@ func normalizeResponseEncoding(value, requestEncoding string) string {
 		return normalizeEncoding(requestEncoding)
 	}
 	return normalizeEncoding(value)
+}
+
+func (m registeredMethod) decodeRequest(encoding string, payload map[string]any, payloadBytes []byte, metadata map[string]any) (proto.Message, bool, error) {
+	if normalizeEncoding(encoding) != protoapi.PayloadEncodingProtobuf || m.requestPool == nil || m.binding == nil {
+		msg, err := protoapi.DecodeByEncoding(*m.binding, encoding, payload, payloadBytes, metadata)
+		return msg, false, err
+	}
+	request, ok := m.requestPool.Get().(proto.Message)
+	if !ok || request == nil {
+		var err error
+		request, err = m.binding.NewRequest()
+		if err != nil {
+			return nil, false, err
+		}
+	}
+	msg, err := m.binding.DecodeRequestBytesInto(request, payloadBytes, metadata, protoapi.DecodeRequestBytesIntoOptions{
+		CompleteMessage: true,
+	})
+	if err != nil {
+		proto.Reset(request)
+		m.requestPool.Put(request)
+		return nil, false, err
+	}
+	return msg, true, nil
+}
+
+func (m registeredMethod) releaseRequest(request proto.Message, pooled bool) {
+	if !pooled || request == nil || m.requestPool == nil {
+		return
+	}
+	m.requestPool.Put(request)
 }

@@ -290,6 +290,38 @@ func TestFrameCodecRejectsTrailingBytes(t *testing.T) {
 	}
 }
 
+func TestFrameCodecReusesStableCorrelationStorage(t *testing.T) {
+	codec := binaryFrameCodec{}
+	firstFrame := Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_1"}`),
+		CorrelationID: "corr_1",
+		SchemaVersion: "1.0",
+	}
+	secondFrame := firstFrame
+	secondFrame.CorrelationID = "corr_2"
+	raw := AppendMarshalFrame(nil, firstFrame)
+	rawChanged := AppendMarshalFrame(nil, secondFrame)
+
+	var out Frame
+	if err := codec.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("first unmarshal failed: %v", err)
+	}
+	firstCorrelation := out.CorrelationID
+	if err := codec.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("second unmarshal failed: %v", err)
+	}
+	if out.CorrelationID != firstCorrelation {
+		t.Fatalf("stable correlation changed: %q != %q", out.CorrelationID, firstCorrelation)
+	}
+	if err := codec.Unmarshal(rawChanged, &out); err != nil {
+		t.Fatalf("changed unmarshal failed: %v", err)
+	}
+	if out.CorrelationID != "corr_2" {
+		t.Fatalf("changed correlation = %q, want corr_2", out.CorrelationID)
+	}
+}
+
 func TestDirectFrameClientValidatesEnvelopeBoundsBeforeDispatch(t *testing.T) {
 	client := NewDirectFrameClient(testRouter(t), ServerOptions{
 		MaxEventTypeBytes:   len("order:create:v1:frame") - 1,
@@ -571,6 +603,58 @@ func BenchmarkGeneratedProtoMarshalAppendRoundTrip(b *testing.B) {
 		}
 		out.Reset()
 		if err := proto.Unmarshal(raw, &out); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkGeneratedProtoUnmarshalReset(b *testing.B) {
+	req := &testprotos.TestRequest{
+		Metadata: &testprotos.Metadata{
+			CorrelationId: "corr_1",
+			RequestId:     "req_1",
+		},
+		WorkspaceId: "wrk_1",
+		ContentType: "application/octet-stream",
+		Size:        16,
+		Hash:        "sha256:abc",
+	}
+	raw, err := proto.Marshal(req)
+	if err != nil {
+		b.Fatal(err)
+	}
+	var out testprotos.TestRequest
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		out.Reset()
+		if err := proto.Unmarshal(raw, &out); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkGeneratedProtoUnmarshalMergeReuse(b *testing.B) {
+	req := &testprotos.TestRequest{
+		Metadata: &testprotos.Metadata{
+			CorrelationId: "corr_1",
+			RequestId:     "req_1",
+		},
+		WorkspaceId: "wrk_1",
+		ContentType: "application/octet-stream",
+		Size:        16,
+		Hash:        "sha256:abc",
+	}
+	raw, err := proto.Marshal(req)
+	if err != nil {
+		b.Fatal(err)
+	}
+	opts := proto.UnmarshalOptions{Merge: true}
+	out := testprotos.TestRequest{Metadata: &testprotos.Metadata{}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := opts.Unmarshal(raw, &out); err != nil {
 			b.Fatal(err)
 		}
 	}

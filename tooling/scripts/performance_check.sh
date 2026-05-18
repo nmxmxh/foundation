@@ -3,18 +3,29 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export GOCACHE="${GOCACHE:-/tmp/ovasabi-foundation-go-build}"
+SCALE_BENCHTIME="${SCALE_BENCHTIME:-100x}"
 
 echo "== foundation Go performance guards =="
 (
   cd "$ROOT/server-kit/go"
   go test -tags=perf ./grpcsvc ./chain
-  go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFrameClientDispatch|RouterDispatchFrameDirect|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$|BenchmarkRunParallel$' -benchmem ./grpcsvc ./chain
-  go test -bench='BenchmarkTypedFrameAdapterDispatch$' -benchmem -run='^$' ./bootstrap
+  go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|ClientDispatchFrameOverBufconn|RouterDispatchFrameDirect|DirectFrameClientDispatch|BoundFrameClientDispatch|BoundFrameClientDispatchTrusted|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip|GeneratedProtoUnmarshalReset|GeneratedProtoUnmarshalMergeReuse)$|BenchmarkRunParallel(Into)?$' -benchmem ./grpcsvc ./chain
+  go test -bench='BenchmarkDecodeRequestBytesIntoCompleteReuse$' -benchmem -run='^$' ./protoapi
+  go test -bench='BenchmarkTypedFrameAdapterDispatch(NoMetadata|Reuse)?$' -benchmem -run='^$' ./bootstrap
   go test -bench='BenchmarkAppLane_' -benchmem -run='^$' ./appbench
+  go test -bench='BenchmarkScale(_|1M_)' -benchmem -benchtime="$SCALE_BENCHTIME" -run='^$' ./appbench
+  go test -bench='Benchmark' -benchmem -run='^$' ./cache ./circuitbreaker ./compress ./events ./metrics ./redis ./retry ./worker
+  go test -bench='Benchmark(MemoryDB|Query|Exec)' -benchmem -run='^$' ./database
   go test -bench='BenchmarkRouter' -benchmem -run='^$' ./wsrouting
+  go test -bench='Benchmark(TLSHandshake|ApplyPostQuantumTLS)' -benchmem -run='^$' ./security
+  if [[ -n "${SERVICE_BACKED_DATABASE_URL:-}" && -n "${SERVICE_BACKED_REDIS_URL:-}" ]]; then
+    go test -bench='BenchmarkServiceBacked' -benchmem -run='^$' ./servicebacked
+  else
+    echo "skip service-backed Redis/Postgres benchmarks: SERVICE_BACKED_DATABASE_URL and SERVICE_BACKED_REDIS_URL are not set"
+  fi
   if [[ "${PROFILE:-0}" == "1" ]]; then
     mkdir -p /tmp/ovasabi-foundation-profiles
-    go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFrameClientDispatch|RouterDispatchFrameDirect|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$' -benchmem \
+    go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFrameClientDispatch|RouterDispatchFrameDirect|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip|GeneratedProtoUnmarshalReset|GeneratedProtoUnmarshalMergeReuse)$' -benchmem \
       -cpuprofile /tmp/ovasabi-foundation-profiles/grpcsvc.cpu.out \
       -memprofile /tmp/ovasabi-foundation-profiles/grpcsvc.mem.out \
       ./grpcsvc

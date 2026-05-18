@@ -389,3 +389,13 @@ func BenchmarkMatches_Exact(b *testing.B) {
 		_ = Matches("media:upload:requested", "media:upload:requested")
 	}
 }
+
+func BenchmarkTerminalState(b *testing.B) {
+	eventType := "media:upload:v1:success"
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if TerminalState(eventType) != "success" {
+			b.Fatal("unexpected terminal state")
+		}
+	}
+}

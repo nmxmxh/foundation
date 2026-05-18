@@ -169,7 +169,7 @@ func (p *ProcessPool) Execute(ctx context.Context, req ProcessRequest) (ProcessR
 	if err := buffer.SetHeaderInt(generated.INT_IDX_CONTEXT_HASH, req.ContextHash); err != nil {
 		return ProcessResponse{}, err
 	}
-	if err := buffer.SetInputBytes(req.Input); err != nil {
+	if err := buffer.SetInputBytesFast(req.Input); err != nil {
 		return ProcessResponse{}, err
 	}
 	if _, err := buffer.AddEpoch(generated.IDX_INPUT_WRITTEN, 1); err != nil {
@@ -184,7 +184,7 @@ func (p *ProcessPool) Execute(ctx context.Context, req ProcessRequest) (ProcessR
 	if err != nil {
 		return ProcessResponse{}, err
 	}
-	output, err := buffer.OutputBytes()
+	output, err := buffer.OutputBytesView()
 	if err != nil {
 		return ProcessResponse{}, err
 	}
@@ -459,21 +459,13 @@ func (w *processWorker) executeLocked(unitID string, buffer []byte) error {
 	if w.mode == ProcessTransportSharedMemory {
 		return w.executeSharedMemoryLocked(unitID, buffer)
 	}
-	if err := writeFrame(w.stdin, []byte(unitID)); err != nil {
+	if err := writeStringFrame(w.stdin, unitID); err != nil {
 		return err
 	}
 	if err := writeFrame(w.stdin, buffer); err != nil {
 		return err
 	}
-	updated, err := readFrame(w.stdout)
-	if err != nil {
-		return err
-	}
-	if len(updated) != len(buffer) {
-		return fmt.Errorf("unexpected runtime buffer length: %d != %d", len(updated), len(buffer))
-	}
-	copy(buffer, updated)
-	return nil
+	return readFrameInto(w.stdout, buffer)
 }
 
 func (w *processWorker) executeSharedMemoryLocked(unitID string, buffer []byte) error {
@@ -481,7 +473,7 @@ func (w *processWorker) executeSharedMemoryLocked(unitID string, buffer []byte) 
 		return errors.New("shared memory segment is not initialized")
 	}
 	copy(w.shm.raw, buffer)
-	if err := writeFrame(w.stdin, []byte(unitID)); err != nil {
+	if err := writeStringFrame(w.stdin, unitID); err != nil {
 		return err
 	}
 	ack, err := readFrame(w.stdout)
@@ -512,16 +504,46 @@ func writeFrame(w io.Writer, payload []byte) error {
 	return err
 }
 
-func readFrame(r io.Reader) ([]byte, error) {
+func writeStringFrame(w io.Writer, payload string) error {
 	var size [4]byte
-	if _, err := io.ReadFull(r, size[:]); err != nil {
+	binary.LittleEndian.PutUint32(size[:], uint32(len(payload)))
+	if _, err := w.Write(size[:]); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, payload)
+	return err
+}
+
+func readFrame(r io.Reader) ([]byte, error) {
+	length, err := readFrameLength(r)
+	if err != nil {
 		return nil, err
 	}
-	payload := make([]byte, binary.LittleEndian.Uint32(size[:]))
+	payload := make([]byte, length)
 	if _, err := io.ReadFull(r, payload); err != nil {
 		return nil, err
 	}
 	return payload, nil
+}
+
+func readFrameInto(r io.Reader, dst []byte) error {
+	length, err := readFrameLength(r)
+	if err != nil {
+		return err
+	}
+	if uint64(length) != uint64(len(dst)) {
+		return fmt.Errorf("unexpected runtime buffer length: %d != %d", length, len(dst))
+	}
+	_, err = io.ReadFull(r, dst)
+	return err
+}
+
+func readFrameLength(r io.Reader) (uint32, error) {
+	var size [4]byte
+	if _, err := io.ReadFull(r, size[:]); err != nil {
+		return 0, err
+	}
+	return binary.LittleEndian.Uint32(size[:]), nil
 }
 
 func defaultProcessWorkerCount(cores int) int {

@@ -2,6 +2,7 @@ package runtimehost
 
 import (
 	"bytes"
+	"encoding/binary"
 	"testing"
 
 	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
@@ -26,6 +27,22 @@ func BenchmarkBufferSetInputBytes1KB(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if err := buffer.SetInputBytes(payload); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBufferSetInputBytesFast1KB(b *testing.B) {
+	buffer := benchmarkBuffer(b)
+	payload := bytes.Repeat([]byte{17}, int(generated.INPUT_MAX_BYTES))
+	buffer.Reset()
+	if err := buffer.Initialize(1); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := buffer.SetInputBytesFast(payload); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -76,6 +93,22 @@ func BenchmarkBufferSetOutputBytes2KB(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		if err := buffer.SetOutputBytes(payload); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBufferSetOutputBytesFast2KB(b *testing.B) {
+	buffer := benchmarkBuffer(b)
+	payload := bytes.Repeat([]byte{29}, int(generated.OUTPUT_MAX_BYTES))
+	buffer.Reset()
+	if err := buffer.Initialize(1); err != nil {
+		b.Fatal(err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := buffer.SetOutputBytesFast(payload); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -142,4 +175,43 @@ func BenchmarkBufferDiagnosticsText(b *testing.B) {
 			b.Fatal("empty diagnostics")
 		}
 	}
+}
+
+func BenchmarkBufferReadFrameAllocCopy4KB(b *testing.B) {
+	frame := makeRuntimeBufferFrame()
+	dst := make([]byte, generated.BUFFER_TOTAL_BYTES)
+	reader := bytes.NewReader(frame)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader.Reset(frame)
+		updated, err := readFrame(reader)
+		if err != nil {
+			b.Fatal(err)
+		}
+		copy(dst, updated)
+	}
+}
+
+func BenchmarkBufferReadFrameInto4KB(b *testing.B) {
+	frame := makeRuntimeBufferFrame()
+	dst := make([]byte, generated.BUFFER_TOTAL_BYTES)
+	reader := bytes.NewReader(frame)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		reader.Reset(frame)
+		if err := readFrameInto(reader, dst); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func makeRuntimeBufferFrame() []byte {
+	frame := make([]byte, 4+generated.BUFFER_TOTAL_BYTES)
+	binary.LittleEndian.PutUint32(frame[:4], generated.BUFFER_TOTAL_BYTES)
+	for index := 4; index < len(frame); index++ {
+		frame[index] = byte(index)
+	}
+	return frame
 }

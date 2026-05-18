@@ -37,6 +37,11 @@ export type RuntimePacketRingDrain = {
   count: number;
 };
 
+export type RuntimePacketRingIdDrain = {
+  descriptorIds: number[];
+  count: number;
+};
+
 export type RuntimePacketRingOptions = {
   slots: number;
   slotBytes: number;
@@ -58,6 +63,14 @@ const zeroTimestamps = (source: RuntimeLaneTimestampSource): RuntimeLaneTimestam
   processedNs: 0n,
   emittedNs: 0n,
 });
+
+const resetTimestamps = (target: RuntimeLaneTimestamps, source: RuntimeLaneTimestampSource): void => {
+  target.source = source;
+  target.ingressNs = 0n;
+  target.dequeuedNs = 0n;
+  target.processedNs = 0n;
+  target.emittedNs = 0n;
+};
 
 export class RuntimePacketRing {
   private readonly bytes: Uint8Array;
@@ -135,10 +148,8 @@ export class RuntimePacketRing {
     descriptor.length = payload.byteLength;
     descriptor.flags = flags;
     descriptor.lane = lane;
-    descriptor.timestamps = {
-      ...zeroTimestamps(this.timestampSource),
-      ingressNs: this.nowNs(),
-    };
+    resetTimestamps(descriptor.timestamps, this.timestampSource);
+    descriptor.timestamps.ingressNs = this.nowNs();
     this.queue[this.tail % this.queue.length] = id;
     this.tail += 1;
     this.stats.enqueued += 1;
@@ -181,6 +192,26 @@ export class RuntimePacketRing {
       target.push(descriptor);
     }
     return { descriptors: target, count: target.length };
+  }
+
+  dequeueIdsBurst(limit: number, target: number[] = []): RuntimePacketRingIdDrain {
+    const count = this.dequeueIdsBurstInto(limit, target);
+    return { descriptorIds: target, count };
+  }
+
+  dequeueIdsBurstInto(limit: number, target: number[]): number {
+    const max = Math.max(0, Math.floor(limit));
+    target.length = 0;
+    while (target.length < max && this.head < this.tail) {
+      const id = this.queue[this.head % this.queue.length];
+      this.head += 1;
+      const descriptor = this.descriptors[id];
+      descriptor.state = "processing";
+      descriptor.timestamps.dequeuedNs = this.nowNs();
+      this.stats.dequeued += 1;
+      target.push(id);
+    }
+    return target.length;
   }
 
   view(descriptorId: number): Uint8Array {

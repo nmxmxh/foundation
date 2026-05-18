@@ -63,6 +63,10 @@ Design rules:
    (ANALYZE, BUFFERS, WAL, VERBOSE)` evidence and call out whether the plan
    uses index scan, index-only scan, bitmap heap scan, seq scan, partition
    pruning, sort, hash aggregate, nested loop, hash join, or materialization.
+8. CPU locality review: when a repository path feeds Go/Rust/TS scan logic,
+   prefer compact columns, ordered cursors, and late materialization so the app
+   loop touches predictable cache lines instead of chasing JSON maps, wide row
+   objects, or pointer-heavy joined structures.
 
 Index rules from this posture:
 
@@ -388,6 +392,10 @@ Columnar-read design rules:
    same fact row or controlled duplicate outcome.
 5. Measure warm-cache and cold-cache report runs separately. Page-cache effects
    are part of the lane contract, not noise to hide.
+6. Keep runtime columnar projections as structure-of-arrays buffers where
+   possible. Contiguous validity, offset, and value buffers let downstream
+   filters count cache lines and use SIMD/vector lanes when benchmarks justify
+   them.
 
 ## Security and compliance
 

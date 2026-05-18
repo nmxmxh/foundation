@@ -98,6 +98,13 @@ impl NativeBuffer {
         Ok(self.output_bytes_view()?.to_vec())
     }
 
+    pub fn read_output_bytes_into(&self, target: &mut Vec<u8>) -> Result<(), String> {
+        let view = self.output_bytes_view()?;
+        target.clear();
+        target.extend_from_slice(view);
+        Ok(())
+    }
+
     pub fn write_output_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
         validate_output_length(bytes.len() as u32)?;
         self.zero_region(OFFSET_OUTPUT_BYTES, ovrt_core::OUTPUT_MAX_BYTES)?;
@@ -232,5 +239,11 @@ mod tests {
 
         assert_eq!(buffer.output_bytes_view().expect("output view"), b"short");
         assert_eq!(buffer.read_output_bytes().expect("owned output"), b"short");
+
+        let mut reused = Vec::with_capacity(16);
+        buffer
+            .read_output_bytes_into(&mut reused)
+            .expect("read output into");
+        assert_eq!(reused, b"short");
     }
 }

@@ -3,7 +3,6 @@ package transport
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"slices"
 	"strings"
 	"time"
 )
@@ -137,25 +136,28 @@ func CanDispatch(route *Route, grantedCapabilities []string, hasPolicyAccess fun
 	if domain == "" {
 		return false
 	}
-	if slices.Contains(grantedCapabilities, domain+".*") {
-		return true
-	}
+	wildcard := domain + ".*"
+	view := domain + ".view"
+	write := domain + ".write"
+	admin := domain + ".admin"
 	switch route.Permission {
 	case "view":
 		for _, capability := range grantedCapabilities {
-			if capability == domain+".view" || capability == domain+".write" || capability == domain+".admin" {
+			if capability == wildcard || capability == view || capability == write || capability == admin {
 				return true
 			}
 		}
 	case "write":
 		for _, capability := range grantedCapabilities {
-			if capability == domain+".write" || capability == domain+".admin" {
+			if capability == wildcard || capability == write || capability == admin {
 				return true
 			}
 		}
 	default:
-		if slices.Contains(grantedCapabilities, domain+".admin") {
-			return true
+		for _, capability := range grantedCapabilities {
+			if capability == wildcard || capability == admin {
+				return true
+			}
 		}
 	}
 	return false

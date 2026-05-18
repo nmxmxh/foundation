@@ -87,6 +87,18 @@ func BenchmarkCanDispatchExactCapability(b *testing.B) {
 	}
 }
 
+func BenchmarkCanDispatchWriteViaAdminFallback(b *testing.B) {
+	route := &Route{RequiredCapability: "workspace.write", Permission: "write"}
+	capabilities := []string{"profile.view", "workspace.admin", "billing.view"}
+	allow := func(*Route) bool { return true }
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if !CanDispatch(route, capabilities, allow) {
+			b.Fatal("dispatch denied")
+		}
+	}
+}
+
 func BenchmarkSchemaRegistryNegotiate(b *testing.B) {
 	registry := NewSchemaRegistry()
 	for _, version := range []string{"v1", "v2", "v3"} {

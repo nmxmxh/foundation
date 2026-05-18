@@ -65,3 +65,38 @@ func TestRouterDispatchFrameDirectAllocBudget(t *testing.T) {
 		t.Fatalf("direct frame allocation budget exceeded: got %0.1f allocs/run, want <= 1", allocs)
 	}
 }
+
+func TestBinaryFrameCodecAllocBudgets(t *testing.T) {
+	req := Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_1"}`),
+		CorrelationID: "corr_1",
+		SchemaVersion: "1.0",
+	}
+	codec := binaryFrameCodec{}
+	buf := make([]byte, 0, 256)
+	var out Frame
+
+	appendAllocs := testing.AllocsPerRun(100, func() {
+		buf = AppendMarshalFrame(buf[:0], req)
+		if err := codec.Unmarshal(buf, &out); err != nil {
+			t.Fatalf("binary append roundtrip failed: %v", err)
+		}
+	})
+	if appendAllocs > 0 {
+		t.Fatalf("binary append roundtrip allocation budget exceeded: got %0.1f allocs/run, want 0", appendAllocs)
+	}
+
+	codecAllocs := testing.AllocsPerRun(100, func() {
+		raw, err := codec.Marshal(req)
+		if err != nil {
+			t.Fatalf("binary codec marshal failed: %v", err)
+		}
+		if err := codec.Unmarshal(raw, &out); err != nil {
+			t.Fatalf("binary codec unmarshal failed: %v", err)
+		}
+	})
+	if codecAllocs > 2 {
+		t.Fatalf("binary codec allocation budget exceeded: got %0.1f allocs/run, want <= 2", codecAllocs)
+	}
+}

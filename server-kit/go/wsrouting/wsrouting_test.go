@@ -249,6 +249,26 @@ func TestForEachLocalStopsEarlyAndHealth(t *testing.T) {
 	}
 }
 
+func TestForEachLocalValueStopsEarlyAndReturnsCopies(t *testing.T) {
+	r := NewRouter(nil, "server-1")
+	ctx := context.Background()
+	_ = r.Register(ctx, ConnectionInfo{ConnectionID: "conn-1"})
+	_ = r.Register(ctx, ConnectionInfo{ConnectionID: "conn-2"})
+
+	var seen int
+	r.ForEachLocalValue(func(info ConnectionInfo) bool {
+		seen++
+		info.ConnectionID = "mutated"
+		return false
+	})
+	if seen != 1 {
+		t.Fatalf("ForEachLocalValue seen = %d, want 1", seen)
+	}
+	if _, ok := r.GetLocalConnection("mutated"); ok {
+		t.Fatal("ForEachLocalValue should pass value copies")
+	}
+}
+
 func TestLocalConnectionCount(t *testing.T) {
 	client := redis.NewMemoryClient("test")
 	defer func() { _ = client.Close() }()
@@ -612,6 +632,33 @@ func BenchmarkRouterForEachLocal1024(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		count := 0
 		router.ForEachLocal(func(*ConnectionInfo) bool {
+			count++
+			return true
+		})
+		if count != 1024 {
+			b.Fatalf("iterated %d connections, want 1024", count)
+		}
+	}
+}
+
+func BenchmarkRouterForEachLocalValue1024(b *testing.B) {
+	router := NewRouter(nil, "bench-server")
+	ctx := context.Background()
+	for i := range 1024 {
+		id := strconv.Itoa(i)
+		err := router.Register(ctx, ConnectionInfo{
+			ConnectionID: "conn-" + id,
+			DeviceID:     "device-" + id,
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		count := 0
+		router.ForEachLocalValue(func(ConnectionInfo) bool {
 			count++
 			return true
 		})

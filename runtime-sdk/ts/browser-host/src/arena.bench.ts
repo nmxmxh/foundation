@@ -78,6 +78,14 @@ describe("RuntimeSharedArena payload movement", () => {
         batchArena.dequeueBatchFast(batchSize, scratch);
       }
     });
+
+    const idScratch: number[] = [];
+    bench(`descriptor-ready id batch traffic x${batchSize}`, () => {
+      for (let index = 0; index < groups.length; index += 1) {
+        batchArena.enqueueDescriptorReadyBatchFast(groups[index], index);
+        batchArena.dequeueDescriptorReadyIdsFast(batchSize, idScratch);
+      }
+    });
   }
 
   for (const batchSize of [1, 8, 32, 128]) {
@@ -110,9 +118,11 @@ describe("RuntimeSharedArena payload movement", () => {
 
   for (const batchSize of [1, 8, 32, 128]) {
     const packetRing = new RuntimePacketRing({ slots: 512, slotBytes: 1024 });
+    const packetRingIds = new RuntimePacketRing({ slots: 512, slotBytes: 1024 });
     const packetPayload = payload(256);
     const packets = Array.from({ length: batchSize }, () => packetPayload);
     const scratch: RuntimePacketDescriptor[] = [];
+    const idScratch: number[] = [];
 
     bench(`packet-ring enqueue/dequeue/complete/release x${batchSize}`, () => {
       packetRing.enqueueBurst(packets, 0, "packet-ring");
@@ -122,6 +132,17 @@ describe("RuntimeSharedArena payload movement", () => {
         packetRing.view(descriptor.id);
         packetRing.complete(descriptor.id);
         packetRing.release(descriptor.id);
+      }
+    });
+
+    bench(`packet-ring id enqueue/dequeue/complete/release x${batchSize}`, () => {
+      packetRingIds.enqueueBurst(packets, 0, "packet-ring");
+      const count = packetRingIds.dequeueIdsBurstInto(batchSize, idScratch);
+      for (let index = 0; index < count; index += 1) {
+        const descriptorId = idScratch[index];
+        packetRingIds.view(descriptorId);
+        packetRingIds.complete(descriptorId);
+        packetRingIds.release(descriptorId);
       }
     });
   }

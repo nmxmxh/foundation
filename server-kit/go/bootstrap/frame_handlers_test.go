@@ -117,6 +117,68 @@ func TestRegisterTypedFrameHandlersMapsHandlerErrors(t *testing.T) {
 	}
 }
 
+func TestRegisterTypedFrameHandlersOptInProtobufDecodeReuse(t *testing.T) {
+	router := grpcsvc.NewRouter()
+	const eventType = "media:process_asset:v1:requested"
+	binding := frameTestBinding()
+	binding.ProtobufDecodeReuse = protoapi.ProtobufDecodeReuseCompleteMessages
+	calls := 0
+	var firstRequest *testprotos.TestRequest
+	err := RegisterTypedFrameHandlers(router, TypedServiceHandlers{
+		eventType: {
+			Binding: binding,
+			Handler: func(_ context.Context, request proto.Message) (proto.Message, error) {
+				typed := request.(*testprotos.TestRequest)
+				if calls == 0 {
+					firstRequest = typed
+					if typed.GetWorkspaceId() != "wrk_1" || typed.GetHash() != "sha256:one" {
+						t.Fatalf("first frame decode mismatch: %+v", typed)
+					}
+				} else {
+					if typed != firstRequest {
+						t.Fatalf("expected frame adapter to reuse caller-owned protobuf message")
+					}
+					if typed.GetWorkspaceId() != "wrk_2" || typed.GetHash() != "sha256:two" || typed.GetSize() != 32 {
+						t.Fatalf("second frame decode mismatch: %+v", typed)
+					}
+				}
+				calls++
+				return &testprotos.TestResponse{ResourceId: typed.GetWorkspaceId(), Status: "complete"}, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterTypedFrameHandlers() error = %v", err)
+	}
+	firstPayload, err := proto.Marshal(&testprotos.TestRequest{
+		WorkspaceId: "wrk_1",
+		ContentType: "application/octet-stream",
+		Size:        16,
+		Hash:        "sha256:one",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() first error = %v", err)
+	}
+	secondPayload, err := proto.Marshal(&testprotos.TestRequest{
+		WorkspaceId: "wrk_2",
+		ContentType: "application/octet-stream",
+		Size:        32,
+		Hash:        "sha256:two",
+	})
+	if err != nil {
+		t.Fatalf("Marshal() second error = %v", err)
+	}
+	if _, err := router.DispatchFrame(context.Background(), grpcsvc.Frame{EventType: eventType, Payload: firstPayload}); err != nil {
+		t.Fatalf("first DispatchFrame() error = %v", err)
+	}
+	if _, err := router.DispatchFrame(context.Background(), grpcsvc.Frame{EventType: eventType, Payload: secondPayload}); err != nil {
+		t.Fatalf("second DispatchFrame() error = %v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("handler calls = %d", calls)
+	}
+}
+
 func BenchmarkTypedFrameAdapterDispatch(b *testing.B) {
 	router := grpcsvc.NewRouter()
 	if err := RegisterTypedFrameHandlers(router, TypedServiceHandlers{
@@ -139,6 +201,80 @@ func BenchmarkTypedFrameAdapterDispatch(b *testing.B) {
 		Payload:       payload,
 		CorrelationID: "corr_bench",
 		SchemaVersion: "schema_v1",
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := router.DispatchFrame(context.Background(), frame); err != nil {
+			b.Fatalf("DispatchFrame() error = %v", err)
+		}
+	}
+}
+
+func BenchmarkTypedFrameAdapterDispatchNoMetadata(b *testing.B) {
+	router := grpcsvc.NewRouter()
+	if err := RegisterTypedFrameHandlers(router, TypedServiceHandlers{
+		"media:process_asset:v1:requested": {
+			Binding: frameTestBinding(),
+			Handler: func(_ context.Context, request proto.Message) (proto.Message, error) {
+				typed := request.(*testprotos.TestRequest)
+				return &testprotos.TestResponse{ResourceId: typed.GetWorkspaceId(), Status: "complete"}, nil
+			},
+		},
+	}); err != nil {
+		b.Fatalf("RegisterTypedFrameHandlers() error = %v", err)
+	}
+	payload, err := proto.Marshal(&testprotos.TestRequest{
+		WorkspaceId: "wrk_bench",
+		ContentType: "application/octet-stream",
+		Size:        16,
+		Hash:        "sha256:bench",
+	})
+	if err != nil {
+		b.Fatalf("Marshal() error = %v", err)
+	}
+	frame := grpcsvc.Frame{
+		EventType: "media:process_asset:v1:requested",
+		Payload:   payload,
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := router.DispatchFrame(context.Background(), frame); err != nil {
+			b.Fatalf("DispatchFrame() error = %v", err)
+		}
+	}
+}
+
+func BenchmarkTypedFrameAdapterDispatchReuse(b *testing.B) {
+	router := grpcsvc.NewRouter()
+	binding := frameTestBinding()
+	binding.ProtobufDecodeReuse = protoapi.ProtobufDecodeReuseCompleteMessages
+	if err := RegisterTypedFrameHandlers(router, TypedServiceHandlers{
+		"media:process_asset:v1:requested": {
+			Binding: binding,
+			Handler: func(_ context.Context, request proto.Message) (proto.Message, error) {
+				typed := request.(*testprotos.TestRequest)
+				return &testprotos.TestResponse{ResourceId: typed.GetWorkspaceId(), Status: "complete"}, nil
+			},
+		},
+	}); err != nil {
+		b.Fatalf("RegisterTypedFrameHandlers() error = %v", err)
+	}
+	payload, err := proto.Marshal(&testprotos.TestRequest{
+		WorkspaceId: "wrk_bench",
+		ContentType: "application/octet-stream",
+		Size:        16,
+		Hash:        "sha256:bench",
+	})
+	if err != nil {
+		b.Fatalf("Marshal() error = %v", err)
+	}
+	frame := grpcsvc.Frame{
+		EventType: "media:process_asset:v1:requested",
+		Payload:   payload,
 	}
 
 	b.ReportAllocs()
