@@ -78,6 +78,11 @@ const (
 	maxPostgresRecheckRowBudget     = 10000
 )
 
+const (
+	postgresSQLStateLockNotAvailable = "55P03"
+	postgresSQLStateQueryCanceled    = "57014"
+)
+
 type StateListOptions struct {
 	Limit             int
 	RecheckRowBudget  int
@@ -119,6 +124,7 @@ func (r postgresCommandResult) RowsAffected() int64 {
 
 type budgetedRow struct {
 	row     RowScanner
+	ctx     context.Context
 	cancel  context.CancelFunc
 	release func()
 	start   time.Time
@@ -126,6 +132,7 @@ type budgetedRow struct {
 
 type budgetedRows struct {
 	rows    pgx.Rows
+	ctx     context.Context
 	cancel  context.CancelFunc
 	release func()
 	start   time.Time
@@ -137,6 +144,7 @@ func (r budgetedRow) Scan(dest ...any) error {
 		defer r.release()
 	}
 	err := r.row.Scan(dest...)
+	err = normalizePostgresOperationError(contextErr(r.ctx), err)
 	recordDatabaseOperation("query_row", r.start, err)
 	return err
 }
@@ -147,7 +155,7 @@ func (r budgetedRows) Close() {
 		r.release()
 	}
 	r.cancel()
-	recordDatabaseOperation("query", r.start, r.rows.Err())
+	recordDatabaseOperation("query", r.start, normalizePostgresOperationError(contextErr(r.ctx), r.rows.Err()))
 }
 
 func (r budgetedRows) Next() bool {
@@ -159,7 +167,7 @@ func (r budgetedRows) Scan(dest ...any) error {
 }
 
 func (r budgetedRows) Err() error {
-	return r.rows.Err()
+	return normalizePostgresOperationError(contextErr(r.ctx), r.rows.Err())
 }
 
 func newPostgresDB(ctx context.Context, databaseURL string, opts PoolOptions) (*PostgresDB, error) {
@@ -205,9 +213,11 @@ func ApplyPoolOptions(cfg *pgxpool.Config, opts PoolOptions) {
 	cfg.ConnConfig.DescriptionCacheCapacity = opts.DescriptionCacheCapacity
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheStatement
 	if cfg.ConnConfig.RuntimeParams == nil {
-		cfg.ConnConfig.RuntimeParams = make(map[string]string, 1)
+		cfg.ConnConfig.RuntimeParams = make(map[string]string, 3)
 	}
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = fmt.Sprintf("%d", opts.QueryTimeout.Milliseconds())
+	cfg.ConnConfig.RuntimeParams["lock_timeout"] = fmt.Sprintf("%d", opts.LockTimeout.Milliseconds())
+	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = fmt.Sprintf("%d", opts.IdleTxTimeout.Milliseconds())
 }
 
 // WrapPostgresPool projects an existing pgx pool into Foundation's RuntimeStore
@@ -272,6 +282,7 @@ func (db *PostgresDB) Exec(ctx context.Context, query string, args ...any) error
 		cancel()
 	}()
 	_, err = conn.Exec(queryCtx, query, args...)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("exec", start, err)
 	return err
 }
@@ -289,6 +300,7 @@ func (db *PostgresDB) ExecResult(ctx context.Context, query string, args ...any)
 		cancel()
 	}()
 	tag, err := conn.Exec(queryCtx, query, args...)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("exec_result", start, err)
 	if err != nil {
 		return nil, err
@@ -304,7 +316,7 @@ func (db *PostgresDB) QueryRow(ctx context.Context, query string, args ...any) R
 	if err != nil {
 		return memoryRow{err: err}
 	}
-	return budgetedRow{row: conn.QueryRow(queryCtx, query, args...), cancel: cancel, release: conn.Release, start: start}
+	return budgetedRow{row: conn.QueryRow(queryCtx, query, args...), ctx: queryCtx, cancel: cancel, release: conn.Release, start: start}
 }
 
 func (db *PostgresDB) Query(ctx context.Context, query string, args ...any) (Rows, error) {
@@ -317,12 +329,13 @@ func (db *PostgresDB) Query(ctx context.Context, query string, args ...any) (Row
 	}
 	rows, err := conn.Query(queryCtx, query, args...)
 	if err != nil {
+		err = normalizePostgresOperationError(contextErr(queryCtx), err)
 		conn.Release()
 		cancel()
 		recordDatabaseOperation("query", start, err)
 		return nil, err
 	}
-	return budgetedRows{rows: rows, cancel: cancel, release: conn.Release, start: start}, nil
+	return budgetedRows{rows: rows, ctx: queryCtx, cancel: cancel, release: conn.Release, start: start}, nil
 }
 
 func (db *PostgresDB) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
@@ -339,11 +352,13 @@ func (db *PostgresDB) QueryMaps(ctx context.Context, query string, args ...any) 
 	}()
 	rows, err := conn.Query(queryCtx, query, args...)
 	if err != nil {
+		err = normalizePostgresOperationError(contextErr(queryCtx), err)
 		recordDatabaseOperation("query_maps", start, err)
 		return nil, err
 	}
 	defer rows.Close()
 	result, err := scanToMaps(rows)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("query_maps", start, err)
 	return result, err
 }
@@ -405,6 +420,34 @@ func normalizeAcquireError(ctxErr error, err error) error {
 	return err
 }
 
+func normalizePostgresOperationError(ctxErr error, err error) error {
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case postgresSQLStateLockNotAvailable:
+			return fmt.Errorf("%w: %v", ErrLockTimeout, err)
+		case postgresSQLStateQueryCanceled:
+			if strings.Contains(strings.ToLower(pgErr.Message), "statement timeout") {
+				return fmt.Errorf("%w: %v", ErrQueryTimeout, err)
+			}
+		}
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctxErr, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %v", ErrQueryTimeout, err)
+	}
+	return err
+}
+
+func contextErr(ctx context.Context) error {
+	if ctx == nil {
+		return nil
+	}
+	return ctx.Err()
+}
+
 func recordDatabasePoolPressure(pool *pgxpool.Pool) {
 	if pool == nil {
 		return
@@ -434,7 +477,7 @@ func (tx *postgresTx) Exec(ctx context.Context, query string, args ...any) error
 		return errors.New("postgres tx is nil")
 	}
 	_, err := tx.tx.Exec(ctx, query, args...)
-	return err
+	return normalizePostgresOperationError(contextErr(ctx), err)
 }
 
 func (tx *postgresTx) ExecResult(ctx context.Context, query string, args ...any) (CommandResult, error) {
@@ -443,7 +486,7 @@ func (tx *postgresTx) ExecResult(ctx context.Context, query string, args ...any)
 	}
 	tag, err := tx.tx.Exec(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, normalizePostgresOperationError(contextErr(ctx), err)
 	}
 	return postgresCommandResult{tag: tag}, nil
 }
@@ -468,10 +511,11 @@ func (tx *postgresTx) QueryMaps(ctx context.Context, query string, args ...any) 
 	}
 	rows, err := tx.tx.Query(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, normalizePostgresOperationError(contextErr(ctx), err)
 	}
 	defer rows.Close()
-	return scanToMaps(rows)
+	result, err := scanToMaps(rows)
+	return result, normalizePostgresOperationError(contextErr(ctx), err)
 }
 
 func scanToMaps(rows pgx.Rows) ([]map[string]any, error) {
@@ -504,14 +548,14 @@ func (tx *postgresTx) Commit(ctx context.Context) error {
 	if tx == nil || tx.tx == nil {
 		return errors.New("postgres tx is nil")
 	}
-	return tx.tx.Commit(ctx)
+	return normalizePostgresOperationError(contextErr(ctx), tx.tx.Commit(ctx))
 }
 
 func (tx *postgresTx) Rollback(ctx context.Context) error {
 	if tx == nil || tx.tx == nil {
 		return nil
 	}
-	return tx.tx.Rollback(ctx)
+	return normalizePostgresOperationError(contextErr(ctx), tx.tx.Rollback(ctx))
 }
 
 func (db *PostgresDB) UpsertRecord(ctx context.Context, rec DomainRecord) (DomainRecord, error) {
@@ -540,6 +584,7 @@ func (db *PostgresDB) UpsertRecord(ctx context.Context, rec DomainRecord) (Domai
 		cancel()
 	}()
 	err = conn.QueryRow(queryCtx, upsertRecordSQL, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload).Scan(&createdAt, &updatedAt)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("upsert_record", start, err)
 	if err != nil {
 		return DomainRecord{}, err
@@ -572,6 +617,7 @@ func (db *PostgresDB) UpsertRecordJSON(ctx context.Context, rec RawDomainRecord)
 		cancel()
 	}()
 	err = conn.QueryRow(queryCtx, upsertRecordJSONSQL, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload, rec.OrganizationID).Scan(&createdAt, &updatedAt)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("upsert_record_json", start, err)
 	if err != nil {
 		return RawDomainRecord{}, err
@@ -636,6 +682,7 @@ func (db *PostgresDB) GetRecordJSON(ctx context.Context, domain, collection, org
 		  AND organization_id = $3
 		  AND record_id = $4
 	`, domain, collection, organizationID, recordID).Scan(&dataRaw, &createdAt, &updatedAt)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("get_record_json", start, err)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -697,6 +744,7 @@ func (db *PostgresDB) ListRecordsWithOptions(ctx context.Context, domain, collec
 	}
 	rows, err := conn.Query(queryCtx, query, args...)
 	if err != nil {
+		err = normalizePostgresOperationError(contextErr(queryCtx), err)
 		conn.Release()
 		cancel()
 		recordDatabaseOperation("list_records", start, err)
@@ -725,6 +773,7 @@ func (db *PostgresDB) ListRecordsWithOptions(ctx context.Context, domain, collec
 			updated time.Time
 		)
 		if err := rows.Scan(&rec.Domain, &rec.Collection, &rec.OrganizationID, &rec.RecordID, &dataRaw, &created, &updated); err != nil {
+			err = normalizePostgresOperationError(contextErr(queryCtx), err)
 			opErr = err
 			return nil, err
 		}
@@ -744,7 +793,7 @@ func (db *PostgresDB) ListRecordsWithOptions(ctx context.Context, domain, collec
 			break
 		}
 	}
-	if err := rows.Err(); err != nil {
+	if err := normalizePostgresOperationError(contextErr(queryCtx), rows.Err()); err != nil {
 		opErr = err
 		return nil, err
 	}
@@ -796,6 +845,7 @@ func (db *PostgresDB) CountRecordsWithOptions(ctx context.Context, domain, colle
 	}()
 	query := `SELECT COUNT(*) FROM governance_state_records WHERE ` + where
 	err = conn.QueryRow(queryCtx, query, args...).Scan(&count)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("count_records", start, err)
 	return count, err
 }
@@ -825,6 +875,7 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 			FROM pg_class 
 			WHERE oid = 'governance_state_records'::regclass
 		`).Scan(&estimate)
+		err = normalizePostgresOperationError(contextErr(queryCtx), err)
 		recordDatabaseOperation("estimate_count", start, err)
 		return estimate, err
 	}
@@ -860,6 +911,7 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 		cancel()
 	}()
 	err = conn.QueryRow(queryCtx, query, args...).Scan(&planJSON)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("estimate_count", start, err)
 	if err != nil {
 		return 0, err
@@ -906,6 +958,7 @@ func (db *PostgresDB) DeleteRecord(ctx context.Context, domain, collection, orga
 		  AND organization_id = $3
 		  AND record_id = $4
 	`, strings.TrimSpace(domain), strings.TrimSpace(collection), strings.TrimSpace(organizationID), strings.TrimSpace(recordID))
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("delete_record", start, err)
 	return err
 }
@@ -927,6 +980,7 @@ func (db *PostgresDB) DeleteRecordsByOrganization(ctx context.Context, organizat
 		DELETE FROM governance_state_records
 		WHERE organization_id = $1
 	`, strings.TrimSpace(organizationID))
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("delete_records_by_organization", start, err)
 	if err != nil {
 		return 0, err

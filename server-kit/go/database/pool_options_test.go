@@ -20,6 +20,12 @@ func TestNormalizePoolOptionsDefaults(t *testing.T) {
 	if opts.ConnectTimeout <= 0 {
 		t.Fatalf("expected default connect timeout")
 	}
+	if opts.LockTimeout <= 0 || opts.LockTimeout > opts.QueryTimeout {
+		t.Fatalf("expected bounded lock timeout, got lock=%s query=%s", opts.LockTimeout, opts.QueryTimeout)
+	}
+	if opts.IdleTxTimeout <= 0 {
+		t.Fatalf("expected idle transaction timeout")
+	}
 	if opts.StatementCacheCapacity <= 0 {
 		t.Fatalf("expected statement cache capacity")
 	}
@@ -30,11 +36,16 @@ func TestNormalizePoolOptionsDefaults(t *testing.T) {
 
 func TestNormalizePoolOptionsClampMinToMax(t *testing.T) {
 	opts := normalizePoolOptions(PoolOptions{
-		MaxConns: 4,
-		MinConns: 10,
+		MaxConns:     4,
+		MinConns:     10,
+		QueryTimeout: 100 * time.Millisecond,
+		LockTimeout:  500 * time.Millisecond,
 	})
 	if opts.MinConns != opts.MaxConns {
 		t.Fatalf("expected min conns to clamp to max conns")
+	}
+	if opts.LockTimeout != opts.QueryTimeout {
+		t.Fatalf("expected lock timeout to clamp to query timeout, got lock=%s query=%s", opts.LockTimeout, opts.QueryTimeout)
 	}
 }
 
@@ -73,6 +84,8 @@ func TestApplyPoolOptionsConfiguresPgxPool(t *testing.T) {
 		HealthCheckPeriod:        9 * time.Second,
 		ConnectTimeout:           4 * time.Second,
 		QueryTimeout:             75 * time.Millisecond,
+		LockTimeout:              50 * time.Millisecond,
+		IdleTxTimeout:            11 * time.Second,
 		StatementCacheCapacity:   128,
 		DescriptionCacheCapacity: 32,
 	})
@@ -87,6 +100,12 @@ func TestApplyPoolOptionsConfiguresPgxPool(t *testing.T) {
 	}
 	if got := cfg.ConnConfig.RuntimeParams["statement_timeout"]; got != "75" {
 		t.Fatalf("statement_timeout = %q, want 75", got)
+	}
+	if got := cfg.ConnConfig.RuntimeParams["lock_timeout"]; got != "50" {
+		t.Fatalf("lock_timeout = %q, want 50", got)
+	}
+	if got := cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"]; got != "11000" {
+		t.Fatalf("idle_in_transaction_session_timeout = %q, want 11000", got)
 	}
 	ApplyPoolOptions(nil, PoolOptions{})
 }

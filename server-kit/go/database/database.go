@@ -15,6 +15,8 @@ import (
 )
 
 var ErrPoolAcquireTimeout = errors.New("database pool acquire timeout")
+var ErrQueryTimeout = errors.New("database query timeout")
+var ErrLockTimeout = errors.New("database lock timeout")
 var ErrQueryLimitReached = errors.New("database query row limit reached")
 var ErrUnsupportedFilterShape = errors.New("database filter shape cannot be pushed down")
 
@@ -68,6 +70,8 @@ type PoolOptions struct {
 	ConnectTimeout           time.Duration
 	QueryTimeout             time.Duration
 	AcquireTimeout           time.Duration
+	LockTimeout              time.Duration
+	IdleTxTimeout            time.Duration
 	StatementCacheCapacity   int
 	DescriptionCacheCapacity int
 }
@@ -114,6 +118,8 @@ func DefaultPoolOptionsFor(lane RuntimeLane) PoolOptions {
 		ConnectTimeout:           10 * time.Second,
 		QueryTimeout:             queryTimeout,
 		AcquireTimeout:           100 * time.Millisecond,
+		LockTimeout:              defaultLockTimeout(queryTimeout),
+		IdleTxTimeout:            15 * time.Second,
 		StatementCacheCapacity:   512,
 		DescriptionCacheCapacity: 128,
 	}
@@ -142,6 +148,15 @@ func normalizePoolOptions(opts PoolOptions) PoolOptions {
 	if opts.AcquireTimeout <= 0 {
 		opts.AcquireTimeout = defaults.AcquireTimeout
 	}
+	if opts.LockTimeout <= 0 {
+		opts.LockTimeout = defaultLockTimeout(opts.QueryTimeout)
+	}
+	if opts.LockTimeout > opts.QueryTimeout {
+		opts.LockTimeout = opts.QueryTimeout
+	}
+	if opts.IdleTxTimeout <= 0 {
+		opts.IdleTxTimeout = defaults.IdleTxTimeout
+	}
 	if opts.StatementCacheCapacity <= 0 {
 		opts.StatementCacheCapacity = defaults.StatementCacheCapacity
 	}
@@ -149,6 +164,17 @@ func normalizePoolOptions(opts PoolOptions) PoolOptions {
 		opts.DescriptionCacheCapacity = defaults.DescriptionCacheCapacity
 	}
 	return opts
+}
+
+func defaultLockTimeout(queryTimeout time.Duration) time.Duration {
+	if queryTimeout <= time.Millisecond {
+		return queryTimeout
+	}
+	lockTimeout := queryTimeout / 2
+	if lockTimeout < time.Millisecond {
+		return time.Millisecond
+	}
+	return lockTimeout
 }
 
 func QueryBudgetContext(ctx context.Context, opts PoolOptions) (context.Context, context.CancelFunc) {

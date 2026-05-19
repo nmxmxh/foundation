@@ -1,6 +1,28 @@
-.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts lint verify docker-up docker-down migrate-up help
+.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts lint verify docker-up docker-down migrate-up help \
+	check-scaffold-manifest check-init-project check-update-project check-migration-seed-policy check-lifecycle-contract-generator \
+	check-contract-drift check-go-fix check-coding-practices check-testing-practices check-go-concurrency-practices \
+	check-database-practices check-redis-practices check-river-practices check-migration-structure check-server-kit-usage
 
 .DEFAULT_GOAL := help
+
+FOUNDATION_LINT_CHECKS := \
+	check-scaffold-manifest \
+	check-init-project \
+	check-update-project \
+	check-migration-seed-policy \
+	check-lifecycle-contract-generator \
+	check-contract-drift \
+	check-go-fix \
+	check-coding-practices \
+	check-testing-practices \
+	check-go-concurrency-practices \
+	check-database-practices \
+	check-redis-practices \
+	check-river-practices \
+	check-migration-structure \
+	check-server-kit-usage
+
+FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 180
 
 all: build
 
@@ -38,17 +60,65 @@ test-ts:
 
 lint:
 	@echo "Running foundation checks..."
+	@tmp_log=$$(mktemp "$${TMPDIR:-/tmp}/foundation-lint.XXXXXX"); \
+	trap 'rm -f "$$tmp_log"' EXIT; \
+	runner="tooling/scripts/foundation_lint_check_runner.sh"; \
+	for check in $(FOUNDATION_LINT_CHECKS); do \
+		printf '[RUN] %s\n' "$$check"; \
+		if FOUNDATION_LINT_CHECK_TIMEOUT_SEC="$(FOUNDATION_LINT_CHECK_TIMEOUT_SEC)" zsh "$$runner" "$$tmp_log" "$(MAKE)" --no-print-directory "$$check"; then \
+			printf '[OK] %s\n' "$$check"; \
+			: >"$$tmp_log"; \
+		else \
+			cat "$$tmp_log"; \
+			exit 1; \
+		fi; \
+	done; \
+	echo "foundation checks passed"
+
+check-scaffold-manifest:
 	@tests/scaffold_manifest_test.sh
+
+check-init-project:
+	@tests/init_project_test.sh
+
+check-update-project:
+	@tests/update_project_test.sh
+
+check-migration-seed-policy:
+	@tests/migration_seed_policy_test.sh
+
+check-lifecycle-contract-generator:
 	@tests/lifecycle_contract_generator_test.sh
+
+check-contract-drift:
 	@tooling/scripts/contract_drift_check.sh .
+
+check-go-fix:
 	@tooling/scripts/go_fix_check.sh .
+
+check-coding-practices:
 	@tooling/scripts/coding_practices_check.sh .
+
+check-testing-practices:
 	@tooling/scripts/testing_practices_check.sh .
+
+check-go-concurrency-practices:
 	@tooling/scripts/go_concurrency_practices_check.sh .
+
+check-database-practices:
 	@tooling/scripts/database_practices_check.sh .
+
+check-redis-practices:
 	@tooling/scripts/redis_practices_check.sh .
+
+check-river-practices:
 	@tooling/scripts/river_practices_check.sh .
+
+check-migration-structure:
 	@tooling/scripts/migration_structure_check.sh .
+
+check-server-kit-usage:
+	@tooling/scripts/server_kit_usage_check.sh .
 
 verify: lint test frontend-build
 
@@ -71,3 +141,4 @@ help:
 	@echo "  make lint                Run foundation scaffold/practice checks"
 	@echo "  make verify              Run lint, tests, and TS typechecks"
 	@echo "  make docker-up/down      Start/stop core service-backed test stack"
+	@echo "  make check-database-practices  Run a single foundation check"

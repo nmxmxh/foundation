@@ -149,22 +149,28 @@ The database rules in `database_practices.md` remain authoritative. The synthesi
 9. Treat autovacuum and bloat as production concerns. Track dead tuples, table/index bloat, vacuum lag, and index usage.
 10. Use PgBouncer transaction pooling before allowing app replicas to create broad direct connection fanout.
 11. Partition only when it matches access patterns such as time, tenant, or append-only history, and confirm pruning with `EXPLAIN`.
-11. Read replicas can protect the primary from read load, but consistency expectations must be explicit in the feature contract.
-12. Optimize like a query engine: push projections, predicates, limits, and
+12. Read replicas can protect the primary from read load, but consistency expectations must be explicit in the feature contract.
+13. Optimize like a query engine: push projections, predicates, limits, and
     partition keys as close to the scan as possible; then materialize wide rows
     only after scope, filter, and order have reduced the candidate set.
-13. Read important plans as physical execution, not just SQL text. Identify
+14. Read important plans as physical execution, not just SQL text. Identify
     scan type, join algorithm, sort/materialization nodes, rows removed by
     filter, heap fetches, temp files, WAL records, and buffer read/write/hit
     counts before changing indexes or code.
-14. Treat SSD write amplification as a cross-layer metric. Minimize needless
+15. Treat SSD write amplification as a cross-layer metric. Minimize needless
     heap rewrites, index maintenance, WAL full-page images, checkpoint bursts,
     vacuum churn, row-by-row deletes, and wide JSONB updates before tuning the
     storage device.
-15. HOT-update eligibility, table `fillfactor`, TOAST behavior, WAL compression,
+16. HOT-update eligibility, table `fillfactor`, TOAST behavior, WAL compression,
     checkpoint sizing, and insert-triggered autovacuum are performance tools,
     but each changes a different bottleneck and must be validated with
     service-backed measurements.
+17. Backpressure is a performance feature. Track acquire timeouts, lock
+    timeouts, statement timeouts, idle transaction kills, worker queue depth,
+    WAL growth, and replica replay lag together during load tests.
+18. Separate storage-engine lessons by lane: Postgres owns durable row truth;
+    append partitions, read models, materialized views, and columnar exports
+    are where immutable-file and compaction ideas become Foundation practice.
 
 ## Columnar analytics performance
 

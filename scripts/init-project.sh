@@ -353,6 +353,11 @@ scaffold_sync_tooling
 foundation_log_info "Creating managed scaffold..."
 scaffold_apply_manifest
 foundation_log_success "Managed scaffold created"
+if [[ -x "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" ]]; then
+    foundation_log_info "Applying managed scaffold patches..."
+    "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" "$PROJECT_PATH"
+    foundation_log_success "Managed scaffold patches applied"
+fi
 
 foundation_log_success "$PROJECT_NAME created at $PROJECT_PATH"
 echo ""

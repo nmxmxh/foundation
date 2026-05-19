@@ -35,6 +35,7 @@ func (db *PostgresDB) CopyFromSource(ctx context.Context, tablePath []string, co
 		cancel()
 	}()
 	copied, err := conn.Conn().CopyFrom(queryCtx, pgx.Identifier(tablePath), columns, source)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("copy_from", start, err)
 	return copied, err
 }
@@ -72,6 +73,7 @@ func (db *PostgresDB) SendBatch(ctx context.Context, build func(*pgx.Batch), con
 	results := conn.Conn().SendBatch(queryCtx, &batch)
 	defer results.Close()
 	err = consume(results)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("send_batch", start, err)
 	return err
 }

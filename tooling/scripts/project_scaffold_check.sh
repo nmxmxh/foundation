@@ -420,8 +420,12 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     if [[ -f "$target/frontend/package.json" ]] && grep -Fq '"@ovasabi/runtime-native"' "$target/frontend/package.json"; then
       check_file_contains "Docker copies runtime-native package manifest" "$target/Dockerfile" "COPY foundation/runtime-native/ts/package.json"
       check_file_contains "Docker copies runtime-native source" "$target/Dockerfile" "COPY foundation/runtime-native/ts ./foundation/runtime-native/ts"
-      check_file_contains "frontend lock includes runtime-native" "$target/frontend/package-lock.json" '"@ovasabi/runtime-native"'
-      check_file_contains "frontend lock links runtime-native workspace package" "$target/frontend/package-lock.json" '"node_modules/@ovasabi/runtime-native"'
+      if [[ -f "$target/frontend/package-lock.json" ]]; then
+        check_file_contains "frontend lock includes runtime-native" "$target/frontend/package-lock.json" '"@ovasabi/runtime-native"'
+        check_file_contains "frontend lock links runtime-native workspace package" "$target/frontend/package-lock.json" '"node_modules/@ovasabi/runtime-native"'
+      else
+        echo "[OK] frontend lock absent before npm install"
+      fi
     fi
     check_exists "postgresql config" "$target/config/postgresql.conf"
     check_exists "redis config" "$target/config/redis.conf"

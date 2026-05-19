@@ -167,7 +167,7 @@ Requirements:
 14. Typed registry, WebSocket, HTTP, and gRPC paths must preserve payload bytes until the owning handler validates/decodes them; avoid intermediate map materialization for observability, routing, or convenience.
 15. Same-process hot communication must not use gRPC, HTTP, Redis, or JSON. Use direct typed calls, direct frame dispatch, worker channels, or shared-memory descriptors so the hot path can remain zero-copy or near-zero allocation.
 16. Serialization boundaries should expose both owned and borrowed decode APIs where safe. Borrowed views are preferred inside synchronous hot paths; owned decoded values are required when data escapes the frame lifetime.
-17. Prefer Foundation database executor helpers for repository code. Use `QueryOne`, `QueryEach`, `QueryAll`, `ExecRowsAffected`, `AtomicLane`, and only then driver-native `pgx.Batch`/`CopyFrom` through the Foundation Postgres adapter for high-volume paths.
+17. Prefer Foundation database executor helpers for repository code. Use `QueryOne`, `QueryEach`, `QueryAll`, `ExecRowsAffected`, `AtomicLane`, and only then driver-native `pgx.Batch`/`CopyFrom` through the Foundation Postgres adapter for high-volume paths. `AtomicLane` closures must stay pure database work so query, lock, and idle-transaction budgets remain meaningful.
 18. Parallelize independent I/O-bound operations, such as object-storage uploads during batch ingestion, with bounded goroutines or the project chain helper. Preserve per-record diagnostics and cancellation semantics.
 19. Initial dashboard and bootstrap summaries must request the smallest useful projection: explicit compact/light metadata, bounded recent items, and expensive sections disabled unless the first viewport actually renders them.
 20. Frontend cache keys for summary/list hot paths must be semantic and stable. Include filters that change the response; exclude volatile metadata such as correlation IDs, timestamps, trace IDs, and retry markers.
@@ -206,7 +206,8 @@ Requirements:
 8. Database performance changes must state whether the improvement comes from
    projection pushdown, predicate pushdown, limit pushdown, partition pruning,
    index-only scan, join selection, batching, WAL/checkpoint reduction, HOT
-   updates, or materialized/read-model projection.
+   updates, page-cache locality, lock/pool backpressure, replica-lag reduction,
+   or materialized/read-model projection.
 
 Enforcement:
 

@@ -142,6 +142,8 @@ func QueryAllLimit[T any](ctx context.Context, db RowQueryer, limit int, query s
 func AtomicLane(ctx context.Context, db DBTX, lane RuntimeLane, fn func(DBTX) error) error {
 	// Definition: transaction lane. The closure must contain only database work:
 	// no network calls, unbounded waits, or callbacks into user-controlled logic.
+	// Postgres pools also apply statement, lock, and idle-transaction session
+	// budgets; keeping the closure tight preserves those backpressure semantics.
 	budgetCtx, cancel := QueryBudgetContext(ctx, DefaultPoolOptionsFor(lane))
 	defer cancel()
 	return Atomic(budgetCtx, db, fn)

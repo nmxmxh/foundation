@@ -64,6 +64,13 @@ This document tracks the deliberate performance and architecture carryovers fold
     not assumptions. Branchless rewrites, manual prefetch, SIMD, and higher
     fanout require profiles or benchmarks that include cache misses, branch
     misses, allocations, and p95/p99 behavior.
+53. LSM/SSTable lessons translate into Foundation as append-only partitions,
+    replayable outbox/audit/fact lanes, read-model refresh, VACUUM/analyze
+    hygiene, and bounded worker pressure. They do not change Postgres being the
+    durable row-store authority.
+54. Database overload must surface as controlled pressure signals: pool acquire
+    timeout, lock timeout, statement timeout, idle-transaction timeout, WAL
+    growth, checkpoint pressure, autovacuum lag, and replica replay lag.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 

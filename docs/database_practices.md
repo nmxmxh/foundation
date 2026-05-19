@@ -1,7 +1,7 @@
 # Standalone Apps Database Practices
 
 Status: baseline
-Date: 2026-05-01
+Date: 2026-05-19
 
 ## Purpose
 
@@ -32,6 +32,46 @@ Foundation scaffolds now default local/test Postgres to version 18 because the r
 5. `pg_stat_io`, `pg_aios`, vacuum timing, WAL I/O timing, and richer `EXPLAIN` output are part of the operational contract. Production observability should include read/write bytes, WAL pressure, vacuum/analyze timing, pool acquire latency, and top query families.
 
 Production Postgres must still be sized from workload evidence: memory, WAL, autovacuum, partition strategy, and connection pool limits should be derived from p95/p99 latency, write rate, table growth, and EXPLAIN plans.
+
+## Storage-engine translation for Foundation
+
+LSM/SSTable database lessons are useful, but they are not literal instructions
+for the Foundation primary store. Postgres remains the heap/WAL/MVCC row store
+for command truth. Foundation applies storage-engine ideas through schema shape,
+worker pressure, read models, partitions, and observability.
+
+Translation rules:
+
+1. WAL is the durable write boundary. Command state, idempotency records, and
+   outbox rows must commit before external effects are considered durable.
+   Measure WAL bytes, full-page images, archive throughput, and replica replay
+   lag per operation family.
+2. Immutable-file thinking maps to append-only domain facts, audit/event
+   history, outbox history, telemetry partitions, and Parquet/object-storage
+   export lanes. Do not create app-owned file compaction paths for durable
+   business truth when Postgres already owns recovery.
+3. LSM compaction maps to Postgres vacuum/analyze, partition retention, index
+   maintenance, and materialized/read-model refresh. Track dead tuples, bloat,
+   visibility-map health, autovacuum lag, and refresh cadence before adding
+   indexes or wider read models.
+4. Page cache is part of the runtime contract. Measure cold-cache and
+   warm-cache paths separately; avoid wide rows, unused indexes, and report
+   scans that evict hot tenant/state pages. Treat `effective_cache_size` as a
+   planner estimate, not reserved memory.
+5. Backpressure must happen before Postgres becomes an unbounded queue. Runtime
+   pools must use conservative `max_conns`, explicit acquire budgets,
+   statement budgets, lock budgets, and idle-transaction budgets. River worker
+   concurrency, batch size, and ingress fanout must be reduced when WAL, lock,
+   pool, replica, or vacuum pressure rises.
+6. Replica lag is a correctness input, not only an operations metric. Do not
+   serve read-after-write, authorization, idempotency, balance, or policy
+   decisions from replicas unless the feature defines an LSN/freshness fence.
+   Monitor write, flush, and replay lag plus replication slot WAL retention.
+7. Checkpoints are a recovery and write-amplification tradeoff. Frequent
+   checkpoints can increase full-page-image WAL; oversized checkpoint windows
+   can increase recovery time and dirty-buffer pressure. Tune
+   `max_wal_size`, `checkpoint_timeout`, and checkpoint completion behavior
+   from load-test evidence, not defaults alone.
 
 ## Query-engine optimization posture
 
@@ -177,6 +217,10 @@ stable repeated SQL. `PoolOptions.StatementCacheCapacity` defaults to a non-zero
 capacity, `PostgresDB` forces `QueryExecModeCacheStatement`, and existing
 `pgxpool.Pool` instances should be projected through `WrapPostgresPool` while
 legacy services migrate toward the Foundation repository interfaces.
+`PoolOptions` also carries explicit query, acquire, lock, and idle-transaction
+budgets. `ApplyPoolOptions` installs `statement_timeout`, `lock_timeout`, and
+`idle_in_transaction_session_timeout` as session parameters so saturation and
+lock contention fail as controlled database errors instead of silent queueing.
 
 1. Use parameterized SQL only.
 2. Keep transactions short and scoped.
@@ -328,17 +372,19 @@ State-machine candidates that deserve table-driven/property-style tests:
 5. Monitor pool acquire latency and timeout rate as saturation signals.
 6. **Observability**: Export native `pgxpool` stats (Total, Idle, Active, Acquire Duration) to the Foundation's observability bridge. Alert on high acquire duration or connection exhaustion.
 7. Pool saturation must fail under an explicit acquire budget and error class. Tests should simulate `MaxConns` exhaustion with concurrent callers and assert bounded wait, `ErrPoolAcquireTimeout`, and visible pool pressure metrics.
-8. **Zero-Allocation Scanning**: In high-throughput paths, use manual `rows.Scan()` or the Foundation's optimized `QueryMaps` bridge to avoid reflection and redundant allocations.
-9. **Count Optimization**: Exact `COUNT(*)` is an O(N) operation in Postgres due to MVCC.
+8. Lock pressure must fail under a `lock_timeout` budget and map to a visible `ErrLockTimeout` class. Treat repeated lock timeouts as a schema, transaction-scope, or worker-concurrency problem, not a reason to hide retries in a hot path.
+9. Idle transactions are production hazards because they hold snapshots, block vacuum progress, and can amplify replica/WAL pressure. Foundation pools set `idle_in_transaction_session_timeout`; repository code must still keep `AtomicLane` closures tight.
+10. **Zero-Allocation Scanning**: In high-throughput paths, use manual `rows.Scan()` or the Foundation's optimized `QueryMaps` bridge to avoid reflection and redundant allocations.
+11. **Count Optimization**: Exact `COUNT(*)` is an O(N) operation in Postgres due to MVCC.
     * **Small Sets**: Exact count with index is acceptable.
     * **Large Sets**: Use `EstimateCount` (via `EXPLAIN` plan analysis or `reltuples` catalog statistics) for UI indicators and non-critical analytics.
     * **Hot Counters**: Use a dedicated counter cache table or Redis if exact, high-frequency counting is required.
-10. **Index Overhead**: While missing indexes cause slow reads, excessive indexes cause slow writes and increased VACUUM pressure. Audit indexes regularly for usage.
-11. Use read models or materialized views for dashboard, feed, search, and analytics reads that would otherwise join many live transactional tables.
-12. Use partitioned append tables for high-volume events, audit logs, outbox history, and time/campaign-heavy telemetry. Partition by time, tenant/campaign, or hash only when query pruning and retention policy are explicit.
-13. Use `pgx.CopyFrom` or batched statements for high-volume writes. Per-row loops are acceptable only for small control-plane writes.
-14. Use `EXPLAIN (ANALYZE, BUFFERS, WAL, VERBOSE)` for slow or important queries on PostgreSQL 18 so CPU, memory, buffer, and WAL costs are visible.
-15. Enable `pg_stat_statements` in production and treat top total-time queries as optimization priorities, even if individual latency looks modest.
+12. **Index Overhead**: While missing indexes cause slow reads, excessive indexes cause slow writes and increased VACUUM pressure. Audit indexes regularly for usage.
+13. Use read models or materialized views for dashboard, feed, search, and analytics reads that would otherwise join many live transactional tables.
+14. Use partitioned append tables for high-volume events, audit logs, outbox history, and time/campaign-heavy telemetry. Partition by time, tenant/campaign, or hash only when query pruning and retention policy are explicit.
+15. Use `pgx.CopyFrom` or batched statements for high-volume writes. Per-row loops are acceptable only for small control-plane writes.
+16. Use `EXPLAIN (ANALYZE, BUFFERS, WAL, VERBOSE)` for slow or important queries on PostgreSQL 18 so CPU, memory, buffer, and WAL costs are visible.
+17. Enable `pg_stat_statements` in production and treat top total-time queries as optimization priorities, even if individual latency looks modest.
 
 ## Columnar and analytical lane
 

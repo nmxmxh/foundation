@@ -669,6 +669,30 @@ func TestPostgresUpsertSQLAvoidsNoopJSONRewrites(t *testing.T) {
 	}
 }
 
+func TestNormalizePostgresOperationError(t *testing.T) {
+	lockErr := normalizePostgresOperationError(nil, &pgconn.PgError{
+		Code:    postgresSQLStateLockNotAvailable,
+		Message: "canceling statement due to lock timeout",
+	})
+	if !errors.Is(lockErr, ErrLockTimeout) {
+		t.Fatalf("lock error = %v", lockErr)
+	}
+
+	queryErr := normalizePostgresOperationError(nil, &pgconn.PgError{
+		Code:    postgresSQLStateQueryCanceled,
+		Message: "canceling statement due to statement timeout",
+	})
+	if !errors.Is(queryErr, ErrQueryTimeout) {
+		t.Fatalf("query error = %v", queryErr)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := normalizePostgresOperationError(ctx.Err(), context.Canceled); errors.Is(err, ErrQueryTimeout) {
+		t.Fatalf("canceled context should not normalize as query timeout: %v", err)
+	}
+}
+
 func TestParseExplainPlanRows(t *testing.T) {
 	count, err := parseExplainPlanRows([]byte(`[{"Plan":{"Node Type":"Index Scan","Plan Rows":42}}]`))
 	if err != nil || count != 42 {
