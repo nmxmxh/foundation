@@ -31,7 +31,7 @@ func TestRunParallelCancelsChainOnCriticalFailure(t *testing.T) {
 	}
 
 	results := RunParallel(context.Background(), ops)
-	if !HasCriticalFailure(ops, results) {
+	if !HasCriticalFailureOrdered(ops, results) {
 		t.Fatalf("expected critical failure")
 	}
 	if results[1].Error == nil {
@@ -45,7 +45,7 @@ func TestRunParallelKeepsMovingOnNonCriticalFailure(t *testing.T) {
 		{Name: "required", Critical: true, Run: func(context.Context) (string, error) { return "ok", nil }},
 	}
 	results := RunParallel(context.Background(), ops)
-	if HasCriticalFailure(ops, results) {
+	if HasCriticalFailureOrdered(ops, results) {
 		t.Fatalf("did not expect critical failure")
 	}
 	if results[1].Value != "ok" {
@@ -54,14 +54,15 @@ func TestRunParallelKeepsMovingOnNonCriticalFailure(t *testing.T) {
 }
 
 func TestRunParallelSingleNilAndNilContextBranches(t *testing.T) {
-	if got := RunParallel[int](nil, nil); got != nil {
+	nilCtx := nilTestContext()
+	if got := RunParallel[int](nilCtx, nil); got != nil {
 		t.Fatalf("empty operations = %+v, want nil", got)
 	}
-	results := RunParallel[int](nil, []Operation[int]{{Name: "missing"}})
+	results := RunParallel[int](nilCtx, []Operation[int]{{Name: "missing"}})
 	if len(results) != 1 || results[0].Name != "missing" || results[0].Error == nil {
 		t.Fatalf("single nil operation result = %+v", results)
 	}
-	results = RunParallel[int](nil, []Operation[int]{{Name: "one", Run: func(ctx context.Context) (int, error) {
+	results = RunParallel[int](nilCtx, []Operation[int]{{Name: "one", Run: func(ctx context.Context) (int, error) {
 		if ctx == nil {
 			t.Fatalf("expected default context")
 		}
@@ -77,6 +78,10 @@ func TestRunParallelSingleNilAndNilContextBranches(t *testing.T) {
 	if !HasCriticalFailure([]Operation[int]{{Name: "critical", Critical: true}}, results) {
 		t.Fatalf("expected critical failure from nil run function")
 	}
+}
+
+func nilTestContext() context.Context {
+	return nil
 }
 
 func TestRunParallelIntoReusesCallerStorage(t *testing.T) {
@@ -98,6 +103,22 @@ func TestRunParallelIntoReusesCallerStorage(t *testing.T) {
 	empty := RunParallelInto[int](context.Background(), nil, results)
 	if empty == nil || len(empty) != 0 || cap(empty) != cap(results) {
 		t.Fatalf("empty reused result shape = len %d cap %d", len(empty), cap(empty))
+	}
+}
+
+func TestHasCriticalFailureOrdered(t *testing.T) {
+	criticalErr := errors.New("critical")
+	ops := []Operation[int]{
+		{Name: "a", Run: func(context.Context) (int, error) { return 1, nil }},
+		{Name: "b", Critical: true, Run: func(context.Context) (int, error) { return 0, criticalErr }},
+		{Name: "c", Critical: true, Run: func(context.Context) (int, error) { return 3, nil }},
+	}
+	results := RunParallelInto(context.Background(), ops, make([]Result[int], 0, len(ops)))
+	if !HasCriticalFailureOrdered(ops, results) {
+		t.Fatalf("expected ordered critical failure")
+	}
+	if !HasCriticalFailure(ops, []Result[int]{{Name: "b", Error: criticalErr}}) {
+		t.Fatalf("expected name-based critical failure for filtered result")
 	}
 }
 
@@ -123,5 +144,41 @@ func BenchmarkRunParallelInto(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		results = RunParallelInto(context.Background(), ops, results)
+	}
+}
+
+func BenchmarkHasCriticalFailure(b *testing.B) {
+	err := errors.New("critical")
+	ops := []Operation[int]{
+		{Name: "a", Critical: true},
+		{Name: "b", Critical: true},
+		{Name: "c"},
+	}
+	results := []Result[int]{
+		{Name: "a"},
+		{Name: "b", Error: err},
+		{Name: "c"},
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		HasCriticalFailure(ops, results)
+	}
+}
+
+func BenchmarkHasCriticalFailureOrdered(b *testing.B) {
+	err := errors.New("critical")
+	ops := []Operation[int]{
+		{Name: "a", Critical: true},
+		{Name: "b", Critical: true},
+		{Name: "c"},
+	}
+	results := []Result[int]{
+		{Name: "a"},
+		{Name: "b", Error: err},
+		{Name: "c"},
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		HasCriticalFailureOrdered(ops, results)
 	}
 }

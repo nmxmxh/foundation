@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap"
 	eventcontract "github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/intelligence"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
 	testprotos "github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi/testprotos"
@@ -41,6 +43,46 @@ func TestRegisterAndDispatchMapHandler(t *testing.T) {
 	events := registry.RegisteredEventTypes()
 	if len(events) != 1 || events[0] != "orders:create:v1:requested" {
 		t.Fatalf("registered events = %+v", events)
+	}
+}
+
+func TestDispatchInputInjectsIntelligenceSignal(t *testing.T) {
+	var observed intelligence.Signal
+	registry := NewWithOptions(nil, nil, nil, Options{
+		Intelligence: intelligence.NewInjector(intelligence.ObserverFunc(func(_ context.Context, signal intelligence.Signal) {
+			observed = signal
+		})),
+	})
+	err := registry.RegisterWithOptions("documents:index:v1:requested", func(ctx context.Context, payload map[string]any) (any, error) {
+		signal, ok := intelligence.FromContext(ctx)
+		if !ok {
+			t.Fatalf("missing intelligence signal in handler context")
+		}
+		if signal.KnowledgeGraph != "documents.intelligence" {
+			t.Fatalf("knowledge graph = %q", signal.KnowledgeGraph)
+		}
+		md := metadata.FromContext(ctx)
+		if !contains(md.Tags, "domain:documents") || !contains(md.Tags, "entity:document") {
+			t.Fatalf("metadata tags were not injected: %+v", md.Tags)
+		}
+		if payload["document_id"] != "doc_1" {
+			t.Fatalf("payload mismatch: %+v", payload)
+		}
+		return map[string]any{"ok": true}, nil
+	}, bootstrap.ConcurrencyOptions{})
+	if err != nil {
+		t.Fatalf("RegisterWithOptions() error = %v", err)
+	}
+
+	result, ok, err := registry.DispatchInput(context.Background(), "documents:index:v1:requested", DispatchInput{
+		Payload:  map[string]any{"document_id": "doc_1", "title": "Cross intelligence memo"},
+		Metadata: map[string]any{"tags": []string{"source:api"}},
+	})
+	if err != nil || !ok || result.Payload["ok"] != true {
+		t.Fatalf("DispatchInput() result=%+v ok=%v err=%v", result, ok, err)
+	}
+	if observed.EventType != "documents:index:v1:requested" || len(observed.Relevance) == 0 {
+		t.Fatalf("observer did not receive vectorized signal: %+v", observed)
 	}
 }
 
@@ -523,4 +565,8 @@ func TestDispatchEnvelopeTypedDecodeAndHandlerErrors(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("typed handler calls = %d", calls)
 	}
+}
+
+func contains(values []string, want string) bool {
+	return slices.Contains(values, want)
 }

@@ -65,6 +65,7 @@ func NewRedisBus(client rediskit.Client, channel string, maxRecent int, l logger
 }
 
 func (b *RedisBus) Publish(ctx context.Context, envelope Envelope) error {
+	envelope = envelopeWithContextMetadata(ctx, envelope)
 	envelope.Normalize()
 	envelope.Metadata = copyMap(envelope.Metadata)
 	envelope.SourceNodeID = b.nodeID

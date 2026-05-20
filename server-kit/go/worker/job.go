@@ -90,6 +90,7 @@ func (j Job) NextBackoff() time.Duration {
 		backoff = max
 	}
 	// Add ±25% jitter
+	// #nosec G404 -- retry jitter is load spreading, not a security token or randomness boundary.
 	jitter := time.Duration(rand.Int63n(int64(backoff/2))) - backoff/4
 	return backoff + jitter
 }

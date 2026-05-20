@@ -3,6 +3,7 @@ package runtimehost
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"sync/atomic"
 	"unsafe"
 
@@ -39,6 +40,7 @@ func (b *Buffer) HeaderInt(index uint32) (int32, error) {
 		return 0, fmt.Errorf("invalid header index %d", index)
 	}
 	offset := generated.OFFSET_HEADER_INTS + index*4
+	// #nosec G115 -- header ints are stored as signed int32 bit patterns in a uint32 little-endian slot.
 	return int32(binary.LittleEndian.Uint32(b.raw[offset : offset+4])), nil
 }
 
@@ -47,6 +49,7 @@ func (b *Buffer) SetHeaderInt(index uint32, value int32) error {
 		return fmt.Errorf("invalid header index %d", index)
 	}
 	offset := generated.OFFSET_HEADER_INTS + index*4
+	// #nosec G115 -- header ints are stored as signed int32 bit patterns in a uint32 little-endian slot.
 	binary.LittleEndian.PutUint32(b.raw[offset:offset+4], uint32(value))
 	return nil
 }
@@ -56,6 +59,7 @@ func (b *Buffer) LoadEpoch(index uint32) int32 {
 		return 0
 	}
 	offset := generated.OFFSET_EPOCHS + index*generated.EPOCH_SLOT_BYTES
+	// #nosec G103 -- runtime epoch slots are generated 4-byte aligned shared-memory words.
 	return atomic.LoadInt32((*int32)(unsafe.Pointer(&b.raw[offset])))
 }
 
@@ -64,6 +68,7 @@ func (b *Buffer) StoreEpoch(index uint32, value int32) error {
 		return fmt.Errorf("invalid epoch index %d", index)
 	}
 	offset := generated.OFFSET_EPOCHS + index*generated.EPOCH_SLOT_BYTES
+	// #nosec G103 -- runtime epoch slots are generated 4-byte aligned shared-memory words.
 	atomic.StoreInt32((*int32)(unsafe.Pointer(&b.raw[offset])), value)
 	return nil
 }
@@ -73,6 +78,7 @@ func (b *Buffer) AddEpoch(index uint32, delta int32) (int32, error) {
 		return 0, fmt.Errorf("invalid epoch index %d", index)
 	}
 	offset := generated.OFFSET_EPOCHS + index*generated.EPOCH_SLOT_BYTES
+	// #nosec G103 -- runtime epoch slots are generated 4-byte aligned shared-memory words.
 	current := atomic.AddInt32((*int32)(unsafe.Pointer(&b.raw[offset])), delta)
 	return current - delta, nil
 }
@@ -92,10 +98,14 @@ func (b *Buffer) SetInputBytesFast(payload []byte) error {
 	if len(payload) > int(generated.INPUT_MAX_BYTES) {
 		return fmt.Errorf("input payload too large: %d > %d", len(payload), generated.INPUT_MAX_BYTES)
 	}
+	payloadLen, payloadLenUnsigned, err := checkedPayloadLen(payload)
+	if err != nil {
+		return err
+	}
 	start := generated.OFFSET_INPUT_BYTES
-	end := start + uint32(len(payload))
+	end := start + payloadLenUnsigned
 	copy(b.raw[start:end], payload)
-	return b.SetHeaderInt(generated.INT_IDX_INPUT_LENGTH, int32(len(payload)))
+	return b.SetHeaderInt(generated.INT_IDX_INPUT_LENGTH, payloadLen)
 }
 
 func (b *Buffer) InputBytes() ([]byte, error) {
@@ -136,10 +146,25 @@ func (b *Buffer) SetOutputBytesFast(payload []byte) error {
 	if len(payload) > int(generated.OUTPUT_MAX_BYTES) {
 		return fmt.Errorf("output payload too large: %d > %d", len(payload), generated.OUTPUT_MAX_BYTES)
 	}
+	payloadLen, payloadLenUnsigned, err := checkedPayloadLen(payload)
+	if err != nil {
+		return err
+	}
 	start := generated.OFFSET_OUTPUT_BYTES
-	end := start + uint32(len(payload))
+	end := start + payloadLenUnsigned
 	copy(b.raw[start:end], payload)
-	return b.SetHeaderInt(generated.INT_IDX_OUTPUT_LENGTH, int32(len(payload)))
+	return b.SetHeaderInt(generated.INT_IDX_OUTPUT_LENGTH, payloadLen)
+}
+
+func checkedPayloadLen(payload []byte) (int32, uint32, error) {
+	if len(payload) > math.MaxInt32 {
+		return 0, 0, fmt.Errorf("payload too large for int32 length: %d", len(payload))
+	}
+	// #nosec G115 -- guarded by MaxInt32 check above.
+	signed := int32(len(payload))
+	// #nosec G115 -- signed is non-negative because it was derived from len(payload).
+	unsigned := uint32(signed)
+	return signed, unsigned, nil
 }
 
 func (b *Buffer) OutputBytes() ([]byte, error) {

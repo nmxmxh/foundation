@@ -51,6 +51,7 @@ High-risk boundary classes:
 | CSRF and cross-site websocket abuse | Do not mutate on GET. Cookie-authenticated mutations and websocket upgrades validate `Origin`; cookies use `Secure`, `HttpOnly`, and `SameSite`; CSRF tokens remain required for browser cookie flows where origin alone is insufficient. |
 | HTML injection and XSS | Prefer framework escaping, context-specific encoders, no raw HTML sinks without sanitizer allowlists/tests, strict CSP, and token storage that minimizes XSS blast radius. |
 | CRLF/response splitting | Reject control characters in response headers, redirects, cookies, filenames, proxy headers, and signed URL metadata. |
+| Metadata/tag leakage | Never place bearer tokens, cookies, JWTs, passwords, API keys, raw session IDs, or private identifiers in tags. Use Foundation metadata normalization so security analytics can index safe namespaced tags while secrets remain in protected storage or digests. |
 | SQL injection | Parameterize values, allowlist identifiers, avoid string-built predicates, and keep tenant predicates inside the same query/transaction. |
 | SSRF | Use `security.ValidateOutboundURL`; require `https` by default, exact host allowlists, DNS/IP private-network blocking, bounded timeouts, and re-validation across redirects. |
 | XXE | Disable external entities/DTDs; prefer JSON/protobuf/Cap'n Proto. XML ingestion requires parser configuration tests and strict size/depth limits. |

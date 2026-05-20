@@ -15,7 +15,30 @@ import (
 	transportpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/transport/v1"
 )
 
-var metadataTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+const (
+	MaxTags           = 64
+	MaxTagLength      = 96
+	MaxCategories     = 32
+	MaxCategoryLength = 64
+)
+
+var (
+	metadataTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+	metadataTagPattern   = regexp.MustCompile(`^[a-z0-9._:-]+$`)
+	metadataTagSpace     = regexp.MustCompile(`\s+`)
+)
+
+var unsafeMetadataTagFragments = []string{
+	"authorization",
+	"bearer",
+	"cookie",
+	"jwt",
+	"password",
+	"private_key",
+	"secret",
+	"session_token",
+	"token",
+}
 
 type GlobalContext struct {
 	UserID         string `json:"user_id,omitempty"`
@@ -135,6 +158,60 @@ func NewContext(ctx context.Context, raw map[string]any) context.Context {
 	return IntoContext(ctx, FromMap(raw))
 }
 
+func FromContextMap(ctx context.Context, overlays ...map[string]any) map[string]any {
+	base := FromContext(ctx).ToMap()
+	return MergeMaps(base, overlays...)
+}
+
+func MergeMaps(base map[string]any, overlays ...map[string]any) map[string]any {
+	merged := copyMap(base)
+	for _, overlay := range overlays {
+		if overlay == nil {
+			continue
+		}
+		for key, value := range overlay {
+			if str, ok := value.(string); ok && strings.TrimSpace(str) == "" {
+				continue
+			}
+			if isMergeableStringSliceField(key) {
+				merged[key] = mergeStringSlices(key, merged[key], value)
+				continue
+			}
+			if key == "global_context" || key == "globalContext" {
+				merged[key] = MergeMaps(asMap(merged[key]), asMap(value))
+				continue
+			}
+			merged[key] = value
+		}
+	}
+	return FromMap(merged).ToMap()
+}
+
+func BuildTag(namespace, value string) (string, bool) {
+	namespace = normalizeTagPart(namespace, 24)
+	value = normalizeTagPart(value, MaxTagLength-len(namespace)-1)
+	if namespace == "" || value == "" {
+		return "", false
+	}
+	return NormalizeTag(namespace + ":" + value)
+}
+
+func NormalizeTag(tag string) (string, bool) {
+	normalized := normalizeTagPart(tag, MaxTagLength)
+	if normalized == "" || !metadataTagPattern.MatchString(normalized) || containsUnsafeTagFragment(normalized) {
+		return "", false
+	}
+	return normalized, true
+}
+
+func NormalizeTags(tags []string) []string {
+	return normalizeStringSet(tags, MaxTags, MaxTagLength, true)
+}
+
+func NormalizeCategories(categories []string) []string {
+	return normalizeStringSet(categories, MaxCategories, MaxCategoryLength, false)
+}
+
 func FromMap(raw map[string]any) EnvelopeMetadata {
 	md := New()
 	if raw == nil {
@@ -158,8 +235,8 @@ func FromMap(raw map[string]any) EnvelopeMetadata {
 		}
 	}
 
-	md.Tags = parseStringSlice(raw["tags"])
-	md.Categories = parseStringSlice(raw["categories"])
+	md.Tags = NormalizeTags(parseStringSlice(raw["tags"]))
+	md.Categories = NormalizeCategories(parseStringSlice(raw["categories"]))
 	md.AIConfidence = pickFloat64(raw, "ai_confidence", "aiConfidence")
 	md.EmbeddingID = pickString(raw, "embedding_id", "embeddingId")
 	md.KnowledgeGraph = pickString(raw, "knowledge_graph", "knowledgeGraph")
@@ -199,6 +276,82 @@ func FromMap(raw map[string]any) EnvelopeMetadata {
 		md.Extras[key] = value
 	}
 	return md
+}
+
+func copyMap(raw map[string]any) map[string]any {
+	if raw == nil {
+		return map[string]any{}
+	}
+	return maps.Clone(raw)
+}
+
+func isMergeableStringSliceField(key string) bool {
+	return key == "tags" || key == "categories"
+}
+
+func normalizeStringSet(values []string, limit, maxLength int, rejectSecrets bool) []string {
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, min(len(values), limit))
+	for _, value := range values {
+		item := normalizeTagPart(value, maxLength)
+		if item == "" || !metadataTagPattern.MatchString(item) {
+			continue
+		}
+		if rejectSecrets && containsUnsafeTagFragment(item) {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		normalized = append(normalized, item)
+		if len(normalized) >= limit {
+			break
+		}
+	}
+	return normalized
+}
+
+func normalizeTagPart(value string, maxLength int) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	normalized = metadataTagSpace.ReplaceAllString(normalized, "_")
+	normalized = strings.Trim(normalized, "._:-")
+	if normalized == "" {
+		return ""
+	}
+	if len(normalized) > maxLength {
+		normalized = strings.Trim(normalized[:maxLength], "._:-")
+	}
+	return normalized
+}
+
+func containsUnsafeTagFragment(value string) bool {
+	for _, fragment := range unsafeMetadataTagFragments {
+		if strings.Contains(value, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeStringSlices(key string, values ...any) []string {
+	merged := make([]string, 0)
+	for _, value := range values {
+		merged = append(merged, parseStringSlice(value)...)
+	}
+	if key == "categories" {
+		return NormalizeCategories(merged)
+	}
+	return NormalizeTags(merged)
+}
+
+func asMap(value any) map[string]any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return typed
+	default:
+		return map[string]any{}
+	}
 }
 
 func (m EnvelopeMetadata) ToMap() map[string]any {
@@ -263,26 +416,14 @@ func (m EnvelopeMetadata) appendScalarFields(result map[string]any) {
 // PrepareForEmit restores routing fields from request context before emission.
 func PrepareForEmit(ctx context.Context, raw map[string]any) map[string]any {
 	md := FromContext(ctx)
-	emitted := mergeMaps(md.ToMap(), raw)
+	emitted := MergeMaps(md.ToMap(), raw)
 
 	if emitted["correlation_id"] == nil || emitted["correlation_id"] == "" {
-		if corr := correlationFromGlobalContext(emitted); corr != "" {
+		if corr := correlationFromGlobalContext(raw); corr != "" {
 			emitted["correlation_id"] = corr
 		}
 	}
 	return emitted
-}
-
-func mergeMaps(base, overrides map[string]any) map[string]any {
-	result := map[string]any{}
-	maps.Copy(result, base)
-	for k, v := range overrides {
-		if str, ok := v.(string); ok && str == "" {
-			continue
-		}
-		result[k] = v
-	}
-	return result
 }
 
 func correlationFromGlobalContext(meta map[string]any) string {

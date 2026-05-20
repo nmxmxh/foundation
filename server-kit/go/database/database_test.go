@@ -231,7 +231,7 @@ func TestDatabaseHelpers(t *testing.T) {
 			t.Fatalf("DefaultPoolOptionsFor(%s) = %+v", lane, got)
 		}
 	}
-	ctx, cancel := QueryBudgetContext(nil, PoolOptions{QueryTimeout: time.Millisecond})
+	ctx, cancel := QueryBudgetContext(context.TODO(), PoolOptions{QueryTimeout: time.Millisecond})
 	defer cancel()
 	if ctx == nil {
 		t.Fatal("expected query budget context")

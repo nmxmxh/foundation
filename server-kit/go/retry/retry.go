@@ -109,7 +109,8 @@ func NewPolicy(cfg Config) *Policy {
 
 	return &Policy{
 		config: cfg,
-		rng:    rand.New(rand.NewSource(time.Now().UnixNano())),
+		// #nosec G404 -- retry jitter is load spreading, not a security token or randomness boundary.
+		rng: rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 

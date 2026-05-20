@@ -444,7 +444,8 @@ func TestProcessPoolDiagnosticsAndErrorPaths(t *testing.T) {
 	pool := &ProcessPool{
 		exchangeTimeout: DefaultProcessExchangeTimeout,
 		bufferPool: sync.Pool{New: func() any {
-			return make([]byte, generated.BUFFER_TOTAL_BYTES)
+			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
+			return &buffer
 		}},
 	}
 	if _, err := pool.Execute(context.Background(), ProcessRequest{}); err == nil {

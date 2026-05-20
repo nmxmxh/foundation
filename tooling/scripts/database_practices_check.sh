@@ -76,6 +76,36 @@ else
   echo "[OK] no SELECT * in Go/SQL hot-path sources"
 fi
 
+if [[ -d "$target/internal/service/persistence" ]] || rg -n "internal/service/persistence" "$target" --glob '*.go' --glob '!**/node_modules/**' >/dev/null 2>&1; then
+  echo "[FAIL] persistence helper package found under internal/service; shared database helpers must come from server-kit/go/database"
+  failed=1
+else
+  echo "[OK] no app-local persistence helper package under internal/service"
+fi
+
+if rg -n "(pgx|postgres|QueryRow\\(|Query\\(|Exec\\(|Begin\\()" "$target/internal/service" --glob 'repository.go' --glob '!**/node_modules/**' >/dev/null 2>&1; then
+  if ! rg -n "server-kit/go/database|database\\.(QueryOne|QuerySQLOne|QueryEach|QuerySQLEach|QueryAll|QuerySQLAll|ExecCommand|ExecRowsAffected|ExecSQLRowsAffected|AtomicLane|SendBatch|CopyFrom)" "$target/internal/service" --glob 'repository.go' --glob '!**/node_modules/**' >/dev/null 2>&1; then
+    echo "[FAIL] repository SQL usage detected without Foundation database helper usage"
+    failed=1
+  else
+    echo "[OK] repository SQL usage is anchored to Foundation database helpers"
+  fi
+fi
+
+if rg -n "\\.(Exec|Begin)\\(" "$target/internal/service" --glob 'repository.go' --glob 'persist.go' --glob '!**/node_modules/**' >/dev/null 2>&1; then
+  echo "[FAIL] raw repository command/transaction calls found; use ExecCommand, ExecRowsAffected, or AtomicLane"
+  failed=1
+else
+  echo "[OK] repository command/transaction paths use Foundation executors"
+fi
+
+if rg -n "database\\.(QuerySQL|ExecSQL)" "$target/internal/service" --glob '*.go' --glob '!**/node_modules/**' >/dev/null 2>&1; then
+  echo "[FAIL] transitional SQL compatibility helpers found in service repositories; use executor helpers"
+  failed=1
+else
+  echo "[OK] no transitional SQL compatibility helpers in service repositories"
+fi
+
 if [[ "$failed" -ne 0 ]]; then
   echo "database practices check failed"
   exit 1

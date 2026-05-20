@@ -53,6 +53,34 @@ func TestBindingDecodeRequestMapMergesEnvelopeMetadata(t *testing.T) {
 	}
 }
 
+func TestBindingDecodeRequestMapFiltersMetadataForTargetMessage(t *testing.T) {
+	binding := Binding{
+		Request:  factory(func() anyProto { return &testprotos.TestRequest{} }).toFactory(),
+		Response: factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
+	}
+	request, err := binding.DecodeRequestMap(map[string]any{
+		"workspace_id": "wrk_123",
+		"content_type": "image/jpeg",
+	}, map[string]any{
+		"correlation_id":      "corr_123",
+		"policy_snapshot_ref": "policy_ignored",
+		"global_context": map[string]any{
+			"source":       "api",
+			"jurisdiction": "ignored",
+		},
+	})
+	if err != nil {
+		t.Fatalf("DecodeRequestMap failed: %v", err)
+	}
+	typed := request.(*testprotos.TestRequest)
+	if typed.Metadata.GetCorrelationId() != "corr_123" {
+		t.Fatalf("correlation_id = %q", typed.Metadata.GetCorrelationId())
+	}
+	if typed.Metadata.GetGlobalContext().GetSource() != "api" {
+		t.Fatalf("global_context.source = %q", typed.Metadata.GetGlobalContext().GetSource())
+	}
+}
+
 func TestMessageToMapUsesProtoFieldNames(t *testing.T) {
 	payload, err := MessageToMap(&testprotos.TestResponse{
 		ResourceId: "asset_123",
@@ -330,7 +358,7 @@ func TestGeneratedTestProtoAccessors(t *testing.T) {
 	if (*testprotos.GlobalContext)(nil).GetUserId() != "" || (*testprotos.GlobalContext)(nil).GetSource() != "" || (*testprotos.GlobalContext)(nil).GetDeviceId() != "" {
 		t.Fatalf("nil global context getters failed")
 	}
-	_, _ = (&testprotos.GlobalContext{}).Descriptor()
+	_ = (&testprotos.GlobalContext{}).ProtoReflect().Descriptor()
 
 	md := &testprotos.Metadata{CorrelationId: "corr", RequestId: "req", Locale: "en", GlobalContext: &testprotos.GlobalContext{Source: "api"}}
 	if md.String() == "" || md.ProtoReflect().Descriptor().FullName() == "" {
@@ -346,7 +374,7 @@ func TestGeneratedTestProtoAccessors(t *testing.T) {
 	if (*testprotos.Metadata)(nil).GetCorrelationId() != "" || (*testprotos.Metadata)(nil).GetRequestId() != "" || (*testprotos.Metadata)(nil).GetLocale() != "" || (*testprotos.Metadata)(nil).GetGlobalContext() != nil {
 		t.Fatalf("nil metadata getters failed")
 	}
-	_, _ = (&testprotos.Metadata{}).Descriptor()
+	_ = (&testprotos.Metadata{}).ProtoReflect().Descriptor()
 
 	req := &testprotos.TestRequest{Metadata: &testprotos.Metadata{CorrelationId: "corr"}, WorkspaceId: "wrk", ContentType: "image/png", Size: 7, Hash: "sha"}
 	if req.String() == "" || req.ProtoReflect().Descriptor().FullName() == "" {
@@ -362,7 +390,7 @@ func TestGeneratedTestProtoAccessors(t *testing.T) {
 	if (*testprotos.TestRequest)(nil).GetMetadata() != nil || (*testprotos.TestRequest)(nil).GetWorkspaceId() != "" || (*testprotos.TestRequest)(nil).GetContentType() != "" || (*testprotos.TestRequest)(nil).GetSize() != 0 || (*testprotos.TestRequest)(nil).GetHash() != "" {
 		t.Fatalf("nil request getters failed")
 	}
-	_, _ = (&testprotos.TestRequest{}).Descriptor()
+	_ = (&testprotos.TestRequest{}).ProtoReflect().Descriptor()
 
 	resp := &testprotos.TestResponse{ResourceId: "res", Status: "ok"}
 	if resp.String() == "" || resp.ProtoReflect().Descriptor().FullName() == "" {
@@ -378,7 +406,7 @@ func TestGeneratedTestProtoAccessors(t *testing.T) {
 	if (*testprotos.TestResponse)(nil).GetResourceId() != "" || (*testprotos.TestResponse)(nil).GetStatus() != "" {
 		t.Fatalf("nil response getters failed")
 	}
-	_, _ = (&testprotos.TestResponse{}).Descriptor()
+	_ = (&testprotos.TestResponse{}).ProtoReflect().Descriptor()
 }
 
 func BenchmarkDecodeRequestBytesIntoCompleteReuse(b *testing.B) {

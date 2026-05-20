@@ -113,9 +113,13 @@ func TestMemoryStoreFilesPresignStageAndHelpers(t *testing.T) {
 	if normalizeKey("./a/../b") != "b" || normalizeKey(".") != "" || !isMemoryEndpoint(" MEM://x ") {
 		t.Fatal("objectstore helpers failed")
 	}
-	if ctxOrBackground(nil) == nil || ctxOrBackground(context.Background()) == nil {
+	if ctxOrBackground(nilTestContext()) == nil || ctxOrBackground(context.Background()) == nil {
 		t.Fatal("ctxOrBackground failed")
 	}
+}
+
+func nilTestContext() context.Context {
+	return nil
 }
 
 func TestObjectStoreURLsAndS3Validation(t *testing.T) {

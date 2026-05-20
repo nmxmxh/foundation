@@ -144,12 +144,13 @@ Index rules from this posture:
 2. Use `TIMESTAMPTZ` for all temporal columns.
 3. Use `JSONB` only for flexible metadata, not core filter keys.
 4. If a query uses JSONB tags or metadata paths in a recurring path, add a matching GIN or expression index immediately. JSONB is acceptable for cross-cutting metadata only when index-backed.
-5. Expression indexes must mirror the actual predicate shape. Example: if the query is `LOWER(name)` with `is_active = TRUE`, the index should be `ON (..., LOWER(name)) WHERE is_active = TRUE`.
-6. Index all foreign keys and high-selectivity predicates.
-7. Keep domain table prefixes explicit (`identity_*`, `operations_*`, `billing_*`, etc.).
-8. Store password-reset tokens, invite tokens, API tokens, and other bearer secrets as digests or encrypted blobs when raw-value lookup is unnecessary.
-9. Separate especially sensitive fields (PII, tax identifiers, recovery data) from broad read paths and duplicate them as little as possible.
-10. App runtime roles must default to least privilege on tables, sequences, functions, and views.
+5. Metadata tags must be low-cardinality, namespaced, and safe to index (`actor:*`, `entity:*`, `domain:*`, `service:*`, `event:*`, `state:*`, `risk:*`, `security:*`, `intent:*`, `source:*`, `channel:*`, `region:*`, `locale:*`, `privacy:*`, `compliance:*`, `kg:*`). Store high-cardinality graph facts in explicit columns, `source_ref`, `knowledge_graph`, or bounded `attributes`, not arbitrary tag strings.
+6. Expression indexes must mirror the actual predicate shape. Example: if the query is `LOWER(name)` with `is_active = TRUE`, the index should be `ON (..., LOWER(name)) WHERE is_active = TRUE`.
+7. Index all foreign keys and high-selectivity predicates.
+8. Keep domain table prefixes explicit (`identity_*`, `operations_*`, `billing_*`, etc.).
+9. Store password-reset tokens, invite tokens, API tokens, and other bearer secrets as digests or encrypted blobs when raw-value lookup is unnecessary.
+10. Separate especially sensitive fields (PII, tax identifiers, recovery data) from broad read paths and duplicate them as little as possible.
+11. App runtime roles must default to least privilege on tables, sequences, functions, and views.
 
 ## Foundation state store
 
@@ -211,6 +212,12 @@ opt into `RowQueryer` instead of widening every fake and store. This keeps the
 contract testable while still exposing the fast row path for hot repositories.
 Repositories that need row counts should opt into `ResultExecutor`; this keeps
 strict conflict/not-found behavior portable across Postgres and tests.
+Existing app repositories that still depend on pgxpool or pgxmock should use
+the transitional `SQLStore`, `QuerySQLOne`, `QuerySQLEach`, `QuerySQLAll`, and
+`ExecSQLRowsAffected` helpers from `server-kit/go/database`. Do not create
+app-local `internal/service/persistence` packages for shared SQL or JSONB
+helpers; those helpers belong in Foundation, while service packages should
+represent actual product domains.
 
 Foundation Postgres connections must keep pgx statement caching enabled for
 stable repeated SQL. `PoolOptions.StatementCacheCapacity` defaults to a non-zero

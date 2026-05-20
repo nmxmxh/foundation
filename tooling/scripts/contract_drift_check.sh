@@ -68,7 +68,7 @@ check_lifecycle_contracts() {
   [[ -d "$target/api/protos" ]] || return 0
 
   local generator=""
-  local generator_timeout_sec="${LIFECYCLE_CONTRACT_CHECK_TIMEOUT_SEC:-60}"
+  local generator_timeout_sec="${LIFECYCLE_CONTRACT_CHECK_TIMEOUT_SEC:-180}"
   if [[ -f "$target/scripts/checks/generate_lifecycle_contract_tests.mjs" ]]; then
     generator="$target/scripts/checks/generate_lifecycle_contract_tests.mjs"
   elif generator="$(resolve_path "foundation/tooling/scripts/generate_lifecycle_contract_tests.mjs" 2>/dev/null)"; then

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"runtime"
@@ -114,7 +115,8 @@ func NewProcessPool(opts ProcessPoolOptions) (*ProcessPool, error) {
 		exchangeTimeout: opts.ExchangeTimeout,
 		transport:       transportSupport,
 		bufferPool: sync.Pool{New: func() any {
-			return make([]byte, generated.BUFFER_TOTAL_BYTES)
+			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
+			return &buffer
 		}},
 	}
 	if transportSupport.Fallback {
@@ -156,8 +158,12 @@ func (p *ProcessPool) Execute(ctx context.Context, req ProcessRequest) (ProcessR
 		defer cancel()
 	}
 
-	raw := p.bufferPool.Get().([]byte)
-	defer p.bufferPool.Put(raw)
+	rawPtr := p.bufferPool.Get().(*[]byte)
+	raw := *rawPtr
+	defer func() {
+		*rawPtr = raw
+		p.bufferPool.Put(rawPtr)
+	}()
 	buffer, err := NewBuffer(raw)
 	if err != nil {
 		return ProcessResponse{}, err
@@ -297,6 +303,7 @@ func (w *processWorker) startLocked() error {
 		env = append(env, "OVRT_SHM_PATH="+w.shm.path)
 	}
 
+	// #nosec G204 -- runtime worker command comes from trusted ProcessPoolOptions, never request input.
 	cmd := exec.Command(w.command[0], w.command[1:]...)
 	if len(env) > 0 {
 		cmd.Env = append(os.Environ(), env...)
@@ -492,26 +499,45 @@ func (w *processWorker) logStderr(stderr io.ReadCloser) {
 	for scanner.Scan() {
 		w.logger.Warn("native runtime stderr", zap.String("line", scanner.Text()))
 	}
+	if err := scanner.Err(); err != nil {
+		w.logger.Warn("native runtime stderr scan failed", zap.Error(err))
+	}
 }
 
 func writeFrame(w io.Writer, payload []byte) error {
+	frameSize, err := checkedFrameSize(len(payload))
+	if err != nil {
+		return err
+	}
 	var size [4]byte
-	binary.LittleEndian.PutUint32(size[:], uint32(len(payload)))
+	binary.LittleEndian.PutUint32(size[:], frameSize)
 	if _, err := w.Write(size[:]); err != nil {
 		return err
 	}
-	_, err := w.Write(payload)
+	_, err = w.Write(payload)
 	return err
 }
 
 func writeStringFrame(w io.Writer, payload string) error {
+	frameSize, err := checkedFrameSize(len(payload))
+	if err != nil {
+		return err
+	}
 	var size [4]byte
-	binary.LittleEndian.PutUint32(size[:], uint32(len(payload)))
+	binary.LittleEndian.PutUint32(size[:], frameSize)
 	if _, err := w.Write(size[:]); err != nil {
 		return err
 	}
-	_, err := io.WriteString(w, payload)
+	_, err = io.WriteString(w, payload)
 	return err
+}
+
+func checkedFrameSize(size int) (uint32, error) {
+	if size < 0 || size > math.MaxUint32 {
+		return 0, fmt.Errorf("frame too large: %d", size)
+	}
+	// #nosec G115 -- guarded by MaxUint32 check above.
+	return uint32(size), nil
 }
 
 func readFrame(r io.Reader) ([]byte, error) {

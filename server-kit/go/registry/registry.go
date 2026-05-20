@@ -11,6 +11,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap"
 	eventcontract "github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/intelligence"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
@@ -52,10 +53,12 @@ type ServiceRegistry struct {
 	handler         *graceful.Handler
 	log             logger.Logger
 	dispatchWorkers int
+	intelligence    *intelligence.Injector
 }
 
 type Options struct {
 	DispatchWorkers int
+	Intelligence    *intelligence.Injector
 }
 
 // New creates a new ServiceRegistry.
@@ -78,6 +81,7 @@ func NewWithOptions(redisClient redis.Client, gh *graceful.Handler, l logger.Log
 		handler:         gh,
 		log:             l.With(zap.String("component", "service_registry")),
 		dispatchWorkers: dispatchWorkers,
+		intelligence:    opts.Intelligence,
 	}
 }
 
@@ -257,8 +261,15 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 		metaMap["correlation_id"] = env.CorrelationID
 	}
 
-	// Enrich context
 	ctx = metadata.NewContext(ctx, metaMap)
+	if r.intelligence != nil {
+		ctx, metaMap, _ = r.intelligence.Inject(ctx, intelligence.Input{
+			EventType:    env.EventType,
+			Payload:      env.Payload,
+			PayloadBytes: env.PayloadBytes,
+			Metadata:     metaMap,
+		})
+	}
 
 	if method.typedHandler != nil && method.binding != nil {
 		req, pooled, err := method.decodeRequest(env.PayloadEncoding, env.Payload, env.PayloadBytes, metaMap)
@@ -315,6 +326,15 @@ func (r *ServiceRegistry) DispatchInput(ctx context.Context, eventType string, i
 	}
 	if input.Metadata == nil {
 		input.Metadata = map[string]any{}
+	}
+	ctx = metadata.NewContext(ctx, input.Metadata)
+	if r.intelligence != nil {
+		ctx, input.Metadata, _ = r.intelligence.Inject(ctx, intelligence.Input{
+			EventType:    eventType,
+			Payload:      input.Payload,
+			PayloadBytes: input.PayloadBytes,
+			Metadata:     input.Metadata,
+		})
 	}
 
 	if method.typedHandler != nil && method.binding != nil {

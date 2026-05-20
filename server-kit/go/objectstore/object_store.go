@@ -232,6 +232,7 @@ func (s *Store) PutFile(ctx context.Context, key, localPath string, opts PutOpti
 		contentType = "application/octet-stream"
 	}
 	if s.memory {
+		// #nosec G304 -- PutFile uploads an explicit caller-selected local file path; object keys remain separately normalized.
 		payload, err := os.ReadFile(localPath)
 		if err != nil {
 			return Object{}, err
@@ -242,6 +243,7 @@ func (s *Store) PutFile(ctx context.Context, key, localPath string, opts PutOpti
 		})
 	}
 
+	// #nosec G304 -- PutFile uploads an explicit caller-selected local file path; object keys remain separately normalized.
 	file, err := os.Open(localPath)
 	if err != nil {
 		return Object{}, err

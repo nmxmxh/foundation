@@ -91,7 +91,7 @@ func TestQueryAllLimitStopsRetainingRows(t *testing.T) {
 	if !rows.closed {
 		t.Fatal("rows were not closed after limit")
 	}
-	if _, err := QueryAllLimit[int](context.Background(), db, -1, "SELECT id", func(Rows) (int, error) { return 0, nil }); err == nil {
+	if _, err := QueryAllLimit(context.Background(), db, -1, "SELECT id", func(Rows) (int, error) { return 0, nil }); err == nil {
 		t.Fatal("expected negative limit to fail")
 	}
 }

@@ -89,10 +89,12 @@ func NewFFIPool(opts FFIPoolOptions) (*FFIPool, error) {
 		logger:  opts.Logger,
 		library: handle,
 		bufferPool: sync.Pool{New: func() any {
-			return make([]byte, generated.BUFFER_TOTAL_BYTES)
+			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
+			return &buffer
 		}},
 		errBufPool: sync.Pool{New: func() any {
-			return make([]byte, 4096)
+			buffer := make([]byte, 4096)
+			return &buffer
 		}},
 	}
 
@@ -152,8 +154,12 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 		return ProcessResponse{}, err
 	}
 
-	raw := p.bufferPool.Get().([]byte)
-	defer p.bufferPool.Put(raw)
+	rawPtr := p.bufferPool.Get().(*[]byte)
+	raw := *rawPtr
+	defer func() {
+		*rawPtr = raw
+		p.bufferPool.Put(rawPtr)
+	}()
 	buffer, err := NewBuffer(raw)
 	if err != nil {
 		return ProcessResponse{}, err
@@ -180,8 +186,12 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 		return ProcessResponse{}, errors.New("ffi runtime host is closed")
 	}
 
-	errBuf := p.errBufPool.Get().([]byte)
-	defer p.errBufPool.Put(errBuf)
+	errBufPtr := p.errBufPool.Get().(*[]byte)
+	errBuf := *errBufPtr
+	defer func() {
+		*errBufPtr = errBuf
+		p.errBufPool.Put(errBufPtr)
+	}()
 	clear(errBuf)
 	unitID := unsafe.StringData(req.UnitID)
 	status := int32(C.ovrt_call_process(

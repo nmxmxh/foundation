@@ -47,6 +47,29 @@ frontend projections.
 6. JSON text is allowed at human/debug boundaries. Hot runtime paths must keep
    typed or binary payloads until the owning handler validates and decodes them.
 
+## Intelligence Graph Lane
+
+1. Foundation intelligence signals are generated at the registry dispatch
+   boundary, before app handlers run. This is the central injection point where
+   event type, trusted metadata, payload keys, tags, categories, source refs, and
+   actor/entity references are normalized once.
+2. The default lane is intentionally lightweight: bounded keyword extraction,
+   safe metadata tags, graph provenance, actor/entity edge hints, and a small
+   sparse hashed relevance vector. It does not call a model, allocate large
+   embeddings, or decode typed payloads twice.
+3. Durable graph/vector storage is a sink concern. The registry can emit
+   `intelligence.Signal` to an async observer that writes to Postgres/pgvector,
+   Neo4j, a columnar lane, or a worker queue without coupling service handlers
+   to that backend. Observer delivery must be bounded and drop under pressure;
+   command dispatch must never wait on analyst-facing graph/vector sinks.
+4. Use tags for low-cardinality semantic indexes. Use `knowledge_graph` for
+   graph scope, `source_ref` for provenance, `attributes` for bounded graph
+   facts, and explicit schema columns for high-cardinality identifiers.
+5. Retrieval should be hybrid when promoted: lexical keyword match, vector
+   similarity, graph neighborhood expansion, and authorization/tenant filters
+   must be composed before results influence user-visible or model-visible
+   answers.
+
 ## Verification
 
 1. AI mutating flows must emit the same `requested -> success/failed` lifecycle

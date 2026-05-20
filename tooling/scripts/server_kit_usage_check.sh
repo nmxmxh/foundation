@@ -56,6 +56,26 @@ check_no_project_match() {
   fi
 }
 
+check_no_service_dir() {
+  local label="$1"
+  local name="$2"
+  local found=""
+  local service_path
+  for service_root in "$target/internal/service" "$target/backend/internal/service"; do
+    [[ -d "$service_root" ]] || continue
+    while IFS= read -r service_path; do
+      found+="${service_path#$target/}"$'\n'
+    done < <(find "$service_root" -mindepth 1 -maxdepth 1 -type d -name "$name" 2>/dev/null)
+  done
+  if [[ -n "$found" ]]; then
+    echo "[FAIL] $label"
+    echo "$found" | sed '/^$/d; s/^/  /'
+    failed=1
+  else
+    echo "[OK] $label"
+  fi
+}
+
 if [[ -d "$target/foundation/server-kit/go" ]]; then
   kit="$target/foundation/server-kit/go"
 else
@@ -101,6 +121,16 @@ if [[ -f "$target/.foundation" && -d "$target/internal" ]]; then
   check_file_contains "websocket uses websocket metrics" "$target/internal/server/websocket.go" "server-kit/go/wsmetrics"
   check_file_contains "worker queues are bounded by config" "$target/internal/worker/registry.go" "DefaultQueueConfig"
   check_no_project_match "internal code avoids JSON gRPC compatibility dispatch" "grpcsvc\\.Dispatch\\s*\\(|\\.Dispatch\\s*\\([^\\n]*grpcsvc\\.Envelope|grpcsvc\\.Envelope\\b" "$target/internal" "$target/cmd"
+  check_no_project_match "services use Foundation domain errors" "type .*Error struct|type .*Error interface|func New.*Error\\(" "$target/internal/service"
+  check_no_project_match "services use Foundation event bus" "type .*Bus struct|type .*EventBus" "$target/internal/service"
+  check_no_project_match "services use Foundation cache/Redis clients" "type .*Cache struct|type .*Redis|redis\\.NewClient\\(|redis\\.NewClusterClient\\(" "$target/internal/service"
+  check_no_project_match "services use Foundation database executors" "\"database/sql\"|sql\\.(DB|Tx|Rows|Row)|pgxpool\\.New|pgxpool\\.ParseConfig|pgx\\.Connect" "$target/internal/service"
+  check_no_project_match "services use Foundation worker/runtime primitives" "type .*Worker|type .*Queue|go func\\(|time\\.NewTicker\\(" "$target/internal/service"
+  check_no_service_dir "service tree avoids local persistence primitive packages" "persistence"
+  check_no_service_dir "service tree avoids local shared primitive packages" "shared"
+  check_no_service_dir "service tree avoids local adapter primitive packages" "adapters"
+  check_no_service_dir "service tree avoids local service-kit primitive packages" "servicekit"
+  check_no_service_dir "service tree avoids local test utility service packages" "testutil"
 fi
 
 if [[ "$failed" -ne 0 ]]; then

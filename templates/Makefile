@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-go-fix check-coding-practices check-testing-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -524,7 +524,7 @@ lint-frontend:
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-FOUNDATION_LINT_CHECKS := check-go-fix check-coding-practices check-testing-practices check-go-concurrency-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-contract-drift check-server-kit-usage check-project-scaffold
+FOUNDATION_LINT_CHECKS := check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-usage check-project-scaffold
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 180
 
 lint-foundation:
@@ -533,7 +533,7 @@ lint-foundation:
 	runner="./scripts/checks/foundation_lint_check_runner.sh"; \
 	for check in $(FOUNDATION_LINT_CHECKS); do \
 		printf '[RUN] %s\n' "$$check"; \
-		if zsh "$$runner" "$$tmp_log" "$(MAKE)" --no-print-directory "$$check"; then \
+		if FOUNDATION_LINT_CHECK_TIMEOUT_SEC="$(FOUNDATION_LINT_CHECK_TIMEOUT_SEC)" zsh "$$runner" "$$tmp_log" "$(MAKE)" --no-print-directory "$$check"; then \
 			printf '[OK] %s\n' "$$check"; \
 			: >"$$tmp_log"; \
 		else \
@@ -546,6 +546,9 @@ lint-foundation:
 check-go-fix:
 	@./scripts/checks/go_fix_check.sh .
 
+check-go-static-analysis:
+	@./scripts/checks/go_static_analysis_check.sh .
+
 check-coding-practices:
 	@./scripts/checks/coding_practices_check.sh .
 
@@ -554,6 +557,9 @@ check-testing-practices:
 
 check-go-concurrency-practices:
 	@./scripts/checks/go_concurrency_practices_check.sh .
+
+check-metadata-practices:
+	@./scripts/checks/metadata_practices_check.sh .
 
 check-database-practices:
 	@./scripts/checks/database_practices_check.sh .
@@ -566,6 +572,9 @@ check-river-practices:
 
 check-migration-structure:
 	@./scripts/checks/migration_structure_check.sh .
+
+check-domain-contract-consistency:
+	@./scripts/checks/domain_contract_consistency_check.sh .
 
 check-contract-drift:
 	@./scripts/checks/contract_drift_check.sh .
@@ -668,6 +677,7 @@ help:
 	@echo "  check-redis-practices"
 	@echo "  check-river-practices"
 	@echo "  check-migration-structure"
+	 "  check-domain-contract-consistency"
 	@echo "  check-contract-drift"
 	@echo "  check-project-scaffold"
 	@echo ""

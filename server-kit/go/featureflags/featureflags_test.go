@@ -41,7 +41,8 @@ func TestFlagEvaluationRulesAndSources(t *testing.T) {
 	if m.IsEnabled(context.Background(), "rollout") {
 		t.Fatal("percentage rollout requires user id")
 	}
-	if hashToBucket("flag", "user") != hashToBucket("flag", "user") {
+	bucket := hashToBucket("flag", "user")
+	if bucket != hashToBucket("flag", "user") {
 		t.Fatal("hash bucket should be deterministic")
 	}
 	flags := m.AllFlags()

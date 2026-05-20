@@ -1064,6 +1064,10 @@ Applied implementation:
    closure allocations.
 4. Perf-tag tests now guard `RunParallel` at `<=8 allocs/run` and
    `RunParallelInto` at `<=7 allocs/run`.
+5. `chain.HasCriticalFailureOrdered` provides an indexed hot-path check for
+   direct `RunParallel`/`RunParallelInto` results without building a name
+   lookup. `HasCriticalFailure` remains the compatibility helper for filtered,
+   merged, or reordered results.
 
 Command:
 
@@ -1076,10 +1080,17 @@ GOCACHE=/tmp/ovasabi-foundation-go-build go test -bench='BenchmarkRunParallel' -
 | --- | ---: | ---: | --- |
 | `BenchmarkRunParallel` | `1227 ns/op`, `640 B/op`, `11 allocs/op` | `1172 ns/op`, `576 B/op`, `7 allocs/op` | Compatibility API improves from helper extraction; returned result slice is still owned by caller. |
 | `BenchmarkRunParallelInto` | not available | `1108 ns/op`, `448 B/op`, `6 allocs/op` | Caller-owned result storage avoids the result-slice allocation and is the preferred hot orchestration API. |
+| `BenchmarkHasCriticalFailure` | name lookup only | `~36 ns/op`, `0 B/op`, `0 allocs/op` | Compatibility helper is still cheap, but it pays lookup work that ordered chain results do not need. |
+| `BenchmarkHasCriticalFailureOrdered` | not available | `~1.27 ns/op`, `0 B/op`, `0 allocs/op` | Indexed critical-failure detection matches direct chain result order and is the preferred hot-path check. |
 
 Refinement note: visible result order, critical-failure cancellation, nil-run
 error behavior, and nil-context fallback are unchanged. Only result storage and
-goroutine helper shape changed.
+goroutine/helper/check shape changed. The remaining `RunParallelInto`
+allocations come from per-call goroutine fanout, `sync.WaitGroup`,
+`context.WithCancel`, and goroutine argument escape. Removing those cleanly
+requires a new reusable runner/lane API that owns worker state across calls; the
+current function API cannot become allocation-free without changing its
+execution model.
 
 ### Generated Protobuf Decode Strategy
 

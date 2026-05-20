@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 )
 
@@ -47,6 +48,66 @@ func TestInMemoryBus_PublishSubscribe(t *testing.T) {
 	}
 	if trace := observability.Default().Trace("corr-1", 1); len(trace) != 1 || trace[0].EventType != "media:upload:requested" {
 		t.Fatalf("expected publish trace, got %+v", trace)
+	}
+}
+
+func TestInMemoryBus_PublishInjectsContextMetadata(t *testing.T) {
+	bus := NewInMemoryBus(10)
+	ctx := metadata.IntoContext(context.Background(), metadata.EnvelopeMetadata{
+		CorrelationID: "corr_ctx",
+		GlobalContext: &metadata.GlobalContext{
+			OrganizationID: "org_ctx",
+			UserID:         "user_ctx",
+			Source:         "test",
+		},
+	})
+
+	if err := bus.Publish(ctx, Envelope{
+		EventType:     "media:upload:requested",
+		Payload:       map[string]any{"key": "value"},
+		CorrelationID: "corr_ctx",
+		SchemaVersion: "1.0",
+		Timestamp:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	recent := bus.Recent(1)
+	if len(recent) != 1 {
+		t.Fatalf("recent len = %d, want 1", len(recent))
+	}
+	md := metadata.FromMap(recent[0].Metadata)
+	if md.CorrelationID != "corr_ctx" || md.GlobalContext == nil || md.GlobalContext.OrganizationID != "org_ctx" || md.GlobalContext.UserID != "user_ctx" {
+		t.Fatalf("metadata was not injected from context: %#v", recent[0].Metadata)
+	}
+}
+
+func TestInMemoryBus_PublishMergesContextTags(t *testing.T) {
+	bus := NewInMemoryBus(10)
+	ctx := metadata.IntoContext(context.Background(), metadata.EnvelopeMetadata{
+		CorrelationID: "corr_ctx",
+		Tags:          []string{"request:tag", "shared"},
+		Categories:    []string{"request"},
+	})
+
+	if err := bus.Publish(ctx, Envelope{
+		EventType:     "media:upload:requested",
+		Payload:       map[string]any{"key": "value"},
+		Metadata:      map[string]any{"tags": []string{"domain:tag", "shared"}, "categories": []any{"domain"}},
+		CorrelationID: "corr_ctx",
+		SchemaVersion: "1.0",
+		Timestamp:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("publish failed: %v", err)
+	}
+
+	recent := bus.Recent(1)
+	md := metadata.FromMap(recent[0].Metadata)
+	if got, want := fmt.Sprint(md.Tags), "[request:tag shared domain:tag]"; got != want {
+		t.Fatalf("tags = %s, want %s", got, want)
+	}
+	if got, want := fmt.Sprint(md.Categories), "[request domain]"; got != want {
+		t.Fatalf("categories = %s, want %s", got, want)
 	}
 }
 

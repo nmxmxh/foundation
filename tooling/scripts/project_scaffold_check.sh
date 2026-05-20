@@ -225,6 +225,43 @@ check_repository_boundaries() {
   fi
 }
 
+check_service_domain_contracts() {
+  local service_root=""
+  if [[ -d "$target/internal/service" ]]; then
+    service_root="$target/internal/service"
+  elif [[ -d "$target/backend/internal/service" ]]; then
+    service_root="$target/backend/internal/service"
+  fi
+  [[ -n "$service_root" ]] || return 0
+
+  local proto_root="$target/api/protos"
+  local violations=""
+  local service_dir service_name proto_dir
+  while IFS= read -r service_dir; do
+    service_name="$(basename "$service_dir")"
+    case "$service_name" in
+      .*|_*|common|transport) continue ;;
+    esac
+    proto_dir="$proto_root/$service_name"
+    if [[ ! -d "$proto_dir" ]] || ! find "$proto_dir" -maxdepth 3 -type f -name '*.proto' 2>/dev/null | grep -q .; then
+      violations+="${service_dir#$target/} -> missing api/protos/$service_name contract"$'\n'
+      continue
+    fi
+    if ! rg -n '^[[:space:]]*(service|message)[[:space:]]+' "$proto_dir" --glob '*.proto' >/dev/null 2>&1; then
+      violations+="${service_dir#$target/} -> api/protos/$service_name has no message/service contract"$'\n'
+    fi
+  done < <(find "$service_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+
+  if [[ -n "$violations" ]]; then
+    echo "[FAIL] service folders map to domain proto contracts"
+    echo "  internal/service/<name> is reserved for actual app domains; shared primitives belong in Foundation/server-kit or non-service internal packages"
+    echo "$violations" | sed '/^$/d; s/^/  /' | head -40
+    failed=1
+  else
+    echo "[OK] service folders map to domain proto contracts"
+  fi
+}
+
 if [[ ! -f "$foundation_file" ]]; then
   echo "[FAIL] foundation metadata missing"
   exit 1
@@ -251,7 +288,9 @@ check_file_contains "golangci resource lint baseline" "$target/.golangci.yml" "g
 check_exists "coding practices check" "$target/scripts/checks/coding_practices_check.sh"
 check_exists "testing practices check" "$target/scripts/checks/testing_practices_check.sh"
 check_exists "go fix modernization check" "$target/scripts/checks/go_fix_check.sh"
+check_exists "go static analysis check" "$target/scripts/checks/go_static_analysis_check.sh"
 check_exists "go concurrency practices check" "$target/scripts/checks/go_concurrency_practices_check.sh"
+check_exists "metadata practices check" "$target/scripts/checks/metadata_practices_check.sh"
 check_exists "river practices check" "$target/scripts/checks/river_practices_check.sh"
 check_exists "server-kit usage check" "$target/scripts/checks/server_kit_usage_check.sh"
 check_exists "project scaffold check" "$target/scripts/checks/project_scaffold_check.sh"
@@ -271,6 +310,7 @@ check_absent "unowned root pkg directory" "$target/pkg"
 check_absent "legacy internal domain directory" "$target/internal/domain"
 check_typed_proto_plane
 check_repository_boundaries
+check_service_domain_contracts
 
 if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "server command" "$target/cmd/server/main.go"
@@ -352,6 +392,8 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "coding check enforces internal frame/protobuf lane" "$target/scripts/checks/coding_practices_check.sh" "CP internal Go avoids JSON gRPC compatibility dispatch"
   check_file_contains "testing check blocks focused TypeScript tests" "$target/scripts/checks/testing_practices_check.sh" "TE no focused TypeScript tests"
   check_file_contains "lint-foundation includes go fix modernization" "$target/Makefile" "check-go-fix"
+  check_file_contains "lint-foundation includes Go static analysis" "$target/Makefile" "check-go-static-analysis"
+  check_file_contains "lint-foundation includes metadata practices" "$target/Makefile" "check-metadata-practices"
   check_file_contains "server-kit check rejects internal JSON grpc dispatch" "$target/scripts/checks/server_kit_usage_check.sh" "internal code avoids JSON gRPC compatibility dispatch"
   check_any_startup_contains "startup initializes server-kit resilience" "resilience.New"
   check_any_startup_contains "startup registers server-kit resilience dependencies" "RegisterDependency("
@@ -365,7 +407,8 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "worker processing queue concurrency is configurable" "$target/internal/worker/registry.go" "QUEUE_WORKERS_PROCESSING"
   check_file_contains "worker scheduled queue concurrency is configurable" "$target/internal/worker/registry.go" "QUEUE_WORKERS_SCHEDULED"
   check_file_contains "server exposes correlation trace endpoint" "$target/internal/server/server.go" "/metricsz/trace"
-  check_file_contains "server uses configured CORS origins" "$target/internal/server/server.go" "security.CORS(s.allowedOrigins)"
+  check_file_contains "server wires CORS middleware" "$target/internal/server/server.go" "security.CORS("
+  check_file_contains "server uses configured CORS origins" "$target/internal/server/server.go" "allowedOrigins"
   check_file_not_contains "server avoids wildcard CORS default" "$target/internal/server/server.go" 'security.CORS([]string{"*"})'
   check_file_contains "server protects operational endpoints" "$target/internal/server/server.go" "operationalHandler"
   check_file_contains "config loads allowed origins" "$target/internal/config/config.go" "ALLOWED_ORIGINS"
@@ -376,7 +419,13 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "foundation tooling" "$target/foundation/tooling/docs/enforcement.md"
   check_exists "api README" "$target/api/README.md"
   check_exists "proto README" "$target/api/protos/README.md"
-  check_exists "common proto metadata" "$target/api/protos/common/v1/metadata.proto"
+  if [[ -f "$target/api/protos/common/v1/metadata.proto" || -f "$target/api/protos/common/v1/common.proto" ]]; then
+    echo "[OK] common proto metadata"
+  else
+    echo "[FAIL] common proto metadata"
+    echo "  missing: api/protos/common/v1/metadata.proto or api/protos/common/v1/common.proto"
+    failed=1
+  fi
   check_file_contains "proto README documents lifecycle generator" "$target/api/protos/README.md" "make lifecycle-contracts"
 fi
 

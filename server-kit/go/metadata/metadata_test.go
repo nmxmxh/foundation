@@ -233,6 +233,77 @@ func TestMetadataMapVariantsAndPrepareForEmit(t *testing.T) {
 	}
 }
 
+func TestMetadataTagsAreCanonicalAndSafe(t *testing.T) {
+	tag, ok := BuildTag("Actor", "User 123")
+	if !ok || tag != "actor:user_123" {
+		t.Fatalf("BuildTag() = %q, %v", tag, ok)
+	}
+	if tag, ok := BuildTag("security", "Bearer abc"); ok || tag != "" {
+		t.Fatalf("secret-like tag should be rejected: %q", tag)
+	}
+
+	md := FromMap(map[string]any{
+		"tags": []any{
+			" Actor:User_123 ",
+			"actor:user_123",
+			"security:jwt",
+			"Search:Invoice",
+			"kg:brand-profile",
+		},
+		"categories": []string{" Intelligence ", "intelligence", "Search"},
+	})
+	wantTags := []string{"actor:user_123", "search:invoice", "kg:brand-profile"}
+	if got := md.Tags; len(got) != len(wantTags) {
+		t.Fatalf("tags length = %d, want %d: %#v", len(got), len(wantTags), got)
+	}
+	for i, want := range wantTags {
+		if md.Tags[i] != want {
+			t.Fatalf("tag[%d] = %q, want %q", i, md.Tags[i], want)
+		}
+	}
+	if len(md.Categories) != 2 || md.Categories[0] != "intelligence" || md.Categories[1] != "search" {
+		t.Fatalf("categories were not normalized/deduped: %#v", md.Categories)
+	}
+}
+
+func TestMergeMapsPreservesGraphMetadataAndUnionsTags(t *testing.T) {
+	merged := MergeMaps(
+		map[string]any{
+			"tags":            []string{"actor:user_1", "domain:docuos"},
+			"categories":      []string{"workflow"},
+			"knowledge_graph": "docuos.documents",
+			"source_ref":      "request:req_1",
+			"attributes":      map[string]any{"actor_kind": "user"},
+		},
+		map[string]any{
+			"tags":            []string{"actor:user_1", "entity:brand_profile", "secret:abc"},
+			"categories":      []string{"security", "Workflow"},
+			"knowledge_graph": "",
+			"source_ref":      "",
+		},
+	)
+	tags, ok := merged["tags"].([]string)
+	if !ok {
+		t.Fatalf("tags have unexpected type: %T", merged["tags"])
+	}
+	wantTags := []string{"actor:user_1", "domain:docuos", "entity:brand_profile"}
+	if len(tags) != len(wantTags) {
+		t.Fatalf("tags length = %d, want %d: %#v", len(tags), len(wantTags), tags)
+	}
+	for i, want := range wantTags {
+		if tags[i] != want {
+			t.Fatalf("tag[%d] = %q, want %q", i, tags[i], want)
+		}
+	}
+	categories := merged["categories"].([]string)
+	if len(categories) != 2 || categories[0] != "workflow" || categories[1] != "security" {
+		t.Fatalf("categories mismatch: %#v", categories)
+	}
+	if merged["knowledge_graph"] != "docuos.documents" || merged["source_ref"] != "request:req_1" {
+		t.Fatalf("graph provenance should survive empty overlays: %#v", merged)
+	}
+}
+
 func TestMetadataNilReceiversAndValidationEdges(t *testing.T) {
 	var nilMeta *EnvelopeMetadata
 	if got := nilMeta.EnsureCorrelation(" corr_nil "); got != "corr_nil" {

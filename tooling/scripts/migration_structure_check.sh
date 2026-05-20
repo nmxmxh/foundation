@@ -58,6 +58,13 @@ fi
 
 first_up="${up_files[1]:-}"
 if [[ -n "$first_up" ]]; then
+  first_prefix="${first_up%%_*}"
+  if (( 10#$first_prefix != 1 )); then
+    echo "[FAIL] first migration prefix must start at 1: $first_up"
+    failed=1
+  else
+    echo "[OK] first migration starts at 1"
+  fi
   if [[ "$first_up" != *"_init.up.sql" && "$first_up" != *"_schema.up.sql" ]]; then
     echo "[FAIL] first migration should be an init/schema migration: $first_up"
     failed=1

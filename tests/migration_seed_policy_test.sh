@@ -36,4 +36,17 @@ if [[ -e "$PROJECT_DIR/migrations/000001_init.up.sql" || -e "$PROJECT_DIR/migrat
     exit 1
 fi
 
+"$FOUNDATION_DIR/tooling/scripts/migration_structure_check.sh" "$PROJECT_DIR" >/dev/null
+
+mv "$PROJECT_DIR/migrations/0001_schema.up.sql" "$PROJECT_DIR/migrations/0002_schema.up.sql"
+mv "$PROJECT_DIR/migrations/0001_schema.down.sql" "$PROJECT_DIR/migrations/0002_schema.down.sql"
+if "$FOUNDATION_DIR/tooling/scripts/migration_structure_check.sh" "$PROJECT_DIR" >"$PROJECT_DIR/migration_check.log" 2>&1; then
+    echo "migration structure check should reject first migration prefixes that do not start at 1" >&2
+    exit 1
+fi
+if ! rg -n "first migration prefix must start at 1" "$PROJECT_DIR/migration_check.log" >/dev/null; then
+    echo "migration structure failure should explain the first-prefix rule" >&2
+    exit 1
+fi
+
 echo "foundation migration seed policy test passed"

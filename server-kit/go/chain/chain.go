@@ -6,6 +6,8 @@ import (
 	"sync"
 )
 
+var ErrNilOperationRun = errors.New("operation run function is nil")
+
 type Operation[T any] struct {
 	Name     string
 	Critical bool
@@ -28,7 +30,7 @@ func RunParallel[T any](ctx context.Context, operations []Operation[T]) []Result
 	if len(operations) == 1 {
 		result := Result[T]{Name: operations[0].Name}
 		if operations[0].Run == nil {
-			result.Error = errors.New("operation run function is nil")
+			result.Error = ErrNilOperationRun
 			return []Result[T]{result}
 		}
 		result.Value, result.Error = operations[0].Run(ctx)
@@ -61,7 +63,7 @@ func RunParallelInto[T any](ctx context.Context, operations []Operation[T], resu
 	results = prepareResults(operations, results)
 	if len(operations) == 1 {
 		if operations[0].Run == nil {
-			results[0].Error = errors.New("operation run function is nil")
+			results[0].Error = ErrNilOperationRun
 			return results
 		}
 		results[0].Value, results[0].Error = operations[0].Run(ctx)
@@ -82,7 +84,7 @@ func RunParallelInto[T any](ctx context.Context, operations []Operation[T], resu
 func runOperation[T any](ctx context.Context, wg *sync.WaitGroup, cancel context.CancelFunc, results []Result[T], index int, operation Operation[T]) {
 	defer wg.Done()
 	if operation.Run == nil {
-		results[index].Error = errors.New("operation run function is nil")
+		results[index].Error = ErrNilOperationRun
 		if operation.Critical {
 			cancel()
 		}
@@ -108,6 +110,25 @@ func prepareResults[T any](operations []Operation[T], results []Result[T]) []Res
 	return results
 }
 
+// HasCriticalFailureOrdered checks results returned by RunParallel or
+// RunParallelInto without building a name lookup. It is the hot-path helper when
+// callers keep operation/result order intact.
+func HasCriticalFailureOrdered[T any](operations []Operation[T], results []Result[T]) bool {
+	limit := len(operations)
+	if len(results) < limit {
+		limit = len(results)
+	}
+	for index := 0; index < limit; index++ {
+		if operations[index].Critical && results[index].Error != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// HasCriticalFailure checks by operation name, which is useful when results have
+// been filtered, merged, or reordered. Prefer HasCriticalFailureOrdered for
+// direct RunParallel/RunParallelInto results.
 func HasCriticalFailure[T any](operations []Operation[T], results []Result[T]) bool {
 	critical := map[string]bool{}
 	for _, operation := range operations {

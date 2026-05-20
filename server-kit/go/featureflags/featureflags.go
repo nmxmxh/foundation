@@ -320,7 +320,7 @@ func (m *Manager) evaluate(flag Flag, ctx *EvaluationContext) bool {
 // hashToBucket returns a deterministic bucket (0-99) for a flag and user combination.
 func hashToBucket(flagName, userID string) int {
 	h := fnv.New32a()
-	h.Write([]byte(flagName + ":" + userID))
+	_, _ = h.Write([]byte(flagName + ":" + userID))
 	return int(h.Sum32() % 100)
 }
 

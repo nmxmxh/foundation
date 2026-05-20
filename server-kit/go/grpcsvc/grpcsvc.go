@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"net"
 	"slices"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"sync/atomic"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
 )
@@ -203,7 +205,6 @@ func Dial(ctx context.Context, target string, opts ClientOptions) (*grpc.ClientC
 	}
 	dialOpts := []grpc.DialOption{
 		grpc.WithDefaultCallOptions(grpc.ForceCodec(jsonCodec{})),
-		grpc.WithBlock(),
 	}
 	if opts.MaxMessageBytes > 0 {
 		dialOpts = append(dialOpts, grpc.WithDefaultCallOptions(
@@ -215,7 +216,38 @@ func Dial(ctx context.Context, target string, opts ClientOptions) (*grpc.ClientC
 		dialOpts = append(dialOpts, grpc.WithUnaryInterceptor(clientAuthUnaryInterceptor(opts.AuthToken)))
 	}
 	dialOpts = append(dialOpts, opts.DialOptions...)
-	return grpc.DialContext(ctx, target, dialOpts...)
+	conn, err := grpc.NewClient(passthroughTarget(target), dialOpts...)
+	if err != nil {
+		return nil, err
+	}
+	if err := waitForReady(ctx, conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+func passthroughTarget(target string) string {
+	if strings.Contains(target, "://") {
+		return target
+	}
+	return "passthrough:///" + target
+}
+
+func waitForReady(ctx context.Context, conn *grpc.ClientConn) error {
+	conn.Connect()
+	for {
+		state := conn.GetState()
+		if state == connectivity.Ready {
+			return nil
+		}
+		if !conn.WaitForStateChange(ctx, state) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("grpc connection did not become ready: %s", state)
+		}
+	}
 }
 
 func NewClient(conn grpc.ClientConnInterface, opts ClientOptions) *Client {
@@ -587,14 +619,6 @@ func AppendMarshalFrame(dst []byte, frame Frame) []byte {
 	return dst
 }
 
-func unmarshalFrame(data []byte) (Frame, error) {
-	var frame Frame
-	if err := unmarshalFrameInto(data, &frame); err != nil {
-		return Frame{}, err
-	}
-	return frame, nil
-}
-
 func unmarshalFrameInto(data []byte, frame *Frame) error {
 	var eventType []byte
 	var err error
@@ -651,17 +675,25 @@ func UnmarshalFrameView(data []byte) (FrameView, error) {
 }
 
 func putField(out []byte, offset int, value []byte) int {
-	binary.BigEndian.PutUint32(out[offset:offset+4], uint32(len(value)))
+	binary.BigEndian.PutUint32(out[offset:offset+4], checkedFieldLen(len(value)))
 	offset += 4
 	copy(out[offset:offset+len(value)], value)
 	return offset + len(value)
 }
 
 func putStringField(out []byte, offset int, value string) int {
-	binary.BigEndian.PutUint32(out[offset:offset+4], uint32(len(value)))
+	binary.BigEndian.PutUint32(out[offset:offset+4], checkedFieldLen(len(value)))
 	offset += 4
 	copy(out[offset:offset+len(value)], value)
 	return offset + len(value)
+}
+
+func checkedFieldLen(size int) uint32 {
+	if size < 0 || size > math.MaxUint32 {
+		panic("foundation binary frame field too large")
+	}
+	// #nosec G115 -- guarded by MaxUint32 check above.
+	return uint32(size)
 }
 
 func readField(data []byte, offset int) ([]byte, int, error) {

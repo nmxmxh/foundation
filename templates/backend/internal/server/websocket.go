@@ -362,12 +362,7 @@ func (s *Server) sendWSAck(conn *wsConnection) {
 			"connection_id": conn.id,
 			"state":         "guest",
 		},
-		Metadata: map[string]any{
-			"global_context": map[string]any{
-				"device_id": conn.deviceID,
-				"source":    "ws",
-			},
-		},
+		Metadata:      metadataForWSConnection(conn),
 		CorrelationID: httpapi.NewCorrelationID(),
 		Timestamp:     time.Now().UTC(),
 		SchemaVersion: events.EnvelopeSchemaVersion,
@@ -487,6 +482,7 @@ func (s *Server) handleWSSubscribe(conn *wsConnection, env events.Envelope) {
 	if err := s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_subscribe:v1:success",
 		Payload:       map[string]any{"pattern": pattern},
+		Metadata:      metadataForWSEnvelope(conn, env),
 		CorrelationID: env.CorrelationID,
 		SchemaVersion: events.EnvelopeSchemaVersion,
 		Timestamp:     time.Now().UTC(),
@@ -520,6 +516,7 @@ func (s *Server) handleWSUnsubscribe(conn *wsConnection, env events.Envelope) {
 	if err := s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_unsubscribe:v1:success",
 		Payload:       map[string]any{"pattern": pattern},
+		Metadata:      metadataForWSEnvelope(conn, env),
 		CorrelationID: env.CorrelationID,
 		SchemaVersion: events.EnvelopeSchemaVersion,
 		Timestamp:     time.Now().UTC(),
@@ -650,7 +647,7 @@ func (s *Server) sendWSDomainError(conn *wsConnection, err error, correlationID 
 	if err := s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_error:v1:failed",
 		Payload:       payload,
-		Metadata:      map[string]any{},
+		Metadata:      metadataForWSConnection(conn),
 		CorrelationID: correlationID,
 		SchemaVersion: events.EnvelopeSchemaVersion,
 		Timestamp:     time.Now().UTC(),
@@ -722,6 +719,39 @@ func (s *Server) forwardEventToConnections(_ context.Context, envelope events.En
 		}
 		return true
 	})
+}
+
+func metadataForWSEnvelope(conn *wsConnection, env events.Envelope) map[string]any {
+	md := metadata.FromMap(env.Metadata)
+	enrichWSMetadata(conn, &md)
+	return md.ToMap()
+}
+
+func metadataForWSConnection(conn *wsConnection) map[string]any {
+	md := metadata.New()
+	enrichWSMetadata(conn, &md)
+	return md.ToMap()
+}
+
+func enrichWSMetadata(conn *wsConnection, md *metadata.EnvelopeMetadata) {
+	if conn == nil || md == nil {
+		return
+	}
+	if md.GlobalContext == nil {
+		md.GlobalContext = &metadata.GlobalContext{}
+	}
+	if md.GlobalContext.DeviceID == "" {
+		md.GlobalContext.DeviceID = conn.deviceID
+	}
+	if md.GlobalContext.Source == "" {
+		md.GlobalContext.Source = "ws"
+	}
+	auth := conn.authSnapshot()
+	if auth.authenticated {
+		md.GlobalContext.UserID = auth.userID
+		md.GlobalContext.OrganizationID = auth.orgID
+		md.GlobalContext.RoleID = auth.roleID
+	}
 }
 
 func (c *wsConnection) setAuth(userID, orgID, roleID string, capabilities []string) {

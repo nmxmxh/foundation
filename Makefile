@@ -1,7 +1,7 @@
 .PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-migration-seed-policy check-lifecycle-contract-generator \
-	check-contract-drift check-go-fix check-coding-practices check-testing-practices check-go-concurrency-practices \
-	check-database-practices check-redis-practices check-river-practices check-migration-structure check-server-kit-usage
+	check-contract-drift check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
+	check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-server-kit-usage
 
 .DEFAULT_GOAL := help
 
@@ -13,13 +13,16 @@ FOUNDATION_LINT_CHECKS := \
 	check-lifecycle-contract-generator \
 	check-contract-drift \
 	check-go-fix \
+	check-go-static-analysis \
 	check-coding-practices \
 	check-testing-practices \
 	check-go-concurrency-practices \
+	check-metadata-practices \
 	check-database-practices \
 	check-redis-practices \
 	check-river-practices \
 	check-migration-structure \
+	check-domain-contract-consistency \
 	check-server-kit-usage
 
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 180
@@ -96,6 +99,9 @@ check-contract-drift:
 check-go-fix:
 	@tooling/scripts/go_fix_check.sh .
 
+check-go-static-analysis:
+	@tooling/scripts/go_static_analysis_check.sh .
+
 check-coding-practices:
 	@tooling/scripts/coding_practices_check.sh .
 
@@ -104,6 +110,9 @@ check-testing-practices:
 
 check-go-concurrency-practices:
 	@tooling/scripts/go_concurrency_practices_check.sh .
+
+check-metadata-practices:
+	@tooling/scripts/metadata_practices_check.sh .
 
 check-database-practices:
 	@tooling/scripts/database_practices_check.sh .
@@ -116,6 +125,9 @@ check-river-practices:
 
 check-migration-structure:
 	@tooling/scripts/migration_structure_check.sh .
+
+check-domain-contract-consistency:
+	@tooling/scripts/domain_contract_consistency_check.sh .
 
 check-server-kit-usage:
 	@tooling/scripts/server_kit_usage_check.sh .

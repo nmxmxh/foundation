@@ -186,8 +186,11 @@ func decodeMapIntoMessage(msg proto.Message, payload map[string]any, metadata ma
 	if len(working) == 0 {
 		working = map[string]any{}
 	}
-	if hasMetadataField(msg) && len(metadata) > 0 {
-		working["metadata"] = mergeMetadataMap(asMap(working["metadata"]), metadata)
+	if field := metadataFieldDescriptor(msg); field != nil && len(metadata) > 0 {
+		filtered := filterMapForMessage(metadata, field.Message())
+		if len(filtered) > 0 {
+			working["metadata"] = mergeMetadataMap(asMap(working["metadata"]), filtered)
+		}
 	}
 	raw, err := json.Marshal(working)
 	if err != nil {
@@ -199,11 +202,43 @@ func decodeMapIntoMessage(msg proto.Message, payload map[string]any, metadata ma
 }
 
 func hasMetadataField(msg proto.Message) bool {
+	return metadataFieldDescriptor(msg) != nil
+}
+
+func metadataFieldDescriptor(msg proto.Message) protoreflect.FieldDescriptor {
 	if msg == nil {
-		return false
+		return nil
 	}
 	field := msg.ProtoReflect().Descriptor().Fields().ByName("metadata")
-	return field != nil && field.Kind() == protoreflect.MessageKind
+	if field == nil || field.Kind() != protoreflect.MessageKind {
+		return nil
+	}
+	return field
+}
+
+func filterMapForMessage(input map[string]any, desc protoreflect.MessageDescriptor) map[string]any {
+	if len(input) == 0 || desc == nil {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(input))
+	fields := desc.Fields()
+	for key, value := range input {
+		field := fields.ByJSONName(key)
+		if field == nil {
+			field = fields.ByName(protoreflect.Name(key))
+		}
+		if field == nil {
+			continue
+		}
+		if field.Kind() == protoreflect.MessageKind {
+			if nested, ok := value.(map[string]any); ok && !field.IsMap() && !field.IsList() {
+				out[key] = filterMapForMessage(nested, field.Message())
+				continue
+			}
+		}
+		out[key] = deepClone(value)
+	}
+	return out
 }
 
 func cloneMap(input map[string]any) map[string]any {

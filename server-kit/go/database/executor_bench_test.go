@@ -54,7 +54,7 @@ type fakeResultExecutor struct {
 }
 
 func (f fakeResultExecutor) ExecResult(context.Context, string, ...any) (CommandResult, error) {
-	return commandResult{rowsAffected: f.rowsAffected}, nil
+	return commandResult(f), nil
 }
 
 func BenchmarkQueryEachFakeRows100(b *testing.B) {

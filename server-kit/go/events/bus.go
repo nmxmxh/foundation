@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 )
 
@@ -45,6 +46,7 @@ func NewInMemoryBus(maxRecent int) *InMemoryBus {
 }
 
 func (b *InMemoryBus) Publish(ctx context.Context, envelope Envelope) error {
+	envelope = envelopeWithContextMetadata(ctx, envelope)
 	if !envelopeDispatchReady(envelope) {
 		envelope.Normalize()
 	}
@@ -80,6 +82,13 @@ func (b *InMemoryBus) Publish(ctx context.Context, envelope Envelope) error {
 		subscriber(ctx, envelope)
 	}
 	return nil
+}
+
+func envelopeWithContextMetadata(ctx context.Context, envelope Envelope) Envelope {
+	md := metadata.FromContext(ctx)
+	md.EnsureCorrelation(envelope.CorrelationID)
+	envelope.Metadata = metadata.MergeMaps(md.ToMap(), envelope.Metadata)
+	return envelope
 }
 
 func recordEventTrace(stage string, envelope Envelope) {
