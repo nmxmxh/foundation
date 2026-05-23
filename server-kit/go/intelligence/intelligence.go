@@ -101,6 +101,7 @@ func (o *AsyncObserver) ObserveIntelligence(_ context.Context, signal Signal) {
 	select {
 	case o.queue <- signal:
 	default:
+		// queue full: async intelligence observation is lossy by design.
 		o.dropped.Add(1)
 	}
 }

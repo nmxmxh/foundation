@@ -54,9 +54,17 @@ type FFIPoolOptions struct {
 type FFIPool struct {
 	logger logger.Logger
 
-	mu           sync.RWMutex
-	bufferPool   sync.Pool
-	errBufPool   sync.Pool
+	mu         sync.RWMutex
+	bufferPool sync.Pool
+	backend    ffiBackend
+}
+
+type ffiBackend interface {
+	Process(unitID string, buffer []byte, errBuf []byte) (int32, string)
+	Close() error
+}
+
+type cgoFFIBackend struct {
 	library      unsafe.Pointer
 	host         unsafe.Pointer
 	abiVersionFn unsafe.Pointer
@@ -77,69 +85,18 @@ func NewFFIPool(opts FFIPoolOptions) (*FFIPool, error) {
 		return nil, errors.New("runtime ffi library path is required")
 	}
 
-	libraryPath := C.CString(opts.LibraryPath)
-	defer C.free(unsafe.Pointer(libraryPath))
-
-	handle := C.dlopen(libraryPath, C.RTLD_NOW|C.RTLD_LOCAL)
-	if handle == nil {
-		return nil, errors.New(dlError("dlopen runtime ffi library"))
-	}
-
 	pool := &FFIPool{
-		logger:  opts.Logger,
-		library: handle,
 		bufferPool: sync.Pool{New: func() any {
 			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
 			return &buffer
 		}},
-		errBufPool: sync.Pool{New: func() any {
-			buffer := make([]byte, 4096)
-			return &buffer
-		}},
+		logger: opts.Logger,
 	}
-
-	var err error
-	if pool.abiVersionFn, err = lookupSymbol(handle, "ovrt_runtime_abi_version"); err != nil {
-		_ = pool.Close()
+	backend, err := openFFIBackend(opts.LibraryPath, opts.Workers)
+	if err != nil {
 		return nil, err
 	}
-	if pool.createFn, err = lookupSymbol(handle, "ovrt_runtime_create"); err != nil {
-		_ = pool.Close()
-		return nil, err
-	}
-	if pool.destroyFn, err = lookupSymbol(handle, "ovrt_runtime_destroy"); err != nil {
-		_ = pool.Close()
-		return nil, err
-	}
-	if pool.processFn, err = lookupSymbol(handle, "ovrt_runtime_process_buffer"); err != nil {
-		_ = pool.Close()
-		return nil, err
-	}
-
-	if version := uint32(C.ovrt_call_abi_version(pool.abiVersionFn)); version != ffiABIVersion {
-		_ = pool.Close()
-		return nil, fmt.Errorf("runtime ffi abi mismatch: %d != %d", version, ffiABIVersion)
-	}
-
-	var host unsafe.Pointer
-	errBuf := make([]byte, 4096)
-	status := int32(C.ovrt_call_create(
-		pool.createFn,
-		C.uintptr_t(opts.Workers),
-		(*unsafe.Pointer)(unsafe.Pointer(&host)),
-		(*C.char)(unsafe.Pointer(unsafe.SliceData(errBuf))),
-		C.uintptr_t(len(errBuf)),
-	))
-	if status != 0 {
-		_ = pool.Close()
-		return nil, errors.New(cStringBytes(errBuf))
-	}
-	if host == nil {
-		_ = pool.Close()
-		return nil, errors.New("runtime ffi host returned a nil handle")
-	}
-
-	pool.host = host
+	pool.backend = backend
 	return pool, nil
 }
 
@@ -149,6 +106,9 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 	}
 	if stringsTrim(req.UnitID) == "" {
 		return ProcessResponse{}, errors.New("unit id is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return ProcessResponse{}, err
@@ -165,9 +125,7 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 		return ProcessResponse{}, err
 	}
 	buffer.Reset()
-	if err := buffer.Initialize(req.ModuleVersion); err != nil {
-		return ProcessResponse{}, err
-	}
+	buffer.Initialize(req.ModuleVersion)
 	if err := buffer.SetHeaderInt(generated.INT_IDX_CONTEXT_HASH, req.ContextHash); err != nil {
 		return ProcessResponse{}, err
 	}
@@ -178,34 +136,15 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 		return ProcessResponse{}, err
 	}
 
-	p.mu.RLock()
-	host := p.host
-	processFn := p.processFn
-	p.mu.RUnlock()
-	if host == nil || processFn == nil {
+	backend := p.currentBackend()
+	if backend == nil {
 		return ProcessResponse{}, errors.New("ffi runtime host is closed")
 	}
 
-	errBufPtr := p.errBufPool.Get().(*[]byte)
-	errBuf := *errBufPtr
-	defer func() {
-		*errBufPtr = errBuf
-		p.errBufPool.Put(errBufPtr)
-	}()
+	errBuf := make([]byte, 4096)
 	clear(errBuf)
-	unitID := unsafe.StringData(req.UnitID)
-	status := int32(C.ovrt_call_process(
-		processFn,
-		host,
-		(*C.uint8_t)(unsafe.Pointer(unitID)),
-		C.uintptr_t(len(req.UnitID)),
-		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(raw))),
-		C.uintptr_t(len(raw)),
-		(*C.char)(unsafe.Pointer(unsafe.SliceData(errBuf))),
-		C.uintptr_t(len(errBuf)),
-	))
+	status, message := backend.Process(req.UnitID, raw, errBuf)
 	if status != 0 {
-		message := cStringBytes(errBuf)
 		if message == "" {
 			message = "ffi runtime process failed"
 		}
@@ -245,20 +184,111 @@ func (p *FFIPool) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.destroyFn != nil && p.host != nil {
-		C.ovrt_call_destroy(p.destroyFn, p.host)
-		p.host = nil
+	if p.backend == nil {
+		return nil
 	}
-	if p.library != nil {
-		if result := C.dlclose(p.library); result != 0 {
+	err := p.backend.Close()
+	p.backend = nil
+	return err
+}
+
+func (p *FFIPool) currentBackend() ffiBackend {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.backend
+}
+
+func openFFIBackend(library string, workers int) (*cgoFFIBackend, error) {
+	libraryPath := C.CString(library)
+	defer C.free(unsafe.Pointer(libraryPath))
+
+	handle := C.dlopen(libraryPath, C.RTLD_NOW|C.RTLD_LOCAL)
+	if handle == nil {
+		return nil, errors.New(dlError("dlopen runtime ffi library"))
+	}
+
+	backend := &cgoFFIBackend{library: handle}
+	var err error
+	if backend.abiVersionFn, err = lookupSymbol(handle, "ovrt_runtime_abi_version"); err != nil {
+		_ = backend.Close()
+		return nil, err
+	}
+	if backend.createFn, err = lookupSymbol(handle, "ovrt_runtime_create"); err != nil {
+		_ = backend.Close()
+		return nil, err
+	}
+	if backend.destroyFn, err = lookupSymbol(handle, "ovrt_runtime_destroy"); err != nil {
+		_ = backend.Close()
+		return nil, err
+	}
+	if backend.processFn, err = lookupSymbol(handle, "ovrt_runtime_process_buffer"); err != nil {
+		_ = backend.Close()
+		return nil, err
+	}
+
+	if version := uint32(C.ovrt_call_abi_version(backend.abiVersionFn)); version != ffiABIVersion {
+		_ = backend.Close()
+		return nil, fmt.Errorf("runtime ffi abi mismatch: %d != %d", version, ffiABIVersion)
+	}
+
+	var host unsafe.Pointer
+	errBuf := make([]byte, 4096)
+	status := int32(C.ovrt_call_create(
+		backend.createFn,
+		C.uintptr_t(workers),
+		(*unsafe.Pointer)(unsafe.Pointer(&host)),
+		(*C.char)(unsafe.Pointer(unsafe.SliceData(errBuf))),
+		C.uintptr_t(len(errBuf)),
+	))
+	if status != 0 {
+		_ = backend.Close()
+		return nil, errors.New(cStringBytes(errBuf))
+	}
+	if host == nil {
+		_ = backend.Close()
+		return nil, errors.New("runtime ffi host returned a nil handle")
+	}
+
+	backend.host = host
+	return backend, nil
+}
+
+func (b *cgoFFIBackend) Process(unitID string, buffer []byte, errBuf []byte) (int32, string) {
+	if b == nil || b.host == nil || b.processFn == nil {
+		return 1, "ffi runtime host is closed"
+	}
+	unitIDData := unsafe.StringData(unitID)
+	status := int32(C.ovrt_call_process(
+		b.processFn,
+		b.host,
+		(*C.uint8_t)(unsafe.Pointer(unitIDData)),
+		C.uintptr_t(len(unitID)),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(buffer))),
+		C.uintptr_t(len(buffer)),
+		(*C.char)(unsafe.Pointer(unsafe.SliceData(errBuf))),
+		C.uintptr_t(len(errBuf)),
+	))
+	return status, cStringBytes(errBuf)
+}
+
+func (b *cgoFFIBackend) Close() error {
+	if b == nil {
+		return nil
+	}
+	if b.destroyFn != nil && b.host != nil {
+		C.ovrt_call_destroy(b.destroyFn, b.host)
+		b.host = nil
+	}
+	if b.library != nil {
+		if result := C.dlclose(b.library); result != 0 {
 			return errors.New(dlError("dlclose runtime ffi library"))
 		}
-		p.library = nil
+		b.library = nil
 	}
-	p.abiVersionFn = nil
-	p.createFn = nil
-	p.destroyFn = nil
-	p.processFn = nil
+	b.abiVersionFn = nil
+	b.createFn = nil
+	b.destroyFn = nil
+	b.processFn = nil
 	return nil
 }
 

@@ -94,11 +94,14 @@ func New() EnvelopeMetadata {
 }
 
 func NewCorrelationID() string {
+	now := time.Now().UTC().Format("20060102T150405.000000000")
 	var random [8]byte
 	if _, err := rand.Read(random[:]); err == nil {
-		return "corr_" + time.Now().UTC().Format("20060102T150405.000000000") + "_" + hex.EncodeToString(random[:])
+		var encoded [16]byte
+		hex.Encode(encoded[:], random[:])
+		return "corr_" + now + "_" + string(encoded[:])
 	}
-	return "corr_" + time.Now().UTC().Format("20060102T150405.000000000")
+	return "corr_" + now
 }
 
 func (m *EnvelopeMetadata) EnsureCorrelation(candidates ...string) string {
@@ -138,12 +141,20 @@ func IntoContext(ctx context.Context, md EnvelopeMetadata) context.Context {
 }
 
 func FromContext(ctx context.Context) EnvelopeMetadata {
-	if ctx == nil {
+	value, ok := FromContextOK(ctx)
+	if !ok {
 		return New()
+	}
+	return value
+}
+
+func FromContextOK(ctx context.Context) (EnvelopeMetadata, bool) {
+	if ctx == nil {
+		return EnvelopeMetadata{}, false
 	}
 	value, ok := ctx.Value(metadataKey).(EnvelopeMetadata)
 	if !ok {
-		return New()
+		return EnvelopeMetadata{}, false
 	}
 	if value.Attributes == nil {
 		value.Attributes = map[string]string{}
@@ -151,7 +162,7 @@ func FromContext(ctx context.Context) EnvelopeMetadata {
 	if value.Extras == nil {
 		value.Extras = map[string]any{}
 	}
-	return value
+	return value, true
 }
 
 func NewContext(ctx context.Context, raw map[string]any) context.Context {

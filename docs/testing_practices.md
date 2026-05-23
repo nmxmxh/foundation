@@ -1,7 +1,7 @@
 # Ovasabi Testing Practices
 
 Status: v1.0
-Date: 2026-05-14
+Date: 2026-05-22
 Owner: Platform Architecture
 
 ## Purpose and scope
@@ -44,6 +44,8 @@ The source review used five passes over each testing document:
 | **Structural test** | White-box test derived from code structure: branch, loop, error path, data-flow, race, or optimized-lane behavior. |
 | **Regression test** | A durable test added or updated because a defect was found, a contract changed, or a risky interaction was identified. |
 | **Contract test** | A test that verifies compatibility across a boundary: producer/consumer events, proto schemas, envelopes, DB migrations, frontend transport, worker payloads, WASM host/guest buffers, or generated scaffold behavior. |
+| **Property test** | A generative test that checks an invariant over many valid and invalid generated inputs, with a recorded or fixed seed for reproduction. |
+| **Acceptance mutation** | A fault-based acceptance adequacy check that mutates Gherkin example values in the JSON IR and expects generated acceptance tests to fail for meaningful changes. |
 
 ## Rules (`TE-*`)
 
@@ -204,14 +206,26 @@ Level: `Mandatory`
 
 Requirements:
 
-1. HTTP, WebSocket, Redis, gRPC, direct frame, and WASM/native lanes must preserve canonical metadata and payload semantics.
+1. HTTP, WebSocket, Redis, gRPC, direct frame, WASM/native, and GPU/WebGPU lanes must preserve canonical metadata and payload semantics.
 2. Optimized lanes must have parity/refinement tests against the canonical behavior.
 3. Compatibility JSON lanes must not become the only tested path for performance-sensitive communication.
+4. GPU/WebGPU parity tests must include buffer layout, fallback behavior, device/capability absence, boundary sizes, and deterministic tolerance for numeric output.
+5. Native GPU tests must check asynchronous error surfaces: launch-time status, synchronization-time status, stream/event status, device assertion behavior, and fallback replay after a failed dispatch.
+6. GPU numeric tests must name tolerance and ULP budgets, then cover fused multiply-add drift, reduction-order changes, NaN/Inf behavior, subnormal handling, and host/device accuracy differences.
+7. GPU edge tests must include default-stream or implicit-queue serialization, graph capture invalidation, unsupported operations, memory-pool reuse, page migration or oversubscription where supported, and sanitizer/debug-tool gaps.
+8. Interactive rendering, media, canvas, WebGPU, and native preview tests must
+   include a frame-budget case, a first-use cold-start case, a warmed steady
+   state case, and a reduced-capability fallback case.
+9. Capture-backed tests must preserve enough metadata to replay or compare the
+   run: build SHA, browser/runtime, driver version, GPU/CPU model, quality
+   profile, feature flags, input seed, async overlap state, and capture tool.
 
 Enforcement:
 
 - Runtime transport and server-kit contract tests.
 - Reviewer gate for transport/router/runtime changes.
+- GPU adapter changes must link to parity, edge-case, and benchmark evidence from `docs/gpu_practices.md`.
+- Interactive GPU/media/rendering changes must link to `docs/game_runtime_practices.md` evidence when user-visible hitches or visual regressions are possible.
 
 ### TE-12: Database tests must prove constraints, not only app prechecks
 
@@ -498,7 +512,43 @@ Enforcement:
 
 - Review of critical validation and resilience changes.
 
-### TE-31: Test suites must be organized by speed and dependency
+### TE-31: Use property tests for invariant-heavy code
+
+Level: `Contextual`
+
+Requirements:
+
+1. Property tests are expected for parsers, serializers, validators, canonicalizers, permission predicates, routing/deduplication logic, idempotency keys, retry/backoff math, pagination cursors, money/count arithmetic, state transitions, and runtime buffer/frame transforms when the behavior has a stable invariant.
+2. Each property test must name the invariant and constrain the generator domain to realistic Foundation inputs: bounded sizes, valid tenant/correlation shapes, explicit invalid classes, and edge values near limits.
+3. Property tests must include negative domains when the contract rejects malformed, cross-tenant, oversized, stale, replayed, missing, or semantically invalid values.
+4. Generated examples must be bounded. Do not use unbounded recursion, unbounded collection sizes, wall-clock randomness, or external services inside a property.
+5. Failures must be reproducible by logging or fixing the seed and by printing the shrunk counterexample when the framework supports shrinking.
+6. Property tests complement table tests. Keep small table tests for named boundaries and regressions, then use property tests to explore the surrounding space.
+
+Enforcement:
+
+- Reviewer gate for invariant-heavy changes that only test hand-picked happy paths.
+- Static check for uncontrolled randomness in test files.
+
+### TE-32: Acceptance mutation hardens generated acceptance tests
+
+Level: `Contextual`
+
+Requirements:
+
+1. Projects that generate acceptance tests from Gherkin or a JSON acceptance IR must provide a normal acceptance command that parses the feature, writes the JSON IR, generates executable tests from that IR, and runs the project test runner.
+2. Those projects must also provide an explicit acceptance mutation command that mutates only example-cell values in the IR, regenerates tests per mutation, runs them, and reports `killed`, `survived`, and `error` outcomes.
+3. The mutator must be deterministic: stable mutation IDs, stable paths, bounded workers, bounded timeout, and no in-place mutation of the base IR.
+4. Survived mutations are test-quality failures unless a documented equivalent-mutation filter explains why the change is semantically identical for the project.
+5. Differential acceptance mutation may reuse previous clean scenario results only when feature identity, scenario content, background content, and the selected implementation-hash policy prove reuse is valid.
+6. Normal acceptance belongs in regular verification. Acceptance mutation belongs in an explicit quality target because it may be slower.
+
+Enforcement:
+
+- Reviewer gate for generated acceptance-test pipelines.
+- Static check for scaffold or project targets/scripts when `features/*.feature` files are present.
+
+### TE-33: Test suites must be organized by speed and dependency
 
 Level: `Mandatory`
 
@@ -513,7 +563,7 @@ Enforcement:
 
 - `make test-unit`, `make test-integration`, `make test-frontend`, `make test-load`, `make test-bench`, and `make test-all`.
 
-### TE-32: Test failures must preserve diagnostics
+### TE-34: Test failures must preserve diagnostics
 
 Level: `Mandatory`
 
@@ -527,7 +577,7 @@ Enforcement:
 
 - Reviewer gate on low-signal assertions and swallowed errors.
 
-### TE-33: Test automation must be reproducible locally
+### TE-35: Test automation must be reproducible locally
 
 Level: `Mandatory`
 
@@ -541,7 +591,7 @@ Enforcement:
 
 - Makefile targets and scaffold manifest checks.
 
-### TE-34: Testing checks are linted as part of Foundation
+### TE-36: Testing checks are linted as part of Foundation
 
 Level: `Mandatory`
 
@@ -556,7 +606,7 @@ Enforcement:
 - `make lint`.
 - Scaffold sync.
 
-### TE-35: Update this document when test strategy changes
+### TE-37: Update this document when test strategy changes
 
 Level: `Mandatory`
 
@@ -580,7 +630,10 @@ The conservative automated check set is:
 4. No long fixed waits in TypeScript tests: `setTimeout`/promise sleeps above one second outside explicit E2E/load paths.
 5. Domain lifecycle tests must exist when generated lifecycle contract tests are present.
 6. Frontend scaffold tests must keep Testing Library, jsdom, and user-event dependencies.
-7. Generated project lint must run the testing-practices check.
+7. Frontend scaffold tests must include a property-testing library.
+8. Tests must avoid uncontrolled random sources that cannot reproduce failures.
+9. Acceptance feature files must have normal acceptance and acceptance-mutation script or target entry points.
+10. Generated project lint must run the testing-practices check.
 
 These checks intentionally do not try to infer whether every test has a strong oracle or adequate partitions. Those are review obligations under `TE-02` through `TE-06`.
 
@@ -596,4 +649,6 @@ These checks intentionally do not try to infer whether every test has a strong o
 - [ ] Frontend changes include loading, empty, success, error, permission, and reconnect states where applicable.
 - [ ] Runtime/WASM/native changes include parity/refinement tests across lanes.
 - [ ] Bug fixes include regression tests.
+- [ ] Invariant-heavy logic has property tests with bounded generators and reproducible seeds.
+- [ ] Generated acceptance pipelines include acceptance mutation, or the absence is documented as a test gap.
 - [ ] Long, service-backed, load, or external tests are under explicit targets/gates.

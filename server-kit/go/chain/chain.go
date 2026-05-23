@@ -114,11 +114,8 @@ func prepareResults[T any](operations []Operation[T], results []Result[T]) []Res
 // RunParallelInto without building a name lookup. It is the hot-path helper when
 // callers keep operation/result order intact.
 func HasCriticalFailureOrdered[T any](operations []Operation[T], results []Result[T]) bool {
-	limit := len(operations)
-	if len(results) < limit {
-		limit = len(results)
-	}
-	for index := 0; index < limit; index++ {
+	limit := min(len(results), len(operations))
+	for index := range limit {
 		if operations[index].Critical && results[index].Error != nil {
 			return true
 		}

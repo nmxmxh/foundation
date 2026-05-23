@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"context"
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -34,6 +35,110 @@ func TestMemoryStoreRoundTripsBytes(t *testing.T) {
 	}
 	if string(payload) != "rendered" {
 		t.Fatalf("unexpected payload %q", string(payload))
+	}
+}
+
+func TestMemoryStoreStreamsRangesAndDeletes(t *testing.T) {
+	store := New(runtimeconfig.ObjectStorageConfig{
+		Endpoint: "memory://object-tests",
+		Bucket:   "bulk-test",
+	})
+	ctx := context.Background()
+
+	object, err := store.PutStream(ctx, "chunks/part-1", strings.NewReader("0123456789"), 10, PutOptions{
+		ContentType: "application/octet-stream",
+		Metadata:    map[string]string{"transfer": "t1"},
+	})
+	if err != nil {
+		t.Fatalf("PutStream() error = %v", err)
+	}
+	if object.Size != 10 || object.Metadata["transfer"] != "t1" {
+		t.Fatalf("object = %+v", object)
+	}
+
+	stream, opened, err := store.Open(ctx, "chunks/part-1")
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	payload, err := io.ReadAll(stream)
+	_ = stream.Close()
+	if err != nil || string(payload) != "0123456789" || opened.Size != 10 {
+		t.Fatalf("Open() payload = %q object=%+v err=%v", string(payload), opened, err)
+	}
+
+	ranged, rangedObject, err := store.GetRange(ctx, "chunks/part-1", 3, 4)
+	if err != nil {
+		t.Fatalf("GetRange() error = %v", err)
+	}
+	rangePayload, err := io.ReadAll(ranged)
+	_ = ranged.Close()
+	if err != nil || string(rangePayload) != "3456" || rangedObject.Size != 10 {
+		t.Fatalf("GetRange() payload = %q object=%+v err=%v", string(rangePayload), rangedObject, err)
+	}
+
+	if _, err := store.PutStream(ctx, "chunks/bad", strings.NewReader("abc"), 4, PutOptions{}); err == nil {
+		t.Fatal("expected stream size mismatch")
+	}
+	if err := store.Delete(ctx, "chunks/part-1"); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if _, _, err := store.Open(ctx, "chunks/part-1"); err == nil {
+		t.Fatal("expected deleted object to be missing")
+	}
+}
+
+func TestStreamRangeAndDeleteValidation(t *testing.T) {
+	ctx := context.Background()
+	store := New(runtimeconfig.ObjectStorageConfig{
+		Endpoint: "memory://object-tests",
+		Bucket:   "bulk-test",
+	})
+	if _, err := (*Store)(nil).PutStream(ctx, "k", strings.NewReader("x"), 1, PutOptions{}); err == nil {
+		t.Fatal("expected nil PutStream to fail")
+	}
+	if _, err := store.PutStream(ctx, " ", strings.NewReader("x"), 1, PutOptions{}); err == nil {
+		t.Fatal("expected empty PutStream key to fail")
+	}
+	if _, err := store.PutStream(ctx, "k", nil, 1, PutOptions{}); err == nil {
+		t.Fatal("expected nil PutStream reader to fail")
+	}
+	if _, err := New(runtimeconfig.ObjectStorageConfig{Endpoint: "memory://object-tests"}).PutStream(ctx, "k", strings.NewReader("x"), 1, PutOptions{}); err == nil {
+		t.Fatal("expected missing bucket PutStream to fail")
+	}
+	if _, _, err := (*Store)(nil).Open(ctx, "k"); err == nil {
+		t.Fatal("expected nil Open to fail")
+	}
+	if _, _, err := store.Open(ctx, " "); err == nil {
+		t.Fatal("expected empty Open key to fail")
+	}
+	if _, _, err := (*Store)(nil).GetRange(ctx, "k", 0, 1); err == nil {
+		t.Fatal("expected nil GetRange to fail")
+	}
+	if _, _, err := store.GetRange(ctx, "k", -1, 1); err == nil {
+		t.Fatal("expected negative range offset to fail")
+	}
+	if _, _, err := store.GetRange(ctx, "k", 0, 0); err == nil {
+		t.Fatal("expected zero range length to fail")
+	}
+	if err := (*Store)(nil).Delete(ctx, "k"); err == nil {
+		t.Fatal("expected nil Delete to fail")
+	}
+	if err := store.Delete(ctx, " "); err == nil {
+		t.Fatal("expected empty Delete key to fail")
+	}
+
+	s3ish := &Store{Endpoint: "https://storage.example.com", Bucket: "bucket", Region: "us-east-1"}
+	if _, err := s3ish.PutStream(ctx, "k", strings.NewReader("x"), 1, PutOptions{}); err == nil {
+		t.Fatal("expected S3 PutStream validation to fail")
+	}
+	if _, _, err := s3ish.Open(ctx, "k"); err == nil {
+		t.Fatal("expected S3 Open validation to fail")
+	}
+	if _, _, err := s3ish.GetRange(ctx, "k", 0, 1); err == nil {
+		t.Fatal("expected S3 GetRange validation to fail")
+	}
+	if err := s3ish.Delete(ctx, "k"); err == nil {
+		t.Fatal("expected S3 Delete validation to fail")
 	}
 }
 

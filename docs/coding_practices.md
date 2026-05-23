@@ -1,7 +1,7 @@
 # Ovasabi Coding Practices (Pragmatic Strict-Core)
 
 Status: v2.6
-Date: 2026-05-01
+Date: 2026-05-22
 Owner: Platform Architecture
 
 ## Purpose and scope
@@ -168,21 +168,25 @@ Requirements:
 15. Same-process hot communication must not use gRPC, HTTP, Redis, or JSON. Use direct typed calls, direct frame dispatch, worker channels, or shared-memory descriptors so the hot path can remain zero-copy or near-zero allocation.
 16. Serialization boundaries should expose both owned and borrowed decode APIs where safe. Borrowed views are preferred inside synchronous hot paths; owned decoded values are required when data escapes the frame lifetime.
 17. Prefer Foundation database executor helpers for repository code. Use `QueryOne`, `QueryEach`, `QueryAll`, `ExecRowsAffected`, `AtomicLane`, and only then driver-native `pgx.Batch`/`CopyFrom` through the Foundation Postgres adapter for high-volume paths. `AtomicLane` closures must stay pure database work so query, lock, and idle-transaction budgets remain meaningful.
-18. Parallelize independent I/O-bound operations, such as object-storage uploads during batch ingestion, with bounded goroutines or the project chain helper. Preserve per-record diagnostics and cancellation semantics.
-19. Initial dashboard and bootstrap summaries must request the smallest useful projection: explicit compact/light metadata, bounded recent items, and expensive sections disabled unless the first viewport actually renders them.
-20. Frontend cache keys for summary/list hot paths must be semantic and stable. Include filters that change the response; exclude volatile metadata such as correlation IDs, timestamps, trace IDs, and retry markers.
-21. Service metadata must use Foundation metadata helpers so request context, tags, categories, knowledge graph, source reference, and bounded attributes merge centrally. Tags are semantic indexes for analytics/search/security; high-cardinality actor/entity facts belong in `knowledge_graph`, `source_ref`, explicit schema columns, or `attributes`.
-22. Do not log full summary/list payloads in store setters, reducers, or render-adjacent code. Hot UI paths may log compact counters/keys only behind a development guard.
-23. Scan-heavy analytical flows should use compact projections, materialized views, or columnar/export lanes before scanning wide transactional tables in product traffic.
-24. Runtime batches that operate over many records should prefer structure-of-arrays layouts and shared arena descriptors over arrays of row objects when benchmarks show scan/vector locality matters.
-25. FFI surfaces must remain C-compatible and versioned: scalar integers, lengths, raw byte buffers, opaque handles, and explicit diagnostics only.
-26. Repository SQL must be pushdown-friendly: select only needed columns, keep tenant/auth/time/state predicates inside SQL, push `LIMIT` to the database boundary, and keep partition/index columns in simple comparable forms.
-27. Update-heavy tables must not index every mutable field by default. Indexes on frequently updated columns require query-plan evidence and a write-amplification review.
-28. Large JSONB/text/binary payloads must not sit in the same hot mutable row when compact state updates dominate the workload. Use sidecar/detail tables or append facts when that preserves the domain contract.
-29. Hot loops must account for cache-line locality. Prefer contiguous typed buffers, structure-of-arrays layouts, borrowed frame views, and fixed-width descriptors over pointer-heavy graphs, dynamic maps, or per-record object materialization.
-30. Contended atomics, ring cursors, per-worker counters, and queue ownership words must be reviewed for false sharing. Padding, sharding, or ownership separation is required when benchmarks or profiles show cache-line bouncing.
-31. Branchless code, manual prefetch, SIMD, and alignment-specific layouts require benchmark evidence, scalar fallbacks, and parity tests. Do not introduce them into tenant/auth/orchestration paths as speculative cleanup.
-32. Batch-size changes in runtime, database, websocket, worker, or analytical paths must state the intended working-set budget: payload bytes, descriptor count, cache-line footprint, and downstream backpressure limit.
+18. Fixed-size checksum, random suffix, and short redaction hash encodings in hot paths should use stack-backed `hex.Encode`/`hex.Decode` into fixed arrays before final string conversion. `hex.EncodeToString`/`hex.DecodeString` are acceptable in cold paths, tests, or one-off setup code.
+19. Stream APIs with a declared size should prefer exact-size bounded reads or caller-owned copy buffers over hidden scratch allocation. When both materialized and callback/borrowed APIs exist, benchmark and document them separately.
+20. Parallelize independent I/O-bound operations, such as object-storage uploads during batch ingestion, with bounded goroutines or the project chain helper. Preserve per-record diagnostics and cancellation semantics.
+21. Initial dashboard and bootstrap summaries must request the smallest useful projection: explicit compact/light metadata, bounded recent items, and expensive sections disabled unless the first viewport actually renders them.
+22. Frontend cache keys for summary/list hot paths must be semantic and stable. Include filters that change the response; exclude volatile metadata such as correlation IDs, timestamps, trace IDs, and retry markers.
+23. Service metadata must use Foundation metadata helpers so request context, tags, categories, knowledge graph, source reference, and bounded attributes merge centrally. Tags are semantic indexes for analytics/search/security; high-cardinality actor/entity facts belong in `knowledge_graph`, `source_ref`, explicit schema columns, or `attributes`.
+24. Do not log full summary/list payloads in store setters, reducers, or render-adjacent code. Hot UI paths may log compact counters/keys only behind a development guard.
+25. Scan-heavy analytical flows should use compact projections, materialized views, or columnar/export lanes before scanning wide transactional tables in product traffic.
+26. Runtime batches that operate over many records should prefer structure-of-arrays layouts and shared arena descriptors over arrays of row objects when benchmarks show scan/vector locality matters.
+27. FFI surfaces must remain C-compatible and versioned: scalar integers, lengths, raw byte buffers, opaque handles, and explicit diagnostics only.
+28. Repository SQL must be pushdown-friendly: select only needed columns, keep tenant/auth/time/state predicates inside SQL, push `LIMIT` to the database boundary, and keep partition/index columns in simple comparable forms.
+29. Update-heavy tables must not index every mutable field by default. Indexes on frequently updated columns require query-plan evidence and a write-amplification review.
+30. Large JSONB/text/binary payloads must not sit in the same hot mutable row when compact state updates dominate the workload. Use sidecar/detail tables or append facts when that preserves the domain contract.
+31. Hot loops must account for cache-line locality. Prefer contiguous typed buffers, structure-of-arrays layouts, borrowed frame views, and fixed-width descriptors over pointer-heavy graphs, dynamic maps, or per-record object materialization.
+32. Contended atomics, ring cursors, per-worker counters, and queue ownership words must be reviewed for false sharing. Padding, sharding, or ownership separation is required when benchmarks or profiles show cache-line bouncing.
+33. Branchless code, manual prefetch, SIMD, and alignment-specific layouts require benchmark evidence, scalar fallbacks, and parity tests. Do not introduce them into tenant/auth/orchestration paths as speculative cleanup.
+34. Batch-size changes in runtime, database, websocket, worker, or analytical paths must state the intended working-set budget: payload bytes, descriptor count, cache-line footprint, and downstream backpressure limit.
+35. GPU/WebGPU kernels must state workload shape, buffer layout, transfer/readback budget, synchronization scope, capability gate, async error-drain points, numeric tolerance, fallback lane, and benchmarked tuning parameters before promotion. Keep shader/kernel code out of auth, tenant, idempotency, orchestration, and request-handler control paths.
+36. Interactive rendering, media, canvas, map, visual dashboard, and native preview code must state frame budget, hitch budget, pass boundaries, resource lifetimes, culling/LOD/filter strategy, first-use warmup, quality profile, and capture evidence when it touches user-visible deadlines.
 
 Enforcement:
 
@@ -209,6 +213,14 @@ Requirements:
    index-only scan, join selection, batching, WAL/checkpoint reduction, HOT
    updates, page-cache locality, lock/pool backpressure, replica-lag reduction,
    or materialized/read-model projection.
+9. GPU/WebGPU performance changes must state the bottleneck class, data layout,
+   workgroup/dispatch shape, transfer/readback cost, synchronization scope,
+   stream/queue ordering, graph or memory-pool reuse if any, fallback lane, and
+   parity tolerance. Use `docs/gpu_practices.md` as the review checklist.
+10. Realtime interactive changes must state whether the improvement comes from
+    culling, LOD, batching, instancing, pass-graph scheduling, shader/pipeline
+    warmup, asset streaming, quality-tier reduction, or target-device profile
+    selection. Use `docs/game_runtime_practices.md` as the review checklist.
 
 Enforcement:
 

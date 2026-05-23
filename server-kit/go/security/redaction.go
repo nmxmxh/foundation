@@ -33,7 +33,9 @@ func HashIdentifier(raw string) string {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(trimmed))
-	return hex.EncodeToString(sum[:8])
+	var encoded [16]byte
+	hex.Encode(encoded[:], sum[:8])
+	return string(encoded[:])
 }
 
 func RedactSecret(raw string) string {

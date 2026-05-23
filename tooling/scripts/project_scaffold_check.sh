@@ -432,7 +432,17 @@ fi
 if [[ "${WITH_DOCKER:-}" == "true" ]]; then
   check_exists "Dockerfile" "$target/Dockerfile"
   check_exists "docker-compose.yml" "$target/docker-compose.yml"
-  if [[ -n "$(find "$target" -path "$target/foundation" -prune -o -name Dockerfile -type f -exec grep -Fq "fholzer/nginx-brotli" {} \; -print -quit 2>/dev/null)" ]]; then
+  if [[ -n "$(find "$target" \
+    \( -type d \( -name .git \
+      -o -name foundation \
+      -o -name node_modules \
+      -o -name .next \
+      -o -name dist \
+      -o -name build \
+      -o -name tmp \
+      -o -name vendor \
+      -o -name target \) \) -prune \
+    -o -name Dockerfile -type f -exec grep -Fq "fholzer/nginx-brotli" {} \; -print -quit 2>/dev/null)" ]]; then
     echo "[FAIL] Dockerfiles avoid removed nginx-brotli image"
     failed=1
   else
@@ -543,7 +553,7 @@ if [[ "${WITH_WASM:-false}" == "true" ]]; then
   check_exists "runtime payload router API" "$target/foundation/runtime-sdk/ts/browser-host/src/payloadRouter.ts"
   check_file_contains "runtime ffi macro exports ovrt-core" "$target/foundation/runtime-sdk/rust/crates/ovrt-ffi/src/lib.rs" "pub use ovrt_core;"
   check_file_contains "runtime ffi pool reuses fixed buffer" "$target/foundation/runtime-sdk/go/runtimehost/ffi_unix.go" "bufferPool"
-  check_file_contains "runtime ffi pool reuses error buffer" "$target/foundation/runtime-sdk/go/runtimehost/ffi_unix.go" "errBufPool"
+  check_file_contains "runtime ffi pool uses backend seam" "$target/foundation/runtime-sdk/go/runtimehost/ffi_unix.go" "type ffiBackend interface"
   check_exists "runtime transport compression API" "$target/foundation/runtime-transport/ts/src/compression.ts"
   check_exists "runtime offline queue API" "$target/foundation/runtime-transport/ts/src/offlineQueue.ts"
   check_exists "wasm entry" "$target/wasm/main.go"

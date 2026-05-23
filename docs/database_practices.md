@@ -1,7 +1,7 @@
 # Standalone Apps Database Practices
 
 Status: baseline
-Date: 2026-05-19
+Date: 2026-05-22
 
 ## Purpose
 
@@ -9,7 +9,7 @@ This is the cross-app database standard for Ovasabi standalone apps. It is optim
 
 ## Architecture posture
 
-Postgres gives this architecture the ACID side of the system: durable state, constraints, transactional idempotency, outbox records, auditability, and analytical read models. The BASE side should be built around append-only events, materialized/read-model tables, bounded caches, River durable workers, Redis ephemeral coordination, and idempotent retry semantics. Do not turn Redis, queues, or app memory into hidden sources of truth.
+Postgres gives this architecture the ACID side of the system: durable state, constraints, transactional idempotency, outbox records, auditability, Postgres-owned search, and analytical read models. The BASE side should be built around append-only events, materialized/read-model tables, bounded caches, River durable workers, Redis ephemeral coordination, and idempotent retry semantics. Do not turn Redis, queues, app memory, or external search indexes into hidden sources of truth.
 
 Default lane budgets:
 
@@ -28,7 +28,7 @@ Foundation scaffolds now default local/test Postgres to version 18 because the r
 1. Async I/O improves eligible sequential scans, bitmap heap scans, vacuums, and related operations. The scaffold config enables the portable `io_method = worker` baseline with explicit combine/concurrency settings; production Linux hosts may benchmark `io_uring` if the Postgres build supports it.
 2. Multicolumn B-tree skip scans make some composite indexes useful even when the leading column is not fully constrained. This is useful, but it does not remove our rule that hot tenant/campaign paths must filter by tenant/campaign first.
 3. Virtual generated columns are now the generated-column default. Use them for derived searchable/display fields when recomputation on read is cheaper than write amplification; use `STORED` only when the read path proves it needs precomputed storage.
-4. Parallel GIN index creation and improved hash join/GROUP BY behavior help search and analytics lanes, not unbounded runtime queries.
+4. Parallel GIN index creation and improved hash join/GROUP BY behavior help search and analytics lanes, not unbounded runtime queries. Search paths still need explicit `tsvector`, `pg_trgm`, JSONB, or expression-index design that matches the query shape.
 5. `pg_stat_io`, `pg_aios`, vacuum timing, WAL I/O timing, and richer `EXPLAIN` output are part of the operational contract. Production observability should include read/write bytes, WAL pressure, vacuum/analyze timing, pool acquire latency, and top query families.
 
 Production Postgres must still be sized from workload evidence: memory, WAL, autovacuum, partition strategy, and connection pool limits should be derived from p95/p99 latency, write rate, table growth, and EXPLAIN plans.
@@ -123,6 +123,85 @@ Index rules from this posture:
 5. If an optimizer cannot push a predicate through a CTE, view, function,
    window, or JSON expression, rewrite the repository query or add a read model
    rather than assuming the planner will recover the intended shape.
+
+## Postgres search lane
+
+Foundation search is Postgres-first. Searchable projections are durable
+database state, not a separate product truth maintained by an external index.
+Use Elasticsearch/OpenSearch-style systems only as app-owned secondary
+projections after a product requirement proves Postgres cannot meet the
+freshness, ranking, or query-shape budget.
+
+Search design rules:
+
+1. Model search as a read model. The searchable row should already contain the
+   tenant scope, authorization scope, display fields, ranking fields, and
+   deterministic cursor columns needed for the result list.
+2. Use weighted `tsvector` values for natural-language fields. Weight names,
+   titles, codes, and identifiers above tags and body text. Always `coalesce`
+   nullable text before building vectors so missing fields do not erase the
+   whole document.
+3. Use `websearch_to_tsquery` for ordinary user search boxes because it accepts
+   raw user text without surfacing `tsquery` syntax errors. Use `to_tsquery`
+   only for app-owned advanced syntax behind an allowlisted parser.
+4. Use GIN indexes on `tsvector` columns or matching expression indexes for
+   regular full-text search. GIN is the default text-search index shape for
+   high-cardinality document search.
+5. Use `pg_trgm` for typo tolerance, autocomplete support, and substring or
+   `ILIKE` search. Prefer `gin_trgm_ops` for broad filtering and
+   `gist_trgm_ops` only when distance-ordered top-N queries or tuned signatures
+   are measured to win.
+6. Keep exact identifiers, public refs, slugs, emails, and other equality or
+   left-prefix lookups on B-tree or expression B-tree indexes. Do not make
+   trigram or full-text search carry exact-lookup semantics.
+7. Bound weak search patterns. Very short terms, regular expressions, and
+   patterns with no extractable trigrams can degrade to broad scans. Enforce
+   minimum query length, query timeout, result limit, and operator allowlists.
+8. Ranking must be app-owned. Combine `ts_rank` or `ts_rank_cd` with explicit
+   business signals such as recency, pinned status, popularity, permission
+   weight, or semantic score. Always add deterministic tie-breakers for cursor
+   pagination.
+9. Search freshness is a visible contract. Hot command acceptance,
+   authorization, idempotency, balance, and policy reads must not depend on a
+   lagging search projection. If read-your-own-write search matters, define an
+   LSN/freshness fence or route the immediate lookup to transactional state.
+10. Vector or embedding search remains Postgres-owned when used. Store embedding
+    metadata and source fingerprints in Postgres, keep tenant predicates in the
+    candidate query, and use extension-specific ANN indexes only with measured
+    recall, latency, rebuild, and fallback behavior.
+
+Search anti-patterns:
+
+1. Dynamic `to_tsvector(...) @@ ...` in runtime `WHERE` clauses without a
+   matching expression index or materialized search column.
+2. `ILIKE '%term%'`, regex search, or JSONB containment over broad tables
+   without a matching index and term-length guard.
+3. Search endpoints that filter tenant or authorization scope after ranking.
+4. Offset pagination for search results. Use keyset cursors over `(rank,
+   updated_at, id)` or another deterministic result order.
+5. External indexes that can accept writes, suppress records, or decide
+   authorization independently of Postgres.
+
+Search verification:
+
+1. Important search changes must include `EXPLAIN (ANALYZE, BUFFERS, WAL,
+   VERBOSE)` evidence for representative exact, full-text, trigram, empty,
+   short-term, and no-result queries.
+2. Tests must cover tenant bleed, permission filtering, typo/fuzzy behavior,
+   deterministic ordering, cursor continuation, stale projection behavior, and
+   query-timeout rejection.
+3. Search metrics should record query class, normalized term length bucket,
+   result count, plan family, p95/p99 latency, rows removed by filter, buffer
+   reads/hits, and projection lag.
+
+References checked for wording:
+
+1. PostgreSQL 18 Full Text Search index guidance:
+   <https://www.postgresql.org/docs/18/textsearch-indexes.html>
+2. PostgreSQL 18 `pg_trgm` index and similarity behavior:
+   <https://www.postgresql.org/docs/18/pgtrgm.html>
+3. PostgreSQL 18 text search query parsing and ranking:
+   <https://www.postgresql.org/docs/18/textsearch-controls.html>
 
 ## Non-negotiable rules
 

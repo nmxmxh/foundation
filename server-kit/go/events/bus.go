@@ -85,7 +85,10 @@ func (b *InMemoryBus) Publish(ctx context.Context, envelope Envelope) error {
 }
 
 func envelopeWithContextMetadata(ctx context.Context, envelope Envelope) Envelope {
-	md := metadata.FromContext(ctx)
+	md, ok := metadata.FromContextOK(ctx)
+	if !ok {
+		return envelope
+	}
 	md.EnsureCorrelation(envelope.CorrelationID)
 	envelope.Metadata = metadata.MergeMaps(md.ToMap(), envelope.Metadata)
 	return envelope

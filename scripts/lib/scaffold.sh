@@ -85,6 +85,52 @@ scaffold_copy_file() {
     [[ "$(basename "$dest")" == "start.sh" ]] && chmod +x "$dest" 2>/dev/null || true
 }
 
+scaffold_copy_tree() {
+    local source="$1"
+    local dest_parent="$2"
+    local name
+    name="$(basename "$source")"
+    local dest="$dest_parent/$name"
+
+    rm -rf "$dest"
+    mkdir -p "$dest_parent"
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a \
+            --exclude '.cache/' \
+            --exclude '.gocache/' \
+            --exclude 'node_modules/' \
+            --exclude 'dist/' \
+            --exclude 'build/' \
+            --exclude 'target/' \
+            --exclude 'test-results/' \
+            --exclude '*.test' \
+            --exclude '*.prof' \
+            --exclude '*.cover' \
+            --exclude '*.out' \
+            --exclude '.DS_Store' \
+            "$source/" "$dest/"
+        return
+    fi
+
+    cp -R "$source" "$dest_parent/"
+    find "$dest" \( \
+        -name '.cache' -o \
+        -name '.gocache' -o \
+        -name 'node_modules' -o \
+        -name 'dist' -o \
+        -name 'build' -o \
+        -name 'target' -o \
+        -name 'test-results' \
+    \) -prune -exec rm -rf {} + 2>/dev/null || true
+    find "$dest" \( \
+        -name '*.test' -o \
+        -name '*.prof' -o \
+        -name '*.cover' -o \
+        -name '*.out' -o \
+        -name '.DS_Store' \
+    \) -delete 2>/dev/null || true
+}
+
 scaffold_sync_frontend_manifest_contract() {
     [[ "$PROFILE" == "full" || "$PROFILE" == "frontend" ]] || return 0
 
@@ -156,8 +202,7 @@ scaffold_sync_foundation_modules() {
             if [[ "${DRY_RUN:-false}" == "true" ]]; then
                 foundation_log_info "[DRY RUN] Would refresh foundation/$dir"
             else
-                rm -rf "$PROJECT_PATH/foundation/$dir"
-                cp -R "$FOUNDATION_DIR/$dir" "$PROJECT_PATH/foundation/"
+                scaffold_copy_tree "$FOUNDATION_DIR/$dir" "$PROJECT_PATH/foundation"
             fi
         done
         if [[ "${DRY_RUN:-false}" != "true" ]]; then
@@ -171,10 +216,8 @@ scaffold_sync_foundation_modules() {
             foundation_log_info "[DRY RUN] Would refresh foundation/ui-minimal and foundation/frontend-kit"
         else
             mkdir -p "$PROJECT_PATH/foundation"
-            rm -rf "$PROJECT_PATH/foundation/ui-minimal"
-            rm -rf "$PROJECT_PATH/foundation/frontend-kit"
-            cp -R "$FOUNDATION_DIR/ui-minimal" "$PROJECT_PATH/foundation/"
-            cp -R "$FOUNDATION_DIR/frontend-kit" "$PROJECT_PATH/foundation/"
+            scaffold_copy_tree "$FOUNDATION_DIR/ui-minimal" "$PROJECT_PATH/foundation"
+            scaffold_copy_tree "$FOUNDATION_DIR/frontend-kit" "$PROJECT_PATH/foundation"
         fi
     fi
 
@@ -183,8 +226,7 @@ scaffold_sync_foundation_modules() {
             foundation_log_info "[DRY RUN] Would refresh foundation/runtime-sdk"
         else
             mkdir -p "$PROJECT_PATH/foundation"
-            rm -rf "$PROJECT_PATH/foundation/runtime-sdk"
-            cp -R "$FOUNDATION_DIR/runtime-sdk" "$PROJECT_PATH/foundation/"
+            scaffold_copy_tree "$FOUNDATION_DIR/runtime-sdk" "$PROJECT_PATH/foundation"
         fi
     fi
 
@@ -193,8 +235,7 @@ scaffold_sync_foundation_modules() {
             foundation_log_info "[DRY RUN] Would refresh foundation/runtime-native"
         else
             mkdir -p "$PROJECT_PATH/foundation"
-            rm -rf "$PROJECT_PATH/foundation/runtime-native"
-            cp -R "$FOUNDATION_DIR/runtime-native" "$PROJECT_PATH/foundation/"
+            scaffold_copy_tree "$FOUNDATION_DIR/runtime-native" "$PROJECT_PATH/foundation"
         fi
     fi
 

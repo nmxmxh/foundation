@@ -1,4 +1,4 @@
-.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts lint verify docker-up docker-down migrate-up help \
+.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-bench lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-migration-seed-policy check-lifecycle-contract-generator \
 	check-contract-drift check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-server-kit-usage
@@ -60,6 +60,10 @@ test-ts:
 	@echo "Running TypeScript tests..."
 	@if [ -d runtime-transport/ts/node_modules ]; then npm --prefix runtime-transport/ts run test; else echo "Skipping runtime-transport/ts tests; run npm install first"; fi
 	@if [ -d runtime-sdk/ts/browser-host/node_modules ]; then npm --prefix runtime-sdk/ts/browser-host run test; else echo "Skipping runtime-sdk/ts/browser-host tests; run npm install first"; fi
+
+test-bench:
+	@echo "Running bounded Foundation benchmarks..."
+	@cd server-kit/go && go test -run=^$$ -bench='Benchmark(MemoryStore|Manager)' -benchmem -benchtime=100ms -count=1 ./objectstore ./bulk
 
 lint:
 	@echo "Running foundation checks..."
@@ -150,6 +154,7 @@ help:
 	@echo "  make frontend-build      Typecheck shared TS packages"
 	@echo "  make delivery-metrics    Emit a local DORA/incident collection event"
 	@echo "  make test                Run Go and TS tests"
+	@echo "  make test-bench          Run bounded local Foundation benchmarks"
 	@echo "  make lint                Run foundation scaffold/practice checks"
 	@echo "  make verify              Run lint, tests, and TS typechecks"
 	@echo "  make docker-up/down      Start/stop core service-backed test stack"

@@ -14,9 +14,7 @@ func benchmarkBuffer(b *testing.B) *Buffer {
 	if err != nil {
 		b.Fatalf("NewBuffer() error = %v", err)
 	}
-	if err := buffer.Initialize(1); err != nil {
-		b.Fatalf("Initialize() error = %v", err)
-	}
+	buffer.Initialize(1)
 	return buffer
 }
 
@@ -36,9 +34,7 @@ func BenchmarkBufferSetInputBytesFast1KB(b *testing.B) {
 	buffer := benchmarkBuffer(b)
 	payload := bytes.Repeat([]byte{17}, int(generated.INPUT_MAX_BYTES))
 	buffer.Reset()
-	if err := buffer.Initialize(1); err != nil {
-		b.Fatal(err)
-	}
+	buffer.Initialize(1)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -102,9 +98,7 @@ func BenchmarkBufferSetOutputBytesFast2KB(b *testing.B) {
 	buffer := benchmarkBuffer(b)
 	payload := bytes.Repeat([]byte{29}, int(generated.OUTPUT_MAX_BYTES))
 	buffer.Reset()
-	if err := buffer.Initialize(1); err != nil {
-		b.Fatal(err)
-	}
+	buffer.Initialize(1)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

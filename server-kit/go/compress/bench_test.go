@@ -1,17 +1,13 @@
 package compress
 
 import (
-	"crypto/rand"
-	"fmt"
 	"testing"
 )
 
 func BenchmarkCompressLargeBatch(b *testing.B) {
 	// Create a 1MB payload of semi-random data to simulate a large batch envelope
 	// (Some repetition to allow compression to actually work)
-	data := make([]byte, 1024*1024)
-	_, _ = rand.Read(data[:512*1024])
-	copy(data[512*1024:], data[:512*1024])
+	data := compressionFixture()
 
 	b.Run("Brotli-Q4", func(b *testing.B) {
 		b.ResetTimer()
@@ -29,9 +25,7 @@ func BenchmarkCompressLargeBatch(b *testing.B) {
 }
 
 func BenchmarkDecompressLargeBatch(b *testing.B) {
-	data := make([]byte, 1024*1024)
-	_, _ = rand.Read(data[:512*1024])
-	copy(data[512*1024:], data[:512*1024])
+	data := compressionFixture()
 
 	brData, _ := CompressBrotli(data, 4)
 	zstdData, _ := CompressZstd(data)
@@ -52,15 +46,30 @@ func BenchmarkDecompressLargeBatch(b *testing.B) {
 }
 
 func TestCompressionRatio(t *testing.T) {
-	// Create a 1MB payload of semi-random data
+	data := compressionFixture()
+
+	brData, err := CompressBrotli(data, 4)
+	if err != nil {
+		t.Fatalf("brotli compress failed: %v", err)
+	}
+	zstdData, err := CompressZstd(data)
+	if err != nil {
+		t.Fatalf("zstd compress failed: %v", err)
+	}
+
+	if len(brData) >= len(data) {
+		t.Fatalf("brotli did not reduce deterministic fixture: original=%d compressed=%d", len(data), len(brData))
+	}
+	if len(zstdData) >= len(data) {
+		t.Fatalf("zstd did not reduce deterministic fixture: original=%d compressed=%d", len(data), len(zstdData))
+	}
+}
+
+func compressionFixture() []byte {
 	data := make([]byte, 1024*1024)
-	_, _ = rand.Read(data[:512*1024])
+	for i := range data[:512*1024] {
+		data[i] = byte((i*31 + i/7) % 251)
+	}
 	copy(data[512*1024:], data[:512*1024])
-
-	brData, _ := CompressBrotli(data, 4)
-	zstdData, _ := CompressZstd(data)
-
-	fmt.Printf("Original Size: %d KB\n", len(data)/1024)
-	fmt.Printf("Brotli Size:   %d KB (Ratio: %.2f)\n", len(brData)/1024, float64(len(data))/float64(len(brData)))
-	fmt.Printf("Zstd Size:     %d KB (Ratio: %.2f)\n", len(zstdData)/1024, float64(len(data))/float64(len(zstdData)))
+	return data
 }

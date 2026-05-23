@@ -1,7 +1,7 @@
 # Ovasabi Performance Practices
 
 Status: baseline
-Date: 2026-05-05
+Date: 2026-05-22
 Owner: Platform Architecture
 
 ## Purpose
@@ -15,6 +15,7 @@ Related docs:
 - `foundation/docs/coding_practices.md`
 - `foundation/docs/database_practices.md`
 - `foundation/docs/foundation_benchmarks.md`
+- `foundation/docs/game_runtime_practices.md`
 - `foundation/docs/go_concurrency_bug_practices.md`
 - `foundation/docs/runtime_foundation.md`
 - `foundation/docs/tla_architecture_practices.md`
@@ -29,6 +30,35 @@ Related docs:
 5. Optimize the cheapest correct layer first: query shape before more hardware, batching before fanout, typed frames before JSON maps, direct dispatch before RPC.
 6. Treat each lower-level performance lane as a refinement of a higher-level contract. Faster implementations must preserve canonical metadata, payload semantics, terminal events, and error classes.
 7. Track every adopted optimization in docs when it changes a project default, benchmark expectation, concurrency budget, invariant, or operational runbook.
+
+## Realtime and frame-budget posture
+
+Use `game_runtime_practices.md` for interactive loops, canvas/WebGL/WebGPU,
+media, maps, dashboards, native previews, and any user-visible runtime surface
+where hitches matter.
+
+1. Use frame time and deadline budgets, not average FPS or mean latency. Track
+   first-use, p95, p99, and max hitch separately.
+2. Treat every visible interaction as a bounded frame transaction: main thread,
+   worker, GPU queue, decode, network, database, object-store, and compose work
+   each need a visible budget.
+3. Data reduction comes before acceleration. Cull by viewport, subscription,
+   tenant, permission, time window, visibility, interest, and quality tier
+   before decoding, ranking, rendering, or dispatching GPU work.
+4. Complex interactive work should use a pass graph: declare pass inputs,
+   outputs, resources, barriers, transient lifetimes, fallback lanes, and
+   validation rules before optimizing.
+5. Stable performance markers are mandatory for interactive hot paths. Marker
+   names must be low-cardinality and hierarchical; entropy belongs in fields.
+6. Avoid first-use hitches. Prewarm shader/pipeline state, WebGPU modules,
+   WASM modules, FFI backends, prepared SQL, route handlers, and cache entries
+   where the first interaction would otherwise pay the compile/load cost.
+7. Use capability profiles and quality tiers. Degrade visual/detail quality,
+   update cadence, resolution, sample count, and refinement frequency before
+   violating tenant, auth, idempotency, or command truth.
+8. Capture-backed evidence is required for serious rendering/media/GPU changes:
+   include build SHA, browser/runtime, driver, device, quality profile,
+   feature flags, input seed, and whether async overlap was enabled.
 
 ## TLA+ specification layer
 
@@ -67,6 +97,8 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 7. Use concrete types on fixed hot paths. Interfaces are fine at boundaries, but hidden boxing and dynamic dispatch must not sit inside tight loops without measurement.
 8. Review struct layout when many instances are stored or scanned. Put larger fields before smaller fields when it materially reduces padding and cache waste.
 9. Use escape analysis (`go build -gcflags="-m"`) when a hot allocation is unexpected. Avoid contorting code unless the benchmark proves the heap move matters.
+10. For bounded stream copies, use caller-owned buffers or exact-size bounded reads when the size is part of the contract. Avoid accidental scratch allocation in byte loops, and benchmark both the materialized API and any callback/borrowed-view API separately.
+11. For fixed-size checksum and identifier encodings, prefer stack-backed `hex.Encode`/`hex.Decode` into fixed arrays before the final string conversion. Reserve `hex.EncodeToString`/`hex.DecodeString` for cold paths or tests where the extra allocation is irrelevant.
 
 ### CPU microarchitecture posture
 
@@ -171,6 +203,10 @@ The database rules in `database_practices.md` remain authoritative. The synthesi
 18. Separate storage-engine lessons by lane: Postgres owns durable row truth;
     append partitions, read models, materialized views, and columnar exports
     are where immutable-file and compaction ideas become Foundation practice.
+19. Search performance is a Postgres read-model problem by default. Use
+    weighted `tsvector`, `pg_trgm`, JSONB/expression indexes, tenant predicates,
+    deterministic cursors, and `EXPLAIN` evidence before considering an external
+    search projection.
 
 ## Columnar analytics performance
 
@@ -197,6 +233,52 @@ not replacements for Postgres transactional truth.
 7. Late materialization is a review principle: filter/prune on compact columns
    before constructing wide row objects, JSON maps, React state, or response
    DTOs.
+
+## GPU and WebGPU performance
+
+The detailed rules in `gpu_practices.md` are authoritative. The synthesized
+performance posture is:
+
+1. GPU lanes are batch lanes. Use them for wide homogeneous numeric, vector,
+   media, signal, model, simulation, or columnar workloads that amortize
+   transfer, dispatch, and readback.
+2. Start from a bottleneck label: memory bandwidth, memory latency,
+   uncoalesced access, branch divergence, load imbalance, synchronization,
+   atomics, host-device transfer, kernel launch throughput, or CPU hot loop.
+3. Prefer structure-of-arrays, typed columnar buffers, contiguous arena
+   descriptors, and storage-buffer-friendly packing before changing algorithms.
+4. Include host-device transfer bytes, queue submit, dispatch count, pipeline
+   creation, readback, and fallback cost in benchmarks. Kernel-only timings are
+   not enough for a Foundation lane decision.
+5. Treat workgroup size, work per invocation, fusion/fission, shared memory,
+   register pressure, and auto-tuning parameters as measured choices, not
+   defaults.
+6. Occupancy is a diagnostic, not the goal. Throughput, p95/p99, memory
+   throughput, transfer cost, and parity against the fallback lane decide
+   whether GPU promotion stays.
+7. Browser WebGPU remains optional and worker-owned. React render paths receive
+   state and results; they do not create devices, compile pipelines, dispatch
+   workgroups, or map readback buffers.
+8. GPU optimization must preserve Foundation invariants: metadata, tenant
+   scope, result semantics, bounded work, fallback refinement, and controlled
+   error classes.
+9. Native GPU performance reviews must separate cold compile/JIT, first launch,
+   warmed cache, steady-state dispatch, and lazy-loading behavior. Benchmark
+   notes should include driver/runtime versions and relevant environment flags.
+10. Streams, events, async copies, CUDA Graphs or command graphs, and memory
+    pools are launch/transfer optimizations. Use them when they reduce measured
+    queue, copy, allocation, or launch overhead, and document capture
+    invalidation, prohibited operations, reuse rules, and fallback lanes.
+11. Unified/managed memory needs page-migration evidence. Prefetch, usage
+    hints, direct host access, CPU writes to GPU-resident memory, and
+    oversubscription can dominate kernel time and must be measured as part of
+    the lane.
+12. Launch bounds, max-register controls, `__restrict__`, inline decisions,
+    LTO, cooperative groups, warp shuffle/reduce primitives, and async barriers
+    require before/after benchmarks plus parity tests. They are not cleanup.
+13. Default-stream or implicit-queue serialization is a performance smell.
+    Foundation adapters should use explicit streams/queues/events and expose
+    ordering edges in diagnostics.
 
 ## Virtual-memory-aware profiling
 

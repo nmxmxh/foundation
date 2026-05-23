@@ -31,6 +31,7 @@ check_has_match() {
     --glob '!**/node_modules/**' \
     --glob '!**/dist/**' \
     --glob '!**/target/**' \
+    --glob '!**/coverage/**' \
     "$pattern" "$@" >/dev/null 2>&1; then
     echo "[OK] $label"
   else
@@ -52,6 +53,10 @@ if rg --files "$target" | rg -q '(\.test|\.spec)\.(ts|tsx|js|jsx)$'; then
     --glob '*.test.ts' --glob '*.test.tsx' --glob '*.spec.ts' --glob '*.spec.tsx' \
     --glob '*.test.js' --glob '*.test.jsx' --glob '*.spec.js' --glob '*.spec.jsx' \
     --glob '!**/e2e/**' --glob '!**/load/**'
+
+  check_no_match "TE TypeScript tests avoid uncontrolled Math.random" "\bMath\.random\s*\(" "$target" \
+    --glob '*.test.ts' --glob '*.test.tsx' --glob '*.spec.ts' --glob '*.spec.tsx' \
+    --glob '*.test.js' --glob '*.test.jsx' --glob '*.spec.js' --glob '*.spec.jsx'
 else
   echo "[OK] no TypeScript test files present"
 fi
@@ -64,6 +69,9 @@ if rg --files "$target" | rg -q '_test\.go$'; then
     check_has_match "TE lifecycle/contract tests present for event contracts" "(VerifyProducer|VerifyConsumer|lifecycle|:requested|:success|:failed)" "$target" \
       --glob '*_test.go' --glob '!**/node_modules/**'
   fi
+
+  check_no_match "TE Go tests avoid package-global random without explicit source" "\brand\.(Int|Intn|Int31|Int31n|Int63|Int63n|Float32|Float64|Perm|Shuffle|NormFloat64|ExpFloat64)\s*\(" "$target" \
+    --glob '*_test.go' --glob '!**/tests/load/**' --glob '!**/load/**' --glob '!**/benchmark/**'
 else
   echo "[OK] no Go test files present"
 fi
@@ -72,10 +80,20 @@ if [[ -f "$target/templates/frontend/package.json" ]]; then
   check_has_match "TE frontend scaffold includes Testing Library React" '"@testing-library/react"' "$target/templates/frontend/package.json"
   check_has_match "TE frontend scaffold includes user-event" '"@testing-library/user-event"' "$target/templates/frontend/package.json"
   check_has_match "TE frontend scaffold includes jsdom" '"jsdom"' "$target/templates/frontend/package.json"
+  check_has_match "TE frontend scaffold includes property testing" '"fast-check"' "$target/templates/frontend/package.json"
 fi
 
 if [[ -f "$target/templates/Makefile" ]]; then
   check_has_match "TE scaffold lint runs testing practices check" "check-testing-practices|testing_practices_check\.sh" "$target/templates/Makefile"
+fi
+
+if rg --files "$target" | rg -q '(^|/)features/.*\.feature$'; then
+  check_has_match "TE acceptance feature files have normal acceptance entry point" "(acceptance|test-acceptance|acceptance-generator|gherkin-parser)" "$target" \
+    --glob 'Makefile' --glob '*.mk' --glob '*.sh' --glob 'package.json' --glob '!**/node_modules/**'
+  check_has_match "TE acceptance feature files have mutation entry point" "(acceptance-mutation|mutation-acceptance|gherkin-mutator)" "$target" \
+    --glob 'Makefile' --glob '*.mk' --glob '*.sh' --glob 'package.json' --glob '!**/node_modules/**'
+else
+  echo "[OK] no acceptance feature files present"
 fi
 
 if [[ "$failed" -ne 0 ]]; then

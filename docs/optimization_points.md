@@ -1,6 +1,6 @@
 # Optimization Points
 
-Date: 2026-05-11
+Date: 2026-05-22
 
 This document tracks the deliberate performance and architecture carryovers folded into the scaffold after reviewing `fintech_v1` history and the current performance synthesis. For cross-cutting Go, networking, PostgreSQL, Rust, benchmarking, and documentation-tracking practices, see `foundation/docs/performance_practices.md`. For TLA+/`Specifying Systems` state-machine, invariant, liveness, real-time bound, composition, and refinement practices, see `foundation/docs/tla_architecture_practices.md`. For Go concurrency bug taxonomy and practices extracted from `go-study.pdf`, see `foundation/docs/go_concurrency_bug_practices.md`. For deep-dives into legendary computer science optimization tricks, see [Coding Magic](file:///Users/okhai/Desktop/OVASABI%20STUDIOS/reframe_v1/foundation/docs/coding_magic.md).
 
@@ -60,17 +60,59 @@ This document tracks the deliberate performance and architecture carryovers fold
     database scans, websocket fanout, worker queues, and native kernels should
     count cache lines, preserve contiguous scan layouts, avoid pointer chasing,
     and isolate contended atomics before reaching for wider parallel lanes.
-52. Branch predictability and memory-level parallelism are measured properties,
+52. Search remains Postgres-owned by default. Weighted `tsvector`, `pg_trgm`,
+    JSONB/expression indexes, tenant predicates, deterministic cursors, and
+    projection-lag evidence come before any external search projection.
+53. GPU is a throughput batch lane, not a control-plane shortcut. Promote work
+    only after the bottleneck, transfer/readback cost, data layout,
+    synchronization scope, fallback lane, and parity tests are explicit.
+54. GPU tuning is empirical. Workgroup size, work per invocation, kernel
+    fusion/fission, shared memory, register pressure, coalescing, occupancy,
+    atomics, and auto-tuning parameters belong in benchmark notes when changed.
+55. Branch predictability and memory-level parallelism are measured properties,
     not assumptions. Branchless rewrites, manual prefetch, SIMD, and higher
     fanout require profiles or benchmarks that include cache misses, branch
     misses, allocations, and p95/p99 behavior.
-53. LSM/SSTable lessons translate into Foundation as append-only partitions,
+56. LSM/SSTable lessons translate into Foundation as append-only partitions,
     replayable outbox/audit/fact lanes, read-model refresh, VACUUM/analyze
     hygiene, and bounded worker pressure. They do not change Postgres being the
     durable row-store authority.
-54. Database overload must surface as controlled pressure signals: pool acquire
+57. Database overload must surface as controlled pressure signals: pool acquire
     timeout, lock timeout, statement timeout, idle-transaction timeout, WAL
     growth, checkpoint pressure, autovacuum lag, and replica replay lag.
+58. Native GPU acceleration has its own compatibility lane. Device capability,
+    driver/runtime version, feature support, stream/queue ordering, graph
+    support, memory-pool behavior, and fallback path must be declared before a
+    kernel becomes a Foundation runtime option.
+59. GPU correctness includes asynchronous failure and numeric drift. Launch
+    status, synchronization status, device assertions, sanitizer gaps, ULP
+    tolerance, NaN/Inf handling, reduction order, and host/device accuracy
+    belong in tests for every non-trivial GPU lane.
+60. GPU launch and transfer optimizations are edge-case heavy. Default-stream
+    serialization, graph capture invalidation, prohibited operations, lazy
+    loading, JIT/cache warmth, managed-memory migration, page oversubscription,
+    peer access, and memory-pool reuse must appear in benchmark notes when
+    those features are used.
+61. Interactive runtime performance borrows from AAA game engines: optimize
+    frame time, hitch count, first-use latency, pass boundaries, resource
+    lifetime, and target-device captures before chasing average FPS or mean
+    request latency.
+62. Render-graph thinking applies outside rendering. Multi-stage media, canvas,
+    GPU, native, streaming, and dashboard work should declare passes, resources,
+    barriers, transient lifetimes, fallback lanes, and validation checks before
+    low-level optimization.
+63. Culling, LOD, instancing, batching, and streaming are data-reduction tools.
+    Foundation should filter by visibility, tenant, permission, subscription,
+    viewport, quality tier, and interest mask before decoding, ranking,
+    uploading, dispatching, or rendering.
+64. First-use hitches are production defects. Shader variants, PSOs, WebGPU
+    pipelines, WASM modules, FFI backends, prepared SQL, route handlers, and
+    hot caches need prewarm or explicit cold-path budgets when they touch the
+    first viewport or first interaction.
+65. Stable performance markers are now a Foundation review primitive. Marker
+    names must be hierarchical and low-cardinality; correlation IDs, tenant IDs,
+    hashes, and timestamps belong in fields so traces and captures can be
+    compared across runs.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 

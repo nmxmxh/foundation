@@ -64,6 +64,17 @@ type ProcessPool struct {
 	transport       ProcessTransportSupport
 }
 
+type workerExchange interface {
+	Exchange(context.Context, string, []byte) error
+	Close() error
+	Restart() error
+}
+
+type stdioExchange struct {
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+}
+
 type processWorker struct {
 	command []string
 	env     []string
@@ -83,10 +94,11 @@ type processWorker struct {
 	lastSuccess  time.Time
 	lastFailure  time.Time
 
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	stdin  io.WriteCloser
-	stdout *bufio.Reader
+	mu           sync.Mutex
+	cmd          *exec.Cmd
+	stdin        io.WriteCloser
+	stdout       *bufio.Reader
+	testExchange workerExchange
 }
 
 var errWorkerBusy = errors.New("process worker busy")
@@ -169,9 +181,7 @@ func (p *ProcessPool) Execute(ctx context.Context, req ProcessRequest) (ProcessR
 		return ProcessResponse{}, err
 	}
 	buffer.Reset()
-	if err := buffer.Initialize(req.ModuleVersion); err != nil {
-		return ProcessResponse{}, err
-	}
+	buffer.Initialize(req.ModuleVersion)
 	if err := buffer.SetHeaderInt(generated.INT_IDX_CONTEXT_HASH, req.ContextHash); err != nil {
 		return ProcessResponse{}, err
 	}
@@ -287,6 +297,9 @@ func (w *processWorker) start() error {
 }
 
 func (w *processWorker) startLocked() error {
+	if w.testExchange != nil {
+		return nil
+	}
 	if w.cmd != nil {
 		return nil
 	}
@@ -343,6 +356,9 @@ func (w *processWorker) close() error {
 }
 
 func (w *processWorker) closeLocked() error {
+	if w.testExchange != nil {
+		return w.testExchange.Close()
+	}
 	if w.cmd == nil {
 		return nil
 	}
@@ -378,6 +394,9 @@ func (w *processWorker) closeLocked() error {
 }
 
 func (w *processWorker) restartLocked() error {
+	if w.testExchange != nil {
+		return w.testExchange.Restart()
+	}
 	if err := w.closeLocked(); err != nil {
 		return err
 	}
@@ -434,8 +453,9 @@ func (w *processWorker) executeHeld(ctx context.Context, unitID string, buffer [
 }
 
 func (w *processWorker) executeWithContext(ctx context.Context, unitID string, buffer []byte) error {
+	exchange := w.exchange()
 	if ctx == nil {
-		return w.executeLocked(unitID, buffer)
+		return exchange.Exchange(context.Background(), unitID, buffer)
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -443,7 +463,7 @@ func (w *processWorker) executeWithContext(ctx context.Context, unitID string, b
 
 	result := make(chan error, 1)
 	go func() {
-		result <- w.executeLocked(unitID, buffer)
+		result <- exchange.Exchange(ctx, unitID, buffer)
 	}()
 
 	select {
@@ -462,17 +482,39 @@ func (w *processWorker) executeWithContext(ctx context.Context, unitID string, b
 	}
 }
 
+func (w *processWorker) exchange() workerExchange {
+	if w.testExchange != nil {
+		return w.testExchange
+	}
+	return stdioExchange{stdin: w.stdin, stdout: w.stdout}
+}
+
 func (w *processWorker) executeLocked(unitID string, buffer []byte) error {
 	if w.mode == ProcessTransportSharedMemory {
 		return w.executeSharedMemoryLocked(unitID, buffer)
 	}
-	if err := writeStringFrame(w.stdin, unitID); err != nil {
+	return stdioExchange{stdin: w.stdin, stdout: w.stdout}.Exchange(context.Background(), unitID, buffer)
+}
+
+func (x stdioExchange) Exchange(_ context.Context, unitID string, buffer []byte) error {
+	if err := writeStringFrame(x.stdin, unitID); err != nil {
 		return err
 	}
-	if err := writeFrame(w.stdin, buffer); err != nil {
+	if err := writeFrame(x.stdin, buffer); err != nil {
 		return err
 	}
-	return readFrameInto(w.stdout, buffer)
+	return readFrameInto(x.stdout, buffer)
+}
+
+func (x stdioExchange) Close() error {
+	if x.stdin != nil {
+		return x.stdin.Close()
+	}
+	return nil
+}
+
+func (x stdioExchange) Restart() error {
+	return nil
 }
 
 func (w *processWorker) executeSharedMemoryLocked(unitID string, buffer []byte) error {

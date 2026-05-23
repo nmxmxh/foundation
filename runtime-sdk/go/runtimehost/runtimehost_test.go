@@ -1,9 +1,12 @@
 package runtimehost
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +17,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 )
 
 func TestBufferRoundTrip(t *testing.T) {
@@ -23,9 +27,7 @@ func TestBufferRoundTrip(t *testing.T) {
 		t.Fatalf("NewBuffer() error = %v", err)
 	}
 
-	if err := buffer.Initialize(4); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	buffer.Initialize(4)
 	if err := buffer.SetInputBytes([]byte("asset")); err != nil {
 		t.Fatalf("SetInputBytes() error = %v", err)
 	}
@@ -78,9 +80,7 @@ func TestBufferFastSettersUseDeclaredLength(t *testing.T) {
 		t.Fatalf("NewBuffer() error = %v", err)
 	}
 	buffer.Reset()
-	if err := buffer.Initialize(1); err != nil {
-		t.Fatalf("Initialize() error = %v", err)
-	}
+	buffer.Initialize(1)
 
 	if err := buffer.SetInputBytes(bytes.Repeat([]byte{'x'}, 16)); err != nil {
 		t.Fatalf("SetInputBytes() error = %v", err)
@@ -279,6 +279,36 @@ func TestProcessPoolDispatchesRuntimeBufferFrames(t *testing.T) {
 	}
 }
 
+func TestProcessPoolReportsRuntimeStatusFailure(t *testing.T) {
+	if os.Getenv("OVRT_PROCESS_HELPER") == "1" {
+		runProcessPoolHelper(t)
+		return
+	}
+
+	pool, err := NewProcessPool(ProcessPoolOptions{
+		Command: []string{os.Args[0], "-test.run=TestProcessPoolReportsRuntimeStatusFailure", "--"},
+		Env:     []string{"OVRT_PROCESS_HELPER=1"},
+		Workers: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewProcessPool() error = %v", err)
+	}
+	defer func() {
+		if err := pool.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}()
+
+	response, err := pool.Execute(context.Background(), ProcessRequest{
+		UnitID:        "runtime.fail",
+		Input:         []byte("bad"),
+		ModuleVersion: 1,
+	})
+	if err == nil || response.StatusCode != 1 || response.Diagnostics != "forced failure" {
+		t.Fatalf("Execute(runtime.fail) response=%+v err=%v", response, err)
+	}
+}
+
 func TestProcessPoolSupportsSharedMemoryTransport(t *testing.T) {
 	if !sharedMemorySupported("") {
 		t.Skip("shared memory transport is not supported on this runtime")
@@ -351,6 +381,70 @@ func TestFFIPoolDispatchesRuntimeBufferFrames(t *testing.T) {
 	if response.OutputEpoch != 1 {
 		t.Fatalf("unexpected output epoch %d", response.OutputEpoch)
 	}
+	failed, err := pool.Execute(context.Background(), ProcessRequest{
+		UnitID:        "runtime.fail",
+		Input:         []byte("ffi-fail"),
+		ModuleVersion: 7,
+	})
+	if err == nil || failed.StatusCode != 1 || failed.Diagnostics != "forced ffi failure" {
+		t.Fatalf("ffi failure response=%+v err=%v", failed, err)
+	}
+	if err := pool.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := pool.Execute(context.Background(), ProcessRequest{UnitID: "runtime.echo"}); err == nil {
+		t.Fatal("expected closed ffi pool execute to fail")
+	}
+}
+
+func TestFFIPoolErrorBoundaries(t *testing.T) {
+	if _, err := NewFFIPool(FFIPoolOptions{}); err == nil {
+		t.Fatal("expected missing ffi library path to fail")
+	}
+	if _, err := NewFFIPool(FFIPoolOptions{LibraryPath: filepath.Join(t.TempDir(), "missing.so")}); err == nil {
+		t.Fatal("expected missing ffi library to fail")
+	}
+	if _, err := (*FFIPool)(nil).Execute(context.Background(), ProcessRequest{UnitID: "unit"}); err == nil {
+		t.Fatal("expected nil ffi pool execute to fail")
+	}
+	pool := &FFIPool{}
+	if _, err := pool.Execute(context.Background(), ProcessRequest{}); err == nil {
+		t.Fatal("expected missing unit id to fail")
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := pool.Execute(cancelled, ProcessRequest{UnitID: "unit"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled ffi Execute() error = %v", err)
+	}
+	pool.bufferPool = sync.Pool{New: func() any {
+		buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
+		return &buffer
+	}}
+	if _, err := pool.Execute(context.Background(), ProcessRequest{UnitID: "unit"}); err == nil {
+		t.Fatal("expected closed ffi host to fail")
+	}
+	if err := (*FFIPool)(nil).Close(); err != nil {
+		t.Fatalf("nil Close() error = %v", err)
+	}
+	if err := pool.Close(); err != nil {
+		t.Fatalf("empty Close() error = %v", err)
+	}
+
+	for _, tt := range []struct {
+		name   string
+		source string
+	}{
+		{"missing process symbol", ffiMinimalSource(1, "ok", false)},
+		{"abi mismatch", ffiMinimalSource(2, "ok", true)},
+		{"create failure", ffiMinimalSource(1, "fail", true)},
+		{"nil host", ffiMinimalSource(1, "nil", true)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := NewFFIPool(FFIPoolOptions{LibraryPath: buildFFITestLibrarySource(t, tt.source)}); err == nil {
+				t.Fatal("expected ffi setup to fail")
+			}
+		})
+	}
 }
 
 func TestDefaultProcessWorkerCount(t *testing.T) {
@@ -411,9 +505,16 @@ func TestResolveProcessTransportMode(t *testing.T) {
 	if mode != ProcessTransportFFI {
 		t.Fatalf("unexpected ffi mode: %s", mode)
 	}
+	if normalizeProcessTransportMode(ProcessTransportMode(" STDIO ")) != ProcessTransportStdio {
+		t.Fatal("normalizeProcessTransportMode did not normalize stdio")
+	}
 }
 
 func TestResolveProcessTransportSupportReportsFallbacks(t *testing.T) {
+	supported := SupportedProcessTransports("")
+	if len(supported) == 0 || supported[0] != ProcessTransportStdio {
+		t.Fatalf("supported transports = %+v", supported)
+	}
 	support, err := ResolveProcessTransportSupport(ProcessTransportAuto, "")
 	if err != nil {
 		t.Fatalf("ResolveProcessTransportSupport(auto) error = %v", err)
@@ -438,6 +539,9 @@ func TestProcessPoolDiagnosticsAndErrorPaths(t *testing.T) {
 	if _, err := NewProcessPool(ProcessPoolOptions{}); err == nil {
 		t.Fatal("expected missing command to fail")
 	}
+	if _, err := NewProcessPool(ProcessPoolOptions{Command: []string{filepath.Join(t.TempDir(), "missing-runtime")}}); err == nil {
+		t.Fatal("expected missing runtime command to fail")
+	}
 	if _, err := (*ProcessPool)(nil).Execute(context.Background(), ProcessRequest{UnitID: "unit"}); err == nil {
 		t.Fatal("expected nil pool execute to fail")
 	}
@@ -451,8 +555,17 @@ func TestProcessPoolDiagnosticsAndErrorPaths(t *testing.T) {
 	if _, err := pool.Execute(context.Background(), ProcessRequest{}); err == nil {
 		t.Fatal("expected missing unit id to fail")
 	}
+	if _, err := pool.Execute(context.Background(), ProcessRequest{UnitID: "unit", Input: make([]byte, generated.INPUT_MAX_BYTES+1)}); err == nil {
+		t.Fatal("expected oversized process input to fail")
+	}
 	if _, err := pool.Execute(context.Background(), ProcessRequest{UnitID: "unit"}); err == nil {
 		t.Fatal("expected no workers to fail")
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	pool.allWorkers = []*processWorker{{}}
+	if _, err := pool.Execute(cancelled, ProcessRequest{UnitID: "unit"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled Execute() error = %v", err)
 	}
 	if got := (*ProcessPool)(nil).Diagnostics(); got.ExchangeTimeoutMS != 0 || len(got.Workers) != 0 {
 		t.Fatalf("nil diagnostics = %+v", got)
@@ -481,10 +594,136 @@ func TestProcessPoolDiagnosticsAndErrorPaths(t *testing.T) {
 	}
 }
 
+func TestProcessPoolWorkerSelectionBusyAndFallback(t *testing.T) {
+	pool := &ProcessPool{
+		allWorkers: []*processWorker{{}, {}},
+	}
+	pool.allWorkers[0].mu.Lock()
+	defer pool.allWorkers[0].mu.Unlock()
+	pool.allWorkers[1] = workerWithEchoTransport(t, ProcessTransportStdio)
+	if err := pool.executeOnSelectedWorker(context.Background(), ProcessRequest{UnitID: "runtime.echo"}, newRuntimeBuffer(t, "busy")); err != nil {
+		t.Fatalf("executeOnSelectedWorker() error = %v", err)
+	}
+	worker := workerWithEchoTransport(t, ProcessTransportStdio)
+	buffer := newRuntimeBuffer(t, "direct")
+	if err := worker.execute(context.Background(), "runtime.echo", buffer); err != nil {
+		t.Fatalf("worker.execute() error = %v", err)
+	}
+	parsed, err := NewBuffer(buffer)
+	if err != nil {
+		t.Fatalf("NewBuffer() error = %v", err)
+	}
+	output, err := parsed.OutputBytes()
+	if err != nil || string(output) != "DIRECT" {
+		t.Fatalf("direct worker output = %q err=%v", string(output), err)
+	}
+	plain := stdioExchange{stdin: nopWriteCloser{Writer: io.Discard}}
+	if err := plain.Close(); err != nil {
+		t.Fatalf("stdio Close() error = %v", err)
+	}
+	if err := plain.Restart(); err != nil {
+		t.Fatalf("stdio Restart() error = %v", err)
+	}
+}
+
+func TestProcessWorkerExchangeRestartAndClosePaths(t *testing.T) {
+	exchange := &scriptedExchange{
+		errs: []error{errors.New("first exchange failed"), nil},
+	}
+	worker := &processWorker{
+		logger:       testLogger(t),
+		mode:         ProcessTransportStdio,
+		testExchange: exchange,
+	}
+	if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "restart")); err != nil {
+		t.Fatalf("execute() error = %v", err)
+	}
+	if exchange.calls != 2 || exchange.restarts != 1 || worker.snapshot().RestartCount != 1 {
+		t.Fatalf("exchange=%+v snapshot=%+v", exchange, worker.snapshot())
+	}
+	if err := worker.close(); err != nil || exchange.closes != 1 {
+		t.Fatalf("close err=%v exchange=%+v", err, exchange)
+	}
+
+	restartFailure := &scriptedExchange{
+		errs:       []error{errors.New("exchange failed")},
+		restartErr: errors.New("restart failed"),
+	}
+	worker = &processWorker{
+		logger:       testLogger(t),
+		testExchange: restartFailure,
+	}
+	if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "restart-fail")); err == nil || !strings.Contains(err.Error(), "restart native runtime worker") {
+		t.Fatalf("restart failure error = %v", err)
+	}
+
+	cancelled := &scriptedExchange{waitForContext: true}
+	worker = &processWorker{
+		logger:       testLogger(t),
+		testExchange: cancelled,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := worker.execute(ctx, "runtime.echo", newRuntimeBuffer(t, "cancel")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled execute error = %v", err)
+	}
+
+	timeoutExchange := &scriptedExchange{waitForContext: true}
+	worker = &processWorker{
+		logger:       testLogger(t),
+		testExchange: timeoutExchange,
+	}
+	timeoutCtx, timeoutCancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer timeoutCancel()
+	if err := worker.executeWithContext(timeoutCtx, "runtime.echo", newRuntimeBuffer(t, "timeout")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("timeout exchange error = %v", err)
+	}
+}
+
+func TestProcessWorkerSharedMemoryGuard(t *testing.T) {
+	worker := &processWorker{mode: ProcessTransportSharedMemory, stdin: nopWriteCloser{Writer: io.Discard}, stdout: bufio.NewReader(strings.NewReader(""))}
+	if err := worker.executeLocked("runtime.echo", newRuntimeBuffer(t, "shm")); err == nil {
+		t.Fatal("expected shared memory execution without segment to fail")
+	}
+	if _, err := newSharedMemorySegment(""); sharedMemorySupported("") || err == nil {
+		t.Fatalf("unsupported shared memory probe supported=%v err=%v", sharedMemorySupported(""), err)
+	}
+	if err := (*sharedMemorySegment)(nil).Close(); err != nil {
+		t.Fatalf("nil shared memory Close() error = %v", err)
+	}
+	var ack bytes.Buffer
+	if err := writeFrame(&ack, nil); err != nil {
+		t.Fatalf("write ack error = %v", err)
+	}
+	buffer := newRuntimeBuffer(t, "shared")
+	worker = &processWorker{
+		shm:    &sharedMemorySegment{raw: make([]byte, generated.BUFFER_TOTAL_BYTES)},
+		stdin:  nopWriteCloser{Writer: io.Discard},
+		stdout: bufio.NewReader(&ack),
+	}
+	if err := worker.executeSharedMemoryLocked("runtime.echo", buffer); err != nil {
+		t.Fatalf("executeSharedMemoryLocked() error = %v", err)
+	}
+	var badAck bytes.Buffer
+	if err := writeFrame(&badAck, []byte("bad")); err != nil {
+		t.Fatalf("write bad ack error = %v", err)
+	}
+	worker.stdout = bufio.NewReader(&badAck)
+	if err := worker.executeSharedMemoryLocked("runtime.echo", buffer); err == nil {
+		t.Fatal("expected bad shared memory ack to fail")
+	}
+}
+
 func TestFrameHelpersAndStringTrim(t *testing.T) {
 	var frame bytes.Buffer
 	if err := writeFrame(&frame, []byte("payload")); err != nil {
 		t.Fatalf("writeFrame() error = %v", err)
+	}
+	if err := writeFrame(errorWriter{}, []byte("payload")); err == nil {
+		t.Fatal("expected writeFrame writer failure")
+	}
+	if err := writeStringFrame(errorWriter{}, "payload"); err == nil {
+		t.Fatal("expected writeStringFrame writer failure")
 	}
 	payload, err := readFrame(&frame)
 	if err != nil || string(payload) != "payload" {
@@ -492,6 +731,9 @@ func TestFrameHelpersAndStringTrim(t *testing.T) {
 	}
 	if _, err := readFrame(strings.NewReader("\x05\x00")); err == nil {
 		t.Fatal("expected short frame to fail")
+	}
+	if _, err := checkedFrameSize(-1); err == nil {
+		t.Fatal("expected negative frame size to fail")
 	}
 	frame.Reset()
 	if err := writeStringFrame(&frame, "runtime.echo"); err != nil {
@@ -525,6 +767,140 @@ func TestFrameHelpersAndStringTrim(t *testing.T) {
 	if cStringBytes([]byte{'o', 'k', 0, 'x'}) != "ok" || cStringBytes([]byte{'o', 'k'}) != "ok" {
 		t.Fatal("cStringBytes failed")
 	}
+	logWorker := &processWorker{logger: testLogger(t)}
+	logWorker.logStderr(scanErrorReadCloser{})
+}
+
+func workerWithEchoTransport(t *testing.T, mode ProcessTransportMode) *processWorker {
+	t.Helper()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	worker := &processWorker{
+		stdin:  clientToServerWriter,
+		stdout: bufio.NewReader(serverToClientReader),
+		logger: testLogger(t),
+		mode:   mode,
+		cmd:    &exec.Cmd{},
+	}
+	t.Cleanup(func() {
+		_ = serverToClientReader.Close()
+		_ = serverToClientWriter.Close()
+		_ = clientToServerReader.Close()
+		_ = clientToServerWriter.Close()
+	})
+	go echoRuntimeFrames(clientToServerReader, serverToClientWriter)
+	return worker
+}
+
+func echoRuntimeFrames(input io.Reader, output io.Writer) {
+	for {
+		unitID, err := readFrame(input)
+		if err != nil {
+			return
+		}
+		raw, err := readFrame(input)
+		if err != nil {
+			return
+		}
+		buffer, err := NewBuffer(raw)
+		if err != nil {
+			return
+		}
+		payload, err := buffer.InputBytes()
+		if err != nil {
+			return
+		}
+		_ = buffer.SetOutputBytes([]byte(strings.ToUpper(string(payload))))
+		_, _ = buffer.AddEpoch(generated.IDX_OUTPUT_WRITTEN, 1)
+		if string(unitID) == "runtime.fail" {
+			_ = buffer.SetHeaderInt(generated.INT_IDX_STATUS_CODE, 1)
+			_ = buffer.SetDiagnosticsText("forced failure")
+		}
+		if err := writeFrame(output, raw); err != nil {
+			return
+		}
+	}
+}
+
+func newRuntimeBuffer(t *testing.T, payload string) []byte {
+	t.Helper()
+	raw := make([]byte, generated.BUFFER_TOTAL_BYTES)
+	buffer, err := NewBuffer(raw)
+	if err != nil {
+		t.Fatalf("NewBuffer() error = %v", err)
+	}
+	buffer.Initialize(1)
+	if err := buffer.SetInputBytesFast([]byte(payload)); err != nil {
+		t.Fatalf("SetInputBytesFast() error = %v", err)
+	}
+	return raw
+}
+
+func testLogger(t *testing.T) logger.Logger {
+	t.Helper()
+	log, err := logger.NewDefault()
+	if err != nil {
+		t.Fatalf("NewDefault logger error = %v", err)
+	}
+	return log
+}
+
+type nopWriteCloser struct {
+	io.Writer
+}
+
+func (w nopWriteCloser) Close() error {
+	return nil
+}
+
+type errorWriter struct{}
+
+func (errorWriter) Write([]byte) (int, error) {
+	return 0, errors.New("write failed")
+}
+
+type scanErrorReadCloser struct{}
+
+func (scanErrorReadCloser) Read([]byte) (int, error) {
+	return 0, errors.New("scan failed")
+}
+
+func (scanErrorReadCloser) Close() error {
+	return nil
+}
+
+type scriptedExchange struct {
+	errs           []error
+	restartErr     error
+	closeErr       error
+	waitForContext bool
+	calls          int
+	restarts       int
+	closes         int
+}
+
+func (x *scriptedExchange) Exchange(ctx context.Context, _ string, _ []byte) error {
+	x.calls++
+	if x.waitForContext {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	if len(x.errs) == 0 {
+		return nil
+	}
+	err := x.errs[0]
+	x.errs = x.errs[1:]
+	return err
+}
+
+func (x *scriptedExchange) Restart() error {
+	x.restarts++
+	return x.restartErr
+}
+
+func (x *scriptedExchange) Close() error {
+	x.closes++
+	return x.closeErr
 }
 
 func runProcessPoolHelper(t *testing.T) {
@@ -635,15 +1011,7 @@ func runSharedMemoryProcessPoolHelper(t *testing.T) {
 func buildFFITestLibrary(t *testing.T) string {
 	t.Helper()
 
-	cc, err := exec.LookPath("cc")
-	if err != nil {
-		t.Skip("cc compiler not available")
-	}
-
-	dir := t.TempDir()
-	sourcePath := filepath.Join(dir, "runtime_ffi_stub.c")
-	libraryPath := filepath.Join(dir, ffiLibraryFileName())
-	source := fmt.Sprintf(`#include <ctype.h>
+	return buildFFITestLibrarySource(t, fmt.Sprintf(`#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -691,13 +1059,22 @@ void ovrt_runtime_destroy(void* host) {
 
 int32_t ovrt_runtime_process_buffer(void* host, const uint8_t* unit_id, uintptr_t unit_id_len, uint8_t* buffer, uintptr_t buffer_len, char* err_buf, uintptr_t err_cap) {
   (void)host;
-  (void)unit_id;
-  (void)unit_id_len;
   if (buffer == NULL || buffer_len != BUFFER_TOTAL_BYTES) {
     if (err_buf != NULL && err_cap > 0) {
       snprintf(err_buf, err_cap, "invalid runtime buffer");
     }
     return 1;
+  }
+  if (unit_id_len == 12 && memcmp(unit_id, "runtime.fail", 12) == 0) {
+    write_i32(buffer, STATUS_CODE_OFFSET, 1);
+    const char* message = "forced ffi failure";
+    uintptr_t n = strlen(message);
+    if (n > DIAGNOSTIC_MAX_BYTES) {
+      n = DIAGNOSTIC_MAX_BYTES;
+    }
+    memset(buffer + DIAGNOSTIC_BYTES_OFFSET, 0, DIAGNOSTIC_MAX_BYTES);
+    memcpy(buffer + DIAGNOSTIC_BYTES_OFFSET, message, n);
+    return 0;
   }
   int32_t input_len = read_i32(buffer, INPUT_LENGTH_OFFSET);
   if (input_len < 0) {
@@ -726,7 +1103,20 @@ int32_t ovrt_runtime_process_buffer(void* host, const uint8_t* unit_id, uintptr_
 		generated.OFFSET_OUTPUT_BYTES,
 		generated.OFFSET_DIAGNOSTIC_BYTES,
 		generated.DIAGNOSTIC_MAX_BYTES,
-	)
+	))
+}
+
+func buildFFITestLibrarySource(t *testing.T, source string) string {
+	t.Helper()
+
+	cc, err := exec.LookPath("cc")
+	if err != nil {
+		t.Skip("cc compiler not available")
+	}
+
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "runtime_ffi_stub.c")
+	libraryPath := filepath.Join(dir, ffiLibraryFileName())
 	if err := os.WriteFile(sourcePath, []byte(source), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
@@ -743,6 +1133,33 @@ int32_t ovrt_runtime_process_buffer(void* host, const uint8_t* unit_id, uintptr_
 		t.Fatalf("compile ffi test library: %v\n%s", err, string(output))
 	}
 	return libraryPath
+}
+
+func ffiMinimalSource(abi int, createMode string, includeProcess bool) string {
+	process := ""
+	if includeProcess {
+		process = `int32_t ovrt_runtime_process_buffer(void* host, const uint8_t* unit_id, uintptr_t unit_id_len, uint8_t* buffer, uintptr_t buffer_len, char* err_buf, uintptr_t err_cap) {
+  (void)host; (void)unit_id; (void)unit_id_len; (void)buffer; (void)buffer_len; (void)err_buf; (void)err_cap;
+  return 0;
+}`
+	}
+	createBody := `*out_host = (void*)0x1; return 0;`
+	switch createMode {
+	case "fail":
+		createBody = `snprintf(err_buf, err_cap, "create failed"); return 1;`
+	case "nil":
+		createBody = `*out_host = NULL; return 0;`
+	}
+	return fmt.Sprintf(`#include <stdint.h>
+#include <stdio.h>
+uint32_t ovrt_runtime_abi_version(void) { return %d; }
+int32_t ovrt_runtime_create(uintptr_t workers, void** out_host, char* err_buf, uintptr_t err_cap) {
+  (void)workers;
+  %s
+}
+void ovrt_runtime_destroy(void* host) { (void)host; }
+%s
+`, abi, createBody, process)
 }
 
 func ffiLibraryFileName() string {

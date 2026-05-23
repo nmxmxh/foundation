@@ -17,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 	runtimeconfig "github.com/nmxmxh/ovasabi_foundation/config-contracts/go/runtimeconfig"
 )
 
@@ -275,6 +276,80 @@ func (s *Store) PutFile(ctx context.Context, key, localPath string, opts PutOpti
 	}, nil
 }
 
+func (s *Store) PutStream(ctx context.Context, key string, reader io.Reader, size int64, opts PutOptions) (Object, error) {
+	if s == nil {
+		return Object{}, fmt.Errorf("object store is required")
+	}
+	key = normalizeKey(key)
+	if key == "" {
+		return Object{}, fmt.Errorf("object key is required")
+	}
+	if reader == nil {
+		return Object{}, fmt.Errorf("object reader is required")
+	}
+	if s.Bucket == "" {
+		return Object{}, fmt.Errorf("object storage bucket is required")
+	}
+	contentType := strings.TrimSpace(opts.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	if s.memory {
+		payload, err := readStream(reader, size)
+		if err != nil {
+			return Object{}, err
+		}
+		if size >= 0 && int64(len(payload)) != size {
+			return Object{}, fmt.Errorf("object stream size mismatch: got %d want %d", len(payload), size)
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.blobs == nil {
+			s.blobs = map[string]storedObject{}
+		}
+		s.blobs[key] = storedObject{
+			payload:     payload,
+			contentType: contentType,
+			metadata:    cloneMetadata(opts.Metadata),
+		}
+		return Object{
+			Key:         key,
+			Bucket:      s.Bucket,
+			ContentType: contentType,
+			Size:        int64(len(payload)),
+			URL:         s.ObjectURL(key),
+			Metadata:    cloneMetadata(opts.Metadata),
+		}, nil
+	}
+
+	client, err := s.s3Client()
+	if err != nil {
+		return Object{}, err
+	}
+	input := &s3manager.UploadInput{
+		Bucket:      new(s.Bucket),
+		Key:         new(key),
+		Body:        reader,
+		ContentType: new(contentType),
+		Metadata:    aws.StringMap(cloneMetadata(opts.Metadata)),
+	}
+	uploader := s3manager.NewUploaderWithClient(client)
+	output, err := uploader.UploadWithContext(ctxOrBackground(ctx), input)
+	if err != nil {
+		return Object{}, err
+	}
+	return Object{
+		Key:         key,
+		Bucket:      s.Bucket,
+		ContentType: contentType,
+		Size:        size,
+		ETag:        aws.StringValue(output.ETag),
+		URL:         firstNonEmpty(output.Location, s.ObjectURL(key)),
+		Metadata:    cloneMetadata(opts.Metadata),
+	}, nil
+}
+
 func (s *Store) ReadBytes(ctx context.Context, key string) ([]byte, error) {
 	if s == nil {
 		return nil, fmt.Errorf("object store is required")
@@ -306,6 +381,143 @@ func (s *Store) ReadBytes(ctx context.Context, key string) ([]byte, error) {
 	}
 	defer func() { _ = output.Body.Close() }()
 	return io.ReadAll(output.Body)
+}
+
+func (s *Store) Open(ctx context.Context, key string) (io.ReadCloser, Object, error) {
+	if s == nil {
+		return nil, Object{}, fmt.Errorf("object store is required")
+	}
+	key = normalizeKey(key)
+	if key == "" {
+		return nil, Object{}, fmt.Errorf("object key is required")
+	}
+	if s.memory {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		blob, ok := s.blobs[key]
+		if !ok {
+			return nil, Object{}, fmt.Errorf("object %s not found", key)
+		}
+		payload := append([]byte(nil), blob.payload...)
+		object := Object{
+			Key:         key,
+			Bucket:      s.Bucket,
+			ContentType: blob.contentType,
+			Size:        int64(len(payload)),
+			URL:         s.ObjectURL(key),
+			Metadata:    cloneMetadata(blob.metadata),
+		}
+		return io.NopCloser(bytes.NewReader(payload)), object, nil
+	}
+
+	client, err := s.s3Client()
+	if err != nil {
+		return nil, Object{}, err
+	}
+	output, err := client.GetObjectWithContext(ctxOrBackground(ctx), &s3.GetObjectInput{
+		Bucket: new(s.Bucket),
+		Key:    new(key),
+	})
+	if err != nil {
+		return nil, Object{}, err
+	}
+	object := Object{
+		Key:         key,
+		Bucket:      s.Bucket,
+		ContentType: aws.StringValue(output.ContentType),
+		Size:        aws.Int64Value(output.ContentLength),
+		ETag:        aws.StringValue(output.ETag),
+		URL:         s.ObjectURL(key),
+		Metadata:    aws.StringValueMap(output.Metadata),
+	}
+	return output.Body, object, nil
+}
+
+func (s *Store) GetRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, Object, error) {
+	if offset < 0 {
+		return nil, Object{}, fmt.Errorf("object range offset must be non-negative")
+	}
+	if length <= 0 {
+		return nil, Object{}, fmt.Errorf("object range length must be positive")
+	}
+	if s == nil {
+		return nil, Object{}, fmt.Errorf("object store is required")
+	}
+	key = normalizeKey(key)
+	if key == "" {
+		return nil, Object{}, fmt.Errorf("object key is required")
+	}
+	if s.memory {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		blob, ok := s.blobs[key]
+		if !ok {
+			return nil, Object{}, fmt.Errorf("object %s not found", key)
+		}
+		if offset > int64(len(blob.payload)) {
+			return nil, Object{}, fmt.Errorf("object range offset exceeds object size")
+		}
+		end := min(offset+length, int64(len(blob.payload)))
+		payload := append([]byte(nil), blob.payload[offset:end]...)
+		object := Object{
+			Key:         key,
+			Bucket:      s.Bucket,
+			ContentType: blob.contentType,
+			Size:        int64(len(blob.payload)),
+			URL:         s.ObjectURL(key),
+			Metadata:    cloneMetadata(blob.metadata),
+		}
+		return io.NopCloser(bytes.NewReader(payload)), object, nil
+	}
+
+	client, err := s.s3Client()
+	if err != nil {
+		return nil, Object{}, err
+	}
+	end := offset + length - 1
+	output, err := client.GetObjectWithContext(ctxOrBackground(ctx), &s3.GetObjectInput{
+		Bucket: new(s.Bucket),
+		Key:    new(key),
+		Range:  new(fmt.Sprintf("bytes=%d-%d", offset, end)),
+	})
+	if err != nil {
+		return nil, Object{}, err
+	}
+	object := Object{
+		Key:         key,
+		Bucket:      s.Bucket,
+		ContentType: aws.StringValue(output.ContentType),
+		Size:        aws.Int64Value(output.ContentLength),
+		ETag:        aws.StringValue(output.ETag),
+		URL:         s.ObjectURL(key),
+		Metadata:    aws.StringValueMap(output.Metadata),
+	}
+	return output.Body, object, nil
+}
+
+func (s *Store) Delete(ctx context.Context, key string) error {
+	if s == nil {
+		return fmt.Errorf("object store is required")
+	}
+	key = normalizeKey(key)
+	if key == "" {
+		return fmt.Errorf("object key is required")
+	}
+	if s.memory {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		delete(s.blobs, key)
+		return nil
+	}
+	client, err := s.s3Client()
+	if err != nil {
+		return err
+	}
+	_, err = client.DeleteObjectWithContext(ctxOrBackground(ctx), &s3.DeleteObjectInput{
+		Bucket: new(s.Bucket),
+		Key:    new(key),
+	})
+	return err
 }
 
 func (s *Store) StageToTempFile(ctx context.Context, key, prefix, suffix string) (string, func() error, error) {
@@ -458,6 +670,41 @@ func cloneMetadata(in map[string]string) map[string]string {
 		out[strings.TrimSpace(key)] = strings.TrimSpace(value)
 	}
 	return out
+}
+
+func readStream(reader io.Reader, size int64) ([]byte, error) {
+	if size <= 0 {
+		return io.ReadAll(reader)
+	}
+	if size > int64(^uint(0)>>1) {
+		return io.ReadAll(reader)
+	}
+	payload := make([]byte, int(size))
+	n, err := io.ReadFull(reader, payload)
+	if err != nil {
+		if err == io.ErrUnexpectedEOF || err == io.EOF {
+			return payload[:n], nil
+		}
+		return nil, err
+	}
+	var extra [1]byte
+	extraN, err := reader.Read(extra[:])
+	if extraN > 0 {
+		return append(payload, extra[0]), nil
+	}
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func ctxOrBackground(ctx context.Context) context.Context {

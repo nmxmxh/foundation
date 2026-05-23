@@ -214,9 +214,16 @@ GOCACHE=/private/tmp/ovasabi-go-build-cache go test -run=^$ -bench='BenchmarkInM
 
 | Benchmark | ns/op | B/op | allocs/op | Interpretation |
 | --- | ---: | ---: | ---: | --- |
-| `BenchmarkInMemoryBus_Publish_NoSubscribers` | 245.9 | 0 | 0 | Bounded per-correlation trace ring avoids post-cap slice copying, and terminal-state extraction is allocation-free. |
-| `BenchmarkInMemoryBus_Publish_1Subscriber` | 253.5 | 0 | 0 | One exact subscriber adds little over trace/event validation. |
-| `BenchmarkInMemoryBus_Publish_10Subscribers` | 289.2 | 0 | 0 | Synchronous local fanout remains sub-microsecond for small exact sets. |
+| `BenchmarkInMemoryBus_Publish_NoSubscribers` | 307.0 | 0 | 0 | Context-free publish now skips empty metadata map construction and remains allocation-free. |
+| `BenchmarkInMemoryBus_Publish_1Subscriber` | 309.1 | 0 | 0 | One exact subscriber adds little over trace/event validation. |
+| `BenchmarkInMemoryBus_Publish_10Subscribers` | 340.7 | 0 | 0 | Synchronous local fanout remains sub-microsecond for small exact sets. |
+
+2026-05-21 propagation note: the bulk checksum/copy audit exposed that
+`Publish(context.Background(), normalizedEnvelope)` was constructing empty
+metadata maps before discovering there was no context metadata to merge.
+`metadata.FromContextOK` now lets event publish stay zero-allocation on the
+context-free hot path while preserving metadata injection when the context
+actually carries Foundation metadata.
 
 ### 2026-05-11 service-backed Docker substrate check
 
@@ -1188,3 +1195,107 @@ hot camera/audio/sensor/market payloads should move by descriptor, shared
 memory, fixed runtime buffer, SAB, arena slab, or packet ring. Full-payload
 native frames are linear in payload size and must not become the default for
 device hot streams.
+
+## 2026-05-20 Bulk Transfer And Object Store
+
+This pass added a bounded benchmark lane for the new `server-kit/go/bulk`
+primitive and the object store streaming surface. The first draft accidentally
+stored every benchmark object under a unique key, which turned the benchmark
+into an unbounded memory-retention test. The accepted benchmark shape now reuses
+a small key ring for object-store writes and sets up per-iteration bulk state
+outside timed sections so memory stays bounded.
+
+The implementation follows the external shape used by large object stores:
+bounded parts, explicit per-part receipts/checksums, a completion manifest, and
+part-aligned range reads where possible. Go hot paths use caller-sized buffers
+or exact-size bounded reads rather than accidental `io.Copy` scratch allocation,
+and checksum hex conversion stays stack-backed so manifest completion does not
+allocate per decoded part hash.
+
+Two lessons were promoted into `performance_practices.md` and
+`coding_practices.md`: bounded copy paths should make scratch-buffer ownership
+explicit, and fixed-size checksum/identifier hex work should use stack-backed
+`hex.Encode`/`hex.Decode` when the path is hot. The same hex pattern was applied
+to metadata correlation suffixes and security redaction hashes so bulk is not a
+one-off optimization island.
+
+Command:
+
+```bash
+make test-bench
+```
+
+Equivalent direct command:
+
+```bash
+cd foundation/server-kit/go
+go test -run=^$ -bench='Benchmark(MemoryStore|Manager)' -benchmem -benchtime=100ms -count=1 ./objectstore ./bulk
+```
+
+Current local reference on Apple M1 Pro:
+
+| Benchmark | Result | Allocation shape | Interpretation |
+| --- | ---: | ---: | --- |
+| `BenchmarkMemoryStorePutStream/64KB` | `6507 ns/op`, `10072 MB/s` | `65753 B/op`, `8 allocs/op` | Exact-size stream read removes the earlier 3x heap growth and brings memory-store stream writes near `PutBytes`. |
+| `BenchmarkMemoryStorePutStream/1024KB` | `41009 ns/op`, `25569 MB/s` | `1048834 B/op`, `8 allocs/op` | Stream storage now retains roughly one payload copy for the memory test backend. |
+| `BenchmarkMemoryStorePutStream/4096KB` | `132657 ns/op`, `31618 MB/s` | `4194585 B/op`, `8 allocs/op` | Larger stream writes stay bounded to roughly one payload copy. |
+| `BenchmarkMemoryStorePutBytes/64KB` | `7095 ns/op`, `9237 MB/s` | `65695 B/op`, `6 allocs/op` | Existing-slice path is the baseline because the caller already materialized the object. |
+| `BenchmarkMemoryStorePutBytes/1024KB` | `33072 ns/op`, `31706 MB/s` | `1048771 B/op`, `6 allocs/op` | Existing-slice path remains faster because the caller already materialized the whole object. |
+| `BenchmarkMemoryStorePutBytes/4096KB` | `114282 ns/op`, `36701 MB/s` | `4194522 B/op`, `6 allocs/op` | Large in-memory writes show the store copy cost without stream-reader overhead. |
+| `BenchmarkMemoryStoreGetRange/64KB` | `3691 ns/op`, `17755 MB/s` | `65696 B/op`, `6 allocs/op` | Small range reads copy only the requested range. |
+| `BenchmarkMemoryStoreGetRange/1024KB` | `35510 ns/op`, `29529 MB/s` | `1048737 B/op`, `6 allocs/op` | Memory range reads copy only the requested range. |
+| `BenchmarkManagerAcceptPartIdentity/64KB` | `42033 ns/op`, `1559 MB/s` | `68434 B/op`, `27 allocs/op` | The no-event path no longer builds event payload maps when no event bus is configured. |
+| `BenchmarkManagerAcceptPartIdentity/1024KB` | `540914 ns/op`, `1939 MB/s` | `1051474 B/op`, `27 allocs/op` | Large identity chunks scale linearly and retain about one payload copy in the memory backend. |
+| `BenchmarkManagerAcceptPartIdentity/4096KB` | `2034869 ns/op`, `2061 MB/s` | `4197295 B/op`, `27 allocs/op` | The 4MB lane stays bounded and shows hashing plus store-copy throughput. |
+| `BenchmarkManagerAcceptPartWithCacheAndEvents` | `169178 ns/op`, `1550 MB/s` | `281457 B/op`, `157 allocs/op` | Evented/cache operation is explicitly a control-plane lane; the no-event manager path stays cheaper. |
+| `BenchmarkManagerAcceptPartGzipCompressible` | `1368758 ns/op`, `766 MB/s` | `1256056 B/op`, `65 allocs/op` | Gzip at best-speed is the throughput-oriented stored-compression lane. |
+| `BenchmarkManagerAcceptPartZstdCompressible` | `910361 ns/op`, `1152 MB/s` | `9505533 B/op`, `143 allocs/op` | Zstd is fastest on this compressible sample but currently carries high encoder allocation overhead. |
+| `BenchmarkManagerAcceptPartBrotliCompressible` | `1468706 ns/op`, `714 MB/s` | `389920 B/op`, `47 allocs/op` | Brotli is allocation-light here but slower; reserve it for policy-driven size wins. |
+| `BenchmarkManagerAcceptPartAutoCompressible` | `1370252 ns/op`, `765 MB/s` | `2281309 B/op`, `54 allocs/op` | Auto uses exact-size bounded reads and stack-backed checksum hex conversion. |
+| `BenchmarkManagerAcceptPartAutoIncompressible` | `660804 ns/op`, `1587 MB/s` | `2099946 B/op`, `25 allocs/op` | Auto avoids codec work on likely incompressible data and pays roughly one decision buffer plus one store copy. |
+| `BenchmarkManagerCompleteManifest/128Parts` | `160511 ns/op`, `52262 MB/s represented` | `234242 B/op`, `167 allocs/op` | Stack-backed hex decode/encode removes per-part digest allocations from manifest root construction. |
+| `BenchmarkManagerCompleteManifest/1024Parts` | `1175334 ns/op`, `57098 MB/s represented` | `2057586 B/op`, `1074 allocs/op` | Manifest completion is now dominated by receipt sorting and JSON manifest construction. |
+| `BenchmarkManagerOpenRangeIdentity` | `45366 ns/op`, `11557 MB/s` | `531448 B/op`, `35 allocs/op` | Materialized range reads copy the requested range and compose chunk readers. |
+| `BenchmarkManagerForEachRangeIdentity` | `33394 ns/op`, `15700 MB/s` | `531117 B/op`, `28 allocs/op` | Callback range walking follows the `wsrouting` split technique: avoid the aggregate reader and slice materialization for hot fanout reads. |
+
+Behavior invariants held:
+
+1. No benchmark path routes bulk bytes through generic dispatch or `io.ReadAll`
+   on a full logical transfer.
+2. Each accepted part remains bounded by its declared part size and memory
+   budget; overrun readers fail before extra bytes become accepted payload.
+3. Redis/cache/event work remains control-plane metadata only.
+4. Identity remains the default. Gzip, Brotli, and Zstd are explicit stored
+   artifact policies; `auto` is also explicit because it buffers one bounded
+   chunk to decide whether compression is worth storing.
+
+Adapter gaps to measure next:
+
+1. `runtime-transport` adapter cost: `server-kit/go/bulk.Pipeline` now carries
+   typed transfer-plan, part receipt, resume-token, status, progress, and
+   manifest envelopes separately from byte movement. It also exposes
+   `AcceptHTTPPart` for server-mediated streams and signed object-store grants
+   through `GrantSignedPart`/`AcceptSignedPart` for direct-to-object-store
+   uploads. Same-host producers can bind descriptor readers through
+   `AcceptDescriptorPart`, while `DetectPlatformCapabilities` reports
+   conservative Linux acceleration hints for future zero-copy/MPTCP/QUIC
+   adapters. `Pipeline.PlanLane` ranks descriptor, signed object-store, kernel
+   zero-copy, MPTCP, QUIC, and HTTP stream candidates without changing the
+   receipt/manifest contract. `BenchmarkPipelinePlanLane` reports about
+   `443 ns/op`, `696 B/op`, and `8 allocs/op`; `BenchmarkPipelineHandleStatus`
+   reports about `1.7-2.0 us/op`, `1816 B/op`, and `26 allocs/op`. Future work
+   should reduce envelope allocation without moving bulk bytes into envelopes.
+2. Resumable protocol recovery: benchmark idempotent duplicate part acceptance,
+   missing-part discovery, offset retry, and manifest completion after process
+   restart or worker handoff.
+3. Distributed state backend: compare in-memory state, Redis lease/progress
+   state, and durable manifest recovery under bounded concurrency. Redis must
+   remain ephemeral coordination unless the product explicitly promotes state to
+   a durable store.
+4. Data-plane adapters: add filesystem/object-store streaming benchmarks that
+   do not retain the whole object in memory. Memory-store numbers are a fast
+   regression net, not proof of production storage throughput.
+5. Kernel/network acceleration: when implemented, benchmark Linux `sendfile`,
+   `splice`, `MSG_ZEROCOPY`, `io_uring`, pacing, MPTCP, QUIC, and packet-ring
+   lanes as refinements of the same receipt/manifest contract. The benchmark
+   result must report fallback behavior and copy budget, not only MB/s.
