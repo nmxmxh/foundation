@@ -4,6 +4,7 @@
   "license": "UNLICENSED",
   "type": "module",
   "dependencies": {
+    "@ovasabi/runtime-browser": "file:../../runtime-sdk/ts/browser-host",
     "@ovasabi/runtime-transport": "file:../../runtime-transport/ts"
   },
   "exports": {

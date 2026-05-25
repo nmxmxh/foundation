@@ -1,4 +1,9 @@
 import type { RuntimeCapabilities, RuntimeRole, RuntimeUnitDescriptor } from "./types";
+import {
+  validateRuntimeNativeGpuDescriptor,
+  type RuntimeNativeGpuDescriptor,
+  type RuntimeNativeGpuPlatform,
+} from "./nativeGpu";
 
 export type RuntimeWorkloadClass =
   | "control"
@@ -15,6 +20,7 @@ export type RuntimeExecutionLane =
   | "cpu-simd"
   | "rust-ffi"
   | "shared-memory"
+  | "native-gpu"
   | "webgpu"
   | "wasm-sab"
   | "wasm-transfer"
@@ -27,6 +33,8 @@ export type RuntimeLanePlannerCapabilities = Pick<
   "supportsSharedMemoryRuntime" | "supportsSharedWasmMemory" | "worker" | "sharedArrayBuffer" | "crossOriginIsolated"
 > & {
   webGpu?: boolean;
+  nativeGpu?: boolean;
+  nativeGpuPlatforms?: RuntimeNativeGpuPlatform[];
   nativeFfi?: boolean;
   nativeSharedMemory?: boolean;
   cpuSimd?: boolean;
@@ -44,6 +52,7 @@ export type RuntimeLanePlanInput = {
   trust: "trusted" | "sandboxed" | "remote";
   locality: "same-process" | "same-host" | "browser" | "cross-host";
   unit?: Partial<RuntimeUnitDescriptor>;
+  nativeGpuDescriptor?: RuntimeNativeGpuDescriptor;
   capabilities: RuntimeLanePlannerCapabilities;
 };
 
@@ -79,6 +88,10 @@ export const planRuntimeLane = (input: RuntimeLanePlanInput): RuntimeLanePlan =>
 
   if (shouldUsePacketRing(input, batchItems)) {
     return plan("packet-ring", roundBatch(batchItems, 8), "none", "zero-heap", "nanoseconds", deadlineRisk(deadlineMs, 0.05), false, "packet-like same-host stream can use fixed descriptor rings with burst dequeue", fallbacks);
+  }
+
+  if (shouldUseNativeGpu(input, byteLength, batchItems, deadlineMs)) {
+    return plan("native-gpu", roundBatch(batchItems, 64), "none", "runtime-managed", "microseconds", deadlineRisk(deadlineMs, 0.15), false, "trusted native GPU descriptor can stay resident in the platform device lane", fallbacks);
   }
 
   if (shouldUseGpu(input, byteLength, batchItems, deadlineMs)) {
@@ -131,6 +144,44 @@ const shouldUseGpu = (input: RuntimeLanePlanInput, byteLength: number, batchItem
   );
 };
 
+const shouldUseNativeGpu = (
+  input: RuntimeLanePlanInput,
+  byteLength: number,
+  batchItems: number,
+  deadlineMs: number
+): boolean => {
+  if (!input.capabilities.nativeGpu) {
+    return false;
+  }
+  if (input.trust !== "trusted" || (input.locality !== "same-host" && input.locality !== "same-process")) {
+    return false;
+  }
+  if (input.unit?.supportsGpu === false) {
+    return false;
+  }
+  if (deadlineMs < 0.05) {
+    return false;
+  }
+  if (!input.nativeGpuDescriptor) {
+    return false;
+  }
+  const validation = validateRuntimeNativeGpuDescriptor(input.nativeGpuDescriptor);
+  if (!validation.ok) {
+    return false;
+  }
+  if (input.capabilities.nativeGpuPlatforms?.length &&
+    !input.capabilities.nativeGpuPlatforms.includes(validation.descriptor.platform)) {
+    return false;
+  }
+  return (
+    input.workload === "media" ||
+    input.workload === "simulation" ||
+    input.workload === "inference-prepost" ||
+    ((input.workload === "vector" || input.workload === "batch") &&
+      (byteLength >= SIMD_MIN_BYTES || batchItems >= SIMD_MIN_ITEMS))
+  );
+};
+
 const shouldUseSimd = (input: RuntimeLanePlanInput, byteLength: number, batchItems: number): boolean =>
   (input.workload === "vector" || input.workload === "inference-prepost") &&
   byteLength >= SIMD_MIN_BYTES &&
@@ -146,6 +197,12 @@ const shouldUsePacketRing = (input: RuntimeLanePlanInput, batchItems: number): b
 
 const fallbackOrder = (input: RuntimeLanePlanInput): RuntimeExecutionLane[] => {
   const lanes: RuntimeExecutionLane[] = [];
+  if (input.capabilities.nativeGpu) {
+    lanes.push("native-gpu");
+  }
+  if (input.capabilities.webGpu) {
+    lanes.push("webgpu");
+  }
   if (input.capabilities.supportsSharedMemoryRuntime) {
     lanes.push("wasm-sab");
   }

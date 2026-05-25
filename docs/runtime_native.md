@@ -91,11 +91,83 @@ The first high-performance custom plugins should be camera and microphone:
    ring, or packet-ring-shaped queue.
 3. Rust validates stream id, schema, dimensions/rate, stride, timestamp, and
    frame budget.
-4. `runtime-native` dispatches a binary descriptor or buffer reference into
-   `runtime-sdk`.
-5. The lane planner selects `rust-ffi`, `shared-memory`, `wasm-sab`,
-   `wasm-transfer`, `wgpu`, `stdio`, or network fallback according to workload,
-   trust, locality, and deadline.
+4. `runtime-native` dispatches a binary descriptor, fixed buffer reference, or
+   opaque native GPU descriptor receipt into `runtime-sdk`.
+5. The lane planner selects `rust-ffi`, `shared-memory`, `native-gpu`,
+   `wasm-sab`, `wasm-transfer`, `wgpu`, `stdio`, or network fallback according
+   to workload, trust, locality, descriptor validity, and deadline.
+
+Native GPU receipts use the canonical
+`runtime-sdk/protocols/system/v1/runtime_native_gpu.capnp` contract. They name
+the resource kind, platform, dimensions/format, schema, producer, and fallback;
+raw DMA-BUF, IOSurface, Android hardware buffer, CUDA, Vulkan, Metal, stream,
+event, and fence handles stay private to the native plugin side table.
+
+## Native GPU Handle Registry
+
+Native zero-copy work is descriptor-first and registry-backed:
+
+```text
+camera/decoder/native producer
+        |
+        v
+private platform handle + fence
+        |
+        v
+runtime-native bounded handle registry
+        |
+        v
+public Cap'n Proto descriptor receipt
+        |
+        v
+runtime-sdk lane planner: native-gpu, WebGPU copy, arena copy, or CPU materialize
+```
+
+The public receipt is stable Foundation contract. The private registry record is
+native-only state: descriptor, platform handle, synchronization fence, owner
+scope, and reference count. Rust owns the registry boundary, validates the
+Cap'n Proto descriptor before insert, enforces owner-scope checks before acquire
+or release, caps the record table, and blocks final release until the fence is
+complete.
+
+Foundation Core now supports two private handle entry shapes:
+
+- Unix fd-backed records for Linux DMA-BUF, Vulkan opaque fd, or CUDA opaque fd
+  style adapters. The plugin passes owned fd values into the registry; snapshots
+  expose only `UnixFd`, platform, plane count, and whether external sync exists.
+- Opaque plugin records for SDK-owned handles such as IOSurface/Metal,
+  Android `AHardwareBuffer`, CUDA external memory, or Vulkan objects where the
+  platform plugin must own unsafe FFI, retain/release, and device compatibility.
+
+This is where DMA-BUF, IOSurface, Android hardware-buffer, CUDA external memory,
+and Vulkan external-memory adapters plug in. Those adapters may use
+platform-specific handle types internally, but Foundation callers only see the
+opaque descriptor and an explicit materialization fallback:
+
+- `copy-to-arena` for CPU-visible runtime arena bytes.
+- `copy-to-webgpu` for the browser portable GPU lane.
+- `cpu-materialize` for a plugin-owned readback path.
+
+The registry is not a serializer. It is a lifetime and permission table. Raw
+file descriptors, IOSurface objects, hardware-buffer pointers, Metal textures,
+CUDA/Vulkan memory handles, streams, events, and fences must not appear in
+frontend messages, logs, snapshots, or generated contracts.
+
+Use this lane when all of these are true:
+
+1. A native producer already owns a device resource, such as camera frames,
+   decoder output, sensor images, or plugin-generated compute buffers.
+2. The next consumer can run in native GPU/WebGPU/GPU-compatible space, or the
+   workload is large enough that explicit materialization is cheaper than
+   copying payload frames through the control plane.
+3. The plugin can prove platform capability, queue/stream ordering, fence
+   status, dimensions, format, stride, owner scope, and fallback behavior before
+   publishing a descriptor receipt.
+
+Do not use this lane for scalar control work, auth/tenant/orchestration paths,
+small request/response payloads, or browser-only features that must work without
+a native device plugin. Those stay on direct, Rust/WASM, shared-memory, WebGPU,
+or ordinary transport lanes selected by the planner.
 
 For camera, prefer explicit plane metadata:
 
@@ -107,7 +179,7 @@ height
 stride/plane offsets
 timestamp_monotonic_ns
 epoch
-payload bytes or native buffer handle
+payload bytes or opaque native GPU descriptor receipt
 ```
 
 For microphone, prefer fixed chunking:
@@ -156,6 +228,10 @@ foundation/runtime-sdk/
 ## Commands
 
 ```bash
+make test-rust
+make test-bench-native-rust
+make check-rust-runtime-practices
+
 make native-dev
 make native-build
 make native-mobile-init
@@ -163,7 +239,15 @@ make native-bench
 make native-doctor
 ```
 
-`native-bench` is report-only until three stable baselines exist for a machine class.
+In Foundation Core, `make test-rust` runs the `runtime-sdk/rust` workspace and
+`runtime-native/rust` tests. `make check-rust-runtime-practices` verifies the
+safe Rust boundary, native GPU private-handle test coverage, and benchmark
+evidence hooks. `make test-bench-native-rust` runs the bounded native flow
+simulation and reports nanosecond timings for descriptor, registry, opaque
+plugin, and fd-backed lifecycle paths.
+
+Generated app `native-bench` targets are report-only until three stable
+baselines exist for a machine class.
 
 Without Tauri or mobile SDKs, run the local communication simulation directly:
 
@@ -186,6 +270,14 @@ Native commands are limited to:
 - `foundation_secure_store_get`
 - `foundation_secure_store_put`
 - `foundation_secure_store_delete`
+
+Native GPU device plugins may additionally expose these commands only when the
+app capability allowlist enables the plugin:
+
+- `foundation_native_gpu_capabilities`
+- `foundation_native_gpu_acquire`
+- `foundation_native_gpu_release`
+- `foundation_native_gpu_materialize`
 
 Runtime units are allowlisted by descriptor before dispatch. Secure tokens must use native storage surfaces; frontend `localStorage` is not an acceptable token store for native shells.
 

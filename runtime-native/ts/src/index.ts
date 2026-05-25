@@ -6,6 +6,9 @@ import {
   type Subscription,
   type TransportStrategy,
 } from "@ovasabi/runtime-transport";
+import type { RuntimeNativeGpuPlatform } from "./nativeGpu";
+
+export * from "./nativeGpu";
 
 export const NATIVE_DISPATCH_COMMAND = "foundation_runtime_dispatch";
 export const NATIVE_CAPABILITIES_COMMAND = "foundation_runtime_capabilities";
@@ -22,6 +25,8 @@ export type NativeRuntimeCapabilities = {
   native: boolean;
   nativeFfi: boolean;
   nativeSharedMemory: boolean;
+  nativeGpu: boolean;
+  nativeGpuPlatforms: RuntimeNativeGpuPlatform[];
   wasmSab: boolean;
   wasmTransfer: boolean;
   platform: string;
@@ -239,10 +244,26 @@ const normalizeCapabilities = (value: Record<string, unknown>): NativeRuntimeCap
   native: value.native === true,
   nativeFfi: value.nativeFfi === true || value.native_ffi === true,
   nativeSharedMemory: value.nativeSharedMemory === true || value.native_shared_memory === true,
+  nativeGpu: value.nativeGpu === true || value.native_gpu === true,
+  nativeGpuPlatforms: normalizeNativeGpuPlatforms(value.nativeGpuPlatforms ?? value.native_gpu_platforms),
   wasmSab: value.wasmSab === true || value.wasm_sab === true,
   wasmTransfer: value.wasmTransfer === true || value.wasm_transfer === true,
   platform: typeof value.platform === "string" ? value.platform : "unknown",
 });
+
+const normalizeNativeGpuPlatforms = (value: unknown): RuntimeNativeGpuPlatform[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const platforms = value.filter((platform): platform is RuntimeNativeGpuPlatform =>
+    platform === "linux-dmabuf" ||
+    platform === "apple-iosurface" ||
+    platform === "android-hardware-buffer" ||
+    platform === "cuda-external" ||
+    platform === "vulkan-external"
+  );
+  return [...new Set(platforms)];
+};
 
 const throwIfAborted = (signal?: AbortSignal): void => {
   if (signal?.aborted) {

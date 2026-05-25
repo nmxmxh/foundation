@@ -8,6 +8,8 @@ const baseCaps: RuntimeLanePlannerCapabilities = {
   sharedArrayBuffer: true,
   crossOriginIsolated: true,
   webGpu: true,
+  nativeGpu: true,
+  nativeGpuPlatforms: ["apple-iosurface"],
   nativeFfi: true,
   nativeSharedMemory: true,
   cpuSimd: true,
@@ -43,6 +45,124 @@ describe("runtime lane planner", () => {
     expect(plan.batchSize).toBeGreaterThanOrEqual(4096);
     expect(plan.expectedLatencyClass).toBe("milliseconds");
     expect(plan.requiresCrossOriginIsolation).toBe(true);
+  });
+
+  it("routes trusted same-host resident GPU descriptors to the native GPU lane", () => {
+    const plan = planRuntimeLane({
+      byteLength: 1920 * 1080,
+      workload: "media",
+      batchItems: 1,
+      trust: "trusted",
+      locality: "same-host",
+      capabilities: baseCaps,
+      unit: { supportsGpu: true },
+      nativeGpuDescriptor: {
+        id: "camera.frame.42",
+        kind: "native-gpu-texture",
+        platform: "apple-iosurface",
+        width: 1920,
+        height: 1080,
+        format: "bgra8",
+        producer: "camera.plugin",
+        fallback: "copy-to-webgpu",
+      },
+    });
+
+    expect(plan.lane).toBe("native-gpu");
+    expect(plan.copyBudget).toBe("none");
+    expect(plan.expectedLatencyClass).toBe("microseconds");
+    expect(plan.requiresCrossOriginIsolation).toBe(false);
+    expect(plan.fallbacks).toContain("webgpu");
+  });
+
+  it("does not select native GPU for unsupported descriptor platforms", () => {
+    const plan = planRuntimeLane({
+      byteLength: 512 * 1024,
+      workload: "media",
+      batchItems: 1,
+      trust: "trusted",
+      locality: "same-host",
+      capabilities: baseCaps,
+      unit: { supportsGpu: true },
+      nativeGpuDescriptor: {
+        id: "camera.frame.43",
+        kind: "native-gpu-texture",
+        platform: "linux-dmabuf",
+        width: 1280,
+        height: 720,
+        format: "nv12",
+        producer: "camera.plugin",
+        fallback: "copy-to-webgpu",
+      },
+    });
+
+    expect(plan.lane).not.toBe("native-gpu");
+    expect(plan.fallbacks).toContain("native-gpu");
+  });
+
+  it("does not select native GPU when descriptor validation rejects raw handle leaks", () => {
+    const plan = planRuntimeLane({
+      byteLength: 512 * 1024,
+      workload: "media",
+      batchItems: 1,
+      trust: "trusted",
+      locality: "same-host",
+      capabilities: baseCaps,
+      unit: { supportsGpu: true },
+      nativeGpuDescriptor: {
+        id: "camera.frame.44",
+        kind: "native-gpu-texture",
+        platform: "apple-iosurface",
+        width: 1280,
+        height: 720,
+        format: "bgra8",
+        producer: "camera.plugin",
+        fallback: "copy-to-webgpu",
+        IOSurface: 9,
+      } as any,
+    });
+
+    expect(plan.lane).not.toBe("native-gpu");
+  });
+
+  it("does not list native GPU as fallback when the runtime lacks capability", () => {
+    const plan = planRuntimeLane({
+      byteLength: 512 * 1024,
+      workload: "media",
+      batchItems: 1,
+      trust: "trusted",
+      locality: "same-host",
+      capabilities: {
+        ...baseCaps,
+        nativeGpu: false,
+        nativeGpuPlatforms: [],
+      },
+      unit: { supportsGpu: true },
+    });
+
+    expect(plan.fallbacks).not.toContain("native-gpu");
+  });
+
+  it("does not select native GPU for sandboxed or GPU-disabled work", () => {
+    const sandboxed = planRuntimeLane({
+      byteLength: 512 * 1024,
+      workload: "media",
+      trust: "sandboxed",
+      locality: "same-host",
+      capabilities: baseCaps,
+      unit: { supportsGpu: true },
+    });
+    const disabled = planRuntimeLane({
+      byteLength: 512 * 1024,
+      workload: "media",
+      trust: "trusted",
+      locality: "same-host",
+      capabilities: baseCaps,
+      unit: { supportsGpu: false },
+    });
+
+    expect(sandboxed.lane).not.toBe("native-gpu");
+    expect(disabled.lane).not.toBe("native-gpu");
   });
 
   it("keeps sub-millisecond browser deadlines away from WebGPU dispatch setup", () => {

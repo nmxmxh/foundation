@@ -1,10 +1,12 @@
 #!/bin/zsh
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")/../../.." && pwd)"
-PROTO_DIR="$ROOT_DIR/foundation/runtime-transport/protos"
-GO_OUT_DIR="$ROOT_DIR/foundation/runtime-transport/go/generated"
-TS_OUT_DIR="$ROOT_DIR/foundation/runtime-transport/ts/src/generated"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FOUNDATION_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+ROOT_DIR="$(cd "$FOUNDATION_DIR/.." && pwd)"
+PROTO_DIR="$FOUNDATION_DIR/runtime-transport/protos"
+GO_OUT_DIR="$FOUNDATION_DIR/runtime-transport/go/generated"
+TS_OUT_DIR="$FOUNDATION_DIR/runtime-transport/ts/src/generated"
 
 mkdir -p "$GO_OUT_DIR"
 mkdir -p "$TS_OUT_DIR"
@@ -15,15 +17,40 @@ protoc \
   "$PROTO_DIR/transport/v1/metadata.proto" \
   "$PROTO_DIR/transport/v1/envelope.proto"
 
-TS_PROTO_PLUGIN="${TS_PROTO_PLUGIN:-}"
-if [[ -z "$TS_PROTO_PLUGIN" ]]; then
-  if [[ -x "$ROOT_DIR/frontend/node_modules/.bin/protoc-gen-ts_proto" ]]; then
-    TS_PROTO_PLUGIN="$ROOT_DIR/frontend/node_modules/.bin/protoc-gen-ts_proto"
-  else
-    echo "ts-proto plugin not found" >&2
+resolve_ts_proto_plugin() {
+  local configured="${TS_PROTO_PLUGIN:-}"
+  if [[ -n "$configured" ]]; then
+    if [[ -x "$configured" ]]; then
+      echo "$configured"
+      return
+    fi
+    echo "TS_PROTO_PLUGIN is set but not executable: $configured" >&2
     exit 1
   fi
-fi
+
+  local candidate
+  for candidate in \
+    "$FOUNDATION_DIR/runtime-transport/ts/node_modules/.bin/protoc-gen-ts_proto" \
+    "$ROOT_DIR/frontend/node_modules/.bin/protoc-gen-ts_proto"; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return
+    fi
+  done
+
+  candidate="$(command -v protoc-gen-ts_proto 2>/dev/null || true)"
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    echo "$candidate"
+    return
+  fi
+
+  echo "ts-proto plugin not found" >&2
+  echo "Install Foundation Core transport deps with: npm --prefix runtime-transport/ts install" >&2
+  echo "Or provide an executable plugin with TS_PROTO_PLUGIN=/path/to/protoc-gen-ts_proto" >&2
+  exit 1
+}
+
+TS_PROTO_PLUGIN="$(resolve_ts_proto_plugin)"
 
 find "$TS_OUT_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 

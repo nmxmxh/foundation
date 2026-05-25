@@ -1,13 +1,23 @@
 use std::collections::BTreeMap;
+#[cfg(unix)]
+use std::fs::File;
 use std::hint::black_box;
+#[cfg(unix)]
+use std::os::fd::OwnedFd;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
+use ovasabi_runtime_native::NativeGpuUnixFdHandle;
 use ovasabi_runtime_native::{
     decode_dispatch_response, encode_dispatch_request, NativeDispatchRequest,
+    NativeGpuHandleRegistry, NativeGpuOpaquePluginHandle, NativeGpuOwnerScope,
     NativePayloadEncoding, NativeRuntimeBridge, MAX_NATIVE_FRAME_BYTES,
 };
-use ovrt_core::{RuntimeRole, RuntimeUnitDescriptor};
+use ovrt_core::{
+    RuntimeNativeGpuDescriptor, RuntimeNativeGpuFallback, RuntimeNativeGpuKind,
+    RuntimeNativeGpuPlatform, RuntimeRole, RuntimeUnitDescriptor,
+};
 use ovrt_native::{process_runtime_buffer_in_place, NativeBuffer, NativeRuntimeHost};
 use ovrt_unit::RuntimeUnit;
 
@@ -58,6 +68,21 @@ fn main() {
 
     println!();
     run_runtime_buffer_control();
+
+    println!();
+    run_native_gpu_descriptor_contract();
+
+    println!();
+    run_native_gpu_registry_lifecycle();
+
+    println!();
+    run_native_gpu_plugin_opaque_registry_lifecycle();
+
+    #[cfg(unix)]
+    {
+        println!();
+        run_native_gpu_unix_fd_registry_lifecycle();
+    }
 }
 
 fn run_full_payload_frame(bridge: &NativeRuntimeBridge, payload_bytes: usize) {
@@ -125,7 +150,8 @@ fn run_descriptor_control_frame(bridge: &NativeRuntimeBridge, external_payload_b
 
 fn run_runtime_buffer_control() {
     let host = NativeRuntimeHost::new(BTreeMap::new());
-    host.register_unit(Arc::new(EchoUnit)).expect("register unit");
+    host.register_unit(Arc::new(EchoUnit))
+        .expect("register unit");
 
     let input = vec![31_u8; 1024];
     let mut buffer = NativeBuffer::with_capacity();
@@ -148,6 +174,169 @@ fn run_runtime_buffer_control() {
         stats.p95_ns,
         stats.p99_ns,
         input.len() * 2
+    );
+}
+
+fn run_native_gpu_descriptor_contract() {
+    let descriptor = RuntimeNativeGpuDescriptor {
+        id: "camera.frame.42".to_string(),
+        kind: RuntimeNativeGpuKind::Texture,
+        platform: RuntimeNativeGpuPlatform::AppleIosurface,
+        byte_length: None,
+        width: Some(1920),
+        height: Some(1080),
+        format: Some("bgra8".to_string()),
+        schema_name: Some("media/v1/frame.capnp".to_string()),
+        producer: "camera.plugin".to_string(),
+        fallback: RuntimeNativeGpuFallback::CopyToWebGpu,
+    };
+
+    let stats = sample(|| {
+        let contract = descriptor
+            .contract_descriptor()
+            .expect("native gpu descriptor contract");
+        black_box(contract);
+    });
+
+    println!(
+        "native-gpu-descriptor-contract fields=11 mean={:>10.2}ns p50={:>8}ns p95={:>8}ns p99={:>8}ns modeled_hot_payload_copy=0B contract=capnp",
+        stats.mean_ns,
+        stats.p50_ns,
+        stats.p95_ns,
+        stats.p99_ns
+    );
+}
+
+fn run_native_gpu_registry_lifecycle() {
+    let descriptor = RuntimeNativeGpuDescriptor {
+        id: "camera.frame.registry".to_string(),
+        kind: RuntimeNativeGpuKind::Texture,
+        platform: RuntimeNativeGpuPlatform::AppleIosurface,
+        byte_length: None,
+        width: Some(1920),
+        height: Some(1080),
+        format: Some("bgra8".to_string()),
+        schema_name: Some("media/v1/frame.capnp".to_string()),
+        producer: "camera.plugin".to_string(),
+        fallback: RuntimeNativeGpuFallback::CopyToWebGpu,
+    };
+    let owner =
+        NativeGpuOwnerScope::new("tenant-1", "camera.plugin", "gpu-0").expect("owner scope");
+    let registry = NativeGpuHandleRegistry::new(4);
+
+    let stats = sample(|| {
+        registry
+            .register_stub(black_box(descriptor.clone()), owner.clone(), 1, 0)
+            .expect("register native gpu");
+        registry
+            .acquire("camera.frame.registry", black_box(&owner))
+            .expect("acquire native gpu");
+        registry
+            .release("camera.frame.registry", black_box(&owner))
+            .expect("release native gpu ref");
+        let released = registry
+            .release("camera.frame.registry", black_box(&owner))
+            .expect("release native gpu final");
+        black_box(released.removed);
+    });
+
+    println!(
+        "native-gpu-registry-lifecycle ops=register+acquire+release+release mean={:>10.2}ns p50={:>8}ns p95={:>8}ns p99={:>8}ns modeled_hot_payload_copy=0B private_handle_table=bounded",
+        stats.mean_ns,
+        stats.p50_ns,
+        stats.p95_ns,
+        stats.p99_ns
+    );
+}
+
+fn run_native_gpu_plugin_opaque_registry_lifecycle() {
+    let descriptor = RuntimeNativeGpuDescriptor {
+        id: "camera.frame.plugin".to_string(),
+        kind: RuntimeNativeGpuKind::Texture,
+        platform: RuntimeNativeGpuPlatform::AppleIosurface,
+        byte_length: None,
+        width: Some(1920),
+        height: Some(1080),
+        format: Some("bgra8".to_string()),
+        schema_name: Some("media/v1/frame.capnp".to_string()),
+        producer: "camera.plugin".to_string(),
+        fallback: RuntimeNativeGpuFallback::CopyToWebGpu,
+    };
+    let owner =
+        NativeGpuOwnerScope::new("tenant-1", "camera.plugin", "gpu-0").expect("owner scope");
+    let registry = NativeGpuHandleRegistry::new(4);
+
+    let stats = sample(|| {
+        let handle = NativeGpuOpaquePluginHandle::new(
+            "iosurface-slot-42",
+            RuntimeNativeGpuPlatform::AppleIosurface,
+            true,
+        )
+        .expect("opaque plugin handle");
+        registry
+            .register_plugin_opaque(black_box(descriptor.clone()), owner.clone(), handle, 1, 0)
+            .expect("register opaque native gpu");
+        let released = registry
+            .release("camera.frame.plugin", black_box(&owner))
+            .expect("release opaque native gpu");
+        black_box(released.removed);
+    });
+
+    println!(
+        "native-gpu-plugin-opaque-lifecycle ops=register+release mean={:>10.2}ns p50={:>8}ns p95={:>8}ns p99={:>8}ns modeled_hot_payload_copy=0B private_plugin_handle=opaque",
+        stats.mean_ns,
+        stats.p50_ns,
+        stats.p95_ns,
+        stats.p99_ns
+    );
+}
+
+#[cfg(unix)]
+fn run_native_gpu_unix_fd_registry_lifecycle() {
+    let descriptor = RuntimeNativeGpuDescriptor {
+        id: "camera.frame.fd".to_string(),
+        kind: RuntimeNativeGpuKind::Texture,
+        platform: RuntimeNativeGpuPlatform::LinuxDmabuf,
+        byte_length: None,
+        width: Some(1280),
+        height: Some(720),
+        format: Some("nv12".to_string()),
+        schema_name: Some("media/v1/frame.capnp".to_string()),
+        producer: "camera.plugin".to_string(),
+        fallback: RuntimeNativeGpuFallback::CopyToWebGpu,
+    };
+    let owner =
+        NativeGpuOwnerScope::new("tenant-1", "camera.plugin", "gpu-0").expect("owner scope");
+    let registry = NativeGpuHandleRegistry::new(4);
+
+    let stats = sample(|| {
+        let fd: OwnedFd = File::open("/dev/null").expect("open fd").into();
+        registry
+            .register_unix_fd(
+                black_box(descriptor.clone()),
+                owner.clone(),
+                NativeGpuUnixFdHandle {
+                    fd,
+                    sync_file: None,
+                    plane_count: 1,
+                    modifier: None,
+                },
+                1,
+                0,
+            )
+            .expect("register unix fd native gpu");
+        let released = registry
+            .release("camera.frame.fd", black_box(&owner))
+            .expect("release unix fd native gpu");
+        black_box(released.removed);
+    });
+
+    println!(
+        "native-gpu-unix-fd-lifecycle ops=open-fd+register+release mean={:>10.2}ns p50={:>8}ns p95={:>8}ns p99={:>8}ns modeled_hot_payload_copy=0B private_fd_handle=owned",
+        stats.mean_ns,
+        stats.p50_ns,
+        stats.p95_ns,
+        stats.p99_ns
     );
 }
 

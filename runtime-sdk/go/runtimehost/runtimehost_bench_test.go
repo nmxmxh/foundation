@@ -171,6 +171,27 @@ func BenchmarkBufferDiagnosticsText(b *testing.B) {
 	}
 }
 
+func BenchmarkRuntimeNativeGPUDescriptorValidate(b *testing.B) {
+	descriptor := RuntimeNativeGPUDescriptor{
+		ID:         "camera.frame.42",
+		Kind:       RuntimeNativeGPUKindTexture,
+		Platform:   RuntimeNativeGPUPlatformAppleIOSurface,
+		Width:      1920,
+		Height:     1080,
+		Format:     "bgra8",
+		SchemaName: "media/v1/frame.capnp",
+		Producer:   "camera.plugin",
+		Fallback:   RuntimeNativeGPUFallbackCopyToWebGPU,
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := descriptor.Validate(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkBufferReadFrameAllocCopy4KB(b *testing.B) {
 	frame := makeRuntimeBufferFrame()
 	dst := make([]byte, generated.BUFFER_TOTAL_BYTES)

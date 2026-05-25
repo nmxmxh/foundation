@@ -8,6 +8,7 @@
     "isolatedModules": true,
     "noEmit": true,
     "paths": {
+      "@ovasabi/runtime-browser": ["../../runtime-sdk/ts/browser-host/src/index.ts"],
       "@ovasabi/runtime-transport": ["../../runtime-transport/ts/src/index.ts"]
     }
   },

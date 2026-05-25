@@ -17,6 +17,7 @@ import {
   decodeNativeDispatchResponse,
   encodeNativeDispatchFrame,
   readNativeRuntimeCapabilities,
+  validateRuntimeNativeGpuDescriptor,
   type NativeBinaryInvoke,
 } from "./index";
 
@@ -116,6 +117,8 @@ describe("runtime native transport", () => {
           native: true,
           native_ffi: true,
           native_shared_memory: false,
+          native_gpu: true,
+          native_gpu_platforms: ["apple-iosurface", "apple-iosurface", "raw-handle"],
           wasm_sab: true,
           wasm_transfer: true,
           platform: "darwin",
@@ -127,6 +130,8 @@ describe("runtime native transport", () => {
       native: true,
       nativeFfi: true,
       nativeSharedMemory: false,
+      nativeGpu: true,
+      nativeGpuPlatforms: ["apple-iosurface"],
       wasmSab: true,
       wasmTransfer: true,
       platform: "darwin",
@@ -161,6 +166,26 @@ describe("runtime native transport", () => {
 
   it("rejects non-byte native responses", () => {
     expect(() => coerceNativeBytes({ value: { ok: true } })).toThrow("bytes");
+  });
+
+  it("validates native GPU descriptors as opaque public receipts", () => {
+    const descriptor = {
+      id: "camera.frame.42",
+      kind: "native-gpu-texture",
+      platform: "apple-iosurface",
+      width: 1920,
+      height: 1080,
+      format: "bgra8",
+      schemaName: "media/v1/frame.capnp",
+      producer: "camera.plugin",
+      fallback: "copy-to-webgpu",
+    };
+
+    expect(validateRuntimeNativeGpuDescriptor(descriptor)).toEqual({ ok: true, descriptor });
+    expect(validateRuntimeNativeGpuDescriptor({ ...descriptor, IOSurface: 123 })).toMatchObject({
+      ok: false,
+      reason: "native GPU descriptor must not expose raw handle field IOSurface",
+    });
   });
 
   it("encodes and decodes native frames around runtime envelope bytes", () => {

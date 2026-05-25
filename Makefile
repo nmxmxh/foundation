@@ -1,7 +1,7 @@
-.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-bench lint verify docker-up docker-down migrate-up help \
+.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust test-bench test-bench-go test-bench-native-rust lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-migration-seed-policy check-lifecycle-contract-generator \
 	check-contract-drift check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
-	check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-server-kit-usage
+	check-rust-runtime-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-server-kit-usage
 
 .DEFAULT_GOAL := help
 
@@ -15,6 +15,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-go-fix \
 	check-go-static-analysis \
 	check-coding-practices \
+	check-rust-runtime-practices \
 	check-testing-practices \
 	check-go-concurrency-practices \
 	check-metadata-practices \
@@ -34,7 +35,7 @@ generate-contracts:
 	@if [ -x runtime-transport/scripts/generate_bindings.sh ]; then runtime-transport/scripts/generate_bindings.sh; fi
 	@if [ -x runtime-sdk/scripts/generate_system_bindings.sh ]; then runtime-sdk/scripts/generate_system_bindings.sh; fi
 
-build: test-go frontend-build
+build: test-go test-rust frontend-build
 
 frontend-build:
 	@echo "Typechecking shared TypeScript packages..."
@@ -47,7 +48,7 @@ frontend-build:
 delivery-metrics:
 	@node tooling/scripts/ci_delivery_metrics.mjs --out delivery-metrics/local-event.json
 
-test: test-go test-ts
+test: test-go test-ts test-rust
 
 test-go:
 	@echo "Running Go tests..."
@@ -61,9 +62,25 @@ test-ts:
 	@if [ -d runtime-transport/ts/node_modules ]; then npm --prefix runtime-transport/ts run test; else echo "Skipping runtime-transport/ts tests; run npm install first"; fi
 	@if [ -d runtime-sdk/ts/browser-host/node_modules ]; then npm --prefix runtime-sdk/ts/browser-host run test; else echo "Skipping runtime-sdk/ts/browser-host tests; run npm install first"; fi
 
-test-bench:
+test-rust: test-rust-sdk test-native-rust
+
+test-rust-sdk:
+	@echo "Running runtime-sdk Rust tests..."
+	@cargo test --manifest-path runtime-sdk/rust/Cargo.toml
+
+test-native-rust:
+	@echo "Running runtime-native Rust tests..."
+	@cargo test --manifest-path runtime-native/rust/Cargo.toml
+
+test-bench: test-bench-go test-bench-native-rust
+
+test-bench-go:
 	@echo "Running bounded Foundation benchmarks..."
-	@cd server-kit/go && go test -run=^$$ -bench='Benchmark(MemoryStore|Manager)' -benchmem -benchtime=100ms -count=1 ./objectstore ./bulk
+	@cd server-kit/go && go test -run=^$$ -bench='Benchmark(MemoryStore|Manager)' -benchmem -benchtime=100000000ns -count=1 ./objectstore ./bulk
+
+test-bench-native-rust:
+	@echo "Running native GPU/runtime Rust benchmark simulation..."
+	@cargo run --manifest-path runtime-native/rust/Cargo.toml --release --bin native_flow_sim
 
 lint:
 	@echo "Running foundation checks..."
@@ -109,6 +126,9 @@ check-go-static-analysis:
 check-coding-practices:
 	@tooling/scripts/coding_practices_check.sh .
 
+check-rust-runtime-practices:
+	@tooling/scripts/rust_runtime_practices_check.sh .
+
 check-testing-practices:
 	@tooling/scripts/testing_practices_check.sh .
 
@@ -150,11 +170,13 @@ migrate-up:
 help:
 	@echo "Foundation core targets:"
 	@echo "  make generate-contracts  Regenerate shared transport/runtime bindings"
-	@echo "  make build               Run Go tests and TS typechecks"
+	@echo "  make build               Run Go/Rust tests and TS typechecks"
 	@echo "  make frontend-build      Typecheck shared TS packages"
 	@echo "  make delivery-metrics    Emit a local DORA/incident collection event"
-	@echo "  make test                Run Go and TS tests"
+	@echo "  make test                Run Go, TS, and Rust tests"
+	@echo "  make test-rust           Run runtime-sdk and runtime-native Rust tests"
 	@echo "  make test-bench          Run bounded local Foundation benchmarks"
+	@echo "  make test-bench-native-rust  Run native GPU/runtime Rust benchmark simulation"
 	@echo "  make lint                Run foundation scaffold/practice checks"
 	@echo "  make verify              Run lint, tests, and TS typechecks"
 	@echo "  make docker-up/down      Start/stop core service-backed test stack"

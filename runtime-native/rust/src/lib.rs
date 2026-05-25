@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod native_gpu;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 use std::sync::{Arc, RwLock};
@@ -7,6 +9,14 @@ use std::sync::{Arc, RwLock};
 use ovrt_core::{RuntimeRole, RuntimeUnitDescriptor};
 use ovrt_native::NativeRuntimeHost;
 use ovrt_unit::RuntimeUnit;
+
+#[cfg(unix)]
+pub use native_gpu::NativeGpuUnixFdHandle;
+pub use native_gpu::{
+    NativeGpuFenceSnapshot, NativeGpuHandleRegistry, NativeGpuMaterializationPlan,
+    NativeGpuOpaquePluginHandle, NativeGpuOwnerScope, NativeGpuPlatformHandleKind,
+    NativeGpuPlatformHandleSnapshot, NativeGpuRegistrySnapshot, NativeGpuReleaseResult,
+};
 
 const REQUEST_MAGIC: &[u8; 4] = b"OVRN";
 const RESPONSE_MAGIC: &[u8; 4] = b"OVRR";
@@ -54,6 +64,8 @@ pub struct NativeRuntimeCapabilities {
     pub native: bool,
     pub native_ffi: bool,
     pub native_shared_memory: bool,
+    pub native_gpu: bool,
+    pub native_gpu_platforms: Vec<String>,
     pub wasm_sab: bool,
     pub wasm_transfer: bool,
     pub platform: String,
@@ -65,11 +77,29 @@ impl NativeRuntimeCapabilities {
             native: true,
             native_ffi: true,
             native_shared_memory: cfg!(target_os = "linux"),
+            native_gpu: !native_gpu_platforms().is_empty(),
+            native_gpu_platforms: native_gpu_platforms(),
             wasm_sab: false,
             wasm_transfer: false,
             platform: std::env::consts::OS.to_string(),
         }
     }
+}
+
+fn native_gpu_platforms() -> Vec<String> {
+    let mut platforms = Vec::new();
+    if cfg!(target_os = "linux") {
+        platforms.push("linux-dmabuf".to_string());
+        platforms.push("vulkan-external".to_string());
+    }
+    if cfg!(target_os = "macos") || cfg!(target_os = "ios") {
+        platforms.push("apple-iosurface".to_string());
+    }
+    if cfg!(target_os = "android") {
+        platforms.push("android-hardware-buffer".to_string());
+        platforms.push("vulkan-external".to_string());
+    }
+    platforms
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +111,9 @@ pub enum NativeErrorCode {
     UnauthorizedUnit,
     RuntimeDispatchFailed,
     StoreUnavailable,
+    NativeGpuUnavailable,
+    NativeGpuUnauthorized,
+    NativeGpuBusy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -608,6 +641,16 @@ mod tests {
         assert!(capabilities.native);
         assert!(capabilities.native_ffi);
         assert!(!capabilities.platform.trim().is_empty());
+        assert_eq!(
+            capabilities.native_gpu,
+            !capabilities.native_gpu_platforms.is_empty()
+        );
+        for platform in &capabilities.native_gpu_platforms {
+            assert!(matches!(
+                platform.as_str(),
+                "linux-dmabuf" | "apple-iosurface" | "android-hardware-buffer" | "vulkan-external"
+            ));
+        }
     }
 
     #[test]

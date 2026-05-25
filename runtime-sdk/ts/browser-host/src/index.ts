@@ -6,6 +6,8 @@ export * from "./lanePlanner";
 export * from "./packetRing";
 export * from "./gpuLayout";
 export * from "./webgpuHost";
+export * from "./webgpuDeviceProbe";
+export * from "./nativeGpu";
 export * from "./orchestrator";
 export * from "./pulse/pulseManager";
 export * from "./pulse/runtimeCaps";

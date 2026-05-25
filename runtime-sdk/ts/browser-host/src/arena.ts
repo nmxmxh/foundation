@@ -412,6 +412,59 @@ export class RuntimeSharedArena {
     return this.bytes.subarray(offset, offset + length);
   }
 
+  copyDescriptorBytesTo(
+    descriptor: RuntimeArenaDescriptor,
+    target: Uint8Array,
+    targetOffset = 0,
+    byteLength = descriptor.length
+  ): void {
+    this.assertReadableDescriptorSnapshot(descriptor, byteLength);
+    if (targetOffset < 0 || targetOffset + byteLength > target.byteLength) {
+      throw new Error(`runtime arena target too small: ${targetOffset + byteLength} > ${target.byteLength}`);
+    }
+    target.set(this.bytes.subarray(descriptor.offset, descriptor.offset + byteLength), targetOffset);
+  }
+
+  readDescriptorBytesView(descriptor: RuntimeArenaDescriptor, byteLength = descriptor.length): Uint8Array {
+    this.assertReadableDescriptorSnapshot(descriptor, byteLength);
+    return this.bytes.subarray(descriptor.offset, descriptor.offset + byteLength);
+  }
+
+  readArenaBytesView(): Uint8Array {
+    return this.bytes;
+  }
+
+  descriptorByteOffset(descriptor: RuntimeArenaDescriptor, byteLength = descriptor.length): number {
+    this.assertReadableDescriptorSnapshot(descriptor, byteLength);
+    return descriptor.offset;
+  }
+
+  writeDescriptorBytesReady(
+    descriptor: RuntimeArenaDescriptor,
+    source: Uint8Array,
+    sourceOffset = 0,
+    byteLength = source.byteLength - sourceOffset
+  ): void {
+    this.assertWritableDescriptorSnapshot(descriptor, byteLength);
+    if (sourceOffset < 0 || sourceOffset + byteLength > source.byteLength) {
+      throw new Error(`runtime arena source too small: ${sourceOffset + byteLength} > ${source.byteLength}`);
+    }
+    if (sourceOffset === 0 && byteLength === source.byteLength) {
+      this.bytes.set(source, descriptor.offset);
+    } else {
+      this.bytes.set(source.subarray(sourceOffset, sourceOffset + byteLength), descriptor.offset);
+    }
+    const descriptorTableOffset = descriptorOffset(descriptor.id);
+    this.view.setUint32(descriptorTableOffset, ARENA_DESCRIPTOR_STATE_READY, true);
+    this.view.setUint32(descriptorTableOffset + 8, byteLength, true);
+    this.view.setUint32(
+      descriptorTableOffset + 24,
+      this.view.getUint32(descriptorTableOffset + 24, true) + 1,
+      true
+    );
+    Atomics.add(this.epochs, ARENA_IDX_DESCRIPTOR_EPOCH, 1);
+  }
+
   markConsumed(descriptorId: number): RuntimeArenaDescriptor {
     this.markConsumedById(descriptorId);
     return this.readDescriptor(descriptorId);
@@ -821,6 +874,38 @@ export class RuntimeSharedArena {
   private assertDescriptorId(id: number): void {
     if (!Number.isInteger(id) || id < 0 || id >= ARENA_DESCRIPTOR_COUNT) {
       throw new Error(`invalid runtime arena descriptor id: ${id}`);
+    }
+  }
+
+  private assertReadableDescriptorSnapshot(descriptor: RuntimeArenaDescriptor, byteLength: number): void {
+    this.assertDescriptorId(descriptor.id);
+    if (!Number.isFinite(byteLength) || byteLength < 0) {
+      throw new Error(`invalid runtime arena descriptor byte length: ${byteLength}`);
+    }
+    if (descriptor.state === ARENA_DESCRIPTOR_STATE_FREE) {
+      throw new Error(`runtime arena descriptor ${descriptor.id} is free`);
+    }
+    if (byteLength > descriptor.length || byteLength > descriptor.capacity) {
+      throw new Error(`runtime arena descriptor ${descriptor.id} byte length exceeds snapshot bounds`);
+    }
+    if (descriptor.offset + byteLength > this.buffer.byteLength) {
+      throw new Error(`runtime arena descriptor ${descriptor.id} exceeds arena capacity`);
+    }
+  }
+
+  private assertWritableDescriptorSnapshot(descriptor: RuntimeArenaDescriptor, byteLength: number): void {
+    this.assertDescriptorId(descriptor.id);
+    if (!Number.isFinite(byteLength) || byteLength < 0) {
+      throw new Error(`invalid runtime arena descriptor byte length: ${byteLength}`);
+    }
+    if (descriptor.state === ARENA_DESCRIPTOR_STATE_FREE) {
+      throw new Error(`runtime arena descriptor ${descriptor.id} is free`);
+    }
+    if (byteLength > descriptor.capacity) {
+      throw new Error(`runtime arena descriptor ${descriptor.id} byte length exceeds snapshot capacity`);
+    }
+    if (descriptor.offset + byteLength > this.buffer.byteLength) {
+      throw new Error(`runtime arena descriptor ${descriptor.id} exceeds arena capacity`);
     }
   }
 }

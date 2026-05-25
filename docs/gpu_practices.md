@@ -159,36 +159,58 @@ Before implementing a GPU lane:
 1. Include host-device transfer, queue submit, pipeline creation, dispatch, and
    readback in measured latency. Kernel-only timings are incomplete for
    Foundation lane decisions.
-2. Reuse buffers, bind groups, pipeline layouts, descriptor IDs, and command
+2. Default GPU batch outputs should remain GPU-resident when the next consumer
+   is another GPU pass. Return a Foundation resource receipt for `GPUBuffer` or
+   `GPUTexture` state, and materialize back to runtime arena descriptors only
+   when a CPU-visible domain boundary requests it.
+3. Reuse buffers, bind groups, pipeline layouts, descriptor IDs, and command
    scaffolding where the API allows. Allocation churn can erase kernel wins.
-3. Batch small work into fewer dispatches when semantics allow it. Preserve
+4. Batch small work into fewer dispatches when semantics allow it. Preserve
    per-record diagnostics inside the batch.
-4. Use double buffering or staged transfer pipelines only when profiling shows
+5. Use double buffering or staged transfer pipelines only when profiling shows
    transfer and compute overlap is possible and useful.
-5. Native adapters may use pinned/page-locked memory or mapped transfer buffers
+6. Native adapters may use pinned/page-locked memory or mapped transfer buffers
    only with explicit lifetime, fallback, and memory-pressure budgets.
-6. Browser adapters must treat WebGPU availability as dynamic. Device loss,
+7. Browser adapters must treat WebGPU availability as dynamic. Device loss,
    adapter limits, cross-origin isolation, browser support, and power policy can
    change the selected lane.
-7. Repeated native launch sequences may use CUDA Graphs or API-specific command
+8. Repeated native launch sequences may use CUDA Graphs or API-specific command
    graphs when the graph shape is stable. Capture invalidation, prohibited
    operations, graph update limits, first-upload cost, and memory-node reuse
    must be part of the benchmark.
-8. Async copies, staged pipelines, and tensor-memory accelerators are advanced
+9. Async copies, staged pipelines, and tensor-memory accelerators are advanced
    lanes. Require device-capability checks, alignment checks, fallback copy
    paths, and overlap evidence before relying on them.
-9. Lazy module loading, JIT compilation, binary cache state, and first-launch
+10. Lazy module loading, JIT compilation, binary cache state, and first-launch
    behavior can skew measurements. Benchmarks must distinguish cold compile,
    warm cache, first launch, and steady-state dispatch.
-10. Interactive GPU work should expose pass markers compatible with external
+11. Interactive GPU work should expose pass markers compatible with external
     tools: frame/pass/dispatch/readback names stay stable across runs, while
     correlation IDs and tenant IDs remain fields.
-11. Treat WebGPU pipelines, native PSOs, shader variants, bind groups, and
+12. Treat WebGPU pipelines, native PSOs, shader variants, bind groups, and
     command graph state as cacheable resources. Prewarm them before the user
     reaches a deadline-sensitive interaction when feasible.
-12. GPU culling, occlusion, LOD, and progressive refinement are optimization
+13. GPU culling, occlusion, LOD, and progressive refinement are optimization
     passes, not correctness gates. They can reduce upload/render/dispatch work,
     but they must not decide authorization, command truth, or durable state.
+14. Browser uploads from arena-backed bytes should use `GPUQueue.writeBuffer`
+    offsets and sizes against stable typed-array views when the region is
+    4-byte aligned. Pack first when a region would violate WebGPU write
+    validation.
+15. Transient GPU buffers may be pooled only behind explicit count limits.
+    Pools must key by size and usage, release exposed resources only after the
+    caller destroys the Foundation receipt, and remain observable through
+    benchmarks.
+16. Browser/device timing probes must separate adapter acquisition, device
+    acquisition, pipeline warmup, upload, dispatch, optional queue drain,
+    explicit materialization, and total wall time. Use
+    `measureRuntimeWebGpuDeviceRoundTrip` for this shape; keep
+    `GPUQueue.onSubmittedWorkDone()` as a measurement/throttle barrier, not as
+    the default steady-state readback path.
+17. Device loss is a normal lane event. Browser adapters must observe
+    `GPUDevice.lost`, drop resident resource receipts tied to the lost device,
+    recreate pipelines and buffers on a replacement device, or fall back to
+    WASM/SAB or transferable-worker lanes with the same visible contract.
 
 ## WebGPU and WGSL rules
 
@@ -212,30 +234,86 @@ Before implementing a GPU lane:
 
 1. Prefer portable Rust `wgpu` adapters for app-owned native GPU kernels unless
    a CUDA, Metal, Vulkan, or OpenCL-specific feature is required and benchmarked.
-2. CUDA-specific code must declare compute capability targets, fallback behavior,
+2. Public native GPU receipts must map to
+   `runtime-sdk/protocols/system/v1/runtime_native_gpu.capnp`. Expose only
+   opaque descriptor fields such as id, kind, platform, dimensions, format,
+   schema name, producer, and fallback. Raw DMA-BUF fds, IOSurface objects,
+   Android hardware-buffer pointers, CUDA/Vulkan external-memory handles,
+   Metal textures, stream objects, events, and fences remain in
+   `runtime-native` or plugin-owned side tables.
+3. `runtime-native` owns the private platform handle registry. A registry
+   record contains the public descriptor, a private platform handle, a native
+   fence snapshot, an owner scope, and a reference count. Snapshots,
+   materialization plans, tests, logs, and Cap'n Proto messages must never
+   expose the private handle.
+4. Native plugins may register Unix fd-backed handles for Linux DMA-BUF,
+   Vulkan opaque fd, or CUDA opaque fd style resources, but Foundation snapshots
+   expose only handle kind, platform, plane count, and external-sync presence.
+   The fd itself remains owned by the registry record and is dropped only after
+   the final fence-gated release.
+5. IOSurface/Metal, Android `AHardwareBuffer`, CUDA, and Vulkan SDK objects
+   enter Foundation Core as opaque plugin handles until their platform adapters
+   provide the unsafe SDK boundary. The plugin owns retain/release, device
+   compatibility, and imported semaphore/fence behavior; Foundation owns the
+   descriptor receipt and lifecycle table.
+6. Registry ownership is part of tenant isolation. Acquire, release, and
+   materialization operations must validate descriptor id plus owner scope
+   before returning a descriptor, mutating a reference count, or planning a
+   fallback copy.
+7. Registry lifetime is bounded and fence-gated. Record count has a hard cap,
+   duplicate descriptor ids are rejected, reference counts must not overflow,
+   and final release must fail until the producer/consumer fence is complete.
+8. Materialization is an explicit fallback plan: `copy-to-arena`,
+   `copy-to-webgpu`, or `cpu-materialize`. A native GPU descriptor receipt does
+   not imply CPU-visible bytes.
+9. Platform adapters must follow their OS/API ownership and synchronization
+   rules. Vulkan external memory normally pairs imported/exported memory with
+   matching external fence or semaphore state. Android `AHardwareBuffer`
+   requires usage/format support checks and explicit reference ownership.
+   Apple `IOSurface`/Metal interop must keep IOSurface/texture lifetime and
+   pixel-format compatibility inside the plugin side table.
+10. Lane planning may select `native-gpu` only for trusted same-process or
+   same-host work with a validated native GPU descriptor and matching platform
+   capability. Browser WebGPU remains a separate portable lane.
+11. CUDA-specific code must declare compute capability targets, fallback behavior,
    and build flags. Do not expose CUDA-only types across Foundation public APIs.
-3. Vulkan/Metal/wgpu compute must query device limits such as workgroup size,
+12. Vulkan/Metal/wgpu compute must query device limits such as workgroup size,
    shared memory, storage buffer size, subgroup support, and queue capabilities
    at runtime.
-4. Native GPU profiling should use stable clocks/cache settings where the tool
+13. Native GPU profiling should use stable clocks/cache settings where the tool
    supports them, or explicitly report when clocks, thermals, and cache state
    are uncontrolled.
-5. Native adapters must query device count, selected device, compute capability
+14. Native adapters must query device count, selected device, compute capability
    or feature level, driver/runtime versions, memory limits, peer access,
    cooperative-launch support, graph support, and async-copy support before lane
    selection.
-6. CUDA-specific kernels may use launch bounds, maximum register controls,
+15. CUDA-specific kernels may use launch bounds, maximum register controls,
    `__restrict__`, cooperative groups, warp shuffle/reduce primitives, async
    barriers, or memory pools only behind benchmark evidence and fallback code.
-7. Do not expose default stream behavior through Foundation APIs. Adapters must
+16. Do not expose default stream behavior through Foundation APIs. Adapters must
    own explicit streams, events, synchronization, and error-drain points.
-8. Multi-GPU, peer-to-peer, IPC, and external-memory interop are separate lanes.
+17. Multi-GPU, peer-to-peer, IPC, and external-memory interop are separate lanes.
    They require topology discovery, access-right checks, handle lifetime rules,
    and fallback to single-device execution.
-9. CUDA Dynamic Parallelism, device-side graph launch, and thread-block
-   cancellation are advanced native-only features. Use them only when they
-   reduce a measured launch/scheduling bottleneck and when pending-launch,
-   memory-footprint, and cancellation constraints are tested.
+18. CUDA Dynamic Parallelism, device-side graph launch, and thread-block
+    cancellation are advanced native-only features. Use them only when they
+    reduce a measured launch/scheduling bottleneck and when pending-launch,
+    memory-footprint, and cancellation constraints are tested.
+
+## Continuous GPU feedback loop
+
+1. Each GPU optimization pass must record the bottleneck it targets: packing,
+   upload, buffer allocation, pipeline creation, bind group churn, dispatch,
+   readback, or writeback.
+2. Keep the scalar/Rust/WASM baseline and the previous GPU measurement in the
+   same benchmark note. A faster kernel is not an improvement if transfer,
+   allocation, or readback moved the cost elsewhere.
+3. Add one correctness test for every optimization guard: alignment fallback,
+   pool bounds, resource lifetime, device-limit rejection, and materialization
+   semantics.
+4. Promote an optimization from report-only only after it has a benchmark,
+   fallback path, and TLA-style refinement note showing the visible contract did
+   not change.
 
 ## Testing and verification
 
@@ -340,3 +418,21 @@ runtime language, but several should become explicit review vocabulary:
 7. Local source pass: `/Users/okhai/Desktop/cuda-programming-guide.pdf`
 8. Local source pass: `/Users/okhai/Desktop/GPU_programming.pdf`
 9. Foundation AAA game-runtime translation: `docs/game_runtime_practices.md`
+10. Khronos WebGPU Best Practices:
+    <https://www.khronos.org/developers/linkto/webgpu-best-practices>
+11. MDN `GPUQueue.onSubmittedWorkDone`:
+    <https://developer.mozilla.org/en-US/docs/Web/API/GPUQueue/onSubmittedWorkDone>
+12. MDN `GPUDevice.lost`:
+    <https://developer.mozilla.org/en-US/docs/Web/API/GPUDevice/lost>
+13. Vulkan Guide, External Memory and Synchronization:
+    <https://docs.vulkan.org/guide/latest/extensions/external.html>
+14. Android NDK `AHardwareBuffer`:
+    <https://developer.android.com/ndk/reference/group/a-hardware-buffer>
+15. Apple Metal `MTLTexture`:
+    <https://developer.apple.com/documentation/metal/mtltexture>
+16. Linux kernel DMA-BUF:
+    <https://docs.kernel.org/driver-api/dma-buf.html>
+17. Linux kernel Sync File API:
+    <https://kernel.org/doc/html/next/driver-api/sync_file.html>
+18. NVIDIA CUDA external resource interoperability:
+    <https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXTRES__INTEROP.html>

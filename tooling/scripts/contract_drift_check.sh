@@ -197,29 +197,23 @@ fi
 check_lifecycle_contracts
 
 if [[ "$app_proto_count" -gt 0 && -d "$target/internal" ]]; then
-  startup_hits="$(rg -n "RegisterTypedPlanes|RegisterTypedFrameHandlers" "$target/internal" "$target/cmd" \
-    --glob '!**/*test*' 2>/dev/null || true)"
-  typed_hits="$(rg -n "AllTypedHandlers|GetTypedHandlers|BuildTypedServiceHandlers|TypedServiceHandlers" "$target/internal" \
-    --glob '!**/*test*' 2>/dev/null || true)"
-  if [[ -n "$startup_hits" && -n "$typed_hits" ]]; then
-    echo "[OK] app typed service plane registered"
+  typed_hits="$(rg -n "typedHandler|GetTypedHandlers|BuildTypedServiceHandlers|TypedServiceHandlers|func \\(s \\*Service\\) [A-Za-z0-9_]+V1\\(ctx context\\.Context, req \\*.*v1\\.[A-Za-z0-9_]+Request\\)" "$target/internal" \
+    --glob '*.go' --glob '!**/*test*' 2>/dev/null || true)"
+  if [[ -n "$typed_hits" ]]; then
+    echo "[OK] app protobuf contracts project onto typed service methods"
   else
-    echo "[FAIL] app typed service plane registered"
-    [[ -z "$typed_hits" ]] && echo "  missing: app-owned typed handler bindings in internal/"
-    [[ -z "$startup_hits" ]] && echo "  missing: startup registration into typed frame/registry plane"
+    echo "[FAIL] app protobuf contracts project onto typed service methods"
+    echo "  missing: app-owned protobuf-native V1 service methods or typed handler bindings in internal/"
     failed=1
   fi
 elif [[ "$app_proto_count" -gt 0 && -d "$target/backend/internal" ]]; then
-  startup_hits="$(rg -n "RegisterTypedPlanes|RegisterTypedFrameHandlers|FrameRouter" "$target/backend/internal" \
-    --glob '!**/*test*' 2>/dev/null || true)"
-  typed_hits="$(rg -n "AllTypedHandlers|GetTypedHandlers|BuildTypedServiceHandlers|TypedServiceHandlers" "$target/backend/internal" \
-    --glob '!**/*test*' 2>/dev/null || true)"
-  if [[ -n "$startup_hits" && -n "$typed_hits" ]]; then
-    echo "[OK] app typed service plane registered"
+  typed_hits="$(rg -n "typedHandler|GetTypedHandlers|BuildTypedServiceHandlers|TypedServiceHandlers|func \\(s \\*Service\\) [A-Za-z0-9_]+V1\\(ctx context\\.Context, req \\*.*v1\\.[A-Za-z0-9_]+Request\\)" "$target/backend/internal" \
+    --glob '*.go' --glob '!**/*test*' 2>/dev/null || true)"
+  if [[ -n "$typed_hits" ]]; then
+    echo "[OK] app protobuf contracts project onto typed service methods"
   else
-    echo "[FAIL] app typed service plane registered"
-    [[ -z "$typed_hits" ]] && echo "  missing: app-owned typed handler bindings in backend/internal/"
-    [[ -z "$startup_hits" ]] && echo "  missing: backend startup registration into typed frame/registry plane"
+    echo "[FAIL] app protobuf contracts project onto typed service methods"
+    echo "  missing: app-owned protobuf-native V1 service methods or typed handler bindings in backend/internal/"
     failed=1
   fi
 fi

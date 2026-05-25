@@ -239,6 +239,160 @@ func TestRuntimeUnitDescriptorValidation(t *testing.T) {
 	}
 }
 
+func TestRuntimeNativeGPUDescriptorValidation(t *testing.T) {
+	buffer := RuntimeNativeGPUDescriptor{
+		ID:         "camera.frame.42",
+		Kind:       RuntimeNativeGPUKindBuffer,
+		Platform:   RuntimeNativeGPUPlatformAppleIOSurface,
+		ByteLength: 4096,
+		SchemaName: "media/v1/frame.capnp",
+		Producer:   "camera.plugin",
+		Fallback:   RuntimeNativeGPUFallbackCopyToWebGPU,
+	}
+	if err := buffer.Validate(); err != nil {
+		t.Fatalf("buffer Validate() error = %v", err)
+	}
+	contract, err := buffer.ContractDescriptor()
+	if err != nil {
+		t.Fatalf("ContractDescriptor() error = %v", err)
+	}
+	if contract.SchemaVersion != generated.NATIVE_GPU_DESCRIPTOR_SCHEMA_VERSION {
+		t.Fatalf("contract schema = %d, want %d", contract.SchemaVersion, generated.NATIVE_GPU_DESCRIPTOR_SCHEMA_VERSION)
+	}
+	if contract.Kind != generated.NATIVE_GPU_KIND_BUFFER {
+		t.Fatalf("contract kind = %d, want %d", contract.Kind, generated.NATIVE_GPU_KIND_BUFFER)
+	}
+	if contract.Platform != generated.NATIVE_GPU_PLATFORM_APPLE_IOSURFACE {
+		t.Fatalf("contract platform = %d, want %d", contract.Platform, generated.NATIVE_GPU_PLATFORM_APPLE_IOSURFACE)
+	}
+	if contract.Fallback != generated.NATIVE_GPU_FALLBACK_COPY_TO_WEBGPU {
+		t.Fatalf("contract fallback = %d, want %d", contract.Fallback, generated.NATIVE_GPU_FALLBACK_COPY_TO_WEBGPU)
+	}
+
+	image := RuntimeNativeGPUDescriptor{
+		ID:       "decoder.frame.7",
+		Kind:     RuntimeNativeGPUKindExternalImage,
+		Platform: RuntimeNativeGPUPlatformAndroidHWBuffer,
+		Width:    1920,
+		Height:   1080,
+		Format:   "nv12",
+		Producer: "decoder.plugin",
+		Fallback: RuntimeNativeGPUFallbackCPUMaterialize,
+	}
+	if err := image.Validate(); err != nil {
+		t.Fatalf("image Validate() error = %v", err)
+	}
+
+	tests := []struct {
+		name       string
+		descriptor RuntimeNativeGPUDescriptor
+	}{
+		{name: "missing byte length", descriptor: RuntimeNativeGPUDescriptor{
+			ID:       "camera.frame.43",
+			Kind:     RuntimeNativeGPUKindBuffer,
+			Platform: RuntimeNativeGPUPlatformAppleIOSurface,
+			Producer: "camera.plugin",
+			Fallback: RuntimeNativeGPUFallbackCopyToWebGPU,
+		}},
+		{name: "missing image format", descriptor: RuntimeNativeGPUDescriptor{
+			ID:       "decoder.frame.8",
+			Kind:     RuntimeNativeGPUKindTexture,
+			Platform: RuntimeNativeGPUPlatformAppleIOSurface,
+			Width:    1280,
+			Height:   720,
+			Producer: "decoder.plugin",
+			Fallback: RuntimeNativeGPUFallbackCopyToArena,
+		}},
+		{name: "unsupported platform", descriptor: RuntimeNativeGPUDescriptor{
+			ID:         "camera.frame.44",
+			Kind:       RuntimeNativeGPUKindBuffer,
+			Platform:   RuntimeNativeGPUPlatform("metal-texture"),
+			ByteLength: 4096,
+			Producer:   "camera.plugin",
+			Fallback:   RuntimeNativeGPUFallbackCopyToWebGPU,
+		}},
+		{name: "unsafe id", descriptor: RuntimeNativeGPUDescriptor{
+			ID:         "../camera",
+			Kind:       RuntimeNativeGPUKindBuffer,
+			Platform:   RuntimeNativeGPUPlatformAppleIOSurface,
+			ByteLength: 4096,
+			Producer:   "camera.plugin",
+			Fallback:   RuntimeNativeGPUFallbackCopyToWebGPU,
+		}},
+	}
+	for _, tt := range tests {
+		if err := tt.descriptor.Validate(); err == nil {
+			t.Fatalf("%s: expected invalid native GPU descriptor to fail", tt.name)
+		}
+	}
+}
+
+func TestRuntimeNativeGPUContractCodes(t *testing.T) {
+	kindCases := map[RuntimeNativeGPUKind]uint32{
+		RuntimeNativeGPUKindBuffer:        generated.NATIVE_GPU_KIND_BUFFER,
+		RuntimeNativeGPUKindTexture:       generated.NATIVE_GPU_KIND_TEXTURE,
+		RuntimeNativeGPUKindExternalImage: generated.NATIVE_GPU_KIND_EXTERNAL_IMAGE,
+	}
+	for kind, want := range kindCases {
+		got, ok := kind.ContractCode()
+		if !ok || got != want {
+			t.Fatalf("kind %q contract code = %d ok=%v, want %d", kind, got, ok, want)
+		}
+	}
+
+	platformCases := map[RuntimeNativeGPUPlatform]uint32{
+		RuntimeNativeGPUPlatformLinuxDMABUF:     generated.NATIVE_GPU_PLATFORM_LINUX_DMABUF,
+		RuntimeNativeGPUPlatformAppleIOSurface:  generated.NATIVE_GPU_PLATFORM_APPLE_IOSURFACE,
+		RuntimeNativeGPUPlatformAndroidHWBuffer: generated.NATIVE_GPU_PLATFORM_ANDROID_HARDWARE_BUFFER,
+		RuntimeNativeGPUPlatformCUDAExternal:    generated.NATIVE_GPU_PLATFORM_CUDA_EXTERNAL,
+		RuntimeNativeGPUPlatformVulkanExternal:  generated.NATIVE_GPU_PLATFORM_VULKAN_EXTERNAL,
+	}
+	for platform, want := range platformCases {
+		got, ok := platform.ContractCode()
+		if !ok || got != want {
+			t.Fatalf("platform %q contract code = %d ok=%v, want %d", platform, got, ok, want)
+		}
+	}
+
+	fallbackCases := map[RuntimeNativeGPUFallback]uint32{
+		RuntimeNativeGPUFallbackCopyToArena:    generated.NATIVE_GPU_FALLBACK_COPY_TO_ARENA,
+		RuntimeNativeGPUFallbackCopyToWebGPU:   generated.NATIVE_GPU_FALLBACK_COPY_TO_WEBGPU,
+		RuntimeNativeGPUFallbackCPUMaterialize: generated.NATIVE_GPU_FALLBACK_CPU_MATERIALIZE,
+	}
+	for fallback, want := range fallbackCases {
+		got, ok := fallback.ContractCode()
+		if !ok || got != want {
+			t.Fatalf("fallback %q contract code = %d ok=%v, want %d", fallback, got, ok, want)
+		}
+	}
+}
+
+func TestRuntimeNativeGPUDescriptorBoundaries(t *testing.T) {
+	id := strings.Repeat("a", int(generated.NATIVE_GPU_DESCRIPTOR_ID_MAX_BYTES))
+	producer := strings.Repeat("p", int(generated.NATIVE_GPU_DESCRIPTOR_TEXT_MAX_BYTES))
+	valid := RuntimeNativeGPUDescriptor{
+		ID:         id,
+		Kind:       RuntimeNativeGPUKindBuffer,
+		Platform:   RuntimeNativeGPUPlatformLinuxDMABUF,
+		ByteLength: 1,
+		Producer:   producer,
+		Fallback:   RuntimeNativeGPUFallbackCopyToArena,
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("max-boundary descriptor Validate() error = %v", err)
+	}
+
+	valid.ID += "x"
+	if err := valid.Validate(); err == nil {
+		t.Fatal("expected over-limit id to fail")
+	}
+	valid.ID = id
+	valid.Producer += "x"
+	if err := valid.Validate(); err == nil {
+		t.Fatal("expected over-limit producer to fail")
+	}
+}
+
 func TestProcessPoolDispatchesRuntimeBufferFrames(t *testing.T) {
 	if os.Getenv("OVRT_PROCESS_HELPER") == "1" {
 		runProcessPoolHelper(t)

@@ -1,7 +1,11 @@
 import { bench, describe } from "vitest";
 import { createEnvelope, encodeRuntimeEnvelope } from "@ovasabi/runtime-transport";
 
-import { decodeNativeDispatchResponse, encodeNativeDispatchFrame } from "./index";
+import {
+  decodeNativeDispatchResponse,
+  encodeNativeDispatchFrame,
+  validateRuntimeNativeGpuDescriptor,
+} from "./index";
 
 const envelope = createEnvelope({
   eventType: "media:process_asset:v1:requested",
@@ -24,6 +28,18 @@ const responseFrame = (() => {
   return frame;
 })();
 
+const nativeGpuDescriptor = {
+  id: "camera.frame.42",
+  kind: "native-gpu-texture",
+  platform: "apple-iosurface",
+  width: 1920,
+  height: 1080,
+  format: "bgra8",
+  schemaName: "media/v1/frame.capnp",
+  producer: "camera.plugin",
+  fallback: "copy-to-webgpu",
+};
+
 describe("native frame codec", () => {
   bench("encode native dispatch frame", () => {
     encodeNativeDispatchFrame({
@@ -36,5 +52,9 @@ describe("native frame codec", () => {
 
   bench("decode native dispatch response", () => {
     decodeNativeDispatchResponse(responseFrame);
+  });
+
+  bench("validate native GPU descriptor receipt", () => {
+    validateRuntimeNativeGpuDescriptor(nativeGpuDescriptor);
   });
 });

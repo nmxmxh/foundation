@@ -4,7 +4,7 @@ Date: 2026-05-22
 
 This document records the runtime foundation posture for this scaffold.
 
-For the end-to-end command/event/worker/realtime lifecycle, see `foundation/docs/foundation_nervous_system.md`. That document is the canonical substrate contract; this file describes the runtime lanes that must refine it. For Go-specific concurrency bug taxonomy and watch points, see `foundation/docs/go_concurrency_bug_practices.md`.
+For the end-to-end command/event/worker/realtime lifecycle, see `foundation/docs/foundation_nervous_system.md`. That document is the canonical substrate contract; this file describes the runtime lanes that must refine it. For the Hermes hotplane research posture, see `foundation/docs/hermes_hotplane.md`. For Go-specific concurrency bug taxonomy and watch points, see `foundation/docs/go_concurrency_bug_practices.md`.
 
 ## Control-plane foundations
 
@@ -16,6 +16,7 @@ For the end-to-end command/event/worker/realtime lifecycle, see `foundation/docs
 6. Service-registry listeners should fan in Redis/pubsub traffic to blocking worker pools instead of using sleep-based polling loops.
 7. Handler registration should apply bounded concurrency through a shared execution controller so saturation behavior is explicit and measurable.
 8. Externally reachable handlers must fail closed on missing identity, organization scope, integrity metadata, or route contract validation.
+9. Hermes hotplane projections, when enabled, are node-local read refinements fed only by committed Postgres/outbox/River/Redis Stream observations. They may reduce repeated Redis/Postgres reads, but they must remain bounded, replayable, tenant-scoped, and disposable.
 
 ## Go concurrency posture
 
@@ -72,6 +73,43 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
 8. `FrameSizeBound`: oversized frames and payloads must be rejected before decode, render, storage, or worker dispatch.
 9. No-op/stuttering steps such as duplicate suppression, empty polls, reconnect attempts, cache hits, or retry waits must not change visible semantics.
 10. Runtime parity tests must act as refinement checks, not just byte comparisons.
+
+## Hermes hotplane posture
+
+Hermes is a research-stage node-local hotplane for live operational reads. It
+uses the runtime principles in this document, but it does not replace the
+durable command path. Postgres remains the system of record, River/outbox
+records remain the durable follow-up path, and Redis remains the distributed
+coordination substrate.
+
+1. Hermes consumes committed observations only: terminal lifecycle events,
+   outbox rows, River jobs, Redis Stream entries, or Postgres rebuild snapshots.
+2. Mutating handlers must not update Hermes before the database transaction
+   commits. The correct sequence is durable write -> terminal observation ->
+   projector apply -> epoch publish.
+3. Hermes partitions are keyed by organization, domain, collection, and
+   optional shard. Reads must never cross organization scope.
+4. Every partition owns an atomic epoch, source watermark, bounded apply queue,
+   memory budget, tombstone budget, and declared index set.
+5. Internal consumers may use borrowed views, descriptor IDs, caller-owned
+   result slices, and epoch watchers. Public service APIs must return copied
+   records or copied bytes.
+6. Projection reads that require read-your-own-write semantics must provide a
+   fence: event ID, source watermark, revision, updated-at bound, or equivalent
+   freshness token. If the fence is not satisfied within a tiny bound, Hermes
+   falls back or fails visibly.
+7. Redis integration is for stream tailing, invalidation, watermarks, leases,
+   and node heartbeats. A healthy Hermes read should not require a Redis round
+   trip on every request.
+8. Shared-memory or arena-backed Hermes payloads must use descriptor ownership,
+   release discipline, and epoch signaling from `runtime-sdk`; broad JSON maps
+   are compatibility only.
+9. Memory pressure degrades Hermes before the process. Projections must cap
+   records, bytes, indexes, tombstones, descriptors, queue depth, and watcher
+   count.
+10. Dropping a Hermes partition must be safe. The partition either rebuilds from
+   Postgres plus stream tail or routes reads to Redis/Postgres according to its
+   projection policy.
 
 ## Browser WASM build and binding flow
 
@@ -213,19 +251,20 @@ default substrate.
 14. Frame codecs expose owned decode and borrowed `FrameView` decode. Use borrowed views for synchronous hot paths that do not retain frame data; use owned `Frame` decode when values escape the incoming buffer lifetime.
 15. A typed service binding has two first-class projections: registry protobuf dispatch for ingress/event/lifecycle paths, and `bootstrap.RegisterTypedFrameHandlers` for internal synchronous `grpcsvc.Frame` dispatch. App startup must register the same binding map into both when typed contracts exist.
 16. Frame adapter benchmarks are separate from raw frame benchmarks. Raw frame dispatch measures router/codec mechanics; typed frame adapter benchmarks include protobuf marshal/unmarshal and bounded handler execution, so regressions are interpreted against the correct lane.
-17. Runtime lane planning is a foundation concern. `runtime-sdk` classifies work by payload size, workload class, trust, locality, batchability, deadline, and runtime capabilities before selecting direct, scalar CPU, SIMD/FFI, shared-memory, WebGPU, WASM/SAB, transfer, stream, or HTTP lanes. Plans must expose copy budget, allocation budget, expected latency class, deadline risk, cross-origin-isolation requirements, and fallback order so frontend/backend callers can explain why a lane was chosen.
+17. Runtime lane planning is a foundation concern. `runtime-sdk` classifies work by payload size, workload class, trust, locality, batchability, deadline, and runtime capabilities before selecting direct, scalar CPU, SIMD/FFI, shared-memory, native GPU, WebGPU, WASM/SAB, transfer, stream, or HTTP lanes. Plans must expose copy budget, allocation budget, expected latency class, deadline risk, cross-origin-isolation requirements, and fallback order so frontend/backend callers can explain why a lane was chosen.
 18. GPU/WebGPU lanes must follow `docs/gpu_practices.md`. They are batch lanes, not control lanes. GPU-bound batches must use storage-buffer-friendly packing, explicit alignment/stride metadata, and enough items/bytes to amortize transfer, dispatch, and readback; small trusted control work stays on direct Go, FFI, or WASM/SAB lanes.
 19. GPU lane plans must name the bottleneck they address: memory bandwidth, memory latency, uncoalesced access, branch divergence, load imbalance, synchronization, atomics, host-device transfer, kernel launch throughput, or CPU hot loop. Native GPU plans must also declare device capability, driver/runtime version, stream/queue ordering, graph or memory-pool reuse, async error-drain points, numeric tolerance, frame/pass budget, quality profile, and first-use warmup state. A plan that only says "use GPU" is incomplete.
-20. `RuntimeWebGpuHost` is the browser compute bridge: it packs arena descriptors into GPU buffers, uses async pipeline creation to avoid compile stalls, dispatches workgroups, reads back output, and writes results into the original descriptor IDs. It must remain optional and capability-gated because WebGPU is not available in every browser/runtime. Native GPU adapters follow the same descriptor/fallback contract and must not expose default-stream, CUDA-only type, or driver-specific lifetime assumptions through Foundation public APIs.
-21. Interactive runtime work should follow `docs/game_runtime_practices.md`: pass graphs for multi-stage work, stable performance markers, target-hardware capture bundles, culling/LOD/interest masks before expensive passes, pipeline warmup before first-use deadlines, and quality tiers for reduced-power or reduced-capability profiles.
-22. Arena descriptors have a lifecycle. Producers must consume or explicitly force-release ready descriptors before reuse; released descriptors return through the free-list and keep their page-aligned slab region for future allocations that fit, preventing long-running processes from turning descriptor tables or arena pages into hidden pressure.
-23. Kernel-bypass-inspired lanes are modeled as optional packet rings, not default NIC ownership. The foundation primitive is fixed-size descriptor slots, burst enqueue/dequeue, explicit ownership states, low-overhead monotonic timestamps, drops, high-water depth, and release discipline. A future DPDK, Onload, AF_XDP, or FPGA adapter must refine this same packet-ring contract rather than introducing app-specific packet ownership.
-24. Timestamping is a lane diagnostic, not visible domain behavior. Software monotonic timestamps are always available; hardware/NIC timestamps may be attached by an adapter when supported, but fallback lanes must preserve command/event semantics even when timestamp precision changes.
-25. Garbage-collector avoidance means keeping hot payload movement out of runtime heap object creation. Direct, packet-ring, FFI, and shared-memory lanes should reuse slabs/descriptors/views, return borrowed views for synchronous work, and avoid JSON/map/object materialization until the owning domain boundary needs it. This reduces allocator cost, GC scan work, cache churn, and tail-latency spikes; it does not remove GC from the whole application.
-26. Deadline-sensitive frontend work must call the lane planner before choosing WebGPU, workers, HTTP, or direct SAB/WASM access. Sub-millisecond browser operations should prefer SAB/WASM or transferable workers; WebGPU is reserved for batches large enough to amortize adapter, pipeline, dispatch, and readback costs.
-27. Device streams follow the same rule. WebView media APIs are compatibility lanes. Native camera frames, microphone PCM, and sensor samples must enter through Swift/Kotlin plugins, Rust validation, and Foundation binary buffers/descriptors before reaching FFI, shared-memory, WASM/SAB, or GPU lanes.
-28. Bulk transfer adapters are app-owned. Foundation supplies `server-kit/go/bulk` for plans, streamed part acceptance, per-part hashing/compression, manifest completion, range reads, Redis-compatible progress caches, and lifecycle events. Scaffolded apps decide whether the ingress is HTTP multipart, signed object-store URLs, native FFI/shared-memory, internal service calls, or worker-driven import/export. The visible contract must remain domain-specific (`media:asset_upload:*`, `dataset:import:*`, etc.), while the hidden data plane uses bulk transfer receipts and manifests.
-29. Bulk integration uses the generic `server-kit/go/bulk.Pipeline` adapter ladder:
+20. `RuntimeWebGpuHost` is the browser compute bridge: it packs arena descriptors into GPU buffers, uses async pipeline creation to avoid compile stalls, dispatches workgroups, and now keeps outputs GPU-resident unless arena materialization is explicit. Real browser/device probes use `measureRuntimeWebGpuDeviceRoundTrip` to separate adapter, device, warmup, upload, dispatch, queue-drain, materialization, and total timings. WebGPU must remain optional and capability-gated because availability, adapter lifetime, and device loss can change at runtime.
+21. Native GPU adapters follow the Cap'n Proto `runtime_native_gpu.capnp` descriptor/fallback contract and store raw platform handles in the private `runtime-native` registry. Registry records own the hidden DMA-BUF, IOSurface, Android hardware-buffer, CUDA/Vulkan, Metal, stream, event, fence, owner-scope, and reference-count state. Unix fd-backed handles are accepted as owned private records; IOSurface, Android hardware-buffer, CUDA, and Vulkan SDK objects remain opaque plugin records until the platform plugin owns the unsafe SDK boundary. Public APIs expose only descriptor receipts, snapshots without raw handles, and explicit materialization plans.
+22. Interactive runtime work should follow `docs/game_runtime_practices.md`: pass graphs for multi-stage work, stable performance markers, target-hardware capture bundles, culling/LOD/interest masks before expensive passes, pipeline warmup before first-use deadlines, and quality tiers for reduced-power or reduced-capability profiles.
+23. Arena descriptors have a lifecycle. Producers must consume or explicitly force-release ready descriptors before reuse; released descriptors return through the free-list and keep their page-aligned slab region for future allocations that fit, preventing long-running processes from turning descriptor tables or arena pages into hidden pressure.
+24. Kernel-bypass-inspired lanes are modeled as optional packet rings, not default NIC ownership. The foundation primitive is fixed-size descriptor slots, burst enqueue/dequeue, explicit ownership states, low-overhead monotonic timestamps, drops, high-water depth, and release discipline. A future DPDK, Onload, AF_XDP, or FPGA adapter must refine this same packet-ring contract rather than introducing app-specific packet ownership.
+25. Timestamping is a lane diagnostic, not visible domain behavior. Software monotonic timestamps are always available; hardware/NIC timestamps may be attached by an adapter when supported, but fallback lanes must preserve command/event semantics even when timestamp precision changes.
+26. Garbage-collector avoidance means keeping hot payload movement out of runtime heap object creation. Direct, packet-ring, FFI, and shared-memory lanes should reuse slabs/descriptors/views, return borrowed views for synchronous work, and avoid JSON/map/object materialization until the owning domain boundary needs it. This reduces allocator cost, GC scan work, cache churn, and tail-latency spikes; it does not remove GC from the whole application.
+27. Deadline-sensitive frontend work must call the lane planner before choosing WebGPU, workers, HTTP, or direct SAB/WASM access. Browser operations with deadlines below `1,000,000 ns` should prefer SAB/WASM or transferable workers; WebGPU is reserved for batches large enough to amortize adapter, pipeline, dispatch, and readback costs.
+28. Device streams follow the same rule. WebView media APIs are compatibility lanes. Native camera frames, microphone PCM, and sensor samples must enter through Swift/Kotlin plugins, Rust validation, and Foundation binary buffers/descriptors before reaching FFI, shared-memory, WASM/SAB, or GPU lanes.
+29. Bulk transfer adapters are app-owned. Foundation supplies `server-kit/go/bulk` for plans, streamed part acceptance, per-part hashing/compression, manifest completion, range reads, Redis-compatible progress caches, and lifecycle events. Scaffolded apps decide whether the ingress is HTTP multipart, signed object-store URLs, native FFI/shared-memory, internal service calls, or worker-driven import/export. The visible contract must remain domain-specific (`media:asset_upload:*`, `dataset:import:*`, etc.), while the hidden data plane uses bulk transfer receipts and manifests.
+30. Bulk integration uses the generic `server-kit/go/bulk.Pipeline` adapter ladder:
     - `runtime-transport` adapter: carries the transfer plan, part receipts, resume tokens, progress events, signed-part grants, and manifest references through typed envelopes; it does not push large byte slices through generic JSON or request-body dispatch.
     - resumable protocol handshake: maps domain commands to `init -> accept part -> receipt -> complete -> committed/failed`, with idempotency keys, correlation IDs, part offsets, checksum verification, status/missing-part discovery, and bounded retry windows.
     - distributed state backend: stores in-flight plans, received part receipts, ownership leases, and completion state outside one process when uploads may cross workers, pods, or restarts. Redis is acceptable for ephemeral progress and leases; durable recovery must use the product's durable store or object-store manifest.
@@ -234,17 +273,17 @@ default substrate.
     - signed object-store lane: apps may call `Pipeline.GrantSignedPart` so clients upload a bounded part directly to object storage, then call `Pipeline.AcceptSignedPart` to stream-verify the stored object hash and issue the Foundation receipt. This removes the app server from the byte proxy path while keeping checksum, idempotency, tenant, and manifest invariants.
     - same-host acceleration: trusted native callers may use FFI/shared-memory descriptors through `Pipeline.AcceptDescriptorPart`; the descriptor source opens a bounded reader and the public contract remains receipts/manifests. Borrowed views must not outlive their source descriptor.
     - kernel/network acceleration: Linux `sendfile`, `splice`, `MSG_ZEROCOPY`, `io_uring`, `TCP_NOTSENT_LOWAT`, pacing, BBR/fq, MPTCP, QUIC, or future packet-ring adapters are optional lower lanes. `DetectPlatformCapabilities` reports conservative availability; a real adapter must still manage socket setup, pinned-buffer lifetime, completion notifications, fallback, and metrics. They must refine the same transfer manifest and receipt contract rather than creating app-specific transport semantics.
-30. Bulk lane selection must be adaptive and explicit. `Pipeline.PlanLane` ranks descriptor, signed object-store, kernel zero-copy, MPTCP, QUIC, and HTTP-stream candidates from locality, trust, direct object-store availability, adapter availability, compression policy, and detected platform capabilities. `Pipeline.Diagnostics` provides the generic shape; `DetectPlatformCapabilities` can seed it with local OS capability hints, and app adapters may enrich it with platform-specific discovery. Missing acceleration is not a correctness failure; silent full-file materialization is.
-31. Parallel operation chains should use `server-kit/go/chain`: independent operations run concurrently, non-critical failures do not block movement, and critical failures cancel the operation context for the rest of the chain.
-32. The frontend runtime client uses an authenticated websocket upgrade path that fits the existing allowset model:
+31. Bulk lane selection must be adaptive and explicit. `Pipeline.PlanLane` ranks descriptor, signed object-store, kernel zero-copy, MPTCP, QUIC, and HTTP-stream candidates from locality, trust, direct object-store availability, adapter availability, compression policy, and detected platform capabilities. `Pipeline.Diagnostics` provides the generic shape; `DetectPlatformCapabilities` can seed it with local OS capability hints, and app adapters may enrich it with platform-specific discovery. Missing acceleration is not a correctness failure; silent full-file materialization is.
+32. Parallel operation chains should use `server-kit/go/chain`: independent operations run concurrently, non-critical failures do not block movement, and critical failures cancel the operation context for the rest of the chain.
+33. The frontend runtime client uses an authenticated websocket upgrade path that fits the existing allowset model:
 
     - guest socket opens and receives `identity:connection_open:v1:ack`
     - if a session access token exists, the client sends `identity:authenticate_connection:v1:requested` over that socket
     - once the socket is authenticated, route transport preference can safely switch to `ws -> http` for mutation paths without opening broad guest access
 
-33. Socket authentication is not sufficient on its own. Privileged subscriptions, commands, and topic joins must re-authorize against current session, user, and organization state after connect.
-34. Websocket upgrades must validate allowed origins and close or downgrade sessions when auth state changes or expires.
-35. Event envelopes and payload bodies must enforce schema validation, size limits, and replay/idempotency windows before handler dispatch.
+34. Socket authentication is not sufficient on its own. Privileged subscriptions, commands, and topic joins must re-authorize against current session, user, and organization state after connect.
+35. Websocket upgrades must validate allowed origins and close or downgrade sessions when auth state changes or expires.
+36. Event envelopes and payload bodies must enforce schema validation, size limits, and replay/idempotency windows before handler dispatch.
 
 ## Virtual-memory and columnar data-plane posture
 
@@ -315,7 +354,7 @@ schema version, and ownership of host handles.
 
 1. From `field_os`: route metadata, docgen, route manifest generation, low-cost observability, and strict migration checks.
 2. From `fintech_v1`: environment-driven concurrency defaults, queue budget discipline, lazy shell boot, request replay boundaries, HMR-safe runtime bootstrap, stale-build recovery, and dispatch-worker posture.
-3. From `inos_v1`: raw host ABI imports, shared-memory contract thinking, epoch-style signaling vocabulary, worker isolation, and typed buffer layouts.
+3. From `inos_v1`: raw host ABI imports, shared-memory contract thinking, epoch-style signaling vocabulary, worker isolation, typed buffer layouts, and the Hermes rule that memory-as-communication only works when ownership, snapshot lifetime, and epoch publication are explicit.
 
 ## Shared foundation posture
 
