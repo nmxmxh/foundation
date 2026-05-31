@@ -207,6 +207,7 @@ scaffold_sync_foundation_modules() {
         done
         if [[ "${DRY_RUN:-false}" != "true" ]]; then
             mkdir -p "$PROJECT_PATH/api/protos"
+            rm -rf "$PROJECT_PATH/api/protos/transport" "$PROJECT_PATH/api/protos/hermes"
             cp -R "$FOUNDATION_DIR/runtime-transport/protos/." "$PROJECT_PATH/api/protos/" 2>/dev/null || true
         fi
     fi

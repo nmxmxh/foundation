@@ -62,6 +62,16 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Set up Node
+        if: hashFiles('frontend/package.json') != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install frontend dependencies
+        if: hashFiles('frontend/package.json') != ''
+        run: npm --prefix frontend install --no-audit --no-fund
+
       # Uncomment if your project uses protobuf
       # - name: Install protobuf dependencies
       #   run: |
@@ -97,6 +107,16 @@ jobs:
           make test-unit
           make test-coverage
           make test-integration
+
+      - name: Compile WASM runtime shim
+        if: hashFiles('wasm/main.go') != ''
+        run: make build-wasm
+
+      - name: Build and test frontend
+        if: hashFiles('frontend/package.json') != ''
+        run: |
+          make build-frontend
+          make test-frontend
 
       - name: Upload coverage
         uses: codecov/codecov-action@v4

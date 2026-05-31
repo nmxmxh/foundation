@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package foundation.v1;
+
+option go_package = "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1;foundationpb";
+
+import "google/protobuf/timestamp.proto";
+import "foundation/v1/metadata.proto";
+
+enum PayloadEncoding {
+  PAYLOAD_ENCODING_UNSPECIFIED = 0;
+  PAYLOAD_ENCODING_JSON = 1;
+  PAYLOAD_ENCODING_PROTOBUF = 2;
+  PAYLOAD_ENCODING_CAPNP = 3;
+  PAYLOAD_ENCODING_BINARY = 4;
+}
+
+message EventEnvelope {
+  string id = 1;
+  string event_type = 2;
+  bytes payload = 3;
+  Metadata metadata = 4;
+  string correlation_id = 5;
+  string schema_version = 6;
+  google.protobuf.Timestamp occurred_at = 7;
+  PayloadEncoding payload_encoding = 8;
+  string source_node_id = 9;
+}
+
+message EventBatch {
+  repeated EventEnvelope envelopes = 1;
+}

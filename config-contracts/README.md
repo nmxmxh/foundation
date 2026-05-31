@@ -16,7 +16,7 @@ Rules:
 5. runtime memory, transport, compression, and post-quantum posture must be declared explicitly so scaffolded apps do not drift
 6. frontend communication packages are explicit config consumers: `@ovasabi/runtime-transport` chooses HTTP/WebSocket/binary fallback, `@ovasabi/frontend-kit` discovers runtime artifacts, and app code adapts generated protobuf domain types
 
-Planned public/server split:
+Public/server split:
 
 1. public config
    - API and WS base URLs
@@ -37,6 +37,10 @@ Planned public/server split:
    - dispatch concurrency budgets and compression strategy
    - post-quantum security posture
 
-Extraction gate:
+Compatibility gate:
 
-1. `field_os`, `fintech_v1`, and `reframe_v1` must all derive frontend-safe config from the same schema shape.
+1. Generated apps derive frontend-safe config from the same schema shape.
+2. Backend config loading rejects unknown production keys after template
+   adoption.
+3. Frontend code reads generated config consumers instead of ad-hoc Vite env
+   names directly.

@@ -16,7 +16,30 @@ For the end-to-end command/event/worker/realtime lifecycle, see `foundation/docs
 6. Service-registry listeners should fan in Redis/pubsub traffic to blocking worker pools instead of using sleep-based polling loops.
 7. Handler registration should apply bounded concurrency through a shared execution controller so saturation behavior is explicit and measurable.
 8. Externally reachable handlers must fail closed on missing identity, organization scope, integrity metadata, or route contract validation.
-9. Hermes hotplane projections, when enabled, are node-local read refinements fed only by committed Postgres/outbox/River/Redis Stream observations. They may reduce repeated Redis/Postgres reads, but they must remain bounded, replayable, tenant-scoped, and disposable.
+9. Hermes hotplane projections are mandatory node-local read refinements for the scaffolded `database.RuntimeStore`. They are fed only by committed Postgres/outbox/River/Redis Stream observations, remain bounded, replayable, tenant-scoped, and disposable, and fall back to Postgres instead of serving partial state.
+
+## Foundation log plane
+
+The runtime splits observability into two lanes:
+
+1. Operational logs explain behavior to operators. They use the Foundation logger facade, context enrichment, redaction, bounded value sizes, sampling/deduplication, async queues, colorized development output, JSON production output, or compact wire format (`cwf`) when log storage needs fast append/split/index behavior.
+2. Durable event facts describe system truth. They are typed terminal events with correlation metadata and binary Foundation envelopes. The `server-kit/go/eventlog` package persists those envelopes in `foundation_event_log` and republishes pending rows into Redis Streams for short delivery windows. Hermes consumes these facts only after the Postgres/outbox/River/Redis Stream observation is committed; it must never consume arbitrary operational log text.
+
+The expected hot projection flow is:
+
+```text
+Postgres transaction
+-> durable outbox/event fact row
+-> Redis Stream short delivery window
+-> Hermes typed projection apply
+-> drift checks and operational telemetry around every step
+```
+
+Operational logging failure is non-fatal and must degrade through drops,
+sampling, and counters. Durable event fact failure inside a command boundary is
+part of the truth boundary: the command must fail, retry, or remain unpublished.
+Redis failure leaves the durable row available for replay, and Hermes failure
+falls back to Postgres.
 
 ## Go concurrency posture
 
@@ -76,7 +99,14 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
 
 ## Hermes hotplane posture
 
-Hermes is a research-stage node-local hotplane for live operational reads. It
+Hermes is an experimental node-local hotplane for live operational reads. The
+server-kit slice lives in `server-kit/go/hermes`: bounded projection specs,
+tenant-scoped segmented indexes, copied public reads, borrowed internal views,
+atomic epoch publication, `database.StateStore` rebuild, typed record batch
+ingestion, trusted snapshot `BulkLoad`, generated
+`foundation.v1.RecordMutationBatch` envelope ingestion, binary payload
+ingestion, a worker processor bridge, and Redis Stream tailer
+abstractions. It
 uses the runtime principles in this document, but it does not replace the
 durable command path. Postgres remains the system of record, River/outbox
 records remain the durable follow-up path, and Redis remains the distributed
@@ -104,12 +134,20 @@ coordination substrate.
 8. Shared-memory or arena-backed Hermes payloads must use descriptor ownership,
    release discipline, and epoch signaling from `runtime-sdk`; broad JSON maps
    are compatibility only.
-9. Memory pressure degrades Hermes before the process. Projections must cap
+9. Generic Hermes contracts live in `runtime-transport/protos/foundation/v1`.
+   App-owned schemas can remain protobuf or Cap'n Proto, but projector output to
+   Hermes should use the generated Foundation projection contract.
+10. Memory pressure degrades Hermes before the process. Projections must cap
    records, bytes, indexes, tombstones, descriptors, queue depth, and watcher
    count.
-10. Dropping a Hermes partition must be safe. The partition either rebuilds from
+11. Dropping a Hermes partition must be safe. The partition either rebuilds from
    Postgres plus stream tail or routes reads to Redis/Postgres according to its
    projection policy.
+12. Ingestion shape matters. `ApplyBatch` is the durable event/mixed-mutation
+    lane, `ApplyRecords` is the incremental pure-upsert projector lane, and
+    `BulkLoad` is the trusted snapshot replacement lane used by rebuild/repair.
+    Routine refresh loops should not rebuild from Postgres when a bounded
+    changelog can feed `ApplyRecords`.
 
 ## Browser WASM build and binding flow
 
@@ -232,7 +270,7 @@ default substrate.
 ## Binary event transport posture
 
 1. Foundation event transport now follows the Phase A shape from `fintech_v1/docs/transition_full_binary_pipeline.md`.
-2. The canonical internal event envelope lives under `foundation/runtime-transport/protos/transport/v1`.
+2. The canonical internal event envelope and Hermes projection contract live under `foundation/runtime-transport/protos/foundation/v1`.
 3. `server-kit/events` now publishes Redis/pubsub traffic as protobuf-binary envelopes, not JSON text.
 4. Payload strategy is still `JSON-in-bytes` by default:
    - transport envelope is binary protobuf

@@ -10,7 +10,6 @@ import (
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
-	"go.uber.org/zap"
 )
 
 // RedisBus is a redis-backed event bus with local fanout and recent-event caching.
@@ -44,8 +43,8 @@ func NewRedisBus(client rediskit.Client, channel string, maxRecent int, l logger
 	}
 	if l == nil {
 		l, _ = logger.NewDefault()
-		l = l.With(zap.String("component", "redis_event_bus"))
 	}
+	l = l.With("component", "redis_event_bus")
 	ctx, cancel := context.WithCancel(context.Background())
 	bus := &RedisBus{
 		client:             client,
@@ -149,7 +148,7 @@ func (b *RedisBus) startListener() {
 
 			msgs, cancel, err := b.client.Subscribe(b.ctx, b.channel)
 			if err != nil {
-				b.logger.Warn("event bus subscribe failed", zap.String("channel", b.channel), zap.Error(err))
+				b.logger.WarnContext(b.ctx, "event bus subscribe failed", "channel", b.channel, "error", err)
 				if !sleepWithContext(b.ctx, backoff) {
 					return
 				}
@@ -180,7 +179,7 @@ func (b *RedisBus) consumeLoop(msgs <-chan []byte) {
 			}
 			envelope, err := Decode(raw)
 			if err != nil {
-				b.logger.Warn("invalid event envelope from redis", zap.Error(err))
+				b.logger.WarnContext(b.ctx, "invalid event envelope from redis", "error", err)
 				continue
 			}
 			if sourceNode := envelope.SourceNodeID; sourceNode == "" {

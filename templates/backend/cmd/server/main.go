@@ -3,14 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 
+	"{{MODULE_PATH}}/internal/bootstrap"
 	"{{MODULE_PATH}}/internal/config"
 	"{{MODULE_PATH}}/internal/server"
 	"{{MODULE_PATH}}/internal/startup"
@@ -21,7 +22,7 @@ func main() {
 	defer cancel()
 
 	if err := run(ctx); err != nil {
-		slog.Error("application error", "error", err)
+		_, _ = fmt.Fprintf(os.Stderr, "application error: %v\n", err)
 		os.Exit(1)
 	}
 }
@@ -34,10 +35,9 @@ func run(ctx context.Context) error {
 	}
 
 	// Initialize logger
-	logger := startup.NewLogger(cfg.Env, cfg.LogLevel)
-	slog.SetDefault(logger)
+	log := startup.NewLogger(cfg.Env, cfg.LogLevel).With("component", "server")
 
-	slog.Info("starting server",
+	log.InfoContext(ctx, "starting server",
 		"env", cfg.Env,
 		"port", cfg.Port,
 	)
@@ -51,6 +51,7 @@ func run(ctx context.Context) error {
 
 	// Create and start server
 	srv := server.New(cfg, deps.Registry, deps.Handler)
+	srv.SetHTTPRoutes(httpapi.RoutesFromHandlerMap((&bootstrap.Services{}).AllHandlers()))
 	if cfg.RequireAuth || cfg.ProtectOperationalEndpoints {
 		jwtManager, err := auth.NewJWTManager(cfg.JWTSecret)
 		if err != nil {

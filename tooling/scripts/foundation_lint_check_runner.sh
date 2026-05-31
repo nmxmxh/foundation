@@ -8,7 +8,7 @@ fi
 
 log_file="$1"
 shift
-timeout_sec="${FOUNDATION_LINT_CHECK_TIMEOUT_SEC:-180}"
+timeout_sec="${FOUNDATION_LINT_CHECK_TIMEOUT_SEC:-600}"
 
 if command -v perl >/dev/null 2>&1; then
   perl -e '

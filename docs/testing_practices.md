@@ -14,10 +14,10 @@ Primary references used for synthesis:
 
 - `/Users/okhai/Desktop/Software Testing and Analysis by Mauro Pezze,Michal Young (z-lib.org).pdf`
 - `/Users/okhai/Desktop/testing.pdf`
-- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/coding_practices.md`
-- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/database_practices.md`
-- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/tla_architecture_practices.md`
-- `/Users/okhai/Desktop/OVASABI STUDIOS/foundation/docs/runtime_foundation.md`
+- `docs/coding_practices.md`
+- `docs/database_practices.md`
+- `docs/tla_architecture_practices.md`
+- `docs/runtime_foundation.md`
 
 The source review used five passes over each testing document:
 
@@ -620,6 +620,85 @@ Enforcement:
 
 - Reviewer gate for new testing infrastructure and critical defect postmortems.
 
+### TE-38: Service-backed pressure tests prove substrate claims
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Claims about Postgres pool behavior must include live pgxpool saturation tests that prove acquire timeouts are bounded and observable.
+2. Claims about Redis coordination must include live Redis tests for stream lag, pending windows, pub/sub slow-consumer behavior, and multi-key batching.
+3. Claims about Hermes as a hot-plane must include live Postgres/Redis tests for rebuild latency, Redis stream tailing, drift checks, and hot indexed reads.
+4. Mixed workflow tests must report p95/p99 latency across Postgres, Redis, and Hermes together, not only isolated microbenchmarks.
+5. Service-backed tests must remain Foundation-only. Generated projects inherit the APIs and checks, not the Foundation benchmark harness.
+6. Service-backed Docker ports should be ephemeral by default and discovered at runtime. Fixed host ports are allowed only through explicit override environment variables.
+7. Generated app integration tests must write Docker-assigned test ports into a runtime env file and feed those resolved URLs into Go tests. This keeps manual parallel app runs from fighting over `5433`/`6380`.
+8. Catalogue-wide app test runners must use isolated Compose project names per app/run so parallel execution does not share containers, networks, volumes, or runtime env files.
+
+Enforcement:
+
+- `make test-service-backed`.
+- `tests/service_backed_foundation_test.sh`.
+- `server-kit/go/servicebacked` with the `servicebacked` build tag.
+
+### TE-39: Scaffold smoke belongs in verify, not fast lint
+
+Level: `Mandatory`
+
+Requirements:
+
+1. `make lint` must remain structural and fast enough for frequent local use.
+2. `make verify` and CI must run stronger generated-scaffold smoke checks.
+3. Generated-scaffold smoke must compile the Go WASM shim when present.
+4. CI must install generated frontend dependencies and run generated frontend build/test when a frontend exists.
+5. Local scaffold smoke may skip frontend install/build/test unless dependencies already exist or the caller opts in.
+
+Enforcement:
+
+- `make verify`.
+- `tests/scaffold_smoke_test.sh`.
+- Generated CI workflow frontend/WASM steps.
+
+### TE-40: Benchmark and latency statistics must be sound
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Percentile calculations must use one conservative rule across Foundation:
+   nearest-rank over a sorted sample set, clamped to the valid sample range.
+   Do not mix floor-based, average-based, and nearest-rank formulas across
+   packages.
+2. p95/p99 metrics require enough samples to mean something. Short smoke
+   benchmark lanes may use bounded iteration counts for speed, but percentile
+   lanes must run with a duration or sample count large enough to avoid one
+   scheduler hiccup dominating the result.
+3. Benchmarks must separate fixture construction from the measured hot path
+   unless the benchmark name explicitly claims to measure construction,
+   parsing, ingress allocation, or cold-start setup.
+4. Benchmarks that report p95/p99 should also preserve enough diagnostics to
+   interpret variance: at minimum the workload shape, sample count or
+   benchmark duration, allocation count, and max observed latency where the
+   harness supports it.
+5. Benchmark-history tooling must not silently drop a runtime lane. Go, Rust,
+   TypeScript, browser-host, native, and service-backed results should either
+   appear in the saved artifact or produce an explicit skip reason.
+6. A benchmark result is evidence for the lane it measures, not for adjacent
+   lanes. Local memory benchmarks do not prove Postgres/Redis behavior;
+   service-backed benchmarks do not prove browser slow-consumer behavior;
+   fake GPU dispatch does not prove physical device execution.
+7. When variance appears, rerun with `-count`, increase sample duration, and
+   inspect fixture allocation, timer placement, GC pressure, scheduler
+   pressure, lock contention, and hidden network or filesystem work before
+   calling it noise.
+
+Enforcement:
+
+- `tooling/scripts/performance_check.sh`.
+- `tooling/scripts/benchmark_history.sh`.
+- Package-level percentile helper tests.
+- Reviewer gate for benchmark or load-test changes.
+
 ## Foundation test checks
 
 The conservative automated check set is:
@@ -634,6 +713,8 @@ The conservative automated check set is:
 8. Tests must avoid uncontrolled random sources that cannot reproduce failures.
 9. Acceptance feature files must have normal acceptance and acceptance-mutation script or target entry points.
 10. Generated project lint must run the testing-practices check.
+11. Benchmark and load-test helpers must use conservative percentile math and
+    must not report p95/p99 from intentionally tiny smoke samples.
 
 These checks intentionally do not try to infer whether every test has a strong oracle or adequate partitions. Those are review obligations under `TE-02` through `TE-06`.
 
@@ -652,3 +733,5 @@ These checks intentionally do not try to infer whether every test has a strong o
 - [ ] Invariant-heavy logic has property tests with bounded generators and reproducible seeds.
 - [ ] Generated acceptance pipelines include acceptance mutation, or the absence is documented as a test gap.
 - [ ] Long, service-backed, load, or external tests are under explicit targets/gates.
+- [ ] Benchmarks separate fixture setup from measured hot paths, use enough
+      samples for p95/p99, and preserve variance diagnostics.

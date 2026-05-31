@@ -26,7 +26,7 @@ Foundation modules must assume active abuse of APIs, automation, identity edges,
 4. **SSRF reaches cloud metadata and internal control planes**: outbound URL validation must block private/link-local networks and re-check redirects.
 5. **Supply-chain risk is continuous**: lockfiles, SCA/audit output, generated artifacts, CI scripts, and package publish flows require review and reproducible builds.
 6. **Memory safety is a roadmap item**: new high-risk native code should prefer Go/Rust/WASM-safe boundaries, keep unsafe blocks exceptional, and test FFI buffer contracts.
-7. **Security logging must be useful but not leaky**: log authz failures, validation anomalies, rate-limit events, and high-risk actions with correlation IDs while hashing or redacting secrets.
+7. **Security logging must be useful but not leaky**: log authz failures, validation anomalies, rate-limit events, and high-risk actions through the Foundation logger facade with correlation IDs while hashing or redacting secrets. Use structured JSON or compact wire format only after the same redaction and value-bounding path has run.
 
 ## Three-Pass Vulnerability Synthesis
 

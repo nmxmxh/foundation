@@ -3,6 +3,7 @@ package appbench
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -482,6 +483,7 @@ func BenchmarkScale_LocalOperationMixLatency(b *testing.B) {
 		b.Fatal(err)
 	}
 	cfg := scaleServerConfig()
+	env := scaleEnvelope("tenant:org_0042:signal:success")
 	target := wsrouting.TargetedDelivery{TargetType: "user", TargetID: "user-0042"}
 	targets := make([]string, 0, 10)
 	sampleLimit := min(b.N, 100000)
@@ -504,7 +506,7 @@ func BenchmarkScale_LocalOperationMixLatency(b *testing.B) {
 		if err := c.Get(ctx, "tenant:org_0042:profile", &cached); err != nil {
 			b.Fatal(err)
 		}
-		if err := bus.Publish(ctx, scaleEnvelope("tenant:org_0042:signal:success")); err != nil {
+		if err := bus.Publish(ctx, env); err != nil {
 			b.Fatal(err)
 		}
 		if err := runtimeconfig.ValidateServer(cfg); err != nil {
@@ -875,15 +877,29 @@ func reportPercentiles(b *testing.B, samples []int64) {
 	b.ReportMetric(float64(percentile(samples, 0.50)), "p50-ns/op")
 	b.ReportMetric(float64(percentile(samples, 0.95)), "p95-ns/op")
 	b.ReportMetric(float64(percentile(samples, 0.99)), "p99-ns/op")
+	b.ReportMetric(float64(samples[len(samples)-1]), "max-ns/op")
 }
 
 func percentile(samples []int64, quantile float64) int64 {
 	if len(samples) == 0 {
 		return 0
 	}
-	index := max(int(float64(len(samples)-1)*quantile), 0)
+	index := max(int(math.Ceil(float64(len(samples))*quantile))-1, 0)
 	if index >= len(samples) {
 		index = len(samples) - 1
 	}
 	return samples[index]
+}
+
+func TestPercentileUsesConservativeNearestRank(t *testing.T) {
+	samples := []int64{1, 2, 3, 4, 100}
+	if got := percentile(samples, 0.50); got != 3 {
+		t.Fatalf("p50 = %d, want 3", got)
+	}
+	if got := percentile(samples, 0.95); got != 100 {
+		t.Fatalf("p95 = %d, want 100", got)
+	}
+	if got := percentile(samples, 0.99); got != 100 {
+		t.Fatalf("p99 = %d, want 100", got)
+	}
 }

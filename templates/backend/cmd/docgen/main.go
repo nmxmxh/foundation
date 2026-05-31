@@ -9,7 +9,9 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
+	"{{MODULE_PATH}}/internal/bootstrap"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
@@ -777,14 +779,7 @@ func isLikelyListEndpoint(path, description string) bool {
 	return false
 }
 
-// Example main function - customize for your project
 func main() {
-	// TODO: Import your domain handlers and collect routes
-	// Example:
-	// var allRoutes []registry.HTTPRoute
-	// allRoutes = append(allRoutes, geo.GetHTTPHandlers(nil)...)
-	// allRoutes = append(allRoutes, report.GetHTTPHandlers(nil)...)
-
 	cfg := Config{
 		Title:       "{{PROJECT_NAME}} API",
 		Version:     "{{FOUNDATION_VERSION}}",
@@ -793,7 +788,7 @@ func main() {
 			"/v1/health",
 			"/v1/status",
 		},
-		Routes: []registry.HTTPRoute{}, // Add your routes here
+		Routes: httpapi.RoutesFromHandlerMap((&bootstrap.Services{}).AllHandlers()),
 	}
 
 	spec := Generate(cfg)

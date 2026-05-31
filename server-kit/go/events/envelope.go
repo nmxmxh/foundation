@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	transportpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/transport/v1"
+	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -16,6 +16,8 @@ import (
 const (
 	PayloadEncodingJSON     = "json"
 	PayloadEncodingProtobuf = "protobuf"
+	PayloadEncodingCapnp    = "capnp"
+	PayloadEncodingBinary   = "binary"
 )
 
 type Envelope struct {
@@ -64,9 +66,9 @@ func (e Envelope) Validate() error {
 	switch normalized := normalizePayloadEncoding(e.PayloadEncoding); normalized {
 	case PayloadEncodingJSON:
 		return nil
-	case PayloadEncodingProtobuf:
+	case PayloadEncodingProtobuf, PayloadEncodingCapnp, PayloadEncodingBinary:
 		if len(e.PayloadBytes) == 0 {
-			return errors.New("protobuf payload_encoding requires payload bytes")
+			return fmt.Errorf("%s payload_encoding requires payload bytes", normalized)
 		}
 		return nil
 	default:
@@ -213,7 +215,7 @@ func (e Envelope) ToBinary() ([]byte, error) {
 		}
 	}
 
-	return proto.Marshal(&transportpb.EventEnvelope{
+	return proto.Marshal(&foundationpb.EventEnvelope{
 		Id:              env.ID,
 		EventType:       env.EventType,
 		Payload:         payload,
@@ -266,7 +268,7 @@ func FromJSON(data []byte) (Envelope, error) {
 }
 
 func FromBinary(data []byte) (Envelope, error) {
-	message := &transportpb.EventEnvelope{}
+	message := &foundationpb.EventEnvelope{}
 	if err := proto.Unmarshal(data, message); err != nil {
 		return Envelope{}, err
 	}
@@ -317,29 +319,37 @@ func normalizePayloadEncoding(value string) string {
 	switch value {
 	case "", PayloadEncodingJSON:
 		return PayloadEncodingJSON
-	case PayloadEncodingProtobuf:
-		return PayloadEncodingProtobuf
+	case PayloadEncodingProtobuf, PayloadEncodingCapnp, PayloadEncodingBinary:
+		return value
 	default:
 		return value
 	}
 }
 
-func payloadEncodingToProto(value string) transportpb.PayloadEncoding {
+func payloadEncodingToProto(value string) foundationpb.PayloadEncoding {
 	switch normalizePayloadEncoding(value) {
 	case PayloadEncodingJSON:
-		return transportpb.PayloadEncoding_PAYLOAD_ENCODING_JSON
+		return foundationpb.PayloadEncoding_PAYLOAD_ENCODING_JSON
 	case PayloadEncodingProtobuf:
-		return transportpb.PayloadEncoding_PAYLOAD_ENCODING_PROTOBUF
+		return foundationpb.PayloadEncoding_PAYLOAD_ENCODING_PROTOBUF
+	case PayloadEncodingCapnp:
+		return foundationpb.PayloadEncoding_PAYLOAD_ENCODING_CAPNP
+	case PayloadEncodingBinary:
+		return foundationpb.PayloadEncoding_PAYLOAD_ENCODING_BINARY
 	default:
-		return transportpb.PayloadEncoding_PAYLOAD_ENCODING_UNSPECIFIED
+		return foundationpb.PayloadEncoding_PAYLOAD_ENCODING_UNSPECIFIED
 	}
 }
 
-func payloadEncodingFromProto(value transportpb.PayloadEncoding) string {
+func payloadEncodingFromProto(value foundationpb.PayloadEncoding) string {
 	switch value {
-	case transportpb.PayloadEncoding_PAYLOAD_ENCODING_PROTOBUF:
+	case foundationpb.PayloadEncoding_PAYLOAD_ENCODING_PROTOBUF:
 		return PayloadEncodingProtobuf
-	case transportpb.PayloadEncoding_PAYLOAD_ENCODING_JSON, transportpb.PayloadEncoding_PAYLOAD_ENCODING_UNSPECIFIED:
+	case foundationpb.PayloadEncoding_PAYLOAD_ENCODING_CAPNP:
+		return PayloadEncodingCapnp
+	case foundationpb.PayloadEncoding_PAYLOAD_ENCODING_BINARY:
+		return PayloadEncodingBinary
+	case foundationpb.PayloadEncoding_PAYLOAD_ENCODING_JSON, foundationpb.PayloadEncoding_PAYLOAD_ENCODING_UNSPECIFIED:
 		return PayloadEncodingJSON
 	default:
 		return PayloadEncodingJSON
@@ -352,8 +362,8 @@ type Batch struct {
 }
 
 func (b Batch) ToBinary() ([]byte, error) {
-	batch := &transportpb.EventBatch{
-		Envelopes: make([]*transportpb.EventEnvelope, len(b.Envelopes)),
+	batch := &foundationpb.EventBatch{
+		Envelopes: make([]*foundationpb.EventEnvelope, len(b.Envelopes)),
 	}
 	for i, e := range b.Envelopes {
 		e.Normalize()
@@ -375,7 +385,7 @@ func (b Batch) ToBinary() ([]byte, error) {
 			}
 		}
 
-		batch.Envelopes[i] = &transportpb.EventEnvelope{
+		batch.Envelopes[i] = &foundationpb.EventEnvelope{
 			Id:              e.ID,
 			EventType:       e.EventType,
 			Payload:         payload,
@@ -391,7 +401,7 @@ func (b Batch) ToBinary() ([]byte, error) {
 }
 
 func FromBatchBinary(data []byte) (Batch, error) {
-	message := &transportpb.EventBatch{}
+	message := &foundationpb.EventBatch{}
 	if err := proto.Unmarshal(data, message); err != nil {
 		return Batch{}, err
 	}

@@ -5,6 +5,7 @@ package runtimehost
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 )
@@ -15,7 +16,9 @@ type FFIPoolOptions struct {
 	Logger      logger.Logger
 }
 
-type FFIPool struct{}
+type FFIPool struct {
+	bufferPool sync.Pool
+}
 
 func NewFFIPool(FFIPoolOptions) (*FFIPool, error) {
 	return nil, errors.Join(ErrFFITransportUnsupported, errors.New("ffi runtime transport is not supported on this build"))

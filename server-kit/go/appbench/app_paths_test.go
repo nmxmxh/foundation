@@ -20,8 +20,6 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/retry"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 type appProcessor struct {
@@ -32,16 +30,19 @@ type appProcessor struct {
 
 type benchLogger struct{}
 
-func (benchLogger) Info(string, ...zapcore.Field)  {}
-func (benchLogger) Error(string, ...zapcore.Field) {}
-func (benchLogger) Debug(string, ...zapcore.Field) {}
-func (benchLogger) Warn(string, ...zapcore.Field)  {}
-func (benchLogger) Sync() error                    { return nil }
-func (l benchLogger) With(...zapcore.Field) logger.Logger {
-	return l
+func (benchLogger) Info(string, ...any)                         {}
+func (benchLogger) Error(string, ...any)                        {}
+func (benchLogger) Debug(string, ...any)                        {}
+func (benchLogger) Warn(string, ...any)                         {}
+func (benchLogger) InfoContext(context.Context, string, ...any) {}
+func (benchLogger) ErrorContext(context.Context, string, ...any) {
 }
-func (benchLogger) GetZapLogger() *zap.Logger {
-	return zap.NewNop()
+func (benchLogger) DebugContext(context.Context, string, ...any) {}
+func (benchLogger) WarnContext(context.Context, string, ...any)  {}
+func (benchLogger) Sync() error                                  { return nil }
+func (benchLogger) Dropped() uint64                              { return 0 }
+func (l benchLogger) With(...any) logger.Logger {
+	return l
 }
 
 func (p *appProcessor) Kind() string     { return p.kind }

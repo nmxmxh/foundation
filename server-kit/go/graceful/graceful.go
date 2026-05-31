@@ -10,7 +10,6 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	metautil "github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/riverqueue/river"
-	"go.uber.org/zap"
 )
 
 // EventEmitter emits lifecycle events for command outcomes.
@@ -133,10 +132,10 @@ func (h *Handler) Success(ctx context.Context, action string, msg string, result
 	}
 
 	if h.Log != nil {
-		h.Log.Info("operation success",
-			zap.String("action", action),
-			zap.String("entity_id", entityID),
-			zap.String("service", h.Service),
+		h.Log.InfoContext(ctx, "operation success",
+			"action", action,
+			"entity_id", entityID,
+			"service", h.Service,
 		)
 	}
 
@@ -146,10 +145,10 @@ func (h *Handler) Success(ctx context.Context, action string, msg string, result
 			ttl = 5 * time.Minute
 		}
 		if err := h.Cache.Set(ctx, cacheInfo.Key, result, ttl); err != nil && h.Log != nil {
-			h.Log.Warn("cache write failed",
-				zap.String("cache_key", cacheInfo.Key),
-				zap.String("action", action),
-				zap.Error(err),
+			h.Log.WarnContext(ctx, "cache write failed",
+				"cache_key", cacheInfo.Key,
+				"action", action,
+				"error", err,
 			)
 		}
 	}
@@ -158,9 +157,9 @@ func (h *Handler) Success(ctx context.Context, action string, msg string, result
 		eventType := ensureTerminalState(action, "success")
 		meta := withCorrelationIDFromContext(ctx, metadata)
 		if err := h.EventEmitter.EmitEvent(ctx, eventType, success, meta); err != nil && h.Log != nil {
-			h.Log.Warn("success event emit failed",
-				zap.String("event_type", eventType),
-				zap.Error(err),
+			h.Log.WarnContext(ctx, "success event emit failed",
+				"event_type", eventType,
+				"error", err,
 			)
 		}
 	}
@@ -181,11 +180,11 @@ func (h *Handler) Error(ctx context.Context, action string, msg string, cause er
 	}
 
 	if h.Log != nil {
-		h.Log.Error("operation failed",
-			zap.String("action", action),
-			zap.String("entity_id", entityID),
-			zap.String("service", h.Service),
-			zap.Error(cause),
+		h.Log.ErrorContext(ctx, "operation failed",
+			"action", action,
+			"entity_id", entityID,
+			"service", h.Service,
+			"error", cause,
 		)
 	}
 
@@ -193,9 +192,9 @@ func (h *Handler) Error(ctx context.Context, action string, msg string, cause er
 		eventType := ensureTerminalState(action, "failed")
 		meta := withCorrelationIDFromContext(ctx, metadata)
 		if err := h.EventEmitter.EmitEvent(ctx, eventType, errContext, meta); err != nil && h.Log != nil {
-			h.Log.Warn("failure event emit failed",
-				zap.String("event_type", eventType),
-				zap.Error(err),
+			h.Log.WarnContext(ctx, "failure event emit failed",
+				"event_type", eventType,
+				"error", err,
 			)
 		}
 	}

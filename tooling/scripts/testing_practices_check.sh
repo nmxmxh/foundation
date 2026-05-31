@@ -76,6 +76,20 @@ else
   echo "[OK] no Go test files present"
 fi
 
+if rg --files "$target" | rg -q '\.go$'; then
+  check_no_match "TE percentile helpers use conservative nearest-rank math" "float64\(len\([^)]+\)-1\)\s*\*|\(n\s*\*\s*percentile\)\s*/\s*100" "$target" \
+    --glob '*.go' --glob '!**/node_modules/**' --glob '!**/vendor/**'
+fi
+
+for performance_check in \
+  "$target/tooling/scripts/performance_check.sh" \
+  "$target/foundation/tooling/scripts/performance_check.sh" \
+  "$target/scripts/checks/performance_check.sh"; do
+  if [[ -f "$performance_check" ]]; then
+    check_has_match "TE performance check separates latency percentile duration" "LATENCY_BENCHTIME" "$performance_check"
+  fi
+done
+
 if [[ -f "$target/templates/frontend/package.json" ]]; then
   check_has_match "TE frontend scaffold includes Testing Library React" '"@testing-library/react"' "$target/templates/frontend/package.json"
   check_has_match "TE frontend scaffold includes user-event" '"@testing-library/user-event"' "$target/templates/frontend/package.json"

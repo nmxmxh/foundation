@@ -20,6 +20,10 @@ library shelf. The scaffold wires these surfaces by default:
 4. `worker`, `chain`, `metrics`, `slo`, `profiling`, and `contracttest` provide
    queue execution, bounded parallelism, observability, SLO evidence, runtime
    profiling, and event-contract verification.
+5. `database`, `redis`, `objectstore`, `bulk`, `eventlog`, `servicebacked`, and
+   `hermes` provide the data substrate: durable state helpers, coordination,
+   bounded object/bulk transfer, append-only event evidence, service-backed
+   pressure harnesses, and node-local projection reads.
 
 The generated `scripts/checks/server_kit_usage_check.sh` fails when these
 runtime bindings are present but not wired through startup/server paths.
@@ -57,6 +61,18 @@ A unified client for Redis operations.
 - **Atomic Counters**: Used for distributed locking and rate limiting.
 - **In-Memory Mock**: `NewMemoryClient` allows for full testing of distributed logic without a real Redis instance.
 
+### 2b. Hermes (`/hermes`) And Eventlog (`/eventlog`)
+- **Hermes**: Node-local, bounded projection hotplane for scoped live reads.
+  It consumes committed Postgres/outbox/River/Redis Stream observations and
+  publishes epoch-signaled snapshots without becoming durable truth.
+- **Hermes Ingestion Lanes**: Use `ApplyBatch` for durable mixed mutation
+  events, `ApplyRecords` for incremental pure-upsert projector batches, and
+  `BulkLoad` for trusted snapshot replacement during rebuild/repair.
+- **Eventlog**: Append-only event evidence for lifecycle and operational
+  inspection. Keep it tied to correlation, tenant, and schema metadata.
+- **Projection Contract**: Generic projection messages live in
+  `runtime-transport/protos/foundation/v1/projection.proto`.
+
 ### 3. Compression (`/compress`)
 Handles transport-level optimization.
 - **Priority**: Brotli (Encoding `br`) is the primary target for modern clients, with GZIP as fallback.
@@ -90,7 +106,8 @@ Handles transport-level optimization.
   dispatch benchmarks because protobuf decode/encode cost is part of the adapter
   path, not the router-only lane.
 - Use scaffold `make lint-foundation` to run CP, database, Redis, River,
-  contract drift, server-kit usage, and project scaffold checks together.
+  logging, metadata, contract drift, module ownership, server-kit usage, and
+  project scaffold checks together.
 
 ## LLM Agent Patterns: Implementing a New Route
 

@@ -217,6 +217,7 @@ client command
 -> <domain>:<action>:v1:requested
 -> optional worker/cache/Redis coordination
 -> <domain>:<action>:v1:success or :failed
+-> optional Hermes projection envelope (`foundation.v1.RecordMutationBatch`)
 -> realtime projection/store update
 -> frontend state
 ```
@@ -239,6 +240,13 @@ client command
 `make communication-contracts` generates `tests/contract/generated_lifecycle_test.go` for mutating proto request/response pairs. Those generated tests call `server-kit/go/contracttest.VerifyCommandLifecycle`; implementation and integration tests should reuse that verifier with real observed envelopes/jobs.
 
 For handler tests, wrap the event bus with `contracttest.NewLifecycleRecorder().WrapBus(bus)`, record any enqueued `worker.Job`, then call the generated `verifyGeneratedLifecycleObservation` helper for the relevant contract case.
+
+Hermes is already active through the scaffolded `database.RuntimeStore` wrapper.
+Keep domain command/event contracts in `api/protos/<domain>/v1`; specialized
+projectors should translate committed terminal events into the Foundation-owned
+`foundation.v1.RecordMutationBatch` contract from
+`foundation/runtime-transport/protos/foundation/v1/projection.proto`. App code
+should not create ad hoc JSON projection messages.
 
 ## Compression Thresholds
 

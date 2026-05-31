@@ -2,8 +2,8 @@ import {
   EventEnvelope as ProtoEventEnvelope,
   PayloadEncoding as ProtoPayloadEncoding,
   type EventEnvelope,
-} from "./generated/transport/v1/envelope";
-import { type Metadata as ProtoMetadata } from "./generated/transport/v1/metadata";
+} from "./generated/foundation/v1/envelope";
+import { type Metadata as ProtoMetadata } from "./generated/foundation/v1/metadata";
 import {
   RUNTIME_ENVELOPE_SCHEMA_VERSION,
   assertCompatibleSchemaVersion,
@@ -101,20 +101,20 @@ export const decodeJSONRuntimeEnvelope = (payload: string): RuntimeEnvelope<unkn
 };
 
 const encodePayload = <TPayload>(payload: TPayload, encoding: PayloadEncoding): Uint8Array => {
-  if (encoding === "protobuf") {
+  if (encoding === "protobuf" || encoding === "capnp" || encoding === "binary") {
     if (payload instanceof Uint8Array) {
       return payload;
     }
     if (payload instanceof ArrayBuffer) {
       return new Uint8Array(payload);
     }
-    throw new Error("protobuf runtime envelopes require Uint8Array payloads");
+    throw new Error(`${encoding} runtime envelopes require Uint8Array payloads`);
   }
   return textEncoder.encode(JSON.stringify(payload ?? {}));
 };
 
 const decodePayload = (payload: Uint8Array, encoding: PayloadEncoding): unknown => {
-  if (encoding === "protobuf") {
+  if (encoding === "protobuf" || encoding === "capnp" || encoding === "binary") {
     return payload;
   }
   if (payload.byteLength === 0) {
@@ -191,13 +191,26 @@ const normalizeEnvelopeMetadata = (metadata: EnvelopeMetadata): EnvelopeMetadata
   };
 };
 
-const normalizePayloadEncoding = (value: PayloadEncoding): PayloadEncoding => (value === "protobuf" ? "protobuf" : "json");
+const normalizePayloadEncoding = (value: PayloadEncoding): PayloadEncoding =>
+  value === "protobuf" || value === "capnp" || value === "binary" ? value : "json";
 
 const payloadEncodingToProto = (value: PayloadEncoding): ProtoPayloadEncoding =>
-  value === "protobuf" ? ProtoPayloadEncoding.PAYLOAD_ENCODING_PROTOBUF : ProtoPayloadEncoding.PAYLOAD_ENCODING_JSON;
+  value === "protobuf"
+    ? ProtoPayloadEncoding.PAYLOAD_ENCODING_PROTOBUF
+    : value === "capnp"
+      ? ProtoPayloadEncoding.PAYLOAD_ENCODING_CAPNP
+      : value === "binary"
+        ? ProtoPayloadEncoding.PAYLOAD_ENCODING_BINARY
+        : ProtoPayloadEncoding.PAYLOAD_ENCODING_JSON;
 
 const protoToPayloadEncoding = (value: ProtoPayloadEncoding): PayloadEncoding =>
-  value === ProtoPayloadEncoding.PAYLOAD_ENCODING_PROTOBUF ? "protobuf" : "json";
+  value === ProtoPayloadEncoding.PAYLOAD_ENCODING_PROTOBUF
+    ? "protobuf"
+    : value === ProtoPayloadEncoding.PAYLOAD_ENCODING_CAPNP
+      ? "capnp"
+      : value === ProtoPayloadEncoding.PAYLOAD_ENCODING_BINARY
+        ? "binary"
+        : "json";
 
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;

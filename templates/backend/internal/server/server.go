@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -18,6 +17,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
+	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
@@ -32,7 +32,7 @@ type Server struct {
 	cfg      *config.Config
 	registry *registry.ServiceRegistry
 	handler  *graceful.Handler
-	log      *slog.Logger
+	log      kitlogger.Logger
 	jwt      *auth.JWTManager
 	rbac     *security.Authorizer
 	routes   []registry.HTTPRoute
@@ -93,7 +93,7 @@ func New(cfg *config.Config, reg *registry.ServiceRegistry, handler ...*graceful
 		cfg:      cfg,
 		registry: reg,
 		handler:  h,
-		log:      slog.Default().With("component", "http_server"),
+		log:      kitlogger.Default().With("component", "http_server"),
 		routes:   []registry.HTTPRoute{},
 		publicPaths: []string{
 			"/healthz",
@@ -606,7 +606,7 @@ func (s *Server) handleStreamResponse(w http.ResponseWriter, r *http.Request, ex
 	}
 }
 
-func writeJSON(log *slog.Logger, w http.ResponseWriter, value any) {
+func writeJSON(log kitlogger.Logger, w http.ResponseWriter, value any) {
 	if err := json.NewEncoder(w).Encode(value); err != nil && log != nil {
 		log.Warn("failed to encode json response", "error", err)
 	}

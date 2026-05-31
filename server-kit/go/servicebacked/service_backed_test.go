@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -1134,8 +1135,33 @@ func percentileFromSorted(durations []time.Duration, percentile float64) time.Du
 	if len(durations) == 0 {
 		return 0
 	}
-	index := int(float64(len(durations)-1) * percentile)
+	index := int(math.Ceil(float64(len(durations))*percentile)) - 1
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(durations) {
+		index = len(durations) - 1
+	}
 	return durations[index]
+}
+
+func TestPercentileFromSortedUsesConservativeNearestRank(t *testing.T) {
+	durations := []time.Duration{
+		1 * time.Millisecond,
+		2 * time.Millisecond,
+		3 * time.Millisecond,
+		4 * time.Millisecond,
+		100 * time.Millisecond,
+	}
+	if got := percentileFromSorted(durations, 0.50); got != 3*time.Millisecond {
+		t.Fatalf("p50 = %s, want 3ms", got)
+	}
+	if got := percentileFromSorted(durations, 0.95); got != 100*time.Millisecond {
+		t.Fatalf("p95 = %s, want 100ms", got)
+	}
+	if got := percentileFromSorted(durations, 0.99); got != 100*time.Millisecond {
+		t.Fatalf("p99 = %s, want 100ms", got)
+	}
 }
 
 func maxDuration(values <-chan time.Duration) time.Duration {

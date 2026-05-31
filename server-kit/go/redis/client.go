@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,6 +44,7 @@ type Client interface {
 	// Streams (Reliable event delivery)
 	XAdd(ctx context.Context, stream string, values map[string]any) (string, error)
 	XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error)
+	XReadGroupPending(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error)
 	XAck(ctx context.Context, stream, group string, ids ...string) error
 
 	// Coordination & Locks
@@ -342,6 +344,33 @@ func (c *memoryClient) XReadGroup(_ context.Context, stream, group, _ string, co
 		out = append(out, msg)
 	}
 	g.next += limit
+	return out, nil
+}
+
+func (c *memoryClient) XReadGroupPending(_ context.Context, stream, group, _ string, count int64) ([]StreamMessage, error) {
+	qualified := c.qualify(stream)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, fmt.Errorf("memory redis client is closed")
+	}
+	g := c.memoryStreamGroupLocked(qualified, group)
+	if len(g.pending) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(g.pending))
+	for id := range g.pending {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	limit := len(ids)
+	if count > 0 && int(count) < limit {
+		limit = int(count)
+	}
+	out := make([]StreamMessage, 0, limit)
+	for _, id := range ids[:limit] {
+		out = append(out, cloneStreamMessage(g.pending[id]))
+	}
 	return out, nil
 }
 
@@ -894,14 +923,22 @@ func (c *redisClient) XAdd(ctx context.Context, stream string, values map[string
 }
 
 func (c *redisClient) XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error) {
+	return c.xReadGroup(ctx, stream, group, consumer, count, ">")
+}
+
+func (c *redisClient) XReadGroupPending(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error) {
+	return c.xReadGroup(ctx, stream, group, consumer, count, "0")
+}
+
+func (c *redisClient) xReadGroup(ctx context.Context, stream, group, consumer string, count int64, id string) ([]StreamMessage, error) {
 	qualified := c.qualify(stream)
 	start := time.Now()
 	res, err := c.client.XReadGroup(ctx, &goredis.XReadGroupArgs{
 		Group:    group,
 		Consumer: consumer,
-		Streams:  []string{qualified, ">"},
+		Streams:  []string{qualified, id},
 		Count:    count,
-		Block:    0,
+		Block:    -1,
 	}).Result()
 	if isRedisNoGroup(err) {
 		if createErr := c.client.XGroupCreateMkStream(ctx, qualified, group, "0").Err(); createErr != nil && !isRedisBusyGroup(createErr) {
@@ -911,9 +948,9 @@ func (c *redisClient) XReadGroup(ctx context.Context, stream, group, consumer st
 		res, err = c.client.XReadGroup(ctx, &goredis.XReadGroupArgs{
 			Group:    group,
 			Consumer: consumer,
-			Streams:  []string{qualified, ">"},
+			Streams:  []string{qualified, id},
 			Count:    count,
-			Block:    0,
+			Block:    -1,
 		}).Result()
 	}
 	if errors.Is(err, goredis.Nil) {
@@ -1168,6 +1205,10 @@ func (c *shardedClient) XAdd(ctx context.Context, stream string, values map[stri
 
 func (c *shardedClient) XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error) {
 	return c.shard(stream).XReadGroup(ctx, stream, group, consumer, count)
+}
+
+func (c *shardedClient) XReadGroupPending(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error) {
+	return c.shard(stream).XReadGroupPending(ctx, stream, group, consumer, count)
 }
 
 func (c *shardedClient) XAck(ctx context.Context, stream, group string, ids ...string) error {

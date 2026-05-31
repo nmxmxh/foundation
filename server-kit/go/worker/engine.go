@@ -15,7 +15,6 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing"
 	"github.com/riverqueue/river"
-	"go.uber.org/zap"
 )
 
 const (
@@ -70,7 +69,7 @@ func NewEngine(queueWorkers map[string]int, l logger.Logger) *Engine {
 		workers:    workers,
 		dedupe:     map[string]time.Time{},
 		jobHealth:  map[string]JobHealthSnapshot{},
-		log:        l.With(zap.String("component", "worker_engine")),
+		log:        l.With("component", "worker_engine"),
 		predictor:  NewTrendPredictor(),
 	}
 }
@@ -239,14 +238,14 @@ func (e *Engine) adaptiveScaler(ctx context.Context) {
 					}
 					e.spawnWorkers(ctx, q.name, q.ch, newWorkers)
 					e.mu.RLock()
-					e.log.Info("scaled up workers (reactive)", zap.String("queue", q.name), zap.Int("new_total", e.workers[q.name]), zap.Int("depth", depth))
+					e.log.InfoContext(ctx, "scaled up workers (reactive)", "queue", q.name, "new_total", e.workers[q.name], "depth", depth)
 					e.mu.RUnlock()
 				} else if e.predictor != nil {
 					// Pre-emptive scaling based on predictive signals
 					if needed := e.predictor.Predict(ctx, q.name, depth, currentWorkers); needed > 0 {
 						e.spawnWorkers(ctx, q.name, q.ch, needed)
 						e.mu.RLock()
-						e.log.Info("scaled up workers (predictive)", zap.String("queue", q.name), zap.Int("added", needed), zap.Int("new_total", e.workers[q.name]), zap.Int("depth", depth))
+						e.log.InfoContext(ctx, "scaled up workers (predictive)", "queue", q.name, "added", needed, "new_total", e.workers[q.name], "depth", depth)
 						e.mu.RUnlock()
 					}
 				}
@@ -341,7 +340,7 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 					TrackingData:  job.Metadata,
 				}
 				if err := ms.Save(ctx, meta); err != nil {
-					e.log.Warn("failed to save job metadata", zap.Int64("job_id", jobID), zap.Error(err))
+					e.log.WarnContext(ctx, "failed to save job metadata", "job_id", jobID, "error", err)
 				}
 			}
 		}
@@ -400,16 +399,16 @@ func (e *Engine) spawnWorkers(ctx context.Context, queue string, jobs <-chan Job
 }
 
 func (e *Engine) runQueue(ctx context.Context, queue string, jobs <-chan Job, workerIndex int) {
-	e.log.Info("worker queue runner started", zap.String("queue", queue), zap.Int("worker", workerIndex))
+	e.log.InfoContext(ctx, "worker queue runner started", "queue", queue, "worker", workerIndex)
 	for {
 		observability.Default().RecordQueueDepth(queue, len(jobs))
 		select {
 		case <-ctx.Done():
-			e.log.Info("worker queue runner stopped", zap.String("queue", queue), zap.Int("worker", workerIndex))
+			e.log.InfoContext(ctx, "worker queue runner stopped", "queue", queue, "worker", workerIndex)
 			return
 		case job := <-jobs:
 			if ctx.Err() != nil {
-				e.log.Info("worker queue runner stopped", zap.String("queue", queue), zap.Int("worker", workerIndex))
+				e.log.InfoContext(ctx, "worker queue runner stopped", "queue", queue, "worker", workerIndex)
 				return
 			}
 			e.handleJob(ctx, queue, workerIndex, job)
@@ -422,7 +421,7 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 	processor, ok := e.processors[job.Kind()]
 	e.mu.RUnlock()
 	if !ok {
-		e.log.Error("dropping job without processor", zap.String("kind", job.Kind()), zap.String("queue", queue))
+		e.log.ErrorContext(ctx, "dropping job without processor", "kind", job.Kind(), "queue", queue)
 		observability.Default().RecordWorker(job.Kind(), queue, "dropped_no_processor")
 		e.recordHealth(job, JobHealthDroppedNoProcessor, errors.New("processor not registered"), time.Time{}, time.Now().UTC())
 		return
@@ -432,7 +431,7 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 		e.mu.Lock()
 		if _, exists := e.dedupe[key]; exists {
 			e.mu.Unlock()
-			e.log.Info("deduped job replay", zap.String("kind", job.Kind()), zap.String("queue", queue), zap.String("key", key))
+			e.log.InfoContext(ctx, "deduped job replay", "kind", job.Kind(), "queue", queue, "key", key)
 			observability.Default().RecordWorker(job.Kind(), queue, "deduped")
 			e.recordHealth(job, JobHealthDeduped, nil, time.Time{}, time.Now().UTC())
 			return
@@ -462,18 +461,18 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 	if err != nil {
 		finishedAt := time.Now().UTC()
 		timedOut := errors.Is(err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded)
-		e.log.Warn("job processing failed",
-			zap.String("kind", job.Kind()),
-			zap.String("queue", queue),
-			zap.Int("attempt", job.Attempt+1),
-			zap.Int("max_attempts", job.MaxAttempts),
-			zap.Error(err),
-			zap.Int("worker", workerIndex),
+		e.log.WarnContext(runCtx, "job processing failed",
+			"kind", job.Kind(),
+			"queue", queue,
+			"attempt", job.Attempt+1,
+			"max_attempts", job.MaxAttempts,
+			"error", err,
+			"worker", workerIndex,
 		)
 
 		job.Attempt++
 		if job.Attempt >= job.MaxAttempts {
-			e.log.Error("job exhausted retries", zap.String("kind", job.Kind()), zap.String("queue", queue))
+			e.log.ErrorContext(runCtx, "job exhausted retries", "kind", job.Kind(), "queue", queue)
 			observability.Default().RecordWorker(job.Kind(), queue, "failed_exhausted")
 			recordJobTrace(job, "worker.process", "failed_exhausted", err.Error())
 			if timedOut {
@@ -508,10 +507,10 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 			e.pruneDedupe(time.Now().UTC())
 		}
 	}
-	e.log.Info("job processed",
-		zap.String("kind", job.Kind()),
-		zap.String("queue", queue),
-		zap.Int("worker", workerIndex),
+	e.log.InfoContext(runCtx, "job processed",
+		"kind", job.Kind(),
+		"queue", queue,
+		"worker", workerIndex,
 	)
 	observability.Default().RecordWorker(job.Kind(), queue, "succeeded")
 	recordJobTrace(job, "worker.process", "succeeded", "")

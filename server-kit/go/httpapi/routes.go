@@ -96,6 +96,41 @@ func WithStaticPayload(payload map[string]any) RouteOption {
 	}
 }
 
+func WithMetadata(values map[string]any) RouteOption {
+	return func(route *registry.HTTPRoute) {
+		if values == nil {
+			return
+		}
+		if route.Metadata == nil {
+			route.Metadata = map[string]any{}
+		}
+		for key, value := range values {
+			key = strings.TrimSpace(key)
+			if key == "" {
+				continue
+			}
+			route.Metadata[key] = value
+		}
+	}
+}
+
+func WithMetadataValue(key string, value any) RouteOption {
+	return WithMetadata(map[string]any{key: value})
+}
+
+func WithTags(tags ...string) RouteOption {
+	normalized := dedupeNonEmpty(tags)
+	return func(route *registry.HTTPRoute) {
+		route.Tags = append(route.Tags, normalized...)
+	}
+}
+
+func WithPublic() RouteOption {
+	return func(route *registry.HTTPRoute) {
+		route.IsPublic = true
+	}
+}
+
 func MakeEventRoute(method, path, eventType, description, requestSchema, responseSchema string, opts ...RouteOption) registry.HTTPRoute {
 	route := registry.HTTPRoute{
 		Method:         strings.ToUpper(strings.TrimSpace(method)),
@@ -105,6 +140,7 @@ func MakeEventRoute(method, path, eventType, description, requestSchema, respons
 		RequestSchema:  strings.TrimSpace(requestSchema),
 		ResponseSchema: strings.TrimSpace(responseSchema),
 		StaticPayload:  map[string]any{},
+		Metadata:       map[string]any{},
 	}
 	for _, opt := range opts {
 		if opt != nil {

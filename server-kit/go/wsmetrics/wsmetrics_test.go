@@ -133,6 +133,27 @@ func TestLatencyMetrics(t *testing.T) {
 	}
 }
 
+func TestLatencyPercentilesUseConservativeNearestRank(t *testing.T) {
+	samples := []time.Duration{
+		1 * time.Millisecond,
+		2 * time.Millisecond,
+		3 * time.Millisecond,
+		4 * time.Millisecond,
+		100 * time.Millisecond,
+	}
+
+	p50, p95, p99 := calculatePercentiles(samples)
+	if p50 != 3*time.Millisecond {
+		t.Fatalf("p50 = %s, want 3ms", p50)
+	}
+	if p95 != 100*time.Millisecond {
+		t.Fatalf("p95 = %s, want 100ms", p95)
+	}
+	if p99 != 100*time.Millisecond {
+		t.Fatalf("p99 = %s, want 100ms", p99)
+	}
+}
+
 func TestLatencyCircularBuffer(t *testing.T) {
 	c := NewCollector("test")
 	c.maxLatencySamples = 10

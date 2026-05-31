@@ -67,7 +67,7 @@ pub const fn columnar_descriptor_payload_bytes(column_count: u32) -> u32 {
     let raw =
         COLUMNAR_BATCH_HEADER_BYTES + column_count.saturating_mul(COLUMNAR_FIELD_DESCRIPTOR_BYTES);
     let align = COLUMNAR_BATCH_ALIGNMENT_BYTES;
-    ((raw + align - 1) / align).saturating_mul(align)
+    raw.div_ceil(align).saturating_mul(align)
 }
 
 pub fn validate_columnar_batch_shape(row_count: u32, column_count: u32) -> Result<(), String> {

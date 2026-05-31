@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	transportpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/transport/v1"
+	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 )
 
 func TestFromMapAndToMap(t *testing.T) {
@@ -370,7 +370,7 @@ func TestTransportProtoRoundTrip(t *testing.T) {
 	if err != nil || empty.Attributes == nil {
 		t.Fatalf("nil transport metadata = %+v err=%v", empty, err)
 	}
-	_, err = FromTransportProto(&transportpb.Metadata{ExtrasJson: []byte("{bad")})
+	_, err = FromTransportProto(&foundationpb.Metadata{ExtrasJson: []byte("{bad")})
 	if err == nil {
 		t.Fatalf("expected invalid extras JSON error")
 	}

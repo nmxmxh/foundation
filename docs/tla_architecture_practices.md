@@ -259,6 +259,15 @@ Use benchmarks and telemetry for statistical performance:
 5. cache hit ratios
 6. pool utilization distributions
 
+Statistical measurements still need an oracle. A p99 claim is only useful when
+the benchmark names the workload shape, uses a consistent percentile formula,
+collects enough samples for that percentile, and keeps fixture setup out of the
+measured hot path unless setup is the behavior under test. If a fast smoke lane
+uses a tiny fixed iteration count, treat its ns/op and allocation results as a
+regression signal, not as evidence of tail latency. Tail latency belongs in a
+separate benchmark or load test with enough duration, sample count, and variance
+diagnostics to explain scheduler, GC, lock, pool, network, or filesystem noise.
+
 ## Hidden state
 
 The FIFO and cache examples use internal variables such as queues and caches, then hide them when specifying external behavior. This is directly relevant to Ovasabi.

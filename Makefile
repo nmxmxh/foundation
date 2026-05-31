@@ -1,7 +1,7 @@
-.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust test-bench test-bench-go test-bench-native-rust lint verify docker-up docker-down migrate-up help \
-	check-scaffold-manifest check-init-project check-update-project check-migration-seed-policy check-lifecycle-contract-generator \
-	check-contract-drift check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
-	check-rust-runtime-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-server-kit-usage
+.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust test-service-backed test-bench test-bench-go test-bench-native-rust test-bench-history lint verify docker-up docker-down migrate-up help \
+	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator \
+	check-contract-drift check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
+	check-rust-runtime-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage
 
 .DEFAULT_GOAL := help
 
@@ -14,19 +14,27 @@ FOUNDATION_LINT_CHECKS := \
 	check-contract-drift \
 	check-go-fix \
 	check-go-static-analysis \
+	check-rust-static-analysis \
+	check-ts-static-analysis \
 	check-coding-practices \
 	check-rust-runtime-practices \
 	check-testing-practices \
 	check-go-concurrency-practices \
+	check-logging-practices \
 	check-metadata-practices \
 	check-database-practices \
 	check-redis-practices \
 	check-river-practices \
 	check-migration-structure \
+	check-directory-ownership \
+	check-enforcement-integrity \
+	check-foundation-assets \
+	check-server-kit-module-contract \
 	check-domain-contract-consistency \
 	check-server-kit-usage
 
-FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 180
+FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
+FOUNDATION_GO_CACHE_DIR ?= /tmp/ovasabi-foundation-go-build
 
 all: build
 
@@ -41,6 +49,7 @@ frontend-build:
 	@echo "Typechecking shared TypeScript packages..."
 	@if [ -d runtime-transport/ts/node_modules ]; then npm --prefix runtime-transport/ts run typecheck; else echo "Skipping runtime-transport/ts typecheck; run npm install first"; fi
 	@if [ -d runtime-sdk/ts/browser-host/node_modules ]; then npm --prefix runtime-sdk/ts/browser-host run typecheck; else echo "Skipping runtime-sdk/ts/browser-host typecheck; run npm install first"; fi
+	@if [ -d runtime-native/ts/node_modules ]; then npm --prefix runtime-native/ts run typecheck; else echo "Skipping runtime-native/ts typecheck; run npm install first"; fi
 	@if [ -d frontend-kit/ts/node_modules ]; then npm --prefix frontend-kit/ts run typecheck; else echo "Skipping frontend-kit/ts typecheck; run npm install first"; fi
 	@if [ -d ui-minimal/ts/node_modules ]; then npm --prefix ui-minimal/ts run typecheck; else echo "Skipping ui-minimal/ts typecheck; run npm install first"; fi
 	@if [ -d config-contracts/ts/node_modules ]; then npm --prefix config-contracts/ts run typecheck; else echo "Skipping config-contracts/ts typecheck; run npm install first"; fi
@@ -52,17 +61,22 @@ test: test-go test-ts test-rust
 
 test-go:
 	@echo "Running Go tests..."
-	@cd server-kit/go && go test ./...
-	@cd runtime-transport/go && go test ./...
-	@cd runtime-sdk/go && go test ./...
-	@cd config-contracts/go && go test ./...
+	@mkdir -p "$(FOUNDATION_GO_CACHE_DIR)"
+	@cd server-kit/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test ./...
+	@cd runtime-transport/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test ./...
+	@cd runtime-sdk/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test ./...
+	@cd config-contracts/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test ./...
 
 test-ts:
 	@echo "Running TypeScript tests..."
-	@if [ -d runtime-transport/ts/node_modules ]; then npm --prefix runtime-transport/ts run test; else echo "Skipping runtime-transport/ts tests; run npm install first"; fi
-	@if [ -d runtime-sdk/ts/browser-host/node_modules ]; then npm --prefix runtime-sdk/ts/browser-host run test; else echo "Skipping runtime-sdk/ts/browser-host tests; run npm install first"; fi
+	@if [ -d runtime-transport/ts/node_modules ]; then tooling/scripts/run_vitest.sh runtime-transport/ts run; else echo "Skipping runtime-transport/ts tests; run npm install first"; fi
+	@if [ -d runtime-sdk/ts/browser-host/node_modules ]; then tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host run; else echo "Skipping runtime-sdk/ts/browser-host tests; run npm install first"; fi
+	@if [ -d runtime-native/ts/node_modules ]; then tooling/scripts/run_vitest.sh runtime-native/ts run; else echo "Skipping runtime-native/ts tests; run npm install first"; fi
 
 test-rust: test-rust-sdk test-native-rust
+
+test-service-backed:
+	@tests/service_backed_foundation_test.sh
 
 test-rust-sdk:
 	@echo "Running runtime-sdk Rust tests..."
@@ -73,6 +87,9 @@ test-native-rust:
 	@cargo test --manifest-path runtime-native/rust/Cargo.toml
 
 test-bench: test-bench-go test-bench-native-rust
+
+test-bench-history:
+	@tooling/scripts/benchmark_history.sh .
 
 test-bench-go:
 	@echo "Running bounded Foundation benchmarks..."
@@ -108,6 +125,9 @@ check-init-project:
 check-update-project:
 	@tests/update_project_test.sh
 
+check-scaffold-smoke:
+	@tests/scaffold_smoke_test.sh
+
 check-migration-seed-policy:
 	@tests/migration_seed_policy_test.sh
 
@@ -123,6 +143,12 @@ check-go-fix:
 check-go-static-analysis:
 	@tooling/scripts/go_static_analysis_check.sh .
 
+check-rust-static-analysis:
+	@tooling/scripts/rust_static_analysis_check.sh .
+
+check-ts-static-analysis:
+	@tooling/scripts/ts_static_analysis_check.sh .
+
 check-coding-practices:
 	@tooling/scripts/coding_practices_check.sh .
 
@@ -134,6 +160,9 @@ check-testing-practices:
 
 check-go-concurrency-practices:
 	@tooling/scripts/go_concurrency_practices_check.sh .
+
+check-logging-practices:
+	@tooling/scripts/logging_practices_check.sh .
 
 check-metadata-practices:
 	@tooling/scripts/metadata_practices_check.sh .
@@ -150,13 +179,25 @@ check-river-practices:
 check-migration-structure:
 	@tooling/scripts/migration_structure_check.sh .
 
+check-directory-ownership:
+	@tooling/scripts/directory_ownership_check.sh .
+
+check-enforcement-integrity:
+	@tooling/scripts/enforcement_integrity_check.sh .
+
+check-foundation-assets:
+	@tooling/scripts/foundation_assets_check.sh .
+
+check-server-kit-module-contract:
+	@tooling/scripts/server_kit_module_contract_check.sh .
+
 check-domain-contract-consistency:
 	@tooling/scripts/domain_contract_consistency_check.sh .
 
 check-server-kit-usage:
 	@tooling/scripts/server_kit_usage_check.sh .
 
-verify: lint test frontend-build
+verify: lint test frontend-build check-scaffold-smoke
 
 docker-up:
 	@docker compose -f tests/docker-compose.service-backed.yml up -d
@@ -178,6 +219,6 @@ help:
 	@echo "  make test-bench          Run bounded local Foundation benchmarks"
 	@echo "  make test-bench-native-rust  Run native GPU/runtime Rust benchmark simulation"
 	@echo "  make lint                Run foundation scaffold/practice checks"
-	@echo "  make verify              Run lint, tests, and TS typechecks"
+	@echo "  make verify              Run lint, tests, TS typechecks, and generated scaffold smoke"
 	@echo "  make docker-up/down      Start/stop core service-backed test stack"
 	@echo "  make check-database-practices  Run a single foundation check"

@@ -8,7 +8,9 @@ services:
       POSTGRES_PASSWORD: ${SERVICE_BACKED_DB_PASSWORD:-postgres}
       POSTGRES_DB: ${SERVICE_BACKED_DB_NAME:-foundation_service_test}
     ports:
-      - "${SERVICE_BACKED_POSTGRES_PORT:-55432}:5432"
+      - target: 5432
+        published: ${SERVICE_BACKED_POSTGRES_PORT:-0}
+        protocol: tcp
     command:
       - postgres
       - -c
@@ -46,7 +48,9 @@ services:
   service-redis:
     image: ${SERVICE_BACKED_REDIS_IMAGE:-redis:8-alpine}
     ports:
-      - "${SERVICE_BACKED_REDIS_PORT:-56379}:6379"
+      - target: 6379
+        published: ${SERVICE_BACKED_REDIS_PORT:-0}
+        protocol: tcp
     command:
       - redis-server
       - --appendonly

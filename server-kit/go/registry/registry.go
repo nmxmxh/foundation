@@ -16,7 +16,6 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
-	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -79,7 +78,7 @@ func NewWithOptions(redisClient redis.Client, gh *graceful.Handler, l logger.Log
 		methods:         map[string]registeredMethod{},
 		redis:           redisClient,
 		handler:         gh,
-		log:             l.With(zap.String("component", "service_registry")),
+		log:             l.With("component", "service_registry"),
 		dispatchWorkers: dispatchWorkers,
 		intelligence:    opts.Intelligence,
 	}
@@ -116,7 +115,7 @@ func (r *ServiceRegistry) RegisterWithOptions(eventType string, handler bootstra
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.methods[eventType] = registeredMethod{handler: wrapped}
-	r.log.Info("registered handler", zap.String("event_type", eventType))
+	r.log.Info("registered handler", "event_type", eventType)
 	return nil
 }
 
@@ -163,7 +162,7 @@ func (r *ServiceRegistry) RegisterTypedWithOptions(eventType string, binding pro
 		binding:      &currentBinding,
 		requestPool:  requestPool,
 	}
-	r.log.Info("registered typed handler", zap.String("event_type", eventType))
+	r.log.Info("registered typed handler", "event_type", eventType)
 	return nil
 }
 
@@ -181,7 +180,7 @@ func (r *ServiceRegistry) Listen(ctx context.Context, patterns ...string) error 
 		return err
 	}
 
-	r.log.Info("listening for events", zap.Strings("patterns", patterns), zap.Int("dispatch_workers", r.dispatchWorkers))
+	r.log.InfoContext(ctx, "listening for events", "patterns", patterns, "dispatch_workers", r.dispatchWorkers)
 
 	payloadCh := make(chan []byte, 256)
 	uniqueChannels := make(map[<-chan []byte]struct{}, len(channels))
@@ -239,7 +238,7 @@ func (r *ServiceRegistry) Listen(ctx context.Context, patterns ...string) error 
 func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) {
 	env, err := eventcontract.Decode(payload)
 	if err != nil {
-		r.log.Error("failed to decode event envelope", zap.Error(err))
+		r.log.ErrorContext(ctx, "failed to decode event envelope", "error", err)
 		return
 	}
 
@@ -274,7 +273,7 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 	if method.typedHandler != nil && method.binding != nil {
 		req, pooled, err := method.decodeRequest(env.PayloadEncoding, env.Payload, env.PayloadBytes, metaMap)
 		if err != nil {
-			r.log.Error("failed to decode typed payload", zap.String("event_type", env.EventType), zap.Error(err))
+			r.log.ErrorContext(ctx, "failed to decode typed payload", "event_type", env.EventType, "error", err)
 			return
 		}
 		_, err = method.typedHandler(ctx, req)
@@ -287,7 +286,7 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 
 	// Legacy map-based handler
 	if env.PayloadEncoding == protoapi.PayloadEncodingProtobuf {
-		r.log.Error("handler does not support protobuf payload dispatch", zap.String("event_type", env.EventType))
+		r.log.ErrorContext(ctx, "handler does not support protobuf payload dispatch", "event_type", env.EventType)
 		return
 	}
 	_, err = method.handler(ctx, env.Payload)

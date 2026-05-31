@@ -74,6 +74,50 @@ CREATE INDEX IF NOT EXISTS idx_governance_state_scope_state_updated
     )
     WHERE data ? 'state';
 
+-- Foundation durable event log
+-- Stores typed binary EventEnvelope facts for outbox replay, Redis Stream
+-- publication, Hermes rebuild/repair, audit, and analytics. Operational log
+-- text must never be written here.
+CREATE TABLE IF NOT EXISTS foundation_event_log (
+    id BIGSERIAL PRIMARY KEY,
+    event_id TEXT NOT NULL DEFAULT ('evt_' || gen_random_uuid()::text),
+    event_type TEXT NOT NULL,
+    organization_id TEXT NOT NULL DEFAULT '',
+    correlation_id TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    payload_encoding TEXT NOT NULL,
+    envelope BYTEA NOT NULL,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    source_node_id TEXT NOT NULL DEFAULT '',
+    publish_stream TEXT,
+    publish_stream_id TEXT,
+    published_at TIMESTAMPTZ,
+    publish_attempts INTEGER NOT NULL DEFAULT 0,
+    last_publish_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT foundation_event_log_event_unique UNIQUE (event_id),
+    CONSTRAINT foundation_event_log_metadata_object
+        CHECK (jsonb_typeof(metadata) = 'object')
+);
+
+CREATE TRIGGER update_foundation_event_log_updated_at
+    BEFORE UPDATE ON foundation_event_log
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+COMMENT ON TABLE foundation_event_log
+    IS 'Durable typed event facts. Operational logs must not feed Hermes.';
+
+CREATE INDEX IF NOT EXISTS idx_foundation_event_log_pending
+    ON foundation_event_log (id)
+    WHERE published_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_foundation_event_log_org_time
+    ON foundation_event_log (organization_id, occurred_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_foundation_event_log_type_time
+    ON foundation_event_log (event_type, occurred_at DESC, id DESC);
+
 -- ============================================================================
 -- RIVER JOB QUEUE SCHEMA
 -- River is a background job processing system for Go applications

@@ -1,0 +1,18 @@
+# path_prefix	classification	propagation	notes
+server-kit/go/	foundation-module	vendored	Shared Go substrate for generated apps; app services must consume through public APIs.
+runtime-sdk/	foundation-module	vendored	Runtime host contracts and native/browser execution lanes.
+runtime-transport/	foundation-module	vendored	Foundation transport contracts and generated bindings.
+runtime-native/	foundation-module	vendored	Native runtime implementation and benchmark harness.
+config-contracts/	foundation-module	vendored	Runtime configuration contracts.
+frontend-kit/	foundation-module	vendored	Shared frontend integration primitives.
+ui-minimal/	foundation-module	vendored	Shared minimal UI primitives.
+tooling/scripts/	scaffolded-tooling	scaffolded	Copied into projects as scripts/checks; must stay app-safe.
+tooling/enforcement_manifest.tsv	foundation-enforcement	foundation-only	Hash manifest for protected enforcement files.
+tests/docker-compose.service-backed.yml	foundation-test	foundation-only	Foundation service-backed harness; not scaffolded into apps.
+tests/service_backed_foundation_test.sh	foundation-test	foundation-only	Foundation service-backed harness; not scaffolded into apps.
+server-kit/go/servicebacked/	foundation-test	foundation-only	Foundation service-backed tests; references must be pruned from generated projects.
+templates/	scaffold-source	foundation-only	Source of managed scaffold files.
+templates/backend/internal/service/	project-owned-template	create-only	Domain services belong to generated projects after creation.
+templates/backend/migrations/	project-owned-template	create-only	Seed migration only; project migrations are not overwritten.
+scripts/lib/	scaffold-engine	foundation-only	Foundation init/update implementation.
+docs/	foundation-docs	vendored	Foundation practice docs are copied into project docs/foundation.

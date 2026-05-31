@@ -18,7 +18,6 @@ import (
 
 	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
-	"go.uber.org/zap"
 )
 
 type ProcessRequest struct {
@@ -112,8 +111,8 @@ func NewProcessPool(opts ProcessPoolOptions) (*ProcessPool, error) {
 	}
 	if opts.Logger == nil {
 		opts.Logger, _ = logger.NewDefault()
-		opts.Logger = opts.Logger.With(zap.String("component", "runtime_process_pool"))
 	}
+	opts.Logger = opts.Logger.With("component", "runtime_process_pool")
 	if opts.ExchangeTimeout <= 0 {
 		opts.ExchangeTimeout = DefaultProcessExchangeTimeout
 	}
@@ -132,7 +131,7 @@ func NewProcessPool(opts ProcessPoolOptions) (*ProcessPool, error) {
 		}},
 	}
 	if transportSupport.Fallback {
-		opts.Logger.Warn("native runtime transport fallback enabled", zap.String("reason", transportSupport.Reason))
+		opts.Logger.Warn("native runtime transport fallback enabled", "reason", transportSupport.Reason)
 	}
 	for index := 0; index < opts.Workers; index++ {
 		worker := &processWorker{
@@ -140,7 +139,7 @@ func NewProcessPool(opts ProcessPoolOptions) (*ProcessPool, error) {
 			env:     append([]string(nil), opts.Env...),
 			dir:     strings.TrimSpace(opts.Dir),
 			index:   index + 1,
-			logger:  opts.Logger.With(zap.Int("worker_index", index+1)),
+			logger:  opts.Logger.With("worker_index", index+1),
 			mode:    transportSupport.Resolved,
 			shmDir:  strings.TrimSpace(opts.SharedMemoryDir),
 		}
@@ -434,7 +433,7 @@ func (w *processWorker) executeHeld(ctx context.Context, unitID string, buffer [
 	}
 	if err := w.executeWithContext(ctx, unitID, buffer); err != nil {
 		w.recordFailure(err)
-		w.logger.Warn("native runtime exchange failed; restarting worker", zap.Error(err))
+		w.logger.WarnContext(ctx, "native runtime exchange failed; restarting worker", "error", err)
 		w.incrementRestart()
 		if restartErr := w.restartLocked(); restartErr != nil {
 			w.recordFailure(restartErr)
@@ -470,7 +469,7 @@ func (w *processWorker) executeWithContext(ctx context.Context, unitID string, b
 	case err := <-result:
 		return err
 	case <-ctx.Done():
-		w.logger.Warn("native runtime exchange timed out; terminating worker", zap.Error(ctx.Err()))
+		w.logger.WarnContext(ctx, "native runtime exchange timed out; terminating worker", "error", ctx.Err())
 		if w.cmd != nil && w.cmd.Process != nil {
 			_ = w.cmd.Process.Kill()
 		}
@@ -539,10 +538,10 @@ func (w *processWorker) executeSharedMemoryLocked(unitID string, buffer []byte) 
 func (w *processWorker) logStderr(stderr io.ReadCloser) {
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
-		w.logger.Warn("native runtime stderr", zap.String("line", scanner.Text()))
+		w.logger.Warn("native runtime stderr", "line", scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
-		w.logger.Warn("native runtime stderr scan failed", zap.Error(err))
+		w.logger.Warn("native runtime stderr scan failed", "error", err)
 	}
 }
 

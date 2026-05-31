@@ -27,7 +27,9 @@ Primary performance companions:
 * **Core Services**:
   * **Event Bus**: Multi-driver (Redis/In-Memory) pattern matching for decoupled service communication. Highly focuses on `<domain>:<action>:requested/success/failed` lifecycle.
   * **Graceful Signalers**: Consistently formats error and success streams into conforming envelopes.
-* **Scaffold Contract**: Generated backends must use server-kit as the runtime spine. Startup registers dependencies with `resilience`; server ingress uses `registry`, `httpapi`, `metadata`, `graceful`, `security`, `compress`, and `observability`; WebSockets use `wsrouting` and `wsmetrics`; workers use bounded queue defaults.
+  * **Hotplane Reads**: Hermes provides bounded, node-local projection reads over committed observations; Postgres remains durable truth.
+  * **Event Evidence**: Eventlog and contracttest preserve lifecycle evidence for tests, traces, and operator inspection.
+* **Scaffold Contract**: Generated backends must use server-kit as the runtime spine. Startup registers dependencies with `resilience`; server ingress uses `registry`, `httpapi`, `metadata`, `graceful`, `security`, `compress`, and `observability`; WebSockets use `wsrouting` and `wsmetrics`; workers use bounded queue defaults; scaffolded runtime stores are wrapped by Hermes for safe live projections.
 
 * **Extended Modules** (v1.0.0):
 
@@ -43,14 +45,19 @@ Primary performance companions:
 | **Cache Patterns** | `cache` | Cache-aside with TTL policies and invalidation |
 | **Graceful Degradation** | `degradation` | Health monitoring with automatic fallback behaviors |
 | **API Versioning** | `versioning` | Header/path/query versioning with deprecation support |
+| **Hermes Hotplane** | `hermes` | Bounded projection reads with freshness and rebuild contracts |
+| **Event Log** | `eventlog` | Append-only lifecycle evidence for traces and inspection |
+| **Bulk/Object Transfer** | `bulk`, `objectstore` | Bounded large-payload and object-storage helpers |
+| **Service-Backed Harness** | `servicebacked` | Redis/Postgres pressure tests for Foundation substrate changes |
 
 ### B. runtime-transport (TypeScript)
 
-* **Purpose**: The universal client wire. Abstracts "How" we dispatch.
+* **Purpose**: The universal client and platform wire. Abstracts "how" commands,
+  events, binary envelopes, and projection batches move across boundaries.
 * **Key Services**:
   * **Stateless Bus**: `createEnvelope`, `createCommandBus`. Automatically manages falling back between WebSocket setups and HTTP streams.
   * **Stateful SDK (New)**: `createMetadataStore`, `createEventStore` (Zustand/Vanilla). Offers framework-agnostic singletons for request deduplication and implicit metadata carrying.
-* **Scaffold Contract**: Frontends consume this as `@ovasabi/runtime-transport` from `file:../foundation/runtime-transport/ts`; raw aliases into `foundation/runtime-transport/ts/src` are drift.
+* **Scaffold Contract**: Frontends consume this as `@ovasabi/runtime-transport` from `file:../foundation/runtime-transport/ts`; raw aliases into `foundation/runtime-transport/ts/src` are drift. Foundation-owned transport and Hermes projection protobuf contracts live under `foundation/runtime-transport/protos/foundation/v1`.
 
 ### C. runtime-sdk (Rust/WASM)
 
@@ -155,7 +162,7 @@ Primary performance companions:
 * Custom native plugins must preserve Foundation frame discipline: bounded buffers, descriptor allowlists, schema/version validation, correlation metadata where commands mutate state, and controlled errors for permission-denied, canceled, malformed, stale, oversized, and backpressured frames.
 * Financial kernels must use integer minor units and checked arithmetic only. Floats are not allowed for ledger balances, merchant settlement, fee calculation, stablecoin reserve math, or compliance thresholds.
 * Keep worker throughput bounded through server-kit queue configuration and chain helpers instead of ad-hoc goroutine fan-out.
-* Run `make lint-foundation` or `scripts/checks/server_kit_usage_check.sh .` after scaffold sync. `.foundation` projects receive deep wiring checks; intentionally custom apps should either adopt the scaffold profile or remain explicitly outside that contract.
+* Run `make lint-foundation` in generated projects or `tooling/scripts/server_kit_usage_check.sh .` from Foundation Core after scaffold sync. `.foundation` projects receive deep wiring checks; intentionally custom apps should either adopt the scaffold profile or remain explicitly outside that contract.
 
 ### 10. Delivery Metrics Rule
 
@@ -427,10 +434,10 @@ http.Handle("/api/versions", v.VersionsHandler())
 
 ```bash
 # From OVASABI STUDIOS root
-./foundation/init.sh my-app full      # Full-stack (Go + React + WASM)
-./foundation/init.sh api-service backend   # Backend only
-./foundation/init.sh web-client frontend   # Frontend only
-./foundation/init.sh utility minimal       # Tooling only
+./foundation/scripts/init-project.sh my-app full          # Full-stack (Go + React + WASM)
+./foundation/scripts/init-project.sh api-service backend  # Backend only
+./foundation/scripts/init-project.sh web-client frontend  # Frontend only
+./foundation/scripts/init-project.sh utility minimal      # Tooling only
 ```
 
 ### Update Existing Projects

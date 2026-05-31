@@ -339,6 +339,10 @@ func TestMemoryClientStreamsReadGroupsAreMonotonicAndAckable(t *testing.T) {
 	if err != nil || len(first) != 1 || first[0].ID != firstID {
 		t.Fatalf("first read = %+v err=%v, want first message", first, err)
 	}
+	pending, err := client.XReadGroupPending(context.Background(), "events", "workers", "worker-1", 10)
+	if err != nil || len(pending) != 1 || pending[0].ID != firstID {
+		t.Fatalf("pending read = %+v err=%v, want first message", pending, err)
+	}
 	second, err := client.XReadGroup(context.Background(), "events", "workers", "worker-1", 10)
 	if err != nil || len(second) != 1 || second[0].ID != secondID {
 		t.Fatalf("second read = %+v err=%v, want second message", second, err)

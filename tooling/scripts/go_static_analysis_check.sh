@@ -3,6 +3,79 @@ set -euo pipefail
 
 target="${1:-.}"
 target="$(cd "$target" && pwd)"
+script_dir="${0:A:h}"
+
+if [[ -f "$script_dir/local_toolchain_env.sh" ]]; then
+  source "$script_dir/local_toolchain_env.sh"
+  ovasabi_toolchain_init "$target"
+fi
+
+prepend_path_dir() {
+  local dir="$1"
+  [[ -n "$dir" && -d "$dir" ]] || return 0
+  case ":$PATH:" in
+    *":$dir:"*) ;;
+    *) export PATH="$dir:$PATH" ;;
+  esac
+}
+
+discover_go_tool_bins() {
+  command -v go >/dev/null 2>&1 || return 0
+
+  local gobin gopath
+  gobin="$(go env GOBIN 2>/dev/null || true)"
+  gopath="$(go env GOPATH 2>/dev/null || true)"
+
+  prepend_path_dir "$gobin"
+  if [[ -n "$gopath" ]]; then
+    local entry
+    for entry in ${(s/:/)gopath}; do
+      prepend_path_dir "$entry/bin"
+    done
+  fi
+}
+
+discover_go_tool_bins
+
+is_truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+strict_vuln_check() {
+  is_truthy "${CI:-}" || is_truthy "${GOVULNCHECK_STRICT:-}" || is_truthy "${FOUNDATION_STRICT_SECURITY:-}"
+}
+
+run_govulncheck() {
+  local output_file
+  output_file="$(mktemp "${TMPDIR:-/tmp}/govulncheck.XXXXXX")"
+
+  if govulncheck ./... >"$output_file" 2>&1; then
+    rm -f "$output_file"
+    return 0
+  fi
+
+  local exit_code=$?
+  if grep -Eqi 'fetching vulnerabilities|vuln[.]go[.]dev|no such host|network is unreachable|i/o timeout|TLS handshake timeout|connection refused|temporary failure in name resolution' "$output_file"; then
+    if strict_vuln_check; then
+      cat "$output_file"
+      rm -f "$output_file"
+      return "$exit_code"
+    fi
+
+    echo "[WARN] govulncheck skipped: vulnerability database unavailable in local/offline mode" >&2
+    echo "[WARN] set GOVULNCHECK_STRICT=1 or run under CI=true to fail closed" >&2
+    sed -n '1,6p' "$output_file" >&2
+    rm -f "$output_file"
+    return 0
+  fi
+
+  cat "$output_file"
+  rm -f "$output_file"
+  return "$exit_code"
+}
 
 required_tools=(go staticcheck gopls govulncheck gosec)
 missing_tools=()
@@ -59,7 +132,12 @@ if (( ${#go_modules[@]} == 0 )); then
 fi
 
 go_cache="${GO_CACHE_DIR:-${TMPDIR:-/tmp}/ovasabi-go-build}"
-mkdir -p "$go_cache"
+go_path="${GO_PATH_DIR:-}"
+analysis_cache="${GO_ANALYSIS_CACHE_DIR:-${TMPDIR:-/tmp}/ovasabi-go-analysis-cache}"
+mkdir -p "$go_cache" "$analysis_cache/staticcheck"
+if [[ -n "$go_path" ]]; then
+  mkdir -p "$go_path"
+fi
 
 for mod_dir in "${go_modules[@]}"; do
   rel="${mod_dir#$target/}"
@@ -71,6 +149,11 @@ for mod_dir in "${go_modules[@]}"; do
   (
     cd "$mod_dir"
     export GOCACHE="$go_cache"
+    if [[ -n "$go_path" ]]; then
+      export GOPATH="$go_path"
+    fi
+    export XDG_CACHE_HOME="$analysis_cache"
+    export STATICCHECK_CACHE="$analysis_cache/staticcheck"
 
     packages="$(go list ./...)"
     if [[ -z "$packages" ]]; then
@@ -85,11 +168,39 @@ for mod_dir in "${go_modules[@]}"; do
     if [[ -s "$gopls_file" ]]; then
       xargs -0 gopls check <"$gopls_file"
     fi
-    govulncheck ./...
+    run_govulncheck
     gosec -quiet -exclude-generated -exclude-dir=.cache -exclude-dir="$target/.cache" -exclude-dir="$go_cache" -exclude-rules=".*/ovasabi-go-build/.*:*;.*/go-build/.*:*;.*/generated/.*:*;.*\\.pb\\.go:*" ./...
   )
 
   echo "[OK] Go static analysis: $rel"
 done
+
+wasm_compile() {
+  local module_dir="$1"
+  local package_path="$2"
+  local output_name="$3"
+
+  if [[ ! -d "$module_dir" ]]; then
+    return 0
+  fi
+
+  (
+    cd "$module_dir"
+    export GOCACHE="$go_cache"
+    GOOS=js GOARCH=wasm go test -c -o "${TMPDIR:-/tmp}/${output_name}.wasm" "$package_path"
+  )
+}
+
+if (( is_foundation_repo )); then
+  echo "[RUN] Go js/wasm portability compile checks"
+  wasm_compile "$target/server-kit/go" "./healthcheck" "ovasabi-healthcheck"
+  wasm_compile "$target/runtime-sdk/go" "./runtimehost" "ovasabi-runtimehost"
+  echo "[OK] Go js/wasm portability compile checks"
+elif [[ -d "$target/foundation/server-kit/go" || -d "$target/foundation/runtime-sdk/go" ]]; then
+  echo "[RUN] vendored Foundation Go js/wasm portability compile checks"
+  wasm_compile "$target/foundation/server-kit/go" "./healthcheck" "ovasabi-vendored-healthcheck"
+  wasm_compile "$target/foundation/runtime-sdk/go" "./runtimehost" "ovasabi-vendored-runtimehost"
+  echo "[OK] vendored Foundation Go js/wasm portability compile checks"
+fi
 
 echo "Go static analysis check passed"

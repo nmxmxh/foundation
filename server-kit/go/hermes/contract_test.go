@@ -1,0 +1,196 @@
+package hermes
+
+import (
+	"errors"
+	"testing"
+	"time"
+
+	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	redispkg "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
+)
+
+func TestStoreApplyProjectionEnvelopeContract(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name:          "projection_contract",
+		Domain:        "signals",
+		Collection:    "ticks",
+		IndexedFields: []string{"bucket", "symbol"},
+		MaxRecords:    10,
+		MaxBytes:      1 << 20,
+	})
+	envelope, err := NewProjectionEnvelope([]*foundationpb.RecordMutation{
+		projectionMutation("tick_1", 7, "corr_projection"),
+	}, "corr_projection")
+	if err != nil {
+		t.Fatalf("NewProjectionEnvelope() error = %v", err)
+	}
+	raw, err := envelope.ToBinary()
+	if err != nil {
+		t.Fatalf("ToBinary() error = %v", err)
+	}
+
+	result, err := store.ApplyEnvelopeBytes(t.Context(), "projection_contract", raw)
+	if err != nil || result.Applied != 1 {
+		t.Fatalf("ApplyEnvelopeBytes() result=%+v err=%v", result, err)
+	}
+	count, err := store.Count(t.Context(), "projection_contract", Query{
+		OrganizationID: "org_1",
+		Filters:        map[string]any{"bucket": int64(7)},
+	}, Fence{})
+	if err != nil || count != 1 {
+		t.Fatalf("Count() = %d err=%v", count, err)
+	}
+}
+
+func TestEnvelopeTailerPollOnceAppliesFoundationEnvelopeFromRedisStream(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name:          "projection_stream",
+		Domain:        "signals",
+		Collection:    "ticks",
+		IndexedFields: []string{"symbol"},
+		MaxRecords:    10,
+		MaxBytes:      1 << 20,
+	})
+	envelope, err := NewProjectionEnvelope([]*foundationpb.RecordMutation{
+		projectionMutation("tick_2", 8, "corr_stream"),
+	}, "corr_stream")
+	if err != nil {
+		t.Fatalf("NewProjectionEnvelope() error = %v", err)
+	}
+	raw, err := envelope.ToBinary()
+	if err != nil {
+		t.Fatalf("ToBinary() error = %v", err)
+	}
+	client := redispkg.NewMemoryClient("test")
+	if _, err := client.XAdd(t.Context(), "hermes:projection", map[string]any{"envelope": raw}); err != nil {
+		t.Fatalf("XAdd() error = %v", err)
+	}
+	source, err := NewRedisStreamEnvelopeSource(client, "hermes:projection", "hermes", "node_1", "")
+	if err != nil {
+		t.Fatalf("NewRedisStreamEnvelopeSource() error = %v", err)
+	}
+	tailer, err := NewEnvelopeTailer(store, "projection_stream", source, TailerOptions{MaxBatch: 8})
+	if err != nil {
+		t.Fatalf("NewEnvelopeTailer() error = %v", err)
+	}
+
+	result, err := tailer.PollOnce(t.Context())
+	if err != nil || result.Read != 1 || result.Decoded != 1 || result.Acked != 1 || result.Apply.Applied != 1 {
+		t.Fatalf("PollOnce() result=%+v err=%v", result, err)
+	}
+	count, err := store.Count(t.Context(), "projection_stream", Query{
+		OrganizationID: "org_1",
+		Filters:        map[string]any{"symbol": "OVS"},
+	}, Fence{})
+	if err != nil || count != 1 {
+		t.Fatalf("Count() = %d err=%v", count, err)
+	}
+}
+
+func TestRedisStreamEnvelopeSourceReplaysPendingBeforeNewMessages(t *testing.T) {
+	envelope, err := NewProjectionEnvelope([]*foundationpb.RecordMutation{
+		projectionMutation("tick_pending", 1, "corr_pending"),
+	}, "corr_pending")
+	if err != nil {
+		t.Fatalf("NewProjectionEnvelope() error = %v", err)
+	}
+	raw, err := envelope.ToBinary()
+	if err != nil {
+		t.Fatalf("ToBinary() error = %v", err)
+	}
+	client := redispkg.NewMemoryClient("test")
+	firstID, err := client.XAdd(t.Context(), "hermes:pending", map[string]any{"envelope": raw})
+	if err != nil {
+		t.Fatalf("XAdd(first) error = %v", err)
+	}
+	if _, err := client.XAdd(t.Context(), "hermes:pending", map[string]any{"envelope": raw}); err != nil {
+		t.Fatalf("XAdd(second) error = %v", err)
+	}
+	source, err := NewRedisStreamEnvelopeSource(client, "hermes:pending", "hermes", "node_1", "")
+	if err != nil {
+		t.Fatalf("NewRedisStreamEnvelopeSource() error = %v", err)
+	}
+	first, err := source.ReadEnvelopes(t.Context(), 1)
+	if err != nil || len(first) != 1 || first[0].AckID != firstID {
+		t.Fatalf("first ReadEnvelopes() = %+v err=%v, want first", first, err)
+	}
+	pending, err := source.ReadEnvelopes(t.Context(), 1)
+	if err != nil || len(pending) != 1 || pending[0].AckID != firstID {
+		t.Fatalf("pending ReadEnvelopes() = %+v err=%v, want first again", pending, err)
+	}
+	if err := source.Ack(t.Context(), firstID); err != nil {
+		t.Fatalf("Ack() error = %v", err)
+	}
+	next, err := source.ReadEnvelopes(t.Context(), 1)
+	if err != nil || len(next) != 1 || next[0].AckID == firstID {
+		t.Fatalf("next ReadEnvelopes() = %+v err=%v, want second", next, err)
+	}
+}
+
+func TestProjectionEnvelopeRejectsJSONPayload(t *testing.T) {
+	_, err := EventsFromEnvelope(events.Envelope{
+		EventType:       ProjectionEnvelopeEventType,
+		Payload:         map[string]any{"record_id": "tick_1"},
+		PayloadEncoding: events.PayloadEncodingJSON,
+		Metadata:        map[string]any{"correlation_id": "corr_json"},
+		CorrelationID:   "corr_json",
+		SchemaVersion:   events.EnvelopeSchemaVersion,
+		Timestamp:       testTime(),
+	})
+	if !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("EventsFromEnvelope() err=%v, want ErrInvalidEvent", err)
+	}
+}
+
+func TestProjectionEnvelopeRejectsDuplicateFields(t *testing.T) {
+	mutation := projectionMutation("tick_3", 9, "corr_duplicate")
+	mutation.Fields = append(mutation.Fields, &foundationpb.FieldValue{
+		Name: "bucket",
+		Value: &foundationpb.ScalarValue{
+			Kind: &foundationpb.ScalarValue_Int64Value{Int64Value: 9},
+		},
+	})
+	envelope, err := NewProjectionEnvelope([]*foundationpb.RecordMutation{mutation}, "corr_duplicate")
+	if err != nil {
+		t.Fatalf("NewProjectionEnvelope() error = %v", err)
+	}
+	_, err = EventsFromEnvelope(envelope)
+	if !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("EventsFromEnvelope() err=%v, want ErrInvalidEvent", err)
+	}
+}
+
+func projectionMutation(recordID string, version uint64, correlationID string) *foundationpb.RecordMutation {
+	return &foundationpb.RecordMutation{
+		Operation:            foundationpb.ProjectionOperation_PROJECTION_OPERATION_UPSERT,
+		SourceId:             "projection:" + recordID,
+		Version:              version,
+		Domain:               "signals",
+		Collection:           "ticks",
+		OrganizationId:       "org_1",
+		RecordId:             recordID,
+		Payload:              []byte{0x01, 0x02, 0x03},
+		PayloadEncoding:      foundationpb.PayloadEncoding_PAYLOAD_ENCODING_CAPNP,
+		PayloadSchemaVersion: "capnp.signals.ticks.v1",
+		CorrelationId:        correlationID,
+		Fields: []*foundationpb.FieldValue{
+			{
+				Name: "bucket",
+				Value: &foundationpb.ScalarValue{
+					Kind: &foundationpb.ScalarValue_Int64Value{Int64Value: int64(version)},
+				},
+			},
+			{
+				Name: "symbol",
+				Value: &foundationpb.ScalarValue{
+					Kind: &foundationpb.ScalarValue_StringValue{StringValue: "OVS"},
+				},
+			},
+		},
+	}
+}
+
+func testTime() time.Time {
+	return time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+}

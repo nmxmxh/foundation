@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -145,6 +146,79 @@ func TestClientDispatchMethodsOverBufconn(t *testing.T) {
 	}
 	if _, err := client.DispatchFrame(context.Background(), Frame{EventType: ""}); err == nil {
 		t.Fatalf("expected client frame validation error")
+	}
+}
+
+func TestDispatchCrossLaneRefinementPreservesIdentityPayloadAndErrorClass(t *testing.T) {
+	ctx := context.Background()
+	req := Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_refine"}`),
+		CorrelationID: "corr_refine",
+		SchemaVersion: "1.0",
+	}
+	router := testRouter(t)
+	directClient := NewDirectFrameClient(router, ServerOptions{})
+	boundClient, err := NewBoundFrameClient(router, req.EventType, ServerOptions{})
+	if err != nil {
+		t.Fatalf("NewBoundFrameClient() error = %v", err)
+	}
+	conn, cleanup := startTestServer(t, ServerOptions{AuthToken: "secret", MaxMessageBytes: 64 * 1024})
+	defer cleanup()
+	grpcClient := NewClient(conn, ClientOptions{MaxMessageBytes: 64 * 1024})
+
+	want, err := router.DispatchFrame(ctx, req)
+	if err != nil {
+		t.Fatalf("router.DispatchFrame() error = %v", err)
+	}
+	frameLanes := map[string]func() (Frame, error){
+		"direct_client": func() (Frame, error) { return directClient.DispatchFrame(ctx, req) },
+		"bound_client":  func() (Frame, error) { return boundClient.DispatchFrameTrusted(ctx, req) },
+		"grpc_frame":    func() (Frame, error) { return DispatchFrame(ctx, conn, req) },
+		"grpc_client":   func() (Frame, error) { return grpcClient.DispatchFrame(ctx, req) },
+	}
+	for name, dispatch := range frameLanes {
+		got, err := dispatch()
+		if err != nil {
+			t.Fatalf("%s dispatch error = %v", name, err)
+		}
+		if got.EventType != want.EventType ||
+			got.CorrelationID != want.CorrelationID ||
+			got.SchemaVersion != want.SchemaVersion ||
+			!bytes.Equal(got.Payload, want.Payload) {
+			t.Fatalf("%s broke frame refinement: got=%+v want=%+v", name, got, want)
+		}
+	}
+
+	env, err := Dispatch(ctx, conn, Envelope{
+		EventType:     "order:create:v1:requested",
+		Payload:       map[string]any{"id": "ord_refine"},
+		CorrelationID: "corr_refine",
+		SchemaVersion: "1.0",
+	})
+	if err != nil {
+		t.Fatalf("json compatibility dispatch error = %v", err)
+	}
+	if env.EventType != "order:create:v1:success" ||
+		env.CorrelationID != "corr_refine" ||
+		env.SchemaVersion != "1.0" ||
+		env.Payload["id"] != "ord_refine" {
+		t.Fatalf("json compatibility lane broke visible semantics: %+v", env)
+	}
+
+	missing := Frame{EventType: "order:missing:v1:frame", CorrelationID: "corr_refine"}
+	errorLanes := map[string]error{
+		"router":        firstFrameError(router.DispatchFrame(ctx, missing)),
+		"direct_client": firstFrameError(directClient.DispatchFrame(ctx, missing)),
+		"grpc_frame":    firstFrameError(DispatchFrame(ctx, conn, missing)),
+	}
+	for name, err := range errorLanes {
+		if got := dispatchErrorClass(err); got != "missing_frame_handler" {
+			t.Fatalf("%s error class = %q err=%v", name, got, err)
+		}
+	}
+	if _, err := Dispatch(ctx, conn, Envelope{EventType: "order:missing:v1:requested"}); dispatchErrorClass(err) != "missing_handler" {
+		t.Fatalf("json compatibility missing handler class err=%v", err)
 	}
 }
 
@@ -657,6 +731,29 @@ func BenchmarkGeneratedProtoUnmarshalMergeReuse(b *testing.B) {
 		if err := opts.Unmarshal(raw, &out); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func firstFrameError(_ Frame, err error) error {
+	return err
+}
+
+func dispatchErrorClass(err error) string {
+	if err == nil {
+		return "ok"
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "no grpc frame handler"):
+		return "missing_frame_handler"
+	case strings.Contains(msg, "no grpc handler"):
+		return "missing_handler"
+	case strings.Contains(msg, "correlation id too large"):
+		return "correlation_bounds"
+	case strings.Contains(msg, "event type is required"):
+		return "invalid_event_type"
+	default:
+		return "other"
 	}
 }
 

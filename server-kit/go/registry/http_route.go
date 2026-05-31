@@ -28,6 +28,8 @@ type HTTPRoute struct {
 	IncludeRawBody      bool
 	IncludeHeaders      []string
 	StaticPayload       map[string]any
+	Metadata            map[string]any
+	Tags                []string
 	IsStreaming         bool
 	IsPublic            bool
 	AuthRequirements    []HTTPSecurityRequirement

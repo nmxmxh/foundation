@@ -53,6 +53,29 @@ func TestRunParallelKeepsMovingOnNonCriticalFailure(t *testing.T) {
 	}
 }
 
+func TestRunParallelPropagatesParentCancellation(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+	ops := []Operation[struct{}]{
+		{Name: "wait", Run: func(ctx context.Context) (struct{}, error) {
+			select {
+			case <-ctx.Done():
+				return struct{}{}, ctx.Err()
+			case <-time.After(time.Second):
+				t.Fatalf("operation did not observe parent cancellation")
+				return struct{}{}, nil
+			}
+		}},
+		{Name: "ready", Run: func(context.Context) (struct{}, error) {
+			return struct{}{}, nil
+		}},
+	}
+	results := RunParallelInto(parent, ops, make([]Result[struct{}], 0, len(ops)))
+	if !errors.Is(results[0].Error, context.Canceled) {
+		t.Fatalf("parent cancellation error = %v, want context.Canceled", results[0].Error)
+	}
+}
+
 func TestRunParallelSingleNilAndNilContextBranches(t *testing.T) {
 	nilCtx := nilTestContext()
 	if got := RunParallel[int](nilCtx, nil); got != nil {

@@ -21,6 +21,8 @@ type PayloadEncoding string
 const (
 	PayloadEncodingJSON     PayloadEncoding = "json"
 	PayloadEncodingProtobuf PayloadEncoding = "protobuf"
+	PayloadEncodingCapnp    PayloadEncoding = "capnp"
+	PayloadEncodingBinary   PayloadEncoding = "binary"
 )
 
 type Envelope struct {

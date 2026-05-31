@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 var ErrNilOperationRun = errors.New("operation run function is nil")
@@ -36,15 +38,15 @@ func RunParallel[T any](ctx context.Context, operations []Operation[T]) []Result
 		result.Value, result.Error = operations[0].Run(ctx)
 		return []Result[T]{result}
 	}
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	cancelCtx := newChainContext(ctx)
+	defer cancelCtx.Cancel()
 
 	results := make([]Result[T], len(operations))
 	var wg sync.WaitGroup
 	for index, operation := range operations {
 		results[index].Name = operation.Name
 		wg.Add(1)
-		go runOperation(ctx, &wg, cancel, results, index, operation)
+		go runOperation(cancelCtx, &wg, cancelCtx, results, index, operation)
 	}
 	wg.Wait()
 	return results
@@ -69,24 +71,28 @@ func RunParallelInto[T any](ctx context.Context, operations []Operation[T], resu
 		results[0].Value, results[0].Error = operations[0].Run(ctx)
 		return results
 	}
-	ctx, cancel := context.WithCancel(ctx)
+	cancelCtx := newChainContext(ctx)
 
 	var wg sync.WaitGroup
 	for index, operation := range operations {
 		wg.Add(1)
-		go runOperation(ctx, &wg, cancel, results, index, operation)
+		go runOperation(cancelCtx, &wg, cancelCtx, results, index, operation)
 	}
 	wg.Wait()
-	cancel()
+	cancelCtx.Cancel()
 	return results
 }
 
-func runOperation[T any](ctx context.Context, wg *sync.WaitGroup, cancel context.CancelFunc, results []Result[T], index int, operation Operation[T]) {
+type operationCanceler interface {
+	Cancel()
+}
+
+func runOperation[T any](ctx context.Context, wg *sync.WaitGroup, cancel operationCanceler, results []Result[T], index int, operation Operation[T]) {
 	defer wg.Done()
 	if operation.Run == nil {
 		results[index].Error = ErrNilOperationRun
 		if operation.Critical {
-			cancel()
+			cancel.Cancel()
 		}
 		return
 	}
@@ -94,8 +100,92 @@ func runOperation[T any](ctx context.Context, wg *sync.WaitGroup, cancel context
 	results[index].Value = value
 	results[index].Error = err
 	if err != nil && operation.Critical {
-		cancel()
+		cancel.Cancel()
 	}
+}
+
+type chainContext struct {
+	parent    context.Context
+	done      atomic.Pointer[chan struct{}]
+	closed    atomic.Bool
+	once      sync.Once
+	watchOnce sync.Once
+}
+
+func newChainContext(parent context.Context) *chainContext {
+	return &chainContext{parent: parent}
+}
+
+func (c *chainContext) Deadline() (time.Time, bool) {
+	return c.parent.Deadline()
+}
+
+func (c *chainContext) Done() <-chan struct{} {
+	if c.closed.Load() {
+		closed := closedChainDone()
+		return closed
+	}
+	ch := c.ensureDone()
+	c.watchParent()
+	return ch
+}
+
+func (c *chainContext) Err() error {
+	if c.closed.Load() {
+		return context.Canceled
+	}
+	return c.parent.Err()
+}
+
+func (c *chainContext) Value(key any) any {
+	return c.parent.Value(key)
+}
+
+func (c *chainContext) Cancel() {
+	c.once.Do(func() {
+		c.closed.Store(true)
+		if done := c.done.Load(); done != nil {
+			close(*done)
+		}
+	})
+}
+
+func (c *chainContext) ensureDone() <-chan struct{} {
+	if done := c.done.Load(); done != nil {
+		return *done
+	}
+	ch := make(chan struct{})
+	if c.done.CompareAndSwap(nil, &ch) {
+		return ch
+	}
+	return *c.done.Load()
+}
+
+func (c *chainContext) watchParent() {
+	parentDone := c.parent.Done()
+	if parentDone == nil {
+		return
+	}
+	c.watchOnce.Do(func() {
+		go func() {
+			select {
+			case <-parentDone:
+				c.Cancel()
+			case <-c.ensureDone():
+			}
+		}()
+	})
+}
+
+var globalClosedChainDone chan struct{}
+var globalClosedChainDoneOnce sync.Once
+
+func closedChainDone() <-chan struct{} {
+	globalClosedChainDoneOnce.Do(func() {
+		globalClosedChainDone = make(chan struct{})
+		close(globalClosedChainDone)
+	})
+	return globalClosedChainDone
 }
 
 func prepareResults[T any](operations []Operation[T], results []Result[T]) []Result[T] {

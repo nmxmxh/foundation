@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	transportpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/transport/v1"
+	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -121,17 +121,46 @@ func TestEnvelopeBinaryRoundTripWithProtobufPayloadBytes(t *testing.T) {
 	}
 }
 
+func TestEnvelopeBinaryRoundTripWithCapnpPayloadBytes(t *testing.T) {
+	envelope := Envelope{
+		EventType:       "publish:webhook_ingest:v1:requested",
+		PayloadBytes:    []byte{0x0a, 0x0b, 0x0c},
+		PayloadEncoding: PayloadEncodingCapnp,
+		Metadata: map[string]any{
+			"correlation_id": "corr_capnp",
+		},
+		CorrelationID: "corr_capnp",
+		SchemaVersion: "1.0",
+		Timestamp:     time.Date(2026, 3, 14, 11, 35, 0, 0, time.UTC),
+	}
+
+	raw, err := envelope.ToBinary()
+	if err != nil {
+		t.Fatalf("ToBinary() error = %v", err)
+	}
+	decoded, err := FromBinary(raw)
+	if err != nil {
+		t.Fatalf("FromBinary() error = %v", err)
+	}
+	if decoded.PayloadEncoding != PayloadEncodingCapnp {
+		t.Fatalf("payload encoding mismatch: got %s", decoded.PayloadEncoding)
+	}
+	if string(decoded.PayloadBytes) != string(envelope.PayloadBytes) {
+		t.Fatalf("payload bytes mismatch: got %v want %v", decoded.PayloadBytes, envelope.PayloadBytes)
+	}
+}
+
 func TestBatchBinaryRejectsInvalidJSONPayload(t *testing.T) {
-	raw, err := proto.Marshal(&transportpb.EventBatch{
-		Envelopes: []*transportpb.EventEnvelope{
+	raw, err := proto.Marshal(&foundationpb.EventBatch{
+		Envelopes: []*foundationpb.EventEnvelope{
 			{
 				EventType:       "market:ingest_batch:v1:requested",
 				Payload:         []byte(`{"broken":`),
-				Metadata:        &transportpb.Metadata{CorrelationId: "corr_bad_json"},
+				Metadata:        &foundationpb.Metadata{CorrelationId: "corr_bad_json"},
 				CorrelationId:   "corr_bad_json",
 				SchemaVersion:   "1.0",
 				OccurredAt:      timestamppb.New(time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)),
-				PayloadEncoding: transportpb.PayloadEncoding_PAYLOAD_ENCODING_JSON,
+				PayloadEncoding: foundationpb.PayloadEncoding_PAYLOAD_ENCODING_JSON,
 			},
 		},
 	})

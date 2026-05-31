@@ -2,8 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
-	"log/slog"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,6 +14,7 @@ import (
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"{{MODULE_PATH}}/internal/config"
+	"{{MODULE_PATH}}/internal/startup"
 	"{{MODULE_PATH}}/internal/worker"
 )
 
@@ -22,23 +22,25 @@ func main() {
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		_, _ = fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
 	}
 
 	// Initialize logger
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: workerLogLevel()}))
-	slog.SetDefault(logger)
+	log := startup.NewLogger(cfg.Env, cfg.LogLevel).With("component", "worker")
 
 	// Connect to database
 	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("Failed to parse database config: %v", err)
+		log.Error("failed to parse database config", "error", err)
+		os.Exit(1)
 	}
 	database.ApplyPoolOptions(dbConfig, workerPoolOptions(cfg))
 
 	dbPool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
-		log.Fatalf("Unable to connect to database: %v", err)
+		log.Error("unable to connect to database", "error", err)
+		os.Exit(1)
 	}
 	defer dbPool.Close()
 
@@ -46,10 +48,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if pingErr := dbPool.Ping(ctx); pingErr != nil {
 		cancel()
-		log.Fatalf("Unable to ping database: %v", pingErr)
+		log.ErrorContext(ctx, "unable to ping database", "error", pingErr)
+		os.Exit(1)
 	}
 	cancel()
-	slog.Info("database connected")
+	log.Info("database connected")
 
 	// Create context that cancels on interrupt signal
 	ctx, cancel = context.WithCancel(context.Background())
@@ -70,46 +73,35 @@ func main() {
 		PeriodicJobs: worker.PeriodicJobs(cfg),
 	})
 	if err != nil {
-		log.Fatalf("Failed to initialize River client: %v", err)
+		log.Error("failed to initialize River client", "error", err)
+		os.Exit(1)
 	}
 
 	// Start River Client
 	if err := riverClient.Start(ctx); err != nil {
-		log.Fatalf("Failed to start River client: %v", err)
+		log.ErrorContext(ctx, "failed to start River client", "error", err)
+		os.Exit(1)
 	}
 
 	// Handle OS signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	slog.Info("worker started", "queues", worker.DefaultQueueConfig(cfg))
+	log.InfoContext(ctx, "worker started", "queues", worker.DefaultQueueConfig(cfg))
 
 	// Wait for signal
 	sig := <-sigChan
-	slog.Info("received shutdown signal", "signal", sig)
+	log.Info("received shutdown signal", "signal", sig)
 
 	// Graceful shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
 
 	if err := riverClient.Stop(shutdownCtx); err != nil {
-		slog.Error("error stopping River client", "error", err)
+		log.ErrorContext(shutdownCtx, "error stopping River client", "error", err)
 	}
 
-	slog.Info("worker stopped")
-}
-
-func workerLogLevel() slog.Level {
-	switch os.Getenv("LOG_LEVEL") {
-	case "debug":
-		return slog.LevelDebug
-	case "warn":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
+	log.Info("worker stopped")
 }
 
 func workerPoolOptions(cfg *config.Config) database.PoolOptions {

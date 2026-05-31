@@ -40,7 +40,6 @@ import (
 
 	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
-	"go.uber.org/zap"
 )
 
 const ffiABIVersion = 1
@@ -79,8 +78,8 @@ func NewFFIPool(opts FFIPoolOptions) (*FFIPool, error) {
 	}
 	if opts.Logger == nil {
 		opts.Logger, _ = logger.NewDefault()
-		opts.Logger = opts.Logger.With(zap.String("component", "runtime_ffi_pool"))
 	}
+	opts.Logger = opts.Logger.With("component", "runtime_ffi_pool")
 	if opts.LibraryPath == "" {
 		return nil, errors.New("runtime ffi library path is required")
 	}
@@ -308,25 +307,4 @@ func dlError(action string) string {
 		return action + " failed"
 	}
 	return action + ": " + C.GoString(message)
-}
-
-func cStringBytes(raw []byte) string {
-	for index, value := range raw {
-		if value == 0 {
-			return string(raw[:index])
-		}
-	}
-	return string(raw)
-}
-
-func stringsTrim(value string) string {
-	start := 0
-	for start < len(value) && (value[start] == ' ' || value[start] == '\n' || value[start] == '\t' || value[start] == '\r') {
-		start++
-	}
-	end := len(value)
-	for end > start && (value[end-1] == ' ' || value[end-1] == '\n' || value[end-1] == '\t' || value[end-1] == '\r') {
-		end--
-	}
-	return value[start:end]
 }

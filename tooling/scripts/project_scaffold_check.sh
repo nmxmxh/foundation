@@ -130,6 +130,30 @@ check_any_startup_contains() {
   fi
 }
 
+check_any_server_contains() {
+  local label="$1"
+  local pattern="$2"
+  local found="false"
+  for file in "$target/internal/server/server.go" "$target/cmd/server/main.go" "$target/backend/internal/server/server.go" "$target/backend/cmd/server/main.go"; do
+    if [[ -f "$file" ]] && grep -Fq -- "$pattern" "$file"; then
+      found="true"
+      break
+    fi
+  done
+  if [[ "$found" == "true" ]]; then
+    echo "[OK] $label"
+  else
+    echo "[FAIL] $label"
+    echo "  missing server pattern: $pattern"
+    failed=1
+  fi
+}
+
+first_schema_migration() {
+  find "$target/migrations" -maxdepth 1 -type f \
+    \( -name '000001*up.sql' -o -name '0001*up.sql' \) 2>/dev/null | sort | head -n 1
+}
+
 check_typed_proto_plane() {
   local proto_root="$target/api/protos"
   [[ -d "$proto_root" ]] || return 0
@@ -138,7 +162,7 @@ check_typed_proto_plane() {
   local proto_file
   while IFS= read -r proto_file; do
     case "$proto_file" in
-      */_template/*|*/common/*|*/transport/*) continue ;;
+      */_template/*|*/common/*|*/foundation/*|*/transport/*|*/hermes/*) continue ;;
     esac
     if grep -Eq '^[[:space:]]*(service|message)[[:space:]]+' "$proto_file"; then
       has_domain_proto="true"
@@ -280,6 +304,8 @@ check_exists "agents guide" "$target/.agents/DOMAIN_GUIDE.md"
 check_exists "post-init checklist" "$target/.agents/POST_INIT.md"
 check_exists "foundation guide" "$target/docs/foundation/foundation_guide.md"
 check_exists "foundation architecture contract" "$target/docs/foundation/foundation_architecture_contract.md"
+check_exists "foundation tour" "$target/docs/foundation/foundation_tour.md"
+check_exists "foundation scaffold manifest guide" "$target/docs/foundation/scaffold_manifest.md"
 check_exists "coding practices" "$target/docs/foundation/coding_practices.md"
 check_exists "testing practices" "$target/docs/foundation/testing_practices.md"
 check_exists "post quantum security posture" "$target/docs/foundation/post_quantum_security.md"
@@ -289,9 +315,13 @@ check_exists "coding practices check" "$target/scripts/checks/coding_practices_c
 check_exists "testing practices check" "$target/scripts/checks/testing_practices_check.sh"
 check_exists "go fix modernization check" "$target/scripts/checks/go_fix_check.sh"
 check_exists "go static analysis check" "$target/scripts/checks/go_static_analysis_check.sh"
+check_exists "local toolchain environment check helper" "$target/scripts/checks/local_toolchain_env.sh"
 check_exists "go concurrency practices check" "$target/scripts/checks/go_concurrency_practices_check.sh"
+check_exists "frontend script runner" "$target/scripts/checks/frontend_script_runner.sh"
+check_exists "logging practices check" "$target/scripts/checks/logging_practices_check.sh"
 check_exists "metadata practices check" "$target/scripts/checks/metadata_practices_check.sh"
 check_exists "river practices check" "$target/scripts/checks/river_practices_check.sh"
+check_exists "server-kit module contract check" "$target/scripts/checks/server_kit_module_contract_check.sh"
 check_exists "server-kit usage check" "$target/scripts/checks/server_kit_usage_check.sh"
 check_exists "project scaffold check" "$target/scripts/checks/project_scaffold_check.sh"
 check_exists "ci workflow" "$target/.github/workflows/ci.yml"
@@ -308,6 +338,10 @@ check_absent "stale vendored foundation initializer" "$target/foundation/init.sh
 check_absent "stale vendored foundation updater" "$target/foundation/scripts/update-project.sh"
 check_absent "unowned root pkg directory" "$target/pkg"
 check_absent "legacy internal domain directory" "$target/internal/domain"
+check_absent "stale root server-kit module" "$target/server-kit"
+check_absent "stale root runtime-sdk module" "$target/runtime-sdk"
+check_absent "stale root runtime-transport module" "$target/runtime-transport"
+check_absent "stale root config-contracts module" "$target/config-contracts"
 check_typed_proto_plane
 check_repository_boundaries
 check_service_domain_contracts
@@ -322,6 +356,22 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "worker command" "$target/cmd/worker/main.go"
   check_exists "docgen command" "$target/cmd/docgen/main.go"
   check_exists "docgen helper tests" "$target/cmd/docgen/helpers_test.go"
+  if [[ -f "$target/internal/server/routes.go" ]]; then
+    check_file_contains "server exposes HTTP route catalogue" "$target/internal/server/routes.go" "CollectHTTPRoutes"
+    check_file_not_contains "server route catalogue avoids generic thin wrappers" "$target/internal/server/routes.go" "httpapi.RoutesFromHandlerMap"
+    check_file_not_contains "server route catalogue avoids hard-coded event list" "$target/internal/server/routes.go" "EventTypes = []string"
+    check_file_not_contains "server route catalogue avoids local event inference" "$target/internal/server/routes.go" "func routeFromEvent"
+    check_file_not_contains "server route catalogue avoids local method inference" "$target/internal/server/routes.go" "func methodForAction"
+    check_file_contains "server command installs HTTP route catalogue" "$target/cmd/server/main.go" "SetHTTPRoutes"
+    check_file_contains "docgen consumes HTTP route catalogue" "$target/cmd/docgen/main.go" "CollectHTTPRoutes"
+    check_file_not_contains "docgen avoids empty route catalogue" "$target/cmd/docgen/main.go" "Routes: []registry.HTTPRoute{}"
+    check_file_not_contains "docgen avoids route TODO scaffold" "$target/cmd/docgen/main.go" "TODO: Import your domain handlers"
+  else
+    check_file_contains "server command uses Foundation route derivation" "$target/cmd/server/main.go" "httpapi.RoutesFromHandlerMap"
+    check_file_contains "docgen uses Foundation route derivation" "$target/cmd/docgen/main.go" "httpapi.RoutesFromHandlerMap"
+  fi
+  check_file_not_contains "docgen avoids hand-maintained route collector" "$target/cmd/docgen/main.go" "func collectRoutes"
+  check_file_not_contains "server avoids hand-registering service routes" "$target/internal/server/server.go" ".RegisterRoutes(api)"
   check_exists "worker helper tests" "$target/cmd/worker/helpers_test.go"
   check_exists "startup package" "$target/internal/startup"
   check_exists "startup smoke tests" "$target/internal/startup/startup_test.go"
@@ -334,6 +384,10 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "river worker registry tests" "$target/internal/worker/registry_test.go"
   check_exists "river periodic jobs" "$target/internal/worker/periodic_jobs.go"
   check_exists "integration infra test" "$target/tests/integration/infra_test.go"
+  check_exists "integration Hermes hotplane test" "$target/tests/integration/hermes_test.go"
+  check_exists "integration test DB helper" "$target/tests/integration/setup_helpers_test.go"
+  check_file_contains "Hermes integration covers Postgres rebuild" "$target/tests/integration/hermes_test.go" "store.Rebuild"
+  check_file_contains "Hermes integration covers Redis stream envelope" "$target/tests/integration/hermes_test.go" "NewRedisStreamEnvelopeSource"
   check_file_contains "managed test env defaults" "$target/tests/testutil/env.go" "ApplyTestEnvDefaults"
   check_file_contains "managed test infra required flag" "$target/tests/testutil/env.go" "TEST_INFRA_REQUIRED"
   check_exists "testutil scaffold tests" "$target/tests/testutil/storage_env_test.go"
@@ -351,10 +405,18 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "make benchmark target" "$target/Makefile" "test-bench:"
   check_file_contains "make test database URL" "$target/Makefile" "TEST_DATABASE_URL"
   check_file_contains "make test Redis URL" "$target/Makefile" "TEST_REDIS_URL"
+  check_file_contains "make auto-selects PostGIS test image when migrations need it" "$target/Makefile" "TEST_REQUIRES_POSTGIS ?="
+  check_file_contains "make supports service-scoped PostGIS test image platform" "$target/Makefile" "TEST_POSTGRES_PLATFORM"
   check_file_contains "env test database URL" "$target/.env.example" "TEST_DATABASE_URL"
   check_file_contains "env test Redis URL" "$target/.env.example" "TEST_REDIS_URL"
   check_file_contains "env DB pool budget" "$target/.env.example" "DB_MAX_CONNS"
+  check_file_contains "env Hermes scope record bound" "$target/.env.example" "HERMES_MAX_RECORDS_PER_SCOPE"
+  check_file_contains "env Hermes scope byte bound" "$target/.env.example" "HERMES_MAX_BYTES_PER_SCOPE"
   check_file_contains "env DB query budget" "$target/.env.example" "DB_QUERY_TIMEOUT"
+  schema_migration="$(first_schema_migration)"
+  check_file_contains "migration includes durable event log" "$schema_migration" "foundation_event_log"
+  check_file_contains "migration keeps event log typed" "$schema_migration" "envelope BYTEA NOT NULL"
+  check_file_contains "migration separates logs from durable facts" "$schema_migration" "Operational logs must not feed Hermes"
   check_file_contains "env Postgres 18 baseline" "$target/.env.example" "POSTGRES_VERSION=18"
   check_file_contains "env Redis pool budget" "$target/.env.example" "REDIS_POOL_SIZE"
   check_file_contains "env Redis shard extension" "$target/.env.example" "REDIS_SHARD_URLS"
@@ -380,23 +442,50 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "delivery metrics collector" "$target/scripts/checks/ci_delivery_metrics.mjs"
   check_file_contains "foundation River job metadata cascades with jobs" "$target/foundation/server-kit/sql/river_setup.up.sql" "job_id bigint primary key references river_job(id) on delete cascade"
   check_exists "foundation performance check script" "$target/foundation/tooling/scripts/performance_check.sh"
+  check_exists "foundation Vitest Node runtime runner" "$target/foundation/tooling/scripts/run_vitest.sh"
   check_exists "foundation lifecycle contract generator" "$target/foundation/tooling/scripts/generate_lifecycle_contract_tests.mjs"
   check_exists "foundation parallel chain module" "$target/foundation/server-kit/go/chain/chain.go"
   check_exists "foundation chaos module" "$target/foundation/server-kit/go/chaos/chaos.go"
   check_exists "foundation contract testing module" "$target/foundation/server-kit/go/contracttest/event_contract.go"
   check_exists "foundation profiling module" "$target/foundation/server-kit/go/profiling/profiling.go"
   check_exists "foundation SLO module" "$target/foundation/server-kit/go/slo/slo.go"
+  check_exists "foundation portable disk health check" "$target/foundation/server-kit/go/healthcheck/disk_space_unsupported.go"
+  check_file_not_contains "foundation healthcheck avoids common syscall statfs" "$target/foundation/server-kit/go/healthcheck/healthcheck.go" "syscall.Statfs"
   check_file_contains "make server-kit usage check target" "$target/Makefile" "check-server-kit-usage:"
   check_file_contains "make Go concurrency review target" "$target/Makefile" "check-go-concurrency-practices:"
+  check_file_contains "make logging practices target" "$target/Makefile" "check-logging-practices:"
   check_file_contains "make testing practices target" "$target/Makefile" "check-testing-practices:"
   check_file_contains "coding check enforces internal frame/protobuf lane" "$target/scripts/checks/coding_practices_check.sh" "CP internal Go avoids JSON gRPC compatibility dispatch"
   check_file_contains "testing check blocks focused TypeScript tests" "$target/scripts/checks/testing_practices_check.sh" "TE no focused TypeScript tests"
+  check_file_contains "logging check blocks raw slog drift" "$target/scripts/checks/logging_practices_check.sh" "application code avoids raw slog imports"
+  check_file_contains "logging check requires Foundation declarative logger install" "$target/scripts/checks/logging_practices_check.sh" "logger.Install"
   check_file_contains "lint-foundation includes go fix modernization" "$target/Makefile" "check-go-fix"
   check_file_contains "lint-foundation includes Go static analysis" "$target/Makefile" "check-go-static-analysis"
+  check_file_contains "lint-foundation includes logging practices" "$target/Makefile" "check-logging-practices"
   check_file_contains "lint-foundation includes metadata practices" "$target/Makefile" "check-metadata-practices"
+  check_file_contains "lint-foundation includes server-kit module contract" "$target/Makefile" "check-server-kit-module-contract"
+  check_file_contains "make resolves Docker CLI centrally" "$target/Makefile" "DOCKER_BIN ?="
+  check_file_contains "make isolates test Compose project" "$target/Makefile" "TEST_COMPOSE_PROJECT_NAME ?="
+  check_file_contains "make uses isolated test Compose project" "$target/Makefile" 'compose -p $(TEST_COMPOSE_PROJECT_NAME)'
+  check_file_contains "integration tests clean started Docker test env" "$target/Makefile" "started_test_env=1"
+  check_file_contains "test env cleanup removes orphan containers" "$target/Makefile" "down -v --remove-orphans"
+  check_file_contains "make delegates frontend scripts to Foundation runner" "$target/Makefile" "FRONTEND_SCRIPT_RUNNER ?="
   check_file_contains "server-kit check rejects internal JSON grpc dispatch" "$target/scripts/checks/server_kit_usage_check.sh" "internal code avoids JSON gRPC compatibility dispatch"
+  check_file_contains "startup installs Foundation logger" "$target/internal/startup/logger.go" "server-kit/go/logger"
+  check_file_contains "startup installs Foundation runtime logger" "$target/internal/startup/logger.go" "logger.Install"
+  check_file_contains "startup declares Foundation runtime logger scope" "$target/internal/startup/logger.go" "logger.RuntimeConfig"
+  check_file_contains "server uses Foundation logger type" "$target/internal/server/server.go" "kitlogger.Logger"
+  check_file_contains "middleware injects log metadata" "$target/internal/server/middleware/middleware.go" "metadata.IntoContext"
+  check_file_contains "middleware propagates correlation header" "$target/internal/server/middleware/middleware.go" "X-Correlation-ID"
+  check_any_startup_contains "startup logs database and Hermes readiness" "\"hermes\", \"enabled\""
+  check_any_startup_contains "startup logs Redis event bus readiness" "redis event bus connected"
   check_any_startup_contains "startup initializes server-kit resilience" "resilience.New"
   check_any_startup_contains "startup registers server-kit resilience dependencies" "RegisterDependency("
+  check_any_startup_contains "startup initializes mandatory Hermes" "hermes.WrapRuntimeStore"
+  check_any_startup_contains "startup exposes Hermes dependency" "Hermes"
+  check_any_startup_contains "startup registers Hermes health" "HermesHealth"
+  check_any_server_contains "server logs listening state" "server listening"
+  check_file_contains "server logs route registration" "$target/internal/server/server.go" "registered route"
   check_file_contains "server-kit usage check in foundation lint" "$target/Makefile" "check-server-kit-usage"
   check_file_contains "make lifecycle contract generation target" "$target/Makefile" "lifecycle-contracts:"
   check_file_contains "make delivery metrics target" "$target/Makefile" "delivery-metrics:"
@@ -412,13 +501,20 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_not_contains "server avoids wildcard CORS default" "$target/internal/server/server.go" 'security.CORS([]string{"*"})'
   check_file_contains "server protects operational endpoints" "$target/internal/server/server.go" "operationalHandler"
   check_file_contains "config loads allowed origins" "$target/internal/config/config.go" "ALLOWED_ORIGINS"
+  check_file_contains "config loads explicit Redis URL" "$target/internal/config/config.go" "REDIS_URL"
   check_file_contains "config defaults auth on in production" "$target/internal/config/config.go" 'env == "production"'
   check_file_contains "env documents operational endpoint protection" "$target/.env.example" "PROTECT_OPERATIONAL_ENDPOINTS"
   check_exists "foundation runtime transport" "$target/foundation/runtime-transport/go/go.mod"
+  check_exists "foundation common proto envelope" "$target/foundation/runtime-transport/protos/foundation/v1/envelope.proto"
+  check_exists "foundation common proto projection" "$target/foundation/runtime-transport/protos/foundation/v1/projection.proto"
   check_exists "foundation config contracts" "$target/foundation/config-contracts/go/go.mod"
   check_exists "foundation tooling" "$target/foundation/tooling/docs/enforcement.md"
   check_exists "api README" "$target/api/README.md"
   check_exists "proto README" "$target/api/protos/README.md"
+  check_exists "scaffolded common Foundation proto envelope" "$target/api/protos/foundation/v1/envelope.proto"
+  check_exists "scaffolded common Foundation proto projection" "$target/api/protos/foundation/v1/projection.proto"
+  check_absent "legacy scaffolded transport proto directory" "$target/api/protos/transport"
+  check_absent "legacy scaffolded Hermes proto directory" "$target/api/protos/hermes"
   if [[ -f "$target/api/protos/common/v1/metadata.proto" || -f "$target/api/protos/common/v1/common.proto" ]]; then
     echo "[OK] common proto metadata"
   else
@@ -464,9 +560,17 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     check_exists "Dockerfile.migrate" "$target/Dockerfile.migrate"
     check_exists "docker-compose.test.yml" "$target/docker-compose.test.yml"
     check_file_contains "test Postgres image override" "$target/docker-compose.test.yml" "TEST_POSTGRES_IMAGE"
+    check_file_contains "test Postgres service-scoped platform override" "$target/docker-compose.test.yml" "TEST_POSTGRES_PLATFORM"
     check_file_contains "test Redis image override" "$target/docker-compose.test.yml" "TEST_REDIS_IMAGE"
+    check_file_contains "test Postgres host port defaults to Docker ephemeral allocation" "$target/docker-compose.test.yml" '${TEST_DB_PORT:-0}:5432'
+    check_file_contains "test Redis host port defaults to Docker ephemeral allocation" "$target/docker-compose.test.yml" '${TEST_REDIS_PORT:-0}:6379'
+    check_file_not_contains "test compose avoids fixed container names" "$target/docker-compose.test.yml" "container_name:"
     check_file_contains "test Postgres 18 mounts parent data directory" "$target/docker-compose.test.yml" "/var/lib/postgresql"
     check_file_not_contains "test Postgres 18 avoids legacy data mount" "$target/docker-compose.test.yml" "/var/lib/postgresql/data"
+    check_file_contains "Makefile test DB port defaults to ephemeral allocation" "$target/Makefile" "TEST_DB_PORT ?= 0"
+    check_file_contains "Makefile test Redis port defaults to ephemeral allocation" "$target/Makefile" "TEST_REDIS_PORT ?= 0"
+    check_file_contains "Makefile records resolved test Postgres port" "$target/Makefile" "test-postgres 5432"
+    check_file_contains "Makefile records resolved test Redis port" "$target/Makefile" "test-redis 6379"
     check_file_contains "shared Docker Go module cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gomod'
     check_file_contains "shared Docker Go build cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gobuild'
     check_file_contains "Docker dependency stage" "$target/Dockerfile" "AS go-deps"
@@ -551,6 +655,7 @@ if [[ "${WITH_WASM:-false}" == "true" ]]; then
   check_exists "runtime shared arena schema" "$target/foundation/runtime-sdk/protocols/system/v1/runtime_shared_arena.capnp"
   check_exists "runtime shared arena host API" "$target/foundation/runtime-sdk/ts/browser-host/src/arena.ts"
   check_exists "runtime payload router API" "$target/foundation/runtime-sdk/ts/browser-host/src/payloadRouter.ts"
+  check_exists "runtime ffi portable string helpers" "$target/foundation/runtime-sdk/go/runtimehost/ffi_strings.go"
   check_file_contains "runtime ffi macro exports ovrt-core" "$target/foundation/runtime-sdk/rust/crates/ovrt-ffi/src/lib.rs" "pub use ovrt_core;"
   check_file_contains "runtime ffi pool reuses fixed buffer" "$target/foundation/runtime-sdk/go/runtimehost/ffi_unix.go" "bufferPool"
   check_file_contains "runtime ffi pool uses backend seam" "$target/foundation/runtime-sdk/go/runtimehost/ffi_unix.go" "type ffiBackend interface"

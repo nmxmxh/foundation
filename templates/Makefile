@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -27,6 +27,8 @@ GO_TEST_TIMEOUT ?= 120s
 GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
 GO_PACKAGE_EXCLUDE_RE ?= /node_modules/|/api/protos/
 GO_COVERAGE_THRESHOLD ?= 95.0
+MIGRATE_TEST_MAX_RETRIES ?= 12
+MIGRATE_TEST_RETRY_SLEEP ?= 2
 LOAD_RACE ?= 1
 ifeq ($(LOAD_RACE),0)
 LOAD_RACE_FLAG :=
@@ -34,27 +36,32 @@ else
 LOAD_RACE_FLAG := -race
 endif
 
-DOCKER_COMPOSE ?= docker compose -f docker-compose.yml -f docker-compose.dev.yml
-DOCKER_COMPOSE_TEST ?= docker compose -f docker-compose.test.yml
+DOCKER_BIN ?= $(shell if command -v docker >/dev/null 2>&1; then command -v docker; elif [ -x /Applications/Docker.app/Contents/Resources/bin/docker ]; then echo /Applications/Docker.app/Contents/Resources/bin/docker; else echo docker; fi)
+DOCKER_COMPOSE ?= $(DOCKER_BIN) compose -f docker-compose.yml -f docker-compose.dev.yml
+TEST_COMPOSE_PROJECT_NAME ?= $(PROJECT_NAME)_test
+DOCKER_COMPOSE_TEST ?= $(DOCKER_BIN) compose -p $(TEST_COMPOSE_PROJECT_NAME) -f docker-compose.test.yml
 DOCKER_BUILDKIT ?= 1
 DOCKER_CACHE_NAMESPACE ?= ovasabi-foundation-v1
 DOCKER_BUILD_ARGS ?= --build-arg CACHE_NAMESPACE=$(DOCKER_CACHE_NAMESPACE) --build-arg BUILDKIT_INLINE_CACHE=1
+FRONTEND_SCRIPT_RUNNER ?= scripts/checks/frontend_script_runner.sh
+TEST_ENV_FILE ?= .cache/test-env/runtime.env
 
 DB_USER ?= postgres
 DB_PASSWORD ?= postgres
 DB_NAME ?= $(PROJECT_NAME)_dev
 DB_PORT ?= 5432
+POSTGRES_VERSION ?= 18
 POSTGRES_PORT ?= $(DB_PORT)
 
 TEST_DB_HOST ?= localhost
-TEST_DB_PORT ?= 5433
+TEST_DB_PORT ?= 0
 TEST_DB_USER ?= $(DB_USER)
 TEST_DB_PASSWORD ?= $(DB_PASSWORD)
 TEST_DB_NAME ?= $(PROJECT_NAME)_test
 TEST_DATABASE_URL ?= postgresql://$(TEST_DB_USER):$(TEST_DB_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME)?sslmode=disable
 
 TEST_REDIS_HOST ?= localhost
-TEST_REDIS_PORT ?= 6380
+TEST_REDIS_PORT ?= 0
 TEST_REDIS_DB ?= 0
 TEST_REDIS_PASSWORD ?=
 ifeq ($(strip $(TEST_REDIS_PASSWORD)),)
@@ -62,6 +69,20 @@ TEST_REDIS_URL ?= redis://$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/$(TEST_REDIS_DB)
 else
 TEST_REDIS_URL ?= redis://:$(TEST_REDIS_PASSWORD)@$(TEST_REDIS_HOST):$(TEST_REDIS_PORT)/$(TEST_REDIS_DB)
 endif
+TEST_REQUIRES_POSTGIS ?= $(shell if [ -d migrations ] && grep -RiqE 'CREATE[[:space:]]+EXTENSION[[:space:]]+(IF[[:space:]]+NOT[[:space:]]+EXISTS[[:space:]]+)?"?postgis"?' migrations 2>/dev/null; then echo true; else echo false; fi)
+TEST_POSTGIS_VERSION ?= 3.6
+HOST_DOCKER_ARCH ?= $(shell uname -m | sed -e 's/^aarch64$$/arm64/' -e 's/^x86_64$$/amd64/')
+HOST_DOCKER_PLATFORM ?= linux/$(HOST_DOCKER_ARCH)
+ifeq ($(strip $(TEST_POSTGRES_IMAGE)),)
+ifeq ($(TEST_REQUIRES_POSTGIS),true)
+TEST_POSTGRES_IMAGE := postgis/postgis:$(POSTGRES_VERSION)-$(TEST_POSTGIS_VERSION)
+TEST_POSTGRES_PLATFORM ?= linux/amd64
+else
+TEST_POSTGRES_IMAGE := postgres:$(POSTGRES_VERSION)-alpine
+TEST_POSTGRES_PLATFORM ?= $(HOST_DOCKER_PLATFORM)
+endif
+endif
+TEST_POSTGRES_PLATFORM ?= $(HOST_DOCKER_PLATFORM)
 
 .DEFAULT_GOAL := help
 
@@ -170,7 +191,7 @@ build-server:
 
 build-frontend:
 	@if [ -f frontend/package.json ]; then \
-		cd frontend && npm run build; \
+		$(FRONTEND_SCRIPT_RUNNER) . build; \
 	else \
 		echo "No frontend package; skipping frontend build"; \
 	fi
@@ -348,24 +369,38 @@ test-integration:
 		echo "No tests/integration package; skipping integration tests"; \
 		exit 0; \
 	fi; \
+	started_test_env=0; \
 	if [ -z "$$CI" ]; then \
 		$(MAKE) test-env-up; \
+		started_test_env=1; \
+		trap 'if [ "$$started_test_env" = "1" ]; then $(MAKE) test-env-down >/dev/null 2>&1 || true; fi' EXIT; \
 	fi; \
 	$(MAKE) migrate-test; \
+	test_db_host="$(TEST_DB_HOST)"; \
+	test_db_port="$(TEST_DB_PORT)"; \
+	test_database_url="$(TEST_DATABASE_URL)"; \
+	test_redis_url="$(TEST_REDIS_URL)"; \
+	if [ -f "$(TEST_ENV_FILE)" ]; then \
+		. "$(TEST_ENV_FILE)"; \
+		test_db_host="$$TEST_DB_HOST"; \
+		test_db_port="$$TEST_DB_PORT"; \
+		test_database_url="$$TEST_DATABASE_URL"; \
+		test_redis_url="$$TEST_REDIS_URL"; \
+	fi; \
 	mkdir -p "$(GO_CACHE_DIR)"; \
 	APP_ENV=test \
 	GOCACHE="$(GO_CACHE_DIR)" \
 	TEST_INFRA_REQUIRED=true \
 	TEST_REDIS_REQUIRED=true \
-	TEST_DB_HOST="$(TEST_DB_HOST)" \
-	TEST_DB_PORT="$(TEST_DB_PORT)" \
+	TEST_DB_HOST="$$test_db_host" \
+	TEST_DB_PORT="$$test_db_port" \
 	TEST_DB_USER="$(TEST_DB_USER)" \
 	TEST_DB_PASSWORD="$(TEST_DB_PASSWORD)" \
 	TEST_DB_NAME="$(TEST_DB_NAME)" \
-	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
-	DATABASE_URL="$(TEST_DATABASE_URL)" \
-	TEST_REDIS_URL="$(TEST_REDIS_URL)" \
-	REDIS_URL="$(TEST_REDIS_URL)" \
+	TEST_DATABASE_URL="$$test_database_url" \
+	DATABASE_URL="$$test_database_url" \
+	TEST_REDIS_URL="$$test_redis_url" \
+	REDIS_URL="$$test_redis_url" \
 	REDIS_PREFIX="test_$(PROJECT_NAME):" \
 	$(GOTEST) -C "$$go_dir" -race -count=1 -timeout $(GO_TEST_TIMEOUT) -tags=integration "$$test_pkg"
 
@@ -385,25 +420,39 @@ test-load:
 		echo "No tests/load package; skipping load tests"; \
 		exit 0; \
 	fi; \
+	started_test_env=0; \
 	if [ -z "$$CI" ]; then \
 		$(MAKE) test-env-up; \
+		started_test_env=1; \
+		trap 'if [ "$$started_test_env" = "1" ]; then $(MAKE) test-env-down >/dev/null 2>&1 || true; fi' EXIT; \
 	fi; \
 	$(MAKE) migrate-test; \
+	test_db_host="$(TEST_DB_HOST)"; \
+	test_db_port="$(TEST_DB_PORT)"; \
+	test_database_url="$(TEST_DATABASE_URL)"; \
+	test_redis_url="$(TEST_REDIS_URL)"; \
+	if [ -f "$(TEST_ENV_FILE)" ]; then \
+		. "$(TEST_ENV_FILE)"; \
+		test_db_host="$$TEST_DB_HOST"; \
+		test_db_port="$$TEST_DB_PORT"; \
+		test_database_url="$$TEST_DATABASE_URL"; \
+		test_redis_url="$$TEST_REDIS_URL"; \
+	fi; \
 	mkdir -p "$(GO_CACHE_DIR)"; \
 	APP_ENV=test \
 	GOCACHE="$(GO_CACHE_DIR)" \
 	RUN_LOAD_TESTS="$${RUN_LOAD_TESTS:-1}" \
 	TEST_INFRA_REQUIRED=true \
 	TEST_REDIS_REQUIRED=true \
-	TEST_DB_HOST="$(TEST_DB_HOST)" \
-	TEST_DB_PORT="$(TEST_DB_PORT)" \
+	TEST_DB_HOST="$$test_db_host" \
+	TEST_DB_PORT="$$test_db_port" \
 	TEST_DB_USER="$(TEST_DB_USER)" \
 	TEST_DB_PASSWORD="$(TEST_DB_PASSWORD)" \
 	TEST_DB_NAME="$(TEST_DB_NAME)" \
-	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" \
-	DATABASE_URL="$(TEST_DATABASE_URL)" \
-	TEST_REDIS_URL="$(TEST_REDIS_URL)" \
-	REDIS_URL="$(TEST_REDIS_URL)" \
+	TEST_DATABASE_URL="$$test_database_url" \
+	DATABASE_URL="$$test_database_url" \
+	TEST_REDIS_URL="$$test_redis_url" \
+	REDIS_URL="$$test_redis_url" \
 	REDIS_PREFIX="test_$(PROJECT_NAME):" \
 	$(GOTEST) -C "$$go_dir" $(LOAD_RACE_FLAG) -v -count=1 -timeout "$${LOAD_TEST_TIMEOUT:-10m}" "$$load_pkg"
 
@@ -427,7 +476,7 @@ test-all: lint-foundation test-unit test-integration test-frontend
 
 test-frontend:
 	@if [ -f frontend/package.json ]; then \
-		cd frontend && npm run test; \
+		$(FRONTEND_SCRIPT_RUNNER) . test; \
 	else \
 		echo "No frontend package; skipping frontend tests"; \
 	fi
@@ -437,20 +486,47 @@ test-env-up:
 		echo "docker-compose.test.yml not found"; \
 		exit 1; \
 	fi
+	@$(DOCKER_COMPOSE_TEST) down -v --remove-orphans >/dev/null 2>&1 || true
+	@rm -f "$(TEST_ENV_FILE)"
 	@TEST_DB_USER="$(TEST_DB_USER)" \
 	TEST_DB_PASSWORD="$(TEST_DB_PASSWORD)" \
 	TEST_DB_NAME="$(TEST_DB_NAME)" \
 	TEST_DB_PORT="$(TEST_DB_PORT)" \
 	POSTGRES_VERSION="$(POSTGRES_VERSION)" \
 	TEST_POSTGRES_IMAGE="$(TEST_POSTGRES_IMAGE)" \
+	TEST_POSTGRES_PLATFORM="$(TEST_POSTGRES_PLATFORM)" \
 	TEST_REDIS_PORT="$(TEST_REDIS_PORT)" \
 	TEST_REDIS_PASSWORD="$(TEST_REDIS_PASSWORD)" \
 	$(DOCKER_COMPOSE_TEST) up -d test-postgres test-redis
+	@mkdir -p "$$(dirname "$(TEST_ENV_FILE)")"
+	@db_port="$$($(DOCKER_COMPOSE_TEST) port test-postgres 5432 | awk -F: 'END { print $$NF }')"; \
+	redis_port="$$($(DOCKER_COMPOSE_TEST) port test-redis 6379 | awk -F: 'END { print $$NF }')"; \
+	if [ -z "$$db_port" ] || [ -z "$$redis_port" ]; then \
+		echo "failed to resolve test Docker host ports"; \
+		exit 1; \
+	fi; \
+	db_url="postgresql://$(TEST_DB_USER):$(TEST_DB_PASSWORD)@127.0.0.1:$$db_port/$(TEST_DB_NAME)?sslmode=disable"; \
+	if [ -n "$(TEST_REDIS_PASSWORD)" ]; then \
+		redis_url="redis://:$(TEST_REDIS_PASSWORD)@127.0.0.1:$$redis_port/$(TEST_REDIS_DB)"; \
+	else \
+		redis_url="redis://127.0.0.1:$$redis_port/$(TEST_REDIS_DB)"; \
+	fi; \
+	{ \
+		echo "TEST_DB_HOST=127.0.0.1"; \
+		echo "TEST_DB_PORT=$$db_port"; \
+		echo "TEST_DATABASE_URL=$$db_url"; \
+		echo "DATABASE_URL=$$db_url"; \
+		echo "TEST_REDIS_HOST=127.0.0.1"; \
+		echo "TEST_REDIS_PORT=$$redis_port"; \
+		echo "TEST_REDIS_URL=$$redis_url"; \
+		echo "REDIS_URL=$$redis_url"; \
+	} > "$(TEST_ENV_FILE)"
 
 test-env-down:
 	@if [ -f docker-compose.test.yml ]; then \
-		$(DOCKER_COMPOSE_TEST) down -v; \
+		$(DOCKER_COMPOSE_TEST) down -v --remove-orphans; \
 	fi
+	@rm -f "$(TEST_ENV_FILE)"
 
 test-env-logs:
 	@if [ -f docker-compose.test.yml ]; then \
@@ -459,13 +535,27 @@ test-env-logs:
 
 migrate-test:
 	@echo "Running test migrations..."
-	@if [ -f docker-compose.test.yml ] && [ -z "$$CI" ]; then \
-		TEST_DB_USER="$(TEST_DB_USER)" \
-		TEST_DB_PASSWORD="$(TEST_DB_PASSWORD)" \
-		TEST_DB_NAME="$(TEST_DB_NAME)" \
-		POSTGRES_VERSION="$(POSTGRES_VERSION)" \
-		TEST_POSTGRES_IMAGE="$(TEST_POSTGRES_IMAGE)" \
-		$(DOCKER_COMPOSE_TEST) run --rm test-migrate; \
+	@set -e; \
+	if [ -f docker-compose.test.yml ] && [ -z "$$CI" ]; then \
+		attempt=1; \
+		while true; do \
+			if TEST_DB_USER="$(TEST_DB_USER)" \
+				TEST_DB_PASSWORD="$(TEST_DB_PASSWORD)" \
+				TEST_DB_NAME="$(TEST_DB_NAME)" \
+				POSTGRES_VERSION="$(POSTGRES_VERSION)" \
+				TEST_POSTGRES_IMAGE="$(TEST_POSTGRES_IMAGE)" \
+				TEST_POSTGRES_PLATFORM="$(TEST_POSTGRES_PLATFORM)" \
+				$(DOCKER_COMPOSE_TEST) run --rm test-migrate; then \
+				break; \
+			fi; \
+			status=$$?; \
+			if [ "$$attempt" -ge "$(MIGRATE_TEST_MAX_RETRIES)" ]; then \
+				exit "$$status"; \
+			fi; \
+			echo "Retrying test migrations... ($$attempt/$(MIGRATE_TEST_MAX_RETRIES))"; \
+			attempt=$$((attempt + 1)); \
+			sleep "$(MIGRATE_TEST_RETRY_SLEEP)"; \
+		done; \
 	elif command -v migrate >/dev/null 2>&1; then \
 		migrate -path migrations -database "$(TEST_DATABASE_URL)" up; \
 	else \
@@ -519,13 +609,13 @@ lint-rust:
 
 lint-frontend:
 	@if [ -f frontend/package.json ]; then \
-		cd frontend && npm run lint; \
+		$(FRONTEND_SCRIPT_RUNNER) . lint; \
 	else \
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-FOUNDATION_LINT_CHECKS := check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-usage check-project-scaffold
-FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 180
+FOUNDATION_LINT_CHECKS := check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 
 lint-foundation:
 	@tmp_log=$$(mktemp "$${TMPDIR:-/tmp}/foundation-lint.XXXXXX"); \
@@ -558,6 +648,9 @@ check-testing-practices:
 check-go-concurrency-practices:
 	@./scripts/checks/go_concurrency_practices_check.sh .
 
+check-logging-practices:
+	@./scripts/checks/logging_practices_check.sh .
+
 check-metadata-practices:
 	@./scripts/checks/metadata_practices_check.sh .
 
@@ -579,13 +672,16 @@ check-domain-contract-consistency:
 check-contract-drift:
 	@./scripts/checks/contract_drift_check.sh .
 
+check-server-kit-module-contract:
+	@./scripts/checks/server_kit_module_contract_check.sh .
+
 check-server-kit-usage:
 	@./scripts/checks/server_kit_usage_check.sh .
 
 check-project-scaffold:
 	@./scripts/checks/project_scaffold_check.sh .
 
-verify: lint test build
+verify: lint test build build-wasm
 	@echo "Verification complete"
 
 docker-build:
@@ -673,6 +769,7 @@ help:
 	@echo ""
 	@echo "Checks:"
 	@echo "  check-coding-practices"
+	@echo "  check-logging-practices"
 	@echo "  check-database-practices"
 	@echo "  check-redis-practices"
 	@echo "  check-river-practices"

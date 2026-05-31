@@ -40,6 +40,9 @@ type Config struct {
 	DBQueryTimeout      time.Duration
 	DBHotReadTimeout    time.Duration
 	DBShardCount        int
+	HermesMaxRecords    int
+	HermesMaxBytes      int64
+	HermesIndexedFields []string
 
 	// Redis
 	RedisURL          string
@@ -100,6 +103,9 @@ func Load() (*Config, error) {
 		DBQueryTimeout:                      getEnvDuration("DB_QUERY_TIMEOUT", 250*time.Millisecond),
 		DBHotReadTimeout:                    getEnvDuration("DB_HOT_READ_TIMEOUT", 50*time.Millisecond),
 		DBShardCount:                        getEnvInt("DB_SHARD_COUNT", 1),
+		HermesMaxRecords:                    getEnvInt("HERMES_MAX_RECORDS_PER_SCOPE", 10000),
+		HermesMaxBytes:                      int64(getEnvInt("HERMES_MAX_BYTES_PER_SCOPE", 16*1024*1024)),
+		HermesIndexedFields:                 splitCSV(getEnv("HERMES_INDEXED_FIELDS", "state,status,type,kind,bucket")),
 		RedisURL:                            getEnv("REDIS_URL", ""),
 		RedisShardURLs:                      getEnv("REDIS_SHARD_URLS", ""),
 		RedisPrefix:                         getEnv("REDIS_PREFIX", "{{PROJECT_NAME}}"),
@@ -188,6 +194,9 @@ func (c *Config) validate() error {
 	}
 	if c.DBHealthCheckPeriod <= 0 || c.DBConnectTimeout <= 0 || c.DBAcquireTimeout <= 0 || c.DBQueryTimeout <= 0 || c.DBHotReadTimeout <= 0 {
 		return fmt.Errorf("database timeout settings must be positive")
+	}
+	if c.HermesMaxRecords <= 0 || c.HermesMaxBytes <= 0 || len(c.HermesIndexedFields) == 0 {
+		return fmt.Errorf("hermes bounds and indexed fields must be configured")
 	}
 	if c.RedisPoolSize < 0 || c.RedisMinIdle < 0 || c.RedisMaxRetries < 0 {
 		return fmt.Errorf("redis pool settings must be zero or greater")

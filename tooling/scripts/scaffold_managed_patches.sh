@@ -158,6 +158,57 @@ patch_server_binary_path() {
   PATCH_SEARCH='COPY --from=builder /bin/${PROJECT_NAME} ./server' PATCH_REPLACE='COPY --from=builder /bin/server ./server' replace_in_file "$file" 'COPY --from=builder /bin/${PROJECT_NAME} ./server' 'COPY --from=builder /bin/server ./server' "Docker server binary fixed copy"
 }
 
+patch_foundation_event_log_trigger_function() {
+  local migration
+  while IFS= read -r migration; do
+    if grep -Fq "CREATE OR REPLACE FUNCTION update_updated_at_column" "$migration"; then
+      continue
+    fi
+    if ! grep -Fq "update_foundation_event_log_updated_at" "$migration"; then
+      continue
+    fi
+    if ! grep -Fq "EXECUTE FUNCTION update_updated_at_column()" "$migration"; then
+      continue
+    fi
+
+    perl -0pi -e 's/-- Foundation durable event log/CREATE OR REPLACE FUNCTION update_updated_at_column()\nRETURNS TRIGGER AS \$\$\nBEGIN\n    NEW.updated_at = NOW();\n    RETURN NEW;\nEND;\n\$\$ LANGUAGE plpgsql;\n\n-- Foundation durable event log/' "$migration"
+    log_patch "Foundation event log trigger function: ${migration#$target/}"
+  done < <(find "$target/migrations" -maxdepth 1 -type f -name '*.up.sql' 2>/dev/null | sort)
+}
+
+patch_test_postgres_platform() {
+  local file="$target/docker-compose.test.yml"
+  [[ -f "$file" ]] || return 0
+  grep -Fq "TEST_POSTGRES_PLATFORM" "$file" && return 0
+
+  if grep -Fq 'image: ${TEST_POSTGRES_IMAGE:-postgres:18-alpine}' "$file"; then
+    PATCH_SEARCH='    image: ${TEST_POSTGRES_IMAGE:-postgres:18-alpine}'
+    PATCH_REPLACE='    image: ${TEST_POSTGRES_IMAGE:-postgres:18-alpine}
+    platform: ${TEST_POSTGRES_PLATFORM:-linux/amd64}'
+    replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "test Postgres service platform"
+  fi
+}
+
+patch_test_compose_ephemeral_ports() {
+  local file="$target/docker-compose.test.yml"
+  [[ -f "$file" ]] || return 0
+
+  local before
+  before="$(mktemp)"
+  cp "$file" "$before"
+
+  perl -0pi -e 's/#   TEST_DB_PORT: Port to expose PostgreSQL \(default: 5433\)/#   TEST_DB_PORT: Host port to expose PostgreSQL (default: 0, Docker assigns an ephemeral port)/g' "$file"
+  perl -0pi -e 's/#   TEST_REDIS_PORT: Port to expose Redis \(default: 6380\)/#   TEST_REDIS_PORT: Host port to expose Redis (default: 0, Docker assigns an ephemeral port)/g' "$file"
+  perl -0pi -e 's/"\$\{TEST_DB_PORT:-5433\}:5432"/"\${TEST_DB_PORT:-0}:5432"/g' "$file"
+  perl -0pi -e 's/"\$\{TEST_REDIS_PORT:-6380\}:6379"/"\${TEST_REDIS_PORT:-0}:6379"/g' "$file"
+  perl -0pi -e 's/^[[:blank:]]*container_name:[^\n]*\n//mg' "$file"
+
+  if ! cmp -s "$before" "$file"; then
+    log_patch "test Compose ephemeral ports and scoped container names: ${file#$target/}"
+  fi
+  rm -f "$before"
+}
+
 sync_go_work() {
   [[ -f "$target/go.mod" ]] || return 0
 
@@ -209,6 +260,9 @@ patch_reframe_frontend_dockerfile
 patch_runtime_native_dockerfile
 patch_go_dependency_manifests
 patch_server_binary_path
+patch_foundation_event_log_trigger_function
+patch_test_postgres_platform
+patch_test_compose_ephemeral_ports
 sync_go_work
 
 if [[ "$patched" -eq 0 ]]; then

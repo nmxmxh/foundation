@@ -181,17 +181,30 @@ func (e *RealTestEnv) Teardown(t *testing.T) {
 // cleanupTrackedEntities deletes all tracked test data.
 func (e *RealTestEnv) cleanupTrackedEntities(ctx context.Context, t *testing.T) {
 	for _, userID := range e.CreatedUserIDs {
-		_, err := e.DB.Exec(ctx, "DELETE FROM users WHERE id = $1 OR public_id = $1", userID)
-		if err != nil {
-			t.Logf("failed to delete user %s: %v", userID, err)
-		}
+		e.deleteIfTableExists(ctx, t, "users", "DELETE FROM users WHERE id = $1 OR public_id = $1", userID)
 	}
 
 	for _, orgID := range e.CreatedOrgIDs {
-		_, err := e.DB.Exec(ctx, "DELETE FROM organizations WHERE id = $1 OR public_id = $1", orgID)
-		if err != nil {
-			t.Logf("failed to delete org %s: %v", orgID, err)
-		}
+		e.deleteIfTableExists(ctx, t, "organizations", "DELETE FROM organizations WHERE id = $1 OR public_id = $1", orgID)
+	}
+}
+
+func (e *RealTestEnv) deleteIfTableExists(ctx context.Context, t *testing.T, tableName string, query string, args ...any) {
+	if e.DB == nil {
+		return
+	}
+
+	var exists bool
+	if err := e.DB.QueryRow(ctx, "SELECT to_regclass($1) IS NOT NULL", tableName).Scan(&exists); err != nil {
+		t.Logf("failed to check cleanup table %s: %v", tableName, err)
+		return
+	}
+	if !exists {
+		return
+	}
+
+	if _, err := e.DB.Exec(ctx, query, args...); err != nil {
+		t.Logf("failed to clean tracked entity from %s: %v", tableName, err)
 	}
 }
 

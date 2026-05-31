@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	transportpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/transport/v1"
+	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 )
 
 const (
@@ -554,8 +554,8 @@ func (m EnvelopeMetadata) ToJSON() ([]byte, error) {
 	return json.Marshal(m.ToMap())
 }
 
-func (m EnvelopeMetadata) ToTransportProto() (*transportpb.Metadata, error) {
-	pb := &transportpb.Metadata{
+func (m EnvelopeMetadata) ToTransportProto() (*foundationpb.Metadata, error) {
+	pb := &foundationpb.Metadata{
 		Tags:              append([]string(nil), m.Tags...),
 		AiConfidence:      m.AIConfidence,
 		EmbeddingId:       m.EmbeddingID,
@@ -575,7 +575,7 @@ func (m EnvelopeMetadata) ToTransportProto() (*transportpb.Metadata, error) {
 		Attributes:        copyStringMap(m.Attributes),
 	}
 	if m.GlobalContext != nil {
-		pb.GlobalContext = &transportpb.GlobalContext{
+		pb.GlobalContext = &foundationpb.GlobalContext{
 			UserId:         m.GlobalContext.UserID,
 			SessionId:      m.GlobalContext.SessionID,
 			Source:         m.GlobalContext.Source,
@@ -588,7 +588,7 @@ func (m EnvelopeMetadata) ToTransportProto() (*transportpb.Metadata, error) {
 		}
 	}
 	if m.ValidityPeriod != nil {
-		pb.ValidityPeriod = &transportpb.ValidityPeriod{
+		pb.ValidityPeriod = &foundationpb.ValidityPeriod{
 			EffectiveFrom: m.ValidityPeriod.EffectiveFrom,
 			EffectiveTo:   m.ValidityPeriod.EffectiveTo,
 		}
@@ -611,7 +611,7 @@ func FromJSON(data []byte) (EnvelopeMetadata, error) {
 	return FromMap(raw), nil
 }
 
-func FromTransportProto(pb *transportpb.Metadata) (EnvelopeMetadata, error) {
+func FromTransportProto(pb *foundationpb.Metadata) (EnvelopeMetadata, error) {
 	md := New()
 	if pb == nil {
 		return md, nil

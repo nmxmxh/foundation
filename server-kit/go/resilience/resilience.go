@@ -90,6 +90,7 @@ type Runtime struct {
 	DegradationManager *degradation.Manager
 	Cache              *cache.Cache
 	TracingProvider    *tracing.Provider
+	TracingInitError   error
 
 	// Retry policies
 	DefaultRetry  *retry.Policy
@@ -152,8 +153,7 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 			Environment: cfg.Environment,
 		})
 		if err != nil {
-			// Log warning but don't fail - tracing is optional
-			fmt.Printf("[WARN] Failed to initialize tracing: %v\n", err)
+			r.TracingInitError = err
 		} else {
 			r.TracingProvider = tp
 		}

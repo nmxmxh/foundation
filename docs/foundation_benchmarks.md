@@ -961,14 +961,14 @@ Current database guard metrics after this pass:
 | `BenchmarkExecRowsAffectedFake` | 32.69 | 24 | 1 | Rows-affected wrapper is a small typed-result cost. |
 | `BenchmarkQueryEachFakeRows100` | 2731 | 2472 | 202 | Streaming helper avoids retained result slice. |
 
-### 2026-05-25 Hermes hotplane research baseline
+### 2026-05-25 Hermes hotplane substrate baseline
 
-This pass did not add a Hermes implementation. It captures the local substrate
-that Hermes would refine: current `MemoryDB` read/index behavior, websocket
-borrowed-batch routing, exact event dispatch, worker enqueue, and bounded
-parallel orchestration. The result supports the Hermes API split proposed in
-`docs/hermes_hotplane.md`: internal borrowed/descriptor reads for local
-hotplane consumers, and copied public reads at service boundaries.
+This first pass captured the local substrate that Hermes would refine: current
+`MemoryDB` read/index behavior, websocket borrowed-batch routing, exact event
+dispatch, worker enqueue, and bounded parallel orchestration. The result
+supports the Hermes API split proposed in `docs/hermes_hotplane.md`: internal
+borrowed/descriptor reads for local hotplane consumers, and copied public reads
+at service boundaries.
 
 Environment:
 
@@ -1018,6 +1018,124 @@ Hermes implication:
    into Hermes before Postgres commit are explicitly out of scope.
 5. Epoch publication and borrowed batch routing should use the same
    no-allocation discipline as websocket batch routing and event exact dispatch.
+
+### 2026-05-26 Hermes mandatory runtime-store baseline
+
+The `server-kit/go/hermes` implementation now adds bounded projection specs,
+tenant-scoped partitions, segmented snapshot indexes, idempotent source-event
+apply, tombstones, atomic epoch publication, `database.StateStore` rebuild,
+typed record batch ingestion, generated `foundation.v1.RecordMutationBatch`
+envelope ingestion, binary payload batch ingestion, a `worker.Processor` bridge,
+Redis Stream source/tailer abstractions, and a mandatory
+`hermes.ProjectedRuntimeStore` wrapper for scaffolded `database.RuntimeStore`
+reads. Public reads return copied `DomainRecord` values; internal reads use
+callback-lifetime borrowed `RecordView` values. JSON is not a Hermes transport
+lane.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -run=^$ -bench='BenchmarkHermes' -benchmem ./hermes
+```
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesGetRecordCopied` | 333.9 | 368 | 3 | Single copied hot record read is sub-microsecond; allocation is defensive ownership. |
+| `BenchmarkHermesForEachViewLimit50` | 7469 | 0 | 0 | Borrowed internal filtered reads remain allocation-free after segmented snapshot publication. |
+| `BenchmarkHermesCountIndexed` | 143.2 | 0 | 0 | Exact single-index count reads from projection cardinality instead of scanning records. |
+| `BenchmarkHermesListRecordsCopiedLimit50` | 21426 | 33400 | 105 | Copy-safe public list still pays the known defensive-copy shape. |
+| `BenchmarkHermesApplyEventUpsert` | 18362 | 15817 | 44 | Single-event RCU publication is slower than direct mutable-map apply; projectors should batch. |
+| `BenchmarkHermesApplyBatch64` | 212200 | 146845 | 1148 | Event batch apply amortizes index publication to about 3.32 us per record. |
+| `BenchmarkHermesApplyRecords64` | 29757 | 29809 | 358 | Typed record batch ingestion avoids per-event construction and is the preferred projector path after decode. |
+| `BenchmarkHermesApplyRecordPayloads64` | 249655 | 199750 | 1243 | Compatibility binary payload ingestion with per-payload decoder calls. |
+| `BenchmarkHermesApplyRecordPayloadEvents64` | 247463 | 195413 | 1242 | Generated batch decoder hook builds ready-to-apply events directly; larger wins require schema-specific typed/columnar record construction. |
+| `BenchmarkHermesProjectedRuntimeStoreHotGet` | 429.2 | 368 | 3 | Mandatory scaffold wrapper caches registered projection scopes while preserving copied-record ownership. |
+| `BenchmarkHermesProjectedRuntimeStoreWarmCount` | 297.2 | 48 | 1 | Warm StateStore counts use cached projection names and Hermes indexes. |
+| `BenchmarkHermesDriftCheckMerkle` | 17448326 | 12619680 | 24939 | Bounded 10K-record production safety check; Hermes side uses borrowed views and witnesses are emitted only for sampled records. |
+
+Implementation implication:
+
+1. Hermes improves the internal read lane immediately: borrowed filtered reads
+   avoid the `33 KB / 105 allocs` public copy shape.
+2. Public safety remains intentionally expensive enough to be visible in
+   benchmarks.
+3. Exact count now exploits declared indexes; multi-filter counts still scan the
+   smallest candidate set until intersection counters are justified.
+4. Apply performance is now shape-dependent: single-event updates pay for RCU
+   publication, while typed record batches are already below 500 ns per record.
+5. Segmented snapshot indexes remove the reader/writer lock boundary. A bounded
+   atomic publish gate prevents readers from observing partial record/index
+   publication.
+6. Generated typed decoders now have a batch event hook:
+   `ApplyRecordPayloadEvents`. It avoids per-payload decoder callbacks and lets
+   app-generated Cap'n Proto/protobuf decoders preserve operation/source/version
+   metadata directly. The measured improvement is modest with the synthetic map
+   decoder; bigger wins require generated decoders to avoid generic maps or feed
+   `ApplyRecords` when the mutation set is pure upsert.
+7. Scaffolded apps now wrap `database.RuntimeStore` with
+   `hermes.ProjectedRuntimeStore` by default. Oversized scopes fall back to
+   Postgres instead of serving partial hot state, and health/resilience checks
+   expose degraded projection scopes.
+8. Drift checks are deliberately outside the hot read path. The 10K-record
+   Merkle run improved from about 56 ms and 1.62M allocs to about 17 ms and
+   25K allocs by hashing borrowed Hermes views and avoiding per-record hex
+   strings. It is suitable for scheduled parity checks and promotion gates, not
+   per-request validation.
+9. The service-backed Redis/Postgres run caught a real Redis stream edge case:
+   empty `XREADGROUP` reads must omit `BLOCK`; `BLOCK 0` waits forever in Redis
+   even though the memory client returned immediately.
+10. Hermes Redis stream sources now drain pending entries for the same consumer
+   before reading `>` messages. This preserves apply-before-ack safety after an
+   ack failure or restart with the same consumer identity.
+
+### 2026-05-29 Hermes bulk-load and byte-estimator refinement
+
+Follow-up review of the Hermes hotplane showed that full rebuild was paying
+event-path costs that belong to durable mutation replay, not trusted snapshot
+replacement. The implementation now exposes `Store.BulkLoad` and routes
+`Rebuild` through that snapshot path. `BulkLoad` still normalizes records,
+validates projection scope, enforces record/byte bounds, builds indexes, and
+publishes a new epoch atomically, but it skips per-event source de-duplication,
+tombstone checks, delete semantics, and synthetic rebuild event bookkeeping.
+
+The record byte estimator was also changed from `fmt.Sprintf("%v", value)` per
+field to typed approximate sizing. `Stats.ApproxBytes` remains a guardrail, not
+an exact heap meter; the important property is that every apply path enforces a
+bounded byte budget without formatting arbitrary values in the hot loop.
+
+Commands:
+
+```bash
+cd foundation/server-kit/go
+go test -run='^$' -bench='BenchmarkHermes' -benchmem ./hermes
+cd ../..
+SERVICE_BACKED_BENCHTIME=1s tests/service_backed_foundation_test.sh
+```
+
+Artifacts:
+
+- `benchmark-results/hermes_bench_20260529T0141_after_bulkload.log`
+- `benchmark-results/service_backed_20260529T014205Z.log`
+- `benchmark-results/service_backed_20260529T014205Z.tsv`
+
+| Benchmark | ns/op | B/op | allocs/op | Per record | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `BenchmarkHermesApplyBatch64` | 222475 | 153467 | 993 | 3476 ns | Durable event path for mixed operations, source IDs, deletes, and idempotency. |
+| `BenchmarkHermesApplyRecords64` | 28482 | 29646 | 351 | 445 ns | Preferred incremental projector path when records are already materialized pure upserts. |
+| `BenchmarkHermesBulkLoad512` | 857575 | 850629 | 4805 | 1675 ns | Trusted snapshot replacement path; faster and simpler than synthetic event rebuild. |
+| `BenchmarkServiceBackedHermesRebuild512` | 2776989 | 1711877 | 19202 | 5424 ns | Live Postgres snapshot plus Hermes bulk-load. Still a control-plane repair path because source reads dominate. |
+| `BenchmarkServiceBackedHermesApplyBatch512` | 928888 | 956837 | 4835 | 1814 ns | Live in-memory hotplane apply after mutation events have already reached the process. |
+
+Practice update:
+
+1. Use `ApplyRecords` for changelog/projector batches that are already decoded
+   into `database.DomainRecord` and contain only upserts.
+2. Use `BulkLoad` for trusted initial seeding, rebuild, and repair snapshots.
+3. Use `ApplyBatch` when the batch carries durable event semantics: deletes,
+   source/correlation IDs, idempotency, or mixed operations.
+4. Do not use `Rebuild` as a routine refresh loop if a bounded changelog can
+   feed `ApplyRecords`; full rebuild is a parity/control-plane tool.
 
 Runtime-transport Go results:
 
@@ -1502,3 +1620,51 @@ Adapter gaps to measure next:
    `splice`, `MSG_ZEROCOPY`, `io_uring`, pacing, MPTCP, QUIC, and packet-ring
    lanes as refinements of the same receipt/manifest contract. The benchmark
    result must report fallback behavior and copy budget, not only MB/s.
+
+## 2026-05-26 service-backed substrate pressure
+
+Command:
+
+```bash
+make test-service-backed
+```
+
+Environment:
+
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Services: Docker-backed `postgres:18-alpine` and `redis:8-alpine`
+- Artifacts:
+  - `benchmark-results/service_backed_20260526T152527Z.log`
+  - `benchmark-results/service_backed_20260526T152527Z.tsv`
+
+Correctness and pressure tests added:
+
+1. Postgres pool saturation proves bounded acquire timeout and records pool pressure.
+2. Redis stream pressure proves pending-window visibility and read/ack latency budgets.
+3. Redis slow-subscriber pressure proves publish latency remains bounded when subscribers do not drain.
+4. Hermes projection pressure proves Postgres rebuild, Redis stream tailing, hot indexed counts, and drift checks.
+5. Mixed workflow pressure measures p95/p99 across Postgres raw writes, Redis batch `SetGetMany`, and Hermes hot-plane apply.
+
+| Benchmark | ns/op | B/op | allocs/op | Unit | Interpretation |
+| --- | ---: | ---: | ---: | --- | --- |
+| `BenchmarkServiceBackedHermesRebuild512` | `2914560` | `1879425` | `21278` | `512 records/op` | Rebuild from canonical Postgres into Hermes is millisecond-scale and should be treated as repair/recovery/control-plane, not per-request hot path. |
+| `BenchmarkServiceBackedHermesApplyBatch512` | `962877` | `1002751` | `6375` | `512 records/op` | In-memory hot-plane batch apply is about 3x faster than rebuild because it avoids Postgres snapshot reads. |
+| `BenchmarkServiceBackedRedisSetGet` | `443338` | `888` | `26` | | Single Redis round-trip pair is network/service-bound. |
+| `BenchmarkServiceBackedRedisSetGetParallel` | `113453` | `1017` | `29` | | Parallelism hides service latency; pool sizing and timeouts matter. |
+| `BenchmarkServiceBackedRedisSetManyGetMany64` | `796525` | `51522` | `1053` | `64 keys/op` | Separate set-many/get-many is slower and more allocation-heavy than combined batch paths. |
+| `BenchmarkServiceBackedRedisSetGetMany64` | `693280` | `49482` | `793` | `64 keys/op` | Foundation batch client is the preferred project API for hot multi-key Redis work. |
+| `BenchmarkServiceBackedRedisRawPipelineSetGet64` | `702681` | `31768` | `657` | `64 keys/op` | Raw pipeline is close in latency but bypasses Foundation semantics; use only inside server-kit. |
+| `BenchmarkServiceBackedPostgresUpsert` | `342599` | `3054` | `49` | | Semantic single writes are service-bound but predictable. |
+| `BenchmarkServiceBackedPostgresUpsertRawJSON` | `409281` | `2204` | `40` | | Raw JSON preserves bytes and lowers allocations, but live latency is similar because Postgres dominates. |
+| `BenchmarkServiceBackedPostgresUpsertParallel` | `77136` | `3091` | `49` | | Parallel pool use improves throughput substantially when pool budgets are explicit. |
+| `BenchmarkServiceBackedPostgresSendBatchUpsert64` | `2811726` | `73373` | `937` | `64 rows/op` | Batched independent statements amortize round trips but still execute per-row upsert logic. |
+| `BenchmarkServiceBackedPostgresCopyFrom64` | `601597` | `37899` | `378` | `64 rows/op` | `CopyFromRows` is the correct append/import lane and is much faster than per-row upsert batches. |
+
+Operational interpretation:
+
+1. Hermes is now proved as a bounded hot-plane over live Postgres/Redis, not only an in-memory unit.
+2. Postgres remains canonical truth; pool saturation must fail fast with `ErrPoolAcquireTimeout`.
+3. Redis remains ephemeral coordination/cache; batch APIs are materially better than sequential calls.
+4. Rebuild and drift checks are control-plane operations. Hot reads should use Hermes indexed queries after projection.
+5. Mixed p95/p99 service-backed tests are now the next truth layer after local microbenchmarks.

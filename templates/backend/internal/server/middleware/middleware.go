@@ -3,12 +3,13 @@ package middleware
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"time"
 
 	"github.com/google/uuid"
+	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 )
 
 type contextKey string
@@ -24,7 +25,12 @@ func RequestID(next http.Handler) http.Handler {
 		}
 
 		ctx := context.WithValue(r.Context(), RequestIDKey, requestID)
+		md := metadata.FromContext(ctx)
+		md.RequestID = requestID
+		md.EnsureCorrelation(r.Header.Get("X-Correlation-ID"), requestID)
+		ctx = metadata.IntoContext(ctx, md)
 		w.Header().Set("X-Request-ID", requestID)
+		w.Header().Set("X-Correlation-ID", md.CorrelationID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -49,7 +55,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 }
 
 // Logger logs HTTP requests
-func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
+func Logger(logger kitlogger.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			start := time.Now()
@@ -57,25 +63,24 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 
 			next.ServeHTTP(rw, r)
 
-			logger.Info("http request",
+			logger.InfoContext(r.Context(), "http request",
 				"method", r.Method,
 				"path", r.URL.Path,
 				"status", rw.status,
 				"duration", time.Since(start),
-				"request_id", GetRequestID(r.Context()),
 			)
 		})
 	}
 }
 
 // Recover recovers from panics and logs them
-func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
+func Recover(logger kitlogger.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ctx := r.Context()
 			defer func() {
 				if err := recover(); err != nil {
-					logger.Error("panic recovered",
+					logger.ErrorContext(ctx, "panic recovered",
 						"error", err,
 						"stack", string(debug.Stack()),
 						"request_id", GetRequestID(ctx),
@@ -93,7 +98,7 @@ func CORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Request-ID")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Request-ID, X-Correlation-ID")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		if r.Method == http.MethodOptions {

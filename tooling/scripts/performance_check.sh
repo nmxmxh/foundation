@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export GOCACHE="${GOCACHE:-/tmp/ovasabi-foundation-go-build}"
 SCALE_BENCHTIME="${SCALE_BENCHTIME:-100x}"
+LATENCY_BENCHTIME="${LATENCY_BENCHTIME:-1s}"
 
 echo "== foundation Go performance guards =="
 (
@@ -13,7 +14,8 @@ echo "== foundation Go performance guards =="
   go test -bench='BenchmarkDecodeRequestBytesIntoCompleteReuse$' -benchmem -run='^$' ./protoapi
   go test -bench='BenchmarkTypedFrameAdapterDispatch(NoMetadata|Reuse)?$' -benchmem -run='^$' ./bootstrap
   go test -bench='BenchmarkAppLane_' -benchmem -run='^$' ./appbench
-  go test -bench='BenchmarkScale(_|1M_)' -benchmem -benchtime="$SCALE_BENCHTIME" -run='^$' ./appbench
+  go test -bench='BenchmarkScale1M_|BenchmarkScale_(MemoryDB|WebSocket|Event|Config)' -benchmem -benchtime="$SCALE_BENCHTIME" -run='^$' ./appbench
+  go test -bench='BenchmarkScale_LocalOperationMixLatency$' -benchmem -benchtime="$LATENCY_BENCHTIME" -run='^$' ./appbench
   go test -bench='Benchmark' -benchmem -run='^$' ./cache ./circuitbreaker ./compress ./events ./metrics ./redis ./retry ./worker
   go test -bench='Benchmark(MemoryDB|Query|Exec)' -benchmem -run='^$' ./database
   go test -bench='BenchmarkRouter' -benchmem -run='^$' ./wsrouting
@@ -54,13 +56,10 @@ echo "== foundation runtime-transport Go benchmarks =="
 )
 
 if [[ -d "$ROOT/runtime-sdk/ts/browser-host/node_modules" ]]; then
-  echo "== foundation runtime-sdk browser-host benchmarks =="
-  (
-    cd "$ROOT/runtime-sdk/ts/browser-host"
-    npm run bench -- --run
-  )
+	echo "== foundation runtime-sdk browser-host benchmarks =="
+	"$ROOT/tooling/scripts/run_vitest.sh" "$ROOT/runtime-sdk/ts/browser-host" bench --run
 else
-  echo "skip runtime-sdk TS benchmarks: node_modules not installed"
+	echo "skip runtime-sdk TS benchmarks: node_modules not installed"
 fi
 
 if command -v cargo >/dev/null 2>&1; then
@@ -74,12 +73,9 @@ else
 fi
 
 if [[ -d "$ROOT/runtime-transport/ts/node_modules" ]]; then
-  echo "== foundation runtime-transport TS tests =="
-  (
-    cd "$ROOT/runtime-transport/ts"
-    npm test
-    npm run bench -- --run src/binaryEnvelope.bench.ts src/routing.bench.ts
-  )
+	echo "== foundation runtime-transport TS tests =="
+	"$ROOT/tooling/scripts/run_vitest.sh" "$ROOT/runtime-transport/ts" run
+	"$ROOT/tooling/scripts/run_vitest.sh" "$ROOT/runtime-transport/ts" bench --run src/binaryEnvelope.bench.ts src/routing.bench.ts
 else
-  echo "skip runtime-transport TS tests: node_modules not installed"
+	echo "skip runtime-transport TS tests: node_modules not installed"
 fi

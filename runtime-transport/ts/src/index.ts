@@ -1,5 +1,5 @@
 export type TransportKind = "postMessage" | "transferable" | "sab" | "native" | "ws" | "http" | "wasm";
-export type PayloadEncoding = "json" | "protobuf";
+export type PayloadEncoding = "json" | "protobuf" | "capnp" | "binary";
 export type ProtobufCodec<TPayload> = {
   encode: (payload: TPayload) => Uint8Array;
   decode: (payload: Uint8Array) => TPayload;

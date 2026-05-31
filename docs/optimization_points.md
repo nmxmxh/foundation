@@ -2,7 +2,7 @@
 
 Date: 2026-05-22
 
-This document tracks the deliberate performance and architecture carryovers folded into the scaffold after reviewing `fintech_v1` history and the current performance synthesis. For cross-cutting Go, networking, PostgreSQL, Rust, benchmarking, and documentation-tracking practices, see `foundation/docs/performance_practices.md`. For TLA+/`Specifying Systems` state-machine, invariant, liveness, real-time bound, composition, and refinement practices, see `foundation/docs/tla_architecture_practices.md`. For Go concurrency bug taxonomy and practices extracted from `go-study.pdf`, see `foundation/docs/go_concurrency_bug_practices.md`. For deep-dives into legendary computer science optimization tricks, see [Coding Magic](file:///Users/okhai/Desktop/OVASABI%20STUDIOS/reframe_v1/foundation/docs/coding_magic.md).
+This document tracks the deliberate performance and architecture carryovers folded into the scaffold after reviewing product histories and the current performance synthesis. For cross-cutting Go, networking, PostgreSQL, Rust, benchmarking, and documentation-tracking practices, see `docs/performance_practices.md`. For TLA+/`Specifying Systems` state-machine, invariant, liveness, real-time bound, composition, and refinement practices, see `docs/tla_architecture_practices.md`. For Go concurrency bug taxonomy and practices extracted from `go-study.pdf`, see `docs/go_concurrency_bug_practices.md`. For deep-dives into classic optimization techniques, see `docs/coding_magic.md`.
 
 ## Adopted immediately
 
@@ -113,6 +113,11 @@ This document tracks the deliberate performance and architecture carryovers fold
     names must be hierarchical and low-cardinality; correlation IDs, tenant IDs,
     hashes, and timestamps belong in fields so traces and captures can be
     compared across runs.
+66. Hermes rebuild performance depends on using the right ingestion lane.
+    Trusted snapshot refreshes use `BulkLoad`, incremental pure-upsert
+    projector batches use `ApplyRecords`, and durable mixed mutation streams use
+    `ApplyBatch`. Byte-bound estimation must stay approximate and allocation
+    light; do not format every record field just to maintain a guardrail.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 

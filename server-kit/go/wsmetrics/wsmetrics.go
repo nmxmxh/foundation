@@ -35,8 +35,8 @@ type Collector struct {
 	authFailures  atomic.Int64
 
 	// Latency tracking (protected by mutex)
-	mu              sync.RWMutex
-	latencySamples  []time.Duration
+	mu                sync.RWMutex
+	latencySamples    []time.Duration
 	maxLatencySamples int
 }
 
@@ -128,7 +128,7 @@ func (c *Collector) RecordLatency(d time.Duration) {
 
 // Snapshot represents a point-in-time view of all metrics.
 type Snapshot struct {
-	ServerID string    `json:"server_id"`
+	ServerID  string    `json:"server_id"`
 	Timestamp time.Time `json:"timestamp"`
 
 	// Connections
@@ -234,7 +234,14 @@ func calculatePercentiles(samples []time.Duration) (p50, p95, p99 time.Duration)
 }
 
 func percentileIndex(n, percentile int) int {
-	idx := (n * percentile) / 100
+	if n <= 0 {
+		return 0
+	}
+	idx := ((n * percentile) + 99) / 100
+	idx--
+	if idx < 0 {
+		return 0
+	}
 	if idx >= n {
 		idx = n - 1
 	}

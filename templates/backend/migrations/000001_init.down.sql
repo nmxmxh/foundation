@@ -11,6 +11,7 @@ DROP FUNCTION IF EXISTS river_job_state_in_bitmask CASCADE;
 DROP TYPE IF EXISTS river_job_state CASCADE;
 
 -- Drop application tables
+DROP TABLE IF EXISTS foundation_event_log CASCADE;
 DROP TABLE IF EXISTS governance_state_records CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 DROP FUNCTION IF EXISTS update_updated_at_column CASCADE;

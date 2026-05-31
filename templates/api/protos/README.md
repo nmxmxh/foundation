@@ -36,7 +36,15 @@ message CreateFooRequest {
 - Handlers must check for duplicate processing
 - Safe retries enabled by default
 
-### 4. Field Numbering
+### 4. Hermes Projection Contract
+- App-owned domain protos remain in `api/protos/<domain>/v1`
+- Foundation-owned transport and hotplane contracts live together in `foundation/runtime-transport/protos/foundation/v1`
+- The scaffolded `database.RuntimeStore` is wrapped with Hermes by default for bounded tenant/domain/collection StateStore reads
+- Projectors emit `foundation.v1.RecordMutationBatch` inside the Foundation `EventEnvelope`
+- The outer envelope uses `payload_encoding = PROTOBUF`; any original app payload can remain `CAPNP`, `PROTOBUF`, or `BINARY` inside `RecordMutation.payload`
+- Do not invent JSON projection envelopes for Hermes
+
+### 5. Field Numbering
 - Reserve 1-10 for common fields (id, metadata, timestamps)
 - Domain-specific fields start at 11
 - Never reuse deleted field numbers
@@ -68,6 +76,15 @@ api/protos/<domain>/v1/<domain>.pb.go
 frontend/src/types/protos/<domain>/v1/<domain>.ts
 tests/contract/generated_lifecycle_test.go
 ```
+
+`make communication-contracts` also regenerates the Foundation
+runtime-transport bindings, including the generic Hermes projection schema used
+by `server-kit/go/hermes`.
+
+Scaffolded apps automatically receive `api/protos/foundation/v1` from the
+vendored Foundation runtime transport. `foundation-update` removes the legacy
+copied `api/protos/transport` and `api/protos/hermes` directories so app-owned
+domain contracts stay separate from Foundation-owned contracts.
 
 ## Event Type Mapping
 

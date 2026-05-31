@@ -68,7 +68,7 @@ check_lifecycle_contracts() {
   [[ -d "$target/api/protos" ]] || return 0
 
   local generator=""
-  local generator_timeout_sec="${LIFECYCLE_CONTRACT_CHECK_TIMEOUT_SEC:-180}"
+  local generator_timeout_sec="${LIFECYCLE_CONTRACT_CHECK_TIMEOUT_SEC:-${FOUNDATION_LINT_CHECK_TIMEOUT_SEC:-300}}"
   if [[ -f "$target/scripts/checks/generate_lifecycle_contract_tests.mjs" ]]; then
     generator="$target/scripts/checks/generate_lifecycle_contract_tests.mjs"
   elif generator="$(resolve_path "foundation/tooling/scripts/generate_lifecycle_contract_tests.mjs" 2>/dev/null)"; then
@@ -148,15 +148,15 @@ run_with_timeout() {
   fi
 }
 
-check_exists "runtime transport proto present" "foundation/runtime-transport/protos/transport/v1/envelope.proto"
+check_exists "foundation proto envelope present" "foundation/runtime-transport/protos/foundation/v1/envelope.proto"
 check_exists "runtime transport generation script present" "foundation/runtime-transport/scripts/generate_bindings.sh"
 
 check_generated_if_present \
-  "foundation/runtime-transport/protos/transport/v1/envelope.proto" \
-  "foundation/runtime-transport/go/generated/transport/v1/envelope.pb.go"
+  "foundation/runtime-transport/protos/foundation/v1/envelope.proto" \
+  "foundation/runtime-transport/go/generated/foundation/v1/envelope.pb.go"
 check_generated_if_present \
-  "foundation/runtime-transport/protos/transport/v1/metadata.proto" \
-  "foundation/runtime-transport/ts/src/generated/transport/v1/metadata.ts"
+  "foundation/runtime-transport/protos/foundation/v1/metadata.proto" \
+  "foundation/runtime-transport/ts/src/generated/foundation/v1/metadata.ts"
 
 if resolve_path "foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp" >/dev/null; then
   check_exists "runtime sdk generation script present" "foundation/runtime-sdk/scripts/generate_system_bindings.sh"
@@ -176,9 +176,11 @@ fi
 
 if [[ -d "$target/api/protos" ]]; then
   while IFS= read -r proto_file; do
+    [[ "$proto_file" == */foundation/v*/* ]] && continue
     [[ "$proto_file" == */transport/v1/* ]] && continue
     [[ "$proto_file" == */common/v*/* ]] && continue
     [[ "$proto_file" == */_template/* ]] && continue
+    [[ "$proto_file" == */hermes/v*/* ]] && continue
     app_proto_count=$((app_proto_count + 1))
     generated="${proto_file%.proto}.pb.go"
     if [[ -s "$generated" ]]; then

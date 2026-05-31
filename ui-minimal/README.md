@@ -17,11 +17,13 @@ It does not own:
 3. product-specific iconography
 4. app-specific route, auth, and page shell composition
 
-Extraction status:
+Compatibility status:
 
-1. `field_os` is the reference structural baseline.
-2. `fintech_v1` still needs primitive normalization before extraction.
-3. `reframe_v1` keeps app-owned primitives that mirror this package boundary.
+1. Generated apps consume `@ovasabi/ui-minimal` through the package boundary.
+2. App-local UI components wrap `Minimal*` primitives instead of duplicating
+   foundation primitives.
+3. Product-specific auth, route lists, content, and domain state stay in the
+   application.
 
 Current canonical surfaces:
 
@@ -83,6 +85,7 @@ Observer posture:
 3. `MutationObserver` is exception-only for narrow third-party DOM or `contenteditable` adapters, never the default state-management path for shared primitives
 4. any observer-backed primitive must disconnect cleanly and avoid unbounded render/measure loops
 
-Extraction gate:
+Compatibility gate:
 
-1. primitive prop and slot structures across the three apps must converge enough that the shared package is not just moving divergence into one repo.
+1. Primitive prop and slot structures must stay generic enough that the shared
+   package does not move app-specific divergence into Foundation Core.

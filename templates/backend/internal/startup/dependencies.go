@@ -4,7 +4,6 @@ package startup
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/healthcheck"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes"
 	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
@@ -24,6 +24,7 @@ import (
 // Dependencies holds all initialized dependencies
 type Dependencies struct {
 	DB            database.RuntimeStore
+	Hermes        *hermes.Store
 	Redis         rediskit.Client
 	Bus           events.Bus
 	closeBus      func() error
@@ -32,56 +33,54 @@ type Dependencies struct {
 	Handler       *graceful.Handler
 	Registry      *registry.ServiceRegistry
 	FrameRouter   *grpcsvc.Router
+	Log           kitlogger.Logger
 }
 
 // InitDependencies initializes all application dependencies
 func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, func(), error) {
 	deps := &Dependencies{}
 	var cleanups []func(context.Context)
+	kitLog := kitlogger.Default().With("component", "startup")
+	deps.Log = kitLog
 
-	db, err := initDatabase(ctx, cfg)
+	db, hermesStore, err := initDatabase(ctx, cfg, kitLog)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init database: %w", err)
 	}
 	deps.DB = db
+	deps.Hermes = hermesStore
 	cleanups = append(cleanups, func(context.Context) {
-		if err := db.Close(); err != nil {
-			slog.Error("failed to close database", "error", err)
-		}
+		db.Close()
 	})
 
-	redisClient, bus, closeBus, err := initEventBus(cfg)
+	redisClient, bus, closeBus, err := initEventBus(ctx, cfg, kitLog)
 	if err != nil {
 		if cfg.IsProduction() {
 			return nil, nil, fmt.Errorf("init event bus: %w", err)
 		}
-		slog.Warn("failed to initialize redis event bus, using in-memory bus", "error", err)
+		kitLog.WarnContext(ctx, "failed to initialize redis event bus, using in-memory bus", "error", err)
 		bus = events.NewInMemoryBus(200)
 	}
 	deps.Redis = redisClient
 	deps.Bus = bus
 	deps.closeBus = closeBus
 	if closeBus != nil {
-		cleanups = append(cleanups, func(context.Context) {
+		cleanups = append(cleanups, func(cleanupCtx context.Context) {
 			if err := closeBus(); err != nil {
-				slog.Error("failed to close event bus", "error", err)
+				kitLog.ErrorContext(cleanupCtx, "failed to close event bus", "error", err)
 			}
 		})
 	}
 	if redisClient != nil {
-		cleanups = append(cleanups, func(context.Context) {
+		cleanups = append(cleanups, func(cleanupCtx context.Context) {
 			if err := redisClient.Close(); err != nil {
-				slog.Error("failed to close redis", "error", err)
+				kitLog.ErrorContext(cleanupCtx, "failed to close redis", "error", err)
 			}
 		})
 	}
 
 	deps.HealthChecker = initHealthChecker(deps.DB, deps.Redis)
 
-	kitLog, err := kitlogger.NewDefault()
-	if err != nil {
-		return nil, nil, fmt.Errorf("init foundation logger: %w", err)
-	}
 	deps.Handler = graceful.NewHandler(
 		graceful.WithLogger(kitLog),
 		graceful.WithService("{{PROJECT_NAME}}"),
@@ -98,7 +97,7 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	deps.Resilience = resilienceRuntime
 	cleanups = append(cleanups, func(ctx context.Context) {
 		if err := resilienceRuntime.Close(ctx); err != nil {
-			slog.Error("failed to close resilience runtime", "error", err)
+			kitLog.ErrorContext(ctx, "failed to close resilience runtime", "error", err)
 		}
 	})
 	bindResilienceDependencies(deps)
@@ -114,7 +113,7 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	return deps, cleanup, nil
 }
 
-func initDatabase(ctx context.Context, cfg *config.Config) (database.RuntimeStore, error) {
+func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger) (database.RuntimeStore, *hermes.Store, error) {
 	db, err := database.Connect(ctx, cfg.DatabaseURL, cfg.StateStore, database.PoolOptions{
 		MaxConns:          cfg.DBMaxConns,
 		MinConns:          cfg.DBMinConns,
@@ -124,13 +123,22 @@ func initDatabase(ctx context.Context, cfg *config.Config) (database.RuntimeStor
 		AcquireTimeout:    cfg.DBAcquireTimeout,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	slog.Info("database connected", "driver", cfg.StateStore)
-	return db, nil
+	projected, err := hermes.WrapRuntimeStore(db, hermes.RuntimeStoreOptions{
+		IndexedFields:      cfg.HermesIndexedFields,
+		MaxRecordsPerScope: cfg.HermesMaxRecords,
+		MaxBytesPerScope:   cfg.HermesMaxBytes,
+	})
+	if err != nil {
+		db.Close()
+		return nil, nil, err
+	}
+	log.InfoContext(ctx, "database connected", "driver", cfg.StateStore, "hermes", "enabled")
+	return projected, projected.Store(), nil
 }
 
-func initEventBus(cfg *config.Config) (rediskit.Client, events.Bus, func() error, error) {
+func initEventBus(ctx context.Context, cfg *config.Config, log kitlogger.Logger) (rediskit.Client, events.Bus, func() error, error) {
 	driver := strings.ToLower(strings.TrimSpace(cfg.EventBus))
 	if driver == "" {
 		driver = rediskit.DriverRedis
@@ -155,8 +163,8 @@ func initEventBus(cfg *config.Config) (rediskit.Client, events.Bus, func() error
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	bus := events.NewRedisBus(redisClient, "events", 200, nil)
-	slog.Info("redis event bus connected", "prefix", cfg.RedisPrefix)
+	bus := events.NewRedisBus(redisClient, "events", 200, log)
+	log.InfoContext(ctx, "redis event bus connected", "prefix", cfg.RedisPrefix)
 	return redisClient, bus, bus.Close, nil
 }
 
@@ -194,6 +202,9 @@ func initHealthChecker(db database.RuntimeStore, redisClient rediskit.Client) *h
 			}
 			return nil
 		}))
+	}
+	if projected, ok := db.(interface{ HermesHealth(context.Context) error }); ok {
+		hc.AddCheck("hermes", healthcheck.CustomCheck("hermes", projected.HermesHealth))
 	}
 
 	return hc
@@ -241,6 +252,21 @@ func bindResilienceDependencies(deps *Dependencies) {
 			resilience.WithCritical(false),
 			resilience.WithFailureThreshold(3),
 			resilience.WithFallbackBehavior("fail_open"),
+		)
+	}
+	if deps.DB != nil {
+		deps.Resilience.RegisterDependency(
+			"hermes",
+			func(ctx context.Context) error {
+				projected, ok := deps.DB.(interface{ HermesHealth(context.Context) error })
+				if !ok {
+					return fmt.Errorf("hermes projected runtime store is not registered")
+				}
+				return projected.HermesHealth(ctx)
+			},
+			resilience.WithCritical(false),
+			resilience.WithFailureThreshold(3),
+			resilience.WithFallbackBehavior("postgres_fallback"),
 		)
 	}
 }

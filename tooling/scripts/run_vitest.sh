@@ -1,0 +1,75 @@
+#!/bin/zsh
+set -euo pipefail
+
+if [[ "$#" -lt 2 ]]; then
+  echo "usage: run_vitest.sh <package-dir> <vitest-args...>" >&2
+  exit 2
+fi
+
+package_dir="$1"
+shift
+
+is_codex_bundled_node() {
+  local node_path="$1"
+  [[ "$node_path" == /Applications/Codex.app/Contents/Resources/node ]]
+}
+
+find_vitest_node() {
+  local explicit="${TEST_NODE:-${BENCH_NODE:-${NODE_BIN:-}}}"
+  if [[ -n "$explicit" ]]; then
+    if [[ -x "$explicit" ]]; then
+      printf '%s\n' "$explicit"
+      return 0
+    fi
+    echo "configured Node is not executable: $explicit" >&2
+    return 1
+  fi
+
+  local candidates=()
+  if command -v node >/dev/null 2>&1; then
+    candidates+=("$(command -v node)")
+  fi
+  candidates+=(
+    /opt/homebrew/bin/node
+    /opt/homebrew/opt/node/bin/node
+    /opt/homebrew/opt/node@24/bin/node
+    /opt/homebrew/opt/node@22/bin/node
+    /opt/homebrew/opt/node@20/bin/node
+    /usr/local/bin/node
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -x "$candidate" ]] && ! is_codex_bundled_node "$candidate"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+if [[ ! -d "$package_dir/node_modules" ]]; then
+  echo "Skipping ${package_dir}: node_modules not installed"
+  exit 0
+fi
+
+if [[ ! -f "$package_dir/node_modules/vitest/dist/cli.js" ]]; then
+  echo "Skipping ${package_dir}: vitest is not installed"
+  exit 0
+fi
+
+if ! node_bin="$(find_vitest_node)"; then
+  message="Skipping ${package_dir}: native Vitest/Rolldown bindings cannot run under Codex's bundled hardened Node; install a developer Node or set TEST_NODE/BENCH_NODE"
+  if [[ "${CI:-}" == "1" ]]; then
+    echo "$message" >&2
+    exit 1
+  fi
+  echo "$message"
+  exit 0
+fi
+
+(
+  cd "$package_dir"
+  "$node_bin" ./node_modules/vitest/dist/cli.js "$@"
+)

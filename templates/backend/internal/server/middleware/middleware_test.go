@@ -3,10 +3,11 @@ package middleware
 import (
 	"context"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 )
 
 func TestRequestIDUsesProvidedOrGeneratedID(t *testing.T) {
@@ -46,7 +47,10 @@ func TestCORSOptionsShortCircuits(t *testing.T) {
 }
 
 func TestLoggerAndRecoverMiddleware(t *testing.T) {
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logger, err := kitlogger.New(kitlogger.Config{Output: io.Discard})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
 	logged := Logger(logger)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	}))

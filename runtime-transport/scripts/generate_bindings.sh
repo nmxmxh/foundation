@@ -11,11 +11,18 @@ TS_OUT_DIR="$FOUNDATION_DIR/runtime-transport/ts/src/generated"
 mkdir -p "$GO_OUT_DIR"
 mkdir -p "$TS_OUT_DIR"
 
+PROTO_FILES=(
+  "$PROTO_DIR/foundation/v1/metadata.proto"
+  "$PROTO_DIR/foundation/v1/envelope.proto"
+  "$PROTO_DIR/foundation/v1/projection.proto"
+)
+
+find "$GO_OUT_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
 protoc \
   -I "$PROTO_DIR" \
   --go_out=paths=source_relative:"$GO_OUT_DIR" \
-  "$PROTO_DIR/transport/v1/metadata.proto" \
-  "$PROTO_DIR/transport/v1/envelope.proto"
+  "${PROTO_FILES[@]}"
 
 resolve_ts_proto_plugin() {
   local configured="${TS_PROTO_PLUGIN:-}"
@@ -59,7 +66,6 @@ protoc \
   --plugin=protoc-gen-ts_proto="$TS_PROTO_PLUGIN" \
   --ts_proto_out="$TS_OUT_DIR" \
   --ts_proto_opt=esModuleInterop=true,useOptionals=messages,outputEncodeMethods=true,outputJsonMethods=false,outputClientImpl=false,env=browser \
-  "$PROTO_DIR/transport/v1/metadata.proto" \
-  "$PROTO_DIR/transport/v1/envelope.proto"
+  "${PROTO_FILES[@]}"
 
 echo "generated runtime transport protobuf bindings"

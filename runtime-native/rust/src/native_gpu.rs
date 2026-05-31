@@ -406,6 +406,14 @@ impl NativeGpuHandleRegistry {
         Ok(guard.len())
     }
 
+    pub fn is_empty(&self) -> Result<bool, NativeRuntimeError> {
+        let guard = self
+            .records
+            .read()
+            .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
+        Ok(guard.is_empty())
+    }
+
     fn register_private(
         &self,
         descriptor: RuntimeNativeGpuDescriptor,

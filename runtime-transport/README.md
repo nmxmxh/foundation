@@ -1,6 +1,7 @@
 # runtime-transport
 
-`runtime-transport` is the shared client-side transport layer planned for extraction from converged app implementations.
+`runtime-transport` is the shared Foundation transport boundary for generated
+apps and platform modules.
 
 It owns:
 
@@ -14,14 +15,15 @@ It owns:
 
 Current transport contract posture:
 
-1. foundation-owned protobuf transport envelopes now live under [foundation/runtime-transport/protos/transport/v1](/Users/okhai/Desktop/OVASABI%20STUDIOS/reframe_v1/foundation/runtime-transport/protos/transport/v1)
+1. foundation-owned protobuf contracts now live together under `foundation/runtime-transport/protos/foundation/v1`
 2. `server-kit` uses that binary envelope for internal Redis/pubsub event traffic
-3. payloads remain `JSON-in-bytes` by default in the current phase
+3. the envelope supports `JSON`, `PROTOBUF`, `CAPNP`, and opaque `BINARY` payload encodings
 4. websocket/client traffic now supports protobuf-binary envelopes end to end
 5. authenticated apps can prefer `ws -> http` without widening guest allowsets by using a narrow connection-auth upgrade on the same socket
 6. typed protobuf request/response dispatch is available in the shared Go registry/binding layer and the shared frontend command bus
+7. generic Hermes projection contracts share the same `foundation/v1` package as the runtime envelope
 
-Planned public surface:
+Public surface:
 
 1. `createEnvelope`
 2. `createCommandBus`
@@ -40,7 +42,11 @@ It does not own:
 3. guest/public route allowlists
 4. domain event names
 
-Extraction gate:
+Compatibility gate:
 
-1. `field_os` and `reframe_v1` must share the same route-registry and command-bus interface.
-2. `fintech_v1` must be adapted to the same transport contract.
+1. Generated apps consume `@ovasabi/runtime-transport` through the package
+   boundary, not raw `ts/src` aliases.
+2. Backend event, Hermes, and binary envelope code use the Foundation protobuf
+   contracts under `runtime-transport/protos/foundation/v1`.
+3. Compatibility JSON paths remain available for ingress, admin, and debugging,
+   but internal hot lanes should prefer typed protobuf or binary frame dispatch.

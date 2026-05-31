@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package foundation.v1;
+
+option go_package = "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1;foundationpb";
+
+import "google/protobuf/timestamp.proto";
+import "foundation/v1/envelope.proto";
+
+enum ProjectionOperation {
+  PROJECTION_OPERATION_UNSPECIFIED = 0;
+  PROJECTION_OPERATION_UPSERT = 1;
+  PROJECTION_OPERATION_DELETE = 2;
+}
+
+message ScalarValue {
+  oneof kind {
+    string string_value = 1;
+    int64 int64_value = 2;
+    uint64 uint64_value = 3;
+    double double_value = 4;
+    bool bool_value = 5;
+    bytes bytes_value = 6;
+  }
+}
+
+message FieldValue {
+  string name = 1;
+  ScalarValue value = 2;
+}
+
+message RecordMutation {
+  ProjectionOperation operation = 1;
+  string source_id = 2;
+  uint64 version = 3;
+  string domain = 4;
+  string collection = 5;
+  string organization_id = 6;
+  string record_id = 7;
+  repeated FieldValue fields = 8;
+  repeated float vector = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+  bytes payload = 12;
+  PayloadEncoding payload_encoding = 13;
+  string payload_schema_version = 14;
+  string correlation_id = 15;
+}
+
+message RecordMutationBatch {
+  repeated RecordMutation mutations = 1;
+}

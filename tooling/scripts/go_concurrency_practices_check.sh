@@ -35,6 +35,12 @@ code_window() {
   sed -n "${start},${end}p" "$file"
 }
 
+text_matches() {
+  local text="$1"
+  local pattern="$2"
+  rg -q -- "$pattern" <<<"$text"
+}
+
 add_finding() {
   local file="$1"
   local line="$2"
@@ -62,16 +68,16 @@ scan_lock_scope() {
     [[ -n "${file:-}" && -n "${line:-}" ]] || continue
     block="$(code_window "$file" "$line" 0 80)"
     held="$(
-      printf '%s\n' "$block" | awk '
+      awk '
         NR == 1 { print; next }
         /^func[[:space:]]/ { exit }
         /^}/ { exit }
         /^[[:space:]]*defer[[:space:]]+.*[.]R?Unlock[[:space:]]*[(]/ { print; next }
         /[.]R?Unlock[[:space:]]*[(]/ { exit }
         { print }
-      '
+      ' <<<"$block"
     )"
-    if printf '%s\n' "$held" | rg -q 'select[[:space:]]*[{]|(^|[^A-Za-z0-9_])case[[:space:]].*<-|<-[[:space:]]*[A-Za-z0-9_.]+|[A-Za-z0-9_.]+[[:space:]]*<-[^-]|[.]Wait[[:space:]]*[(]|Cond[.]Wait'; then
+    if text_matches "$held" 'select[[:space:]]*[{]|(^|[^A-Za-z0-9_])case[[:space:]].*<-|<-[[:space:]]*[A-Za-z0-9_.]+|[A-Za-z0-9_.]+[[:space:]]*<-[^-]|[.]Wait[[:space:]]*[(]|Cond[.]Wait'; then
       add_finding "$file" "$line" "$text"
     fi
   done < <(rg_go '[.]R?Lock[[:space:]]*[(]')
@@ -84,8 +90,8 @@ scan_select_default() {
   while IFS=: read -r file line text; do
     [[ -n "${file:-}" && -n "${line:-}" ]] || continue
     block="$(code_window "$file" "$line" 0 35)"
-    printf '%s\n' "$block" | rg -q 'default[[:space:]]*:' || continue
-    if printf '%s\n' "$block" | rg -q 'concurrency:|RecordConcurrency|RecordWorker|RecordQueueDepth|return[[:space:]]+(errors[.]New|fmt[.]Errorf|err|nil|ctx[.]Err|[A-Za-z0-9_.]*Err)|queue full|send_rejected_full'; then
+    text_matches "$block" 'default[[:space:]]*:' || continue
+    if text_matches "$block" 'concurrency:|RecordConcurrency|RecordWorker|RecordQueueDepth|return[[:space:]]+(errors[.]New|fmt[.]Errorf|err|nil|ctx[.]Err|[A-Za-z0-9_.]*Err)|queue full|send_rejected_full'; then
       continue
     fi
     add_finding "$file" "$line" "$text"
@@ -99,7 +105,7 @@ scan_loop_goroutines() {
   while IFS=: read -r file line text; do
     [[ -n "${file:-}" && -n "${line:-}" ]] || continue
     block="$(code_window "$file" "$line" 4 0)"
-    if printf '%s\n' "$block" | rg -q 'for[[:space:]].*[{]'; then
+    if text_matches "$block" 'for[[:space:]].*[{]'; then
       add_finding "$file" "$line" "$text"
     fi
   done < <(rg_go 'go[[:space:]]+func[[:space:]]*[(][[:space:]]*[)][[:space:]]*[{]')
@@ -112,7 +118,7 @@ scan_timers() {
   while IFS=: read -r file line text; do
     [[ -n "${file:-}" && -n "${line:-}" ]] || continue
     block="$(code_window "$file" "$line" 0 14)"
-    if printf '%s\n' "$block" | rg -q '[.]Stop[[:space:]]*[(]'; then
+    if text_matches "$block" '[.]Stop[[:space:]]*[(]'; then
       continue
     fi
     add_finding "$file" "$line" "$text"
@@ -125,14 +131,14 @@ scan_close_ownership() {
   : >"$tmp_findings"
   while IFS=: read -r file line text; do
     [[ -n "${file:-}" && -n "${line:-}" ]] || continue
-    if printf '%s\n' "$text" | rg -q '^[[:space:]]*func[[:space:]]'; then
+    if text_matches "$text" '^[[:space:]]*func[[:space:]]'; then
       continue
     fi
     block="$(code_window "$file" "$line" 18 4)"
-    if printf '%s\n' "$text" | rg -q 'defer[[:space:]]+close[[:space:]]*[(]'; then
+    if text_matches "$text" 'defer[[:space:]]+close[[:space:]]*[(]'; then
       continue
     fi
-    if printf '%s\n' "$block" | rg -q 'once[.]Do[[:space:]]*[(]|[A-Za-z0-9_]*Once[.]Do[[:space:]]*[(]|closed[[:space:]]*=[[:space:]]*true'; then
+    if text_matches "$block" 'once[.]Do[[:space:]]*[(]|[A-Za-z0-9_]*Once[.]Do[[:space:]]*[(]|closed[[:space:]]*=[[:space:]]*true'; then
       continue
     fi
     add_finding "$file" "$line" "$text"
