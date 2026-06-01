@@ -20,6 +20,7 @@ export const NATIVE_RESPONSE_MAGIC = "OVRR";
 export const NATIVE_FRAME_VERSION = 1;
 export const NATIVE_ENCODING_CAPNP = 1;
 export const NATIVE_ENCODING_PROTOBUF = 2;
+export const MAX_NATIVE_FRAME_BYTES = 2 * 1024 * 1024;
 
 export type NativeRuntimeCapabilities = {
   native: boolean;
@@ -165,7 +166,13 @@ export const encodeNativeDispatchFrame = ({
   if (schemaBytes.byteLength === 0 || schemaBytes.byteLength > 0xffff) {
     throw new Error("native schema version length is invalid");
   }
-  const frame = new Uint8Array(20 + unitBytes.byteLength + schemaBytes.byteLength + payload.byteLength + metadata.byteLength);
+  assertU32Length(payload.byteLength, "native payload");
+  assertU32Length(metadata.byteLength, "native metadata");
+  const frameLength = 20 + unitBytes.byteLength + schemaBytes.byteLength + payload.byteLength + metadata.byteLength;
+  if (frameLength > MAX_NATIVE_FRAME_BYTES) {
+    throw new Error(`native request frame exceeds ${MAX_NATIVE_FRAME_BYTES} byte limit`);
+  }
+  const frame = new Uint8Array(frameLength);
   const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
   writeMagic(frame, 0, NATIVE_REQUEST_MAGIC);
   view.setUint8(4, NATIVE_FRAME_VERSION);
@@ -190,6 +197,9 @@ export const decodeNativeDispatchResponse = (frame: Uint8Array): NativeDispatchR
   if (frame.byteLength < 16 || readMagic(frame, 0) !== NATIVE_RESPONSE_MAGIC) {
     throw new Error("native response frame has invalid magic or header");
   }
+  if (frame.byteLength > MAX_NATIVE_FRAME_BYTES) {
+    throw new Error(`native response frame exceeds ${MAX_NATIVE_FRAME_BYTES} byte limit`);
+  }
   const view = new DataView(frame.buffer, frame.byteOffset, frame.byteLength);
   if (view.getUint8(4) !== NATIVE_FRAME_VERSION) {
     throw new Error(`unsupported native response version ${view.getUint8(4)}`);
@@ -197,8 +207,11 @@ export const decodeNativeDispatchResponse = (frame: Uint8Array): NativeDispatchR
   const statusCode = view.getUint16(6, false);
   const payloadLength = view.getUint32(8, false);
   const diagnosticsLength = view.getUint32(12, false);
-  const expectedLength = 16 + payloadLength + diagnosticsLength;
-  if (expectedLength !== frame.byteLength) {
+  const remainingBytes = frame.byteLength - 16;
+  if (payloadLength > remainingBytes || diagnosticsLength > remainingBytes - payloadLength) {
+    throw new Error("native response frame length overflow");
+  }
+  if (payloadLength + diagnosticsLength !== remainingBytes) {
     throw new Error("native response frame length does not match header");
   }
   return {
@@ -285,3 +298,9 @@ const writeMagic = (target: Uint8Array, offset: number, magic: string): void => 
 
 const readMagic = (source: Uint8Array, offset: number): string =>
   String.fromCharCode(...source.subarray(offset, offset + 4));
+
+const assertU32Length = (length: number, label: string): void => {
+  if (!Number.isSafeInteger(length) || length < 0 || length > 0xffffffff) {
+    throw new Error(`${label} length is outside native frame bounds`);
+  }
+};

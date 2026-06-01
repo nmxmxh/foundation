@@ -89,7 +89,7 @@ impl NativeBuffer {
     }
 
     pub fn input_bytes_view(&self) -> Result<&[u8], String> {
-        let length = self.header_int(INT_IDX_INPUT_LENGTH)?.max(0) as u32;
+        let length = self.payload_length(INT_IDX_INPUT_LENGTH, "input")?;
         validate_input_length(length)?;
         self.region_view(OFFSET_INPUT_BYTES, length)
     }
@@ -119,7 +119,7 @@ impl NativeBuffer {
     }
 
     pub fn output_bytes_view(&self) -> Result<&[u8], String> {
-        let length = self.header_int(INT_IDX_OUTPUT_LENGTH)?.max(0) as u32;
+        let length = self.payload_length(INT_IDX_OUTPUT_LENGTH, "output")?;
         validate_output_length(length)?;
         self.region_view(OFFSET_OUTPUT_BYTES, length)
     }
@@ -154,8 +154,10 @@ impl NativeBuffer {
             return 0;
         }
         let offset = (OFFSET_EPOCHS + index * EPOCH_SLOT_BYTES) as usize;
-        let bytes: [u8; 4] = self.raw[offset..offset + 4].try_into().unwrap_or_default();
-        i32::from_le_bytes(bytes)
+        match self.raw.get(offset..offset + 4) {
+            Some(bytes) => i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+            None => 0,
+        }
     }
 
     pub fn store_epoch(&mut self, index: u32, value: i32) -> Result<(), String> {
@@ -194,6 +196,14 @@ impl NativeBuffer {
         let end = start + length as usize;
         self.raw[start..end].fill(0);
         Ok(())
+    }
+
+    fn payload_length(&self, index: u32, label: &str) -> Result<u32, String> {
+        let length = self.header_int(index)?;
+        if length < 0 {
+            return Err(format!("{label} payload length is negative: {length}"));
+        }
+        Ok(length as u32)
     }
 }
 
@@ -245,5 +255,25 @@ mod tests {
             .read_output_bytes_into(&mut reused)
             .expect("read output into");
         assert_eq!(reused, b"short");
+    }
+
+    #[test]
+    fn rejects_negative_runtime_payload_lengths() {
+        let mut buffer = NativeBuffer::new(vec![0; BUFFER_TOTAL_BYTES as usize]).expect("buffer");
+        buffer
+            .set_header_int(INT_IDX_INPUT_LENGTH, -1)
+            .expect("set invalid input length");
+        buffer
+            .set_header_int(INT_IDX_OUTPUT_LENGTH, -1)
+            .expect("set invalid output length");
+
+        assert!(buffer
+            .input_bytes_view()
+            .expect_err("input length must fail")
+            .contains("negative"));
+        assert!(buffer
+            .output_bytes_view()
+            .expect_err("output length must fail")
+            .contains("negative"));
     }
 }

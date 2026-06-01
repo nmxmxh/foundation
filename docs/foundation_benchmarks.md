@@ -1,7 +1,7 @@
 # Foundation Benchmarks
 
-Status: baseline  
-Date: 2026-05-01  
+Status: active reference
+Date: 2026-05-31
 Owner: Platform Architecture
 
 ## Purpose
@@ -81,7 +81,10 @@ Recommended benchmark and load-test additions for goroutine-owning code:
 From the repository root:
 
 ```bash
-foundation/tooling/scripts/performance_check.sh
+make test-bench-history
+make test-bench
+FOUNDATION_NATIVE_SKIP_BASELINE=1 tooling/scripts/native_benchmark.sh .
+make test-service-backed
 ```
 
 For the Go-only server-kit slice:
@@ -94,7 +97,219 @@ go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFra
 
 Set `PROFILE=1` when you need CPU and heap profiles under `/tmp/ovasabi-foundation-profiles`.
 
-## Current reference run
+## 2026-05-31 full benchmark pass
+
+This run is the current local reference for Foundation's performance story. It
+combines the broad performance ladder, targeted objectstore/bulk checks, native
+runtime flow simulation, runtime-native TypeScript frame benches, and live
+Postgres/Redis service-backed benches.
+
+Artifacts:
+
+| Artifact | Contents |
+| --- | --- |
+| `benchmark-results/foundation_bench_20260531T223701Z.tsv` | Broad Go/Rust/TypeScript benchmark summary: 221 rows, with `benchmark`, `ns_per_op`, `bytes_per_op`, `allocs_per_op`, and `source`. |
+| `benchmark-results/foundation_bench_20260531T223701Z.log` | Raw broad benchmark output, including Vitest `hz`, `mean`, p75/p99/p995/p999, RME, and sample counts. |
+| `benchmark-results/test_bench_20260531T224419.log` | Targeted objectstore, bulk manager, and native flow simulation output from `make test-bench`. |
+| `benchmark-results/native_bench_20260531T224409.log` | Runtime-native Rust report-only benches, native flow simulation, and runtime-native TypeScript frame benches. |
+| `benchmark-results/service_backed_20260531T235252Z.tsv` | Live eventlog/Postgres/Redis service-backed summary after eventlog claim leases: 15 rows, with `unit_per_op` for batch rows. |
+| `benchmark-results/service_backed_20260531T235252Z.log` | Raw service-backed benchmark output after Docker-backed race tests, including concurrent multi-drainer eventlog publication coverage. |
+
+The TSV files are the exhaustive machine-readable ledgers. The tables below are
+the architectural read of those ledgers: which Foundation lane is being measured,
+what cost it represents, and where generated applications should inherit the
+practice.
+
+### Runtime ladder
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkBoundFrameClientDispatchTrusted-8` | 10.67 | 0 | 0 | Bound trusted same-process handler, effectively the control-call floor. |
+| `BenchmarkRouterDispatchFrameDirect-8` | 10.79 | 0 | 0 | Generic same-process frame router path. |
+| `BenchmarkBinaryFrameAppendViewRoundTrip-8` | 19.75 | 0 | 0 | Binary append plus borrowed frame view; the preferred synchronous hot parser. |
+| `BenchmarkBinaryFrameAppendRoundTrip-8` | 41.00 | 0 | 0 | Binary append plus owned frame decode. |
+| `BenchmarkBinaryFrameCodecRoundTrip-8` | 81.71 | 144 | 2 | Codec-compatible binary owned path. |
+| `BenchmarkGeneratedProtoMarshalAppendRoundTrip-8` | 371.5 | 152 | 6 | Generated protobuf contract path. |
+| `BenchmarkClientDispatchFrameOverBufconn-8` | 20585 | 10991 | 181 | Binary frame through local gRPC client/server machinery. |
+| `BenchmarkDispatchFrameOverBufconn-8` | 25372 | 10916 | 178 | Server-side binary frame over local gRPC. |
+| `BenchmarkDispatchOverBufconn-8` | 30175 | 12624 | 213 | JSON envelope compatibility lane over local gRPC. |
+
+Foundation's rule is visible: internal hot work should stay on same-process frame
+dispatch or borrowed binary views. Protobuf and gRPC remain correct for typed
+cross-process boundaries. JSON is a compatibility adapter, not a hot product
+lane. Industry-wise, zero-allocation 10-80 ns in-process control paths are
+strong local numbers; tens of microseconds for a gRPC boundary is normal because
+it pays client/server call machinery, codecs, metadata, and framing even through
+`bufconn`.
+
+### App, safety, and orchestration lanes
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkAppLane_DirectFrame_DomainCall-8` | 32.02 | 32 | 1 | App-shaped same-process domain call. |
+| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest-8` | 5399 | 9219 | 71 | HTTP JSON ingress and dispatch request shaping. |
+| `BenchmarkAppLane_Auth_ValidateToken-8` | 3288 | 2104 | 27 | JWT validation only. |
+| `BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8` | 7203 | 11284 | 81 | Auth, security headers, validation, and RBAC middleware. |
+| `BenchmarkAppLane_Cache_GetHit_JSONValue-8` | 54.03 | 0 | 0 | In-memory cache hit. |
+| `BenchmarkAppLane_Retry_NoRetrySuccess-8` | 3.697 | 0 | 0 | No-retry success fast path. |
+| `BenchmarkAppLane_CircuitBreaker_ClosedSuccess-8` | 68.35 | 0 | 0 | Healthy dependency circuit-breaker wrapper. |
+| `BenchmarkAppLane_Worker_EnqueueWithBackpressureAndDrain-8` | 5500 | 1167 | 26 | Accepted bounded worker enqueue and drain. |
+| `BenchmarkAppLane_Worker_RejectFullQueue-8` | 1523 | 738 | 17 | Explicit full-queue rejection. |
+| `BenchmarkAppLane_Worker_DropNoProcessor-8` | 1291 | 706 | 14 | Explicit no-processor rejection. |
+| `BenchmarkAppLane_Retry_CanceledWait-8` | 95.83 | 96 | 2 | Canceled retry wait path. |
+
+These are the costs generated apps inherit when they use Foundation's safety
+boundaries correctly. HTTP/auth/RBAC and worker enqueue are thousands of
+nanoseconds because they do real safety work; the cache, retry, circuit breaker,
+and direct domain path remain nanosecond-scale. The practice is to put expensive
+safety boundaries at ingress and async edges, then keep already-authorized
+same-process work on direct/binary lanes.
+
+### Scale and fanout lanes
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale_MemoryDBTenantCount100K-8` | 5173 | 0 | 0 | 100K tenant-scoped count. |
+| `BenchmarkScale_MemoryDBTenantListFiltered100K-8` | 21586 | 33400 | 105 | 100K tenant/filter list with defensive response copies. |
+| `BenchmarkScale1M_MemoryDBTenantCount-8` | 5079 | 0 | 0 | 1M tenant-scoped count remains indexed. |
+| `BenchmarkScale1M_MemoryDBTenantListFiltered-8` | 21598 | 33400 | 105 | 1M tenant/filter list. |
+| `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit-8` | 16836 | 33400 | 105 | 1M dense-tenant indexed `LIMIT 50` path. |
+| `BenchmarkScale_WebSocketBroadcastResolveInto100K-8` | 34464 | 0 | 0 | 100K owned broadcast target materialization. |
+| `BenchmarkScale1M_WebSocketBroadcastResolveInto-8` | 489633 | 0 | 0 | 1M owned target materialization. |
+| `BenchmarkScale1M_WebSocketBroadcastForEach-8` | 2400135 | 0 | 0 | 1M callback-per-target route. |
+| `BenchmarkScale1M_WebSocketBroadcastBatch-8` | 747.9 | 0 | 0 | 1M adaptive borrowed batch route. |
+| `BenchmarkScale_EventExactDispatch100KSubscriptions-8` | 405.8 | 0 | 0 | Exact event dispatch at 100K subscriptions. |
+| `BenchmarkScale1M_EventExactDispatchSubscriptions-8` | 423.8 | 0 | 0 | Exact event dispatch at 1M subscriptions. |
+| `BenchmarkScale_EventWildcardDispatch1KSubscriptions-8` | 544.2 | 64 | 1 | Generic wildcard compatibility fanout. |
+| `BenchmarkScale_EventPrefixWildcardDispatch100KSubscriptions-8` | 530.8 | 64 | 1 | Colon-prefix wildcard fanout. |
+| `BenchmarkScale_ConfigConvergence10K-8` | 173.8 | 0 | 0 | Runtime config validation/convergence. |
+
+The scale story is data shape, not heroics. Tenant counts are indexed. Dense
+tenant lists stop at indexed limits instead of sorting broad state. Exact event
+fanout is stable at 100K and 1M subscription cardinality. WebSocket broadcast is
+where API choice matters: owning a 1M target slice costs about 0.49 ms, a
+per-target callback loop costs about 2.4 ms, while borrowed adaptive batches keep
+routing below 1 microsecond before actual socket writes begin.
+
+### Objectstore and bulk range gains
+
+| Benchmark | Before | 2026-05-31 | Gain | Allocation gain | Practice |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `BenchmarkMemoryStoreGetRange/64KB-8` | 3596 ns/op, 65696 B/op | 213.3 ns/op, 160 B/op | 16.9x faster | 410.6x fewer bytes | Borrow immutable range readers instead of copying the selected range. |
+| `BenchmarkMemoryStoreGetRange/1024KB-8` | 36024 ns/op, 1048736 B/op | 210.3 ns/op, 160 B/op | 171.3x faster | 6554.6x fewer bytes | Keep range metadata small and payload bytes shared. |
+| `BenchmarkManagerOpenRangeIdentity-8` | 46324 ns/op, 531474 B/op | 12044 ns/op, 5205 B/op | 3.85x faster | 102.1x fewer bytes | Compose bounded range readers instead of rebuilding the complete object. |
+| `BenchmarkManagerForEachRangeIdentity-8` | 35882 ns/op, 530938 B/op | 2648 ns/op, 5072 B/op | 13.6x faster | 104.7x fewer bytes | Stream subranges through callbacks and keep offsets checked. |
+
+This is the clearest recent Foundation gain. The old shape treated range access
+like "copy a payload and then read it." The new shape treats range access as
+"validate checked offsets, borrow immutable slices/readers, and stream only the
+requested span." That is the same principle Rust, Go, and TypeScript should all
+propagate into scaffolded apps: views for hot synchronous reads, ownership only
+when data must outlive the source, and checked arithmetic at every length/offset
+boundary.
+
+### Runtime SDK, browser, and native payload lanes
+
+| Benchmark | Result | Meaning |
+| --- | ---: | --- |
+| `BenchmarkBufferInputBytesView1KB-8` | 3.109 ns/op, 0 B/op, 0 allocs/op | Go runtime buffer borrowed input view. |
+| `BenchmarkBufferInputBytesOwned1KB-8` | 143.4 ns/op, 1024 B/op, 1 alloc/op | Owned input copy. |
+| `BenchmarkBufferOutputBytesView2KB-8` | 3.214 ns/op, 0 B/op, 0 allocs/op | Go runtime buffer borrowed output view. |
+| `BenchmarkBufferOutputBytesOwned2KB-8` | 276.2 ns/op, 2048 B/op, 1 alloc/op | Owned output copy. |
+| `BenchmarkBufferReadFrameInto4KB-8` | 73.68 ns/op, 4 B/op, 1 alloc/op | Read framed data into caller-provided storage. |
+| `BenchmarkBufferReadFrameAllocCopy4KB-8` | 693.6 ns/op, 4100 B/op, 2 allocs/op | Allocating framed read. |
+| `native output_bytes_view borrowed` | 3.93 ns/op | Rust SDK borrowed output view. |
+| `native read_output_bytes_into reused Vec` | 20.06 ns/op | Rust SDK reused output buffer. |
+| `native read_output_bytes owned Vec` | 63.34 ns/op | Rust SDK owned output copy. |
+| `runtime-native TS decode native dispatch response` | 3,296,719 ops/sec | JS/native response frame decode. |
+| `runtime-native TS encode native dispatch frame` | 1,087,686 ops/sec | JS/native request frame encode. |
+| `runtime-transport TS decode identity binary frame` | 4,988,681 ops/sec | Browser/Node identity binary frame decode. |
+
+The runtime lesson is consistent across Go, Rust, and TypeScript: borrowed views
+are the hot path, caller-provided buffers are the next-best path, owned copies
+are the compatibility path. Scaffolded apps should inherit these checks through
+runtime docs and scripts: no unbounded frame lengths, no unchecked offset math,
+no accidental payload cloning in loops, and explicit caps before JS/Rust/Go
+cross-runtime handoff.
+
+### Native descriptor vs full-payload control
+
+| Lane | Payload represented | Mean | p50 | p95 | p99 | Copy model |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `runtime-native dispatch frame` | 4KB | 517.51 ns | 500 ns | 583 ns | 666 ns | Report-only Rust frame encode/decode/echo. |
+| `runtime-native dispatch frame` | 64KB | 6349.09 ns | 6625 ns | 7166 ns | 7625 ns | Linear with payload movement. |
+| `runtime-native dispatch frame` | 1MB | 117019.64 ns | 115708 ns | 134000 ns | 169250 ns | Linear full-payload frame cost. |
+| `descriptor-control` | 4KB external | 332.50-347.03 ns | ~333 ns | ~375 ns | ~417 ns | 96-byte descriptor, zero hot-payload copy. |
+| `descriptor-control` | 64KB external | 326.37-340.00 ns | ~333 ns | ~375 ns | ~417 ns | Constant with represented payload size. |
+| `descriptor-control` | 1MB external | 324.36-340.34 ns | ~333 ns | ~375 ns | ~417 ns | Constant with represented payload size. |
+| `runtime-buffer-in-place` | 1KB input | 137.13-138.91 ns | 125 ns | 167 ns | 209-250 ns | Fixed buffer input view plus bounded output work. |
+
+Native frame dispatch is a useful desktop/mobile control boundary, but it is not
+the highest-performance payload lane. Full-payload native frames copy roughly
+five payload-equivalents in the current simulation, so 1MB frames land in the
+117-189 microsecond range depending on the exact run. Descriptor control remains
+around 325-347 ns because only the control descriptor moves. The Foundation
+runtime principle is therefore strict: camera/audio/GPU/market-data style
+payloads move through descriptors, arenas, packet rings, shared memory, or fixed
+runtime buffers; control frames carry ownership, epoch, schema, and bounds.
+
+### Service-backed live substrate
+
+| Benchmark | ns/op | B/op | allocs/op | Unit | Meaning |
+| --- | ---: | ---: | ---: | --- | --- |
+| `BenchmarkServiceBackedEventLogPublishPending64-8` | 4910472 | 178327 | 1975 | 64 events/op | Claim 64 durable eventlog rows with `FOR UPDATE SKIP LOCKED`, append them to Redis Streams with one pipeline, and mark them published with one token-checked Postgres batch update. |
+| `BenchmarkServiceBackedHermesRebuild512-8` | 3206715 | 1703672 | 19202 | 512 records/op | Rebuild 512 Hermes records from live substrate state. |
+| `BenchmarkServiceBackedHermesApplyBatch512-8` | 899371 | 956955 | 4836 | 512 records/op | Apply 512-record Hermes batch. |
+| `BenchmarkServiceBackedRedisSetGet-8` | 454364 | 888 | 26 | | Two live Redis round trips. |
+| `BenchmarkServiceBackedRedisSet-8` | 223987 | 464 | 13 | | One live Redis `SET`. |
+| `BenchmarkServiceBackedRedisGet-8` | 248782 | 408 | 12 | | One live Redis `GET`. |
+| `BenchmarkServiceBackedRedisSetGetParallel-8` | 117197 | 1006 | 29 | | Parallel Redis set/get under pool concurrency. |
+| `BenchmarkServiceBackedRedisSetManyGetMany64-8` | 766354 | 51521 | 1053 | 64 keys/op | Two 64-key Redis batch phases. |
+| `BenchmarkServiceBackedRedisSetGetMany64-8` | 561730 | 49482 | 793 | 64 keys/op | Combined 64-key pipelined cache lane. |
+| `BenchmarkServiceBackedRedisRawPipelineSetGet64-8` | 636014 | 31768 | 657 | 64 keys/op | Raw go-redis pipeline baseline. |
+| `BenchmarkServiceBackedPostgresUpsert-8` | 286893 | 3063 | 49 | | Full state-store tenant-scoped JSONB upsert. |
+| `BenchmarkServiceBackedPostgresUpsertRawJSON-8` | 309598 | 2201 | 40 | | Byte-preserving raw JSONB upsert path. |
+| `BenchmarkServiceBackedPostgresUpsertParallel-8` | 76576 | 3085 | 49 | | Parallel independent tenant-scoped upserts. |
+| `BenchmarkServiceBackedPostgresSendBatchUpsert64-8` | 3061392 | 73374 | 937 | 64 rows/op | Batched upsert with per-row semantics. |
+| `BenchmarkServiceBackedPostgresCopyFrom64-8` | 698505 | 36700 | 378 | 64 rows/op | `COPY` ingest lane for append/import workloads. |
+
+Live eventlog, Redis, and Postgres rows are in the hundreds of microseconds to
+low milliseconds locally because they cross Docker, socket, and database
+boundaries. That is expected and industry-normal for localhost service-backed
+tests. The Foundation rule is not to wish these into nanoseconds; it is to
+batch, pipeline, pool, cap acquire waits, keep query budgets explicit, and use
+local memory harnesses for fast contract regression before paying
+service-backed costs. The eventlog row is the durable fact-lane expression of
+that rule: claim pending Postgres bytea envelopes with a lease, pipeline Redis
+`XADD`, then batch the token-checked published-state update instead of doing
+one full Postgres/Redis/Postgres cycle per event. The claim lease moved the
+64-event local service-backed benchmark from 2.97ms to 4.91ms per batch
+(roughly 46us/event to 77us/event) while keeping allocation shape essentially
+flat. That is an intentional safety trade: multi-drainer duplicate prevention
+is now part of the measured live substrate contract.
+
+### Delta from the prior history run
+
+Compared with `benchmark-results/foundation_bench_20260529T130319Z.tsv`, the
+largest architectural improvements in the broad ledger were:
+
+| Benchmark | Previous | Current | Gain | Note |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit-8` | 35861 ns/op | 16836 ns/op | 2.13x | Dense tenant read path benefits from the indexed/limited shape. |
+| `can dispatch write via admin fallback` | ~200 ns | ~100 ns | 2.00x | TypeScript capability fallback check got cheaper in this run. |
+| `webgpu fake dispatch resident-to-resident 4KB x1` | ~1700 ns | ~1100 ns | 1.55x | CPU-side WebGPU helper path improved/noise-favored. |
+| `decode protobuf envelope bytes` | ~1900 ns | ~1600 ns | 1.19x | Runtime-transport TS protobuf decode improved. |
+| `packet-ring enqueue/dequeue/complete/release x128` | ~51400 ns | ~43900 ns | 1.17x | Browser packet-ring batch lifecycle improved. |
+
+Several service-backed rows moved slower by 5-20% against the prior Docker run,
+while allocations stayed effectively unchanged. Treat those as environment and
+service jitter unless they repeat across multiple runs. The important current
+signal is that structural allocation shape stayed stable, `COPY` remains much
+cheaper than semantic batch upsert per row, raw/pipelined Redis remains the
+right multi-key lane, and the local in-process/runtime improvements are orders
+of magnitude below networked service boundaries.
+
+## Historical reference run (2026-05-01)
 
 Environment:
 
@@ -115,7 +330,7 @@ Environment:
 | `BenchmarkDispatchFrameOverBufconn` | 22227 | 11034 | 183 | Binary frame over in-memory gRPC |
 | `BenchmarkDispatchOverBufconn` | 27218 | 12690 | 213 | JSON envelope over in-memory gRPC |
 
-## Latest Local Check
+## Historical local check (2026-05-05)
 
 Environment:
 
@@ -383,7 +598,7 @@ Broadcast strategy check:
 
 Interpretation: 1M local scale is not breaking the foundation data structures, but the API and container choice matters. Use `ResolveTargetsInto` only when the caller needs an owned/stable target list. Use adaptive `ForEachTargetBatch` for broadcast fanout so the router hands write queues borrowed chunks instead of copying a huge slice or invoking a million callbacks. Event wildcards should be exact or colon-prefix shaped for product traffic; complex wildcard patterns remain compatibility/observability tools. Returning 50 DB records allocates because public records are defensive copies. Dense tenant reads must stop at indexed `LIMIT`, not sort broad state. Broadcast to 1M live sockets is still a product-level write-pressure problem: it requires bounded per-connection queues, slow-client shedding, and node-level fanout budgets.
 
-### Latest App-Lane Check
+### Historical app-lane check
 
 | Benchmark | ns/op | B/op | allocs/op | Role |
 | --- | ---: | ---: | ---: | --- |
@@ -401,7 +616,7 @@ Interpretation: 1M local scale is not breaking the foundation data structures, b
 
 These app-lane results explain the practical architecture boundary: the foundation communication core remains far cheaper than real HTTP auth, route building, worker rejection, or domain persistence logic. Optimize product code by keeping hot internal calls on direct/binary lanes, then budgeting auth, DB, worker, and cache costs explicitly.
 
-### Latest Foundation Hardening Pass
+### Historical foundation hardening pass
 
 After reducing avoidable allocations in JWT bearer parsing, HTTP path parameter extraction, and worker job normalization:
 

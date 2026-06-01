@@ -1,4 +1,4 @@
-.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust test-service-backed test-bench test-bench-go test-bench-native-rust test-bench-history lint verify docker-up docker-down migrate-up help \
+.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-bench test-bench-go test-bench-native-rust test-bench-history lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator \
 	check-contract-drift check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage
@@ -86,6 +86,9 @@ test-native-rust:
 	@echo "Running runtime-native Rust tests..."
 	@cargo test --manifest-path runtime-native/rust/Cargo.toml
 
+check-rust:
+	@scripts/check-rust.sh .
+
 test-bench: test-bench-go test-bench-native-rust
 
 test-bench-history:
@@ -93,7 +96,8 @@ test-bench-history:
 
 test-bench-go:
 	@echo "Running bounded Foundation benchmarks..."
-	@cd server-kit/go && go test -run=^$$ -bench='Benchmark(MemoryStore|Manager)' -benchmem -benchtime=100000000ns -count=1 ./objectstore ./bulk
+	@mkdir -p "$(FOUNDATION_GO_CACHE_DIR)"
+	@cd server-kit/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -run=^$$ -bench='Benchmark(MemoryStore|Manager)' -benchmem -benchtime=100000000ns -count=1 ./objectstore ./bulk
 
 test-bench-native-rust:
 	@echo "Running native GPU/runtime Rust benchmark simulation..."
@@ -159,7 +163,7 @@ check-testing-practices:
 	@tooling/scripts/testing_practices_check.sh .
 
 check-go-concurrency-practices:
-	@tooling/scripts/go_concurrency_practices_check.sh .
+	@bash tooling/scripts/go_concurrency_practices_check.sh .
 
 check-logging-practices:
 	@tooling/scripts/logging_practices_check.sh .
@@ -216,6 +220,7 @@ help:
 	@echo "  make delivery-metrics    Emit a local DORA/incident collection event"
 	@echo "  make test                Run Go, TS, and Rust tests"
 	@echo "  make test-rust           Run runtime-sdk and runtime-native Rust tests"
+	@echo "  make check-rust          Run Rust fmt, clippy, practice checks, and tests"
 	@echo "  make test-bench          Run bounded local Foundation benchmarks"
 	@echo "  make test-bench-native-rust  Run native GPU/runtime Rust benchmark simulation"
 	@echo "  make lint                Run foundation scaffold/practice checks"

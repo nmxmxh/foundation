@@ -19,7 +19,13 @@ pub fn validate_buffer_size(size: usize) -> Result<(), String> {
 }
 
 pub fn validate_region(offset: u32, length: u32, capacity: usize) -> Result<(), String> {
-    let end = offset as usize + length as usize;
+    let start = offset as usize;
+    let end = start.checked_add(length as usize).ok_or_else(|| {
+        format!(
+            "runtime region offset overflow: {} + {} exceeds addressable space",
+            offset, length
+        )
+    })?;
     if end > capacity {
         return Err(format!(
             "runtime region out of bounds: {} + {} > {}",

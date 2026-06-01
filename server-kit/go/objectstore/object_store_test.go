@@ -120,6 +120,9 @@ func TestStreamRangeAndDeleteValidation(t *testing.T) {
 	if _, _, err := store.GetRange(ctx, "k", 0, 0); err == nil {
 		t.Fatal("expected zero range length to fail")
 	}
+	if _, _, err := store.GetRange(ctx, "k", maxInt64, 2); err == nil {
+		t.Fatal("expected overflowing range to fail")
+	}
 	if err := (*Store)(nil).Delete(ctx, "k"); err == nil {
 		t.Fatal("expected nil Delete to fail")
 	}

@@ -95,6 +95,9 @@ CREATE TABLE IF NOT EXISTS foundation_event_log (
     published_at TIMESTAMPTZ,
     publish_attempts INTEGER NOT NULL DEFAULT 0,
     last_publish_error TEXT,
+    publish_claim_token TEXT,
+    publish_claimed_at TIMESTAMPTZ,
+    publish_claim_expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT foundation_event_log_event_unique UNIQUE (event_id),
@@ -112,6 +115,9 @@ COMMENT ON TABLE foundation_event_log
 
 CREATE INDEX IF NOT EXISTS idx_foundation_event_log_pending
     ON foundation_event_log (id)
+    WHERE published_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_foundation_event_log_claim
+    ON foundation_event_log (publish_claim_expires_at, id)
     WHERE published_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_foundation_event_log_org_time
     ON foundation_event_log (organization_id, occurred_at DESC, id DESC);

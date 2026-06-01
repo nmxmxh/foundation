@@ -225,10 +225,18 @@ foundation/runtime-sdk/
 
 `native/` contains the Tauri shell. It points to the existing `frontend/` Vite dev server in development and `frontend/dist` for production builds.
 
+Scaffolded applications also receive Rust checks in `scripts/checks/`:
+`check-rust.sh`, `rust_static_analysis_check.sh`, and
+`rust_runtime_practices_check.sh`. The generated Makefile exposes
+`make check-rust`, and `lint-foundation` runs the Rust static/runtime-practice
+checks against app-owned `rust/`, `native/src-tauri/`, and vendored
+`foundation/runtime-*` manifests when those lanes exist.
+
 ## Commands
 
 ```bash
 make test-rust
+make check-rust
 make test-bench-native-rust
 make check-rust-runtime-practices
 
@@ -240,10 +248,12 @@ make native-doctor
 ```
 
 In Foundation Core, `make test-rust` runs the `runtime-sdk/rust` workspace and
-`runtime-native/rust` tests. `make check-rust-runtime-practices` verifies the
-safe Rust boundary, native GPU private-handle test coverage, and benchmark
-evidence hooks. `make test-bench-native-rust` runs the bounded native flow
-simulation and reports nanosecond timings for descriptor, registry, opaque
+`runtime-native/rust` tests. `make check-rust` runs Rust fmt, Clippy with unsafe
+documentation lints, runtime-practice checks, and Rust tests for discovered
+manifests. `make check-rust-runtime-practices` verifies the safe Rust boundary,
+native GPU private-handle test coverage, bounded frame/worker behavior, and
+benchmark evidence hooks. `make test-bench-native-rust` runs the bounded native
+flow simulation and reports nanosecond timings for descriptor, registry, opaque
 plugin, and fd-backed lifecycle paths.
 
 Generated app `native-bench` targets are report-only until three stable

@@ -71,7 +71,8 @@ Rules:
 13. The Foundation memory Redis driver is a contract test double, not a production store. It should preserve Redis-like semantics for copied values, TTLs, locks, streams, and pub/sub patterns so tests catch drift, but production throughput claims still require service-backed Redis benchmarks.
 14. Redis clients should be initialized through `ConnectWithOptions` so pool size, min-idle, retry, shard URL, dial, read, and write budgets are inherited from config instead of being silently discarded.
 15. Use `redis.BatchClient` for multi-key cache hydration and write-through paths. `SetMany`, `GetMany`, and `SetGetMany` keep app code on Foundation boundaries while still using Redis pipelining underneath.
-16. Do not benchmark a busy loop of sequential single-key calls as the target shape. Measure it as a baseline, then compare parallel, pipelined, and batch-per-key costs.
+16. Use `redis.StreamBatchClient.XAddMany` for durable event relay bursts. Eventlog/outbox drains must claim pending Postgres rows with a bounded lease before Redis publication, pipeline Redis Stream appends, then batch the token-checked durable published-state update in Postgres while preserving per-entry success/failure diagnostics.
+17. Do not benchmark a busy loop of sequential single-key calls as the target shape. Measure it as a baseline, then compare parallel, pipelined, and batch-per-key costs.
 
 ## Concurrency and scale controls
 

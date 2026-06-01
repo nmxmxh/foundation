@@ -114,7 +114,7 @@ set -e
           if ($(i+1) == "ns/op") ns=$i
           if ($(i+1) == "B/op") bytes=$i
           if ($(i+1) == "allocs/op") allocs=$i
-          if ($(i+1) ~ /(keys|rows|records)\/op/) unit=$i " " $(i+1)
+          if ($(i+1) ~ /(keys|rows|records|events)\/op/) unit=$i " " $(i+1)
         }
         if (ns != "") {
           printf "%s\t%s\t%s\t%s\t%s\tservice-backed\n", bench, ns, bytes, allocs, unit

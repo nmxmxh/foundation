@@ -77,6 +77,8 @@ pub fn create_mock_buffer(_size: usize) -> u32 {
 
 pub fn get_byte_length(handle: u32) -> u32 {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: The JS host owns the handle table and this import reads only the
+    // byte length associated with the handle.
     unsafe {
         ovrt_get_byte_length(handle)
     }
@@ -94,6 +96,7 @@ pub fn get_byte_length(handle: u32) -> u32 {
 
 pub fn copy_to_buffer(handle: u32, target_offset: u32, src: &[u8]) {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: `src` is a live Rust slice for the duration of the host copy call.
     unsafe {
         ovrt_copy_to_buffer(handle, target_offset, src.as_ptr(), src.len() as u32);
     }
@@ -114,6 +117,8 @@ pub fn copy_to_buffer(handle: u32, target_offset: u32, src: &[u8]) {
 
 pub fn copy_from_buffer(handle: u32, src_offset: u32, dest: &mut [u8]) {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: `dest` is a live writable Rust slice for the duration of the host
+    // copy call.
     unsafe {
         ovrt_copy_from_buffer(handle, src_offset, dest.as_mut_ptr(), dest.len() as u32);
     }
@@ -134,6 +139,8 @@ pub fn copy_from_buffer(handle: u32, src_offset: u32, dest: &mut [u8]) {
 
 pub fn atomic_load(handle: u32, index: u32) -> i32 {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: The JS host validates the shared control-buffer handle and atomic
+    // index before loading.
     unsafe {
         ovrt_atomic_load(handle, index)
     }
@@ -151,6 +158,8 @@ pub fn atomic_load(handle: u32, index: u32) -> i32 {
 
 pub fn atomic_store(handle: u32, index: u32, value: i32) -> i32 {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: The JS host validates the shared control-buffer handle and atomic
+    // index before storing.
     unsafe {
         ovrt_atomic_store(handle, index, value)
     }
@@ -174,6 +183,8 @@ pub fn atomic_store(handle: u32, index: u32, value: i32) -> i32 {
 
 pub fn atomic_add(handle: u32, index: u32, delta: i32) -> i32 {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: The JS host validates the shared control-buffer handle and atomic
+    // index before applying the atomic add.
     unsafe {
         ovrt_atomic_add(handle, index, delta)
     }
@@ -198,6 +209,8 @@ pub fn atomic_add(handle: u32, index: u32, delta: i32) -> i32 {
 
 pub fn atomic_compare_exchange(handle: u32, index: u32, expected: i32, replacement: i32) -> i32 {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: The JS host validates the shared control-buffer handle and atomic
+    // index before applying the compare-exchange.
     unsafe {
         ovrt_atomic_compare_exchange(handle, index, expected, replacement)
     }
@@ -223,6 +236,8 @@ pub fn atomic_compare_exchange(handle: u32, index: u32, expected: i32, replaceme
 
 pub fn atomic_notify(handle: u32, index: u32, count: i32) -> i32 {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: The JS host validates the shared control-buffer handle and atomic
+    // index before notifying waiters.
     unsafe {
         ovrt_atomic_notify(handle, index, count)
     }
@@ -236,6 +251,8 @@ pub fn atomic_notify(handle: u32, index: u32, count: i32) -> i32 {
 
 pub fn console_log(message: &str, level: u8) {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: `message` is a live Rust string slice for the duration of the host
+    // log call.
     unsafe {
         ovrt_log(message.as_ptr(), message.len() as u32, level);
     }
@@ -254,6 +271,8 @@ pub fn console_log(message: &str, level: u8) {
 
 pub fn get_now() -> f64 {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: This import reads host monotonic time and has no Rust-side memory
+    // contract.
     unsafe {
         ovrt_get_now()
     }
@@ -269,6 +288,8 @@ pub fn get_now() -> f64 {
 
 pub fn fill_random(bytes: &mut [u8]) {
     #[cfg(target_arch = "wasm32")]
+    // SAFETY: `bytes` is a live writable Rust slice for the duration of the host
+    // fill call.
     unsafe {
         ovrt_fill_random(bytes.as_mut_ptr(), bytes.len() as u32);
     }

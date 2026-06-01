@@ -102,12 +102,16 @@ check_module "wsrouting" "wsrouting/wsrouting.go" "wsrouting/wsrouting_test.go"
 check_file_contains "database exposes atomic executor lane" "$kit/database/executor.go" "AtomicLane"
 check_file_contains "database exposes pool lane budgets" "$kit/database/database.go" "DefaultPoolOptionsFor"
 check_file_contains "redis exposes batch client" "$kit/redis/client.go" "SetGetMany"
+check_file_contains "redis exposes stream batch append client" "$kit/redis/client.go" "XAddMany"
 check_file_contains "metadata exposes context map merge" "$kit/metadata/metadata.go" "FromContextMap"
 check_file_contains "logger exposes Foundation logger interface" "$kit/logger/logger.go" "type Logger interface"
 check_file_contains "intelligence observer is non-blocking" "$kit/intelligence/intelligence.go" "ObserveIntelligence(context.Background()"
 check_file_contains "Hermes wraps runtime store" "$kit/hermes/state_store.go" "ProjectedRuntimeStore"
 check_file_contains "Hermes exposes trusted snapshot bulk load" "$kit/hermes/store.go" "func (s *Store) BulkLoad"
 check_file_contains "eventlog has append-only contract" "$kit/eventlog/eventlog.go" "Append"
+check_file_contains "eventlog batches pending stream publication" "$kit/eventlog/eventlog.go" "publishPendingBatch"
+check_file_contains "eventlog claims pending publication leases" "$kit/eventlog/eventlog.go" "FOR UPDATE SKIP LOCKED"
+check_file_contains "eventlog detects lost publish claims" "$kit/eventlog/eventlog.go" "ErrPublishClaimLost"
 
 check_no_match "server-kit avoids raw process exits in library code" "\\bos\\.Exit\\s*\\(" "$kit" --glob '*.go' --glob '!**/*test.go'
 check_no_match "server-kit avoids stdlib log package outside logger module" "\"log\"|\"log/slog\"" "$kit" --glob '*.go' --glob '!**/logger/**' --glob '!**/*test.go'

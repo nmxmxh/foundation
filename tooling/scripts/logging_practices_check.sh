@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/usr/bin/env bash
 set -euo pipefail
 
 target="${1:-.}"
@@ -63,15 +63,19 @@ check_any_file_contains() {
   local pattern="$2"
   shift 2
   local roots=("$@")
-  local output=""
+  local matched=1
   if [[ "${#roots[@]}" -gt 0 ]]; then
     if command -v rg >/dev/null 2>&1; then
-      output="$(rg -n "$pattern" "${roots[@]}" --glob '*.go' 2>/dev/null || true)"
+      if rg -q "$pattern" "${roots[@]}" --glob '*.go' 2>/dev/null; then
+        matched=0
+      fi
     else
-      output="$(grep -R -n -E --include='*.go' "$pattern" "${roots[@]}" 2>/dev/null || true)"
+      if grep -R -q -E --include='*.go' "$pattern" "${roots[@]}" 2>/dev/null; then
+        matched=0
+      fi
     fi
   fi
-  if [[ -n "$output" ]]; then
+  if [[ "$matched" -eq 0 ]]; then
     echo "[OK] $label"
   else
     echo "[FAIL] $label"
@@ -90,9 +94,9 @@ check_no_match() {
     return
   fi
 
-  local output
+  local matched=1
   if command -v rg >/dev/null 2>&1; then
-    output="$(rg -n "$pattern" "${roots[@]}" \
+    if rg -q "$pattern" "${roots[@]}" \
       --glob '*.go' \
       --glob '!**/foundation/**' \
       --glob '!**/server-kit/go/logger/**' \
@@ -100,14 +104,34 @@ check_no_match() {
       --glob '!**/generated/**' \
       --glob '!**/testdata/**' \
       --glob '!**/.cache/**' \
-      --glob '!**/vendor/**' 2>/dev/null || true)"
+      --glob '!**/vendor/**' 2>/dev/null; then
+      matched=0
+    fi
   else
-    output="$(grep -R -n -E --include='*.go' "$pattern" "${roots[@]}" 2>/dev/null \
-      | grep -Ev '/foundation/|/server-kit/go/logger/|_test[.]go:|/generated/|/testdata/|/[.]cache/|/vendor/' || true)"
+    local tmp_probe
+    tmp_probe="$(mktemp "${TMPDIR:-/tmp}/ovasabi_logging_probe.XXXXXX")"
+    grep -R -n -E --include='*.go' "$pattern" "${roots[@]}" 2>/dev/null \
+      | grep -Ev '/foundation/|/server-kit/go/logger/|_test[.]go:|/generated/|/testdata/|/[.]cache/|/vendor/' >"$tmp_probe" || true
+    [[ -s "$tmp_probe" ]] && matched=0
+    rm -f "$tmp_probe"
   fi
-  if [[ -n "$output" ]]; then
+  if [[ "$matched" -eq 0 ]]; then
     echo "[FAIL] $label"
-    echo "$output" | sed 's/^/  /' | head -60
+    if command -v rg >/dev/null 2>&1; then
+      rg -n -m 60 "$pattern" "${roots[@]}" \
+        --glob '*.go' \
+        --glob '!**/foundation/**' \
+        --glob '!**/server-kit/go/logger/**' \
+        --glob '!**/*test.go' \
+        --glob '!**/generated/**' \
+        --glob '!**/testdata/**' \
+        --glob '!**/.cache/**' \
+        --glob '!**/vendor/**' 2>/dev/null | sed -n '1,60p' | sed 's/^/  /' || true
+    else
+      grep -R -n -E --include='*.go' "$pattern" "${roots[@]}" 2>/dev/null \
+        | grep -Ev '/foundation/|/server-kit/go/logger/|_test[.]go:|/generated/|/testdata/|/[.]cache/|/vendor/' \
+        | sed -n '1,60p' | sed 's/^/  /' || true
+    fi
     failed=1
   else
     echo "[OK] $label"

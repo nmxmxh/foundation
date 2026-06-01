@@ -381,6 +381,7 @@ func TestAcceptPartValidationAndStateBoundaries(t *testing.T) {
 		{"negative part", PartDescriptor{PartNumber: -1, Size: 1, ExpectedRawSHA256: shaHex("a")}, strings.NewReader("a"), apperrors.CodeValidation},
 		{"negative offset", PartDescriptor{PartNumber: 0, Offset: -1, Size: 1, ExpectedRawSHA256: shaHex("a")}, strings.NewReader("a"), apperrors.CodeValidation},
 		{"negative size", PartDescriptor{PartNumber: 0, Size: -1, ExpectedRawSHA256: shaHex("a")}, strings.NewReader("a"), apperrors.CodeValidation},
+		{"offset overflow", PartDescriptor{PartNumber: 0, Offset: maxInt64, Size: 1, ExpectedRawSHA256: shaHex("a")}, strings.NewReader("a"), apperrors.CodeValidation},
 		{"exceeds total", PartDescriptor{PartNumber: 0, Offset: 3, Size: 2, ExpectedRawSHA256: shaHex("ab")}, strings.NewReader("ab"), apperrors.CodeValidation},
 		{"missing hash", PartDescriptor{PartNumber: 0, Size: 1}, strings.NewReader("a"), apperrors.CodeValidation},
 		{"bad hash", PartDescriptor{PartNumber: 0, Size: 1, ExpectedRawSHA256: "not-a-hash"}, strings.NewReader("a"), apperrors.CodeValidation},
@@ -484,6 +485,12 @@ func TestCompleteAndOpenRangeBoundaryFailures(t *testing.T) {
 	r1 := acceptTestPart(t, mgr, ctx, rangePlan.TransferID, 1, 2, "cd")
 	if _, err := mgr.Complete(ctx, rangePlan.TransferID, CompleteRequest{ExpectedRootSHA256: manifestRoot([]PartReceipt{r0, r1})}); err != nil {
 		t.Fatalf("range Complete() error = %v", err)
+	}
+	if _, _, err := mgr.OpenRange(ctx, rangePlan.TransferID, maxInt64, 1); !apperrors.Is(err, apperrors.CodeValidation) {
+		t.Fatalf("overflow OpenRange() error = %v", err)
+	}
+	if _, err := mgr.ForEachRange(ctx, rangePlan.TransferID, maxInt64, 1, func(RangePart) error { return nil }); !apperrors.Is(err, apperrors.CodeValidation) {
+		t.Fatalf("overflow ForEachRange() error = %v", err)
 	}
 	reader, desc, err := mgr.OpenRange(ctx, rangePlan.TransferID, 2, 2)
 	if err != nil {

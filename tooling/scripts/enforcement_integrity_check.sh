@@ -29,6 +29,7 @@ hash_file() {
 default_paths() {
   printf '%s\n' \
     Makefile \
+    scripts/check-rust.sh \
     scripts/lib/scaffold.sh \
     tooling/foundation_ownership.tsv \
     templates/Makefile \

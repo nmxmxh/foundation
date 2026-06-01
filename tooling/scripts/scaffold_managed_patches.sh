@@ -109,6 +109,40 @@ COPY foundation/runtime-native/ts ./foundation/runtime-native/ts'
   fi
 }
 
+patch_native_tauri_startup_expect() {
+  local file="$target/native/src-tauri/src/lib.rs"
+  [[ -f "$file" ]] || return 0
+
+  local search='    tauri::Builder::default()
+        .manage(NativeState::new())
+        .invoke_handler(tauri::generate_handler![
+            foundation_runtime_dispatch,
+            foundation_runtime_capabilities,
+            foundation_secure_store_get,
+            foundation_secure_store_put,
+            foundation_secure_store_delete
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running Tauri application");'
+
+  local replace='    let result = tauri::Builder::default()
+        .manage(NativeState::new())
+        .invoke_handler(tauri::generate_handler![
+            foundation_runtime_dispatch,
+            foundation_runtime_capabilities,
+            foundation_secure_store_get,
+            foundation_secure_store_put,
+            foundation_secure_store_delete
+        ])
+        .run(tauri::generate_context!());
+
+    if let Err(error) = result {
+        eprintln!("tauri runtime failed: {error}");
+    }'
+
+  PATCH_SEARCH="$search" PATCH_REPLACE="$replace" replace_in_file "$file" "$search" "$replace" "native Tauri startup avoids expect"
+}
+
 patch_go_dependency_manifests() {
   local file="$target/Dockerfile"
   [[ -f "$file" ]] || return 0
@@ -173,6 +207,39 @@ patch_foundation_event_log_trigger_function() {
 
     perl -0pi -e 's/-- Foundation durable event log/CREATE OR REPLACE FUNCTION update_updated_at_column()\nRETURNS TRIGGER AS \$\$\nBEGIN\n    NEW.updated_at = NOW();\n    RETURN NEW;\nEND;\n\$\$ LANGUAGE plpgsql;\n\n-- Foundation durable event log/' "$migration"
     log_patch "Foundation event log trigger function: ${migration#$target/}"
+  done < <(find "$target/migrations" -maxdepth 1 -type f -name '*.up.sql' 2>/dev/null | sort)
+}
+
+patch_foundation_event_log_publish_claim_schema() {
+  local migration
+
+  while IFS= read -r migration; do
+    if ! grep -Fq "CREATE TABLE IF NOT EXISTS foundation_event_log" "$migration"; then
+      continue
+    fi
+    if grep -Fq "publish_claim_expires_at" "$migration"; then
+      continue
+    fi
+
+    PATCH_SEARCH='    last_publish_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),'
+    PATCH_REPLACE='    last_publish_error TEXT,
+    publish_claim_token TEXT,
+    publish_claimed_at TIMESTAMPTZ,
+    publish_claim_expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),'
+    replace_in_file "$migration" "$PATCH_SEARCH" "$PATCH_REPLACE" "Foundation event log publish claim columns"
+
+    PATCH_SEARCH='CREATE INDEX IF NOT EXISTS idx_foundation_event_log_pending
+    ON foundation_event_log (id)
+    WHERE published_at IS NULL;'
+    PATCH_REPLACE='CREATE INDEX IF NOT EXISTS idx_foundation_event_log_pending
+    ON foundation_event_log (id)
+    WHERE published_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_foundation_event_log_claim
+    ON foundation_event_log (publish_claim_expires_at, id)
+    WHERE published_at IS NULL;'
+    replace_in_file "$migration" "$PATCH_SEARCH" "$PATCH_REPLACE" "Foundation event log publish claim index"
   done < <(find "$target/migrations" -maxdepth 1 -type f -name '*.up.sql' 2>/dev/null | sort)
 }
 
@@ -258,9 +325,11 @@ patch_compose_targets "$target/docker-compose.dev.yml"
 patch_compose_targets "$target/docker-compose.test.yml"
 patch_reframe_frontend_dockerfile
 patch_runtime_native_dockerfile
+patch_native_tauri_startup_expect
 patch_go_dependency_manifests
 patch_server_binary_path
 patch_foundation_event_log_trigger_function
+patch_foundation_event_log_publish_claim_schema
 patch_test_postgres_platform
 patch_test_compose_ephemeral_ports
 sync_go_work

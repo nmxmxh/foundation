@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
+use std::time::Duration;
 
 use ovrt_core::{RuntimeDiagnostics, RuntimeMode, RuntimeRole};
 use ovrt_unit::{RuntimeUnit, UnitRegistry};
@@ -21,6 +22,7 @@ pub use stdio::{
 };
 
 type TaskResult = Result<Vec<u8>, String>;
+const DEFAULT_DISPATCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct Task {
     unit_id: String,
@@ -33,6 +35,7 @@ pub struct NativeRuntimeHost {
     diagnostics: Arc<RwLock<RuntimeDiagnostics>>,
     senders: BTreeMap<RuntimeRole, Sender<Task>>,
     in_flight: Arc<AtomicU32>,
+    dispatch_timeout: Duration,
 }
 
 impl NativeRuntimeHost {
@@ -44,16 +47,18 @@ impl NativeRuntimeHost {
         }));
         let in_flight = Arc::new(AtomicU32::new(0));
         let mut senders = BTreeMap::new();
+        let mut startup_errors = Vec::new();
 
         for (role, workers) in role_limits {
             let (sender, receiver) = mpsc::channel::<Task>();
             let shared_receiver = Arc::new(Mutex::new(receiver));
+            let mut spawned_workers = 0;
             for worker_index in 0..workers.max(1) {
                 let worker_registry = registry.clone();
                 let worker_receiver = Arc::clone(&shared_receiver);
                 let worker_diagnostics = Arc::clone(&diagnostics);
                 let worker_in_flight = Arc::clone(&in_flight);
-                let _ = thread::Builder::new()
+                match thread::Builder::new()
                     .name(format!("ovrt-native-{role}-{worker_index}"))
                     .spawn(move || {
                         worker_loop(
@@ -62,9 +67,30 @@ impl NativeRuntimeHost {
                             worker_diagnostics,
                             worker_in_flight,
                         );
-                    });
+                    }) {
+                    Ok(_) => {
+                        spawned_workers += 1;
+                    }
+                    Err(error) => {
+                        startup_errors.push(format!(
+                            "spawn native runtime worker {role}/{worker_index}: {error}"
+                        ));
+                    }
+                }
             }
-            senders.insert(role, sender);
+            if spawned_workers > 0 {
+                senders.insert(role, sender);
+            } else {
+                startup_errors.push(format!("native runtime role {role} has no workers"));
+            }
+        }
+
+        if !startup_errors.is_empty() {
+            if let Ok(mut guard) = diagnostics.write() {
+                guard.degraded = true;
+                guard.last_error = Some(startup_errors.join("; "));
+                guard.last_runtime_source = "native-startup-error".to_string();
+            }
         }
 
         Self {
@@ -72,7 +98,13 @@ impl NativeRuntimeHost {
             diagnostics,
             senders,
             in_flight,
+            dispatch_timeout: DEFAULT_DISPATCH_TIMEOUT,
         }
+    }
+
+    pub fn with_dispatch_timeout(mut self, dispatch_timeout: Duration) -> Self {
+        self.dispatch_timeout = dispatch_timeout;
+        self
     }
 
     pub fn register_unit(&self, unit: Arc<dyn RuntimeUnit>) -> Result<(), String> {
@@ -109,9 +141,24 @@ impl NativeRuntimeHost {
             })
             .map_err(|_| "native runtime queue is unavailable".to_string())?;
 
-        let result = response
-            .recv()
-            .map_err(|_| "native runtime worker stopped unexpectedly".to_string())?;
+        let result = match response.recv_timeout(self.dispatch_timeout) {
+            Ok(result) => result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let error = format!(
+                    "native runtime dispatch timed out after {:?}",
+                    self.dispatch_timeout
+                );
+                in_flight.finish();
+                self.record_dispatch_failure("native-timeout", &error);
+                return Err(error);
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let error = "native runtime worker stopped unexpectedly".to_string();
+                in_flight.finish();
+                self.record_dispatch_failure("native-disconnected", &error);
+                return Err(error);
+            }
+        };
         in_flight.finish();
 
         let mut guard = self
@@ -172,6 +219,15 @@ impl NativeRuntimeHost {
             .read()
             .map_err(|_| "runtime diagnostics lock poisoned".to_string())?;
         Ok(guard.clone())
+    }
+
+    fn record_dispatch_failure(&self, source: &str, error: &str) {
+        if let Ok(mut guard) = self.diagnostics.write() {
+            guard.in_flight = self.in_flight.load(Ordering::SeqCst);
+            guard.degraded = true;
+            guard.last_error = Some(error.to_string());
+            guard.last_runtime_source = source.to_string();
+        }
     }
 }
 
@@ -234,15 +290,15 @@ fn worker_loop(
             Err(error) => Err(error),
         };
 
-        let _ = task.respond_to.send(result.clone());
-
         if let Ok(mut guard) = diagnostics.write() {
             guard.in_flight = in_flight.load(Ordering::SeqCst);
-            if let Err(error) = result {
+            if let Err(error) = &result {
                 guard.degraded = true;
-                guard.last_error = Some(error);
+                guard.last_error = Some(error.clone());
             }
         }
+
+        let _ = task.respond_to.send(result);
     }
 }
 
@@ -361,6 +417,49 @@ mod tests {
             .dispatch("panic.compute", b"boom".to_vec())
             .expect_err("panic must be reported");
         assert!(err.contains("runtime unit panicked"));
+    }
+
+    struct SlowUnit;
+
+    impl RuntimeUnit for SlowUnit {
+        fn descriptor(&self) -> RuntimeUnitDescriptor {
+            RuntimeUnitDescriptor {
+                unit_id: "slow.compute".to_string(),
+                role: RuntimeRole::Compute,
+                input_schema: "common/v1/envelope.capnp".to_string(),
+                output_schema: "common/v1/envelope.capnp".to_string(),
+                supports_wasm: false,
+                supports_native: true,
+                requires_shared_memory: false,
+                supports_gpu: false,
+                max_concurrency: 1,
+            }
+        }
+
+        fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
+            std::thread::sleep(Duration::from_millis(25));
+            Ok(input.to_vec())
+        }
+    }
+
+    #[test]
+    fn dispatch_times_out_instead_of_waiting_unbounded() {
+        let mut role_limits = BTreeMap::new();
+        role_limits.insert(RuntimeRole::Compute, 1);
+
+        let host =
+            NativeRuntimeHost::new(role_limits).with_dispatch_timeout(Duration::from_millis(1));
+        host.register_unit(Arc::new(SlowUnit))
+            .expect("register unit");
+
+        let err = host
+            .dispatch("slow.compute", b"late".to_vec())
+            .expect_err("slow dispatch must time out");
+        assert!(err.contains("timed out"));
+
+        let diagnostics = host.diagnostics().expect("read diagnostics");
+        assert!(diagnostics.degraded);
+        assert_eq!(diagnostics.last_runtime_source, "native-timeout");
     }
 
     #[test]

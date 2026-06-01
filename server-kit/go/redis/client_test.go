@@ -360,6 +360,35 @@ func TestMemoryClientStreamsReadGroupsAreMonotonicAndAckable(t *testing.T) {
 	}
 }
 
+func TestMemoryClientXAddManyOwnsStreamPayloads(t *testing.T) {
+	client := NewMemoryClient("app")
+	batch, ok := client.(StreamBatchClient)
+	if !ok {
+		t.Fatal("memory client should implement StreamBatchClient")
+	}
+	payload := []byte("one")
+	ids, errs := batch.XAddMany(context.Background(), "events", []map[string]any{
+		{"payload": payload},
+		{"payload": []byte("two")},
+	})
+	if len(ids) != 2 || len(errs) != 2 || ids[0] == "" || ids[1] == "" || ids[0] == ids[1] {
+		t.Fatalf("XAddMany ids=%v errs=%v", ids, errs)
+	}
+	for _, err := range errs {
+		if err != nil {
+			t.Fatalf("XAddMany unexpected error: %v", err)
+		}
+	}
+	payload[0] = 'x'
+	messages, err := client.XReadGroup(context.Background(), "events", "workers", "worker-1", 10)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("XReadGroup after XAddMany len=%d err=%v", len(messages), err)
+	}
+	if got := messages[0].Values["payload"].([]byte); string(got) != "one" {
+		t.Fatalf("stream payload was not owned: %q", got)
+	}
+}
+
 func TestConnectAndQualifyHelpers(t *testing.T) {
 	client, err := Connect("", "", "memory")
 	if err != nil || client == nil {

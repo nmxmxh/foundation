@@ -26,8 +26,12 @@ impl<'a> LogRingBuffer<'a> {
     /// `64 + size` bytes long and must not be concurrently freed while this
     /// handle is used.
     pub unsafe fn from_ptr(ptr: *mut u8) -> Self {
-        let size_ptr = ptr.add(8) as *const u32;
-        let size = *size_ptr;
+        // SAFETY: The caller guarantees that `ptr` points to the runtime log-ring
+        // header, where bytes 8..12 contain a valid little-endian u32 size field.
+        let size = unsafe {
+            let size_ptr = ptr.add(8) as *const u32;
+            *size_ptr
+        };
         Self {
             ptr,
             size,
@@ -44,16 +48,22 @@ impl<'a> LogRingBuffer<'a> {
             return; // Message too big for buffer
         }
 
+        // SAFETY: `from_ptr` only constructs this handle for a region whose first
+        // word is the atomic write offset shared with the host.
         let write_offset_atomic = unsafe { &*(self.ptr as *const AtomicU32) };
         let mut write_offset = write_offset_atomic.load(Ordering::Acquire);
 
         // Ensure we have enough space (simple wrap-around)
         if write_offset + total_needed > self.size {
             write_offset = 0;
+            // SAFETY: `from_ptr` requires the wrap counter at bytes 12..16 using
+            // the log-ring control-plane layout.
             let wrap_count_atomic = unsafe { &*(self.ptr.add(12) as *const AtomicU32) };
             wrap_count_atomic.fetch_add(1, Ordering::SeqCst);
         }
 
+        // SAFETY: Bounds above guarantee `write_offset + total_needed <= size`;
+        // the caller-owned region is at least `64 + size` bytes and writable.
         unsafe {
             // Write length (4 bytes, little endian as per TS setUint32(..., true))
             let target_len_ptr = self.ptr.add(write_offset as usize + 64) as *mut u32;

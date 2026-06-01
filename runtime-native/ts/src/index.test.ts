@@ -6,6 +6,7 @@ import {
 } from "@ovasabi/runtime-transport";
 
 import {
+  MAX_NATIVE_FRAME_BYTES,
   NATIVE_CAPABILITIES_COMMAND,
   NATIVE_DISPATCH_COMMAND,
   SECURE_STORE_DELETE_COMMAND,
@@ -210,6 +211,30 @@ describe("runtime native transport", () => {
     new DataView(frame.buffer).setUint32(8, payload.byteLength + 1, false);
 
     expect(() => decodeNativeDispatchResponse(frame)).toThrow("length");
+  });
+
+  it("rejects native response frames with overflowing declared lengths", () => {
+    const frame = buildNativeResponse(new Uint8Array([1, 2, 3]));
+    const view = new DataView(frame.buffer);
+    view.setUint32(8, 0xffffffff, false);
+    view.setUint32(12, 1, false);
+
+    expect(() => decodeNativeDispatchResponse(frame)).toThrow("overflow");
+  });
+
+  it("rejects native frames above the Rust bridge frame limit", () => {
+    expect(() =>
+      encodeNativeDispatchFrame({
+        unitId: "media:process_asset:v1:requested",
+        schemaVersion: "1.0",
+        encoding: 2,
+        payload: new Uint8Array(MAX_NATIVE_FRAME_BYTES),
+      })
+    ).toThrow("limit");
+
+    const oversizedResponse = new Uint8Array(MAX_NATIVE_FRAME_BYTES + 1);
+    oversizedResponse.set(buildNativeResponse(new Uint8Array()), 0);
+    expect(() => decodeNativeDispatchResponse(oversizedResponse)).toThrow("limit");
   });
 });
 

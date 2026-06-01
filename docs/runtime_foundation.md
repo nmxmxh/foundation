@@ -4,7 +4,7 @@ Date: 2026-05-22
 
 This document records the runtime foundation posture for this scaffold.
 
-For the end-to-end command/event/worker/realtime lifecycle, see `foundation/docs/foundation_nervous_system.md`. That document is the canonical substrate contract; this file describes the runtime lanes that must refine it. For the Hermes hotplane research posture, see `foundation/docs/hermes_hotplane.md`. For Go-specific concurrency bug taxonomy and watch points, see `foundation/docs/go_concurrency_bug_practices.md`.
+For the end-to-end command/event/worker/realtime lifecycle, see `foundation/docs/foundation_nervous_system.md`. That document is the canonical substrate contract; this file describes the runtime lanes that must refine it. For the Hermes hotplane research posture, see `foundation/docs/hermes_hotplane.md`. For Go-specific concurrency bug taxonomy and watch points, see `foundation/docs/go_concurrency_bug_practices.md`. For Rust/WASM/native coding, async, performance, and error-handling rules, see `foundation/docs/rust_runtime_practices.md`.
 
 ## Control-plane foundations
 
@@ -23,7 +23,7 @@ For the end-to-end command/event/worker/realtime lifecycle, see `foundation/docs
 The runtime splits observability into two lanes:
 
 1. Operational logs explain behavior to operators. They use the Foundation logger facade, context enrichment, redaction, bounded value sizes, sampling/deduplication, async queues, colorized development output, JSON production output, or compact wire format (`cwf`) when log storage needs fast append/split/index behavior.
-2. Durable event facts describe system truth. They are typed terminal events with correlation metadata and binary Foundation envelopes. The `server-kit/go/eventlog` package persists those envelopes in `foundation_event_log` and republishes pending rows into Redis Streams for short delivery windows. Hermes consumes these facts only after the Postgres/outbox/River/Redis Stream observation is committed; it must never consume arbitrary operational log text.
+2. Durable event facts describe system truth. They are typed terminal events with correlation metadata and binary Foundation envelopes. The `server-kit/go/eventlog` package persists those envelopes in `foundation_event_log` and republishes pending rows into Redis Streams for short delivery windows. Pending eventlog drains first claim rows with a bounded Postgres lease (`FOR UPDATE SKIP LOCKED`, `publish_claim_token`, `publish_claim_expires_at`), then use direct bytea reads, Redis Stream batch append, and token-checked batched published-state updates. This keeps multi-publisher drains from publishing the same pending facts while still amortizing service round trips and preserving per-entry diagnostics. Hermes consumes these facts only after the Postgres/outbox/River/Redis Stream observation is committed; it must never consume arbitrary operational log text.
 
 The expected hot projection flow is:
 
@@ -217,6 +217,12 @@ coordination substrate.
 16. Do not route scalar checks through FFI or WASM just because a Rust implementation exists. The planner must compare boundary cost against work size. Direct Go validation remains the right lane for nanosecond-scale request checks; Rust runtime units are for deterministic batched math, simulations, scoring, and browser/native parity.
 17. Financial runtime units must use integer minor units, checked arithmetic, stable text/binary schemas, and explicit rejection of ambiguous decimal inputs. Float semantics are not permitted for ledger, settlement, fee, or stablecoin accounting paths.
 18. Backend projects that add app Rust compute must include a runtimehost integration test for at least one native lane. FFI is the preferred proof for trusted same-process kernels; stdio is the portability/isolation proof. A Rust crate without a backend runtimehost test is not yet operationally integrated.
+19. Native worker dispatch must use bounded response waits and record timeout diagnostics. Framed stdio and TypeScript/native codecs must reject declared frame lengths before allocating payload memory or creating byte views.
+20. Foundation Rust changes should pass `make check-rust`, which runs fmt,
+    Clippy with unsafe-documentation lints, runtime-practice checks, and Rust
+    tests. Scaffolded applications receive the same scripts under
+    `scripts/checks/`; their `lint-foundation` target checks app-owned `rust/`,
+    `native/src-tauri/`, and vendored `foundation/runtime-*` Rust manifests.
 
 ## Go SIMD posture
 

@@ -36,6 +36,7 @@ The paper is a bug study, but its metrics point to a constructive performance mo
 4. `Short lock plus message outside`: mutate shared state under a short lock, then perform blocking send/receive after unlock. Metrics: mutex/block profile samples, channel send latency, blocked/rejected sends.
 5. `Finite operation chain`: independent I/O steps use `server-kit/go/chain` or equivalent bounded fanout with shared cancellation and per-step diagnostics. Metrics: started, completed, canceled, critical failure, total chain duration.
 6. `Observable shutdown`: long-lived loops record started/stopped workers, cancellation observed, drain duration, and work attempted after cancellation. Metrics: active goroutines, shutdown success/failure, work-after-cancel count.
+7. `Immutable byte handoff`: shared readers may borrow immutable byte slices, but writers must store an owned copy first and all offset/length arithmetic must be checked before slicing. Metrics: range length, bytes served, rejected overflow, borrowed-view API usage.
 
 ### Metric model
 
@@ -117,6 +118,7 @@ Shared-memory practices:
 4. `WaitGroup.Add` must happen before the goroutine can call `Done` and before another goroutine can observe `Wait`. Do not call `Wait` inside the goroutine production loop unless serial execution is explicitly intended.
 5. Goroutine closures must copy loop/request values that can change before execution. Go 1.22+ improves loop-variable semantics, but Foundation code should still pass values explicitly when the value is part of the concurrency contract.
 6. Values passed through channels or stored inside contexts can still point to mutable shared state. Passing a pointer through a channel is not data privatization.
+7. Borrowed slices are safe only when the backing storage is immutable for the full reader lifetime. Object-store, bulk, and native descriptor paths must copy at storage boundaries, then reuse views for bounded synchronous reads.
 
 Message-passing practices:
 

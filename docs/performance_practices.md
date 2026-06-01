@@ -18,6 +18,7 @@ Related docs:
 - `foundation/docs/game_runtime_practices.md`
 - `foundation/docs/go_concurrency_bug_practices.md`
 - `foundation/docs/runtime_foundation.md`
+- `foundation/docs/rust_runtime_practices.md`
 - `foundation/docs/tla_architecture_practices.md`
 - `foundation/docs/websocket_scaling.md`
 
@@ -99,6 +100,8 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 9. Use escape analysis (`go build -gcflags="-m"`) when a hot allocation is unexpected. Avoid contorting code unless the benchmark proves the heap move matters.
 10. For bounded stream copies, use caller-owned buffers or exact-size bounded reads when the size is part of the contract. Avoid accidental scratch allocation in byte loops, and benchmark both the materialized API and any callback/borrowed-view API separately.
 11. For fixed-size checksum and identifier encodings, prefer stack-backed `hex.Encode`/`hex.Decode` into fixed arrays before the final string conversion. Reserve `hex.EncodeToString`/`hex.DecodeString` for cold paths or tests where the extra allocation is irrelevant.
+12. Validate offset/length arithmetic with checked addition before slicing, issuing range reads, composing manifests, or building object-store byte ranges. Integer wraparound in a hot path is both a correctness bug and a potential unbounded allocation trigger.
+13. Return borrowed readers or views for immutable in-memory payloads when the caller consumes them synchronously. Make a defensive copy only when storing caller-provided bytes, exposing mutable data, or allowing the view to outlive the owner.
 
 ### CPU microarchitecture posture
 
@@ -162,9 +165,16 @@ Ovasabi uses a transport ladder. Pick the lowest layer that preserves the requir
 9. Connection lifecycle observability should cover DNS, dial, TLS handshake, protocol negotiation, read/write latency, disconnect cause, and retry path for external dependencies.
 10. Use buffered readers/writers for high-volume stream I/O where it reduces syscalls without delaying latency-sensitive flushes.
 11. Batch small operations across network and storage boundaries when correctness allows it. Preserve per-item diagnostics inside the batch.
+    Eventlog publication is the reference service-backed pattern: fetch pending
+    Postgres bytea envelopes through a bounded claim lease, pipeline Redis
+    Stream `XADD`, and mark published rows with one token-checked Postgres
+    batch update rather than one Postgres/Redis/Postgres cycle per event.
+    Multiple drainers must use the claim path, not a plain pending-row select.
 12. Tune socket options only after profiling shows the need. `TCP_NODELAY`, keepalive, receive/send buffers, backlog, and reuse settings are operational choices, not defaults to cargo-cult.
 13. Optimize TLS with session resumption, ALPN correctness, modern cipher defaults, and cert-chain hygiene. Do not trade away security for small handshake gains.
 14. Treat DNS as a latency source. Use resolver metrics, dialer instrumentation, and explicit caching/pre-resolution only when failure modes are understood.
+15. Keep native and TypeScript frame codecs in parity with Rust frame limits. Encoders must reject payloads whose declared lengths exceed the shared frame budget; decoders must validate declared field lengths against remaining bytes before slicing or creating views.
+16. In TypeScript byte lanes, prefer `subarray` views for same-owner, same-lifetime reads and `slice` copies for retained chunks, worker transfer boundaries, or any path where later mutation would violate the contract.
 
 ## PostgreSQL performance
 
@@ -312,6 +322,20 @@ Rust/WASM/native paths are reserved for compute locality and runtime parity, not
 6. Add `#[inline]` only for small, frequently called functions after measurement or clear compiler-boundary reasoning.
 7. Preserve runtime parity across direct, `ffi`, `stdio`, `shm`, and browser/WASM lanes where the product uses those lanes.
 8. Use PGO only after representative profiles exist. It is a release optimization, not a substitute for better algorithms or boundaries.
+9. Validate lengths before indexing or allocating. Runtime frame readers must reject oversized declarations before allocating payload buffers.
+10. Keep worker waits bounded and observable. A fast lane that can hang is not a valid refinement of the runtime contract.
+11. Treat clone-to-borrow changes as first-class performance fixes: add tests for lifetime/ownership behavior and benchmarks for hot-path payloads.
+12. Use explicit Cargo profile changes only with benchmark evidence. Profile
+    settings are read from the workspace-root `Cargo.toml`, so app-owned Rust
+    and vendored Foundation Rust need the owning workspace to record any
+    `opt-level`, `lto`, `codegen-units`, `panic`, or `overflow-checks` decision.
+13. Clippy's unsafe-documentation lints are part of the performance gate
+    because unchecked pointer assumptions are often introduced during hot-path
+    optimization. Unsafe optimization is not accepted without a local safety
+    invariant and parity tests.
+
+Use `rust_runtime_practices.md` for the detailed Rust runtime checklist and
+`make check-rust` before merging Rust/WASM/native runtime changes.
 
 ### FFI ABI discipline
 

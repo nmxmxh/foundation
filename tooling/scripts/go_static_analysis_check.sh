@@ -37,6 +37,21 @@ discover_go_tool_bins() {
 
 discover_go_tool_bins
 
+ensure_writable_dir_or_tmp() {
+  local candidate="$1"
+  local fallback="$2"
+  if [[ -n "$candidate" ]]; then
+    mkdir -p "$candidate" 2>/dev/null || true
+    if { : >"$candidate/.ovasabi-write-test" } 2>/dev/null; then
+      rm -f "$candidate/.ovasabi-write-test"
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  fi
+  mkdir -p "$fallback"
+  printf '%s\n' "$fallback"
+}
+
 is_truthy() {
   case "${1:-}" in
     1|true|TRUE|yes|YES|on|ON) return 0 ;;
@@ -131,9 +146,9 @@ if (( ${#go_modules[@]} == 0 )); then
   exit 0
 fi
 
-go_cache="${GO_CACHE_DIR:-${TMPDIR:-/tmp}/ovasabi-go-build}"
+go_cache="$(ensure_writable_dir_or_tmp "${GO_CACHE_DIR:-${GOCACHE:-}}" "${TMPDIR:-/tmp}/ovasabi-go-build")"
 go_path="${GO_PATH_DIR:-}"
-analysis_cache="${GO_ANALYSIS_CACHE_DIR:-${TMPDIR:-/tmp}/ovasabi-go-analysis-cache}"
+analysis_cache="$(ensure_writable_dir_or_tmp "${GO_ANALYSIS_CACHE_DIR:-${XDG_CACHE_HOME:-}}" "${TMPDIR:-/tmp}/ovasabi-go-analysis-cache")"
 mkdir -p "$go_cache" "$analysis_cache/staticcheck"
 if [[ -n "$go_path" ]]; then
   mkdir -p "$go_path"

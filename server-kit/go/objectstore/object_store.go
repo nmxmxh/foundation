@@ -21,6 +21,8 @@ import (
 	runtimeconfig "github.com/nmxmxh/ovasabi_foundation/config-contracts/go/runtimeconfig"
 )
 
+const maxInt64 = int64(1<<63 - 1)
+
 type PutOptions struct {
 	ContentType string
 	Metadata    map[string]string
@@ -398,16 +400,15 @@ func (s *Store) Open(ctx context.Context, key string) (io.ReadCloser, Object, er
 		if !ok {
 			return nil, Object{}, fmt.Errorf("object %s not found", key)
 		}
-		payload := append([]byte(nil), blob.payload...)
 		object := Object{
 			Key:         key,
 			Bucket:      s.Bucket,
 			ContentType: blob.contentType,
-			Size:        int64(len(payload)),
+			Size:        int64(len(blob.payload)),
 			URL:         s.ObjectURL(key),
 			Metadata:    cloneMetadata(blob.metadata),
 		}
-		return io.NopCloser(bytes.NewReader(payload)), object, nil
+		return io.NopCloser(bytes.NewReader(blob.payload)), object, nil
 	}
 
 	client, err := s.s3Client()
@@ -434,14 +435,18 @@ func (s *Store) Open(ctx context.Context, key string) (io.ReadCloser, Object, er
 }
 
 func (s *Store) GetRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, Object, error) {
+	if s == nil {
+		return nil, Object{}, fmt.Errorf("object store is required")
+	}
 	if offset < 0 {
 		return nil, Object{}, fmt.Errorf("object range offset must be non-negative")
 	}
 	if length <= 0 {
 		return nil, Object{}, fmt.Errorf("object range length must be positive")
 	}
-	if s == nil {
-		return nil, Object{}, fmt.Errorf("object store is required")
+	rangeEnd, err := checkedRangeEnd(offset, length)
+	if err != nil {
+		return nil, Object{}, err
 	}
 	key = normalizeKey(key)
 	if key == "" {
@@ -457,8 +462,7 @@ func (s *Store) GetRange(ctx context.Context, key string, offset, length int64) 
 		if offset > int64(len(blob.payload)) {
 			return nil, Object{}, fmt.Errorf("object range offset exceeds object size")
 		}
-		end := min(offset+length, int64(len(blob.payload)))
-		payload := append([]byte(nil), blob.payload[offset:end]...)
+		end := min(rangeEnd, int64(len(blob.payload)))
 		object := Object{
 			Key:         key,
 			Bucket:      s.Bucket,
@@ -467,14 +471,14 @@ func (s *Store) GetRange(ctx context.Context, key string, offset, length int64) 
 			URL:         s.ObjectURL(key),
 			Metadata:    cloneMetadata(blob.metadata),
 		}
-		return io.NopCloser(bytes.NewReader(payload)), object, nil
+		return io.NopCloser(bytes.NewReader(blob.payload[offset:end])), object, nil
 	}
 
 	client, err := s.s3Client()
 	if err != nil {
 		return nil, Object{}, err
 	}
-	end := offset + length - 1
+	end := rangeEnd - 1
 	output, err := client.GetObjectWithContext(ctxOrBackground(ctx), &s3.GetObjectInput{
 		Bucket: new(s.Bucket),
 		Key:    new(key),
@@ -493,6 +497,13 @@ func (s *Store) GetRange(ctx context.Context, key string, offset, length int64) 
 		Metadata:    aws.StringValueMap(output.Metadata),
 	}
 	return output.Body, object, nil
+}
+
+func checkedRangeEnd(offset, length int64) (int64, error) {
+	if length > maxInt64-offset {
+		return 0, fmt.Errorf("object range offset overflow")
+	}
+	return offset + length, nil
 }
 
 func (s *Store) Delete(ctx context.Context, key string) error {

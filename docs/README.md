@@ -29,6 +29,7 @@ generated scaffold:
 | --- | --- |
 | `runtime_foundation.md` | Runtime ladder, WASM/native lanes, binary transport, and control-buffer discipline. |
 | `runtime_native.md` | Tauri/native shell device access, native byte lanes, secure storage, and GPU handle policy. |
+| `rust_runtime_practices.md` | Rust/WASM/native runtime coding, async, performance, error-handling, and check automation rules. |
 | `foundation_tour.md` | One product action through Foundation from ingress to durable state, workers, Hermes, and observability. |
 | `foundation_nervous_system.md` | Canonical lifecycle and invariants for envelopes, events, workers, stores, and projections. |
 | `hermes_hotplane.md` | Hermes node-local projection contract, scaffold wrapper, consistency modes, and operational watch points. |
@@ -52,6 +53,7 @@ generated scaffold:
 | File | Use |
 | --- | --- |
 | `performance_practices.md` | Cross-cutting performance posture and measurement workflow. |
+| `rust_runtime_practices.md` | Rust runtime measurement, clone/borrow, bounds, unsafe, async, and parity rules. |
 | `foundation_benchmarks.md` | Benchmark commands, reference runs, and interpretation notes. |
 | `optimization_points.md` | Adopted optimization decisions and future targets. |
 | `gpu_practices.md` | WebGPU/native GPU batching, memory, and verification rules. |

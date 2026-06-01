@@ -283,6 +283,7 @@ scaffold_sync_tooling() {
     else
         mkdir -p "$PROJECT_PATH/scripts/checks"
         cp -R "$FOUNDATION_DIR/tooling/scripts/." "$PROJECT_PATH/scripts/checks/"
+        cp "$FOUNDATION_DIR/scripts/check-rust.sh" "$PROJECT_PATH/scripts/checks/check-rust.sh"
         chmod +x "$PROJECT_PATH"/scripts/checks/*.sh 2>/dev/null || true
     fi
 

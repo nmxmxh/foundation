@@ -1,4 +1,4 @@
-#!/usr/bin/env zsh
+#!/bin/zsh
 set -euo pipefail
 
 target="${1:-.}"
@@ -34,6 +34,32 @@ for pkg in "${packages[@]}"; do
   echo "[OK] TypeScript typecheck: $pkg"
   checked=1
 done
+
+practice_checked=0
+for native_index in "$target/runtime-native/ts/src/index.ts" "$target/foundation/runtime-native/ts/src/index.ts"; do
+  if [[ ! -f "$native_index" ]]; then
+    continue
+  fi
+  practice_checked=1
+  echo "[RUN] TypeScript runtime-native frame bounds: ${native_index#$target/}"
+  if ! rg -q "MAX_NATIVE_FRAME_BYTES" "$native_index"; then
+    echo "[FAIL] runtime-native TS codec must define MAX_NATIVE_FRAME_BYTES in parity with Rust" >&2
+    exit 1
+  fi
+  if ! rg -q "payloadLength > remainingBytes" "$native_index"; then
+    echo "[FAIL] runtime-native TS response decoder must reject declared length overflow before slicing" >&2
+    exit 1
+  fi
+  if ! rg -q "assertU32Length" "$native_index"; then
+    echo "[FAIL] runtime-native TS request encoder must validate u32 payload and metadata lengths" >&2
+    exit 1
+  fi
+  echo "[OK] TypeScript runtime-native frame bounds: ${native_index#$target/}"
+done
+
+if (( practice_checked == 0 )); then
+  echo "[OK] no runtime-native TypeScript frame codec found"
+fi
 
 if (( checked == 0 )); then
   echo "[OK] no installed Foundation TypeScript packages found"

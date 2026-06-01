@@ -413,10 +413,11 @@ Use `foundation/docs/tla_architecture_practices.md` for high-risk DB workflows w
 1. `DBUniquenessAuthoritative`: security-critical and idempotency-critical uniqueness must be enforced by constraints, indexes, locks, or serializable transactions, not only app prechecks.
 2. `TransactionScopeBounded`: DB transactions must have finite scope, finite timeout, and no external network call inside the open transaction.
 3. `OutboxRefinement`: publishing an event is a lower-level implementation of the durable state transition; the durable outbox write must exist before publication can be observed as successful.
-4. `QueryBounded`: runtime queries must have tenant predicates, explicit order, finite limits, and no unbounded offset scans.
-5. `RetryIdempotent`: retrying a DB-backed command must converge on the same visible state or controlled duplicate result.
-6. `BatchDiagnosticsPreserved`: batching may change internal execution, but visible per-record success/failure identity and stage diagnostics must remain available.
-7. `LockProgressBounded`: lock waits and pool acquire waits must have hard timeouts and visible failure classes.
+4. `OutboxClaimExclusive`: multi-drainer outbox/eventlog publication must claim rows before external publication. The Foundation eventlog shape uses `FOR UPDATE SKIP LOCKED` plus `publish_claim_token` and `publish_claim_expires_at`; success/failure marks must clear the claim only when the token still matches.
+5. `QueryBounded`: runtime queries must have tenant predicates, explicit order, finite limits, and no unbounded offset scans.
+6. `RetryIdempotent`: retrying a DB-backed command must converge on the same visible state or controlled duplicate result.
+7. `BatchDiagnosticsPreserved`: batching may change internal execution, but visible per-record success/failure identity and stage diagnostics must remain available.
+8. `LockProgressBounded`: lock waits and pool acquire waits must have hard timeouts and visible failure classes.
 
 State-machine candidates that deserve table-driven/property-style tests:
 

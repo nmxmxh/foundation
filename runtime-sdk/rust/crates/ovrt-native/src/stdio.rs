@@ -11,6 +11,8 @@ use ovrt_core::{
 
 use crate::{panic_payload_message, NativeRuntimeHost};
 
+const MAX_UNIT_ID_FRAME_BYTES: usize = 256;
+
 pub fn serve_stdio(host: &NativeRuntimeHost) -> Result<(), String> {
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -25,14 +27,14 @@ pub fn serve_framed_session<R: Read, W: Write>(
     writer: &mut W,
 ) -> Result<(), String> {
     loop {
-        let unit_id_bytes = match read_frame(reader) {
+        let unit_id_bytes = match read_frame_bounded(reader, MAX_UNIT_ID_FRAME_BYTES) {
             Ok(payload) => payload,
             Err(FrameReadError::EndOfStream) => return Ok(()),
             Err(FrameReadError::Io(error)) => return Err(format!("read unit frame: {error}")),
         };
         let unit_id = String::from_utf8(unit_id_bytes).map_err(|error| error.to_string())?;
 
-        let raw_buffer = match read_frame(reader) {
+        let raw_buffer = match read_frame_bounded(reader, BUFFER_TOTAL_BYTES as usize) {
             Ok(payload) => payload,
             Err(FrameReadError::EndOfStream) => {
                 return Err("received unit frame without a matching runtime buffer".to_string())
@@ -191,7 +193,9 @@ fn store_epoch_raw(raw_buffer: &mut [u8], index: u32, value: i32) -> Result<(), 
 
 fn region_raw(raw_buffer: &[u8], offset: u32, length: u32) -> Result<&[u8], String> {
     let start = offset as usize;
-    let end = start + length as usize;
+    let end = start
+        .checked_add(length as usize)
+        .ok_or_else(|| format!("runtime region offset overflow: {offset} + {length}"))?;
     if end > raw_buffer.len() {
         return Err(format!(
             "runtime region out of bounds: {} + {} > {}",
@@ -205,7 +209,9 @@ fn region_raw(raw_buffer: &[u8], offset: u32, length: u32) -> Result<&[u8], Stri
 
 fn region_raw_mut(raw_buffer: &mut [u8], offset: u32, length: u32) -> Result<&mut [u8], String> {
     let start = offset as usize;
-    let end = start + length as usize;
+    let end = start
+        .checked_add(length as usize)
+        .ok_or_else(|| format!("runtime region offset overflow: {offset} + {length}"))?;
     if end > raw_buffer.len() {
         return Err(format!(
             "runtime region out of bounds: {} + {} > {}",
@@ -223,7 +229,10 @@ enum FrameReadError {
     Io(io::Error),
 }
 
-fn read_frame<R: Read>(reader: &mut R) -> Result<Vec<u8>, FrameReadError> {
+fn read_frame_bounded<R: Read>(
+    reader: &mut R,
+    max_payload_bytes: usize,
+) -> Result<Vec<u8>, FrameReadError> {
     let mut size = [0_u8; 4];
     match reader.read_exact(&mut size) {
         Ok(()) => {}
@@ -237,6 +246,12 @@ fn read_frame<R: Read>(reader: &mut R) -> Result<Vec<u8>, FrameReadError> {
     }
 
     let length = u32::from_le_bytes(size) as usize;
+    if length > max_payload_bytes {
+        return Err(FrameReadError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("frame payload has {length} bytes; max is {max_payload_bytes}"),
+        )));
+    }
     let mut payload = vec![0_u8; length];
     reader
         .read_exact(&mut payload)
@@ -245,6 +260,12 @@ fn read_frame<R: Read>(reader: &mut R) -> Result<Vec<u8>, FrameReadError> {
 }
 
 fn write_frame<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
+    if payload.len() > u32::MAX as usize {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "frame payload exceeds u32 length",
+        ));
+    }
     writer.write_all(&(payload.len() as u32).to_le_bytes())?;
     writer.write_all(payload)?;
     Ok(())
@@ -252,7 +273,7 @@ fn write_frame<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
 
 #[cfg(any(test, target_os = "linux"))]
 pub(crate) fn read_frame_for_test<R: Read>(reader: &mut R) -> io::Result<Vec<u8>> {
-    match read_frame(reader) {
+    match read_frame_bounded(reader, BUFFER_TOTAL_BYTES as usize) {
         Ok(payload) => Ok(payload),
         Err(FrameReadError::EndOfStream) => Err(io::Error::new(
             io::ErrorKind::UnexpectedEof,
@@ -265,4 +286,23 @@ pub(crate) fn read_frame_for_test<R: Read>(reader: &mut R) -> io::Result<Vec<u8>
 #[cfg(any(test, target_os = "linux"))]
 pub(crate) fn write_frame_for_test<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
     write_frame(writer, payload)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn read_frame_rejects_declared_lengths_before_allocating_payload() {
+        let mut input = Cursor::new(((MAX_UNIT_ID_FRAME_BYTES + 1) as u32).to_le_bytes());
+        let err = read_frame_bounded(&mut input, MAX_UNIT_ID_FRAME_BYTES)
+            .expect_err("oversized frame must fail");
+
+        match err {
+            FrameReadError::Io(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidData),
+            FrameReadError::EndOfStream => panic!("oversized frame must not look like eof"),
+        }
+    }
 }

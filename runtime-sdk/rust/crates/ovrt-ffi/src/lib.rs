@@ -1,4 +1,5 @@
 #![allow(unsafe_code)]
+#![deny(unsafe_op_in_unsafe_fn)]
 
 use std::ffi::{c_char, c_void};
 use std::slice;
@@ -31,7 +32,11 @@ where
     match builder(workers.max(1)) {
         Ok(host) => {
             let boxed = Box::new(host);
-            *out_host = Box::into_raw(boxed) as *mut c_void;
+            // SAFETY: `out_host` was checked for null and the caller promises it
+            // is writable storage for one host handle.
+            unsafe {
+                *out_host = Box::into_raw(boxed) as *mut c_void;
+            }
             0
         }
         Err(error) => {
@@ -49,7 +54,11 @@ pub unsafe fn destroy_host(host: *mut c_void) {
     if host.is_null() {
         return;
     }
-    drop(Box::from_raw(host as *mut NativeRuntimeHost));
+    // SAFETY: The caller promises that `host` came from `create_host` and has
+    // not already been destroyed.
+    unsafe {
+        drop(Box::from_raw(host as *mut NativeRuntimeHost));
+    }
 }
 
 /// # Safety
@@ -81,7 +90,9 @@ pub unsafe fn process_buffer(
         return 1;
     }
 
-    let unit_id = slice::from_raw_parts(unit_id_ptr, unit_id_len);
+    // SAFETY: The caller promises `unit_id_ptr..unit_id_ptr+unit_id_len` is a
+    // readable byte region for this call.
+    let unit_id = unsafe { slice::from_raw_parts(unit_id_ptr, unit_id_len) };
     let unit_id = match std::str::from_utf8(unit_id) {
         Ok(unit_id) => unit_id,
         Err(error) => {
@@ -90,8 +101,12 @@ pub unsafe fn process_buffer(
         }
     };
 
-    let buffer = slice::from_raw_parts_mut(buffer_ptr, buffer_len);
-    let host = &*(host as *mut NativeRuntimeHost);
+    // SAFETY: The caller promises `buffer_ptr..buffer_ptr+buffer_len` is a
+    // writable runtime buffer for this call.
+    let buffer = unsafe { slice::from_raw_parts_mut(buffer_ptr, buffer_len) };
+    // SAFETY: The caller promises `host` is a live handle returned by
+    // `create_host`.
+    let host = unsafe { &*(host as *mut NativeRuntimeHost) };
     match process_runtime_buffer_in_place(host, unit_id, buffer) {
         Ok(()) => 0,
         Err(error) => {
@@ -107,6 +122,8 @@ pub fn write_error(err_buf: *mut c_char, err_cap: usize, message: &str) {
     }
     let bytes = message.as_bytes();
     let copy_len = utf8_prefix_len(message, err_cap.saturating_sub(1));
+    // SAFETY: `err_buf` is non-null, `copy_len < err_cap`, and the caller owns a
+    // writable error buffer with capacity `err_cap`.
     unsafe {
         let target = err_buf as *mut u8;
         std::ptr::copy_nonoverlapping(bytes.as_ptr(), target, copy_len);
@@ -144,12 +161,16 @@ macro_rules! export_runtime_ffi {
             err_buf: *mut ::std::ffi::c_char,
             err_cap: usize,
         ) -> i32 {
-            $crate::create_host(workers, out_host, err_buf, err_cap, $builder)
+            // SAFETY: The exported C ABI forwards the caller's pointer contract
+            // directly to `create_host`.
+            unsafe { $crate::create_host(workers, out_host, err_buf, err_cap, $builder) }
         }
 
         #[no_mangle]
         pub unsafe extern "C" fn ovrt_runtime_destroy(host: *mut ::std::ffi::c_void) {
-            $crate::destroy_host(host);
+            // SAFETY: The exported C ABI forwards the caller's handle contract
+            // directly to `destroy_host`.
+            unsafe { $crate::destroy_host(host) };
         }
 
         #[no_mangle]
@@ -162,15 +183,19 @@ macro_rules! export_runtime_ffi {
             err_buf: *mut ::std::ffi::c_char,
             err_cap: usize,
         ) -> i32 {
-            $crate::process_buffer(
-                host,
-                unit_id_ptr,
-                unit_id_len,
-                buffer_ptr,
-                buffer_len,
-                err_buf,
-                err_cap,
-            )
+            // SAFETY: The exported C ABI forwards all pointer and lifetime
+            // requirements directly to `process_buffer`.
+            unsafe {
+                $crate::process_buffer(
+                    host,
+                    unit_id_ptr,
+                    unit_id_len,
+                    buffer_ptr,
+                    buffer_len,
+                    err_buf,
+                    err_cap,
+                )
+            }
         }
 
         #[no_mangle]
@@ -179,8 +204,12 @@ macro_rules! export_runtime_ffi {
             msg_ptr: *const u8,
             msg_len: usize,
         ) {
-            let ring = $crate::ovrt_core::log_ring::LogRingBuffer::from_ptr(ring_ptr);
-            let msg_bytes = ::std::slice::from_raw_parts(msg_ptr, msg_len);
+            // SAFETY: The exported C ABI requires a valid log-ring pointer and
+            // readable message byte range for this call.
+            let ring = unsafe { $crate::ovrt_core::log_ring::LogRingBuffer::from_ptr(ring_ptr) };
+            // SAFETY: The caller provides `msg_len` initialized bytes at
+            // `msg_ptr` for the duration of the call.
+            let msg_bytes = unsafe { ::std::slice::from_raw_parts(msg_ptr, msg_len) };
             if let Ok(msg) = ::std::str::from_utf8(msg_bytes) {
                 ring.write(msg);
             }
@@ -234,6 +263,7 @@ mod tests {
         let mut raw_host: *mut c_void = std::ptr::null_mut();
         let mut error = [0_i8; 256];
         assert_eq!(
+            // SAFETY: The test supplies valid output and error buffers.
             unsafe {
                 create_host(
                     1,
@@ -257,6 +287,8 @@ mod tests {
 
         let mut error = [0_i8; 256];
         assert_eq!(
+            // SAFETY: `raw_host` was returned by `create_host`, and the unit id
+            // and runtime buffer live for the duration of the call.
             unsafe {
                 process_buffer(
                     raw_host,
@@ -274,6 +306,8 @@ mod tests {
         let runtime_buffer = ovrt_native::NativeBuffer::new(buffer).expect("buffer");
         assert_eq!(runtime_buffer.read_output_bytes().expect("output"), b"FFI");
 
+        // SAFETY: `raw_host` was returned by `create_host` and has not been
+        // destroyed yet.
         unsafe {
             destroy_host(raw_host);
         }
@@ -298,6 +332,7 @@ mod tests {
         let mut raw_host: *mut c_void = std::ptr::null_mut();
         let mut error = [0_i8; 256];
         assert_eq!(
+            // SAFETY: The test supplies valid output and error buffers.
             unsafe {
                 create_host(
                     4,
@@ -328,6 +363,9 @@ mod tests {
 
                     let mut error = [0_i8; 256];
                     assert_eq!(
+                        // SAFETY: The shared host remains alive until after all
+                        // workers join; unit id and runtime buffer are valid for
+                        // the duration of the call.
                         unsafe {
                             process_buffer(
                                 raw_host,
@@ -355,6 +393,8 @@ mod tests {
             handle.join().expect("worker thread must finish");
         }
 
+        // SAFETY: `raw_host` was returned by `create_host` and is destroyed only
+        // after all worker calls have completed.
         unsafe {
             destroy_host(raw_host);
         }

@@ -324,29 +324,33 @@ Before implementing a GPU lane:
    risk. Financial kernels must not use floating point.
 3. Buffer layout tests must verify byte length, alignment, stride, offset,
    endian assumptions, and invalid descriptor rejection.
-4. Race and synchronization tests must cover missing barrier, duplicate write,
+4. Rust-owned GPU adapters and native descriptor registries must pass
+   `make check-rust`; scaffolded apps inherit the same gate through
+   `scripts/checks/check-rust.sh` for app-owned `rust/`, `native/src-tauri/`,
+   and vendored Foundation runtime manifests.
+5. Race and synchronization tests must cover missing barrier, duplicate write,
    partial batch, canceled dispatch, device loss, and fallback replay where the
    adapter can simulate them.
-5. Benchmarks must report baseline lane, transfer bytes, dispatch count,
+6. Benchmarks must report baseline lane, transfer bytes, dispatch count,
    kernel time, total wall time, readback time, allocation count, p95/p99, and
    thermal/device details when available.
-6. Auto-tuning must be bounded and reproducible. Record the parameter search
+7. Auto-tuning must be bounded and reproducible. Record the parameter search
    space, chosen parameters, device identity, driver/runtime version, and
    fallback when the tuned configuration is unavailable.
-7. Native launch tests must check both launch-time and completion-time errors.
+8. Native launch tests must check both launch-time and completion-time errors.
    CUDA-style errors can surface asynchronously, so tests need explicit error
    drains at synchronization points as well as immediate launch checks.
-8. Use sanitizer/debug tools where the adapter supports them: race checks,
+9. Use sanitizer/debug tools where the adapter supports them: race checks,
    initialization checks, synchronization checks, memory access checks, and
    device assertions. Treat sanitizer absence as a reported test gap.
-9. Numeric tests must cover fused multiply-add drift, associativity changes,
+10. Numeric tests must cover fused multiply-add drift, associativity changes,
    reduction order, ULP/tolerance budgets, subnormal handling, NaN/Inf behavior,
    and host/device accuracy differences.
-10. Edge-case tests must cover default-stream serialization, graph capture
+11. Edge-case tests must cover default-stream serialization, graph capture
     invalidation, unsupported operations, lazy-loading first launch, ECC/device
     faults when simulatable, page migration, oversubscription, peer-access
     failure, and memory-pool reuse.
-11. Rendering or media GPU changes need capture-backed tests on target hardware
+12. Rendering or media GPU changes need capture-backed tests on target hardware
     or target browsers. Record driver/runtime version, adapter, quality tier,
     async overlap state, shader/pipeline cache warmth, and capture tool.
 

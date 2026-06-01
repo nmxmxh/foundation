@@ -26,6 +26,7 @@ documentation copied into downstream projects.
 make generate-contracts
 make lint
 make test
+make check-rust
 make verify
 ```
 
@@ -48,3 +49,8 @@ From the parent workspace:
 Generated projects consume Foundation through package and module boundaries.
 They should not import raw files from `foundation/*/ts/src` or copy internal Go
 packages into app code.
+
+Generated projects also receive Rust issue checks in `scripts/checks/`.
+`make check-rust` discovers app Rust, native Tauri Rust, and vendored
+`foundation/runtime-*` manifests, then runs fmt, Clippy safety lints,
+runtime-practice checks, and tests where Rust lanes are enabled.

@@ -199,7 +199,7 @@ func (p *FFIPool) currentBackend() ffiBackend {
 
 func openFFIBackend(library string, workers int) (*cgoFFIBackend, error) {
 	libraryPath := C.CString(library)
-	defer C.free(unsafe.Pointer(libraryPath))
+	defer C.free(unsafe.Pointer(libraryPath)) // #nosec G103 -- cgo FFI ABI owns C strings and releases them in the same scope.
 
 	handle := C.dlopen(libraryPath, C.RTLD_NOW|C.RTLD_LOCAL)
 	if handle == nil {
@@ -235,8 +235,8 @@ func openFFIBackend(library string, workers int) (*cgoFFIBackend, error) {
 	status := int32(C.ovrt_call_create(
 		backend.createFn,
 		C.uintptr_t(workers),
-		(*unsafe.Pointer)(unsafe.Pointer(&host)),
-		(*C.char)(unsafe.Pointer(unsafe.SliceData(errBuf))),
+		(*unsafe.Pointer)(unsafe.Pointer(&host)),            // #nosec G103 -- bounded FFI out-pointer for the opaque runtime host handle.
+		(*C.char)(unsafe.Pointer(unsafe.SliceData(errBuf))), // #nosec G103 -- errBuf is a fixed-size Go buffer valid for the synchronous C call.
 		C.uintptr_t(len(errBuf)),
 	))
 	if status != 0 {
@@ -260,11 +260,11 @@ func (b *cgoFFIBackend) Process(unitID string, buffer []byte, errBuf []byte) (in
 	status := int32(C.ovrt_call_process(
 		b.processFn,
 		b.host,
-		(*C.uint8_t)(unsafe.Pointer(unitIDData)),
+		(*C.uint8_t)(unsafe.Pointer(unitIDData)), // #nosec G103 -- unitID bytes are borrowed only for this synchronous C call.
 		C.uintptr_t(len(unitID)),
-		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(buffer))),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(buffer))), // #nosec G103 -- runtime buffer ownership stays in Go for the duration of the call.
 		C.uintptr_t(len(buffer)),
-		(*C.char)(unsafe.Pointer(unsafe.SliceData(errBuf))),
+		(*C.char)(unsafe.Pointer(unsafe.SliceData(errBuf))), // #nosec G103 -- errBuf is caller-owned and length-bounded for diagnostics.
 		C.uintptr_t(len(errBuf)),
 	))
 	return status, cStringBytes(errBuf)
@@ -293,7 +293,7 @@ func (b *cgoFFIBackend) Close() error {
 
 func lookupSymbol(handle unsafe.Pointer, name string) (unsafe.Pointer, error) {
 	cName := C.CString(name)
-	defer C.free(unsafe.Pointer(cName))
+	defer C.free(unsafe.Pointer(cName)) // #nosec G103 -- cgo symbol lookup owns and frees the temporary C string locally.
 	symbol := C.dlsym(handle, cName)
 	if symbol == nil {
 		return nil, errors.New(dlError("dlsym " + name))

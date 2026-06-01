@@ -73,6 +73,13 @@ type BatchClient interface {
 	SetGetMany(ctx context.Context, values map[string]any, ttl time.Duration) (map[string][]byte, error)
 }
 
+// StreamBatchClient is the optional round-trip amortization surface for Redis
+// Stream append paths. It keeps durable event relay lanes from paying one
+// socket round trip per pending event.
+type StreamBatchClient interface {
+	XAddMany(ctx context.Context, stream string, entries []map[string]any) ([]string, []error)
+}
+
 // StreamMessage represents a message read from a Redis stream.
 type StreamMessage struct {
 	ID     string
@@ -319,6 +326,35 @@ func (c *memoryClient) XAdd(_ context.Context, stream string, values map[string]
 		Values: copyInterfaceMap(values),
 	})
 	return id, nil
+}
+
+func (c *memoryClient) XAddMany(_ context.Context, stream string, entries []map[string]any) ([]string, []error) {
+	ids := make([]string, len(entries))
+	errs := make([]error, len(entries))
+	if len(entries) == 0 {
+		return ids, errs
+	}
+	qualified := c.qualify(stream)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		err := fmt.Errorf("memory redis client is closed")
+		for i := range errs {
+			errs[i] = err
+		}
+		return ids, errs
+	}
+	now := time.Now().UnixMilli()
+	for i, values := range entries {
+		c.streamSequences[qualified]++
+		id := fmt.Sprintf("%d-%d", now, c.streamSequences[qualified])
+		c.streams[qualified] = append(c.streams[qualified], StreamMessage{
+			ID:     id,
+			Values: copyInterfaceMap(values),
+		})
+		ids[i] = id
+	}
+	return ids, errs
 }
 
 func (c *memoryClient) XReadGroup(_ context.Context, stream, group, _ string, count int64) ([]StreamMessage, error) {
@@ -700,8 +736,21 @@ func cloneStreamMessage(message StreamMessage) StreamMessage {
 
 func copyInterfaceMap(in map[string]any) map[string]any {
 	out := make(map[string]any, len(in))
-	maps.Copy(out, in)
+	for key, value := range in {
+		out[key] = copyInterfaceValue(value)
+	}
 	return out
+}
+
+func copyInterfaceValue(value any) any {
+	switch typed := value.(type) {
+	case []byte:
+		return append([]byte(nil), typed...)
+	case map[string]any:
+		return copyInterfaceMap(typed)
+	default:
+		return typed
+	}
 }
 
 func redisPatternMatches(pattern, channel string) bool {
@@ -920,6 +969,42 @@ func (c *redisClient) XAdd(ctx context.Context, stream string, values map[string
 	}).Result()
 	recordRedisOperation("xadd", start, err)
 	return result, err
+}
+
+func (c *redisClient) XAddMany(ctx context.Context, stream string, entries []map[string]any) ([]string, []error) {
+	ids := make([]string, len(entries))
+	errs := make([]error, len(entries))
+	if len(entries) == 0 {
+		return ids, errs
+	}
+	start := time.Now()
+	qualified := c.qualify(stream)
+	pipe := c.client.Pipeline()
+	cmds := make([]*goredis.StringCmd, len(entries))
+	for i, values := range entries {
+		cmds[i] = pipe.XAdd(ctx, &goredis.XAddArgs{
+			Stream: qualified,
+			Values: values,
+		})
+	}
+	_, execErr := pipe.Exec(ctx)
+	var firstErr error
+	for i, cmd := range cmds {
+		id, err := cmd.Result()
+		ids[i] = id
+		if err != nil {
+			errs[i] = err
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	if execErr != nil && firstErr == nil {
+		firstErr = execErr
+		errs[0] = execErr
+	}
+	recordRedisOperation("xadd_many", start, firstErr)
+	return ids, errs
 }
 
 func (c *redisClient) XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error) {
@@ -1201,6 +1286,10 @@ func (c *shardedClient) PSubscribe(ctx context.Context, patterns ...string) ([]<
 
 func (c *shardedClient) XAdd(ctx context.Context, stream string, values map[string]any) (string, error) {
 	return c.shard(stream).XAdd(ctx, stream, values)
+}
+
+func (c *shardedClient) XAddMany(ctx context.Context, stream string, entries []map[string]any) ([]string, []error) {
+	return c.shard(stream).XAddMany(ctx, stream, entries)
 }
 
 func (c *shardedClient) XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error) {

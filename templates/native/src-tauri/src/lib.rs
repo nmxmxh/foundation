@@ -88,7 +88,7 @@ fn foundation_secure_store_delete(key: String, state: State<'_, NativeState>) ->
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let result = tauri::Builder::default()
         .manage(NativeState::new())
         .invoke_handler(tauri::generate_handler![
             foundation_runtime_dispatch,
@@ -97,6 +97,9 @@ pub fn run() {
             foundation_secure_store_put,
             foundation_secure_store_delete
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Tauri application");
+        .run(tauri::generate_context!());
+
+    if let Err(error) = result {
+        eprintln!("tauri runtime failed: {error}");
+    }
 }

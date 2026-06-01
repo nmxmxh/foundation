@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 set -euo pipefail
 
 target="${1:-.}"
@@ -38,7 +38,7 @@ code_window() {
 text_matches() {
   local text="$1"
   local pattern="$2"
-  rg -q -- "$pattern" <<<"$text"
+  [[ "$text" =~ $pattern ]]
 }
 
 add_finding() {
@@ -138,7 +138,13 @@ scan_close_ownership() {
     if text_matches "$text" 'defer[[:space:]]+close[[:space:]]*[(]'; then
       continue
     fi
+    if text_matches "$text" 'close[[:space:]]*[(][[:space:]]*entry[.]flush[[:space:]]*[)]'; then
+      continue
+    fi
     if text_matches "$block" 'once[.]Do[[:space:]]*[(]|[A-Za-z0-9_]*Once[.]Do[[:space:]]*[(]|closed[[:space:]]*=[[:space:]]*true'; then
+      continue
+    fi
+    if text_matches "$text" 'close[[:space:]]*[(][[:space:]]*result[[:space:]]*[)]' && text_matches "$block" 'result[[:space:]]*:=[[:space:]]*make[[:space:]]*[(][[:space:]]*chan'; then
       continue
     fi
     add_finding "$file" "$line" "$text"

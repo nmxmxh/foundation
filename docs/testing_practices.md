@@ -299,10 +299,11 @@ Requirements:
 2. Rust tests must reject `unwrap`, `expect`, `todo!`, and panic-driven correctness in runtime paths.
 3. Host tests must verify unsupported shared-memory or FFI lanes degrade predictably.
 4. Financial or scoring kernels must test integer/checked arithmetic, overflow rejection, and deterministic serialization.
+5. Frame/buffer tests must include empty, exact-limit, just-over-limit, malformed length, negative declared length, timeout, and panic-conversion cases.
 
 Enforcement:
 
-- Rust `fmt`, `clippy`, Go runtimehost tests, TypeScript browser-host tests.
+- `make check-rust`, Go runtimehost tests, TypeScript browser-host tests.
 
 ### TE-17: Concurrency tests must make ownership and termination observable
 

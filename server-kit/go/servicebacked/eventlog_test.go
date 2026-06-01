@@ -4,12 +4,14 @@ package servicebacked
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/eventlog"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes"
 )
 
@@ -117,6 +119,242 @@ func TestServiceBackedEventLogToRedisToHermes(t *testing.T) {
 	}
 }
 
+func TestServiceBackedEventLogBatchPublishPending(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	env := requireServiceEnv(t)
+	state := openPostgres(t, env, serviceBackedPoolOptions(4))
+	defer state.Close()
+	applyEventLogSchema(t, ctx, state)
+
+	redisClient := openRedis(t, env)
+	defer redisClient.Close()
+
+	stream := uniqueName(env.prefix, "eventlog-batch-stream")
+	t.Cleanup(func() {
+		deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer deleteCancel()
+		_ = redisClient.Del(deleteCtx, stream)
+	})
+
+	for i := 0; i < 3; i++ {
+		envelope := events.Envelope{
+			ID:              fmt.Sprintf("evt_service_batch_%d_%d", time.Now().UnixNano(), i),
+			EventType:       "signals:tick:success",
+			PayloadEncoding: events.PayloadEncodingJSON,
+			CorrelationID:   fmt.Sprintf("corr-service-batch-%d", i),
+			SchemaVersion:   events.EnvelopeSchemaVersion,
+			Metadata: map[string]any{
+				"organization_id": "org-service-batch",
+			},
+			Payload:   map[string]any{"record_id": fmt.Sprintf("record-%d", i)},
+			Timestamp: time.Now().UTC(),
+		}
+		if _, err := eventlog.Append(ctx, state, envelope); err != nil {
+			t.Fatalf("Append(%d) error = %v", i, err)
+		}
+	}
+
+	result, err := eventlog.PublishPending(ctx, state, redisClient, eventlog.PublishOptions{Stream: stream, Limit: 8})
+	if err != nil || result.Read != 3 || result.Published != 3 || result.Failed != 0 {
+		t.Fatalf("PublishPending(batch) result=%+v err=%v, want 3 published", result, err)
+	}
+	pending, err := eventlog.FetchPending(ctx, state, 8, eventlog.DefaultMaxAttempts)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("FetchPending(after batch publish) len=%d err=%v, want 0", len(pending), err)
+	}
+	messages, err := redisClient.XReadGroup(ctx, stream, uniqueName(env.prefix, "eventlog-batch-group"), "consumer-a", 8)
+	if err != nil || len(messages) != 3 {
+		t.Fatalf("redis stream messages len=%d err=%v, want 3", len(messages), err)
+	}
+}
+
+func TestServiceBackedEventLogConcurrentPublishClaimsDoNotDuplicate(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	env := requireServiceEnv(t)
+	state := openPostgres(t, env, serviceBackedPoolOptions(8))
+	defer state.Close()
+	applyEventLogSchema(t, ctx, state)
+
+	redisClient := openRedis(t, env)
+	defer redisClient.Close()
+
+	stream := uniqueName(env.prefix, "eventlog-claim-stream")
+	t.Cleanup(func() {
+		deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer deleteCancel()
+		_ = redisClient.Del(deleteCtx, stream)
+	})
+
+	const eventCount = 8
+	for i := 0; i < eventCount; i++ {
+		envelope := events.Envelope{
+			ID:              fmt.Sprintf("evt_service_claim_%d_%d", time.Now().UnixNano(), i),
+			EventType:       "signals:claim:success",
+			PayloadEncoding: events.PayloadEncodingJSON,
+			CorrelationID:   fmt.Sprintf("corr-service-claim-%d", i),
+			SchemaVersion:   events.EnvelopeSchemaVersion,
+			Metadata: map[string]any{
+				"organization_id": "org-service-claim",
+			},
+			Payload:   map[string]any{"record_id": fmt.Sprintf("claim-record-%d", i)},
+			Timestamp: time.Now().UTC(),
+		}
+		if _, err := eventlog.Append(ctx, state, envelope); err != nil {
+			t.Fatalf("Append(%d) error = %v", i, err)
+		}
+	}
+
+	const drainers = 4
+	start := make(chan struct{})
+	results := make(chan publishOutcome, drainers)
+	for i := 0; i < drainers; i++ {
+		go func(index int) {
+			<-start
+			result, err := eventlog.PublishPending(ctx, state, redisClient, eventlog.PublishOptions{
+				Stream:   stream,
+				Limit:    2,
+				ClaimTTL: 10 * time.Second,
+			})
+			results <- publishOutcome{result: result, err: err, drainer: index}
+		}(i)
+	}
+	close(start)
+
+	totalPublished := 0
+	for i := 0; i < drainers; i++ {
+		outcome := <-results
+		if outcome.err != nil {
+			t.Fatalf("drainer %d PublishPending() result=%+v err=%v", outcome.drainer, outcome.result, outcome.err)
+		}
+		if outcome.result.Failed != 0 {
+			t.Fatalf("drainer %d result=%+v, want no failures", outcome.drainer, outcome.result)
+		}
+		totalPublished += outcome.result.Published
+	}
+	if totalPublished != eventCount {
+		t.Fatalf("total published=%d, want %d", totalPublished, eventCount)
+	}
+	pending, err := eventlog.FetchPending(ctx, state, eventCount, eventlog.DefaultMaxAttempts)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("FetchPending(after concurrent claim publish) len=%d err=%v, want 0", len(pending), err)
+	}
+	messages, err := redisClient.XReadGroup(ctx, stream, uniqueName(env.prefix, "eventlog-claim-group"), "consumer-a", eventCount)
+	if err != nil || len(messages) != eventCount {
+		t.Fatalf("redis stream messages len=%d err=%v, want %d", len(messages), err, eventCount)
+	}
+	seen := make(map[string]struct{}, eventCount)
+	for _, message := range messages {
+		raw, ok := streamEnvelopeBytes(message.Values[eventlog.DefaultStreamField])
+		if !ok {
+			t.Fatalf("stream message %s missing envelope bytes: %#v", message.ID, message.Values[eventlog.DefaultStreamField])
+		}
+		envelope, err := events.FromBinary(raw)
+		if err != nil {
+			t.Fatalf("stream message %s envelope decode failed: %v", message.ID, err)
+		}
+		if _, duplicate := seen[envelope.ID]; duplicate {
+			t.Fatalf("duplicate event id published: %s", envelope.ID)
+		}
+		seen[envelope.ID] = struct{}{}
+	}
+}
+
+func BenchmarkServiceBackedEventLogPublishPending64(b *testing.B) {
+	env := requireServiceEnv(b)
+	ctx := context.Background()
+	state := openPostgres(b, env, serviceBackedPoolOptions(8))
+	defer state.Close()
+	applyEventLogSchema(b, ctx, state)
+
+	redisClient := openRedis(b, env)
+	defer redisClient.Close()
+	stream := uniqueName(env.prefix, "bench-eventlog-stream")
+	b.Cleanup(func() {
+		deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer deleteCancel()
+		_ = redisClient.Del(deleteCtx, stream)
+	})
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		seedEventLogPendingRows(b, ctx, state, env.prefix, i*64, 64)
+		b.StartTimer()
+		result, err := eventlog.PublishPending(ctx, state, redisClient, eventlog.PublishOptions{
+			Stream: stream,
+			Limit:  64,
+		})
+		if err != nil || result.Published != 64 {
+			b.Fatalf("PublishPending64 result=%+v err=%v, want 64 published", result, err)
+		}
+	}
+	b.ReportMetric(64, "events/op")
+}
+
+type publishOutcome struct {
+	result  eventlog.PublishResult
+	err     error
+	drainer int
+}
+
+func streamEnvelopeBytes(value any) ([]byte, bool) {
+	switch typed := value.(type) {
+	case []byte:
+		return append([]byte(nil), typed...), true
+	case string:
+		return []byte(typed), true
+	default:
+		return nil, false
+	}
+}
+
+func seedEventLogPendingRows(tb testing.TB, ctx context.Context, store database.RuntimeStore, prefix string, startID int, count int) {
+	tb.Helper()
+	const query = `
+		INSERT INTO foundation_event_log (
+			event_id,
+			event_type,
+			organization_id,
+			correlation_id,
+			schema_version,
+			payload_encoding,
+			envelope,
+			metadata,
+			occurred_at,
+			source_node_id
+		)
+		SELECT
+			$1 || '-' || gs::text,
+			'signals:tick:success',
+			$2,
+			'corr-bench-' || gs::text,
+			$3,
+			$4,
+			$5::bytea,
+			'{}'::jsonb,
+			NOW(),
+			'service-backed-benchmark'
+		FROM generate_series($6::int, $7::int) AS gs
+	`
+	err := store.Exec(ctx,
+		query,
+		uniqueName(prefix, "eventlog-bench"),
+		"org-eventlog-bench",
+		events.EnvelopeSchemaVersion,
+		events.PayloadEncodingProtobuf,
+		[]byte("foundation-eventlog-envelope"),
+		startID,
+		startID+count-1,
+	)
+	if err != nil {
+		tb.Fatalf("seed event log pending rows failed: %v", err)
+	}
+}
+
 func applyEventLogSchema(tb testing.TB, ctx context.Context, store database.RuntimeStore) {
 	tb.Helper()
 	for _, statement := range eventLogSchemaStatements() {
@@ -145,13 +383,25 @@ func eventLogSchemaStatements() []string {
 			published_at TIMESTAMPTZ,
 			publish_attempts INTEGER NOT NULL DEFAULT 0,
 			last_publish_error TEXT,
+			publish_claim_token TEXT,
+			publish_claimed_at TIMESTAMPTZ,
+			publish_claim_expires_at TIMESTAMPTZ,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 			CONSTRAINT foundation_event_log_event_unique UNIQUE (event_id),
 			CONSTRAINT foundation_event_log_metadata_object CHECK (jsonb_typeof(metadata) = 'object')
 		)`,
+		`ALTER TABLE foundation_event_log
+			ADD COLUMN IF NOT EXISTS publish_claim_token TEXT`,
+		`ALTER TABLE foundation_event_log
+			ADD COLUMN IF NOT EXISTS publish_claimed_at TIMESTAMPTZ`,
+		`ALTER TABLE foundation_event_log
+			ADD COLUMN IF NOT EXISTS publish_claim_expires_at TIMESTAMPTZ`,
 		`CREATE INDEX IF NOT EXISTS idx_foundation_event_log_pending
 			ON foundation_event_log (id)
+			WHERE published_at IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_foundation_event_log_claim
+			ON foundation_event_log (publish_claim_expires_at, id)
 			WHERE published_at IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_foundation_event_log_org_time
 			ON foundation_event_log (organization_id, occurred_at DESC, id DESC)`,

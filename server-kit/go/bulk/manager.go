@@ -28,6 +28,8 @@ import (
 
 var transferIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 
+const maxInt64 = int64(1<<63 - 1)
+
 type EventBus interface {
 	Publish(context.Context, events.Envelope) error
 }
@@ -449,7 +451,11 @@ func (m *Manager) validatePart(plan TransferPlan, desc PartDescriptor, reader io
 	if desc.Size > plan.ChunkSize || desc.Size > plan.MaxMemory {
 		return apperrors.New(apperrors.CodeQuotaExceeded, "part exceeds chunk or memory budget")
 	}
-	if plan.TotalSize >= 0 && desc.Offset+desc.Size > plan.TotalSize {
+	partEnd, ok := checkedAddInt64(desc.Offset, desc.Size)
+	if !ok {
+		return apperrors.New(apperrors.CodeValidation, "part offset and size overflow")
+	}
+	if plan.TotalSize >= 0 && partEnd > plan.TotalSize {
 		return apperrors.New(apperrors.CodeValidation, "part exceeds transfer total_size")
 	}
 	if !validSHA256(desc.ExpectedRawSHA256) {
@@ -615,7 +621,11 @@ func verifyReceiptsCoverPlan(plan TransferPlan, receipts []PartReceipt) error {
 		if receipt.Offset != nextOffset {
 			return apperrors.New(apperrors.CodePrecondition, "part offsets must be contiguous")
 		}
-		nextOffset += receipt.RawSize
+		var ok bool
+		nextOffset, ok = checkedAddInt64(nextOffset, receipt.RawSize)
+		if !ok {
+			return apperrors.New(apperrors.CodePrecondition, "part offsets overflow transfer size")
+		}
 	}
 	if nextOffset != plan.TotalSize {
 		return apperrors.New(apperrors.CodePrecondition, "received parts do not cover total_size")
@@ -646,7 +656,8 @@ func (m *Manager) persistManifest(ctx context.Context, manifest TransferManifest
 }
 
 func (m *Manager) openIdentityRange(ctx context.Context, manifest TransferManifest, offset, length int64) ([]io.ReadCloser, []int, error) {
-	if offset < 0 || length <= 0 || offset+length > manifest.TotalSize {
+	rangeEnd, ok := checkedAddInt64(offset, length)
+	if offset < 0 || length <= 0 || !ok || rangeEnd > manifest.TotalSize {
 		return nil, nil, apperrors.New(apperrors.CodeValidation, "range is outside transfer bounds")
 	}
 	remaining := length
@@ -680,7 +691,8 @@ func (m *Manager) openIdentityRange(ctx context.Context, manifest TransferManife
 }
 
 func (m *Manager) forEachIdentityRange(ctx context.Context, manifest TransferManifest, offset, length int64, fn func(RangePart) error) (RangeDescriptor, error) {
-	if offset < 0 || length <= 0 || offset+length > manifest.TotalSize {
+	rangeEnd, ok := checkedAddInt64(offset, length)
+	if offset < 0 || length <= 0 || !ok || rangeEnd > manifest.TotalSize {
 		return RangeDescriptor{}, apperrors.New(apperrors.CodeValidation, "range is outside transfer bounds")
 	}
 	remaining := length
@@ -734,12 +746,19 @@ func (m *Manager) forEachIdentityRange(ctx context.Context, manifest TransferMan
 }
 
 func (m *Manager) openPartRange(ctx context.Context, part PartReceipt, offset, length int64) (io.ReadCloser, int64, error) {
-	partEnd := part.Offset + part.RawSize
-	if offset >= partEnd || offset+length <= part.Offset {
+	partEnd, ok := checkedAddInt64(part.Offset, part.RawSize)
+	if !ok {
+		return nil, 0, apperrors.New(apperrors.CodePrecondition, "part range overflows transfer bounds")
+	}
+	rangeEnd, ok := checkedAddInt64(offset, length)
+	if !ok {
+		return nil, 0, apperrors.New(apperrors.CodeValidation, "range is outside transfer bounds")
+	}
+	if offset >= partEnd || rangeEnd <= part.Offset {
 		return nil, 0, nil
 	}
 	start := max64(offset, part.Offset)
-	end := min64(offset+length, partEnd)
+	end := min64(rangeEnd, partEnd)
 	reader, _, err := m.objects.GetRange(ctx, part.ObjectKey, start-part.Offset, end-start)
 	return reader, end - start, err
 }
@@ -949,6 +968,16 @@ func max64(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+func checkedAddInt64(a, b int64) (int64, bool) {
+	if a < 0 || b < 0 {
+		return 0, false
+	}
+	if b > 0 && a > maxInt64-b {
+		return 0, false
+	}
+	return a + b, true
 }
 
 func failurePayload(transferID string, err error) map[string]any {
@@ -1278,29 +1307,35 @@ func sha256BytesHex(sum [sha256.Size]byte) string {
 }
 
 type aggregateReadCloser struct {
-	reader io.Reader
-	closer func() error
+	readers []io.ReadCloser
+	index   int
 }
 
 func multiReadCloser(readers []io.ReadCloser) io.ReadCloser {
-	items := make([]io.Reader, 0, len(readers))
-	for _, reader := range readers {
-		items = append(items, reader)
-	}
-	return &aggregateReadCloser{
-		reader: io.MultiReader(items...),
-		closer: func() error {
-			return closeReaders(readers)
-		},
+	switch len(readers) {
+	case 0:
+		return io.NopCloser(bytes.NewReader(nil))
+	case 1:
+		return readers[0]
+	default:
+		return &aggregateReadCloser{readers: readers}
 	}
 }
 
 func (r *aggregateReadCloser) Read(p []byte) (int, error) {
-	return r.reader.Read(p)
+	for r.index < len(r.readers) {
+		n, err := r.readers[r.index].Read(p)
+		if err == io.EOF && n == 0 {
+			r.index++
+			continue
+		}
+		return n, err
+	}
+	return 0, io.EOF
 }
 
 func (r *aggregateReadCloser) Close() error {
-	return r.closer()
+	return closeReaders(r.readers)
 }
 
 func closeReaders(readers []io.ReadCloser) error {

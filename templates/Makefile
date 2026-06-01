@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -596,15 +596,17 @@ lint-go:
 	fi
 
 lint-rust:
-	@if [ -f "$(RUST_WASM_DIR)/Cargo.toml" ]; then \
-		if command -v cargo >/dev/null 2>&1; then \
-			cargo fmt --manifest-path "$(RUST_WASM_DIR)/Cargo.toml" --all -- --check; \
-			cargo clippy --manifest-path "$(RUST_WASM_DIR)/Cargo.toml" --all-targets --all-features -- -D warnings -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic; \
-		else \
-			echo "cargo not found; skipping Rust lint"; \
-		fi; \
+	@$(MAKE) --no-print-directory check-rust-static-analysis
+	@$(MAKE) --no-print-directory check-rust-runtime-practices
+
+check-rust:
+	@if [ -x scripts/checks/check-rust.sh ]; then \
+		scripts/checks/check-rust.sh .; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -x "$(FOUNDATION_PATH)/scripts/check-rust.sh" ]; then \
+		"$(FOUNDATION_PATH)/scripts/check-rust.sh" .; \
 	else \
-		echo "No Rust workspace; skipping Rust lint"; \
+		$(MAKE) --no-print-directory check-rust-static-analysis; \
+		$(MAKE) --no-print-directory check-rust-runtime-practices; \
 	fi
 
 lint-frontend:
@@ -614,7 +616,7 @@ lint-frontend:
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-FOUNDATION_LINT_CHECKS := check-go-fix check-go-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+FOUNDATION_LINT_CHECKS := check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 
 lint-foundation:
@@ -639,6 +641,28 @@ check-go-fix:
 check-go-static-analysis:
 	@./scripts/checks/go_static_analysis_check.sh .
 
+check-rust-static-analysis:
+	@if [ -x scripts/checks/rust_static_analysis_check.sh ]; then \
+		scripts/checks/rust_static_analysis_check.sh .; \
+	elif [ -x foundation/tooling/scripts/rust_static_analysis_check.sh ]; then \
+		foundation/tooling/scripts/rust_static_analysis_check.sh .; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -x "$(FOUNDATION_PATH)/tooling/scripts/rust_static_analysis_check.sh" ]; then \
+		"$(FOUNDATION_PATH)/tooling/scripts/rust_static_analysis_check.sh" .; \
+	else \
+		echo "Rust static analysis check script not found; skipping"; \
+	fi
+
+check-rust-runtime-practices:
+	@if [ -x scripts/checks/rust_runtime_practices_check.sh ]; then \
+		scripts/checks/rust_runtime_practices_check.sh .; \
+	elif [ -x foundation/tooling/scripts/rust_runtime_practices_check.sh ]; then \
+		foundation/tooling/scripts/rust_runtime_practices_check.sh .; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -x "$(FOUNDATION_PATH)/tooling/scripts/rust_runtime_practices_check.sh" ]; then \
+		"$(FOUNDATION_PATH)/tooling/scripts/rust_runtime_practices_check.sh" .; \
+	else \
+		echo "Rust runtime practices check script not found; skipping"; \
+	fi
+
 check-coding-practices:
 	@./scripts/checks/coding_practices_check.sh .
 
@@ -646,7 +670,7 @@ check-testing-practices:
 	@./scripts/checks/testing_practices_check.sh .
 
 check-go-concurrency-practices:
-	@./scripts/checks/go_concurrency_practices_check.sh .
+	@bash ./scripts/checks/go_concurrency_practices_check.sh .
 
 check-logging-practices:
 	@./scripts/checks/logging_practices_check.sh .
@@ -752,6 +776,7 @@ help:
 	@echo "  test-bench       - Run Go benchmarks with benchmem"
 	@echo "  test-all         - Run foundation checks, unit tests, integration tests, and frontend tests"
 	@echo "  lint             - Run linters and scaffold checks"
+	@echo "  check-rust       - Run Rust fmt, clippy, runtime practices, and tests"
 	@echo "  verify           - Run lint, test, and build"
 	@echo ""
 	@echo "Foundation:"
@@ -768,13 +793,15 @@ help:
 	@echo "  delivery-metrics  - Emit a local DORA/incident collection event"
 	@echo ""
 	@echo "Checks:"
+	@echo "  check-rust-static-analysis"
+	@echo "  check-rust-runtime-practices"
 	@echo "  check-coding-practices"
 	@echo "  check-logging-practices"
 	@echo "  check-database-practices"
 	@echo "  check-redis-practices"
 	@echo "  check-river-practices"
 	@echo "  check-migration-structure"
-	 "  check-domain-contract-consistency"
+	@echo "  check-domain-contract-consistency"
 	@echo "  check-contract-drift"
 	@echo "  check-project-scaffold"
 	@echo ""

@@ -1,0 +1,222 @@
+# benchmark	ns_per_op	bytes_per_op	allocs_per_op	source
+BenchmarkDispatchOverBufconn-8	30175	12624	213	go
+BenchmarkDispatchFrameOverBufconn-8	25372	10916	178	go
+BenchmarkClientDispatchFrameOverBufconn-8	20585	10991	181	go
+BenchmarkRouterDispatchFrameDirect-8	10.79	0	0	go
+BenchmarkDirectFrameClientDispatch-8	18.40	0	0	go
+BenchmarkBoundFrameClientDispatch-8	11.98	0	0	go
+BenchmarkBoundFrameClientDispatchTrusted-8	10.67	0	0	go
+BenchmarkBinaryFrameCodecRoundTrip-8	81.71	144	2	go
+BenchmarkBinaryFrameAppendRoundTrip-8	41.00	0	0	go
+BenchmarkBinaryFrameAppendViewRoundTrip-8	19.75	0	0	go
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8	371.5	152	6	go
+BenchmarkGeneratedProtoUnmarshalReset-8	226.6	152	6	go
+BenchmarkGeneratedProtoUnmarshalMergeReuse-8	161.0	56	5	go
+BenchmarkRunParallel-8	981.0	592	6	go
+BenchmarkRunParallelInto-8	949.4	464	5	go
+BenchmarkDecodeRequestBytesIntoCompleteReuse-8	242.4	72	8	go
+BenchmarkTypedFrameAdapterDispatch-8	6293	3829	80	go
+BenchmarkTypedFrameAdapterDispatchNoMetadata-8	559.8	536	10	go
+BenchmarkTypedFrameAdapterDispatchReuse-8	525.2	424	9	go
+BenchmarkAppLane_DirectFrame_DomainCall-8	32.02	32	1	go
+BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest-8	5399	9219	71	go
+BenchmarkAppLane_Auth_ValidateToken-8	3288	2104	27	go
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8	7203	11284	81	go
+BenchmarkAppLane_Cache_GetHit_JSONValue-8	54.03	0	0	go
+BenchmarkAppLane_Retry_NoRetrySuccess-8	3.697	0	0	go
+BenchmarkAppLane_CircuitBreaker_ClosedSuccess-8	68.35	0	0	go
+BenchmarkAppLane_Worker_EnqueueWithBackpressureAndDrain-8	5500	1167	26	go
+BenchmarkAppLane_Worker_RejectFullQueue-8	1523	738	17	go
+BenchmarkAppLane_Worker_DropNoProcessor-8	1291	706	14	go
+BenchmarkAppLane_Retry_CanceledWait-8	95.83	96	2	go
+BenchmarkScale_MemoryDBTenantCount100K-8	5173	0	0	go
+BenchmarkScale_MemoryDBTenantListFiltered100K-8	21586	33400	105	go
+BenchmarkScale1M_MemoryDBTenantCount-8	5079	0	0	go
+BenchmarkScale1M_MemoryDBTenantListFiltered-8	21598	33400	105	go
+BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit-8	16836	33400	105	go
+BenchmarkScale_WebSocketBroadcastResolveInto100K-8	34464	0	0	go
+BenchmarkScale_WebSocketBroadcastResolveInto1K-8	553.3	0	0	go
+BenchmarkScale_WebSocketBroadcastBatch1K-8	32.50	0	0	go
+BenchmarkScale_WebSocketBroadcastBatch100K-8	337.5	0	0	go
+BenchmarkScale_WebSocketUserResolve100K-8	263.3	0	0	go
+BenchmarkScale1M_WebSocketBroadcastResolveInto-8	489633	0	0	go
+BenchmarkScale1M_WebSocketBroadcastForEach-8	2400135	0	0	go
+BenchmarkScale1M_WebSocketBroadcastBatch-8	747.9	0	0	go
+BenchmarkScale1M_WebSocketUserResolve-8	285.0	0	0	go
+BenchmarkScale_EventExactDispatch100KSubscriptions-8	405.8	0	0	go
+BenchmarkScale1M_EventExactDispatchSubscriptions-8	423.8	0	0	go
+BenchmarkScale_EventWildcardDispatch1KSubscriptions-8	544.2	64	1	go
+BenchmarkScale_EventPrefixWildcardDispatch100KSubscriptions-8	530.8	64	1	go
+BenchmarkScale_ConfigConvergence10K-8	173.8	0	0	go
+BenchmarkScale_LocalOperationMixLatency-8	6309	560	10	go
+BenchmarkMemoryBackend_Set-8	452.5	229	2	go
+BenchmarkMemoryBackend_Get-8	52.39	0	0	go
+BenchmarkMemoryBackend_SetGet_Parallel-8	297.2	14	1	go
+BenchmarkGetOrSet-8	205.1	176	3	go
+BenchmarkGetOrSet_ParallelHotHit-8	161.0	168	3	go
+BenchmarkCacheKey-8	223.9	104	6	go
+BenchmarkMemoryBackend_DeletePattern-8	3687	0	0	go
+BenchmarkCircuitBreaker_Execute_Closed-8	60.63	0	0	go
+BenchmarkCircuitBreaker_Execute_Open-8	48.79	0	0	go
+BenchmarkCircuitBreaker_Execute_Parallel-8	287.8	0	0	go
+BenchmarkCircuitBreaker_StateRead-8	0.5294	0	0	go
+BenchmarkCompressLargeBatch/Brotli-Q4-8	2786526	15589281	26	go
+BenchmarkCompressLargeBatch/Zstd-Fastest-8	565183	1048576	1	go
+BenchmarkDecompressLargeBatch/Brotli-8	2290871	3346752	38	go
+BenchmarkDecompressLargeBatch/Zstd-8	397159	1056787	1	go
+BenchmarkInMemoryBus_Publish_NoSubscribers-8	299.0	0	0	go
+BenchmarkInMemoryBus_Publish_1Subscriber-8	305.9	0	0	go
+BenchmarkInMemoryBus_Publish_10Subscribers-8	357.8	0	0	go
+BenchmarkInMemoryBus_Publish_Parallel-8	480.2	0	0	go
+BenchmarkMatches-8	7.964	0	0	go
+BenchmarkMatches_Exact-8	2.570	0	0	go
+BenchmarkTerminalState-8	39.05	0	0	go
+BenchmarkEnvelope_ToJSON-8	3330	2681	49	go
+BenchmarkEnvelope_ToBinary-8	2390	2224	20	go
+BenchmarkEnvelope_FromJSON-8	3777	2072	40	go
+BenchmarkEnvelope_FromBinary-8	2258	2984	35	go
+BenchmarkRegistryCounterNoTags-8	120.3	32	1	go
+BenchmarkRegistryCounterTagged-8	351.9	272	4	go
+BenchmarkRegistryCounterPrecomputedKey-8	20.61	0	0	go
+BenchmarkRegistrySnapshotPrometheus1024-8	162653	230080	19	go
+BenchmarkMemoryClientGetHit-8	178.1	56	4	go
+BenchmarkMemoryClientSetManyGetMany64-8	20175	12637	516	go
+BenchmarkMemoryClientSetGetMany64-8	11911	9563	324	go
+BenchmarkMemoryClientPublish1KSubscribers-8	53420	47701	991	go
+BenchmarkMemoryClientPSubscribePrefix1K-8	28176	111	4	go
+BenchmarkMemoryClientStreamXAddReadAck-8	1058	1015	17	go
+BenchmarkMemoryClientLockUnlock-8	465.7	120	8	go
+BenchmarkPolicy_Do_Success-8	3.546	0	0	go
+BenchmarkPolicy_Do_Retry-8	299.1	264	4	go
+BenchmarkPolicy_CalculateDelay-8	15.32	0	0	go
+BenchmarkEngine_Enqueue_InMemory-8	2969	920	20	go
+BenchmarkEngine_Enqueue_RawPayload-8	2182	906	20	go
+BenchmarkEngine_Processing_Throughput-8	4207	1184	25	go
+BenchmarkJob_Normalize-8	4.998	0	0	go
+BenchmarkJob_HealthKey-8	5.373	0	0	go
+BenchmarkMemoryDBCountRecordsTenantScoped-8	12303	0	0	go
+BenchmarkMemoryDBListRecordsTenantScopedFiltered-8	12520	25304	69	go
+BenchmarkMemoryDBUpsertTenantScopedParallel-8	3130	1979	12	go
+BenchmarkQueryAllFakeRows100-8	3416	4512	210	go
+BenchmarkExecCommandMemoryDB-8	33.00	24	1	go
+BenchmarkExecRowsAffectedFake-8	31.56	24	1	go
+BenchmarkQueryEachFakeRows100-8	2585	2472	202	go
+BenchmarkRouterRegisterLocalOnly-8	1082	725	4	go
+BenchmarkRouterResolveTargetsUserLocal-8	22048	18432	1	go
+BenchmarkRouterResolveTargetsUserSparseLocal-8	435.8	256	1	go
+BenchmarkRouterResolveTargetsDeviceLocal-8	56.17	16	1	go
+BenchmarkRouterForEachLocal1024-8	39039	98304	1024	go
+BenchmarkRouterForEachLocalValue1024-8	17851	0	0	go
+BenchmarkTLSHandshake_ClassicalX25519-8	422080	72597	817	go
+BenchmarkTLSHandshake_HybridX25519MLKEM768-8	585660	116450	838	go
+BenchmarkApplyPostQuantumTLSAuto-8	216.4	964	3	go
+BenchmarkBufferSetInputBytes1KB-8	28.54	0	0	go
+BenchmarkBufferSetInputBytesFast1KB-8	16.02	0	0	go
+BenchmarkBufferInputBytesOwned1KB-8	143.4	1024	1	go
+BenchmarkBufferInputBytesView1KB-8	3.109	0	0	go
+BenchmarkBufferSetOutputBytes2KB-8	59.84	0	0	go
+BenchmarkBufferSetOutputBytesFast2KB-8	29.04	0	0	go
+BenchmarkBufferOutputBytesOwned2KB-8	276.2	2048	1	go
+BenchmarkBufferOutputBytesView2KB-8	3.214	0	0	go
+BenchmarkBufferEpochAdd-8	6.932	0	0	go
+BenchmarkBufferDiagnosticsText-8	266.5	48	1	go
+BenchmarkBufferReadFrameAllocCopy4KB-8	693.6	4100	2	go
+BenchmarkBufferReadFrameInto4KB-8	73.68	4	1	go
+BenchmarkCreateEnvelopeJSON-8	296.8	96	2	go
+BenchmarkResolveRouteLinear16-8	33.38	0	0	go
+BenchmarkResolveRouteLinear1024-8	443.5	0	0	go
+BenchmarkRouteIndexResolve1024-8	8.371	0	0	go
+BenchmarkCanDispatchExactCapability-8	4.786	0	0	go
+BenchmarkCanDispatchWriteViaAdminFallback-8	63.17	0	0	go
+BenchmarkSchemaRegistryNegotiate-8	31.41	0	0	go
+gpu layout strict u32 4KB x1	100.000			ts
+gpu layout strict u32 into 4KB x1	100.000			ts
+gpu pack arena descriptors 4KB x1	1100.000			ts
+gpu pack arena descriptors into 4KB x1	300.000			ts
+gpu writeback arena descriptors 4KB x1	300.000			ts
+gpu layout strict u32 64KB x1	100.000			ts
+gpu layout strict u32 into 64KB x1	100.000			ts
+gpu pack arena descriptors 64KB x1	6500.000			ts
+gpu pack arena descriptors into 64KB x1	3100.000			ts
+gpu writeback arena descriptors 64KB x1	2900.000			ts
+gpu layout strict u32 1024KB x1	100.000			ts
+gpu layout strict u32 into 1024KB x1	100.000			ts
+gpu pack arena descriptors 1024KB x1	72500.000			ts
+gpu pack arena descriptors into 1024KB x1	42900.000			ts
+gpu writeback arena descriptors 1024KB x1	42800.000			ts
+gpu layout strict u32 1KB x8	200.000			ts
+gpu layout strict u32 into 1KB x8	100.000			ts
+gpu pack arena descriptors 1KB x8	1900.000			ts
+gpu pack arena descriptors into 1KB x8	1000.000			ts
+gpu writeback arena descriptors 1KB x8	1400.000			ts
+gpu layout strict u32 1KB x32	400.000			ts
+gpu layout strict u32 into 1KB x32	300.000			ts
+gpu pack arena descriptors 1KB x32	6300.000			ts
+gpu pack arena descriptors into 1KB x32	4400.000			ts
+gpu writeback arena descriptors 1KB x32	6300.000			ts
+gpu layout strict u32 1KB x128	1600.000			ts
+gpu layout strict u32 into 1KB x128	1200.000			ts
+gpu pack arena descriptors 1KB x128	21200.000			ts
+gpu pack arena descriptors into 1KB x128	15000.000			ts
+gpu writeback arena descriptors 1KB x128	20900.000			ts
+webgpu fake dispatch gpu-resident 4KB x1	1800.000			ts
+webgpu fake dispatch materialize-readback 4KB x1	3600.000			ts
+webgpu fake dispatch resident-to-resident 4KB x1	1100.000			ts
+4KB slab write/read	1300.000			ts
+4KB slab write/read view	500.000			ts
+4KB slab fast write/read view	400.000			ts
+64KB slab write/read	9700.000			ts
+64KB slab write/read view	3100.000			ts
+64KB slab fast write/read view	2900.000			ts
+1024KB slab write/read	114500.000			ts
+1024KB slab write/read view	42300.000			ts
+1024KB slab fast write/read view	44400.000			ts
+sustained descriptor-ready ring traffic	1035300.000			ts
+descriptor-ready batch traffic x1	1095200.000			ts
+descriptor-ready fast batch traffic x1	1120600.000			ts
+descriptor-ready id batch traffic x1	1109600.000			ts
+descriptor-ready batch traffic x8	1046700.000			ts
+descriptor-ready fast batch traffic x8	585200.000			ts
+descriptor-ready id batch traffic x8	508400.000			ts
+descriptor-ready batch traffic x32	1075100.000			ts
+descriptor-ready fast batch traffic x32	478000.000			ts
+descriptor-ready id batch traffic x32	441200.000			ts
+descriptor-ready batch traffic x128	1034100.000			ts
+descriptor-ready fast batch traffic x128	461800.000			ts
+descriptor-ready id batch traffic x128	435700.000			ts
+preallocated write/enqueue/dequeue batch x1	500.000			ts
+preallocated write/enqueue/dequeue batch x8	3500.000			ts
+preallocated write/enqueue/dequeue batch x32	14000.000			ts
+preallocated write/enqueue/dequeue batch x128	55400.000			ts
+descriptor release/reallocate free-list x1	300.000			ts
+descriptor release/reallocate free-list x8	2200.000			ts
+descriptor release/reallocate free-list x32	8800.000			ts
+descriptor release/reallocate free-list x128	34600.000			ts
+packet-ring enqueue/dequeue/complete/release x1	400.000			ts
+packet-ring id enqueue/dequeue/complete/release x1	400.000			ts
+packet-ring enqueue/dequeue/complete/release x8	2800.000			ts
+packet-ring id enqueue/dequeue/complete/release x8	2800.000			ts
+packet-ring enqueue/dequeue/complete/release x32	10900.000			ts
+packet-ring id enqueue/dequeue/complete/release x32	11000.000			ts
+packet-ring enqueue/dequeue/complete/release x128	43900.000			ts
+packet-ring id enqueue/dequeue/complete/release x128	43300.000			ts
+validate native GPU descriptor	500.000			ts
+plan native GPU lane	700.000			ts
+native read_output_bytes owned Vec	63.34			rust
+native read_output_bytes_into reused Vec	20.06			rust
+native output_bytes_view borrowed	3.93			rust
+native write_output_bytes clear+copy	39.69			rust
+native write_output_bytes_fast copy only	16.66			rust
+native process_runtime_buffer_in_place	135.92			rust
+parse event type	200.000			ts
+create json envelope	600.000			ts
+resolve route by event type	49.087			ts
+resolve route by path	200.000			ts
+can dispatch exact capability	40.994			ts
+can dispatch write via admin fallback	100.000			ts
+encode json envelope to protobuf bytes	6600.000			ts
+decode json envelope from protobuf bytes	2800.000			ts
+encode protobuf envelope bytes	3800.000			ts
+decode protobuf envelope bytes	1600.000			ts
+encode json compatibility envelope	1300.000			ts
+decode identity binary frame	200.000			ts
