@@ -48,6 +48,7 @@ type wsConnection struct {
 	conn     *websocket.Conn
 	send     chan wsOutbound
 	cancel   context.CancelFunc
+	reserved bool
 
 	mu            sync.RWMutex
 	authenticated bool
@@ -136,8 +137,7 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	current := int(s.ws.connectionCnt.Load())
-	if current >= s.wsMaxConnections {
+	if !s.reserveWSConnectionSlot() {
 		domainerr.WriteHTTP(w, domainerr.Unavailable("ws_capacity_reached", "websocket capacity reached"), domainerr.ResponseOptions{
 			Status: http.StatusServiceUnavailable,
 		})
@@ -146,6 +146,7 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := s.ws.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		s.releaseWSConnectionSlot()
 		s.log.Error("websocket upgrade failed", "error", err.Error())
 		return
 	}
@@ -170,6 +171,7 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		conn:      conn,
 		send:      make(chan wsOutbound, s.wsWriteQueueDepth),
 		cancel:    cancel,
+		reserved:  true,
 		createdAt: time.Now().UTC(),
 		subscriptions: map[string]struct{}{
 			"identity:connection_open:v1:ack":  {},
@@ -179,13 +181,11 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	wsConn.binaryFormat = strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("format")), "binary")
 
 	if !s.registerWSConnection(ctx, wsConn) {
+		s.releaseWSConnectionSlot()
+		cancel()
 		if err := conn.Close(); err != nil {
 			s.log.Warn("failed to close rejected websocket", "error", err)
 		}
-		cancel()
-		domainerr.WriteHTTP(w, domainerr.Unavailable("ws_capacity_reached", "websocket capacity reached"), domainerr.ResponseOptions{
-			Status: http.StatusServiceUnavailable,
-		})
 		return
 	}
 	defer s.unregisterWSConnection(ctx, wsConn)
@@ -203,8 +203,8 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	s.runWSReader(ctx, wsConn)
 }
 
-func (s *Server) registerWSConnection(ctx context.Context, conn *wsConnection) bool {
-	if conn == nil || s.ws == nil {
+func (s *Server) reserveWSConnectionSlot() bool {
+	if s == nil || s.ws == nil {
 		return false
 	}
 	next := s.ws.connectionCnt.Add(1)
@@ -214,6 +214,29 @@ func (s *Server) registerWSConnection(ctx context.Context, conn *wsConnection) b
 			s.ws.metrics.RecordConnectionRejected()
 		}
 		return false
+	}
+	return true
+}
+
+func (s *Server) releaseWSConnectionSlot() {
+	if s != nil && s.ws != nil {
+		s.ws.connectionCnt.Add(-1)
+	}
+}
+
+func (s *Server) registerWSConnection(ctx context.Context, conn *wsConnection) bool {
+	if conn == nil || s.ws == nil {
+		return false
+	}
+	if !conn.reserved {
+		next := s.ws.connectionCnt.Add(1)
+		if int(next) > s.wsMaxConnections {
+			s.ws.connectionCnt.Add(-1)
+			if s.ws.metrics != nil {
+				s.ws.metrics.RecordConnectionRejected()
+			}
+			return false
+		}
 	}
 	s.ws.connections.Store(conn.id, conn)
 
@@ -612,6 +635,9 @@ func (s *Server) enqueueWS(conn *wsConnection, messageType int, payload []byte) 
 	case conn.send <- wsOutbound{messageType: messageType, payload: payload}:
 		return nil
 	default:
+		if s.ws != nil && s.ws.metrics != nil {
+			s.ws.metrics.RecordMessageFailed()
+		}
 		return errors.New("websocket outbound queue full")
 	}
 }

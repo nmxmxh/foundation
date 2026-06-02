@@ -120,8 +120,10 @@ func runLoadStep(ctx context.Context, t *testing.T, env *testutil.RealTestEnv, c
 	var totalError int64
 	var totalLatency int64
 
-	queueBefore := fetchRiverStateCounts(ctx, env)
-	redisBefore := fetchRedisPingLatency(ctx, env)
+	probeCtx, probeCancel := context.WithTimeout(ctx, opTimeout)
+	queueBefore := fetchRiverStateCounts(probeCtx, env)
+	redisBefore := fetchRedisPingLatency(probeCtx, env)
+	probeCancel()
 
 	stop := make(chan struct{})
 	time.AfterFunc(duration, func() {
@@ -175,8 +177,10 @@ func runLoadStep(ctx context.Context, t *testing.T, env *testutil.RealTestEnv, c
 		t.Fatalf("no operations executed at concurrency %d", concurrency)
 	}
 
-	queueAfter := fetchRiverStateCounts(ctx, env)
-	redisAfter := fetchRedisPingLatency(ctx, env)
+	probeCtx, probeCancel = context.WithTimeout(ctx, opTimeout)
+	queueAfter := fetchRiverStateCounts(probeCtx, env)
+	redisAfter := fetchRedisPingLatency(probeCtx, env)
+	probeCancel()
 	rps := float64(totalOps) / elapsed
 	avgLatencyMs := float64(totalLatency) / float64(totalOps) / 1000.0
 	errorRate := float64(totalError) / float64(totalOps) * 100.0

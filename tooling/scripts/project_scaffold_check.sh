@@ -540,6 +540,13 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "server uses configured CORS origins" "$target/internal/server/server.go" "allowedOrigins"
   check_file_not_contains "server avoids wildcard CORS default" "$target/internal/server/server.go" 'security.CORS([]string{"*"})'
   check_file_contains "server protects operational endpoints" "$target/internal/server/server.go" "operationalHandler"
+  check_file_contains "websocket reserves capacity before upgrade" "$target/internal/server/websocket.go" "reserveWSConnectionSlot"
+  check_file_contains "websocket registration uses reserved capacity slots" "$target/internal/server/websocket.go" "reserved:  true"
+  check_file_contains "websocket queue full records failed message metric" "$target/internal/server/websocket.go" "RecordMessageFailed()"
+  check_file_contains "server tests cover websocket capacity rejection" "$target/internal/server/server_test.go" "TestReserveWSConnectionSlotRejectsWhenCapacityExceeded"
+  check_file_contains "server tests cover reserved websocket registration" "$target/internal/server/server_test.go" "TestRegisterWSConnectionUsesReservedSlot"
+  check_file_contains "server tests cover websocket backpressure metric" "$target/internal/server/server_test.go" "TestEnqueueWSRecordsBackpressureFailure"
+  check_file_contains "load tests bound pre/post infrastructure probes" "$target/tests/load/load_test.go" "probeCtx, probeCancel := context.WithTimeout(ctx, opTimeout)"
   check_file_contains "config loads allowed origins" "$target/internal/config/config.go" "ALLOWED_ORIGINS"
   check_file_contains "config loads explicit Redis URL" "$target/internal/config/config.go" "REDIS_URL"
   check_file_contains "config defaults auth on in production" "$target/internal/config/config.go" 'env == "production"'

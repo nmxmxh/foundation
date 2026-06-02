@@ -192,6 +192,145 @@ patch_server_binary_path() {
   PATCH_SEARCH='COPY --from=builder /bin/${PROJECT_NAME} ./server' PATCH_REPLACE='COPY --from=builder /bin/server ./server' replace_in_file "$file" 'COPY --from=builder /bin/${PROJECT_NAME} ./server' 'COPY --from=builder /bin/server ./server' "Docker server binary fixed copy"
 }
 
+patch_websocket_runtime_backpressure() {
+  local file="$target/internal/server/websocket.go"
+  [[ -f "$file" ]] || return 0
+
+  local field_search='	cancel   context.CancelFunc
+
+	mu            sync.RWMutex'
+  local field_replace='	cancel   context.CancelFunc
+	reserved bool
+
+	mu            sync.RWMutex'
+  PATCH_SEARCH="$field_search" PATCH_REPLACE="$field_replace" replace_in_file "$file" "$field_search" "$field_replace" "WebSocket reserved slot field"
+
+  local pre_upgrade_search='	current := int(s.ws.connectionCnt.Load())
+	if current >= s.wsMaxConnections {
+		domainerr.WriteHTTP(w, domainerr.Unavailable("ws_capacity_reached", "websocket capacity reached"), domainerr.ResponseOptions{
+			Status: http.StatusServiceUnavailable,
+		})
+		return
+	}'
+  local pre_upgrade_replace='	if !s.reserveWSConnectionSlot() {
+		domainerr.WriteHTTP(w, domainerr.Unavailable("ws_capacity_reached", "websocket capacity reached"), domainerr.ResponseOptions{
+			Status: http.StatusServiceUnavailable,
+		})
+		return
+	}'
+  PATCH_SEARCH="$pre_upgrade_search" PATCH_REPLACE="$pre_upgrade_replace" replace_in_file "$file" "$pre_upgrade_search" "$pre_upgrade_replace" "WebSocket capacity reserves before upgrade"
+
+  local upgrade_search='	conn, err := s.ws.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.log.Error("websocket upgrade failed", "error", err.Error())
+		return
+	}'
+  local upgrade_replace='	conn, err := s.ws.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		s.releaseWSConnectionSlot()
+		s.log.Error("websocket upgrade failed", "error", err.Error())
+		return
+	}'
+  PATCH_SEARCH="$upgrade_search" PATCH_REPLACE="$upgrade_replace" replace_in_file "$file" "$upgrade_search" "$upgrade_replace" "WebSocket releases slot on failed upgrade"
+
+  local literal
+  literal='reserved:  true'
+  if ! grep -Fq "$literal" "$file"; then
+    local construct_search='		cancel:    cancel,
+		createdAt: time.Now().UTC(),'
+    local construct_replace='		cancel:    cancel,
+		reserved:  true,
+		createdAt: time.Now().UTC(),'
+    PATCH_SEARCH="$construct_search" PATCH_REPLACE="$construct_replace" replace_in_file "$file" "$construct_search" "$construct_replace" "WebSocket connection marks reserved slot"
+  fi
+
+  local rejection_search='	if !s.registerWSConnection(ctx, wsConn) {
+		cancel()
+		if err := conn.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "websocket capacity reached"),
+			time.Now().Add(5*time.Second),
+		); err != nil {
+			s.log.Warn("failed to send rejected websocket close frame", "connection_id", connectionID, "error", err)
+		}
+		if err := conn.Close(); err != nil {
+			s.log.Warn("failed to close rejected websocket", "error", err)
+		}
+		return
+	}'
+
+  local rejection_replace='	if !s.registerWSConnection(ctx, wsConn) {
+		s.releaseWSConnectionSlot()
+		cancel()
+		if err := conn.Close(); err != nil {
+			s.log.Warn("failed to close rejected websocket", "error", err)
+		}
+		return
+	}'
+
+  PATCH_SEARCH="$rejection_search" PATCH_REPLACE="$rejection_replace" replace_in_file "$file" "$rejection_search" "$rejection_replace" "WebSocket avoids post-upgrade capacity close"
+
+  if ! grep -Fq 'func (s *Server) reserveWSConnectionSlot() bool' "$file"; then
+    local register_marker='func (s *Server) registerWSConnection(ctx context.Context, conn *wsConnection) bool {'
+    local reserve_functions='func (s *Server) reserveWSConnectionSlot() bool {
+	if s == nil || s.ws == nil {
+		return false
+	}
+	next := s.ws.connectionCnt.Add(1)
+	if int(next) > s.wsMaxConnections {
+		s.ws.connectionCnt.Add(-1)
+		if s.ws.metrics != nil {
+			s.ws.metrics.RecordConnectionRejected()
+		}
+		return false
+	}
+	return true
+}
+
+func (s *Server) releaseWSConnectionSlot() {
+	if s != nil && s.ws != nil {
+		s.ws.connectionCnt.Add(-1)
+	}
+}
+
+func (s *Server) registerWSConnection(ctx context.Context, conn *wsConnection) bool {'
+    PATCH_SEARCH="$register_marker" PATCH_REPLACE="$reserve_functions" replace_in_file "$file" "$register_marker" "$reserve_functions" "WebSocket capacity reservation helpers"
+  fi
+
+  local register_search='	next := s.ws.connectionCnt.Add(1)
+	if int(next) > s.wsMaxConnections {
+		s.ws.connectionCnt.Add(-1)
+		if s.ws.metrics != nil {
+			s.ws.metrics.RecordConnectionRejected()
+		}
+		return false
+	}
+	s.ws.connections.Store(conn.id, conn)'
+  local register_replace='	if !conn.reserved {
+		next := s.ws.connectionCnt.Add(1)
+		if int(next) > s.wsMaxConnections {
+			s.ws.connectionCnt.Add(-1)
+			if s.ws.metrics != nil {
+				s.ws.metrics.RecordConnectionRejected()
+			}
+			return false
+		}
+	}
+	s.ws.connections.Store(conn.id, conn)'
+  PATCH_SEARCH="$register_search" PATCH_REPLACE="$register_replace" replace_in_file "$file" "$register_search" "$register_replace" "WebSocket registration honors reserved slots"
+
+  local enqueue_search='	default:
+		return errors.New("websocket outbound queue full")'
+
+  local enqueue_replace='	default:
+		if s.ws != nil && s.ws.metrics != nil {
+			s.ws.metrics.RecordMessageFailed()
+		}
+		return errors.New("websocket outbound queue full")'
+
+  PATCH_SEARCH="$enqueue_search" PATCH_REPLACE="$enqueue_replace" replace_in_file "$file" "$enqueue_search" "$enqueue_replace" "WebSocket backpressure metric"
+}
+
 patch_foundation_event_log_trigger_function() {
   local migration
   while IFS= read -r migration; do
@@ -476,6 +615,7 @@ patch_runtime_native_dockerfile
 patch_native_tauri_startup_expect
 patch_go_dependency_manifests
 patch_server_binary_path
+patch_websocket_runtime_backpressure
 patch_foundation_event_log_trigger_function
 patch_foundation_event_log_publish_claim_schema
 patch_test_postgres_platform

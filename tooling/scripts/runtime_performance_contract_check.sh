@@ -83,6 +83,9 @@ else
   check_contains "performance runner captures block profiles" "$performance_script" "-blockprofile"
   check_contains "performance runner captures mutex profiles" "$performance_script" "-mutexprofile"
   check_contains "performance runner supports hardware counter lane" "$performance_script" "PERF_COUNTERS"
+  check_contains "performance runner resolves generated app module layout" "$performance_script" "foundation/server-kit/go"
+  check_contains "performance runner resolves runtime-sdk module path" "$performance_script" "RUNTIME_SDK_GO"
+  check_contains "performance runner resolves Vitest runner" "$performance_script" "RUN_VITEST"
 fi
 
 rust_runtime_script="$(first_existing \

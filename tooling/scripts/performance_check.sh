@@ -10,6 +10,45 @@ TRACE="${TRACE:-0}"
 PROFILE="${PROFILE:-0}"
 PERF_COUNTERS="${PERF_COUNTERS:-0}"
 
+first_existing_dir() {
+  local path
+  for path in "$@"; do
+    if [[ -d "$path" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+  return 1
+}
+
+first_existing_file() {
+  local path
+  for path in "$@"; do
+    if [[ -f "$path" ]]; then
+      printf '%s\n' "$path"
+      return 0
+    fi
+  done
+  return 1
+}
+
+SERVER_KIT_GO="$(first_existing_dir "$ROOT/server-kit/go" "$ROOT/foundation/server-kit/go" || true)"
+RUNTIME_SDK_GO="$(first_existing_dir "$ROOT/runtime-sdk/go" "$ROOT/foundation/runtime-sdk/go" || true)"
+RUNTIME_TRANSPORT_GO="$(first_existing_dir "$ROOT/runtime-transport/go" "$ROOT/foundation/runtime-transport/go" || true)"
+RUNTIME_SDK_TS_BROWSER_HOST="$(first_existing_dir "$ROOT/runtime-sdk/ts/browser-host" "$ROOT/foundation/runtime-sdk/ts/browser-host" || true)"
+RUNTIME_TRANSPORT_TS="$(first_existing_dir "$ROOT/runtime-transport/ts" "$ROOT/foundation/runtime-transport/ts" || true)"
+RUNTIME_SDK_RUST="$(first_existing_dir "$ROOT/runtime-sdk/rust" "$ROOT/foundation/runtime-sdk/rust" || true)"
+RUN_VITEST="$(first_existing_file "$ROOT/tooling/scripts/run_vitest.sh" "$ROOT/scripts/checks/run_vitest.sh" "$ROOT/foundation/tooling/scripts/run_vitest.sh" || true)"
+
+require_dir() {
+  local label="$1"
+  local path="$2"
+  if [[ -z "$path" ]]; then
+    echo "missing required module: $label" >&2
+    exit 1
+  fi
+}
+
 json_escape() {
   sed 's/\\/\\\\/g; s/"/\\"/g' <<<"$1"
 }
@@ -48,7 +87,8 @@ run_hardware_counter_smoke() {
 
   if command -v perf >/dev/null 2>&1; then
     (
-      cd "$ROOT/server-kit/go"
+      require_dir "server-kit/go" "$SERVER_KIT_GO"
+      cd "$SERVER_KIT_GO"
       perf stat -x, \
         -e cycles,instructions,cache-references,cache-misses,branches,branch-misses,page-faults,context-switches \
         -o "$PROFILE_DIR/go-appbench-perf-stat.csv" \
@@ -65,7 +105,8 @@ emit_machine_metadata
 
 echo "== foundation Go performance guards =="
 (
-  cd "$ROOT/server-kit/go"
+  require_dir "server-kit/go" "$SERVER_KIT_GO"
+  cd "$SERVER_KIT_GO"
   go test -tags=perf ./grpcsvc ./chain
   go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|ClientDispatchFrameOverBufconn|RouterDispatchFrameDirect|DirectFrameClientDispatch|BoundFrameClientDispatch|BoundFrameClientDispatchTrusted|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip|GeneratedProtoUnmarshalReset|GeneratedProtoUnmarshalMergeReuse)$|BenchmarkRunParallel(Into)?$' -benchmem ./grpcsvc ./chain
   go test -bench='BenchmarkDecodeRequestBytesIntoCompleteReuse$' -benchmem -run='^$' ./protoapi
@@ -117,37 +158,43 @@ run_hardware_counter_smoke
 
 echo "== foundation runtime-sdk Go benchmarks =="
 (
-  cd "$ROOT/runtime-sdk/go"
+  require_dir "runtime-sdk/go" "$RUNTIME_SDK_GO"
+  cd "$RUNTIME_SDK_GO"
   go test -bench='BenchmarkBuffer' -benchmem -run='^$' ./runtimehost
 )
 
 echo "== foundation runtime-transport Go benchmarks =="
 (
-  cd "$ROOT/runtime-transport/go"
+  require_dir "runtime-transport/go" "$RUNTIME_TRANSPORT_GO"
+  cd "$RUNTIME_TRANSPORT_GO"
   go test -bench='Benchmark' -benchmem -run='^$' ./transport
 )
 
-if [[ -d "$ROOT/runtime-sdk/ts/browser-host/node_modules" ]]; then
+if [[ -n "$RUNTIME_SDK_TS_BROWSER_HOST" && -n "$RUN_VITEST" && -d "$RUNTIME_SDK_TS_BROWSER_HOST/node_modules" ]]; then
 	echo "== foundation runtime-sdk browser-host benchmarks =="
-	"$ROOT/tooling/scripts/run_vitest.sh" "$ROOT/runtime-sdk/ts/browser-host" bench --run
+	"$RUN_VITEST" "$RUNTIME_SDK_TS_BROWSER_HOST" bench --run
 else
 	echo "skip runtime-sdk TS benchmarks: node_modules not installed"
 fi
 
 if command -v cargo >/dev/null 2>&1; then
   echo "== foundation runtime-sdk Rust native buffer benchmarks =="
-  (
-    cd "$ROOT/runtime-sdk/rust"
-    cargo run -p ovrt-native --bin buffer_bench --release
-  )
+  if [[ -n "$RUNTIME_SDK_RUST" ]]; then
+    (
+      cd "$RUNTIME_SDK_RUST"
+      cargo run -p ovrt-native --bin buffer_bench --release
+    )
+  else
+    echo "skip runtime-sdk Rust benchmarks: runtime-sdk/rust module not found"
+  fi
 else
   echo "skip runtime-sdk Rust benchmarks: cargo not installed"
 fi
 
-if [[ -d "$ROOT/runtime-transport/ts/node_modules" ]]; then
+if [[ -n "$RUNTIME_TRANSPORT_TS" && -n "$RUN_VITEST" && -d "$RUNTIME_TRANSPORT_TS/node_modules" ]]; then
 	echo "== foundation runtime-transport TS tests =="
-	"$ROOT/tooling/scripts/run_vitest.sh" "$ROOT/runtime-transport/ts" run
-	"$ROOT/tooling/scripts/run_vitest.sh" "$ROOT/runtime-transport/ts" bench --run src/binaryEnvelope.bench.ts src/routing.bench.ts
+	"$RUN_VITEST" "$RUNTIME_TRANSPORT_TS" run
+	"$RUN_VITEST" "$RUNTIME_TRANSPORT_TS" bench --run src/binaryEnvelope.bench.ts src/routing.bench.ts
 else
 	echo "skip runtime-transport TS tests: node_modules not installed"
 fi
