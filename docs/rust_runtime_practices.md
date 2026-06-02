@@ -130,11 +130,18 @@ Optional deep checks for unsafe-heavy changes:
 
 ```bash
 cargo +nightly miri test --manifest-path <path-to-Cargo.toml>
+RUST_RUNTIME_MIRI=1 make check-rust-runtime-practices
+RUST_RUNTIME_LOOM=1 make check-rust-runtime-practices
 ```
 
 Use Miri for FFI, pointer, endian-sensitive, and aliasing-sensitive changes when
 the crate can run under Miri's supported host model. Keep it opt-in because
 native OS APIs, networking, and some FFI are intentionally unsupported.
+
+Use Loom for small Rust concurrency surfaces: atomics, queues, cancellation,
+descriptor registries, stream handoff, and bounded worker protocols. Keep Loom
+models deliberately small; the point is to exhaust interleavings around the
+contract, not to simulate the whole runtime.
 
 ## Online Rust references
 
@@ -149,6 +156,8 @@ native OS APIs, networking, and some FFI are intentionally unsupported.
   support automated review of unsafe explanations.
 - Miri: useful for undefined-behavior detection in test executions, but not a
   proof of soundness and not a replacement for invariants and review.
+- Loom: useful for deterministic interleaving exploration of Rust concurrency
+  primitives when the crate exposes a small `loom` feature.
 
 ## Review checklist
 

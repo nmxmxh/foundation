@@ -57,6 +57,7 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const protoRootArg = args.protoRoot ?? "api/protos";
   const protoRoot = path.resolve(protoRootArg);
+  const protoRootLabel = stableProtoRootLabel(protoRootArg, protoRoot);
   const outPath = path.resolve(args.out ?? "tests/contract/generated_lifecycle_test.go");
   const includeTemplate = Boolean(args.includeTemplate);
   const importRoot = args.importRoot ?? DEFAULT_IMPORT_ROOT;
@@ -74,7 +75,7 @@ function main() {
     cases: result.cases,
     importRoot,
     packageName,
-    protoRootLabel: protoRootArg,
+    protoRootLabel,
   }));
 
   if (args.check) {
@@ -156,6 +157,17 @@ Options:
   --include-template    Include api/protos/_template fixtures.
   --check               Fail when the generated output is missing or stale.
 `);
+}
+
+function stableProtoRootLabel(protoRootArg, protoRoot) {
+  const normalized = protoRoot.split(path.sep).join("/");
+  if (normalized.endsWith("/api/protos")) {
+    return "api/protos";
+  }
+  if (!path.isAbsolute(protoRootArg)) {
+    return protoRootArg.split(path.sep).join("/");
+  }
+  return (path.relative(process.cwd(), protoRoot) || ".").split(path.sep).join("/");
 }
 
 function discoverContracts(protoRoot, includeTemplate) {

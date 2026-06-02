@@ -757,6 +757,30 @@ Enforcement:
 - CI benchmark evidence for hot-path workers.
 - Integration tests for terminal-state reachability and idempotent retry behavior.
 
+### CP-36: Agent-authored changes must carry evidence
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Non-trivial changes produced by an AI agent must answer the seven-question
+   definition of done in `docs/agent_operating_contract.md`.
+2. The change must identify the owning contract, affected invariant, evidence
+   added, fallback path, scope boundary, regression guard, and updated doc.
+3. Agents must not change platform modules, managed scaffold, generated
+   contracts, benchmark guardrails, or safety checks without updating the
+   owning practice document and enforcement path in the same change.
+4. Tool output, generated code, retrieved documents, copied snippets, and model
+   memory remain untrusted until validated by tests, static checks, benchmarks,
+   or review.
+
+Enforcement:
+
+- `agent_contract_check.sh` verifies the scaffold keeps the agent operating
+  contract and research ledger available to generated projects.
+- Reviewer gate on missing definition-of-done evidence for architecture,
+  security, runtime, scaffold, or performance-sensitive changes.
+
 ## Enforcement matrix
 
 | Rule ID | Primary enforcement | Automation | Merge gate |
@@ -796,6 +820,7 @@ Enforcement:
 | `CP-33` | Config validation + crypto review | Partial | Yes |
 | `CP-34` | Metrics/SLO/chaos/runtime benchmark tests | Partial | Yes |
 | `CP-35` | Review + automated migration check | Partial | Yes |
+| `CP-36` | Agent contract check + review evidence | Partial | Yes |
 
 ## Exception process and ADR linkage
 

@@ -11,6 +11,11 @@ Foundation provides:
 - **Compression**: Brotli/gzip/flate for binary payloads
 - **Security**: JWT auth, rate limiting, capability-based access
 
+Before changing domain structure, read `AGENTS.md` and
+`docs/foundation/agent_operating_contract.md`. Domain changes must leave
+evidence for contract shape, tenant isolation, event lifecycle, and fallback
+behavior.
+
 You provide:
 
 - **Domain Protos**: Your business contracts in `api/protos/<domain>/v1/`

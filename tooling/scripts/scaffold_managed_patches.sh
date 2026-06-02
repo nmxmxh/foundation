@@ -276,6 +276,153 @@ patch_test_compose_ephemeral_ports() {
   rm -f "$before"
 }
 
+insert_before_marker_or_append() {
+  local file="$1"
+  local marker="$2"
+  local insert="$3"
+  local label="$4"
+
+  [[ -f "$file" ]] || return 0
+
+  local before
+  before="$(mktemp)"
+  cp "$file" "$before"
+
+  if grep -Fq -- "$marker" "$file"; then
+    PATCH_MARKER="$marker" PATCH_INSERT="$insert" perl -0pi -e '
+      my $marker = $ENV{PATCH_MARKER};
+      my $insert = $ENV{PATCH_INSERT};
+      s/\n\Q$marker\E/\n$insert\n\n$marker/;
+    ' "$file"
+  else
+    printf '\n%s\n' "$insert" >>"$file"
+  fi
+
+  if ! cmp -s "$before" "$file"; then
+    log_patch "$label: ${file#$target/}"
+  fi
+  rm -f "$before"
+}
+
+patch_agent_native_guides() {
+  local agents="$target/AGENTS.md"
+  if [[ -f "$agents" ]] && ! grep -Fq "agent_operating_contract.md" "$agents"; then
+    local agents_section='## Agent Operating Baseline
+
+Before editing architecture-sensitive code, read these files in order:
+
+1. `docs/foundation/foundation_tour.md`
+2. `docs/foundation/agent_operating_contract.md`
+3. `docs/foundation/foundation_architecture_contract.md`
+4. `docs/foundation/practice_controls.md`
+5. `docs/foundation/ai_threat_model.md` when tool, model, retrieved, generated, package, or security-sensitive input affects the change
+6. The relevant practice file for the lane you are changing
+7. `docs/foundation/future_practices_research.md` when proposing a new practice, security posture, performance lane, or agent workflow
+
+Definition of Done for agent-authored changes:
+
+1. State whether a public contract changed.
+2. Identify the invariant that must still hold.
+3. Leave evidence: test, benchmark, static check, review note, or migration proof.
+4. Preserve or document the fallback path.
+5. Name the scope boundary touched.
+6. Add or update a regression guard.
+7. Update docs or explain why no documentation changed.'
+
+    insert_before_marker_or_append "$agents" "## Tech Stack" "$agents_section" "agent operating baseline"
+  fi
+
+  local claude="$target/CLAUDE.md"
+  if [[ -f "$claude" ]] && ! grep -Fq "agent_operating_contract.md" "$claude"; then
+    local claude_section='## Agent-Native Workflow
+
+Before changing architecture-sensitive code, read `AGENTS.md`,
+`.agents/DOMAIN_GUIDE.md`, `docs/foundation/agent_operating_contract.md`, and
+`docs/foundation/practice_controls.md`. For tool, model, retrieved, generated,
+package, or security-sensitive input, also read
+`docs/foundation/ai_threat_model.md`.
+
+Run `make check-agent-contract` and `make check-practice-controls` after
+changing docs, scaffold, practices, or agent instructions.'
+
+    insert_before_marker_or_append "$claude" "## Commands" "$claude_section" "Claude agent-native workflow"
+  fi
+  if [[ -f "$claude" ]] && ! grep -Fq "check-runtime-performance-contracts" "$claude"; then
+    local claude_quality='## Runtime, Formal, and Operations Checks
+
+Run `make check-runtime-performance-contracts`, `make check-formal-methods`, and
+`make check-operational-excellence` after changing runtime lanes, formal specs,
+delivery telemetry, SBOM/provenance hooks, or operations workflows.'
+
+    insert_before_marker_or_append "$claude" "## Commands" "$claude_quality" "Claude runtime/formal/ops checks"
+  fi
+
+  local domain_guide="$target/.agents/DOMAIN_GUIDE.md"
+  if [[ -f "$domain_guide" ]] && ! grep -Fq "agent_operating_contract.md" "$domain_guide"; then
+    local domain_section='Before changing domain structure, read `AGENTS.md` and
+`docs/foundation/agent_operating_contract.md`. Domain changes must leave
+evidence for contract shape, tenant isolation, event lifecycle, and fallback
+behavior.'
+
+    insert_before_marker_or_append "$domain_guide" "You provide:" "$domain_section" "domain guide agent contract"
+  fi
+
+  local post_init="$target/.agents/POST_INIT.md"
+  if [[ -f "$post_init" ]] && ! grep -Fq "agent_operating_contract.md" "$post_init"; then
+    local post_section='- [ ] Read `AGENTS.md` and `docs/foundation/agent_operating_contract.md`
+- [ ] Read `docs/foundation/practice_controls.md` before changing scaffold or practice rules'
+
+    if grep -Fq -- '- [ ] Copy `.env.example` to `.env`' "$post_init"; then
+      PATCH_SEARCH='- [ ] Copy `.env.example` to `.env`'
+      PATCH_REPLACE="$post_section"'
+- [ ] Copy `.env.example` to `.env`'
+      replace_in_file "$post_init" "$PATCH_SEARCH" "$PATCH_REPLACE" "post-init agent contract"
+    elif grep -Fq -- '- [x] Copy `.env.example` to `.env`' "$post_init"; then
+      PATCH_SEARCH='- [x] Copy `.env.example` to `.env`'
+      PATCH_REPLACE="$post_section"'
+- [x] Copy `.env.example` to `.env`'
+      replace_in_file "$post_init" "$PATCH_SEARCH" "$PATCH_REPLACE" "post-init agent contract"
+    else
+      insert_before_marker_or_append "$post_init" "## Phase 2" "$post_section" "post-init agent contract"
+    fi
+  fi
+  if [[ -f "$post_init" ]] && ! grep -Fq "check-runtime-performance-contracts" "$post_init"; then
+    local post_quality='- [ ] Run `make check-runtime-performance-contracts` for runtime, benchmark, GPU, WASM, FFI, or native-lane changes
+- [ ] Run `make check-formal-methods` for queue, retry, cache, projection, socket, or fallback-ladder changes
+- [ ] Run `make check-operational-excellence` for delivery metrics, incident, SBOM, provenance, or OpenTelemetry changes'
+
+    insert_before_marker_or_append "$post_init" "- [ ] Review security checklist" "$post_quality" "post-init runtime/formal/ops checks"
+  fi
+
+  local readme="$target/README.md"
+  if [[ -f "$readme" ]] && ! grep -Fq "Agent-Native Workflow" "$readme"; then
+    local readme_section='## Agent-Native Workflow
+
+Before changing architecture-sensitive code, read `AGENTS.md`,
+`docs/foundation/agent_operating_contract.md`, and
+`docs/foundation/practice_controls.md`. For new practices, performance lanes,
+security posture, or AI-agent workflow changes, also read
+`docs/foundation/future_practices_research.md`.
+
+Agent-authored changes must leave evidence through tests, benchmarks, static
+checks, review notes, or migration proof. Run `make check-agent-contract` and
+`make check-practice-controls` after changing docs, scaffold, practices, or
+agent instructions.'
+
+    insert_before_marker_or_append "$readme" 'Run `make lint-foundation`' "$readme_section" "README agent-native workflow"
+  fi
+  if [[ -f "$readme" ]] && ! grep -Fq "check-runtime-performance-contracts" "$readme"; then
+    local readme_quality='## Runtime, Formal, and Operations Checks
+
+Use `make check-runtime-performance-contracts` for low-level runtime or
+benchmark evidence hooks, `make check-formal-methods` for queue/retry/cache/
+projection/socket specs, and `make check-operational-excellence` for DORA,
+SPACE/DevEx, OpenTelemetry, SBOM, and provenance hooks.'
+
+    insert_before_marker_or_append "$readme" 'Run `make lint-foundation`' "$readme_quality" "README runtime/formal/ops checks"
+  fi
+}
+
 sync_go_work() {
   [[ -f "$target/go.mod" ]] || return 0
 
@@ -314,6 +461,7 @@ sync_go_work() {
 
 export PATCH_SEARCH PATCH_REPLACE
 
+patch_agent_native_guides
 replace_go_version_defaults "$target/.env.example"
 replace_go_version_defaults "$target/Dockerfile"
 replace_go_version_defaults "$target/docker-compose.yml"

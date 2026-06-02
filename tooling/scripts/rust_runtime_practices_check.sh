@@ -90,6 +90,67 @@ append_existing_dirs app_roots \
   "$target/native/src-tauri"
 scan_roots=("${sdk_roots[@]}" "${native_roots[@]}" "${app_roots[@]}")
 
+run_optional_miri() {
+  if [[ "${RUST_RUNTIME_MIRI:-0}" != "1" ]]; then
+    echo "[OK] Miri runtime UB check is opt-in with RUST_RUNTIME_MIRI=1"
+    return 0
+  fi
+
+  if ! command -v cargo >/dev/null 2>&1 || ! cargo miri --version >/dev/null 2>&1; then
+    echo "[FAIL] RUST_RUNTIME_MIRI=1 requested but cargo miri is unavailable"
+    failed=1
+    return 0
+  fi
+
+  local root seen_roots=()
+  for root in "${scan_roots[@]}"; do
+    [[ -f "$root/Cargo.toml" ]] || continue
+    seen_roots+=("$root")
+    if (cd "$root" && cargo miri test); then
+      echo "[OK] Miri runtime tests: ${root#$target/}"
+    else
+      echo "[FAIL] Miri runtime tests: ${root#$target/}"
+      failed=1
+    fi
+  done
+
+  if (( ${#seen_roots[@]} == 0 )); then
+    echo "[OK] no Cargo runtime roots found for Miri"
+  fi
+}
+
+run_optional_loom() {
+  if [[ "${RUST_RUNTIME_LOOM:-0}" != "1" ]]; then
+    echo "[OK] Loom concurrency model tests are opt-in with RUST_RUNTIME_LOOM=1"
+    return 0
+  fi
+
+  if ! command -v cargo >/dev/null 2>&1; then
+    echo "[FAIL] RUST_RUNTIME_LOOM=1 requested but cargo is unavailable"
+    failed=1
+    return 0
+  fi
+
+  local root found=0
+  for root in "${scan_roots[@]}"; do
+    [[ -f "$root/Cargo.toml" ]] || continue
+    if ! rg -n '(^|[^A-Za-z0-9_])loom[[:space:]]*=' "$root/Cargo.toml" >/dev/null 2>&1; then
+      continue
+    fi
+    found=1
+    if (cd "$root" && cargo test --features loom); then
+      echo "[OK] Loom feature tests: ${root#$target/}"
+    else
+      echo "[FAIL] Loom feature tests: ${root#$target/}"
+      failed=1
+    fi
+  done
+
+  if [[ "$found" -eq 0 ]]; then
+    echo "[OK] no Loom-enabled Cargo runtime roots found"
+  fi
+}
+
 if (( ${#scan_roots[@]} > 0 )); then
   check_no_match_before_tests \
     "RP production Rust runtime paths avoid unwrap/expect/panic/todo/dbg" \
@@ -188,6 +249,9 @@ if (( ${#app_roots[@]} > 0 )); then
 else
   echo "[OK] scaffolded app Rust roots absent"
 fi
+
+run_optional_miri
+run_optional_loom
 
 if [[ "$failed" -ne 0 ]]; then
   echo "rust runtime practices check failed"

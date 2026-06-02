@@ -42,3 +42,21 @@ ephemeral coordination, and River-backed worker execution.
 Prefer small, measured improvements over broad new abstractions. Every runtime
 claim should have a contract, a test, a benchmark where relevant, and a clear
 fallback path.
+
+## Agent Handoff Template
+
+Use this shape when handing work to another agent:
+
+```text
+Objective:
+Changed:
+Evidence:
+Open risks:
+Next agent should:
+Do not touch:
+```
+
+For architecture-sensitive work, also answer the definition-of-done questions in
+`agent_operating_contract.md`: contract changed, invariant preserved, evidence
+added, fallback path, scope boundary, regression guard, and documentation
+updated.

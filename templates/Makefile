@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -616,7 +616,7 @@ lint-frontend:
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-FOUNDATION_LINT_CHECKS := check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+FOUNDATION_LINT_CHECKS := check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 
 lint-foundation:
@@ -662,6 +662,21 @@ check-rust-runtime-practices:
 	else \
 		echo "Rust runtime practices check script not found; skipping"; \
 	fi
+
+check-agent-contract:
+	@./scripts/checks/agent_contract_check.sh .
+
+check-practice-controls:
+	@./scripts/checks/practice_controls_check.sh .
+
+check-runtime-performance-contracts:
+	@./scripts/checks/runtime_performance_contract_check.sh .
+
+check-formal-methods:
+	@./scripts/checks/formal_methods_check.sh .
+
+check-operational-excellence:
+	@./scripts/checks/operational_excellence_check.sh .
 
 check-coding-practices:
 	@./scripts/checks/coding_practices_check.sh .
@@ -793,6 +808,11 @@ help:
 	@echo "  delivery-metrics  - Emit a local DORA/incident collection event"
 	@echo ""
 	@echo "Checks:"
+	@echo "  check-agent-contract"
+	@echo "  check-practice-controls"
+	@echo "  check-runtime-performance-contracts"
+	@echo "  check-formal-methods"
+	@echo "  check-operational-excellence"
 	@echo "  check-rust-static-analysis"
 	@echo "  check-rust-runtime-practices"
 	@echo "  check-coding-practices"

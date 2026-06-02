@@ -17,6 +17,7 @@ Related docs:
 - `foundation/docs/foundation_benchmarks.md`
 - `foundation/docs/game_runtime_practices.md`
 - `foundation/docs/go_concurrency_bug_practices.md`
+- `foundation/docs/performance_lab.md`
 - `foundation/docs/runtime_foundation.md`
 - `foundation/docs/rust_runtime_practices.md`
 - `foundation/docs/tla_architecture_practices.md`
@@ -31,6 +32,8 @@ Related docs:
 5. Optimize the cheapest correct layer first: query shape before more hardware, batching before fanout, typed frames before JSON maps, direct dispatch before RPC.
 6. Treat each lower-level performance lane as a refinement of a higher-level contract. Faster implementations must preserve canonical metadata, payload semantics, terminal events, and error classes.
 7. Track every adopted optimization in docs when it changes a project default, benchmark expectation, concurrency budget, invariant, or operational runbook.
+8. Agent-suggested optimizations remain hypotheses until the owning lane has a
+   baseline, before/after measurement, invariant mapping, and fallback path.
 
 ## Realtime and frame-budget posture
 
@@ -73,6 +76,15 @@ Use `tla_architecture_practices.md` for granular modeling guidance. The short ve
 6. Use real-time bounds for deadlines, TTLs, acquire timeouts, retry ceilings, ping intervals, and execution budgets.
 7. Use refinement/parity tests to prove optimized lanes still implement the original command/event contract.
 8. Keep worst-case behavior and statistical performance separate: hard bounds belong in architecture/spec docs; p95/p99, RPS, CPU, heap, and allocation trends belong in benchmark and telemetry docs.
+
+### Worst-case vs statistical performance
+
+Hard upper bounds are contract facts: deadline, queue depth, retry cap, acquire
+timeout, frame size, ping interval, lease duration, and execution budget.
+Statistical measurements are evidence facts: p50/p95/p99, RPS, allocs/op,
+bytes/op, CPU counters, heap profiles, trace spans, and benchmark deltas. Do
+not replace one with the other. A fast path that can hang violates the contract;
+a bounded path that is too slow needs benchmark and telemetry evidence.
 
 ## Go service hot paths
 
@@ -388,6 +400,8 @@ Each tracked change should include:
 3. The adopted practice.
 4. The guardrail that prevents regression.
 5. The doc and test/benchmark location that will stay updated.
+6. The agent or reviewer evidence note when the change was AI-authored or
+   AI-assisted, using `agent_operating_contract.md`.
 
 ## Review checklist
 

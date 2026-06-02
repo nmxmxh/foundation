@@ -9,7 +9,8 @@ It does not replace app-specific CI, but it sets the baseline for:
 3. redis practices
 4. migration structure
 5. contract drift
-6. delivery metrics and operational scaffold posture
+6. agent operating contracts and evidence ledgers
+7. delivery metrics and operational scaffold posture
 
 Contract drift is expected to fail hard when:
 
@@ -31,6 +32,13 @@ Foundation uses a strict-core lint model:
 2. generated projects inherit the same Go, Rust, scaffold, and CP checks through `.golangci.yml`, `clippy.toml`, `rustfmt.toml`, and `scripts/checks/*`
 3. frontend scaffolds use ESLint warnings for high-verbosity React shape rules and errors for boundary violations such as raw foundation source imports
 4. custom CP shell checks enforce cross-language architecture rules that stock linters cannot see consistently
+5. `agent_contract_check.sh` verifies that generated projects carry the
+   architect/agent read order, Definition of Done, research ledger, and
+   scaffolded self-check entry point
+6. `practice_controls_check.sh` verifies that `tooling/practice_controls.psv`
+   maps every `CP-*` and `TE-*` heading plus cross-cutting controls to owning
+   docs, automation class, evidence, merge-gate posture, and valid script
+   references
 
 Native tool mapping:
 
@@ -95,7 +103,11 @@ Required review questions:
 
 ## Delivery and Operational Enforcement
 
-Generated projects inherit a lightweight delivery metrics collector rather than a central dashboard. CI runs `scripts/checks/ci_delivery_metrics.mjs`, uploads the JSON event artifact, and leaves aggregation to the app deployment platform.
+Generated projects inherit a lightweight delivery metrics collector rather than
+a central dashboard. CI runs `scripts/checks/ci_delivery_metrics.mjs`, uploads
+the JSON event artifact, and leaves aggregation to the app deployment platform.
+The collector carries DORA, SPACE/DevEx, OpenTelemetry linkage, and supply-chain
+fields for SBOM/provenance evidence.
 
 Project scaffold checks verify:
 
@@ -104,6 +116,47 @@ Project scaffold checks verify:
 3. operations runbook templates
 4. configured CORS origins instead of wildcard scaffold defaults
 5. protected operational endpoints for production posture
+6. SBOM generation through the security workflow
+
+`operational_excellence_check.sh` verifies those delivery and supply-chain
+hooks without requiring a production deployment platform.
+
+## Runtime and Formal-Methods Enforcement
+
+Low-level runtime work has two separate gates:
+
+1. `runtime_performance_contract_check.sh` verifies that performance docs and
+   scripts expose pprof/trace, block/mutex profiles, CPU counter capture,
+   machine metadata, Rust Miri/Loom opt-ins, WebGPU/WGSL, and CUDA/Nsight
+   evidence hooks.
+2. `formal_methods_check.sh` verifies that TLA/PlusCal/Alloy/P guidance and
+   the queue, projection, and WebSocket starter modules are present in both
+   Foundation and generated-project layouts.
+
+The heavy tools remain opt-in. The default lint verifies the contract and the
+reproducible entry points; profile, counter, Miri, Loom, and TLC execution are
+selected by the engineer changing that lane.
+
+## Agent Contract Enforcement
+
+Agent-facing documentation is part of the scaffold contract because generated
+applications are expected to be maintained by one architect and multiple coding
+agents. The check enforces:
+
+1. `agent_operating_contract.md` and `future_practices_research.md` are present
+   in copied Foundation docs
+2. `AGENTS.md`, `CLAUDE.md`, and the generated project README point agents to
+   the operating contract
+3. Makefiles expose `check-agent-contract` and include it in
+   `lint-foundation`
+4. scaffolded guidance references evidence requirements before domain or
+   pre-production work
+5. the machine-readable controls matrix remains present and checkable from
+   both Foundation source and generated-project layouts
+
+This is intentionally a documentation and workflow gate, not a substitute for
+tests or static analysis. The evidence itself still belongs in the relevant
+test, benchmark, migration, or review artifact.
 
 ## Coverage and hotspot baseline
 

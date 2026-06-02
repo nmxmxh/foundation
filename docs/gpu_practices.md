@@ -212,6 +212,28 @@ Before implementing a GPU lane:
     recreate pipelines and buffers on a replacement device, or fall back to
     WASM/SAB or transferable-worker lanes with the same visible contract.
 
+### Capture Bundle Schema
+
+Every GPU/WebGPU/native-GPU performance claim should leave a capture bundle.
+Keep the bundle small enough for review, but complete enough to reproduce the
+claim.
+
+Required fields:
+
+1. workload name, schema name, row/count shape, byte size, and quality tier
+2. fallback lane and scalar/WASM/Rust parity test command
+3. host CPU, GPU adapter, driver/runtime, browser/native backend, OS, and build
+   SHA
+4. warmup policy, dispatch count, workgroup size, transfer bytes, readback
+   bytes, pipeline/cache state, and device limits
+5. capture tool and artifact path: browser trace, WebGPU markers, wgpu trace,
+   RenderDoc, PIX, Nsight Systems, Nsight Compute, AMD uProf, or ROCProfiler
+6. failure evidence for device loss, validation error, unsupported feature, and
+   fallback materialization
+
+Do not accept a kernel-only timing as a Foundation lane decision. Host/device
+boundary cost and fallback parity are part of the visible runtime contract.
+
 ## WebGPU and WGSL rules
 
 1. WebGPU is the browser GPU compute lane. It must remain optional,

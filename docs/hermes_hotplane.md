@@ -27,6 +27,9 @@ for Postgres, River, Redis Streams, or materialized database read models. It is
 a runtime refinement of the existing nervous-system lifecycle for reads that are
 frequent, scoped, replayable, and safe to rebuild.
 
+Freshness terminology, stale-window evidence, watermarks, replay, rebuild, and
+fallback obligations are owned by `docs/projection_freshness_contract.md`.
+
 ## Position In The Foundation Lifecycle
 
 Hermes sits after durable command truth:

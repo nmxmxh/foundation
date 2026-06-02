@@ -88,6 +88,33 @@ Use a lightweight TLA-style spec note before implementing or optimizing:
 
 Do not write a formal spec for ordinary CRUD, static UI composition, or code whose behavior is already obvious and single-threaded.
 
+## Lightweight Methods Ladder
+
+Use the lightest method that exposes the state-space risk:
+
+1. TLA+ or PlusCal for queues, retries, caches, sockets, projection freshness,
+   idempotency, fallback ladders, leases, and distributed worker behavior.
+2. Alloy for relational constraints: ownership, tenant scope, schema
+   compatibility, capability matrices, and invalid state combinations.
+3. P state machines for asynchronous event protocols where machines, events,
+   timers, and failure actions map closely to the implementation.
+4. deterministic simulation for queue, retry, cache, worker, socket, and
+   projection code when implementation-level scheduling, message ordering, and
+   fault injection matter more than a separate spec language.
+
+Foundation carries starter TLA templates in `docs/specs/tla/`:
+
+1. `WorkerRetryQueue` for bounded queues, retry budgets, leases, and terminal
+   states.
+2. `CacheProjectionFreshness` for monotonic reads, read-your-write, bounded
+   stale reads, and repair.
+3. `WebSocketBackpressure` for authentication, subscription, bounded write
+   queues, disconnect cleanup, and slow-client policy.
+
+These templates are not proof of production correctness. They are executable
+design skeletons that force invariants, state transitions, and test mappings to
+be explicit before implementation or optimization.
+
 ## Specification template
 
 Use this compact template in ADRs, design docs, or PR descriptions for high-risk performance/concurrency work:

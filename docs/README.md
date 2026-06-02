@@ -17,10 +17,16 @@ generated scaffold:
    and realtime lifecycle.
 3. `foundation_guide.md`: broad agent/developer guide and module overview.
 4. `foundation_tour.md`: one request through Foundation end to end.
-5. `coding_practices.md`: enforceable CP rules used by review and tooling.
-6. `testing_practices.md`: test adequacy rules, generated lifecycle tests, and
+5. `agent_operating_contract.md`: required workflow for one architect and
+   multiple AI agents working from the same Foundation contracts.
+6. `practice_controls.md`: machine-readable mapping from rules to scripts,
+   evidence, and merge-gate posture.
+7. `ai_threat_model.md`: AI/tool/agent threat classes and required validation
+   evidence.
+8. `coding_practices.md`: enforceable CP rules used by review and tooling.
+9. `testing_practices.md`: test adequacy rules, generated lifecycle tests, and
    CI expectations.
-7. `security_practices.md`: trust boundaries, auth posture, secrets, audit, and
+10. `security_practices.md`: trust boundaries, auth posture, secrets, audit, and
    ingress controls.
 
 ## Architecture And Runtime
@@ -35,7 +41,12 @@ generated scaffold:
 | `hermes_hotplane.md` | Hermes node-local projection contract, scaffold wrapper, consistency modes, and operational watch points. |
 | `foundation_architecture_contract.md` | Platform/scaffold/project ownership split and extension rules. |
 | `tla_architecture_practices.md` | State-machine and invariant practice for high-risk changes. |
+| `specs/tla/` | Starter TLA modules for worker retry queues, projection freshness, and WebSocket backpressure. |
 | `scaffold_manifest.md` | Scaffold manifest columns, update modes, and safe maintenance workflow. |
+| `agent_operating_contract.md` | Architect/agent role split, definition of done, evidence ledger, handoff format, and AI-specific safety rules. |
+| `practice_controls.md` | Control matrix maintenance rules for CP, TE, and cross-cutting agent/security/performance controls. |
+| `projection_freshness_contract.md` | Freshness modes and evidence requirements for Hermes, read models, search, materialized views, and Redis caches. |
+| `future_practices_research.md` | June 2026 research gap ledger mapped back to each Foundation document. |
 
 ## Backend And Data
 
@@ -46,13 +57,15 @@ generated scaffold:
 | `redis_practices.md` | Redis coordination, cache, stream, and rate-limit rules. |
 | `websocket_scaling.md` | Socket routing, metrics, fanout, and scaling budgets. |
 | `go_concurrency_bug_practices.md` | Bounded concurrency and known Go failure patterns. |
-| `delivery_metrics_practices.md` | DORA event collection and incident linkage. |
+| `delivery_metrics_practices.md` | DORA, SPACE/DevEx, OpenTelemetry linkage, SLSA/SBOM/provenance, and incident-linked delivery metrics. |
+| `ai_threat_model.md` | Prompt/tool/memory poisoning, generated-code provenance, and AI/tool security review vocabulary. |
 
 ## Performance And Compute
 
 | File | Use |
 | --- | --- |
 | `performance_practices.md` | Cross-cutting performance posture and measurement workflow. |
+| `performance_lab.md` | Low-level performance evidence contract for CPU, allocator, syscall, I/O, WASM, FFI, native, and GPU lanes. |
 | `rust_runtime_practices.md` | Rust runtime measurement, clone/borrow, bounds, unsafe, async, and parity rules. |
 | `foundation_benchmarks.md` | Benchmark commands, reference runs, and interpretation notes. |
 | `optimization_points.md` | Adopted optimization decisions and future targets. |
@@ -73,6 +86,16 @@ generated scaffold:
 Use `tooling/docs/enforcement.md` for lint strictness, communication lane
 enforcement, ownership checks, and operational gates. The source scripts live in
 `tooling/scripts/`; generated projects receive them under `scripts/checks/`.
+`agent_contract_check.sh` verifies that generated projects keep the agent
+operating contract, research ledger, and agent-facing templates wired into the
+scaffold.
+`practice_controls_check.sh` verifies that `tooling/practice_controls.psv`
+contains every `CP-*` and `TE-*` rule plus cross-cutting controls, and that
+referenced docs/scripts exist in both Foundation and generated-project layouts.
+`runtime_performance_contract_check.sh`, `formal_methods_check.sh`, and
+`operational_excellence_check.sh` verify that low-level runtime evidence,
+formal-method templates, and DORA/SPACE/SLSA/OpenTelemetry delivery hooks remain
+wired into Foundation and generated projects.
 
 Core repository commands:
 
@@ -80,6 +103,9 @@ Core repository commands:
 make lint
 make test
 make verify
+make check-runtime-performance-contracts
+make check-formal-methods
+make check-operational-excellence
 ```
 
 Generated project commands:

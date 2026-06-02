@@ -1,6 +1,6 @@
 .PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-bench test-bench-go test-bench-native-rust test-bench-history lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator \
-	check-contract-drift check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
+	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage
 
 .DEFAULT_GOAL := help
@@ -12,6 +12,11 @@ FOUNDATION_LINT_CHECKS := \
 	check-migration-seed-policy \
 	check-lifecycle-contract-generator \
 	check-contract-drift \
+	check-agent-contract \
+	check-practice-controls \
+	check-runtime-performance-contracts \
+	check-formal-methods \
+	check-operational-excellence \
 	check-go-fix \
 	check-go-static-analysis \
 	check-rust-static-analysis \
@@ -141,6 +146,21 @@ check-lifecycle-contract-generator:
 check-contract-drift:
 	@tooling/scripts/contract_drift_check.sh .
 
+check-agent-contract:
+	@tooling/scripts/agent_contract_check.sh .
+
+check-practice-controls:
+	@tooling/scripts/practice_controls_check.sh .
+
+check-runtime-performance-contracts:
+	@tooling/scripts/runtime_performance_contract_check.sh .
+
+check-formal-methods:
+	@tooling/scripts/formal_methods_check.sh .
+
+check-operational-excellence:
+	@tooling/scripts/operational_excellence_check.sh .
+
 check-go-fix:
 	@tooling/scripts/go_fix_check.sh .
 
@@ -226,4 +246,9 @@ help:
 	@echo "  make lint                Run foundation scaffold/practice checks"
 	@echo "  make verify              Run lint, tests, TS typechecks, and generated scaffold smoke"
 	@echo "  make docker-up/down      Start/stop core service-backed test stack"
+	@echo "  make check-agent-contract  Run the agent workflow/documentation contract check"
+	@echo "  make check-practice-controls  Validate the machine-readable practice controls matrix"
+	@echo "  make check-runtime-performance-contracts  Validate low-level runtime performance evidence hooks"
+	@echo "  make check-formal-methods  Validate formal-method templates and spec coverage"
+	@echo "  make check-operational-excellence  Validate DORA/SPACE/SLSA/OTel delivery evidence hooks"
 	@echo "  make check-database-practices  Run a single foundation check"

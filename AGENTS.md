@@ -15,6 +15,28 @@
 
 This is an **Ovasabi Foundation** project - a production-grade full-stack application using Go backend, TypeScript/React frontend, and Rust/WASM for high-performance compute. The foundation provides shared infrastructure for event-driven, tenant-isolated, realtime applications.
 
+## Agent Operating Baseline
+
+Before editing architecture-sensitive code, read these files in order:
+
+1. `docs/foundation/foundation_tour.md` or `docs/foundation_tour.md`
+2. `docs/foundation/agent_operating_contract.md` or `docs/agent_operating_contract.md`
+3. `docs/foundation/foundation_architecture_contract.md` or `docs/foundation_architecture_contract.md`
+4. `docs/foundation/practice_controls.md` or `docs/practice_controls.md`
+5. `docs/foundation/ai_threat_model.md` or `docs/ai_threat_model.md` when tool, model, retrieved, generated, package, or security-sensitive input affects the change
+6. The relevant practice file for the lane you are changing
+7. `docs/foundation/future_practices_research.md` or `docs/future_practices_research.md` when proposing a new practice, security posture, performance lane, or agent workflow
+
+Definition of Done for agent-authored changes:
+
+1. State whether a public contract changed.
+2. Identify the invariant that must still hold.
+3. Leave evidence: test, benchmark, static check, review note, or migration proof.
+4. Preserve or document the fallback path.
+5. Name the scope boundary touched.
+6. Add or update a regression guard.
+7. Update docs or explain why no documentation changed.
+
 ## Tech Stack (2026 Standards)
 
 | Layer | Technology | Version |
@@ -194,7 +216,7 @@ The Foundation modules are linked through a unified "Nervous System":
 
 ## Coding Practice Rules (CP-*)
 
-The foundation enforces 35 coding practices. Key ones to remember:
+The foundation enforces 36 coding practices. Key ones to remember:
 
 | Rule | Summary |
 | ------ | --------- |
@@ -208,6 +230,7 @@ The foundation enforces 35 coding practices. Key ones to remember:
 | CP-16 | Adaptive concurrency, not fixed throttling |
 | CP-18 | Rate limit all ingress APIs |
 | CP-20 | Server-side authorization on every object |
+| CP-36 | Agent-authored changes must carry evidence |
 
 Full reference: `docs/foundation/coding_practices.md` in generated apps, or `docs/coding_practices.md` in the foundation source repo.
 
@@ -217,6 +240,12 @@ For deeper context, read these files (`docs/foundation/` in generated apps, `doc
 
 | Topic | File |
 | ------- | ------ |
+| Agent operating contract | `docs/foundation/agent_operating_contract.md` or `docs/agent_operating_contract.md` |
+| Practice controls matrix | `docs/foundation/practice_controls.md` or `docs/practice_controls.md` |
+| AI and agent threat model | `docs/foundation/ai_threat_model.md` or `docs/ai_threat_model.md` |
+| Future practices research | `docs/foundation/future_practices_research.md` or `docs/future_practices_research.md` |
+| Projection freshness | `docs/foundation/projection_freshness_contract.md` or `docs/projection_freshness_contract.md` |
+| Low-level performance lab | `docs/foundation/performance_lab.md` or `docs/performance_lab.md` |
 | Coding rules | `docs/foundation/coding_practices.md` or `docs/coding_practices.md` |
 | Database patterns | `docs/foundation/database_practices.md` or `docs/database_practices.md` |
 | Redis patterns | `docs/foundation/redis_practices.md` or `docs/redis_practices.md` |
@@ -239,6 +268,8 @@ Before merging any PR, verify:
 - [ ] Rate limiting on exposed endpoints
 - [ ] CORS configured with explicit origins
 - [ ] Correlation IDs propagated for audit trails
+- [ ] AI/tool/retrieved content treated as untrusted input until validated
+- [ ] Agent evidence ledger is present for security, persistence, runtime, or scaffold changes
 
 ---
-Version: 1.1.0 | Last updated: 2026-05-03
+Version: 1.2.0 | Last updated: 2026-06-01

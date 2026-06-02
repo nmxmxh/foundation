@@ -56,6 +56,21 @@ Generated projects should not treat `server-kit` as optional sample code. The sc
 
 Generated projects should also keep operational readiness scaffolded but app-owned. Foundation provides `docs/operations` templates, `make delivery-metrics`, and CI artifact capture; app deployment platforms own dashboard aggregation, incident process, and production alert policies.
 
+## Agent Ownership Contract
+
+AI agents follow the same three-layer ownership model:
+
+1. Platform-module edits require contract, test, and benchmark evidence where
+   the changed path is performance-sensitive or shared across apps.
+2. Managed-scaffold edits require template, manifest, docs, and enforcement
+   updates in the same change.
+3. Project-owned edits must not patch vendored Foundation internals to solve
+   app-specific behavior; promote shared behavior into the correct platform
+   module instead.
+
+Use `docs/agent_operating_contract.md` for definition-of-done evidence,
+multi-agent handoff, tool safety, and research freshness rules.
+
 ## Nervous System Contract
 
 The official runtime substrate contract is `docs/foundation_nervous_system.md`. Generated projects must preserve the canonical lifecycle:

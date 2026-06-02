@@ -31,6 +31,7 @@ default_paths() {
     Makefile \
     scripts/check-rust.sh \
     scripts/lib/scaffold.sh \
+    tooling/practice_controls.psv \
     tooling/foundation_ownership.tsv \
     templates/Makefile \
     templates/scaffold.manifest.tsv \

@@ -14,7 +14,9 @@ if command -v perl >/dev/null 2>&1; then
   perl -e '
     use strict;
     use warnings;
+    use POSIX ":sys_wait_h";
 
+    my $log_file = shift @ARGV;
     my $timeout = shift @ARGV;
     my @cmd = @ARGV;
     my $pid = fork();
@@ -22,36 +24,49 @@ if command -v perl >/dev/null 2>&1; then
 
     if ($pid == 0) {
       setpgrp(0, 0) or die "setpgrp failed: $!\n";
+      open STDOUT, ">", $log_file or die "open $log_file failed: $!\n";
+      open STDERR, ">&", \*STDOUT or die "redirect stderr failed: $!\n";
       exec @cmd or die "exec failed: $!\n";
     }
 
-    my $timed_out = 0;
-    local $SIG{ALRM} = sub {
-      $timed_out = 1;
-      kill "TERM", -$pid;
-      select(undef, undef, undef, 0.5);
-      kill "KILL", -$pid;
-    };
+    my $deadline = time() + $timeout;
+    my $next_heartbeat = time() + 10;
+    my $status;
 
-    alarm $timeout;
-    waitpid($pid, 0);
-    my $status = $?;
-    alarm 0;
-
-    if ($timed_out) {
-      print STDERR "check timed out after ${timeout}s\n";
-      exit 124;
+    while (1) {
+      my $done = waitpid($pid, WNOHANG);
+      if ($done == $pid) {
+        $status = $?;
+        last;
+      }
+      if ($done == -1) {
+        print STDERR "waitpid failed: $!\n";
+        exit 1;
+      }
+      if (time() >= $deadline) {
+        kill "TERM", -$pid;
+        select(undef, undef, undef, 0.5);
+        kill "KILL", -$pid;
+        waitpid($pid, 0);
+        print STDERR "check timed out after ${timeout}s\n";
+        exit 124;
+      }
+      if (time() >= $next_heartbeat) {
+        print STDERR "[WAIT] @cmd\n";
+        $next_heartbeat = time() + 10;
+      }
+      select(undef, undef, undef, 0.2);
     }
 
-    if ($status == -1) {
-      print STDERR "waitpid failed: $!\n";
+    if (!defined $status) {
+      print STDERR "check timed out after ${timeout}s\n";
       exit 1;
     }
     if ($status & 127) {
       exit 128 + ($status & 127);
     }
     exit($status >> 8);
-  ' "$timeout_sec" "$@" >"$log_file" 2>&1
+  ' "$log_file" "$timeout_sec" "$@"
 else
   "$@" >"$log_file" 2>&1
 fi

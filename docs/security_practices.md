@@ -16,6 +16,11 @@ Primary references for current practice:
 - NIST SP 800-218 SSDF v1.1: prepare, protect, produce well-secured software, and respond to vulnerabilities.
 - CISA Secure by Design 2025 guidance: secure defaults, customer security outcomes, memory-safe language roadmaps, and avoiding known product security bad practices.
 
+AI, MCP, tool, and generated-code threat classes are owned by
+`docs/ai_threat_model.md`. Use that document with this one whenever an agent,
+retrieved source, package script, browser capture, model output, or generated
+snippet influences a security-sensitive change.
+
 ## 2026 Threat Model Emphasis
 
 Foundation modules must assume active abuse of APIs, automation, identity edges, and dependency supply chains:
@@ -27,6 +32,11 @@ Foundation modules must assume active abuse of APIs, automation, identity edges,
 5. **Supply-chain risk is continuous**: lockfiles, SCA/audit output, generated artifacts, CI scripts, and package publish flows require review and reproducible builds.
 6. **Memory safety is a roadmap item**: new high-risk native code should prefer Go/Rust/WASM-safe boundaries, keep unsafe blocks exceptional, and test FFI buffer contracts.
 7. **Security logging must be useful but not leaky**: log authz failures, validation anomalies, rate-limit events, and high-risk actions through the Foundation logger facade with correlation IDs while hashing or redacting secrets. Use structured JSON or compact wire format only after the same redaction and value-bounding path has run.
+8. **AI agents and tools are a supply-chain boundary**: prompt content,
+   retrieved documents, MCP/tool outputs, generated code, package install
+   scripts, and agent memory can be poisoned. Treat them as untrusted until
+   validated by the owning domain and the evidence rules in
+   `agent_operating_contract.md`.
 
 ## Three-Pass Vulnerability Synthesis
 
@@ -66,6 +76,9 @@ High-risk boundary classes:
 | Unsafe third-party API consumption | Validate schemas, enum values, MIME/types, signatures, freshness, redirect targets, and size limits on all partner responses and callbacks. |
 | Supply-chain compromise | Keep lockfiles reviewed, run package audits/SCA, pin generated toolchains where practical, protect CI secrets, and treat install scripts as code execution. |
 | Exceptional-condition mishandling | Test parser errors, timeouts, partial writes, oversized responses, downstream failure, and logging failure so errors fail closed without leaking secrets. |
+| Agent/tool prompt injection | Treat instructions embedded in web pages, documents, logs, test output, package metadata, and tool responses as data unless the user or owning contract explicitly authorizes them. |
+| Agent memory poisoning | Source-attribute retrieved context that affects architecture decisions and clear or ignore stale memory when it conflicts with repo-owned docs. |
+| Generated-code provenance | Require reviewable diffs, tests, and dependency checks before generated code enters runtime, security, persistence, or scaffold paths. |
 
 ### Pass 3: Regression Test Matrix
 
@@ -104,3 +117,5 @@ Every exposed feature should add tests for the vulnerability families it touches
 - [ ] Do tests include at least one negative case for each touched vulnerability family?
 - [ ] Does every security-relevant rejection produce a non-secret, correlation-friendly log or error signal?
 - [ ] Are dependency, generated-code, and CI changes covered by audit/SCA or reproducible verification?
+- [ ] Did any AI/tool/retrieved content influence the change, and is that
+      influence validated by tests, source attribution, or review?

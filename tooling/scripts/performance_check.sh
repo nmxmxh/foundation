@@ -5,6 +5,63 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export GOCACHE="${GOCACHE:-/tmp/ovasabi-foundation-go-build}"
 SCALE_BENCHTIME="${SCALE_BENCHTIME:-100x}"
 LATENCY_BENCHTIME="${LATENCY_BENCHTIME:-1s}"
+PROFILE_DIR="${PROFILE_DIR:-/tmp/ovasabi-foundation-profiles}"
+TRACE="${TRACE:-0}"
+PROFILE="${PROFILE:-0}"
+PERF_COUNTERS="${PERF_COUNTERS:-0}"
+
+json_escape() {
+  sed 's/\\/\\\\/g; s/"/\\"/g' <<<"$1"
+}
+
+tool_version() {
+  local tool="$1"
+  shift
+  if command -v "$tool" >/dev/null 2>&1; then
+    "$tool" "$@" 2>/dev/null | head -1
+  else
+    echo ""
+  fi
+}
+
+emit_machine_metadata() {
+  mkdir -p "$PROFILE_DIR"
+  cat >"$PROFILE_DIR/machine.json" <<JSON
+{
+  "schema_version": "foundation.performance_machine.v1",
+  "captured_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+  "uname": "$(json_escape "$(uname -a)")",
+  "go_version": "$(json_escape "$(tool_version go version)")",
+  "rustc_version": "$(json_escape "$(tool_version rustc --version)")",
+  "cargo_version": "$(json_escape "$(tool_version cargo --version)")",
+  "node_version": "$(json_escape "$(tool_version node --version)")",
+  "profile_enabled": "${PROFILE}",
+  "trace_enabled": "${TRACE}",
+  "hardware_counters_enabled": "${PERF_COUNTERS}"
+}
+JSON
+}
+
+run_hardware_counter_smoke() {
+  [[ "$PERF_COUNTERS" == "1" ]] || return 0
+  emit_machine_metadata
+
+  if command -v perf >/dev/null 2>&1; then
+    (
+      cd "$ROOT/server-kit/go"
+      perf stat -x, \
+        -e cycles,instructions,cache-references,cache-misses,branches,branch-misses,page-faults,context-switches \
+        -o "$PROFILE_DIR/go-appbench-perf-stat.csv" \
+        go test -bench='BenchmarkScale_LocalOperationMixLatency$' -benchmem -benchtime="$LATENCY_BENCHTIME" -run='^$' ./appbench
+    )
+  elif command -v xctrace >/dev/null 2>&1; then
+    echo "skip hardware counter smoke: xctrace is available, but counter capture requires an explicit Instruments template and signed target"
+  else
+    echo "skip hardware counter smoke: set PERF_COUNTERS=1 on Linux with perf, or capture Intel VTune/AMD uProf/Instruments externally"
+  fi
+}
+
+emit_machine_metadata
 
 echo "== foundation Go performance guards =="
 (
@@ -26,22 +83,37 @@ echo "== foundation Go performance guards =="
     echo "skip service-backed Redis/Postgres benchmarks: SERVICE_BACKED_DATABASE_URL and SERVICE_BACKED_REDIS_URL are not set"
   fi
   if [[ "${PROFILE:-0}" == "1" ]]; then
-    mkdir -p /tmp/ovasabi-foundation-profiles
+    mkdir -p "$PROFILE_DIR"
     go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFrameClientDispatch|RouterDispatchFrameDirect|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip|GeneratedProtoUnmarshalReset|GeneratedProtoUnmarshalMergeReuse)$' -benchmem \
-      -cpuprofile /tmp/ovasabi-foundation-profiles/grpcsvc.cpu.out \
-      -memprofile /tmp/ovasabi-foundation-profiles/grpcsvc.mem.out \
+      -cpuprofile "$PROFILE_DIR/grpcsvc.cpu.out" \
+      -memprofile "$PROFILE_DIR/grpcsvc.mem.out" \
       ./grpcsvc
     go test -bench='BenchmarkRunParallel$' -benchmem \
-      -cpuprofile /tmp/ovasabi-foundation-profiles/chain.cpu.out \
-      -memprofile /tmp/ovasabi-foundation-profiles/chain.mem.out \
+      -cpuprofile "$PROFILE_DIR/chain.cpu.out" \
+      -memprofile "$PROFILE_DIR/chain.mem.out" \
       ./chain
     go test -bench='BenchmarkAppLane_' -benchmem -run='^$' \
-      -cpuprofile /tmp/ovasabi-foundation-profiles/appbench.cpu.out \
-      -memprofile /tmp/ovasabi-foundation-profiles/appbench.mem.out \
+      -cpuprofile "$PROFILE_DIR/appbench.cpu.out" \
+      -memprofile "$PROFILE_DIR/appbench.mem.out" \
       ./appbench
-    echo "profiles written to /tmp/ovasabi-foundation-profiles"
+    echo "profiles written to $PROFILE_DIR"
+  fi
+  if [[ "${TRACE:-0}" == "1" ]]; then
+    mkdir -p "$PROFILE_DIR"
+    go test -bench='BenchmarkScale_LocalOperationMixLatency$' -benchmem -benchtime="$LATENCY_BENCHTIME" -run='^$' \
+      -trace "$PROFILE_DIR/appbench.trace.out" \
+      -blockprofile "$PROFILE_DIR/appbench.block.out" \
+      -mutexprofile "$PROFILE_DIR/appbench.mutex.out" \
+      ./appbench
+    go test -bench='BenchmarkRouter' -benchmem -run='^$' \
+      -trace "$PROFILE_DIR/wsrouting.trace.out" \
+      -blockprofile "$PROFILE_DIR/wsrouting.block.out" \
+      -mutexprofile "$PROFILE_DIR/wsrouting.mutex.out" \
+      ./wsrouting
+    echo "Go traces and blocking profiles written to $PROFILE_DIR"
   fi
 )
+run_hardware_counter_smoke
 
 echo "== foundation runtime-sdk Go benchmarks =="
 (

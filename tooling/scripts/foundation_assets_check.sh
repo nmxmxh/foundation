@@ -116,11 +116,25 @@ check_no_paths "legacy transport proto namespace is removed" \
   "$target/runtime-transport/protos/transport/v1/metadata.proto"
 
 check_file_contains "scaffold sync copies tooling scripts" "$target/scripts/lib/scaffold.sh" "cp -R \"\$FOUNDATION_DIR/tooling/scripts/.\" \"\$PROJECT_PATH/scripts/checks/\""
+check_exists "agent contract check exists for scaffold sync" "$target/tooling/scripts/agent_contract_check.sh"
+check_exists "practice controls matrix exists for scaffold sync" "$target/tooling/practice_controls.psv"
+check_exists "practice controls check exists for scaffold sync" "$target/tooling/scripts/practice_controls_check.sh"
+check_exists "runtime performance contract check exists for scaffold sync" "$target/tooling/scripts/runtime_performance_contract_check.sh"
+check_exists "formal methods check exists for scaffold sync" "$target/tooling/scripts/formal_methods_check.sh"
+check_exists "operational excellence check exists for scaffold sync" "$target/tooling/scripts/operational_excellence_check.sh"
+check_exists "TLA worker retry queue template exists for docs sync" "$target/docs/specs/tla/WorkerRetryQueue.tla"
+check_exists "TLA cache projection template exists for docs sync" "$target/docs/specs/tla/CacheProjectionFreshness.tla"
+check_exists "TLA WebSocket template exists for docs sync" "$target/docs/specs/tla/WebSocketBackpressure.tla"
 check_exists "logging practice check exists for scaffold sync" "$target/tooling/scripts/logging_practices_check.sh"
 check_exists "server-kit usage check exists for scaffold sync" "$target/tooling/scripts/server_kit_usage_check.sh"
 check_exists "metadata practice check exists for scaffold sync" "$target/tooling/scripts/metadata_practices_check.sh"
 check_exists "Vitest Node runtime runner exists for scaffold sync" "$target/tooling/scripts/run_vitest.sh"
 check_file_contains "scaffold Makefile exposes lint-foundation" "$target/templates/Makefile" "lint-foundation"
+check_file_contains "scaffold Makefile exposes agent contract check" "$target/templates/Makefile" "check-agent-contract"
+check_file_contains "scaffold Makefile exposes practice controls check" "$target/templates/Makefile" "check-practice-controls"
+check_file_contains "scaffold Makefile exposes runtime performance contract check" "$target/templates/Makefile" "check-runtime-performance-contracts"
+check_file_contains "scaffold Makefile exposes formal methods check" "$target/templates/Makefile" "check-formal-methods"
+check_file_contains "scaffold Makefile exposes operational excellence check" "$target/templates/Makefile" "check-operational-excellence"
 
 check_no_rg "templates avoid deprecated nginx brotli base image" "fholzer/nginx-brotli" "$target/templates" --glob 'Dockerfile*' --glob '*.yml'
 check_no_rg "templates avoid PostgreSQL 18 data subdirectory mount" "/var/lib/postgresql/data" "$target/templates" --glob '*.yml'

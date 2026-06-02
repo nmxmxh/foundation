@@ -700,6 +700,29 @@ Enforcement:
 - Package-level percentile helper tests.
 - Reviewer gate for benchmark or load-test changes.
 
+### TE-41: Agent-generated test changes must prove oracle strength
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Tests generated or substantially edited by an AI agent must state the visible
+   behavior they prove, not only mirror the implementation shape.
+2. Agent-generated tests for security, persistence, runtime, worker, Redis,
+   websocket, Hermes, native, GPU, or scaffold changes must include at least
+   one negative or boundary case unless the absence is documented as a gap.
+3. Randomized, property, or benchmark fixtures created by agents must keep
+   bounded input domains and reproducible seeds.
+4. An agent may add scaffolding or helpers only when they preserve the contract
+   they replace and do not hide failure diagnostics.
+
+Enforcement:
+
+- Reviewer gate against `docs/agent_operating_contract.md`.
+- `testing_practices_check.sh` keeps conservative mechanical checks for focused
+  tests, skipped tests, long sleeps, uncontrolled randomness, and benchmark
+  percentile misuse.
+
 ## Foundation test checks
 
 The conservative automated check set is:
@@ -716,6 +739,9 @@ The conservative automated check set is:
 10. Generated project lint must run the testing-practices check.
 11. Benchmark and load-test helpers must use conservative percentile math and
     must not report p95/p99 from intentionally tiny smoke samples.
+12. Agent-facing project docs must include the Foundation agent operating
+    contract and research ledger so generated tests are evaluated against the
+    same evidence rules as Foundation Core.
 
 These checks intentionally do not try to infer whether every test has a strong oracle or adequate partitions. Those are review obligations under `TE-02` through `TE-06`.
 
