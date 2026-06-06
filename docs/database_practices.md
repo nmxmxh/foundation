@@ -378,12 +378,18 @@ Foundation write-amplification rules:
 7. Tune checkpoints from evidence. Frequent checkpoints increase full-page WAL
    images after each checkpoint; oversized checkpoint windows can increase
    recovery time and dirty-buffer pressure. Track `pg_stat_wal`, `pg_stat_io`,
-   checkpoint logs, and WAL bytes per business operation.
+   checkpoint logs, and WAL bytes per business operation. A Postgres hint to
+   increase `max_wal_size` during a Foundation load ramp means the write lane
+   is checkpointing from WAL pressure; tune WAL/checkpoint headroom before
+   adding workers.
 8. Keep `full_page_writes` on unless storage guarantees and recovery posture are
    formally reviewed. It protects against torn pages; disabling it is not a
    normal Foundation optimization.
 9. Consider WAL compression for write-heavy workloads with high full-page image
    volume, but benchmark CPU cost and replica/archive behavior first.
+10. Treat canceled autovacuum work as a signal, not noise. Under high write or
+   cleanup pressure, inspect dead tuples, bloat, vacuum lag, and index churn
+   before changing indexes, table fillfactor, batch size, or retention policy.
 10. For SSD/NVMe hosts, random-page-cost tuning should be evidence-based and
     paired with plan review. Lower random I/O cost can make index access more
     attractive, but a bad index still creates write amplification.

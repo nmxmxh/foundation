@@ -12,7 +12,11 @@ ovrt-unit = { path = "../../runtime-sdk/rust/crates/ovrt-unit" }
 [[bin]]
 name = "native_bench"
 path = "src/bin/native_bench.rs"
+test = false
+bench = false
 
 [[bin]]
 name = "native_flow_sim"
 path = "src/bin/native_flow_sim.rs"
+test = false
+bench = false

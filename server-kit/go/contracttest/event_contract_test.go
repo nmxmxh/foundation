@@ -22,11 +22,12 @@ func (f consumerFunc) ConsumeContractEvent(ctx context.Context, env events.Envel
 
 func TestVerifyProducerAndConsumer(t *testing.T) {
 	producer := producerFunc(func(_ context.Context, eventType string) (events.Envelope, error) {
-		return events.Envelope{EventType: eventType, Payload: map[string]any{"id": "1"}}, nil
+		return events.Envelope{EventType: eventType, Payload: contractObject(map[string]any{"id": "1"})}, nil
 	})
 	consumerCalled := false
 	consumer := consumerFunc(func(_ context.Context, env events.Envelope) error {
-		consumerCalled = env.Payload["id"] == "1"
+		id, _ := env.Payload.GetString("id")
+		consumerCalled = id == "1"
 		return nil
 	})
 
@@ -45,8 +46,8 @@ func TestVerifyProducerRejectsSplitCorrelationIDs(t *testing.T) {
 	producer := producerFunc(func(_ context.Context, eventType string) (events.Envelope, error) {
 		return events.Envelope{
 			EventType:     eventType,
-			Payload:       map[string]any{"id": "1"},
-			Metadata:      map[string]any{"correlation_id": "corr_metadata"},
+			Payload:       contractObject(map[string]any{"id": "1"}),
+			Metadata:      contractObject(map[string]any{"correlation_id": "corr_metadata"}),
 			CorrelationID: "corr_envelope",
 		}, nil
 	})
@@ -68,13 +69,13 @@ func TestVerifyProducerAndConsumerErrorPaths(t *testing.T) {
 		t.Fatalf("producer error = %v", err)
 	}
 	wrongTypeProducer := producerFunc(func(context.Context, string) (events.Envelope, error) {
-		return events.Envelope{EventType: "order:wrong:v1:requested", Payload: map[string]any{"id": "1"}}, nil
+		return events.Envelope{EventType: "order:wrong:v1:requested", Payload: contractObject(map[string]any{"id": "1"})}, nil
 	})
 	if err := VerifyProducer(context.Background(), "order:created:v1:requested", wrongTypeProducer); err == nil {
 		t.Fatalf("expected wrong event type error")
 	}
 	invalidProducer := producerFunc(func(context.Context, string) (events.Envelope, error) {
-		return events.Envelope{EventType: "bad event", Payload: map[string]any{"id": "1"}}, nil
+		return events.Envelope{EventType: "bad event", Payload: contractObject(map[string]any{"id": "1"})}, nil
 	})
 	if err := VerifyProducer(context.Background(), "bad event", invalidProducer); err == nil {
 		t.Fatalf("expected invalid envelope error")
@@ -95,7 +96,7 @@ func TestVerifyProducerAndConsumerErrorPaths(t *testing.T) {
 	}
 	consumeErr := errors.New("consume failed")
 	goodProducer := producerFunc(func(_ context.Context, eventType string) (events.Envelope, error) {
-		return events.Envelope{EventType: eventType, Payload: map[string]any{"id": "1"}}, nil
+		return events.Envelope{EventType: eventType, Payload: contractObject(map[string]any{"id": "1"})}, nil
 	})
 	if err := VerifyConsumer(context.Background(), "order:created:v1:requested", goodProducer, consumerFunc(func(context.Context, events.Envelope) error {
 		return consumeErr

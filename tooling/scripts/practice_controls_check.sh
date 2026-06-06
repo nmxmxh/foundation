@@ -113,7 +113,7 @@ if [[ -f "$matrix" ]]; then
     if [[ -n "${rest:-}" ]]; then
       fail "extra matrix columns" "$control_id line $line_no"
     fi
-    if [[ ! "$control_id" =~ '^(CP|TE|AOC|EVID|FPR|AISEC|PERFLAB|RUNTIME|FORMAL|OPS|PROJFRESH|CTRL)-[0-9A-Z]+$' ]]; then
+    if ! printf '%s\n' "$control_id" | grep -Eq '^(CP|TE|AOC|EVID|FPR|AISEC|PERFLAB|RUNTIME|FORMAL|OPS|PROJFRESH|CTRL)-[0-9A-Z]+$'; then
       fail "control id format" "$control_id line $line_no"
     fi
     if [[ -z "${owner_doc:-}" ]] || ! doc_exists "$owner_doc"; then

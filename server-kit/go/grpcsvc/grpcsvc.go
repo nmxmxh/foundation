@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/encoding"
@@ -31,10 +32,10 @@ const (
 )
 
 type Envelope struct {
-	EventType     string         `json:"event_type"`
-	Payload       map[string]any `json:"payload"`
-	CorrelationID string         `json:"correlation_id"`
-	SchemaVersion string         `json:"schema_version"`
+	EventType     string           `json:"event_type"`
+	Payload       extension.Object `json:"payload"`
+	CorrelationID string           `json:"correlation_id"`
+	SchemaVersion string           `json:"schema_version"`
 }
 
 type Handler func(context.Context, Envelope) (Envelope, error)

@@ -6,13 +6,13 @@ import (
 
 func BenchmarkEnvelope_ToJSON(b *testing.B) {
 	env := makeTestEnvelope("media:upload:requested", "corr-123")
-	env.Payload = map[string]any{
+	env.Payload = ObjectFromMap(map[string]any{
 		"id":      "file-123",
 		"size":    1024 * 1024,
 		"type":    "image/png",
 		"tags":    []string{"vacation", "summer", "beach"},
 		"version": 1,
-	}
+	})
 
 	b.ResetTimer()
 	b.ReportAllocs()

@@ -5,6 +5,8 @@ package grpcsvc
 import (
 	"context"
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 func TestDispatchFrameAllocBudget(t *testing.T) {
@@ -13,7 +15,7 @@ func TestDispatchFrameAllocBudget(t *testing.T) {
 
 	jsonReq := Envelope{
 		EventType:     "order:create:v1:requested",
-		Payload:       map[string]any{"id": "ord_1"},
+		Payload:       extension.Object{"id": extension.String("ord_1")},
 		CorrelationID: "corr_1",
 		SchemaVersion: "1.0",
 	}

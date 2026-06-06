@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FOUNDATION_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_DIR="$(mktemp -d /tmp/ovasabi-foundation-migrations.XXXXXX)"
+source "$SCRIPT_DIR/testlib.sh"
 
 cleanup() {
     rm -rf "$PROJECT_DIR"
@@ -29,17 +30,20 @@ WITH_WASM=true
 BASELINE_GENERATION=legacy
 EOF
 
-"$FOUNDATION_DIR/scripts/update-project.sh" "$PROJECT_DIR" >/dev/null
+test_step "update migration fixture from current foundation"
+"$FOUNDATION_DIR/scripts/update-project.sh" "$PROJECT_DIR"
 
 if [[ -e "$PROJECT_DIR/migrations/000001_init.up.sql" || -e "$PROJECT_DIR/migrations/000001_init.down.sql" ]]; then
     echo "seed init migration should not be added when project-owned migrations exist" >&2
     exit 1
 fi
 
-"$FOUNDATION_DIR/tooling/scripts/migration_structure_check.sh" "$PROJECT_DIR" >/dev/null
+test_step "validate existing project-owned migration sequence"
+"$FOUNDATION_DIR/tooling/scripts/migration_structure_check.sh" "$PROJECT_DIR"
 
 mv "$PROJECT_DIR/migrations/0001_schema.up.sql" "$PROJECT_DIR/migrations/0002_schema.up.sql"
 mv "$PROJECT_DIR/migrations/0001_schema.down.sql" "$PROJECT_DIR/migrations/0002_schema.down.sql"
+test_step "validate first-prefix rejection"
 if "$FOUNDATION_DIR/tooling/scripts/migration_structure_check.sh" "$PROJECT_DIR" >"$PROJECT_DIR/migration_check.log" 2>&1; then
     echo "migration structure check should reject first migration prefixes that do not start at 1" >&2
     exit 1

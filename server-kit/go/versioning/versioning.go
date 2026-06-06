@@ -335,14 +335,19 @@ func (v *Versioner) AllVersions() []Version {
 func (v *Versioner) VersionsHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]any{
-			"versions":        v.AllVersions(),
-			"current_version": v.config.DefaultVersion,
+		if err := json.NewEncoder(w).Encode(versionsResponse{
+			Versions:       v.AllVersions(),
+			CurrentVersion: v.config.DefaultVersion,
 		}); err != nil {
 			// Log error if needed, but at this point headers are sent
 			_ = err
 		}
 	})
+}
+
+type versionsResponse struct {
+	Versions       []Version `json:"versions"`
+	CurrentVersion string    `json:"current_version"`
 }
 
 // Context key for version

@@ -32,11 +32,7 @@ impl<'a> LogRingBuffer<'a> {
             let size_ptr = ptr.add(8) as *const u32;
             *size_ptr
         };
-        Self {
-            ptr,
-            size,
-            _marker: std::marker::PhantomData,
-        }
+        Self { ptr, size, _marker: std::marker::PhantomData }
     }
 
     pub fn write(&self, message: &str) {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	metautil "github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 )
 
@@ -109,7 +110,7 @@ func TestLoggerRedactsAndEnrichesContext(t *testing.T) {
 			"event_type": "media:upload:success",
 			"projection": "media_latest",
 		},
-		Extras: map[string]any{"epoch": uint64(42)},
+		Extras: extension.Object{"epoch": extension.Int(42)},
 	})
 	l.InfoContext(ctx, "security boundary checked", "password", "super-secret", "authorization", "Bearer token", "media_id", "m_1")
 	got := out.String()

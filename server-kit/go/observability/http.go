@@ -42,27 +42,32 @@ func TraceHandler(collector *Collector) http.Handler {
 			correlationID = strings.TrimSpace(r.URL.Query().Get("correlationId"))
 		}
 		if correlationID == "" {
-			writeHandlerJSON(w, http.StatusBadRequest, map[string]any{
-				"error": "correlation_id is required",
-			})
+			writeHandlerJSON(w, http.StatusBadRequest, errorResponse{Error: "correlation_id is required"})
 			return
 		}
 		limit := 0
 		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
 			parsed, err := strconv.Atoi(raw)
 			if err != nil || parsed < 0 {
-				writeHandlerJSON(w, http.StatusBadRequest, map[string]any{
-					"error": "limit must be a non-negative integer",
-				})
+				writeHandlerJSON(w, http.StatusBadRequest, errorResponse{Error: "limit must be a non-negative integer"})
 				return
 			}
 			limit = parsed
 		}
-		writeHandlerJSON(w, http.StatusOK, map[string]any{
-			"correlation_id": correlationID,
-			"events":         collector.Trace(correlationID, limit),
+		writeHandlerJSON(w, http.StatusOK, traceResponse{
+			CorrelationID: correlationID,
+			Events:        collector.Trace(correlationID, limit),
 		})
 	})
+}
+
+type errorResponse struct {
+	Error string `json:"error"`
+}
+
+type traceResponse struct {
+	CorrelationID string       `json:"correlation_id"`
+	Events        []TraceEvent `json:"events"`
 }
 
 func writeHandlerJSON(w http.ResponseWriter, status int, payload any) {

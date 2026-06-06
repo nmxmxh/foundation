@@ -163,7 +163,7 @@ func TestManagerWatchChangesAndAttributes(t *testing.T) {
 
 	eval := &EvaluationContext{}
 	WithAttribute("plan", "pro")(eval)
-	if eval.Attributes["plan"] != "pro" {
+	if plan, ok := eval.Attributes.GetString("plan"); !ok || plan != "pro" {
 		t.Fatalf("attribute option did not initialize map: %+v", eval.Attributes)
 	}
 	if NewJSONSource(`[]`).Watch(context.Background()) != nil {

@@ -12,8 +12,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+test_step "init generated_project fixture"
 "$FOUNDATION_DIR/init.sh" generated_project --project-dir "$PROJECT_DIR" --skip-deps >/dev/null
 
+test_step "validate native project identifier guard"
 if PROJECT_IDENTIFIER=flat "$FOUNDATION_DIR/init.sh" invalid_native --project-dir "$TMP_DIR/invalid_native_v1" --with-native --dry-run --skip-deps >"$TMP_DIR/invalid_identifier.log" 2>&1; then
     echo "expected flat native PROJECT_IDENTIFIER override to fail validation" >&2
     exit 1
@@ -91,6 +93,7 @@ assert_file "migrations/000001_init.down.sql"
 assert_file "wasm/main.go"
 assert_absent "pkg"
 
+test_step "run generated project scaffold checks"
 "$PROJECT_DIR/scripts/checks/project_scaffold_check.sh" "$PROJECT_DIR"
 "$PROJECT_DIR/scripts/checks/agent_contract_check.sh" "$PROJECT_DIR"
 "$PROJECT_DIR/scripts/checks/practice_controls_check.sh" "$PROJECT_DIR"
@@ -99,10 +102,12 @@ assert_absent "pkg"
 "$PROJECT_DIR/scripts/checks/operational_excellence_check.sh" "$PROJECT_DIR"
 "$PROJECT_DIR/scripts/checks/logging_practices_check.sh" "$PROJECT_DIR"
 "$PROJECT_DIR/scripts/checks/river_practices_check.sh" "$PROJECT_DIR"
+test_step "generate lifecycle contracts in fixture"
 (
     cd "$PROJECT_DIR"
     make lifecycle-contracts >/dev/null
 )
+test_step "run generated contract drift check"
 "$PROJECT_DIR/scripts/checks/contract_drift_check.sh" "$PROJECT_DIR"
 assert_file "tests/contract/generated_lifecycle_test.go"
 assert_contains "tests/contract/generated_lifecycle_test.go" "VerifyCommandLifecycle"

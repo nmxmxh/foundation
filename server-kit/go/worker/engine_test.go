@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing"
 	"github.com/riverqueue/river"
@@ -199,7 +200,7 @@ func TestEngineRecordsObservabilityStates(t *testing.T) {
 		MaxAttempts:    2,
 		CorrelationID:  "corr_worker_obs",
 		IdempotencyKey: "idem_obs_1",
-		Metadata:       map[string]any{"organization_id": "org_obs"},
+		Metadata:       extension.Object{"organization_id": extension.String("org_obs")},
 	}); err != nil {
 		t.Fatalf("enqueue failed: %v", err)
 	}
@@ -207,8 +208,7 @@ func TestEngineRecordsObservabilityStates(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		snapshot := observability.Default().Snapshot()
-		worker, _ := snapshot["worker"].(map[string]any)
-		count, _ := worker["count"].(map[string]int64)
+		count := snapshot.Worker.Count
 		if count["operations_lifecycle|operations_core|succeeded"] >= 1 {
 			trace := observability.Default().Trace("corr_worker_obs", 0)
 			if len(trace) == 0 {
@@ -219,8 +219,7 @@ func TestEngineRecordsObservabilityStates(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	snapshot := observability.Default().Snapshot()
-	worker, _ := snapshot["worker"].(map[string]any)
-	count, _ := worker["count"].(map[string]int64)
+	count := snapshot.Worker.Count
 	t.Fatalf("expected succeeded worker metric, got keys: %s", fmt.Sprint(count))
 }
 

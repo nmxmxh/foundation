@@ -20,7 +20,7 @@ func TestPipelineHandlesControlPlaneAndStreamsPartReaders(t *testing.T) {
 	pipeline := newTestPipeline(t, mgr)
 	ctx := bulkContext("org_1", "corr_pipeline_1", "idem_pipeline_1")
 
-	initEnv := transport.CreateEnvelope(EventInitiateRequested, map[string]any{
+	initEnv := transport.CreateEnvelope(EventInitiateRequested, transport.ObjectFromMap(map[string]any{
 		"transfer_id":     "pipe_1",
 		"total_size":      int64(10),
 		"chunk_size":      int64(5),
@@ -32,35 +32,39 @@ func TestPipelineHandlesControlPlaneAndStreamsPartReaders(t *testing.T) {
 		"attributes": map[string]any{
 			"domain": "dataset",
 		},
-	}, nil)
+	}), nil)
 	planEnv, err := pipeline.HandleControl(ctx, initEnv)
 	if err != nil {
 		t.Fatalf("HandleControl(initiate) error = %v", err)
 	}
-	if planEnv.EventType != EventInitiateSuccess || planEnv.Payload["transfer_id"] != "pipe_1" {
+	planPayload := planEnv.Payload.InterfaceMap()
+	if planEnv.EventType != EventInitiateSuccess || planPayload["transfer_id"] != "pipe_1" {
 		t.Fatalf("plan envelope = %+v", planEnv)
 	}
-	lane, ok := planEnv.Payload["lane"].(map[string]any)
+	lane, ok := planPayload["lane"].(map[string]any)
 	if !ok || lane["copy_budget"] != "bounded-part-reader" || lane["zero_copy_available"] != true {
-		t.Fatalf("lane diagnostics = %#v", planEnv.Payload["lane"])
+		t.Fatalf("lane diagnostics = %#v", planPayload["lane"])
 	}
 
 	first := acceptPipelinePart(t, pipeline, ctx, "pipe_1", 0, 0, "hello")
-	if first.Payload["raw_size"] != int64(5) {
+	firstPayload := first.Payload.InterfaceMap()
+	if firstPayload["raw_size"] != int64(5) {
 		t.Fatalf("first receipt envelope = %+v", first)
 	}
 
-	statusEnv, err := pipeline.HandleControl(ctx, transport.CreateEnvelope(EventStatusRequested, map[string]any{
+	statusEnv, err := pipeline.HandleControl(ctx, transport.CreateEnvelope(EventStatusRequested, transport.ObjectFromMap(map[string]any{
 		"transfer_id": "pipe_1",
-	}, nil))
+	}), nil))
 	if err != nil {
 		t.Fatalf("HandleControl(status) error = %v", err)
 	}
-	if statusEnv.Payload["bytes_accepted"] != int64(5) || statusEnv.Payload["parts_accepted"] != 1 {
+	statusPayload := statusEnv.Payload.InterfaceMap()
+	if statusPayload["bytes_accepted"] != int64(5) || statusPayload["parts_accepted"] != int64(1) {
 		t.Fatalf("partial status = %+v", statusEnv.Payload)
 	}
-	missing := statusEnv.Payload["missing_parts"].([]map[string]any)
-	if len(missing) != 1 || missing[0]["part_number"] != 1 || missing[0]["offset"] != int64(5) {
+	missingRaw := statusPayload["missing_parts"].([]any)
+	missing := missingRaw[0].(map[string]any)
+	if len(missingRaw) != 1 || missing["part_number"] != int64(1) || missing["offset"] != int64(5) {
 		t.Fatalf("missing parts = %+v", missing)
 	}
 
@@ -69,14 +73,15 @@ func TestPipelineHandlesControlPlaneAndStreamsPartReaders(t *testing.T) {
 		receiptFromEnvelope(first),
 		receiptFromEnvelope(second),
 	})
-	completeEnv, err := pipeline.HandleControl(ctx, transport.CreateEnvelope(EventCompleteRequested, map[string]any{
+	completeEnv, err := pipeline.HandleControl(ctx, transport.CreateEnvelope(EventCompleteRequested, transport.ObjectFromMap(map[string]any{
 		"transfer_id":          "pipe_1",
 		"expected_root_sha256": root,
-	}, nil))
+	}), nil))
 	if err != nil {
 		t.Fatalf("HandleControl(complete) error = %v", err)
 	}
-	if completeEnv.EventType != EventCompleteSuccess || completeEnv.Payload["root_sha256"] != root {
+	completePayload := completeEnv.Payload.InterfaceMap()
+	if completeEnv.EventType != EventCompleteSuccess || completePayload["root_sha256"] != root {
 		t.Fatalf("complete envelope = %+v", completeEnv)
 	}
 
@@ -110,29 +115,30 @@ func TestPipelineAcceptHTTPPartUsesStreamReader(t *testing.T) {
 	mgr, _, _, _ := newTestManager(t)
 	pipeline := newTestPipeline(t, mgr)
 	ctx := bulkContext("org_1", "corr_pipeline_http", "idem_pipeline_http")
-	if _, err := pipeline.HandleControl(ctx, transport.CreateEnvelope(EventInitiateRequested, map[string]any{
+	if _, err := pipeline.HandleControl(ctx, transport.CreateEnvelope(EventInitiateRequested, transport.ObjectFromMap(map[string]any{
 		"transfer_id": "http_part",
 		"total_size":  int64(4),
 		"chunk_size":  int64(4),
 		"max_memory":  int64(4),
-	}, nil)); err != nil {
+	}), nil)); err != nil {
 		t.Fatalf("HandleControl(initiate) error = %v", err)
 	}
 	req := HTTPPartRequest{
-		Envelope: transport.CreateEnvelope(EventPartAcceptRequest, map[string]any{
+		Envelope: transport.CreateEnvelope(EventPartAcceptRequest, transport.ObjectFromMap(map[string]any{
 			"transfer_id":         "http_part",
 			"part_number":         0,
 			"offset":              int64(0),
 			"size":                int64(4),
 			"expected_raw_sha256": shaHex("body"),
-		}, nil),
+		}), nil),
 		Reader: strings.NewReader("body"),
 	}
 	out, err := pipeline.AcceptHTTPPart(ctx, req)
 	if err != nil {
 		t.Fatalf("AcceptHTTPPart() error = %v", err)
 	}
-	if out.EventType != EventPartAcceptSuccess || out.Payload["raw_sha256"] != shaHex("body") {
+	outPayload := out.Payload.InterfaceMap()
+	if out.EventType != EventPartAcceptSuccess || outPayload["raw_sha256"] != shaHex("body") {
 		t.Fatalf("AcceptHTTPPart() envelope = %+v", out)
 	}
 }
@@ -141,26 +147,27 @@ func TestPipelineAcceptDescriptorPartUsesSameHostSource(t *testing.T) {
 	mgr, _, _, _ := newTestManager(t)
 	pipeline := newTestPipeline(t, mgr)
 	ctx := bulkContext("org_1", "corr_pipeline_descriptor", "idem_pipeline_descriptor")
-	if _, err := pipeline.HandleControl(ctx, transport.CreateEnvelope(EventInitiateRequested, map[string]any{
+	if _, err := pipeline.HandleControl(ctx, transport.CreateEnvelope(EventInitiateRequested, transport.ObjectFromMap(map[string]any{
 		"transfer_id": "descriptor_part",
 		"total_size":  int64(4),
 		"chunk_size":  int64(4),
 		"max_memory":  int64(4),
-	}, nil)); err != nil {
+	}), nil)); err != nil {
 		t.Fatalf("HandleControl(initiate) error = %v", err)
 	}
-	env := transport.CreateEnvelope(EventPartAcceptRequest, map[string]any{
+	env := transport.CreateEnvelope(EventPartAcceptRequest, transport.ObjectFromMap(map[string]any{
 		"transfer_id":         "descriptor_part",
 		"part_number":         0,
 		"offset":              int64(0),
 		"size":                int64(4),
 		"expected_raw_sha256": shaHex("shm!"),
-	}, nil)
+	}), nil)
 	out, err := pipeline.AcceptDescriptorPart(ctx, env, descriptorSource{payload: "shm!"})
 	if err != nil {
 		t.Fatalf("AcceptDescriptorPart() error = %v", err)
 	}
-	if out.EventType != EventPartAcceptSuccess || out.Payload["raw_sha256"] != shaHex("shm!") {
+	outPayload := out.Payload.InterfaceMap()
+	if out.EventType != EventPartAcceptSuccess || outPayload["raw_sha256"] != shaHex("shm!") {
 		t.Fatalf("AcceptDescriptorPart() envelope = %+v", out)
 	}
 }
@@ -169,13 +176,13 @@ func TestPipelineAcceptDescriptorPartFailures(t *testing.T) {
 	mgr, _, _, _ := newTestManager(t)
 	pipeline := newTestPipeline(t, mgr)
 	ctx := bulkContext("org_1", "corr_pipeline_descriptor_fail", "idem_pipeline_descriptor_fail")
-	env := transport.CreateEnvelope(EventPartAcceptRequest, map[string]any{
+	env := transport.CreateEnvelope(EventPartAcceptRequest, transport.ObjectFromMap(map[string]any{
 		"transfer_id":         "descriptor_missing",
 		"part_number":         0,
 		"offset":              int64(0),
 		"size":                int64(4),
 		"expected_raw_sha256": shaHex("shm!"),
-	}, nil)
+	}), nil)
 	if _, err := pipeline.AcceptDescriptorPart(ctx, env, nil); !apperrors.Is(err, apperrors.CodeValidation) {
 		t.Fatalf("nil source error = %v", err)
 	}
@@ -230,8 +237,9 @@ func TestPipelineSignedObjectStorePartBypassesAppByteProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GrantSignedPart() error = %v", err)
 	}
-	objectKey := grantEnv.Payload["object_key"].(string)
-	if objectKey == "" || grantEnv.Payload["upload_url"] == "" {
+	grantPayload := grantEnv.Payload.InterfaceMap()
+	objectKey := grantPayload["object_key"].(string)
+	if objectKey == "" || grantPayload["upload_url"] == "" {
 		t.Fatalf("grant envelope = %+v", grantEnv)
 	}
 	if _, err := store.PutStream(ctx, objectKey, strings.NewReader("cloud"), 5, objectstore.PutOptions{ContentType: "text/plain"}); err != nil {
@@ -241,14 +249,16 @@ func TestPipelineSignedObjectStorePartBypassesAppByteProxy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcceptSignedPart() error = %v", err)
 	}
-	if receiptEnv.Payload["raw_sha256"] != shaHex("cloud") {
+	receiptPayload := receiptEnv.Payload.InterfaceMap()
+	if receiptPayload["raw_sha256"] != shaHex("cloud") {
 		t.Fatalf("receipt envelope = %+v", receiptEnv)
 	}
 	replayed, err := pipeline.AcceptSignedPart(ctx, request, "signed_1", desc)
 	if err != nil {
 		t.Fatalf("AcceptSignedPart(replay) error = %v", err)
 	}
-	if replayed.Payload["raw_sha256"] != shaHex("cloud") {
+	replayedPayload := replayed.Payload.InterfaceMap()
+	if replayedPayload["raw_sha256"] != shaHex("cloud") {
 		t.Fatalf("replayed receipt envelope = %+v", replayed)
 	}
 }
@@ -293,7 +303,8 @@ func TestPipelineSignedObjectStorePartRejectsTamperedObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GrantSignedPart() error = %v", err)
 	}
-	if _, err := store.PutStream(ctx, grantEnv.Payload["object_key"].(string), strings.NewReader("wrong"), 5, objectstore.PutOptions{}); err != nil {
+	grantPayload := grantEnv.Payload.InterfaceMap()
+	if _, err := store.PutStream(ctx, grantPayload["object_key"].(string), strings.NewReader("wrong"), 5, objectstore.PutOptions{}); err != nil {
 		t.Fatalf("direct object upload error = %v", err)
 	}
 	if _, err := pipeline.AcceptSignedPart(ctx, request, "signed_tamper", desc); !apperrors.Is(err, apperrors.CodeValidation) {
@@ -348,7 +359,8 @@ func TestPipelineSignedObjectStorePartRejectsOversizedDirectObject(t *testing.T)
 	if err != nil {
 		t.Fatalf("GrantSignedPart() error = %v", err)
 	}
-	if _, err := store.PutStream(ctx, grantEnv.Payload["object_key"].(string), strings.NewReader("right!"), 6, objectstore.PutOptions{}); err != nil {
+	grantPayload := grantEnv.Payload.InterfaceMap()
+	if _, err := store.PutStream(ctx, grantPayload["object_key"].(string), strings.NewReader("right!"), 6, objectstore.PutOptions{}); err != nil {
 		t.Fatalf("direct object upload error = %v", err)
 	}
 	if _, err := pipeline.AcceptSignedPart(ctx, request, "signed_oversize", desc); !apperrors.Is(err, apperrors.CodeQuotaExceeded) {
@@ -453,7 +465,8 @@ func TestPipelineReportsFailuresAsTypedEnvelopes(t *testing.T) {
 	if !apperrors.Is(err, apperrors.CodeValidation) {
 		t.Fatalf("HandleControl(invalid) error = %v", err)
 	}
-	if env.EventType != EventFailed || env.Payload["request_event"] != EventInitiateRequested {
+	envPayload := env.Payload.InterfaceMap()
+	if env.EventType != EventFailed || envPayload["request_event"] != EventInitiateRequested {
 		t.Fatalf("failure envelope = %+v", env)
 	}
 }
@@ -484,7 +497,7 @@ func TestPipelinePreservesRuntimeTransportMetadata(t *testing.T) {
 
 	failureRequest := request
 	failureRequest.EventType = EventStatusRequested
-	failureRequest.Payload = map[string]any{"transfer_id": "missing"}
+	failureRequest.Payload = transport.ObjectFromMap(map[string]any{"transfer_id": "missing"})
 	failure, err := pipeline.HandleControl(ctx, failureRequest)
 	if !apperrors.Is(err, apperrors.CodeNotFound) {
 		t.Fatalf("HandleControl(missing status) error = %v", err)
@@ -546,7 +559,9 @@ func TestPipelineResumeSurvivesManagerHandoffAndReplaysReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcceptPartEnvelope(replay) error = %v", err)
 	}
-	if replayed.Payload["raw_sha256"] != firstReceipt.Payload["raw_sha256"] {
+	replayedPayload := replayed.Payload.InterfaceMap()
+	firstReceiptPayload := firstReceipt.Payload.InterfaceMap()
+	if replayedPayload["raw_sha256"] != firstReceiptPayload["raw_sha256"] {
 		t.Fatalf("replayed receipt = %+v first=%+v", replayed.Payload, firstReceipt.Payload)
 	}
 
@@ -556,10 +571,11 @@ func TestPipelineResumeSurvivesManagerHandoffAndReplaysReceipts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandleControl(status) error = %v", err)
 	}
-	if statusEnv.Payload["parts_accepted"] != 1 {
+	statusPayload := statusEnv.Payload.InterfaceMap()
+	if statusPayload["parts_accepted"] != int64(1) {
 		t.Fatalf("handoff status = %+v", statusEnv.Payload)
 	}
-	if token := statusEnv.Payload["resume_token"].(string); !strings.HasPrefix(token, "bulk1_") {
+	if token := statusPayload["resume_token"].(string); !strings.HasPrefix(token, "bulk1_") {
 		t.Fatalf("resume token = %q", token)
 	}
 }
@@ -732,13 +748,13 @@ func TestPipelineRejectsOversizedReaderAndConflictingReplay(t *testing.T) {
 		t.Fatalf("AcceptPartEnvelope(valid) error = %v", err)
 	}
 	conflict := env
-	conflict.Payload = map[string]any{
+	conflict.Payload = transport.ObjectFromMap(map[string]any{
 		"transfer_id":         "reader_bounds",
 		"part_number":         0,
 		"offset":              int64(0),
 		"size":                int64(2),
 		"expected_raw_sha256": shaHex("zz"),
-	}
+	})
 	if _, err := pipeline.AcceptPartEnvelope(ctx, conflict, errReader{}); !apperrors.Is(err, apperrors.CodeConflict) {
 		t.Fatalf("conflicting replay error = %v", err)
 	}
@@ -1057,11 +1073,12 @@ func newTestPipeline(t *testing.T, mgr *Manager) *Pipeline {
 }
 
 func receiptFromEnvelope(env transport.Envelope) PartReceipt {
+	payload := env.Payload.InterfaceMap()
 	return PartReceipt{
-		TransferID:     env.Payload["transfer_id"].(string),
-		OrganizationID: env.Payload["organization_id"].(string),
-		PartNumber:     env.Payload["part_number"].(int),
-		RawSize:        env.Payload["raw_size"].(int64),
-		RawSHA256:      env.Payload["raw_sha256"].(string),
+		TransferID:     payload["transfer_id"].(string),
+		OrganizationID: payload["organization_id"].(string),
+		PartNumber:     int(payload["part_number"].(int64)),
+		RawSize:        payload["raw_size"].(int64),
+		RawSHA256:      payload["raw_sha256"].(string),
 	}
 }

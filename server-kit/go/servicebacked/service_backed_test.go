@@ -160,7 +160,7 @@ func assertRedisPubSub(t *testing.T, ctx context.Context, client rediskit.Client
 
 func assertRedisStreams(t *testing.T, ctx context.Context, client rediskit.Client, names redisContractNames) {
 	t.Helper()
-	id, err := client.XAdd(ctx, names.stream, map[string]interface{}{"kind": "requested", "record_id": "r1"})
+	id, err := client.XAdd(ctx, names.stream, serviceRedisValues(map[string]any{"kind": "requested", "record_id": "r1"}))
 	if err != nil || id == "" {
 		t.Fatalf("redis xadd = %q, %v; want id, nil", id, err)
 	}
@@ -221,27 +221,27 @@ func TestServiceBackedPostgresStateStoreAndPool(t *testing.T) {
 			Collection:     "service-backed",
 			OrganizationID: orgID,
 			RecordID:       fmt.Sprintf("record-%02d", i),
-			Data: map[string]any{
+			Data: serviceRecordData(map[string]any{
 				"state":  state,
 				"bucket": strconv.Itoa(i % 4),
-			},
+			}),
 		}
 		if _, err := store.UpsertRecord(ctx, rec); err != nil {
 			t.Fatalf("postgres upsert[%d] failed: %v", i, err)
 		}
 	}
 	got, ok, err := store.GetRecord(ctx, "orders", "service-backed", orgID, "record-04")
-	if err != nil || !ok || got.Data["state"] != "ready" {
+	if err != nil || !ok || !serviceRecordStringEquals(got.Data, "state", "ready") {
 		t.Fatalf("postgres get = %#v, %v, %v; want ready record", got, ok, err)
 	}
-	ready, err := store.ListRecords(ctx, "orders", "service-backed", orgID, map[string]any{"state": "ready"}, 5)
+	ready, err := store.ListRecords(ctx, "orders", "service-backed", orgID, serviceRecordQuery(5, map[string]any{"state": "ready"}))
 	if err != nil {
 		t.Fatalf("postgres filtered list failed: %v", err)
 	}
 	if len(ready) != 5 {
 		t.Fatalf("postgres filtered list returned %d records, want 5", len(ready))
 	}
-	count, err := store.CountRecords(ctx, "orders", "service-backed", orgID, map[string]any{"state": "ready"})
+	count, err := store.CountRecords(ctx, "orders", "service-backed", orgID, serviceRecordQuery(0, map[string]any{"state": "ready"}))
 	if err != nil || count != 16 {
 		t.Fatalf("postgres filtered count = %d, %v; want 16, nil", count, err)
 	}
@@ -363,7 +363,7 @@ func TestServiceBackedPostgresRawJSONStateStore(t *testing.T) {
 		t.Fatalf("postgres raw json payload missing organization: %s", string(raw.DataJSON))
 	}
 	typed, found, err := store.GetRecord(ctx, "orders", "raw-json", orgID, "record-01")
-	if err != nil || !found || typed.Data["organization_id"] != orgID {
+	if err != nil || !found || !serviceRecordStringEquals(typed.Data, "organization_id", orgID) {
 		t.Fatalf("postgres typed get after raw upsert = %#v found=%v err=%v", typed, found, err)
 	}
 	assertSnapshotHasCount(t, "database", "upsert_record_json|success")
@@ -404,7 +404,7 @@ func TestServiceBackedNervousSystemLifecycle(t *testing.T) {
 		Queue:          "orders",
 		CorrelationID:  correlationID,
 		IdempotencyKey: idempotencyKey,
-		Metadata:       map[string]any{"organization_id": orgID},
+		Metadata:       serviceObject(map[string]any{"organization_id": orgID}),
 	}
 	job.Normalize()
 	recorder.RecordJob(job)
@@ -624,7 +624,7 @@ func BenchmarkServiceBackedPostgresUpsert(b *testing.B) {
 			Collection:     "benchmark",
 			OrganizationID: orgID,
 			RecordID:       strconv.Itoa(i),
-			Data:           map[string]any{"state": "ready"},
+			Data:           serviceRecordData(map[string]any{"state": "ready"}),
 		}
 		if _, err := store.UpsertRecord(ctx, rec); err != nil {
 			b.Fatalf("postgres upsert failed: %v", err)
@@ -682,7 +682,7 @@ func BenchmarkServiceBackedPostgresUpsertParallel(b *testing.B) {
 				Collection:     "benchmark-parallel",
 				OrganizationID: orgID,
 				RecordID:       strconv.FormatUint(id, 10),
-				Data:           map[string]any{"state": "ready"},
+				Data:           serviceRecordData(map[string]any{"state": "ready"}),
 			}
 			if _, err := store.UpsertRecord(ctx, rec); err != nil {
 				b.Fatalf("postgres upsert failed: %v", err)
@@ -835,11 +835,11 @@ func requirePostgresDB(tb testing.TB, store database.RuntimeStore) *database.Pos
 	return db
 }
 
-func redisBatchValues(prefix string, size int) (map[string]interface{}, []string) {
+func redisBatchValues(prefix string, size int) (rediskit.Values, []string) {
 	keys := redisBatchKeys(prefix, size)
-	values := make(map[string]interface{}, len(keys))
+	values := make(rediskit.Values, 0, len(keys))
 	for _, key := range keys {
-		values[key] = []byte("foundation")
+		values = append(values, rediskit.Field(key, []byte("foundation")))
 	}
 	return values, keys
 }
@@ -1104,7 +1104,7 @@ func runPostgresWorker(
 			Collection:     "load-smoke",
 			OrganizationID: orgID,
 			RecordID:       fmt.Sprintf("record-%02d-%03d", workerID, i),
-			Data:           map[string]any{"state": "ready"},
+			Data:           serviceRecordData(map[string]any{"state": "ready"}),
 		}
 		start := time.Now()
 		if _, err := store.UpsertRecord(ctx, rec); err != nil {
@@ -1240,8 +1240,8 @@ func waitEnvelopes(t *testing.T, ch <-chan events.Envelope, want int) {
 func lifecycleEnvelope(eventType, correlationID string, metadata map[string]any) events.Envelope {
 	envelope := events.Envelope{
 		EventType:     eventType,
-		Payload:       map[string]any{"record_id": "record-01"},
-		Metadata:      metadata,
+		Payload:       serviceObject(map[string]any{"record_id": "record-01"}),
+		Metadata:      serviceObject(metadata),
 		CorrelationID: correlationID,
 	}
 	envelope.Normalize()
@@ -1251,14 +1251,7 @@ func lifecycleEnvelope(eventType, correlationID string, metadata map[string]any)
 func assertSnapshotHasCount(t *testing.T, section, key string) {
 	t.Helper()
 	snapshot := observability.Default().Snapshot()
-	sectionMap, ok := snapshot[section].(map[string]any)
-	if !ok {
-		t.Fatalf("observability snapshot missing section %q: %#v", section, snapshot)
-	}
-	counts, ok := sectionMap["count"].(map[string]int64)
-	if !ok {
-		t.Fatalf("observability snapshot section %q missing counts: %#v", section, sectionMap)
-	}
+	counts := snapshotCounts(snapshot, section)
 	if counts[key] == 0 {
 		t.Fatalf("observability count %s/%s = 0, snapshot=%#v", section, key, snapshot)
 	}
@@ -1267,20 +1260,29 @@ func assertSnapshotHasCount(t *testing.T, section, key string) {
 func assertSnapshotHasPostgresPoolPressure(t *testing.T, maxConns int32) {
 	t.Helper()
 	snapshot := observability.Default().Snapshot()
-	databaseSection, ok := snapshot["database"].(map[string]any)
+	pressure, ok := snapshot.Database.Pool["postgres"]
 	if !ok {
-		t.Fatalf("observability snapshot missing database section: %#v", snapshot)
-	}
-	pools, ok := databaseSection["pool"].(map[string]observability.DatabasePoolPressure)
-	if !ok {
-		t.Fatalf("observability database snapshot missing pool pressure: %#v", databaseSection)
-	}
-	pressure, ok := pools["postgres"]
-	if !ok {
-		t.Fatalf("observability database pool missing postgres: %#v", pools)
+		t.Fatalf("observability database pool missing postgres: %#v", snapshot.Database.Pool)
 	}
 	if pressure.MaxConns != maxConns || pressure.TotalConns == 0 || pressure.AcquireCount == 0 {
 		t.Fatalf("postgres pool pressure = %+v, want max=%d with acquire activity", pressure, maxConns)
+	}
+}
+
+func snapshotCounts(snapshot observability.Snapshot, section string) map[string]int64 {
+	switch section {
+	case "dispatch":
+		return snapshot.Dispatch.Count
+	case "redis":
+		return snapshot.Redis.Count
+	case "database":
+		return snapshot.Database.Count
+	case "worker":
+		return snapshot.Worker.Count
+	case "concurrency":
+		return snapshot.Concurrency.Count
+	default:
+		return nil
 	}
 }
 

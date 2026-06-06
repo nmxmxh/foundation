@@ -3,6 +3,7 @@ package registry
 import (
 	"net/http"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -27,8 +28,8 @@ type HTTPRoute struct {
 	AnyOfQueryParams    [][]string
 	IncludeRawBody      bool
 	IncludeHeaders      []string
-	StaticPayload       map[string]any
-	Metadata            map[string]any
+	StaticPayload       extension.Object
+	Metadata            extension.Object
 	Tags                []string
 	IsStreaming         bool
 	IsPublic            bool

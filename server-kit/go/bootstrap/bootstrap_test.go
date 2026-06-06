@@ -6,10 +6,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi/testprotos"
 	"google.golang.org/protobuf/proto"
 )
+
+func testObject(values map[string]any) extension.Object {
+	out := make(extension.Object, len(values))
+	for key, value := range values {
+		typed, err := extension.FromJSON(value)
+		if err == nil {
+			out[key] = typed
+		}
+	}
+	return out
+}
 
 func TestHandlerExecutionControllerReturnsExplicitConcurrencyError(t *testing.T) {
 	controller := NewHandlerExecutionController(ConcurrencyOptions{
@@ -19,7 +31,7 @@ func TestHandlerExecutionControllerReturnsExplicitConcurrencyError(t *testing.T)
 
 	release := make(chan struct{})
 	started := make(chan struct{})
-	wrapped := controller.Wrap(func(ctx context.Context, payload map[string]any) (any, error) {
+	wrapped := controller.Wrap(func(ctx context.Context, payload extension.Object) (any, error) {
 		close(started)
 		<-release
 		return map[string]any{"ok": true}, nil
@@ -28,12 +40,12 @@ func TestHandlerExecutionControllerReturnsExplicitConcurrencyError(t *testing.T)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = wrapped(context.Background(), map[string]any{"id": "first"})
+		_, _ = wrapped(context.Background(), testObject(map[string]any{"id": "first"}))
 	}()
 
 	<-started
 
-	_, err := wrapped(context.Background(), map[string]any{"id": "second"})
+	_, err := wrapped(context.Background(), testObject(map[string]any{"id": "second"}))
 	if !errors.Is(err, ErrConcurrencyLimitReached) {
 		t.Fatalf("expected ErrConcurrencyLimitReached, got %v", err)
 	}
@@ -90,7 +102,7 @@ func (r *advancedTestRegistry) RegisterWithOptions(eventType string, handler Han
 func TestRegisterHandlersAndInMemoryRegistry(t *testing.T) {
 	reg := &advancedTestRegistry{registered: map[string]HandlerFunc{}}
 	err := RegisterHandlers(reg, ServiceHandlers{
-		"media:probe:requested": func(context.Context, map[string]any) (any, error) { return "ok", nil },
+		"media:probe:requested": func(context.Context, extension.Object) (any, error) { return "ok", nil },
 	}, ConcurrencyOptions{MaxConcurrent: 2})
 	if err != nil {
 		t.Fatalf("RegisterHandlers() error = %v", err)
@@ -102,13 +114,13 @@ func TestRegisterHandlersAndInMemoryRegistry(t *testing.T) {
 		t.Fatal("expected nil handler to fail")
 	}
 	mem := NewInMemoryRegistry()
-	if err := mem.Register("media:probe:requested", func(context.Context, map[string]any) (any, error) { return nil, nil }); err != nil {
+	if err := mem.Register("media:probe:requested", func(context.Context, extension.Object) (any, error) { return nil, nil }); err != nil {
 		t.Fatalf("memory Register() error = %v", err)
 	}
 	if _, ok := mem.Resolve("media:probe:requested"); !ok {
 		t.Fatal("expected registered handler")
 	}
-	if err := mem.Register("media:probe:success", func(context.Context, map[string]any) (any, error) { return nil, nil }); err == nil {
+	if err := mem.Register("media:probe:success", func(context.Context, extension.Object) (any, error) { return nil, nil }); err == nil {
 		t.Fatal("expected non-requested event to fail")
 	}
 	if err := mem.Register("media:probe:requested", nil); err == nil {
@@ -169,33 +181,34 @@ func TestRegisterTypedHandlersAndController(t *testing.T) {
 }
 
 func TestBuildServiceHandlers(t *testing.T) {
-	handlers := BuildServiceHandlers(" media ", []string{"media:probe:requested"}, nil, func(_ context.Context, eventType string, payload map[string]any) (map[string]any, error) {
-		return map[string]any{"asset_id": payload["asset_id"]}, nil
+	handlers := BuildServiceHandlers(" media ", []string{"media:probe:requested"}, nil, func(_ context.Context, eventType string, payload extension.Object) (extension.Object, error) {
+		assetID, _ := payload.GetString("asset_id")
+		return testObject(map[string]any{"asset_id": assetID}), nil
 	})
-	res, err := handlers["media:probe:requested"](context.Background(), map[string]any{"asset_id": "a1"})
+	res, err := handlers["media:probe:requested"](context.Background(), testObject(map[string]any{"asset_id": "a1"}))
 	if err != nil {
 		t.Fatalf("handler error = %v", err)
 	}
-	out := res.(map[string]any)
-	if out["domain"] != "media" || out["event"] != "media:probe:requested" || out["state"] != "success" {
+	out := res.(extension.Object)
+	domain, _ := out.GetString("domain")
+	event, _ := out.GetString("event")
+	state, _ := out.GetString("state")
+	if domain != "media" || event != "media:probe:requested" || state != "success" {
 		t.Fatalf("unexpected response: %+v", out)
 	}
 	if _, err := handlers["media:probe:requested"](context.Background(), nil); err == nil {
 		t.Fatal("expected nil payload to fail")
 	}
-	if extractEntityID(map[string]any{"public_id": "p1"}) != "p1" || extractEntityID(map[string]any{"asset_id": "a1"}) != "a1" {
+	if extractEntityID(testObject(map[string]any{"public_id": "p1"})) != "p1" || extractEntityID(testObject(map[string]any{"asset_id": "a1"})) != "a1" {
 		t.Fatal("extractEntityID failed")
 	}
-	if len(cloneShallowMap(nil)) != 0 {
-		t.Fatal("empty clone expected")
-	}
-	defaultHandlers := BuildServiceHandlers("", []string{"service:probe:requested"}, nil, func(context.Context, string, map[string]any) (map[string]any, error) {
+	defaultHandlers := BuildServiceHandlers("", []string{"service:probe:requested"}, nil, func(context.Context, string, extension.Object) (extension.Object, error) {
 		return nil, errors.New("boom")
 	})
-	if _, err := defaultHandlers["service:probe:requested"](context.Background(), map[string]any{"id": "1"}); err == nil {
+	if _, err := defaultHandlers["service:probe:requested"](context.Background(), testObject(map[string]any{"id": "1"})); err == nil {
 		t.Fatal("expected executor error")
 	}
-	if extractEntityID(nil) != "" || extractEntityID(map[string]any{"asset_id": 10}) != "" {
+	if extractEntityID(nil) != "" || extractEntityID(testObject(map[string]any{"asset_id": 10})) != "" {
 		t.Fatal("expected empty entity id")
 	}
 }
@@ -207,14 +220,15 @@ func TestBuildTypedServiceHandlers(t *testing.T) {
 	}
 	handlers := BuildTypedServiceHandlers(" media ", map[string]protoapi.Binding{
 		"media:probe:requested": binding,
-	}, nil, func(_ context.Context, eventType string, payload map[string]any) (map[string]any, error) {
+	}, nil, func(_ context.Context, eventType string, payload extension.Object) (extension.Object, error) {
 		if eventType != "media:probe:requested" {
 			t.Fatalf("eventType = %q", eventType)
 		}
-		if payload["workspace_id"] != "wrk_1" {
+		workspaceID, _ := payload.GetString("workspace_id")
+		if workspaceID != "wrk_1" {
 			t.Fatalf("payload = %+v", payload)
 		}
-		return map[string]any{"resourceId": "asset_1", "status": "ok"}, nil
+		return testObject(map[string]any{"resourceId": "asset_1", "status": "ok"}), nil
 	})
 	response, err := handlers["media:probe:requested"].Handler(context.Background(), &testprotos.TestRequest{WorkspaceId: "wrk_1"})
 	if err != nil {
@@ -227,14 +241,14 @@ func TestBuildTypedServiceHandlers(t *testing.T) {
 		t.Fatal("expected nil request error")
 	}
 
-	errorHandlers := BuildTypedServiceHandlers("", map[string]protoapi.Binding{"service:probe:requested": binding}, nil, func(context.Context, string, map[string]any) (map[string]any, error) {
+	errorHandlers := BuildTypedServiceHandlers("", map[string]protoapi.Binding{"service:probe:requested": binding}, nil, func(context.Context, string, extension.Object) (extension.Object, error) {
 		return nil, errors.New("boom")
 	})
 	if _, err := errorHandlers["service:probe:requested"].Handler(context.Background(), &testprotos.TestRequest{}); err == nil {
 		t.Fatal("expected executor error")
 	}
-	encodeErrorHandlers := BuildTypedServiceHandlers("media", map[string]protoapi.Binding{"media:probe:requested": binding}, nil, func(context.Context, string, map[string]any) (map[string]any, error) {
-		return map[string]any{"metadata": 123}, nil
+	encodeErrorHandlers := BuildTypedServiceHandlers("media", map[string]protoapi.Binding{"media:probe:requested": binding}, nil, func(context.Context, string, extension.Object) (extension.Object, error) {
+		return testObject(map[string]any{"resourceId": map[string]any{"bad": true}}), nil
 	})
 	if _, err := encodeErrorHandlers["media:probe:requested"].Handler(context.Background(), &testprotos.TestRequest{}); err == nil {
 		t.Fatal("expected response encode error")

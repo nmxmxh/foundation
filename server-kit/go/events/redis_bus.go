@@ -3,7 +3,6 @@ package events
 import (
 	"context"
 	"fmt"
-	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -66,7 +65,7 @@ func NewRedisBus(client rediskit.Client, channel string, maxRecent int, l logger
 func (b *RedisBus) Publish(ctx context.Context, envelope Envelope) error {
 	envelope = envelopeWithContextMetadata(ctx, envelope)
 	envelope.Normalize()
-	envelope.Metadata = copyMap(envelope.Metadata)
+	envelope.Metadata = cloneObject(envelope.Metadata)
 	envelope.SourceNodeID = b.nodeID
 	if err := envelope.Validate(); err != nil {
 		return err
@@ -183,13 +182,13 @@ func (b *RedisBus) consumeLoop(msgs <-chan []byte) {
 				continue
 			}
 			if sourceNode := envelope.SourceNodeID; sourceNode == "" {
-				if legacySourceNode, _ := envelope.Metadata["_bus_node_id"].(string); legacySourceNode == b.nodeID {
+				if legacySourceNode, _ := envelope.Metadata.GetString("_bus_node_id"); legacySourceNode == b.nodeID {
 					continue
 				}
 			} else if sourceNode == b.nodeID {
 				continue
 			}
-			envelope.Metadata = copyMap(envelope.Metadata)
+			envelope.Metadata = cloneObject(envelope.Metadata)
 			delete(envelope.Metadata, "_bus_node_id")
 			envelope.SourceNodeID = ""
 			b.record(envelope)
@@ -254,13 +253,4 @@ func sleepWithContext(ctx context.Context, d time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
-}
-
-func copyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(in))
-	maps.Copy(out, in)
-	return out
 }

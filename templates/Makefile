@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -25,8 +25,11 @@ GOBUILD := $(GOCMD) build
 GOTEST := $(GOCMD) test
 GO_TEST_TIMEOUT ?= 120s
 GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
+GO_MOD_CACHE_DIR ?= $(CURDIR)/.cache/go-mod
 GO_PACKAGE_EXCLUDE_RE ?= /node_modules/|/api/protos/
 GO_COVERAGE_THRESHOLD ?= 95.0
+FOUNDATION_VITEST_WORKERS ?= 0
+FOUNDATION_VITEST_SERIAL ?= 1
 MIGRATE_TEST_MAX_RETRIES ?= 12
 MIGRATE_TEST_RETRY_SLEEP ?= 2
 LOAD_RACE ?= 1
@@ -191,7 +194,7 @@ build-server:
 
 build-frontend:
 	@if [ -f frontend/package.json ]; then \
-		$(FRONTEND_SCRIPT_RUNNER) . build; \
+		zsh $(FRONTEND_SCRIPT_RUNNER) . build; \
 	else \
 		echo "No frontend package; skipping frontend build"; \
 	fi
@@ -211,7 +214,7 @@ build-wasm:
 	@if [ -d wasm ]; then \
 		echo "Building WASM..."; \
 		mkdir -p "$(WASM_PUBLIC_DIR)"; \
-		GOCACHE="$(GO_CACHE_DIR)" GOOS=js GOARCH=wasm $(GOBUILD) -ldflags="-s -w" -o "$(WASM_PUBLIC_DIR)/main.wasm" ./wasm; \
+		GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" GOOS=js GOARCH=wasm $(GOBUILD) -ldflags="-s -w" -o "$(WASM_PUBLIC_DIR)/main.wasm" ./wasm; \
 		goroot=$$(go env GOROOT); \
 		if [ -f "$$goroot/lib/wasm/wasm_exec.js" ]; then cp "$$goroot/lib/wasm/wasm_exec.js" "$(WASM_PUBLIC_DIR)/wasm_exec.js"; \
 		elif [ -f "$$goroot/misc/wasm/wasm_exec.js" ]; then cp "$$goroot/misc/wasm/wasm_exec.js" "$(WASM_PUBLIC_DIR)/wasm_exec.js"; fi; \
@@ -224,7 +227,7 @@ build-wasm-dev:
 	@if [ -d wasm ]; then \
 		echo "Building WASM (development)..."; \
 		mkdir -p "$(WASM_PUBLIC_DIR)"; \
-		GOCACHE="$(GO_CACHE_DIR)" GOOS=js GOARCH=wasm $(GOBUILD) -o "$(WASM_PUBLIC_DIR)/main.wasm" ./wasm; \
+		GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" GOOS=js GOARCH=wasm $(GOBUILD) -o "$(WASM_PUBLIC_DIR)/main.wasm" ./wasm; \
 		goroot=$$(go env GOROOT); \
 		if [ -f "$$goroot/lib/wasm/wasm_exec.js" ]; then cp "$$goroot/lib/wasm/wasm_exec.js" "$(WASM_PUBLIC_DIR)/wasm_exec.js"; \
 		elif [ -f "$$goroot/misc/wasm/wasm_exec.js" ]; then cp "$$goroot/misc/wasm/wasm_exec.js" "$(WASM_PUBLIC_DIR)/wasm_exec.js"; fi; \
@@ -319,16 +322,16 @@ test: test-unit test-frontend
 
 test-unit:
 	@if [ -f go.mod ]; then \
-		mkdir -p "$(GO_CACHE_DIR)"; \
-		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		mkdir -p "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"; \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
 		if [ -z "$$packages" ]; then echo "No Go packages found"; exit 0; fi; \
-		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -race -count=1 -timeout $(GO_TEST_TIMEOUT) $$packages; \
+		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" $(GOTEST) -race -count=1 -timeout $(GO_TEST_TIMEOUT) $$packages; \
 	elif [ -f backend/go.mod ]; then \
-		mkdir -p "$(GO_CACHE_DIR)"; \
+		mkdir -p "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"; \
 		cd backend && \
-		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
 		if [ -z "$$packages" ]; then echo "No backend Go packages found"; exit 0; fi; \
-		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -race -count=1 -timeout $(GO_TEST_TIMEOUT) $$packages; \
+		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" $(GOTEST) -race -count=1 -timeout $(GO_TEST_TIMEOUT) $$packages; \
 	else \
 		echo "No Go module; skipping Go tests"; \
 	fi
@@ -344,9 +347,9 @@ test-coverage:
 	fi; \
 	mkdir -p coverage "$(GO_CACHE_DIR)"; \
 	( cd "$$go_dir" && \
-		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
 		if [ -z "$$packages" ]; then echo "No Go packages found"; exit 0; fi; \
-		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -race -count=1 -covermode=atomic -coverprofile="$$root_dir/coverage/go.raw.out" -timeout $(GO_TEST_TIMEOUT) $$packages; \
+		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" $(GOTEST) -race -count=1 -covermode=atomic -coverprofile="$$root_dir/coverage/go.raw.out" -timeout $(GO_TEST_TIMEOUT) $$packages; \
 	); \
 	awk 'NR == 1 { print; next } $$0 !~ /\/generated\// && $$0 !~ /\.pb\.go:/' coverage/go.raw.out > coverage/go.owned.out; \
 	go tool cover -func=coverage/go.owned.out | tee coverage/go.summary.txt; \
@@ -387,9 +390,9 @@ test-integration:
 		test_database_url="$$TEST_DATABASE_URL"; \
 		test_redis_url="$$TEST_REDIS_URL"; \
 	fi; \
-	mkdir -p "$(GO_CACHE_DIR)"; \
+	mkdir -p "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"; \
 	APP_ENV=test \
-	GOCACHE="$(GO_CACHE_DIR)" \
+	GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" \
 	TEST_INFRA_REQUIRED=true \
 	TEST_REDIS_REQUIRED=true \
 	TEST_DB_HOST="$$test_db_host" \
@@ -438,9 +441,9 @@ test-load:
 		test_database_url="$$TEST_DATABASE_URL"; \
 		test_redis_url="$$TEST_REDIS_URL"; \
 	fi; \
-	mkdir -p "$(GO_CACHE_DIR)"; \
+	mkdir -p "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"; \
 	APP_ENV=test \
-	GOCACHE="$(GO_CACHE_DIR)" \
+	GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" \
 	RUN_LOAD_TESTS="$${RUN_LOAD_TESTS:-1}" \
 	TEST_INFRA_REQUIRED=true \
 	TEST_REDIS_REQUIRED=true \
@@ -458,16 +461,16 @@ test-load:
 
 test-bench:
 	@if [ -f go.mod ]; then \
-		mkdir -p "$(GO_CACHE_DIR)"; \
-		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		mkdir -p "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"; \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
 		if [ -z "$$packages" ]; then echo "No Go packages found"; exit 0; fi; \
-		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -run '^$$' -bench "$${BENCH_PATTERN:-.}" -benchmem -count "$${BENCH_COUNT:-3}" -timeout "$${BENCH_TIMEOUT:-20m}" $$packages; \
+		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" $(GOTEST) -run '^$$' -bench "$${BENCH_PATTERN:-.}" -benchmem -count "$${BENCH_COUNT:-3}" -timeout "$${BENCH_TIMEOUT:-20m}" $$packages; \
 	elif [ -f backend/go.mod ]; then \
-		mkdir -p "$(GO_CACHE_DIR)"; \
+		mkdir -p "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"; \
 		cd backend && \
-		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
 		if [ -z "$$packages" ]; then echo "No backend Go packages found"; exit 0; fi; \
-		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" $(GOTEST) -run '^$$' -bench "$${BENCH_PATTERN:-.}" -benchmem -count "$${BENCH_COUNT:-3}" -timeout "$${BENCH_TIMEOUT:-20m}" $$packages; \
+		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" $(GOTEST) -run '^$$' -bench "$${BENCH_PATTERN:-.}" -benchmem -count "$${BENCH_COUNT:-3}" -timeout "$${BENCH_TIMEOUT:-20m}" $$packages; \
 	else \
 		echo "No Go module; skipping benchmarks"; \
 	fi
@@ -476,7 +479,7 @@ test-all: lint-foundation test-unit test-integration test-frontend
 
 test-frontend:
 	@if [ -f frontend/package.json ]; then \
-		$(FRONTEND_SCRIPT_RUNNER) . test; \
+		FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" FOUNDATION_VITEST_SERIAL="$(FOUNDATION_VITEST_SERIAL)" zsh $(FRONTEND_SCRIPT_RUNNER) . test; \
 	else \
 		echo "No frontend package; skipping frontend tests"; \
 	fi
@@ -585,13 +588,13 @@ lint: lint-go lint-rust lint-frontend lint-foundation
 
 lint-go:
 	@if [ -f go.mod ]; then \
-		mkdir -p "$(GO_CACHE_DIR)"; \
-		packages=$$(GOCACHE="$(GO_CACHE_DIR)" go list -f '{{.Dir}}' ./... | sed "s#^$$(pwd)#.#" | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		mkdir -p "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"; \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" go list -f '{{.Dir}}' ./... | sed "s#^$$(pwd)#.#" | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
 		if [ -z "$$packages" ]; then echo "No Go packages found"; exit 0; fi; \
 		if command -v golangci-lint >/dev/null 2>&1; then \
-			GOCACHE="$(GO_CACHE_DIR)" golangci-lint run --timeout 10m $$packages; \
+			GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" golangci-lint run --timeout 10m $$packages; \
 		else \
-			GOCACHE="$(GO_CACHE_DIR)" go vet $$packages; \
+			GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" go vet $$packages; \
 		fi; \
 	fi
 
@@ -611,12 +614,12 @@ check-rust:
 
 lint-frontend:
 	@if [ -f frontend/package.json ]; then \
-		$(FRONTEND_SCRIPT_RUNNER) . lint; \
+		zsh $(FRONTEND_SCRIPT_RUNNER) . lint; \
 	else \
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-FOUNDATION_LINT_CHECKS := check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+FOUNDATION_LINT_CHECKS := check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 
 lint-foundation:
@@ -636,89 +639,92 @@ lint-foundation:
 	echo "foundation lint passed"
 
 check-go-fix:
-	@./scripts/checks/go_fix_check.sh .
+	@zsh ./scripts/checks/go_fix_check.sh .
 
 check-go-static-analysis:
-	@./scripts/checks/go_static_analysis_check.sh .
+	@zsh ./scripts/checks/go_static_analysis_check.sh .
 
 check-rust-static-analysis:
 	@if [ -x scripts/checks/rust_static_analysis_check.sh ]; then \
-		scripts/checks/rust_static_analysis_check.sh .; \
+		zsh scripts/checks/rust_static_analysis_check.sh .; \
 	elif [ -x foundation/tooling/scripts/rust_static_analysis_check.sh ]; then \
-		foundation/tooling/scripts/rust_static_analysis_check.sh .; \
+		zsh foundation/tooling/scripts/rust_static_analysis_check.sh .; \
 	elif [ -n "$(FOUNDATION_PATH)" ] && [ -x "$(FOUNDATION_PATH)/tooling/scripts/rust_static_analysis_check.sh" ]; then \
-		"$(FOUNDATION_PATH)/tooling/scripts/rust_static_analysis_check.sh" .; \
+		zsh "$(FOUNDATION_PATH)/tooling/scripts/rust_static_analysis_check.sh" .; \
 	else \
 		echo "Rust static analysis check script not found; skipping"; \
 	fi
 
 check-rust-runtime-practices:
 	@if [ -x scripts/checks/rust_runtime_practices_check.sh ]; then \
-		scripts/checks/rust_runtime_practices_check.sh .; \
+		zsh scripts/checks/rust_runtime_practices_check.sh .; \
 	elif [ -x foundation/tooling/scripts/rust_runtime_practices_check.sh ]; then \
-		foundation/tooling/scripts/rust_runtime_practices_check.sh .; \
+		zsh foundation/tooling/scripts/rust_runtime_practices_check.sh .; \
 	elif [ -n "$(FOUNDATION_PATH)" ] && [ -x "$(FOUNDATION_PATH)/tooling/scripts/rust_runtime_practices_check.sh" ]; then \
-		"$(FOUNDATION_PATH)/tooling/scripts/rust_runtime_practices_check.sh" .; \
+		zsh "$(FOUNDATION_PATH)/tooling/scripts/rust_runtime_practices_check.sh" .; \
 	else \
 		echo "Rust runtime practices check script not found; skipping"; \
 	fi
 
 check-agent-contract:
-	@./scripts/checks/agent_contract_check.sh .
+	@zsh ./scripts/checks/agent_contract_check.sh .
 
 check-practice-controls:
-	@./scripts/checks/practice_controls_check.sh .
+	@zsh ./scripts/checks/practice_controls_check.sh .
 
 check-runtime-performance-contracts:
-	@./scripts/checks/runtime_performance_contract_check.sh .
+	@zsh ./scripts/checks/runtime_performance_contract_check.sh .
 
 check-formal-methods:
-	@./scripts/checks/formal_methods_check.sh .
+	@zsh ./scripts/checks/formal_methods_check.sh .
 
 check-operational-excellence:
-	@./scripts/checks/operational_excellence_check.sh .
+	@zsh ./scripts/checks/operational_excellence_check.sh .
 
 check-coding-practices:
-	@./scripts/checks/coding_practices_check.sh .
+	@zsh ./scripts/checks/coding_practices_check.sh .
 
 check-testing-practices:
-	@./scripts/checks/testing_practices_check.sh .
+	@zsh ./scripts/checks/testing_practices_check.sh .
 
 check-go-concurrency-practices:
 	@bash ./scripts/checks/go_concurrency_practices_check.sh .
 
 check-logging-practices:
-	@./scripts/checks/logging_practices_check.sh .
+	@bash ./scripts/checks/logging_practices_check.sh .
 
 check-metadata-practices:
-	@./scripts/checks/metadata_practices_check.sh .
+	@zsh ./scripts/checks/metadata_practices_check.sh .
+
+check-dynamic-payload-practices:
+	@zsh ./scripts/checks/dynamic_payload_practices_check.sh .
 
 check-database-practices:
-	@./scripts/checks/database_practices_check.sh .
+	@zsh ./scripts/checks/database_practices_check.sh .
 
 check-redis-practices:
-	@./scripts/checks/redis_practices_check.sh .
+	@zsh ./scripts/checks/redis_practices_check.sh .
 
 check-river-practices:
-	@./scripts/checks/river_practices_check.sh .
+	@zsh ./scripts/checks/river_practices_check.sh .
 
 check-migration-structure:
-	@./scripts/checks/migration_structure_check.sh .
+	@zsh ./scripts/checks/migration_structure_check.sh .
 
 check-domain-contract-consistency:
-	@./scripts/checks/domain_contract_consistency_check.sh .
+	@zsh ./scripts/checks/domain_contract_consistency_check.sh .
 
 check-contract-drift:
-	@./scripts/checks/contract_drift_check.sh .
+	@zsh ./scripts/checks/contract_drift_check.sh .
 
 check-server-kit-module-contract:
-	@./scripts/checks/server_kit_module_contract_check.sh .
+	@bash ./scripts/checks/server_kit_module_contract_check.sh .
 
 check-server-kit-usage:
-	@./scripts/checks/server_kit_usage_check.sh .
+	@zsh ./scripts/checks/server_kit_usage_check.sh .
 
 check-project-scaffold:
-	@./scripts/checks/project_scaffold_check.sh .
+	@zsh ./scripts/checks/project_scaffold_check.sh .
 
 verify: lint test build build-wasm
 	@echo "Verification complete"
@@ -817,6 +823,7 @@ help:
 	@echo "  check-rust-runtime-practices"
 	@echo "  check-coding-practices"
 	@echo "  check-logging-practices"
+	@echo "  check-dynamic-payload-practices"
 	@echo "  check-database-practices"
 	@echo "  check-redis-practices"
 	@echo "  check-river-practices"

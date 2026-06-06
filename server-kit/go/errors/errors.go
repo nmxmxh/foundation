@@ -16,10 +16,11 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"runtime"
 	"strings"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 // Code represents an error code category.
@@ -107,7 +108,7 @@ type Error struct {
 	Message string `json:"message"`
 
 	// Details provides additional context.
-	Details map[string]any `json:"details,omitempty"`
+	Details extension.Object `json:"details,omitempty"`
 
 	// Cause is the underlying error (not serialized).
 	Cause error `json:"-"`
@@ -127,7 +128,7 @@ func New(code Code, message string) *Error {
 	return &Error{
 		Code:    code,
 		Message: message,
-		Details: make(map[string]any),
+		Details: extension.Object{},
 		Stack:   captureStack(2),
 	}
 }
@@ -137,7 +138,7 @@ func Newf(code Code, format string, args ...any) *Error {
 	return &Error{
 		Code:    code,
 		Message: fmt.Sprintf(format, args...),
-		Details: make(map[string]any),
+		Details: extension.Object{},
 		Stack:   captureStack(2),
 	}
 }
@@ -151,14 +152,14 @@ func Wrap(err error, code Code, message string) *Error {
 	e := &Error{
 		Code:    code,
 		Message: message,
-		Details: make(map[string]any),
+		Details: extension.Object{},
 		Cause:   err,
 		Stack:   captureStack(2),
 	}
 
 	// Inherit details from wrapped Error
 	if appErr, ok := err.(*Error); ok {
-		maps.Copy(e.Details, appErr.Details)
+		e.Details = appErr.Details.Clone()
 	}
 
 	return e
@@ -184,13 +185,14 @@ func (e *Error) Unwrap() error {
 
 // WithField adds a detail field to the error.
 func (e *Error) WithField(key string, value any) *Error {
-	e.Details[key] = value
-	return e
-}
-
-// WithFields adds multiple detail fields to the error.
-func (e *Error) WithFields(fields map[string]any) *Error {
-	maps.Copy(e.Details, fields)
+	if e.Details == nil {
+		e.Details = extension.Object{}
+	}
+	typed, err := extension.FromJSON(value)
+	if err != nil {
+		typed = extension.String(fmt.Sprintf("%v", value))
+	}
+	e.Details[key] = typed
 	return e
 }
 
@@ -231,10 +233,10 @@ type APIResponse struct {
 }
 
 type APIError struct {
-	Code      string         `json:"code"`
-	Message   string         `json:"message"`
-	Details   map[string]any `json:"details,omitempty"`
-	RequestID string         `json:"request_id,omitempty"`
+	Code      string           `json:"code"`
+	Message   string           `json:"message"`
+	Details   extension.Object `json:"details,omitempty"`
+	RequestID string           `json:"request_id,omitempty"`
 }
 
 // ToAPIResponse converts to an API-safe response.

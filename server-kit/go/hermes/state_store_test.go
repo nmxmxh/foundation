@@ -25,14 +25,14 @@ func TestProjectedRuntimeStoreUsesHermesForWarmStateScope(t *testing.T) {
 			Collection:     "ticks",
 			OrganizationID: "org_1",
 			RecordID:       fmt.Sprintf("tick_%d", i),
-			Data:           map[string]any{"bucket": i % 2},
+			Data:           testRecordData(map[string]any{"bucket": i % 2}),
 		})
 		if err != nil {
 			t.Fatalf("UpsertRecord() error = %v", err)
 		}
 	}
 
-	items, err := store.ListRecords(ctx, "signals", "ticks", "org_1", map[string]any{"bucket": 1}, 10)
+	items, err := store.ListRecords(ctx, "signals", "ticks", "org_1", testRecordQuery(10, map[string]any{"bucket": 1}))
 	if err != nil || len(items) != 1 {
 		t.Fatalf("ListRecords() len=%d err=%v", len(items), err)
 	}
@@ -42,7 +42,7 @@ func TestProjectedRuntimeStoreUsesHermesForWarmStateScope(t *testing.T) {
 	}
 
 	base.Close()
-	count, err := store.CountRecords(ctx, "signals", "ticks", "org_1", map[string]any{"bucket": 1})
+	count, err := store.CountRecords(ctx, "signals", "ticks", "org_1", testRecordQuery(0, map[string]any{"bucket": 1}))
 	if err != nil || count != 1 {
 		t.Fatalf("CountRecords() after base close = %d err=%v", count, err)
 	}
@@ -60,19 +60,19 @@ func TestProjectedRuntimeStoreExactReadThroughAndDelete(t *testing.T) {
 		Collection:     "ticks",
 		OrganizationID: "org_1",
 		RecordID:       "tick_1",
-		Data:           map[string]any{"state": "open"},
+		Data:           testRecordData(map[string]any{"state": "open"}),
 	})
 	if err != nil {
 		t.Fatalf("base UpsertRecord() error = %v", err)
 	}
 
 	rec, found, err := store.GetRecord(ctx, "signals", "ticks", "org_1", "tick_1")
-	if err != nil || !found || rec.Data["state"] != "open" {
+	if err != nil || !found || !recordDataStringEquals(rec.Data, "state", "open") {
 		t.Fatalf("GetRecord() = %+v found=%v err=%v", rec, found, err)
 	}
 	base.Close()
 	rec, found, err = store.GetRecord(ctx, "signals", "ticks", "org_1", "tick_1")
-	if err != nil || !found || rec.Data["state"] != "open" {
+	if err != nil || !found || !recordDataStringEquals(rec.Data, "state", "open") {
 		t.Fatalf("hot GetRecord() = %+v found=%v err=%v", rec, found, err)
 	}
 }
@@ -90,14 +90,14 @@ func TestProjectedRuntimeStoreOversizedScopeFallsBackToDatabase(t *testing.T) {
 			Collection:     "ticks",
 			OrganizationID: "org_1",
 			RecordID:       fmt.Sprintf("tick_%d", i),
-			Data:           map[string]any{"state": "open"},
+			Data:           testRecordData(map[string]any{"state": "open"}),
 		})
 		if err != nil {
 			t.Fatalf("UpsertRecord() error = %v", err)
 		}
 	}
 
-	items, err := store.ListRecords(ctx, "signals", "ticks", "org_1", nil, 10)
+	items, err := store.ListRecords(ctx, "signals", "ticks", "org_1", database.RecordQuery{Limit: 10})
 	if err != nil || len(items) != 2 {
 		t.Fatalf("ListRecords() fallback len=%d err=%v", len(items), err)
 	}
@@ -127,7 +127,7 @@ func TestProjectedRuntimeStoreRawJSONProjectsTypedFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertRecordJSON() error = %v", err)
 	}
-	count, err := store.CountRecords(ctx, "orders", "book", "org_1", map[string]any{"state": "open"})
+	count, err := store.CountRecords(ctx, "orders", "book", "org_1", testRecordQuery(0, map[string]any{"state": "open"}))
 	if err != nil || count != 1 {
 		t.Fatalf("CountRecords() = %d err=%v", count, err)
 	}

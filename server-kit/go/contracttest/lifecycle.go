@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker"
 )
 
@@ -109,24 +110,26 @@ func verifyTerminalEnvelope(
 	return nil
 }
 
-func metadataString(metadata map[string]any, keys ...string) string {
+func metadataString(metadata extension.Object, keys ...string) string {
 	for _, key := range keys {
-		if value, ok := metadata[key].(string); ok {
+		if value, ok := metadata.GetString(key); ok {
 			if trimmed := strings.TrimSpace(value); trimmed != "" {
 				return trimmed
 			}
 		}
 	}
 	for _, gcKey := range []string{"global_context", "globalContext"} {
-		raw, ok := metadata[gcKey].(map[string]any)
+		rawValue, ok := metadata[gcKey]
+		if !ok {
+			continue
+		}
+		raw, ok := rawValue.ObjectValue()
 		if !ok {
 			continue
 		}
 		for _, key := range keys {
-			if value, ok := raw[key].(string); ok {
-				if trimmed := strings.TrimSpace(value); trimmed != "" {
-					return trimmed
-				}
+			if value, ok := raw.GetString(key); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
 			}
 		}
 	}

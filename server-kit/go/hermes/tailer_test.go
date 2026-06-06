@@ -22,11 +22,11 @@ func TestTailerPollOnceAppliesAndAcksRedisStream(t *testing.T) {
 	client := redispkg.NewMemoryClient("test")
 	ctx := t.Context()
 	for i := range 2 {
-		_, err := client.XAdd(ctx, "hermes:signals", map[string]any{
-			"organization_id": "org_1",
-			"record_id":       fmt.Sprintf("tick_%d", i),
-			"bucket":          i,
-			"version":         i + 1,
+		_, err := client.XAdd(ctx, "hermes:signals", redispkg.Values{
+			redispkg.Field("organization_id", "org_1"),
+			redispkg.Field("record_id", fmt.Sprintf("tick_%d", i)),
+			redispkg.Field("bucket", i),
+			redispkg.Field("version", i+1),
 		})
 		if err != nil {
 			t.Fatalf("XAdd() error = %v", err)
@@ -69,11 +69,11 @@ func TestPayloadTailerPollOnceAppliesBinaryRedisStream(t *testing.T) {
 	})
 	client := redispkg.NewMemoryClient("test")
 	ctx := t.Context()
-	_, err := client.XAdd(ctx, "hermes:payloads", map[string]any{
-		"payload":        []byte{5, 'z'},
-		"event_type":     "signals:ticks:success",
-		"schema_version": "capnp.signals.ticks.v1",
-		"version":        uint64(5),
+	_, err := client.XAdd(ctx, "hermes:payloads", redispkg.Values{
+		redispkg.Field("payload", []byte{5, 'z'}),
+		redispkg.Field("event_type", "signals:ticks:success"),
+		redispkg.Field("schema_version", "capnp.signals.ticks.v1"),
+		redispkg.Field("version", uint64(5)),
 	})
 	if err != nil {
 		t.Fatalf("XAdd() error = %v", err)
@@ -94,10 +94,7 @@ func TestPayloadTailerPollOnceAppliesBinaryRedisStream(t *testing.T) {
 	if result.Read != 1 || result.Decoded != 1 || result.Acked != 1 || result.Apply.Applied != 1 {
 		t.Fatalf("PollOnce() result = %+v", result)
 	}
-	count, err := store.Count(ctx, "payload_stream_ticks", Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": 5},
-	}, Fence{})
+	count, err := store.Count(ctx, "payload_stream_ticks", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 5})), Fence{})
 	if err != nil || count != 1 {
 		t.Fatalf("Count() = %d err=%v", count, err)
 	}
@@ -106,9 +103,9 @@ func TestPayloadTailerPollOnceAppliesBinaryRedisStream(t *testing.T) {
 func TestRedisStreamPayloadSourceDefaultsSourceIDToMessageID(t *testing.T) {
 	client := redispkg.NewMemoryClient("test")
 	ctx := t.Context()
-	id, err := client.XAdd(ctx, "hermes:payload-defaults", map[string]any{
-		"payload": []byte{1, 2, 3},
-		"version": float64(12),
+	id, err := client.XAdd(ctx, "hermes:payload-defaults", redispkg.Values{
+		redispkg.Field("payload", []byte{1, 2, 3}),
+		redispkg.Field("version", float64(12)),
 	})
 	if err != nil {
 		t.Fatalf("XAdd() error = %v", err)
@@ -147,10 +144,7 @@ func TestStoreApplyRecordsBatch(t *testing.T) {
 	if err != nil || result.Applied != 2 {
 		t.Fatalf("ApplyRecords() result=%+v err=%v", result, err)
 	}
-	count, err := store.Count(t.Context(), "record_batch", Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": 1},
-	}, Fence{})
+	count, err := store.Count(t.Context(), "record_batch", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 1})), Fence{})
 	if err != nil || count != 2 {
 		t.Fatalf("Count() = %d err=%v", count, err)
 	}
@@ -176,10 +170,7 @@ func TestStoreApplyRecordPayloadsBinary(t *testing.T) {
 	if err != nil || result.Applied != 1 {
 		t.Fatalf("ApplyRecordPayloads() result=%+v err=%v", result, err)
 	}
-	count, err := store.Count(t.Context(), "binary_payloads", Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": 3},
-	}, Fence{})
+	count, err := store.Count(t.Context(), "binary_payloads", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 3})), Fence{})
 	if err != nil || count != 1 {
 		t.Fatalf("Count() = %d err=%v", count, err)
 	}
@@ -205,10 +196,7 @@ func TestStoreApplyRecordPayloadEventsBatchDecoder(t *testing.T) {
 	if err != nil || result.Applied != 1 {
 		t.Fatalf("ApplyRecordPayloadEvents() result=%+v err=%v", result, err)
 	}
-	count, err := store.Count(t.Context(), "binary_payload_events", Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": 4},
-	}, Fence{})
+	count, err := store.Count(t.Context(), "binary_payload_events", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 4})), Fence{})
 	if err != nil || count != 1 {
 		t.Fatalf("Count() = %d err=%v", count, err)
 	}
@@ -216,11 +204,11 @@ func TestStoreApplyRecordPayloadEventsBatchDecoder(t *testing.T) {
 
 func TestSourceMessagePayload(t *testing.T) {
 	payload := []byte{1, 2, 3}
-	got, ok := SourceMessagePayload(SourceMessage{Values: map[string]any{"payload": payload}}, "payload")
+	got, ok := SourceMessagePayload(SourceMessage{Values: redispkg.Values{redispkg.Field("payload", payload)}}, "payload")
 	if !ok || string(got) != string(payload) {
 		t.Fatalf("SourceMessagePayload bytes = %v ok=%v", got, ok)
 	}
-	got, ok = SourceMessagePayload(SourceMessage{Values: map[string]any{"payload": "abc"}}, "payload")
+	got, ok = SourceMessagePayload(SourceMessage{Values: redispkg.Values{redispkg.Field("payload", "abc")}}, "payload")
 	if !ok || string(got) != "abc" {
 		t.Fatalf("SourceMessagePayload string = %q ok=%v", string(got), ok)
 	}
@@ -256,11 +244,7 @@ func TestStoreConcurrentApplyAndBorrowedRead(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 128 {
-			_, err := store.ForEachView(ctx, "concurrent_ticks", Query{
-				OrganizationID: "org_1",
-				Filters:        map[string]any{"bucket": 1},
-				Limit:          8,
-			}, Fence{}, func(view RecordView) error {
+			_, err := store.ForEachView(ctx, "concurrent_ticks", QueryFromRecordQuery("org_1", testRecordQuery(8, map[string]any{"bucket": 1})), Fence{}, func(view RecordView) error {
 				if view.OrganizationID != "org_1" {
 					t.Errorf("cross-tenant view: %+v", view)
 				}
@@ -276,13 +260,17 @@ func TestStoreConcurrentApplyAndBorrowedRead(t *testing.T) {
 }
 
 func streamTestDecoder(_ context.Context, message SourceMessage) ([]Event, error) {
-	orgID, _ := message.Values["organization_id"].(string)
-	recordID, _ := message.Values["record_id"].(string)
+	rawOrgID, _ := message.Values.Get("organization_id")
+	rawRecordID, _ := message.Values.Get("record_id")
+	rawVersion, _ := message.Values.Get("version")
+	rawBucket, _ := message.Values.Get("bucket")
+	orgID, _ := rawOrgID.(string)
+	recordID, _ := rawRecordID.(string)
 	return []Event{{
 		Operation: OperationUpsert,
-		Version:   uint64(intFromAny(message.Values["version"])),
+		Version:   uint64(intFromAny(rawVersion)),
 		Record: testRecord("signals", "ticks", orgID, recordID, map[string]any{
-			"bucket": intFromAny(message.Values["bucket"]),
+			"bucket": intFromAny(rawBucket),
 		}),
 	}}, nil
 }

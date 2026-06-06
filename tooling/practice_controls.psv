@@ -17,6 +17,7 @@ CP-05|docs/coding_practices.md|coding|medium|partial|review|invariant-test|conte
 CP-06|docs/coding_practices.md|coding|high|partial|script:tooling/scripts/go_concurrency_practices_check.sh;review|concurrency-test|yes
 CP-07|docs/coding_practices.md|performance|high|contextual|script:tooling/scripts/performance_check.sh;review|benchmark|contextual
 CP-07B|docs/coding_practices.md|performance|high|contextual|script:tooling/scripts/performance_check.sh;review|hot-path-spec|contextual
+CP-07C|docs/coding_practices.md|performance|high|partial|script:tooling/scripts/dynamic_payload_practices_check.sh;review|typed-payload-check|yes
 CP-08|docs/coding_practices.md|tooling|high|strong|script:tooling/scripts/go_fix_check.sh;script:tooling/scripts/go_static_analysis_check.sh;script:tooling/scripts/rust_static_analysis_check.sh;script:tooling/scripts/ts_static_analysis_check.sh|lint-report|yes
 CP-09|docs/coding_practices.md|coding|high|partial|script:tooling/scripts/coding_practices_check.sh;review|exception-note|yes
 CP-10|docs/coding_practices.md|contracts|high|strong|script:tooling/scripts/contract_drift_check.sh;review|contract-test|yes

@@ -1,13 +1,17 @@
 package events
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strconv"
 	"strings"
 	"time"
 
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -21,16 +25,16 @@ const (
 )
 
 type Envelope struct {
-	ID              string         `json:"id,omitempty"`
-	EventType       string         `json:"event_type"`
-	Payload         map[string]any `json:"payload"`
-	PayloadBytes    []byte         `json:"-"`
-	PayloadEncoding string         `json:"payload_encoding,omitempty"`
-	Metadata        map[string]any `json:"metadata"`
-	CorrelationID   string         `json:"correlation_id"`
-	SchemaVersion   string         `json:"schema_version"`
-	Timestamp       time.Time      `json:"timestamp"`
-	SourceNodeID    string         `json:"-"`
+	ID              string           `json:"id,omitempty"`
+	EventType       string           `json:"event_type"`
+	Payload         extension.Object `json:"payload"`
+	PayloadBytes    []byte           `json:"-"`
+	PayloadEncoding string           `json:"payload_encoding,omitempty"`
+	Metadata        extension.Object `json:"metadata"`
+	CorrelationID   string           `json:"correlation_id"`
+	SchemaVersion   string           `json:"schema_version"`
+	Timestamp       time.Time        `json:"timestamp"`
+	SourceNodeID    string           `json:"-"`
 }
 
 func (e Envelope) Validate() error {
@@ -43,7 +47,7 @@ func (e Envelope) Validate() error {
 			return err
 		}
 	} else {
-		md := metadata.FromMap(e.Metadata)
+		md := metadata.FromObject(e.Metadata)
 		metadataCorrelationID := md.CorrelationID
 		correlationID := md.NormalizeCorrelation(e.CorrelationID)
 		if correlationID == "" {
@@ -76,7 +80,7 @@ func (e Envelope) Validate() error {
 	}
 }
 
-func validateEnvelopeMetadataFast(raw map[string]any, envelopeCorrelationID string) (bool, error) {
+func validateEnvelopeMetadataFast(raw extension.Object, envelopeCorrelationID string) (bool, error) {
 	correlationID := strings.TrimSpace(envelopeCorrelationID)
 	metadataCorrelationID := ""
 	metadataCorrelationIDRaw := ""
@@ -88,14 +92,14 @@ func validateEnvelopeMetadataFast(raw map[string]any, envelopeCorrelationID stri
 		case "ai_confidence", "aiConfidence", "validity_period", "validityPeriod", "attributes", "tags", "categories":
 			return false, nil
 		case "correlation_id", "correlationId":
-			str, ok := value.(string)
+			str, ok := value.StringValue()
 			if !ok {
 				continue
 			}
 			metadataCorrelationIDRaw = str
 			metadataCorrelationID = strings.TrimSpace(str)
 		case "causation_id", "causationId", "request_id", "requestId", "idempotency_key", "idempotencyKey", "trace_id", "traceId", "span_id", "spanId":
-			str, ok := value.(string)
+			str, ok := value.StringValue()
 			if !ok || strings.TrimSpace(str) == "" {
 				continue
 			}
@@ -155,34 +159,15 @@ func (e *Envelope) Normalize() {
 		e.Timestamp = time.Now().UTC()
 	}
 	e.PayloadEncoding = normalizePayloadEncoding(e.PayloadEncoding)
-	if e.PayloadEncoding == PayloadEncodingJSON && e.Payload == nil {
-		e.Payload = map[string]any{}
+	if e.PayloadEncoding == PayloadEncodingJSON && e.Payload == nil && len(e.PayloadBytes) == 0 {
+		e.Payload = extension.Object{}
 	}
-	md := metadata.FromMap(e.Metadata)
+	md := metadata.FromObject(e.Metadata)
 	if e.CorrelationID != "" && md.CorrelationID != "" && e.CorrelationID != md.CorrelationID {
 		return
 	}
 	e.CorrelationID = md.EnsureCorrelation(e.CorrelationID)
-	e.Metadata = md.ToMap()
-}
-
-// ToMap creates a JSON-friendly envelope map shape.
-func (e Envelope) ToMap() map[string]any {
-	result := map[string]any{
-		"event_type":       e.EventType,
-		"metadata":         e.Metadata,
-		"correlation_id":   e.CorrelationID,
-		"schema_version":   e.SchemaVersion,
-		"timestamp":        e.Timestamp.UTC().Format(time.RFC3339),
-		"payload_encoding": normalizePayloadEncoding(e.PayloadEncoding),
-	}
-	if e.ID != "" {
-		result["id"] = e.ID
-	}
-	if normalizePayloadEncoding(e.PayloadEncoding) == PayloadEncodingJSON {
-		result["payload"] = e.Payload
-	}
-	return result
+	e.Metadata = md.ToObject()
 }
 
 // ToJSON serializes envelope into canonical JSON.
@@ -192,7 +177,30 @@ func (e Envelope) ToJSON() ([]byte, error) {
 	if env.PayloadEncoding != PayloadEncodingJSON {
 		return nil, errors.New("json envelope serialization only supports json payload encoding")
 	}
-	return json.Marshal(env.ToMap())
+	if err := env.MaterializePayload(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(envelopeJSON{
+		ID:              env.ID,
+		EventType:       env.EventType,
+		Payload:         env.Payload,
+		Metadata:        env.Metadata,
+		CorrelationID:   env.CorrelationID,
+		SchemaVersion:   env.SchemaVersion,
+		Timestamp:       env.Timestamp.UTC().Format(time.RFC3339),
+		PayloadEncoding: normalizePayloadEncoding(env.PayloadEncoding),
+	})
+}
+
+type envelopeJSON struct {
+	ID              string           `json:"id,omitempty"`
+	EventType       string           `json:"event_type"`
+	Payload         extension.Object `json:"payload,omitempty"`
+	Metadata        extension.Object `json:"metadata"`
+	CorrelationID   string           `json:"correlation_id"`
+	SchemaVersion   string           `json:"schema_version"`
+	Timestamp       string           `json:"timestamp"`
+	PayloadEncoding string           `json:"payload_encoding"`
 }
 
 func (e Envelope) ToBinary() ([]byte, error) {
@@ -202,14 +210,14 @@ func (e Envelope) ToBinary() ([]byte, error) {
 		return nil, err
 	}
 
-	metadataProto, err := metadata.FromMap(env.Metadata).ToTransportProto()
+	metadataProto, err := metadata.FromObject(env.Metadata).ToTransportProto()
 	if err != nil {
 		return nil, err
 	}
 
 	payload := append([]byte(nil), env.PayloadBytes...)
 	if env.PayloadEncoding == PayloadEncodingJSON {
-		payload, err = json.Marshal(env.Payload)
+		payload, err = encodePayloadObject(env.Payload)
 		if err != nil {
 			return nil, err
 		}
@@ -230,41 +238,245 @@ func (e Envelope) ToBinary() ([]byte, error) {
 
 // FromJSON parses and normalizes an envelope.
 func FromJSON(data []byte) (Envelope, error) {
-	var raw struct {
-		ID              string         `json:"id"`
-		EventType       string         `json:"event_type"`
-		Payload         map[string]any `json:"payload"`
-		Metadata        map[string]any `json:"metadata"`
-		CorrelationID   string         `json:"correlation_id"`
-		SchemaVersion   string         `json:"schema_version"`
-		Timestamp       string         `json:"timestamp"`
-		PayloadEncoding string         `json:"payload_encoding"`
-	}
-	if err := json.Unmarshal(data, &raw); err != nil {
+	env, err := parseEnvelopeJSON(data)
+	if err != nil {
 		return Envelope{}, err
-	}
-
-	timestamp := time.Time{}
-	if raw.Timestamp != "" {
-		t, err := time.Parse(time.RFC3339, raw.Timestamp)
-		if err != nil {
-			return Envelope{}, errors.New("invalid timestamp format")
-		}
-		timestamp = t
-	}
-
-	env := Envelope{
-		ID:              raw.ID,
-		EventType:       raw.EventType,
-		Payload:         raw.Payload,
-		PayloadEncoding: raw.PayloadEncoding,
-		Metadata:        raw.Metadata,
-		CorrelationID:   raw.CorrelationID,
-		SchemaVersion:   NormalizeSchemaVersion(raw.SchemaVersion),
-		Timestamp:       timestamp,
 	}
 	env.Normalize()
 	return env, nil
+}
+
+func parseEnvelopeJSON(data []byte) (Envelope, error) {
+	parser := jsonFieldScanner{data: data}
+	return parser.parseEnvelope()
+}
+
+type jsonFieldScanner struct {
+	data []byte
+	pos  int
+}
+
+func (s *jsonFieldScanner) parseEnvelope() (Envelope, error) {
+	env := Envelope{Metadata: extension.Object{}}
+	s.skipSpace()
+	if !s.consume('{') {
+		return Envelope{}, errors.New("json object expected")
+	}
+	s.skipSpace()
+	if s.consume('}') {
+		return env, nil
+	}
+	for {
+		key, err := s.scanString()
+		if err != nil {
+			return Envelope{}, err
+		}
+		s.skipSpace()
+		if !s.consume(':') {
+			return Envelope{}, errors.New("json object key missing ':'")
+		}
+		s.skipSpace()
+		start := s.pos
+		if err := s.skipValue(); err != nil {
+			return Envelope{}, err
+		}
+		raw := s.data[start:s.pos]
+		if err := assignEnvelopeJSONField(&env, key, raw); err != nil {
+			return Envelope{}, err
+		}
+		s.skipSpace()
+		if s.consume('}') {
+			s.skipSpace()
+			if s.pos != len(s.data) {
+				return Envelope{}, errors.New("json envelope contains trailing data")
+			}
+			return env, nil
+		}
+		if !s.consume(',') {
+			return Envelope{}, errors.New("json object entries must be separated by ','")
+		}
+		s.skipSpace()
+	}
+}
+
+func assignEnvelopeJSONField(env *Envelope, key string, raw []byte) error {
+	switch key {
+	case "id":
+		value, err := unquoteJSONField(raw)
+		if err != nil {
+			return err
+		}
+		env.ID = value
+	case "event_type":
+		value, err := unquoteJSONField(raw)
+		if err != nil {
+			return err
+		}
+		env.EventType = value
+	case "correlation_id":
+		value, err := unquoteJSONField(raw)
+		if err != nil {
+			return err
+		}
+		env.CorrelationID = value
+	case "schema_version":
+		value, err := unquoteJSONField(raw)
+		if err != nil {
+			return err
+		}
+		env.SchemaVersion = NormalizeSchemaVersion(value)
+	case "payload_encoding":
+		value, err := unquoteJSONField(raw)
+		if err != nil {
+			return err
+		}
+		env.PayloadEncoding = value
+	case "timestamp":
+		value, err := unquoteJSONField(raw)
+		if err != nil {
+			return err
+		}
+		if value == "" {
+			return nil
+		}
+		timestamp, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return errors.New("invalid timestamp format")
+		}
+		env.Timestamp = timestamp
+	case "metadata":
+		metadataObject, err := extension.ObjectFromJSON(raw)
+		if err != nil {
+			return err
+		}
+		env.Metadata = metadataObject
+	case "payload":
+		env.PayloadBytes = append(env.PayloadBytes[:0], raw...)
+	default:
+		return nil
+	}
+	return nil
+}
+
+func unquoteJSONField(raw []byte) (string, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return "", nil
+	}
+	if raw[0] != '"' {
+		return "", errors.New("json envelope field must be a string")
+	}
+	return strconv.Unquote(string(raw))
+}
+
+func (s *jsonFieldScanner) scanString() (string, error) {
+	start := s.pos
+	if !s.consume('"') {
+		return "", errors.New("json string expected")
+	}
+	escaped := false
+	for s.pos < len(s.data) {
+		ch := s.data[s.pos]
+		s.pos++
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			return strconv.Unquote(string(s.data[start:s.pos]))
+		}
+		if ch < 0x20 {
+			return "", errors.New("json string contains control character")
+		}
+	}
+	return "", io.ErrUnexpectedEOF
+}
+
+func (s *jsonFieldScanner) skipValue() error {
+	s.skipSpace()
+	if s.pos >= len(s.data) {
+		return io.ErrUnexpectedEOF
+	}
+	switch s.data[s.pos] {
+	case '"':
+		_, err := s.scanString()
+		return err
+	case '{':
+		return s.skipComposite('{', '}')
+	case '[':
+		return s.skipComposite('[', ']')
+	default:
+		start := s.pos
+		for s.pos < len(s.data) {
+			switch s.data[s.pos] {
+			case ' ', '\n', '\r', '\t', ',', '}', ']':
+				if s.pos == start {
+					return errors.New("json scalar expected")
+				}
+				return nil
+			default:
+				s.pos++
+			}
+		}
+		return nil
+	}
+}
+
+func (s *jsonFieldScanner) skipComposite(open, close byte) error {
+	if !s.consume(open) {
+		return errors.New("json composite expected")
+	}
+	for {
+		s.skipSpace()
+		if s.pos >= len(s.data) {
+			return io.ErrUnexpectedEOF
+		}
+		if s.consume(close) {
+			return nil
+		}
+		if open == '{' {
+			if _, err := s.scanString(); err != nil {
+				return err
+			}
+			s.skipSpace()
+			if !s.consume(':') {
+				return errors.New("json object key missing ':'")
+			}
+		}
+		if err := s.skipValue(); err != nil {
+			return err
+		}
+		s.skipSpace()
+		if s.consume(close) {
+			return nil
+		}
+		if !s.consume(',') {
+			return errors.New("json composite entries must be separated by ','")
+		}
+	}
+}
+
+func (s *jsonFieldScanner) skipSpace() {
+	for s.pos < len(s.data) {
+		switch s.data[s.pos] {
+		case ' ', '\n', '\r', '\t':
+			s.pos++
+		default:
+			return
+		}
+	}
+}
+
+func (s *jsonFieldScanner) consume(ch byte) bool {
+	if s.pos >= len(s.data) || s.data[s.pos] != ch {
+		return false
+	}
+	s.pos++
+	return true
 }
 
 func FromBinary(data []byte) (Envelope, error) {
@@ -281,9 +493,9 @@ func FromBinary(data []byte) (Envelope, error) {
 	env := Envelope{
 		ID:              message.GetId(),
 		EventType:       message.GetEventType(),
-		PayloadBytes:    append([]byte(nil), message.GetPayload()...),
+		PayloadBytes:    message.GetPayload(),
 		PayloadEncoding: payloadEncodingFromProto(message.GetPayloadEncoding()),
-		Metadata:        md.ToMap(),
+		Metadata:        md.ToObject(),
 		CorrelationID:   message.GetCorrelationId(),
 		SchemaVersion:   NormalizeSchemaVersion(message.GetSchemaVersion()),
 		SourceNodeID:    message.GetSourceNodeId(),
@@ -292,20 +504,26 @@ func FromBinary(data []byte) (Envelope, error) {
 		env.Timestamp = occurredAt.AsTime().UTC()
 	}
 	env.Normalize()
-	if env.PayloadEncoding == PayloadEncodingJSON {
-		if len(env.PayloadBytes) == 0 {
-			env.Payload = map[string]any{}
-			return env, nil
-		}
-		if err := json.Unmarshal(env.PayloadBytes, &env.Payload); err != nil {
-			return Envelope{}, err
-		}
-		if env.Payload == nil {
-			env.Payload = map[string]any{}
-		}
-		return env, nil
-	}
 	return env, nil
+}
+
+func (e *Envelope) MaterializePayload() error {
+	if e == nil || e.Payload != nil {
+		return nil
+	}
+	if normalizePayloadEncoding(e.PayloadEncoding) != PayloadEncodingJSON {
+		return nil
+	}
+	if len(e.PayloadBytes) == 0 {
+		e.Payload = extension.Object{}
+		return nil
+	}
+	payload, err := decodePayloadObject(e.PayloadBytes)
+	if err != nil {
+		return err
+	}
+	e.Payload = payload
+	return nil
 }
 
 func Decode(data []byte) (Envelope, error) {
@@ -371,7 +589,7 @@ func (b Batch) ToBinary() ([]byte, error) {
 			return nil, err
 		}
 
-		metadataProto, err := metadata.FromMap(e.Metadata).ToTransportProto()
+		metadataProto, err := metadata.FromObject(e.Metadata).ToTransportProto()
 		if err != nil {
 			return nil, err
 		}
@@ -379,7 +597,7 @@ func (b Batch) ToBinary() ([]byte, error) {
 		payload := append([]byte(nil), e.PayloadBytes...)
 		if e.PayloadEncoding == PayloadEncodingJSON {
 			var err error
-			payload, err = json.Marshal(e.Payload)
+			payload, err = encodePayloadObject(e.Payload)
 			if err != nil {
 				return nil, err
 			}
@@ -418,9 +636,9 @@ func FromBatchBinary(data []byte) (Batch, error) {
 		env := Envelope{
 			ID:              me.GetId(),
 			EventType:       me.GetEventType(),
-			PayloadBytes:    append([]byte(nil), me.GetPayload()...),
+			PayloadBytes:    me.GetPayload(),
 			PayloadEncoding: payloadEncodingFromProto(me.GetPayloadEncoding()),
-			Metadata:        md.ToMap(),
+			Metadata:        md.ToObject(),
 			CorrelationID:   me.GetCorrelationId(),
 			SchemaVersion:   NormalizeSchemaVersion(me.GetSchemaVersion()),
 			SourceNodeID:    me.GetSourceNodeId(),
@@ -429,15 +647,18 @@ func FromBatchBinary(data []byte) (Batch, error) {
 			env.Timestamp = occurredAt.AsTime().UTC()
 		}
 		env.Normalize()
-		if env.PayloadEncoding == PayloadEncodingJSON && len(env.PayloadBytes) > 0 {
-			if err := json.Unmarshal(env.PayloadBytes, &env.Payload); err != nil {
-				return Batch{}, err
-			}
-			if env.Payload == nil {
-				env.Payload = map[string]any{}
-			}
-		}
 		batch.Envelopes[i] = env
 	}
 	return batch, nil
+}
+
+func encodePayloadObject(payload extension.Object) ([]byte, error) {
+	if payload == nil {
+		payload = extension.Object{}
+	}
+	return payload.MarshalJSON()
+}
+
+func decodePayloadObject(data []byte) (extension.Object, error) {
+	return extension.ObjectFromJSON(data)
 }

@@ -158,18 +158,11 @@ mod tests {
         buffer.initialize_control_plane(7).expect("init");
         buffer.write_input_bytes(b"asset").expect("write input");
         buffer.write_output_bytes(b"layout").expect("write output");
-        buffer
-            .write_diagnostic_bytes(b"diagnostic")
-            .expect("write diagnostics");
+        buffer.write_diagnostic_bytes(b"diagnostic").expect("write diagnostics");
 
         assert_eq!(buffer.read_input_bytes().expect("read input"), b"asset");
         assert_eq!(buffer.read_output_bytes().expect("read output"), b"layout");
-        assert_eq!(
-            buffer
-                .header_int(INT_IDX_MODULE_VERSION)
-                .expect("module version"),
-            7
-        );
+        assert_eq!(buffer.header_int(INT_IDX_MODULE_VERSION).expect("module version"), 7);
 
         assert_eq!(buffer.add_epoch(IDX_INPUT_WRITTEN, 1), 0);
         assert_eq!(buffer.add_epoch(IDX_OUTPUT_WRITTEN, 1), 0);
@@ -180,12 +173,8 @@ mod tests {
     fn rejects_payloads_that_exceed_region_capacity() {
         let handle = crate::js_interop::create_mock_buffer(BUFFER_TOTAL_BYTES as usize);
         let buffer = SafeBuffer::new(handle).expect("create buffer");
-        assert!(buffer
-            .write_input_bytes(&vec![0; INPUT_MAX_BYTES as usize + 1])
-            .is_err());
-        assert!(buffer
-            .write_output_bytes(&vec![0; OUTPUT_MAX_BYTES as usize + 1])
-            .is_err());
+        assert!(buffer.write_input_bytes(&vec![0; INPUT_MAX_BYTES as usize + 1]).is_err());
+        assert!(buffer.write_output_bytes(&vec![0; OUTPUT_MAX_BYTES as usize + 1]).is_err());
         assert!(buffer
             .write_diagnostic_bytes(&vec![0; DIAGNOSTIC_MAX_BYTES as usize + 1])
             .is_err());

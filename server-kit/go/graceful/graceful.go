@@ -2,11 +2,13 @@ package graceful
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	eventcontract "github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	metautil "github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/riverqueue/river"
@@ -14,8 +16,8 @@ import (
 
 // EventEmitter emits lifecycle events for command outcomes.
 type EventEmitter interface {
-	EmitEvent(ctx context.Context, eventType string, payload any, metadata map[string]any) error
-	EmitEventTx(ctx context.Context, tx pgx.Tx, eventType string, payload any, metadata map[string]any) error
+	EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error
+	EmitEventTx(ctx context.Context, tx pgx.Tx, eventType string, payload any, metadata extension.Object) error
 }
 
 // Scheduler abstracts async job scheduling and transactional variants.
@@ -123,7 +125,7 @@ func NewHandler(opts ...Option) *Handler {
 }
 
 // Success records a successful operation and emits <action>:success when configured.
-func (h *Handler) Success(ctx context.Context, action string, msg string, result any, metadata map[string]any, entityID string, cacheInfo *CacheInfo) *SuccessContext {
+func (h *Handler) Success(ctx context.Context, action string, msg string, result any, metadata extension.Object, entityID string, cacheInfo *CacheInfo) *SuccessContext {
 	success := &SuccessContext{
 		Code:      "ok",
 		Message:   msg,
@@ -170,7 +172,7 @@ func (h *Handler) Success(ctx context.Context, action string, msg string, result
 // Error records a failed operation and emits <action>:failed when configured.
 // The metadata argument is augmented, not trusted as authoritative: PrepareForEmit
 // preserves caller-provided extra fields but always overwrites correlation_id from ctx.
-func (h *Handler) Error(ctx context.Context, action string, msg string, cause error, metadata map[string]any, entityID string) {
+func (h *Handler) Error(ctx context.Context, action string, msg string, cause error, metadata extension.Object, entityID string) {
 	errContext := &ErrorContext{
 		Code:      "error",
 		Message:   msg,
@@ -211,16 +213,16 @@ func errorString(err error) string {
 	return err.Error()
 }
 
-func withCorrelationIDFromContext(ctx context.Context, metadata map[string]any) map[string]any {
-	return metautil.PrepareForEmit(ctx, metadata)
+func withCorrelationIDFromContext(ctx context.Context, metadata extension.Object) extension.Object {
+	return metautil.PrepareObjectForEmit(ctx, metadata)
 }
 
 // PublishEventArgs captures event publication job arguments for River.
 type PublishEventArgs struct {
-	EventType     string         `json:"event_type"`
-	Payload       any            `json:"payload"`
-	Metadata      map[string]any `json:"metadata"`
-	SchemaVersion string         `json:"schema_version,omitempty"`
+	EventType     string           `json:"event_type"`
+	Payload       any              `json:"payload"`
+	Metadata      extension.Object `json:"metadata"`
+	SchemaVersion string           `json:"schema_version,omitempty"`
 }
 
 func (PublishEventArgs) Kind() string { return "publish_event" }
@@ -241,7 +243,7 @@ func NewInMemoryEventEmitter(bus eventcontract.Bus) *InMemoryEventEmitter {
 	return &InMemoryEventEmitter{Bus: bus}
 }
 
-func (e *InMemoryEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata map[string]any) error {
+func (e *InMemoryEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error {
 	if e == nil || e.Bus == nil {
 		return nil
 	}
@@ -252,7 +254,7 @@ func (e *InMemoryEventEmitter) EmitEvent(ctx context.Context, eventType string, 
 	meta := withCorrelationIDFromContext(ctx, metadata)
 	envelope := eventcontract.Envelope{
 		EventType:     eventType,
-		Payload:       asMap(payload),
+		Payload:       objectFromPayload(payload),
 		Metadata:      meta,
 		CorrelationID: pickCorrelation(meta),
 		SchemaVersion: eventcontract.EnvelopeSchemaVersion,
@@ -262,7 +264,7 @@ func (e *InMemoryEventEmitter) EmitEvent(ctx context.Context, eventType string, 
 	return e.Bus.Publish(ctx, envelope)
 }
 
-func (e *InMemoryEventEmitter) EmitEventTx(ctx context.Context, _ pgx.Tx, eventType string, payload any, metadata map[string]any) error {
+func (e *InMemoryEventEmitter) EmitEventTx(ctx context.Context, _ pgx.Tx, eventType string, payload any, metadata extension.Object) error {
 	return e.EmitEvent(ctx, eventType, payload, metadata)
 }
 
@@ -321,7 +323,7 @@ func NewRedisEventEmitter(bus eventcontract.Bus) *RedisEventEmitter {
 	return &RedisEventEmitter{Bus: bus}
 }
 
-func (e *RedisEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata map[string]any) error {
+func (e *RedisEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error {
 	if e == nil || e.Bus == nil {
 		return nil
 	}
@@ -332,7 +334,7 @@ func (e *RedisEventEmitter) EmitEvent(ctx context.Context, eventType string, pay
 	meta := withCorrelationIDFromContext(ctx, metadata)
 	envelope := eventcontract.Envelope{
 		EventType:     eventType,
-		Payload:       asMap(payload),
+		Payload:       objectFromPayload(payload),
 		Metadata:      meta,
 		CorrelationID: pickCorrelation(meta),
 		SchemaVersion: eventcontract.EnvelopeSchemaVersion,
@@ -342,7 +344,7 @@ func (e *RedisEventEmitter) EmitEvent(ctx context.Context, eventType string, pay
 	return e.Bus.Publish(ctx, envelope)
 }
 
-func (e *RedisEventEmitter) EmitEventTx(ctx context.Context, _ pgx.Tx, eventType string, payload any, metadata map[string]any) error {
+func (e *RedisEventEmitter) EmitEventTx(ctx context.Context, _ pgx.Tx, eventType string, payload any, metadata extension.Object) error {
 	return e.EmitEvent(ctx, eventType, payload, metadata)
 }
 
@@ -355,7 +357,7 @@ func NewRiverEventEmitter(client *river.Client[pgx.Tx]) *RiverEventEmitter {
 	return &RiverEventEmitter{riverClient: client}
 }
 
-func (e *RiverEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata map[string]any) error {
+func (e *RiverEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error {
 	if err := eventcontract.ValidateEventType(eventType); err != nil {
 		return err
 	}
@@ -369,7 +371,7 @@ func (e *RiverEventEmitter) EmitEvent(ctx context.Context, eventType string, pay
 	return err
 }
 
-func (e *RiverEventEmitter) EmitEventTx(ctx context.Context, tx pgx.Tx, eventType string, payload any, metadata map[string]any) error {
+func (e *RiverEventEmitter) EmitEventTx(ctx context.Context, tx pgx.Tx, eventType string, payload any, metadata extension.Object) error {
 	if err := eventcontract.ValidateEventType(eventType); err != nil {
 		return err
 	}
@@ -412,22 +414,30 @@ func (s *RiverScheduler) ScheduleTxWithOpts(ctx context.Context, tx pgx.Tx, job 
 	return err
 }
 
-func asMap(payload any) map[string]any {
+func objectFromPayload(payload any) extension.Object {
 	if payload == nil {
-		return map[string]any{}
+		return extension.Object{}
 	}
-	if value, ok := payload.(map[string]any); ok {
-		return value
+	switch value := payload.(type) {
+	case extension.Object:
+		return value.Clone()
+	default:
+		return extension.Object{"result": extensionValueFromAny(value)}
 	}
-	return map[string]any{"result": payload}
 }
 
-func pickCorrelation(metadata map[string]any) string {
+func extensionValueFromAny(value any) extension.Value {
+	typed, err := extension.FromJSON(value)
+	if err != nil {
+		return extension.String(fmt.Sprint(value))
+	}
+	return typed
+}
+
+func pickCorrelation(metadata extension.Object) string {
 	if metadata == nil {
 		return ""
 	}
-	if corr, ok := metadata["correlation_id"].(string); ok {
-		return corr
-	}
-	return ""
+	corr, _ := metadata.GetString("correlation_id")
+	return corr
 }

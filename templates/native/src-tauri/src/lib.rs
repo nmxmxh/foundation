@@ -31,7 +31,10 @@ struct Capabilities {
 }
 
 #[tauri::command]
-fn foundation_runtime_dispatch(request: Request<'_>, state: State<'_, NativeState>) -> Result<Response, String> {
+fn foundation_runtime_dispatch(
+    request: Request<'_>,
+    state: State<'_, NativeState>,
+) -> Result<Response, String> {
     let InvokeBody::Raw(bytes) = request.body() else {
         return Err("foundation_runtime_dispatch requires a raw binary request body".to_string());
     };
@@ -63,7 +66,10 @@ fn foundation_runtime_capabilities(state: State<'_, NativeState>) -> Result<Capa
 }
 
 #[tauri::command]
-fn foundation_secure_store_get(key: String, state: State<'_, NativeState>) -> Result<Option<Vec<u8>>, String> {
+fn foundation_secure_store_get(
+    key: String,
+    state: State<'_, NativeState>,
+) -> Result<Option<Vec<u8>>, String> {
     state
         .secure_store
         .get(&key)
@@ -71,7 +77,11 @@ fn foundation_secure_store_get(key: String, state: State<'_, NativeState>) -> Re
 }
 
 #[tauri::command]
-fn foundation_secure_store_put(key: String, value: Vec<u8>, state: State<'_, NativeState>) -> Result<(), String> {
+fn foundation_secure_store_put(
+    key: String,
+    value: Vec<u8>,
+    state: State<'_, NativeState>,
+) -> Result<(), String> {
     state
         .secure_store
         .put(&key, &value)
@@ -79,7 +89,10 @@ fn foundation_secure_store_put(key: String, value: Vec<u8>, state: State<'_, Nat
 }
 
 #[tauri::command]
-fn foundation_secure_store_delete(key: String, state: State<'_, NativeState>) -> Result<bool, String> {
+fn foundation_secure_store_delete(
+    key: String,
+    state: State<'_, NativeState>,
+) -> Result<bool, String> {
     state
         .secure_store
         .delete(&key)

@@ -6,7 +6,20 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
+
+func policyObject(values map[string]any) extension.Object {
+	out := make(extension.Object, len(values))
+	for key, value := range values {
+		typed, err := extension.FromJSON(value)
+		if err == nil {
+			out[key] = typed
+		}
+	}
+	return out
+}
 
 func TestEvaluateAllowDenyPriorityAndConditions(t *testing.T) {
 	engine := NewEngine()
@@ -39,10 +52,10 @@ func TestEvaluateAllowDenyPriorityAndConditions(t *testing.T) {
 	})
 
 	req := Request{
-		Principal: Principal{ID: "u1", Type: "User", Roles: []string{"editor"}, Attributes: map[string]any{"department": "media"}},
+		Principal: Principal{ID: "u1", Type: "User", Roles: []string{"editor"}, Attributes: policyObject(map[string]any{"department": "media"})},
 		Action:    "document:read",
-		Resource:  Resource{ID: "doc1", Type: "Document", Owner: "u1", OrgID: "org_1", Attributes: map[string]any{"classification": "internal"}},
-		Context:   map[string]any{"region": "ng"},
+		Resource:  Resource{ID: "doc1", Type: "Document", Owner: "u1", OrgID: "org_1", Attributes: policyObject(map[string]any{"classification": "internal"})},
+		Context:   policyObject(map[string]any{"region": "ng"}),
 	}
 	if got := engine.Evaluate(context.Background(), req); got.Decision != DecisionAllow || got.PolicyID != "allow-owner" {
 		t.Fatalf("allow decision = %+v", got)
@@ -66,15 +79,15 @@ func TestPrincipalResourceAndConditionOperators(t *testing.T) {
 			Type:   "User",
 			Roles:  []string{"editor", "reviewer"},
 			Groups: []string{"media"},
-			Attributes: map[string]any{
+			Attributes: policyObject(map[string]any{
 				"tags":   []string{"trusted", "beta"},
 				"email":  "person@example.com",
 				"active": true,
-			},
+			}),
 		},
 		Action:   "asset:update",
 		Resource: Resource{ID: "asset_1", Type: "Asset", Owner: "u1", OrgID: "org_1"},
-		Context:  map[string]any{"tier": "gold"},
+		Context:  policyObject(map[string]any{"tier": "gold"}),
 	}
 	policy := Policy{
 		ID: "matrix",

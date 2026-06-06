@@ -10,6 +10,7 @@ import (
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap"
 	eventcontract "github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/intelligence"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
@@ -30,15 +31,15 @@ type registeredMethod struct {
 }
 
 type DispatchInput struct {
-	Payload          map[string]any
+	Payload          extension.Object
 	PayloadBytes     []byte
 	PayloadEncoding  string
 	ResponseEncoding string
-	Metadata         map[string]any
+	Metadata         extension.Object
 }
 
 type DispatchResult struct {
-	Payload         map[string]any
+	Payload         extension.Object
 	PayloadBytes    []byte
 	PayloadEncoding string
 	Stream          any
@@ -68,7 +69,7 @@ func New(redisClient redis.Client, gh *graceful.Handler, l logger.Logger) *Servi
 // NewWithOptions creates a new ServiceRegistry with configurable dispatch worker sizing.
 func NewWithOptions(redisClient redis.Client, gh *graceful.Handler, l logger.Logger, opts Options) *ServiceRegistry {
 	if l == nil {
-		l, _ = logger.NewDefault()
+		l = logger.Default()
 	}
 	dispatchWorkers := opts.DispatchWorkers
 	if dispatchWorkers <= 0 {
@@ -250,28 +251,32 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 		// Silent ignore or debug/warn?
 		return
 	}
+	if env.PayloadEncoding != protoapi.PayloadEncodingProtobuf {
+		if err := env.MaterializePayload(); err != nil {
+			r.log.ErrorContext(ctx, "failed to materialize event payload", "event_type", env.EventType, "error", err)
+			return
+		}
+	}
 
 	// Prepare metadata and inject correlation
-	metaMap := env.Metadata
-	if metaMap == nil {
-		metaMap = map[string]any{}
-	}
+	metaObject := env.Metadata.Clone()
 	if env.CorrelationID != "" {
-		metaMap["correlation_id"] = env.CorrelationID
+		metaObject["correlation_id"] = extension.String(env.CorrelationID)
 	}
+	payloadObject := env.Payload.Clone()
 
-	ctx = metadata.NewContext(ctx, metaMap)
+	ctx = metadata.NewContextObject(ctx, metaObject)
 	if r.intelligence != nil {
-		ctx, metaMap, _ = r.intelligence.Inject(ctx, intelligence.Input{
+		ctx, metaObject, _ = r.intelligence.Inject(ctx, intelligence.Input{
 			EventType:    env.EventType,
-			Payload:      env.Payload,
+			Payload:      payloadObject,
 			PayloadBytes: env.PayloadBytes,
-			Metadata:     metaMap,
+			Metadata:     metaObject,
 		})
 	}
 
 	if method.typedHandler != nil && method.binding != nil {
-		req, pooled, err := method.decodeRequest(env.PayloadEncoding, env.Payload, env.PayloadBytes, metaMap)
+		req, pooled, err := method.decodeRequest(env.PayloadEncoding, payloadObject, env.PayloadBytes, metaObject)
 		if err != nil {
 			r.log.ErrorContext(ctx, "failed to decode typed payload", "event_type", env.EventType, "error", err)
 			return
@@ -279,7 +284,7 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 		_, err = method.typedHandler(ctx, req)
 		method.releaseRequest(req, pooled)
 		if err != nil && r.handler != nil {
-			r.handler.Error(ctx, strings.TrimSuffix(env.EventType, ":requested"), "event processing failed", err, metaMap, "")
+			r.handler.Error(ctx, strings.TrimSuffix(env.EventType, ":requested"), "event processing failed", err, metaObject, "")
 		}
 		return
 	}
@@ -289,22 +294,10 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 		r.log.ErrorContext(ctx, "handler does not support protobuf payload dispatch", "event_type", env.EventType)
 		return
 	}
-	_, err = method.handler(ctx, env.Payload)
+	_, err = method.handler(ctx, payloadObject)
 	if err != nil && r.handler != nil {
-		r.handler.Error(ctx, strings.TrimSuffix(env.EventType, ":requested"), "event processing failed", err, metaMap, "")
+		r.handler.Error(ctx, strings.TrimSuffix(env.EventType, ":requested"), "event processing failed", err, metaObject, "")
 	}
-}
-
-func (r *ServiceRegistry) Dispatch(ctx context.Context, eventType string, payload map[string]any) (map[string]any, bool, error) {
-	result, ok, err := r.DispatchInput(ctx, eventType, DispatchInput{
-		Payload:          payload,
-		PayloadEncoding:  protoapi.PayloadEncodingJSON,
-		ResponseEncoding: protoapi.PayloadEncodingJSON,
-	})
-	if err != nil {
-		return nil, ok, err
-	}
-	return result.Payload, ok, nil
 }
 
 func (r *ServiceRegistry) DispatchInput(ctx context.Context, eventType string, input DispatchInput) (DispatchResult, bool, error) {
@@ -321,12 +314,12 @@ func (r *ServiceRegistry) DispatchInput(ctx context.Context, eventType string, i
 
 	input.PayloadEncoding = normalizeEncoding(input.PayloadEncoding)
 	if input.Payload == nil {
-		input.Payload = map[string]any{}
+		input.Payload = extension.Object{}
 	}
 	if input.Metadata == nil {
-		input.Metadata = map[string]any{}
+		input.Metadata = extension.Object{}
 	}
-	ctx = metadata.NewContext(ctx, input.Metadata)
+	ctx = metadata.NewContextObject(ctx, input.Metadata)
 	if r.intelligence != nil {
 		ctx, input.Metadata, _ = r.intelligence.Inject(ctx, intelligence.Input{
 			EventType:    eventType,
@@ -361,13 +354,13 @@ func (r *ServiceRegistry) DispatchInput(ctx context.Context, eventType string, i
 			result.PayloadEncoding = protoapi.PayloadEncodingProtobuf
 			return result, true, nil
 		}
-		payloadMap, err := method.binding.EncodeResponseMap(response)
+		responseObject, err := method.binding.EncodeResponseObject(response)
 		if err != nil {
 			method.releaseRequest(request, pooled)
 			return DispatchResult{}, true, err
 		}
 		method.releaseRequest(request, pooled)
-		result.Payload = payloadMap
+		result.Payload = responseObject
 		return result, true, nil
 	}
 
@@ -383,25 +376,12 @@ func (r *ServiceRegistry) DispatchInput(ctx context.Context, eventType string, i
 	result := DispatchResult{
 		PayloadEncoding: protoapi.PayloadEncodingJSON,
 	}
-	if m, ok := response.(map[string]any); ok {
+	if m, ok := response.(extension.Object); ok {
 		result.Payload = m
 	} else {
 		result.Stream = response
 	}
 	return result, true, nil
-}
-
-func (r *ServiceRegistry) DispatchBytes(ctx context.Context, eventType string, payload []byte, metadata map[string]any) ([]byte, bool, error) {
-	result, ok, err := r.DispatchInput(ctx, eventType, DispatchInput{
-		PayloadBytes:     payload,
-		PayloadEncoding:  protoapi.PayloadEncodingProtobuf,
-		ResponseEncoding: protoapi.PayloadEncodingProtobuf,
-		Metadata:         metadata,
-	})
-	if err != nil {
-		return nil, ok, err
-	}
-	return result.PayloadBytes, ok, nil
 }
 
 func (r *ServiceRegistry) RegisteredEventTypes() []string {
@@ -432,9 +412,9 @@ func normalizeResponseEncoding(value, requestEncoding string) string {
 	return normalizeEncoding(value)
 }
 
-func (m registeredMethod) decodeRequest(encoding string, payload map[string]any, payloadBytes []byte, metadata map[string]any) (proto.Message, bool, error) {
+func (m registeredMethod) decodeRequest(encoding string, payload extension.Object, payloadBytes []byte, metadata extension.Object) (proto.Message, bool, error) {
 	if normalizeEncoding(encoding) != protoapi.PayloadEncodingProtobuf || m.requestPool == nil || m.binding == nil {
-		msg, err := protoapi.DecodeByEncoding(*m.binding, encoding, payload, payloadBytes, metadata)
+		msg, err := protoapi.DecodeObjectByEncoding(*m.binding, encoding, payload, payloadBytes, metadata)
 		return msg, false, err
 	}
 	request, ok := m.requestPool.Get().(proto.Message)
@@ -445,7 +425,7 @@ func (m registeredMethod) decodeRequest(encoding string, payload map[string]any,
 			return nil, false, err
 		}
 	}
-	msg, err := m.binding.DecodeRequestBytesInto(request, payloadBytes, metadata, protoapi.DecodeRequestBytesIntoOptions{
+	msg, err := m.binding.DecodeRequestBytesIntoObject(request, payloadBytes, metadata, protoapi.DecodeRequestBytesIntoOptions{
 		CompleteMessage: true,
 	})
 	if err != nil {

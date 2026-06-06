@@ -30,6 +30,7 @@ if command -v perl >/dev/null 2>&1; then
     }
 
     my $deadline = time() + $timeout;
+    my $started = time();
     my $next_heartbeat = time() + 10;
     my $status;
 
@@ -52,7 +53,20 @@ if command -v perl >/dev/null 2>&1; then
         exit 124;
       }
       if (time() >= $next_heartbeat) {
-        print STDERR "[WAIT] @cmd\n";
+        my $elapsed = time() - $started;
+        my $last_line = "";
+        if (open my $fh, "<", $log_file) {
+          while (my $line = <$fh>) {
+            chomp $line;
+            $last_line = $line if $line ne "";
+          }
+          close $fh;
+        }
+        if ($last_line ne "") {
+          print STDERR "[WAIT ${elapsed}s] @cmd | last: $last_line\n";
+        } else {
+          print STDERR "[WAIT ${elapsed}s] @cmd\n";
+        }
         $next_heartbeat = time() + 10;
       }
       select(undef, undef, undef, 0.2);

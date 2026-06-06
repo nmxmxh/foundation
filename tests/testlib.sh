@@ -12,6 +12,10 @@ test_root() {
     pwd
 }
 
+test_step() {
+    printf '[STEP] %s\n' "$*"
+}
+
 assert_file() {
     local path="$1"
     local root

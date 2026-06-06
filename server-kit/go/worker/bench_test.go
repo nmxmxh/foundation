@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 )
 
@@ -34,7 +35,7 @@ func BenchmarkEngine_Enqueue_InMemory(b *testing.B) {
 	job := Job{
 		JobKind: "bench_kind",
 		Queue:   "bench",
-		Payload: map[string]any{"key": "value", "id": 123},
+		Payload: extension.Object{"key": extension.String("value"), "id": extension.Int(123)},
 	}
 
 	b.ResetTimer()
@@ -120,7 +121,7 @@ func BenchmarkEngine_Enqueue_River(b *testing.B) {
 func BenchmarkJob_Normalize(b *testing.B) {
 	job := &Job{
 		JobKind:  "test",
-		Metadata: map[string]any{"timeout_ms": 1000},
+		Metadata: extension.Object{"timeout_ms": extension.Int(1000)},
 	}
 
 	b.ReportAllocs()

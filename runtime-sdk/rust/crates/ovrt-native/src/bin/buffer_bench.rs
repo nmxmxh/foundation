@@ -56,9 +56,7 @@ fn main() {
 
     let mut output_reuse = Vec::with_capacity(output.len());
     bench_ns("native read_output_bytes_into reused Vec", || {
-        buffer
-            .read_output_bytes_into(black_box(&mut output_reuse))
-            .expect("read into");
+        buffer.read_output_bytes_into(black_box(&mut output_reuse)).expect("read into");
     });
 
     bench_ns("native output_bytes_view borrowed", || {
@@ -67,15 +65,11 @@ fn main() {
     });
 
     bench_ns("native write_output_bytes clear+copy", || {
-        buffer
-            .write_output_bytes(black_box(&output))
-            .expect("write");
+        buffer.write_output_bytes(black_box(&output)).expect("write");
     });
 
     bench_ns("native write_output_bytes_fast copy only", || {
-        buffer
-            .write_output_bytes_fast(black_box(&output))
-            .expect("fast write");
+        buffer.write_output_bytes_fast(black_box(&output)).expect("fast write");
     });
 
     let host = NativeRuntimeHost::new(BTreeMap::new());

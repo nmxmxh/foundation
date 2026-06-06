@@ -31,7 +31,7 @@ replace_in_file() {
     return 0
   fi
 
-  perl -0pi -e 's/\Q$ENV{PATCH_SEARCH}\E/$ENV{PATCH_REPLACE}/g' "$file"
+  PATCH_SEARCH="$search" PATCH_REPLACE="$replace" perl -0pi -e 's/\Q$ENV{PATCH_SEARCH}\E/$ENV{PATCH_REPLACE}/g' "$file"
   log_patch "$label: ${file#$target/}"
 }
 
@@ -65,6 +65,125 @@ patch_compose_targets() {
     log_patch "Docker Compose build target drift: ${compose#$target/}"
   fi
   rm -f "$before"
+}
+
+project_name_from_metadata() {
+  local file="$target/.foundation"
+  if [[ -f "$file" ]] && grep -q '^PROJECT_NAME=' "$file"; then
+    sed -n 's/^PROJECT_NAME=//p' "$file" | head -n 1
+    return 0
+  fi
+  basename "$target" | sed 's/_v[0-9]*$//'
+}
+
+patch_compose_database_contract() {
+  local compose="$target/docker-compose.yml"
+  [[ -f "$compose" ]] || return 0
+
+  local project_name
+  project_name="$(project_name_from_metadata)"
+
+  if ! grep -Eq '^  postgres:' "$compose"; then
+    local postgres_block
+    postgres_block="$(cat <<EOF
+  # PostgreSQL Database
+  postgres:
+    image: postgres:\${POSTGRES_VERSION:-18}
+    container_name: \${SERVICE_NAME:-$project_name}-postgres
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    expose:
+      - "5432"
+    volumes:
+      # PostgreSQL 18+ stores data in major-version-specific subdirectories.
+      # Mount the parent directory so pg_upgrade can work across versions.
+      - postgres_data:/var/lib/postgresql
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    environment:
+      POSTGRES_USER: "\${DB_USER:-postgres}"
+      POSTGRES_PASSWORD: "\${DB_PASSWORD:-postgres}"
+      POSTGRES_DB: "\${DB_NAME:-$project_name}"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "\${DB_USER:-postgres}", "-d", "\${DB_NAME:-$project_name}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - app-network
+    restart: unless-stopped
+EOF
+)"
+    insert_before_marker_or_append "$compose" "  # Redis Cache" "$postgres_block" "Docker Compose managed Postgres service"
+  fi
+
+  if ! grep -Fq '      DB_HOST: "${DB_HOST:-postgres}"' "$compose"; then
+    local server_db_env
+    server_db_env="$(cat <<EOF
+      DATABASE_URL: "\${DATABASE_URL:-}"
+      DB_HOST: "\${DB_HOST:-postgres}"
+      DB_PORT: "\${DB_PORT:-5432}"
+      DB_USER: "\${DB_USER:-postgres}"
+      DB_PASSWORD: "\${DB_PASSWORD:-postgres}"
+      DB_NAME: "\${DB_NAME:-$project_name}"
+      DB_SSLMODE: "\${DB_SSLMODE:-disable}"
+EOF
+)"
+    replace_in_file "$compose" '      DATABASE_URL: "${DATABASE_URL:-}"' "$server_db_env" "Docker Compose server database environment"
+  fi
+
+  replace_in_file "$compose" '      - DB_HOST=${DB_HOST:-}' '      - DB_HOST=${DB_HOST:-postgres}' "Docker Compose migrate database host default"
+  replace_in_file "$compose" '      - DB_PASSWORD=${DB_PASSWORD:-}' '      - DB_PASSWORD=${DB_PASSWORD:-postgres}' "Docker Compose migrate database password default"
+
+  local before_frontend
+  before_frontend="$(mktemp)"
+  cp "$compose" "$before_frontend"
+  perl -0pi -e 's/(^  frontend:\n(?:(?!^  [A-Za-z0-9_-]+:).)*?    networks:\n      - app-network\n)    depends_on:\n      postgres:\n        condition: service_healthy\n    environment:/${1}    environment:/ms' "$compose"
+  if ! cmp -s "$before_frontend" "$compose"; then
+    log_patch "Docker Compose removes accidental frontend Postgres dependency: ${compose#$target/}"
+  fi
+  rm -f "$before_frontend"
+
+  if ! awk '
+    /^  migrate:/ { in_migrate = 1; next }
+    /^  [A-Za-z0-9_-]+:/ && in_migrate { in_migrate = 0 }
+    in_migrate && /depends_on:/ { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$compose"; then
+    local before_migrate
+    before_migrate="$(mktemp)"
+    cp "$compose" "$before_migrate"
+    perl -0pi -e 's/(^  migrate:\n(?:(?!^  [A-Za-z0-9_-]+:).)*?    networks:\n      - app-network\n)    environment:/${1}    depends_on:\n      postgres:\n        condition: service_healthy\n    environment:/ms' "$compose"
+    if ! cmp -s "$before_migrate" "$compose"; then
+      log_patch "Docker Compose migrate waits for Postgres: ${compose#$target/}"
+    fi
+    rm -f "$before_migrate"
+  fi
+
+  if ! grep -Fq 'DATABASE_URL points at localhost' "$compose"; then
+    local db_url_line='        db_url="$${DATABASE_URL:-}"'
+    local db_url_guard='        db_url="$${DATABASE_URL:-}"
+        if printf '\''%s'\'' "$$db_url" | grep -Eqi '\''@(localhost|127\.0\.0\.1|\[::1\]|::1)(:|/)'\''; then
+          echo "DATABASE_URL points at localhost, which is the migrate container itself."
+          echo "Unset DATABASE_URL and use DB_HOST=postgres, or set DATABASE_URL to the reachable Postgres service hostname."
+          exit 1
+        fi'
+    replace_in_file "$compose" "$db_url_line" "$db_url_guard" "Docker Compose migrate rejects container-local DATABASE_URL"
+  fi
+
+  if ! grep -Eq '^  postgres_data:' "$compose"; then
+    local before
+    before="$(mktemp)"
+    cp "$compose" "$before"
+    if grep -q '^volumes:' "$compose"; then
+      perl -0pi -e 's/^volumes:\n/volumes:\n  postgres_data:\n    driver: local\n/m' "$compose"
+    else
+      printf '\nvolumes:\n  postgres_data:\n    driver: local\n' >>"$compose"
+    fi
+    if ! cmp -s "$before" "$compose"; then
+      log_patch "Docker Compose Postgres volume: ${compose#$target/}"
+    fi
+    rm -f "$before"
+  fi
 }
 
 patch_reframe_frontend_dockerfile() {
@@ -331,6 +450,205 @@ func (s *Server) registerWSConnection(ctx context.Context, conn *wsConnection) b
   PATCH_SEARCH="$enqueue_search" PATCH_REPLACE="$enqueue_replace" replace_in_file "$file" "$enqueue_search" "$enqueue_replace" "WebSocket backpressure metric"
 }
 
+patch_typed_server_runtime() {
+  local server_file="$target/internal/server/server.go"
+  if [[ -f "$server_file" ]]; then
+    if ! grep -Fq 'server-kit/go/extension' "$server_file"; then
+      PATCH_SEARCH='	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+'
+      PATCH_REPLACE='	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+'
+      replace_in_file "$server_file" "$PATCH_SEARCH" "$PATCH_REPLACE" "typed server runtime import"
+    fi
+
+    replace_in_file "$server_file" 'md := metadata.FromMap(req.Metadata)' 'md := metadata.FromObject(req.Metadata)' "typed server request metadata"
+    replace_in_file "$server_file" 'req.Payload = map[string]any{}' 'req.Payload = extension.Object{}' "typed server empty payload"
+    replace_in_file "$server_file" 'Metadata:        md.ToMap(),' 'Metadata:        md.ToObject(),' "typed server envelope metadata"
+    replace_in_file "$server_file" 'Metadata:         md.ToMap(),' 'Metadata:         md.ToObject(),' "typed server dispatch metadata"
+  fi
+
+  local ws_file="$target/internal/server/websocket.go"
+  if [[ -f "$ws_file" ]]; then
+    if ! grep -Fq 'server-kit/go/extension' "$ws_file"; then
+      PATCH_SEARCH='	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+'
+      PATCH_REPLACE='	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+'
+      replace_in_file "$ws_file" "$PATCH_SEARCH" "$PATCH_REPLACE" "typed websocket runtime import"
+    fi
+
+    local ack_payload_search='		EventType: "identity:connection_open:v1:ack",
+		Payload: map[string]any{
+			"connection_id": conn.id,
+			"state":         "guest",
+		},'
+    local ack_payload_replace='		EventType: "identity:connection_open:v1:ack",
+		Payload: extension.Object{
+			"connection_id": extension.String(conn.id),
+			"state":         extension.String("guest"),
+		},'
+    replace_in_file "$ws_file" "$ack_payload_search" "$ack_payload_replace" "typed websocket ack payload"
+
+    replace_in_file "$ws_file" 'md := metadata.FromMap(env.Metadata)' 'md := metadata.FromObject(env.Metadata)' "typed websocket request metadata"
+    replace_in_file "$ws_file" 'md := metadata.FromMap(envelope.Metadata)' 'md := metadata.FromObject(envelope.Metadata)' "typed websocket forwarded metadata"
+    replace_in_file "$ws_file" 'Metadata:         md.ToMap(),' 'Metadata:         md.ToObject(),' "typed websocket dispatch metadata"
+    replace_in_file "$ws_file" 'req.Payload = map[string]any{}' 'req.Payload = extension.Object{}' "typed websocket empty payload"
+
+    local subscribe_pattern_search='func (s *Server) handleWSSubscribe(conn *wsConnection, env events.Envelope) {
+	pattern, ok := env.Payload["pattern"].(string)
+	if !ok {
+		pattern = ""
+	}
+	pattern = strings.TrimSpace(pattern)'
+    local subscribe_pattern_replace='func (s *Server) handleWSSubscribe(conn *wsConnection, env events.Envelope) {
+	pattern, _ := env.Payload.GetString("pattern")
+	pattern = strings.TrimSpace(pattern)'
+    replace_in_file "$ws_file" "$subscribe_pattern_search" "$subscribe_pattern_replace" "typed websocket subscribe payload"
+
+    local unsubscribe_pattern_search='func (s *Server) handleWSUnsubscribe(conn *wsConnection, env events.Envelope) {
+	pattern, ok := env.Payload["pattern"].(string)
+	if !ok {
+		pattern = ""
+	}
+	pattern = strings.TrimSpace(pattern)'
+    local unsubscribe_pattern_replace='func (s *Server) handleWSUnsubscribe(conn *wsConnection, env events.Envelope) {
+	pattern, _ := env.Payload.GetString("pattern")
+	pattern = strings.TrimSpace(pattern)'
+    replace_in_file "$ws_file" "$unsubscribe_pattern_search" "$unsubscribe_pattern_replace" "typed websocket unsubscribe payload"
+
+    replace_in_file "$ws_file" 'Payload:       map[string]any{"pattern": pattern},' 'Payload:       extension.Object{"pattern": extension.String(pattern)},' "typed websocket subscription ack payload"
+
+    local auth_signature_search='func (s *Server) maybeUpgradeConnectionAuth(ctx context.Context, conn *wsConnection, eventType string, payload map[string]any) {'
+    local auth_signature_replace='func (s *Server) maybeUpgradeConnectionAuth(ctx context.Context, conn *wsConnection, eventType string, payload extension.Object) {'
+    replace_in_file "$ws_file" "$auth_signature_search" "$auth_signature_replace" "typed websocket auth payload signature"
+
+    local auth_body_search='	userID, ok := payload["user_id"].(string)
+	if !ok {
+		userID = ""
+	}
+	orgID, ok := payload["organization_id"].(string)
+	if !ok {
+		orgID = ""
+	}
+	roleID, ok := payload["role_id"].(string)
+	if !ok {
+		roleID = ""
+	}
+	rawCaps, ok := payload["capabilities"].([]any)
+	if !ok {
+		rawCaps = nil
+	}
+	caps := make([]string, 0, len(rawCaps))
+	for _, capability := range rawCaps {
+		if text, ok := capability.(string); ok && strings.TrimSpace(text) != "" {
+			caps = append(caps, strings.TrimSpace(text))
+		}
+	}'
+    local auth_body_replace='	userID, _ := payload.GetString("user_id")
+	orgID, _ := payload.GetString("organization_id")
+	roleID, _ := payload.GetString("role_id")
+	rawCaps := []extension.Value{}
+	if value, ok := payload["capabilities"]; ok {
+		rawCaps, _ = value.ListValue()
+	}
+	caps := make([]string, 0, len(rawCaps))
+	for _, capability := range rawCaps {
+		if text, ok := capability.StringValue(); ok && strings.TrimSpace(text) != "" {
+			caps = append(caps, strings.TrimSpace(text))
+		}
+	}'
+    replace_in_file "$ws_file" "$auth_body_search" "$auth_body_replace" "typed websocket auth payload fields"
+
+    replace_in_file "$ws_file" 'Payload:       payload,' 'Payload:       objectFromJSONValue(payload),' "typed websocket error payload"
+
+    if ! grep -Fq 'func objectFromJSONValue(value any) extension.Object' "$ws_file"; then
+      local helper_marker='func (s *Server) ensureEventSubscription() {'
+      local helper='func objectFromJSONValue(value any) extension.Object {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return extension.Object{}
+	}
+	payload, err := extension.ObjectFromJSON(raw)
+	if err != nil {
+		return extension.Object{}
+	}
+	return payload
+}
+
+func (s *Server) ensureEventSubscription() {'
+      replace_in_file "$ws_file" "$helper_marker" "$helper" "typed websocket JSON payload helper"
+    fi
+
+    local meta_env_search='func metadataForWSEnvelope(conn *wsConnection, env events.Envelope) map[string]any {
+	md := metadata.FromMap(env.Metadata)
+	enrichWSMetadata(conn, &md)
+	return md.ToMap()
+}'
+    local meta_env_replace='func metadataForWSEnvelope(conn *wsConnection, env events.Envelope) extension.Object {
+	md := metadata.FromObject(env.Metadata)
+	enrichWSMetadata(conn, &md)
+	return md.ToObject()
+}'
+    replace_in_file "$ws_file" "$meta_env_search" "$meta_env_replace" "typed websocket envelope metadata helper"
+    replace_in_file "$ws_file" 'func metadataForWSEnvelope(conn *wsConnection, env events.Envelope) map[string]any {' 'func metadataForWSEnvelope(conn *wsConnection, env events.Envelope) extension.Object {' "typed websocket envelope metadata helper return"
+    replace_in_file "$ws_file" 'return md.ToMap()' 'return md.ToObject()' "typed websocket metadata object return"
+
+    local meta_conn_search='func metadataForWSConnection(conn *wsConnection) map[string]any {
+	md := metadata.New()
+	enrichWSMetadata(conn, &md)
+	return md.ToMap()
+}'
+    local meta_conn_replace='func metadataForWSConnection(conn *wsConnection) extension.Object {
+	md := metadata.New()
+	enrichWSMetadata(conn, &md)
+	return md.ToObject()
+}'
+    replace_in_file "$ws_file" "$meta_conn_search" "$meta_conn_replace" "typed websocket connection metadata helper"
+
+    local response_meta_search='func buildWSDispatchResponseEnvelope(request events.Envelope, md metadata.EnvelopeMetadata, result registry.DispatchResult) events.Envelope {
+	meta := md.ToMap()
+	meta["status"] = http.StatusOK'
+    local response_meta_replace='func buildWSDispatchResponseEnvelope(request events.Envelope, md metadata.EnvelopeMetadata, result registry.DispatchResult) events.Envelope {
+	meta := md.ToObject()
+	meta["status"] = extension.Int(int64(http.StatusOK))'
+    replace_in_file "$ws_file" "$response_meta_search" "$response_meta_replace" "typed websocket response metadata"
+
+    local error_builder_search='func buildWSDispatchErrorEnvelope(request events.Envelope, md metadata.EnvelopeMetadata, err error) (events.Envelope, error) {
+	payload := map[string]any{}
+	body := domainerr.Body(err, domainerr.ResponseOptions{
+		CorrelationID: request.CorrelationID,
+		EventType:     request.EventType,
+	})
+	raw, marshalErr := json.Marshal(body)
+	if marshalErr != nil {
+		return events.Envelope{}, marshalErr
+	}
+	if decodeErr := json.Unmarshal(raw, &payload); decodeErr != nil {
+		return events.Envelope{}, decodeErr
+	}
+	meta := md.ToMap()
+	meta["status"] = domainerr.HTTPStatus(err)'
+    local error_builder_replace='func buildWSDispatchErrorEnvelope(request events.Envelope, md metadata.EnvelopeMetadata, err error) (events.Envelope, error) {
+	body := domainerr.Body(err, domainerr.ResponseOptions{
+		CorrelationID: request.CorrelationID,
+		EventType:     request.EventType,
+	})
+	raw, marshalErr := json.Marshal(body)
+	if marshalErr != nil {
+		return events.Envelope{}, marshalErr
+	}
+	payload, decodeErr := extension.ObjectFromJSON(raw)
+	if decodeErr != nil {
+		return events.Envelope{}, decodeErr
+	}
+	meta := md.ToObject()
+	meta["status"] = extension.Int(int64(domainerr.HTTPStatus(err)))'
+    replace_in_file "$ws_file" "$error_builder_search" "$error_builder_replace" "typed websocket error envelope"
+  fi
+}
+
 patch_foundation_event_log_trigger_function() {
   local migration
   while IFS= read -r migration; do
@@ -411,6 +729,50 @@ patch_test_compose_ephemeral_ports() {
 
   if ! cmp -s "$before" "$file"; then
     log_patch "test Compose ephemeral ports and scoped container names: ${file#$target/}"
+  fi
+  rm -f "$before"
+}
+
+patch_postgres_config_baseline() {
+  local file="$target/config/postgresql.conf"
+  [[ -f "$file" ]] || return 0
+
+  local before
+  before="$(mktemp)"
+  cp "$file" "$before"
+
+  perl -0pi -e 's/^max_wal_size\s*=.*$/max_wal_size = 4GB/m' "$file"
+  perl -0pi -e 's/^min_wal_size\s*=.*$/min_wal_size = 512MB/m' "$file"
+  perl -0pi -e 's/^checkpoint_timeout\s*=.*$/checkpoint_timeout = 15min/m' "$file"
+  perl -0pi -e 's/^autovacuum_work_mem\s*=.*$/autovacuum_work_mem = 128MB/m' "$file"
+
+  if ! grep -Fq 'max_wal_size = 4GB' "$file"; then
+    PATCH_SEARCH='wal_level = replica'
+    PATCH_REPLACE='wal_level = replica
+max_wal_size = 4GB'
+    replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Postgres WAL headroom baseline"
+  fi
+  if ! grep -Fq 'min_wal_size = 512MB' "$file"; then
+    PATCH_SEARCH='max_wal_size = 4GB'
+    PATCH_REPLACE='max_wal_size = 4GB
+min_wal_size = 512MB'
+    replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Postgres WAL floor baseline"
+  fi
+  if ! grep -Fq 'checkpoint_timeout = 15min' "$file"; then
+    PATCH_SEARCH='min_wal_size = 512MB'
+    PATCH_REPLACE='min_wal_size = 512MB
+checkpoint_timeout = 15min'
+    replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Postgres checkpoint cadence baseline"
+  fi
+  if ! grep -Fq 'autovacuum_work_mem = 128MB' "$file"; then
+    PATCH_SEARCH='autovacuum_max_workers = 5'
+    PATCH_REPLACE='autovacuum_max_workers = 5
+autovacuum_work_mem = 128MB'
+    replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Postgres autovacuum work memory baseline"
+  fi
+
+  if ! cmp -s "$before" "$file"; then
+    log_patch "Postgres WAL/autovacuum config baseline: ${file#$target/}"
   fi
   rm -f "$before"
 }
@@ -610,16 +972,19 @@ replace_go_version_defaults "$target/docker-compose.test.yml"
 patch_compose_targets "$target/docker-compose.yml"
 patch_compose_targets "$target/docker-compose.dev.yml"
 patch_compose_targets "$target/docker-compose.test.yml"
+patch_compose_database_contract
 patch_reframe_frontend_dockerfile
 patch_runtime_native_dockerfile
 patch_native_tauri_startup_expect
 patch_go_dependency_manifests
 patch_server_binary_path
 patch_websocket_runtime_backpressure
+patch_typed_server_runtime
 patch_foundation_event_log_trigger_function
 patch_foundation_event_log_publish_claim_schema
 patch_test_postgres_platform
 patch_test_compose_ephemeral_ports
+patch_postgres_config_baseline
 sync_go_work
 
 if [[ "$patched" -eq 0 ]]; then

@@ -124,7 +124,7 @@ impl RuntimeNativeGpuDescriptor {
     pub fn validate(&self) -> Result<(), String> {
         if !valid_descriptor_id(&self.id) {
             return Err(
-                "native GPU descriptor id must be 1-128 URL-safe identifier bytes".to_string(),
+                "native GPU descriptor id must be 1-128 URL-safe identifier bytes".to_string()
             );
         }
         if !valid_short_text(&self.producer) {
@@ -151,10 +151,8 @@ impl RuntimeNativeGpuDescriptor {
                     || self.height.unwrap_or(0) == 0
                     || self.format.as_deref().unwrap_or("").trim().is_empty()
                 {
-                    return Err(
-                        "native GPU image descriptors require width, height, and format"
-                            .to_string(),
-                    );
+                    return Err("native GPU image descriptors require width, height, and format"
+                        .to_string());
                 }
             }
         }
@@ -217,18 +215,10 @@ mod tests {
 
         assert!(descriptor.validate().is_ok());
         assert_eq!(RuntimeNativeGpuKind::Texture.as_str(), "native-gpu-texture");
+        assert_eq!(RuntimeNativeGpuPlatform::AppleIosurface.as_str(), "apple-iosurface");
+        assert_eq!(RuntimeNativeGpuFallback::CopyToWebGpu.as_str(), "copy-to-webgpu");
         assert_eq!(
-            RuntimeNativeGpuPlatform::AppleIosurface.as_str(),
-            "apple-iosurface"
-        );
-        assert_eq!(
-            RuntimeNativeGpuFallback::CopyToWebGpu.as_str(),
-            "copy-to-webgpu"
-        );
-        assert_eq!(
-            descriptor
-                .contract_descriptor()
-                .expect("contract descriptor"),
+            descriptor.contract_descriptor().expect("contract descriptor"),
             RuntimeNativeGpuContractDescriptor {
                 schema_version: NATIVE_GPU_DESCRIPTOR_SCHEMA_VERSION,
                 id: "camera.frame.42",
@@ -247,14 +237,8 @@ mod tests {
 
     #[test]
     fn maps_all_native_gpu_enums_to_contract_codes() {
-        assert_eq!(
-            RuntimeNativeGpuKind::Buffer.contract_code(),
-            NATIVE_GPU_KIND_BUFFER
-        );
-        assert_eq!(
-            RuntimeNativeGpuKind::Texture.contract_code(),
-            NATIVE_GPU_KIND_TEXTURE
-        );
+        assert_eq!(RuntimeNativeGpuKind::Buffer.contract_code(), NATIVE_GPU_KIND_BUFFER);
+        assert_eq!(RuntimeNativeGpuKind::Texture.contract_code(), NATIVE_GPU_KIND_TEXTURE);
         assert_eq!(
             RuntimeNativeGpuKind::ExternalImage.contract_code(),
             NATIVE_GPU_KIND_EXTERNAL_IMAGE
@@ -317,10 +301,7 @@ mod tests {
 
         let mut invalid = descriptor;
         invalid.producer.push('x');
-        assert!(invalid
-            .validate()
-            .expect_err("producer must fail")
-            .contains("producer"));
+        assert!(invalid.validate().expect_err("producer must fail").contains("producer"));
     }
 
     #[test]
@@ -345,17 +326,11 @@ mod tests {
     fn rejects_incomplete_native_gpu_descriptors() {
         let mut descriptor = texture_descriptor();
         descriptor.format = None;
-        assert!(descriptor
-            .validate()
-            .expect_err("format is required")
-            .contains("image"));
+        assert!(descriptor.validate().expect_err("format is required").contains("image"));
 
         let mut descriptor = texture_descriptor();
         descriptor.id = "../camera".to_string();
-        assert!(descriptor
-            .validate()
-            .expect_err("id is invalid")
-            .contains("id"));
+        assert!(descriptor.validate().expect_err("id is invalid").contains("id"));
 
         let descriptor = RuntimeNativeGpuDescriptor {
             id: "pipeline.buffer.8".to_string(),

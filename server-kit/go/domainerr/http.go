@@ -2,9 +2,10 @@ package domainerr
 
 import (
 	"encoding/json"
-	"maps"
 	"net/http"
 	"strings"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 type Response struct {
@@ -13,20 +14,20 @@ type Response struct {
 }
 
 type APIError struct {
-	Kind          string         `json:"kind"`
-	Code          string         `json:"code"`
-	Message       string         `json:"message"`
-	Status        int            `json:"status"`
-	EventType     string         `json:"event_type,omitempty"`
-	CorrelationID string         `json:"correlation_id,omitempty"`
-	Details       map[string]any `json:"details,omitempty"`
+	Kind          string           `json:"kind"`
+	Code          string           `json:"code"`
+	Message       string           `json:"message"`
+	Status        int              `json:"status"`
+	EventType     string           `json:"event_type,omitempty"`
+	CorrelationID string           `json:"correlation_id,omitempty"`
+	Details       extension.Object `json:"details,omitempty"`
 }
 
 type ResponseOptions struct {
 	Status        int
 	EventType     string
 	CorrelationID string
-	Details       map[string]any
+	Details       extension.Object
 }
 
 func Body(err error, opts ResponseOptions) Response {
@@ -47,7 +48,7 @@ func Body(err error, opts ResponseOptions) Response {
 			Status:        status,
 			EventType:     strings.TrimSpace(opts.EventType),
 			CorrelationID: strings.TrimSpace(opts.CorrelationID),
-			Details:       cloneDetails(opts.Details),
+			Details:       opts.Details.Clone(),
 		},
 	}
 }
@@ -63,13 +64,4 @@ func WriteHTTP(w http.ResponseWriter, err error, opts ResponseOptions) int {
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
 	return status
-}
-
-func cloneDetails(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	maps.Copy(out, in)
-	return out
 }

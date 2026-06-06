@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
 	"google.golang.org/protobuf/proto"
@@ -100,17 +101,17 @@ func RegisterTypedPlanes(registry RegistryAdapter, router FrameRouterAdapter, ha
 	return RegisterTypedFrameHandlers(router, handlers, opts...)
 }
 
-func frameMetadata(frame grpcsvc.Frame) map[string]any {
+func frameMetadata(frame grpcsvc.Frame) extension.Object {
 	correlationID := strings.TrimSpace(frame.CorrelationID)
 	if correlationID == "" {
 		return nil
 	}
-	return map[string]any{"correlation_id": correlationID}
+	return extension.Object{"correlation_id": extension.String(correlationID)}
 }
 
-func decodeFrameRequest(binding protoapi.Binding, requestPool *sync.Pool, payload []byte, metadata map[string]any) (proto.Message, bool, error) {
+func decodeFrameRequest(binding protoapi.Binding, requestPool *sync.Pool, payload []byte, metadata extension.Object) (proto.Message, bool, error) {
 	if requestPool == nil {
-		msg, err := binding.DecodeRequestBytes(payload, metadata)
+		msg, err := binding.DecodeRequestBytesObject(payload, metadata)
 		return msg, false, err
 	}
 	request, ok := requestPool.Get().(proto.Message)
@@ -121,7 +122,7 @@ func decodeFrameRequest(binding protoapi.Binding, requestPool *sync.Pool, payloa
 			return nil, false, err
 		}
 	}
-	msg, err := binding.DecodeRequestBytesInto(request, payload, metadata, protoapi.DecodeRequestBytesIntoOptions{
+	msg, err := binding.DecodeRequestBytesIntoObject(request, payload, metadata, protoapi.DecodeRequestBytesIntoOptions{
 		CompleteMessage: true,
 	})
 	if err != nil {

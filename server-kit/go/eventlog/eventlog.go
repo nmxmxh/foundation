@@ -5,19 +5,18 @@ package eventlog
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	metautil "github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
+	redispkg "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 )
 
 const (
@@ -37,11 +36,15 @@ var (
 )
 
 type StreamAppender interface {
-	XAdd(ctx context.Context, stream string, values map[string]any) (string, error)
+	XAdd(ctx context.Context, stream string, values redispkg.Values) (string, error)
 }
 
 type streamBatchAppender interface {
-	XAddMany(ctx context.Context, stream string, entries []map[string]any) ([]string, []error)
+	XAddMany(ctx context.Context, stream string, entries []redispkg.Values) ([]string, []error)
+}
+
+type streamFieldBatchAppender interface {
+	XAddManyField(ctx context.Context, stream string, field string, payloads [][]byte) ([]string, []error)
 }
 
 type Entry struct {
@@ -53,7 +56,7 @@ type Entry struct {
 	SchemaVersion    string
 	PayloadEncoding  string
 	Envelope         []byte
-	Metadata         map[string]any
+	Metadata         extension.Object
 	OccurredAt       time.Time
 	CreatedAt        time.Time
 	PublishedAt      *time.Time
@@ -115,7 +118,7 @@ func Append(ctx context.Context, db database.DBTX, envelope events.Envelope) (En
 		SchemaVersion:   envelope.SchemaVersion,
 		PayloadEncoding: envelope.PayloadEncoding,
 		Envelope:        append([]byte(nil), raw...),
-		Metadata:        copyMap(envelope.Metadata),
+		Metadata:        envelope.Metadata.Clone(),
 		OccurredAt:      envelope.Timestamp.UTC(),
 	}
 	const query = `
@@ -163,43 +166,7 @@ func FetchPending(ctx context.Context, db database.DBTX, limit int, maxAttempts 
 	}
 	limit = normalizeLimit(limit)
 	maxAttempts = normalizeMaxAttempts(maxAttempts)
-	if queryer, ok := db.(database.RowQueryer); ok {
-		return fetchPendingRows(ctx, queryer, limit, maxAttempts)
-	}
-	const query = `
-		SELECT
-			id,
-			event_id,
-			event_type,
-			organization_id,
-			correlation_id,
-			schema_version,
-			payload_encoding,
-			encode(envelope, 'base64') AS envelope_base64,
-			metadata::text AS metadata_json,
-			occurred_at,
-			created_at,
-			publish_attempts,
-			COALESCE(last_publish_error, '') AS last_publish_error
-		FROM foundation_event_log
-		WHERE published_at IS NULL
-		  AND publish_attempts < $1
-		ORDER BY id ASC
-		LIMIT $2
-	`
-	rows, err := db.QueryMaps(ctx, query, maxAttempts, limit)
-	if err != nil {
-		return nil, err
-	}
-	entries := make([]Entry, 0, len(rows))
-	for _, row := range rows {
-		entry, err := entryFromMap(row)
-		if err != nil {
-			return nil, err
-		}
-		entries = append(entries, entry)
-	}
-	return entries, nil
+	return fetchPendingRows(ctx, db, limit, maxAttempts)
 }
 
 func fetchPendingRows(ctx context.Context, db database.RowQueryer, limit int, maxAttempts int) ([]Entry, error) {
@@ -332,7 +299,7 @@ func scanPendingEntry(row database.RowScanner) (Entry, error) {
 	entry.PublishAttempts = int(publishAttempts)
 	entry.OccurredAt = entry.OccurredAt.UTC()
 	entry.CreatedAt = entry.CreatedAt.UTC()
-	entry.Metadata = map[string]any{}
+	entry.Metadata = extension.Object{}
 	if rawMetadata := strings.TrimSpace(metadataJSON); rawMetadata != "" {
 		if err := json.Unmarshal([]byte(rawMetadata), &entry.Metadata); err != nil {
 			return Entry{}, err
@@ -371,7 +338,7 @@ func PublishPending(ctx context.Context, db database.DBTX, appender StreamAppend
 		if err := ctxErr(ctx); err != nil {
 			return result, err
 		}
-		streamID, err := appender.XAdd(ctx, stream, map[string]any{field: entry.Envelope})
+		streamID, err := appender.XAdd(ctx, stream, redispkg.Values{redispkg.Field(field, entry.Envelope)})
 		if err != nil {
 			result.Failed++
 			_ = markPublishFailed(ctx, db, entry.ID, err, claimToken)
@@ -419,11 +386,33 @@ func publishPendingBatch(
 	claimToken string,
 	result PublishResult,
 ) (PublishResult, error) {
-	values := make([]map[string]any, len(entries))
+	if fieldAppender, ok := appender.(streamFieldBatchAppender); ok {
+		payloads := make([][]byte, len(entries))
+		for i := range entries {
+			payloads[i] = entries[i].Envelope
+		}
+		streamIDs, appendErrs := fieldAppender.XAddManyField(ctx, stream, field, payloads)
+		return finishPublishPendingBatch(ctx, db, stream, entries, claimToken, result, streamIDs, appendErrs)
+	}
+
+	values := make([]redispkg.Values, len(entries))
 	for i, entry := range entries {
-		values[i] = map[string]any{field: entry.Envelope}
+		values[i] = redispkg.Values{redispkg.Field(field, entry.Envelope)}
 	}
 	streamIDs, appendErrs := appender.XAddMany(ctx, stream, values)
+	return finishPublishPendingBatch(ctx, db, stream, entries, claimToken, result, streamIDs, appendErrs)
+}
+
+func finishPublishPendingBatch(
+	ctx context.Context,
+	db database.DBTX,
+	stream string,
+	entries []Entry,
+	claimToken string,
+	result PublishResult,
+	streamIDs []string,
+	appendErrs []error,
+) (PublishResult, error) {
 	if len(streamIDs) != len(entries) || len(appendErrs) != len(entries) {
 		err := fmt.Errorf("stream batch append returned %d ids and %d errors for %d entries", len(streamIDs), len(appendErrs), len(entries))
 		return result, err
@@ -615,56 +604,23 @@ func execClaimedUpdate(ctx context.Context, db database.DBTX, query string, want
 	return db.Exec(ctx, query, args...)
 }
 
-func entryFromMap(row map[string]any) (Entry, error) {
-	raw, err := base64.StdEncoding.DecodeString(asString(row["envelope_base64"]))
-	if err != nil {
-		return Entry{}, err
-	}
-	md := map[string]any{}
-	if rawMetadata := strings.TrimSpace(asString(row["metadata_json"])); rawMetadata != "" {
-		if err := json.Unmarshal([]byte(rawMetadata), &md); err != nil {
-			return Entry{}, err
-		}
-	}
-	return Entry{
-		ID:               asInt64(row["id"]),
-		EventID:          asString(row["event_id"]),
-		EventType:        asString(row["event_type"]),
-		OrganizationID:   asString(row["organization_id"]),
-		CorrelationID:    asString(row["correlation_id"]),
-		SchemaVersion:    asString(row["schema_version"]),
-		PayloadEncoding:  asString(row["payload_encoding"]),
-		Envelope:         raw,
-		Metadata:         md,
-		OccurredAt:       asTime(row["occurred_at"]),
-		CreatedAt:        asTime(row["created_at"]),
-		PublishAttempts:  int(asInt64(row["publish_attempts"])),
-		LastPublishError: asString(row["last_publish_error"]),
-	}, nil
-}
-
-func organizationID(raw map[string]any) string {
-	md := metautil.FromMap(raw)
+func organizationID(raw extension.Object) string {
+	md := metautil.FromObject(raw)
 	if md.GlobalContext != nil {
 		if orgID := strings.TrimSpace(md.GlobalContext.OrganizationID); orgID != "" {
 			return orgID
 		}
 	}
 	for _, key := range []string{"organization_id", "organizationId", "org_id", "orgId"} {
-		if value := strings.TrimSpace(asString(raw[key])); value != "" {
+		rawValue, ok := raw[key]
+		if !ok {
+			continue
+		}
+		if value := strings.TrimSpace(asString(rawValue.Interface())); value != "" {
 			return value
 		}
 	}
 	return ""
-}
-
-func copyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(in))
-	maps.Copy(out, in)
-	return out
 }
 
 func normalizeLimit(limit int) int {
@@ -746,39 +702,4 @@ func asString(value any) string {
 	default:
 		return fmt.Sprint(typed)
 	}
-}
-
-func asInt64(value any) int64 {
-	switch typed := value.(type) {
-	case int64:
-		return typed
-	case int:
-		return int64(typed)
-	case int32:
-		return int64(typed)
-	case uint64:
-		if typed > uint64(^uint(0)>>1) {
-			return 0
-		}
-		return int64(typed)
-	case string:
-		n, _ := strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
-		return n
-	default:
-		return 0
-	}
-}
-
-func asTime(value any) time.Time {
-	switch typed := value.(type) {
-	case time.Time:
-		return typed.UTC()
-	case string:
-		for _, layout := range []string{time.RFC3339Nano, time.RFC3339} {
-			if parsed, err := time.Parse(layout, typed); err == nil {
-				return parsed.UTC()
-			}
-		}
-	}
-	return time.Time{}
 }

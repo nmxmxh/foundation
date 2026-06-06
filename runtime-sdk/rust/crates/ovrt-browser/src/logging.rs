@@ -39,12 +39,7 @@ pub fn init_logging() {
         let location = info
             .location()
             .map(|location| {
-                format!(
-                    " at {}:{}:{}",
-                    location.file(),
-                    location.line(),
-                    location.column()
-                )
+                format!(" at {}:{}:{}", location.file(), location.line(), location.column())
             })
             .unwrap_or_default();
         crate::js_interop::console_log(

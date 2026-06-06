@@ -5,8 +5,8 @@
 # Or via Makefile: make docker-up
 #
 # This file overrides production docker-compose.yml for local development:
-# 1. Adds PostgreSQL service (production uses external database)
-# 2. Exposes ports for localhost access
+# 1. Exposes infrastructure ports for localhost access
+# 2. Uses development database names and credentials
 # 3. Removes Traefik labels (not needed locally)
 # 4. Sets development environment variables
 # =============================================================================

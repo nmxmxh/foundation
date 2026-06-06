@@ -87,6 +87,185 @@ CUDA/Nsight:
    lock contention, thermal state, cold/warm cache, and hidden filesystem or
    network work.
 
+## Staged Load Research
+
+Use `make test-load-research` when the question is scale shape rather than a
+single microbenchmark. The default ramp is:
+
+```text
+1k -> 10k -> 50k -> 100k -> 250k -> 500k -> 1M
+```
+
+This harness measures local cardinality lanes: MemoryDB tenant predicates,
+Hermes hotplane count/get/view/apply, exact event dispatch, and WebSocket
+broadcast routing before socket writes. It records setup time separately from
+steady operation latency because setup memory and warmup pressure are different
+questions from hot-path lookup cost.
+
+Interpretation rules:
+
+1. Treat `setup_ns` and `heap_alloc_delta` as capacity-planning evidence.
+2. Treat p50/p95/p99/max as steady hot-path evidence only for the named lane.
+3. Do not convert local million-cardinality results into a claim about one
+   million live network clients. Live-client claims need distributed load
+   generators, socket/kernel tuning, and service telemetry.
+4. Compare borrowed/batched lanes against owned/materialized lanes. If owned
+   materialization dominates, tune API shape before tuning CPU.
+5. For Hermes, compare prebuilt `ApplyRecords` against build+apply. Record
+   construction in the hot path is a product-shape cost, not a projector cost.
+
+## Service-Backed Staged Saturation
+
+Use `make test-service-backed-load` when a claim crosses live Postgres, Redis,
+Hermes, or WebSocket-routing coordination. The default ramp is the same:
+
+```text
+1k -> 10k -> 50k -> 100k -> 250k -> 500k -> 1M
+```
+
+This is not a "spawn one million goroutines" harness. Foundation's scalable
+shape is bounded workers plus batched lanes. The runner therefore treats each
+step as a target unit count and chooses bounded worker concurrency from the
+CPU-aware scaling config unless `SERVICE_BACKED_LOAD_RESEARCH_MAX_WORKERS`
+overrides it.
+
+Interpretation rules:
+
+1. `postgres_send_batch64` describes semantic write throughput when many
+   independent mutations must cross the database boundary.
+2. `postgres_copy_from1024` describes append/import throughput. Do not use its
+   number to justify replacing semantic command writes with COPY.
+3. `redis_set_get_many64` describes multi-key cache pressure. Sequential
+   per-key Redis paths should be treated as a different and usually worse lane.
+4. `redis_xadd_many64` and `redis_stream_drain64` describe projector/event
+   relay pressure and lag. Watch p99 batch latency and memory growth together.
+5. `hermes_rebuild_postgres_snapshot` is control-plane warmup/repair. It should
+   be fast enough for startup or recovery, but live updates should normally use
+   `ApplyRecords` or Redis Stream tailing. Rebuild must consume the default
+   `StateStore.ForEachRecord` streaming lane rather than materializing a full
+   snapshot before projection.
+6. `hermes_redis_tailer64` is the live hotplane bridge: Redis coordinates,
+   Hermes applies, and ack happens only after apply.
+7. `hermes_hot_count` proves repeated scoped reads after a live rebuild. It is
+   a read-plane number, not a durable-write number.
+8. `mixed_pg_redis_hermes64` is the closest Foundation substrate shape to a
+   product workflow: durable batch, cache batch, projection batch.
+9. `pipeline_pg_redis_hermes` is the live cooperation lane: Postgres writes
+   durable records, Redis relays batched projection envelopes, Hermes tails and
+   applies before ack, and hot reads continue while writes are flowing.
+10. `wsroute_register_redis` measures live route registration coordination.
+11. `wsroute_broadcast_after_register` measures borrowed fanout planning after
+    registration; it still excludes actual socket writes and slow-client queues.
+
+Hermes mutation consistency lanes:
+
+- `UPSERT` is a complete hot-record replacement. Use it when the durable state
+  snapshot is already materialized or the whole record changed.
+- `PATCH` is a partial hot-record merge. It updates only supplied fields,
+  preserves unchanged fields, moves affected indexes atomically, and ignores
+  patches for records that are missing or already deleted. Use it for status,
+  state, archive, bucket, assignment, and other small projection updates.
+- `DELETE` is hard invalidation. It removes the hot record and its indexes, then
+  records a tombstone so stale replay cannot reappear as a live read.
+
+Archive is normally a `PATCH` to a domain status/state field, not a hard delete.
+That keeps the record discoverable through an archived index while removing it
+from active views. Hard delete is for erasure, revocation, or retention expiry.
+
+Resource knobs for serious runs:
+
+```bash
+SERVICE_BACKED_POSTGRES_TMPFS_SIZE=8g
+SERVICE_BACKED_REDIS_MAXMEMORY=4gb
+SERVICE_BACKED_POSTGRES_MAX_CONNECTIONS=120
+SERVICE_BACKED_POSTGRES_MAX_WAL_SIZE=4GB
+SERVICE_BACKED_POSTGRES_MIN_WAL_SIZE=1GB
+SERVICE_BACKED_LOAD_RESEARCH_DB_RESERVED_CONNS=24
+SERVICE_BACKED_LOAD_RESEARCH_DB_ACQUIRE_TIMEOUT=2s
+SERVICE_BACKED_LOAD_RESEARCH_DB_QUERY_TIMEOUT=10s
+SERVICE_BACKED_LOAD_RESEARCH_LANES=pipeline_pg_redis_hermes
+SERVICE_BACKED_LOAD_RESEARCH_PIPELINE_BATCH=512
+SERVICE_BACKED_LOAD_RESEARCH_PIPELINE_TAILER_BATCH=256
+SERVICE_BACKED_LOAD_RESEARCH_PIPELINE_MAX_LAG=32768
+SERVICE_BACKED_LOAD_RESEARCH_WS_REGISTER_BATCH=256
+make test-service-backed-load
+```
+
+The runner adapts Postgres scratch space to the largest requested step: 2GB
+below 250K, 4GB at 250K, 6GB at 500K, and 8GB at 1M. It also reserves database
+headroom by default. With the local service set to 120 max connections, the
+load harness budgets 96 application connections and leaves 24 for health checks,
+setup, cleanup, and control-plane work. Do not size benchmark pools directly to
+the database hard cap unless the experiment is explicitly about starvation.
+
+The runner also adapts WAL headroom. A 1M all-lane write ramp uses a 4GB
+`max_wal_size` and 1GB `min_wal_size` by default. If Postgres logs "consider
+increasing max_wal_size", the write lane is checkpointing from WAL pressure
+instead of time-based cadence; raise WAL headroom before raising DB workers.
+Autovacuum cancellation during these runs is a pressure signal on the mutable
+state table, not an automatic failure. Keep autovacuum enabled and logged, then
+track bloat, dead tuples, vacuum lag, and index churn before changing table or
+index shape.
+
+For 10M research, run focused lanes before running `all`. A 10M Hermes hotplane
+question is primarily about `MaxRecords`, `MaxBytes`, indexed field count,
+tombstone policy, and fallback. A 10M WebSocket question is primarily about
+file descriptors, kernel TCP limits, write queue bounds, Redis routing TTLs,
+slow-consumer policy, and load-generator distribution. A 10M Postgres question
+is primarily about batch semantics, WAL volume, index write amplification,
+partitioning, and pool acquire budgets.
+
+Adaptive tuning rule:
+
+```text
+single user: keep safety boundaries explicit; avoid unnecessary cold setup
+10k: batch cross-service work; keep exact indexes and per-tenant scopes
+1M: borrowed/batched fanout, bounded projections, pool acquire budgets
+10M: shard by tenant/scope, promote only proven hot scopes into Hermes, and use
+     fallback/repair as a first-class operational mode
+```
+
+StateStore/Hermes rule:
+
+1. `StateStore.ForEachRecord` is the default record-snapshot contract.
+2. `ListRecords` is a convenience wrapper for callers that truly need a slice.
+3. Hermes rebuild uses streaming snapshot iteration and swaps the rebuilt
+   projection only after the replacement partition is ready.
+4. Do not tune 1M rebuilds by relaxing normal hot-path DB budgets. Use explicit
+   control-plane rebuild budgets and keep request lanes strict.
+
+WebSocket route-registration tuning rule:
+
+1. Use `Router.Register` for ordinary single connection lifecycle operations.
+2. Use `Router.RegisterMany` for reconnect bursts, resume storms, fixture
+   hydration, or any path already holding multiple connection descriptors.
+3. Keep `SERVICE_BACKED_LOAD_RESEARCH_WS_REGISTER_BATCH=256` as the local
+   default until a new service-backed run proves a better value for the host.
+   The 2026-06-03 run showed 256 beating 64, 128, and 512; 512 regressed because
+   the larger Redis pipeline increased tail cost instead of reducing it.
+
+Postgres/Redis/Hermes pipeline tuning rule:
+
+1. Isolated lane throughput is not the final product claim. Use
+   `pipeline_pg_redis_hermes` after isolated lanes to measure cooperation.
+2. Tune Postgres workers and pool pressure separately from Redis stream batch
+   grouping. More DB workers can reduce throughput and worsen p99 when WAL,
+   indexes, or pool scheduling are already saturated.
+3. The pipeline default is intentionally not "use every worker." The default
+   durable batch is 512 records, the default tailer batch is 256, and the
+   default DB writer count is `min(cpu-2, 6)`. On the measured 8-core host,
+   that means six DB writers by default because higher DB concurrency made the
+   cooperative pipeline worse.
+4. Prefer batched Hermes projection envelopes for committed outbox/projector
+   relay. One Redis stream message may carry many record mutations, and Hermes
+   still preserves apply-before-ack semantics.
+5. Track published-vs-applied lag. Redis should not outrun Hermes indefinitely;
+   bounded lag keeps the hotplane fresh while preserving durable-write
+   throughput.
+6. Hot reads should run while writes flow. If Hermes indexed reads regress under
+   concurrent tailing, inspect owned materialization, index count, tombstone
+   pressure, and projection byte caps before tuning Postgres.
+
 ## Do-Not-Optimize Gate
 
 Do not add a faster lane unless all are true:

@@ -11,9 +11,73 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+func testData(t testing.TB, fields ...any) RecordData {
+	t.Helper()
+	if len(fields)%2 != 0 {
+		t.Fatalf("testData requires name/value pairs")
+	}
+	out := make(RecordData, 0, len(fields)/2)
+	for i := 0; i < len(fields); i += 2 {
+		name, ok := fields[i].(string)
+		if !ok {
+			t.Fatalf("field name %d is %T", i, fields[i])
+		}
+		value, ok := RecordValueFromAny(fields[i+1])
+		if !ok {
+			t.Fatalf("field value %q is unsupported", name)
+		}
+		out = append(out, RecordField{Name: name, Value: value})
+	}
+	return out.Normalize()
+}
+
+func testQuery(t testing.TB, limit int, fields ...any) RecordQuery {
+	t.Helper()
+	return RecordQuery{Limit: limit, Filters: testFilters(t, fields...)}.Normalize()
+}
+
+func testFilters(t testing.TB, fields ...any) []RecordFilter {
+	t.Helper()
+	data := testData(t, fields...)
+	out := make([]RecordFilter, 0, len(data))
+	for _, field := range data {
+		out = append(out, RecordFilter{Field: field.Name, Value: field.Value})
+	}
+	return out
+}
+
+func requireStringField(t testing.TB, data RecordData, name, want string) {
+	t.Helper()
+	value, ok := data.Get(name)
+	if !ok || value.Kind != RecordValueString || value.Text != want {
+		t.Fatalf("field %q = %+v ok=%v, want %q", name, value, ok, want)
+	}
+}
+
+func TestRecordDataMergePreservesAndOverridesSortedFields(t *testing.T) {
+	base := testData(t, "status", "active", "bucket", 1, "title", "original")
+	patch := testData(t, "status", "archived", "revision", 2)
+	merged := base.Merge(patch)
+
+	requireStringField(t, merged, "title", "original")
+	requireStringField(t, merged, "status", "archived")
+	value, ok := merged.Get("bucket")
+	if !ok || !value.Equal(IntValue(1)) {
+		t.Fatalf("bucket = %+v ok=%v, want 1", value, ok)
+	}
+	value, ok = merged.Get("revision")
+	if !ok || !value.Equal(IntValue(2)) {
+		t.Fatalf("revision = %+v ok=%v, want 2", value, ok)
+	}
+	for i := 1; i < len(merged); i++ {
+		if merged[i-1].Name >= merged[i].Name {
+			t.Fatalf("merged data is not sorted unique: %+v", merged)
+		}
+	}
+}
 
 func TestMemoryDBUpsertGetListCount(t *testing.T) {
 	db := NewMemoryDB()
@@ -23,11 +87,7 @@ func TestMemoryDBUpsertGetListCount(t *testing.T) {
 		Collection:     "brand_kits",
 		OrganizationID: "org_1",
 		RecordID:       "brand_1",
-		Data: map[string]any{
-			"brand_kit_id": "brand_1",
-			"workspace_id": "ws_1",
-			"locale_code":  "en-US",
-		},
+		Data:           testData(t, "brand_kit_id", "brand_1", "workspace_id", "ws_1", "locale_code", "en-US"),
 	})
 	if err != nil {
 		t.Fatalf("upsert failed: %v", err)
@@ -37,11 +97,12 @@ func TestMemoryDBUpsertGetListCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get failed: %v", err)
 	}
-	if !ok || rec.Data["brand_kit_id"] != "brand_1" {
+	if !ok {
 		t.Fatalf("expected record to be retrievable")
 	}
+	requireStringField(t, rec.Data, "brand_kit_id", "brand_1")
 
-	items, err := db.ListRecords(context.Background(), "workspace", "brand_kits", "org_1", map[string]any{"workspace_id": "ws_1"}, 10)
+	items, err := db.ListRecords(context.Background(), "workspace", "brand_kits", "org_1", testQuery(t, 10, "workspace_id", "ws_1"))
 	if err != nil {
 		t.Fatalf("list failed: %v", err)
 	}
@@ -49,7 +110,7 @@ func TestMemoryDBUpsertGetListCount(t *testing.T) {
 		t.Fatalf("expected one listed record")
 	}
 
-	count, err := db.CountRecords(context.Background(), "workspace", "brand_kits", "org_1", map[string]any{"locale_code": "en-US"})
+	count, err := db.CountRecords(context.Background(), "workspace", "brand_kits", "org_1", testQuery(t, 0, "locale_code", "en-US"))
 	if err != nil {
 		t.Fatalf("count failed: %v", err)
 	}
@@ -81,9 +142,10 @@ func TestMemoryDBRawJSONStateStore(t *testing.T) {
 		t.Fatalf("GetRecordJSON() did not stamp organization: %s", string(got.DataJSON))
 	}
 	typed, ok, err := db.GetRecord(context.Background(), "workspace", "brand_kits", "org_1", "brand_raw")
-	if err != nil || !ok || typed.Data["organization_id"] != "org_1" {
+	if err != nil || !ok {
 		t.Fatalf("GetRecord() after raw upsert = %+v ok=%v err=%v", typed, ok, err)
 	}
+	requireStringField(t, typed.Data, "organization_id", "org_1")
 }
 
 func TestMemoryDBContextCancel(t *testing.T) {
@@ -96,7 +158,7 @@ func TestMemoryDBContextCancel(t *testing.T) {
 		Collection:     "users",
 		OrganizationID: "org_1",
 		RecordID:       "usr_1",
-		Data:           map[string]any{"user_id": "usr_1"},
+		Data:           testData(t, "user_id", "usr_1"),
 	}); err == nil {
 		t.Fatalf("expected context canceled error")
 	}
@@ -108,22 +170,24 @@ func TestMemoryDBQueryDeleteAtomicAndClosedPaths(t *testing.T) {
 	if err := db.Exec(ctx, "select 1"); err != nil {
 		t.Fatalf("Exec() error = %v", err)
 	}
-	if _, err := db.QueryMaps(ctx, "select 1"); err != nil {
-		t.Fatalf("QueryMaps() error = %v", err)
+	rows, err := db.Query(ctx, "select 1")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
 	}
+	rows.Close()
 	if err := db.QueryRow(ctx, "select 1").Scan(); err == nil {
 		t.Fatal("expected memory QueryRow scan to fail")
 	}
 	for _, rec := range []DomainRecord{
-		{Domain: "media", Collection: "assets", OrganizationID: "org1", RecordID: "a", Data: map[string]any{"kind": "image"}},
-		{Domain: "media", Collection: "assets", OrganizationID: "org1", RecordID: "b", Data: map[string]any{"kind": "video"}},
-		{Domain: "media", Collection: "assets", OrganizationID: "org2", RecordID: "c", Data: map[string]any{"kind": "image"}},
+		{Domain: "media", Collection: "assets", OrganizationID: "org1", RecordID: "a", Data: testData(t, "kind", "image")},
+		{Domain: "media", Collection: "assets", OrganizationID: "org1", RecordID: "b", Data: testData(t, "kind", "video")},
+		{Domain: "media", Collection: "assets", OrganizationID: "org2", RecordID: "c", Data: testData(t, "kind", "image")},
 	} {
 		if _, err := db.UpsertRecord(ctx, rec); err != nil {
 			t.Fatalf("UpsertRecord() error = %v", err)
 		}
 	}
-	items, err := db.ListRecords(ctx, "media", "assets", "org1", map[string]any{"kind": "image"}, 10)
+	items, err := db.ListRecords(ctx, "media", "assets", "org1", testQuery(t, 10, "kind", "image"))
 	if err != nil || len(items) != 1 || items[0].RecordID != "a" {
 		t.Fatalf("ListRecords() = %+v err=%v", items, err)
 	}
@@ -155,8 +219,8 @@ func TestMemoryDBQueryDeleteAtomicAndClosedPaths(t *testing.T) {
 	if err := db.Exec(ctx, ""); err == nil {
 		t.Fatal("expected closed db exec to fail")
 	}
-	if _, err := db.QueryMaps(ctx, ""); err == nil {
-		t.Fatal("expected closed db query maps to fail")
+	if _, err := db.Query(ctx, ""); err == nil {
+		t.Fatal("expected closed db query to fail")
 	}
 	if err := db.QueryRow(ctx, "").Scan(); err == nil {
 		t.Fatal("expected closed db query row to fail")
@@ -181,10 +245,7 @@ func TestMemoryDBConcurrentTenantIsolationUnderPressure(t *testing.T) {
 					Collection:     "ticks",
 					OrganizationID: orgID,
 					RecordID:       fmt.Sprintf("tick_%03d", i),
-					Data: map[string]any{
-						"tenant": orgID,
-						"bucket": i % 4,
-					},
+					Data:           testData(t, "tenant", orgID, "bucket", i%4),
 				})
 				if err != nil {
 					t.Errorf("upsert %s/%d: %v", orgID, i, err)
@@ -196,19 +257,20 @@ func TestMemoryDBConcurrentTenantIsolationUnderPressure(t *testing.T) {
 
 	for tenant := range tenants {
 		orgID := fmt.Sprintf("org_%02d", tenant)
-		count, err := db.CountRecords(ctx, "signals", "ticks", orgID, nil)
+		count, err := db.CountRecords(ctx, "signals", "ticks", orgID, RecordQuery{})
 		if err != nil {
 			t.Fatalf("CountRecords %s: %v", orgID, err)
 		}
 		if count != perTenant {
 			t.Fatalf("CountRecords %s = %d, want %d", orgID, count, perTenant)
 		}
-		items, err := db.ListRecords(ctx, "signals", "ticks", orgID, map[string]any{"bucket": 2}, perTenant)
+		items, err := db.ListRecords(ctx, "signals", "ticks", orgID, testQuery(t, perTenant, "bucket", 2))
 		if err != nil {
 			t.Fatalf("ListRecords %s: %v", orgID, err)
 		}
 		for _, item := range items {
-			if item.OrganizationID != orgID || item.Data["organization_id"] != orgID {
+			orgValue, ok := item.Data.Get("organization_id")
+			if item.OrganizationID != orgID || !ok || orgValue.Text != orgID {
 				t.Fatalf("tenant isolation breach for %s: %+v", orgID, item)
 			}
 		}
@@ -240,8 +302,8 @@ func TestDatabaseHelpers(t *testing.T) {
 	if err != nil || store == nil {
 		t.Fatalf("Connect(memory) = %v err=%v", store, err)
 	}
-	if !matchesFilter(map[string]any{"a": " 1 "}, map[string]any{"a": 1}) || matchesFilter(map[string]any{}, map[string]any{"missing": 1}) {
-		t.Fatal("matchesFilter failed")
+	if !testData(t, "a", " 1 ").Matches(testFilters(t, "a", " 1 ")) || testData(t).Matches(testFilters(t, "missing", 1)) {
+		t.Fatal("RecordData.Matches failed")
 	}
 }
 
@@ -257,7 +319,7 @@ func TestMemoryDBValidationAndCopySemantics(t *testing.T) {
 			t.Fatalf("expected validation error for %+v", rec)
 		}
 	}
-	input := map[string]any{"nested": map[string]any{"unchanged": true}}
+	input := testData(t, "nested", map[string]any{"unchanged": true})
 	rec, err := db.UpsertRecord(ctx, DomainRecord{
 		Domain:         " domain ",
 		Collection:     " collection ",
@@ -268,20 +330,20 @@ func TestMemoryDBValidationAndCopySemantics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertRecord() error = %v", err)
 	}
-	input["mutated"] = true
 	if rec.Domain != "domain" || rec.Collection != "collection" || rec.OrganizationID != "org" || rec.RecordID != "rec" {
 		t.Fatalf("record fields not normalized: %+v", rec)
 	}
-	if rec.Data["organization_id"] != "org" || rec.Data["mutated"] != nil {
+	if _, ok := rec.Data.Get("mutated"); ok {
 		t.Fatalf("record data copy/default mismatch: %+v", rec.Data)
 	}
+	requireStringField(t, rec.Data, "organization_id", "org")
 	got, ok, err := db.GetRecord(ctx, " domain ", " collection ", " org ", " rec ")
 	if err != nil || !ok {
 		t.Fatalf("GetRecord() ok=%v err=%v", ok, err)
 	}
-	got.Data["changed"] = true
+	got.Data = got.Data.With("changed", BoolValue(true))
 	gotAgain, _, _ := db.GetRecord(ctx, "domain", "collection", "org", "rec")
-	if gotAgain.Data["changed"] != nil {
+	if _, ok := gotAgain.Data.Get("changed"); ok {
 		t.Fatalf("GetRecord should return a copy")
 	}
 }
@@ -290,23 +352,23 @@ func TestMemoryDBListOrderingLimitAndCancellation(t *testing.T) {
 	db := NewMemoryDB()
 	ctx := context.Background()
 	for _, id := range []string{"b", "a", "c"} {
-		if _, err := db.UpsertRecord(ctx, DomainRecord{Domain: "d", Collection: "c", OrganizationID: "o", RecordID: id, Data: map[string]any{"kind": "same"}}); err != nil {
+		if _, err := db.UpsertRecord(ctx, DomainRecord{Domain: "d", Collection: "c", OrganizationID: "o", RecordID: id, Data: testData(t, "kind", "same")}); err != nil {
 			t.Fatalf("UpsertRecord() error = %v", err)
 		}
 	}
-	items, err := db.ListRecords(ctx, "d", "c", "o", nil, 2)
+	items, err := db.ListRecords(ctx, "d", "c", "o", RecordQuery{Limit: 2})
 	if err != nil || len(items) != 2 {
 		t.Fatalf("ListRecords limit = %+v err=%v", items, err)
 	}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := db.ListRecords(cancelled, "d", "c", "o", nil, 0); !errors.Is(err, context.Canceled) {
+	if _, err := db.ListRecords(cancelled, "d", "c", "o", RecordQuery{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled ListRecords error = %v", err)
 	}
 	if _, _, err := db.GetRecord(cancelled, "d", "c", "o", "a"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled GetRecord error = %v", err)
 	}
-	if _, err := db.CountRecords(cancelled, "d", "c", "o", nil); !errors.Is(err, context.Canceled) {
+	if _, err := db.CountRecords(cancelled, "d", "c", "o", RecordQuery{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled CountRecords error = %v", err)
 	}
 	if err := db.DeleteRecord(cancelled, "d", "c", "o", "a"); !errors.Is(err, context.Canceled) {
@@ -358,10 +420,7 @@ func benchmarkMemoryDBWithTenants(b *testing.B, tenants, perTenant int) *MemoryD
 				Collection:     "ticks",
 				OrganizationID: orgID,
 				RecordID:       fmt.Sprintf("tick_%05d", i),
-				Data: map[string]any{
-					"bucket": i % 8,
-					"kind":   "tick",
-				},
+				Data:           testData(b, "bucket", i%8, "kind", "tick"),
 			}); err != nil {
 				b.Fatalf("UpsertRecord() error = %v", err)
 			}
@@ -376,7 +435,7 @@ func BenchmarkMemoryDBCountRecordsTenantScoped(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		count, err := db.CountRecords(ctx, "signals", "ticks", "org_07", nil)
+		count, err := db.CountRecords(ctx, "signals", "ticks", "org_07", RecordQuery{})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -389,11 +448,11 @@ func BenchmarkMemoryDBCountRecordsTenantScoped(b *testing.B) {
 func BenchmarkMemoryDBListRecordsTenantScopedFiltered(b *testing.B) {
 	db := benchmarkMemoryDBWithTenants(b, 32, 256)
 	ctx := context.Background()
-	filter := map[string]any{"bucket": 3}
+	filter := testQuery(b, 64, "bucket", 3)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		items, err := db.ListRecords(ctx, "signals", "ticks", "org_07", filter, 64)
+		items, err := db.ListRecords(ctx, "signals", "ticks", "org_07", filter)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -417,7 +476,7 @@ func BenchmarkMemoryDBUpsertTenantScopedParallel(b *testing.B) {
 				Collection:     "ticks",
 				OrganizationID: orgID,
 				RecordID:       fmt.Sprintf("tick_%09d", n),
-				Data:           map[string]any{"kind": "tick"},
+				Data:           testData(b, "kind", "tick"),
 			}); err != nil {
 				b.Fatal(err)
 			}
@@ -437,9 +496,6 @@ func (f *fakeBeginner) QueryRow(context.Context, string, ...any) RowScanner {
 func (f *fakeBeginner) Query(context.Context, string, ...any) (Rows, error) {
 	return memoryRows{}, nil
 }
-func (f *fakeBeginner) QueryMaps(context.Context, string, ...any) ([]map[string]any, error) {
-	return nil, nil
-}
 func (f *fakeBeginner) BeginTx(context.Context) (Tx, error) {
 	if f.beginErr != nil {
 		return nil, f.beginErr
@@ -458,9 +514,6 @@ func (f *fakeTx) QueryRow(context.Context, string, ...any) RowScanner {
 }
 func (f *fakeTx) Query(context.Context, string, ...any) (Rows, error) {
 	return memoryRows{}, nil
-}
-func (f *fakeTx) QueryMaps(context.Context, string, ...any) ([]map[string]any, error) {
-	return nil, nil
 }
 func (f *fakeTx) Commit(context.Context) error {
 	f.committed = true
@@ -489,8 +542,8 @@ func TestPostgresNilAndHelperPaths(t *testing.T) {
 	if err := db.QueryRow(context.Background(), "select 1").Scan(); err == nil {
 		t.Fatalf("expected nil QueryRow scan error")
 	}
-	if _, err := db.QueryMaps(context.Background(), "select 1"); err == nil {
-		t.Fatalf("expected nil QueryMaps error")
+	if _, err := db.Query(context.Background(), "select 1"); err == nil {
+		t.Fatalf("expected nil Query error")
 	}
 	if db.Stats().TotalConns != 0 {
 		t.Fatalf("nil Stats should be zero")
@@ -501,10 +554,10 @@ func TestPostgresNilAndHelperPaths(t *testing.T) {
 	if _, _, err := db.GetRecord(context.Background(), "d", "c", "o", "r"); err == nil {
 		t.Fatalf("expected nil GetRecord error")
 	}
-	if _, err := db.ListRecords(context.Background(), "d", "c", "o", nil, 1); err == nil {
+	if _, err := db.ListRecords(context.Background(), "d", "c", "o", RecordQuery{Limit: 1}); err == nil {
 		t.Fatalf("expected nil ListRecords error")
 	}
-	if _, err := db.CountRecords(context.Background(), "d", "c", "o", nil); err == nil {
+	if _, err := db.CountRecords(context.Background(), "d", "c", "o", RecordQuery{}); err == nil {
 		t.Fatalf("expected nil CountRecords error")
 	}
 	if _, err := db.EstimateCount(context.Background(), "d", "c", "o"); err == nil {
@@ -537,8 +590,8 @@ func TestPostgresNilAndHelperPaths(t *testing.T) {
 	if err := tx.QueryRow(context.Background(), "select 1").Scan(); err == nil {
 		t.Fatalf("expected nil tx QueryRow error")
 	}
-	if _, err := tx.QueryMaps(context.Background(), "select 1"); err == nil {
-		t.Fatalf("expected nil tx QueryMaps error")
+	if _, err := tx.Query(context.Background(), "select 1"); err == nil {
+		t.Fatalf("expected nil tx Query error")
 	}
 	if err := tx.Commit(context.Background()); err == nil {
 		t.Fatalf("expected nil tx Commit error")
@@ -556,7 +609,8 @@ func TestPostgresRecordValidationAndJSONParsing(t *testing.T) {
 	if err := validateDomainRecord(&rec); err != nil {
 		t.Fatalf("validateDomainRecord() error = %v", err)
 	}
-	if rec.Domain != "d" || rec.Collection != "c" || rec.OrganizationID != "o" || rec.RecordID != "r" || rec.Data["organization_id"] != "o" {
+	orgValue, ok := rec.Data.Get("organization_id")
+	if rec.Domain != "d" || rec.Collection != "c" || rec.OrganizationID != "o" || rec.RecordID != "r" || !ok || orgValue.Text != "o" {
 		t.Fatalf("record normalization failed: %+v", rec)
 	}
 	for _, rec := range []DomainRecord{
@@ -569,7 +623,8 @@ func TestPostgresRecordValidationAndJSONParsing(t *testing.T) {
 		}
 	}
 	parsed, err := parseDataJSON([]byte(`{"a":1}`))
-	if err != nil || parsed["a"].(float64) != 1 {
+	aValue, ok := parsed.Get("a")
+	if err != nil || !ok || aValue.Text != "1" {
 		t.Fatalf("parseDataJSON object = %+v err=%v", parsed, err)
 	}
 	if parsed, err := parseDataJSON(nil); err != nil || len(parsed) != 0 {
@@ -588,7 +643,14 @@ func TestPostgresRecordValidationAndJSONParsing(t *testing.T) {
 		t.Fatalf("raw record identity normalization failed: %+v", raw)
 	}
 	parsed, err = parseDataJSON(payload)
-	if err != nil || parsed["organization_id"] != nil || parsed["state"] != "ready" {
+	if err != nil {
+		t.Fatalf("raw payload parse error = %v", err)
+	}
+	if _, ok := parsed.Get("organization_id"); ok {
+		t.Fatalf("raw payload unexpectedly stamped organization: %s parsed=%+v", string(payload), parsed)
+	}
+	stateValue, ok := parsed.Get("state")
+	if !ok || stateValue.Text != "ready" {
 		t.Fatalf("raw payload = %s parsed=%+v err=%v", string(payload), parsed, err)
 	}
 	if _, err := normalizeDataJSON([]byte(`[1]`)); err == nil {
@@ -600,11 +662,7 @@ func TestPostgresRecordValidationAndJSONParsing(t *testing.T) {
 }
 
 func TestPostgresRecordWhereMatchesStateStoreShape(t *testing.T) {
-	where, args, pushed := buildPostgresRecordWhere("d", "c", "o", map[string]any{
-		"active":   true,
-		"owner'id": " user_1 ",
-		"shard":    7,
-	}, 1)
+	where, args, pushed := buildPostgresRecordWhere("d", "c", "o", testFilters(t, "active", true, "owner'id", " user_1 ", "shard", 7), 1)
 	if !pushed {
 		t.Fatalf("expected scalar filters to push down")
 	}
@@ -624,9 +682,7 @@ func TestPostgresRecordWhereMatchesStateStoreShape(t *testing.T) {
 }
 
 func TestPostgresRecordWhereLeavesNestedFiltersForStoreRecheck(t *testing.T) {
-	where, args, pushed := buildPostgresRecordWhere("", "", "", map[string]any{
-		"nested": map[string]any{"k": "v"},
-	}, 3)
+	where, args, pushed := buildPostgresRecordWhere("", "", "", testFilters(t, "nested", map[string]any{"k": "v"}), 3)
 	if pushed {
 		t.Fatalf("expected nested filter to remain app-side")
 	}
@@ -643,14 +699,15 @@ func TestPostgresRecheckBudgetOptions(t *testing.T) {
 		t.Fatalf("max recheck budget = %d", normalizedRecheckRowBudget(maxPostgresRecheckRowBudget+1))
 	}
 	var db *PostgresDB
-	if _, err := db.ListRecordsWithOptions(context.Background(), "d", "c", "o", map[string]any{"nested": map[string]any{"k": "v"}}, StateListOptions{RequirePushdown: true}); err == nil {
+	nestedQuery := testQuery(t, 0, "nested", map[string]any{"k": "v"})
+	if _, err := db.ListRecordsWithOptions(context.Background(), "d", "c", "o", nestedQuery, StateListOptions{RequirePushdown: true}); err == nil {
 		t.Fatal("expected nil postgres list to fail before pushdown option")
 	}
 	db = &PostgresDB{}
-	if _, err := db.ListRecordsWithOptions(context.Background(), "d", "c", "o", map[string]any{"nested": map[string]any{"k": "v"}}, StateListOptions{RequirePushdown: true}); !errors.Is(err, ErrUnsupportedFilterShape) {
+	if _, err := db.ListRecordsWithOptions(context.Background(), "d", "c", "o", nestedQuery, StateListOptions{RequirePushdown: true}); !errors.Is(err, ErrUnsupportedFilterShape) {
 		t.Fatalf("require-pushdown list error = %v", err)
 	}
-	if _, err := db.CountRecordsWithOptions(context.Background(), "d", "c", "o", map[string]any{"nested": map[string]any{"k": "v"}}, StateCountOptions{RequirePushdown: true}); !errors.Is(err, ErrUnsupportedFilterShape) {
+	if _, err := db.CountRecordsWithOptions(context.Background(), "d", "c", "o", nestedQuery, StateCountOptions{RequirePushdown: true}); !errors.Is(err, ErrUnsupportedFilterShape) {
 		t.Fatalf("require-pushdown count error = %v", err)
 	}
 }
@@ -705,72 +762,4 @@ func TestParseExplainPlanRows(t *testing.T) {
 	if _, err := parseExplainPlanRows([]byte(`bad`)); err == nil {
 		t.Fatal("expected invalid explain JSON to fail")
 	}
-}
-
-func TestScanToMapsConvertsBytesAndReturnsRowErrors(t *testing.T) {
-	rows := &fakeRows{
-		fields: []pgconn.FieldDescription{{Name: "id"}, {Name: "payload"}},
-		values: [][]any{
-			{"row_1", []byte("bytes")},
-		},
-	}
-	items, err := scanToMaps(rows)
-	if err != nil {
-		t.Fatalf("scanToMaps() error = %v", err)
-	}
-	if len(items) != 1 || items[0]["payload"] != "bytes" {
-		t.Fatalf("items = %+v", items)
-	}
-
-	valueErr := errors.New("values failed")
-	rows = &fakeRows{fields: []pgconn.FieldDescription{{Name: "id"}}, values: [][]any{{"row_1"}}, valueErr: valueErr}
-	if _, err := scanToMaps(rows); !errors.Is(err, valueErr) {
-		t.Fatalf("values error = %v", err)
-	}
-	rowErr := errors.New("rows failed")
-	rows = &fakeRows{fields: []pgconn.FieldDescription{{Name: "id"}}, err: rowErr}
-	if _, err := scanToMaps(rows); !errors.Is(err, rowErr) {
-		t.Fatalf("rows error = %v", err)
-	}
-}
-
-type fakeRows struct {
-	fields   []pgconn.FieldDescription
-	values   [][]any
-	index    int
-	err      error
-	valueErr error
-}
-
-func (r *fakeRows) Close() {}
-func (r *fakeRows) Err() error {
-	return r.err
-}
-func (r *fakeRows) CommandTag() pgconn.CommandTag {
-	return pgconn.CommandTag{}
-}
-func (r *fakeRows) FieldDescriptions() []pgconn.FieldDescription {
-	return r.fields
-}
-func (r *fakeRows) Next() bool {
-	if r.index >= len(r.values) {
-		return false
-	}
-	r.index++
-	return true
-}
-func (r *fakeRows) Scan(...any) error {
-	return nil
-}
-func (r *fakeRows) Values() ([]any, error) {
-	if r.valueErr != nil {
-		return nil, r.valueErr
-	}
-	return r.values[r.index-1], nil
-}
-func (r *fakeRows) RawValues() [][]byte {
-	return nil
-}
-func (r *fakeRows) Conn() *pgx.Conn {
-	return nil
 }

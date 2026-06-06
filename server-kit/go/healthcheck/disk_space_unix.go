@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"syscall"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 // DiskSpaceCheck returns a check for available disk space.
@@ -28,11 +30,11 @@ func DiskSpaceCheck(path string, minFreeBytes uint64) CheckFunc {
 		freeBytes := stat.Bavail * uint64(stat.Bsize)
 		totalBytes := stat.Blocks * uint64(stat.Bsize)
 
-		result.Details = map[string]any{
-			"path":        path,
-			"free_bytes":  freeBytes,
-			"total_bytes": totalBytes,
-			"free_pct":    float64(freeBytes) / float64(totalBytes) * 100,
+		result.Details = extension.Object{
+			"path":        extension.String(path),
+			"free_bytes":  extension.Uint(freeBytes),
+			"total_bytes": extension.Uint(totalBytes),
+			"free_pct":    extension.Float(float64(freeBytes) / float64(totalBytes) * 100),
 		}
 
 		if freeBytes < minFreeBytes {

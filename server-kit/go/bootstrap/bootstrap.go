@@ -9,12 +9,13 @@ import (
 	"time"
 
 	eventcontract "github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
 	"google.golang.org/protobuf/proto"
 )
 
 // HandlerFunc is the normalized command handler signature.
-type HandlerFunc func(context.Context, map[string]any) (any, error)
+type HandlerFunc func(context.Context, extension.Object) (any, error)
 
 // TypedHandlerFunc is the normalized protobuf command handler signature.
 type TypedHandlerFunc = protoapi.TypedHandlerFunc
@@ -144,7 +145,7 @@ func (c *HandlerExecutionController) Wrap(handler HandlerFunc) HandlerFunc {
 		return NewHandlerExecutionController(defaultConcurrencyOptions()).Wrap(handler)
 	}
 
-	return func(ctx context.Context, payload map[string]any) (any, error) {
+	return func(ctx context.Context, payload extension.Object) (any, error) {
 		release, err := acquireSlot(ctx, c.workerSem, c.acquireTimeout)
 		if err != nil {
 			return nil, err

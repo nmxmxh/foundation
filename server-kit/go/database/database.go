@@ -4,11 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"maps"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -272,13 +269,6 @@ func (db *MemoryDB) Query(ctx context.Context, _ string, _ ...any) (Rows, error)
 	return memoryRows{}, nil
 }
 
-func (db *MemoryDB) QueryMaps(ctx context.Context, _ string, _ ...any) ([]map[string]any, error) {
-	if err := db.ensureReady(ctx); err != nil {
-		return nil, err
-	}
-	return nil, nil // MemoryDB doesn't support generic SQL queries
-}
-
 func (db *MemoryDB) Stats() StoreStats {
 	return StoreStats{
 		TotalConns:    1,
@@ -307,12 +297,9 @@ func (db *MemoryDB) UpsertRecord(ctx context.Context, rec DomainRecord) (DomainR
 	rec.Collection = strings.TrimSpace(rec.Collection)
 	rec.OrganizationID = strings.TrimSpace(rec.OrganizationID)
 	rec.RecordID = strings.TrimSpace(rec.RecordID)
-	rec.Data = copyMap(rec.Data)
-	if rec.Data == nil {
-		rec.Data = map[string]any{}
-	}
+	rec.Data = rec.Data.Normalize()
 	if rec.OrganizationID != "" {
-		rec.Data["organization_id"] = rec.OrganizationID
+		rec.Data = rec.Data.With("organization_id", StringValue(rec.OrganizationID))
 	}
 
 	key := recordKey(rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID)
@@ -349,7 +336,7 @@ func (db *MemoryDB) UpsertRecordJSON(ctx context.Context, rec RawDomainRecord) (
 		return RawDomainRecord{}, err
 	}
 	if rec.OrganizationID != "" {
-		data["organization_id"] = rec.OrganizationID
+		data = data.With("organization_id", StringValue(rec.OrganizationID))
 	}
 	typed, err := db.UpsertRecord(ctx, DomainRecord{
 		Domain:         rec.Domain,
@@ -402,17 +389,34 @@ func (db *MemoryDB) GetRecordJSON(ctx context.Context, domain, collection, organ
 	}, true, nil
 }
 
-func (db *MemoryDB) ListRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any, limit int) ([]DomainRecord, error) {
-	if err := db.ensureReady(ctx); err != nil {
+func (db *MemoryDB) ListRecords(ctx context.Context, domain, collection, organizationID string, query RecordQuery) ([]DomainRecord, error) {
+	records := make([]DomainRecord, 0)
+	err := db.ForEachRecord(ctx, domain, collection, organizationID, query, func(rec DomainRecord) error {
+		records = append(records, rec)
+		return nil
+	})
+	if err != nil {
 		return nil, err
+	}
+	return records, nil
+}
+
+func (db *MemoryDB) ForEachRecord(ctx context.Context, domain, collection, organizationID string, query RecordQuery, fn RecordVisitor) error {
+	if fn == nil {
+		return errors.New("record visitor is required")
+	}
+	if err := db.ensureReady(ctx); err != nil {
+		return err
 	}
 	domain = strings.TrimSpace(domain)
 	collection = strings.TrimSpace(collection)
 	organizationID = strings.TrimSpace(organizationID)
+	query = query.Normalize()
+	limit := query.Limit
 
 	db.mu.RLock()
-	ordered := db.orderedCandidatesLocked(domain, collection, organizationID, filters)
-	keys := db.candidateKeysLocked(domain, collection, organizationID, filters)
+	ordered := db.orderedCandidatesLocked(domain, collection, organizationID, query.Filters)
+	keys := db.candidateKeysLocked(domain, collection, organizationID, query.Filters)
 	candidateCap := len(db.records)
 	if limit > 0 && len(ordered) > 0 {
 		candidateCap = limit
@@ -431,9 +435,9 @@ func (db *MemoryDB) ListRecords(ctx context.Context, domain, collection, organiz
 			}
 			if err := ctxErr(ctx); err != nil {
 				db.mu.RUnlock()
-				return nil, err
+				return err
 			}
-			if recordMatches(rec, domain, collection, organizationID, filters) {
+			if recordMatches(rec, domain, collection, organizationID, query.Filters) {
 				candidates = append(candidates, rec)
 			}
 		}
@@ -445,9 +449,9 @@ func (db *MemoryDB) ListRecords(ctx context.Context, domain, collection, organiz
 			}
 			if err := ctxErr(ctx); err != nil {
 				db.mu.RUnlock()
-				return nil, err
+				return err
 			}
-			if recordMatches(rec, domain, collection, organizationID, filters) {
+			if recordMatches(rec, domain, collection, organizationID, query.Filters) {
 				candidates = appendListCandidate(candidates, rec, limit)
 			}
 		}
@@ -455,9 +459,9 @@ func (db *MemoryDB) ListRecords(ctx context.Context, domain, collection, organiz
 		for _, rec := range db.records {
 			if err := ctxErr(ctx); err != nil {
 				db.mu.RUnlock()
-				return nil, err
+				return err
 			}
-			if recordMatches(rec, domain, collection, organizationID, filters) {
+			if recordMatches(rec, domain, collection, organizationID, query.Filters) {
 				candidates = appendListCandidate(candidates, rec, limit)
 			}
 		}
@@ -469,11 +473,12 @@ func (db *MemoryDB) ListRecords(ctx context.Context, domain, collection, organiz
 			return recordBefore(candidates[i], candidates[j])
 		})
 	}
-	out := make([]DomainRecord, len(candidates))
-	for i, rec := range candidates {
-		out[i] = copyRecord(rec)
+	for _, rec := range candidates {
+		if err := fn(copyRecord(rec)); err != nil {
+			return err
+		}
 	}
-	return out, nil
+	return nil
 }
 
 func appendListCandidate(candidates []DomainRecord, rec DomainRecord, limit int) []DomainRecord {
@@ -504,18 +509,19 @@ func recordBefore(left, right DomainRecord) bool {
 	return left.UpdatedAt.After(right.UpdatedAt)
 }
 
-func (db *MemoryDB) CountRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any) (int64, error) {
+func (db *MemoryDB) CountRecords(ctx context.Context, domain, collection, organizationID string, query RecordQuery) (int64, error) {
 	if err := db.ensureReady(ctx); err != nil {
 		return 0, err
 	}
 	domain = strings.TrimSpace(domain)
 	collection = strings.TrimSpace(collection)
 	organizationID = strings.TrimSpace(organizationID)
+	query = query.Normalize()
 
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 	var count int64
-	keys := db.candidateKeysLocked(domain, collection, organizationID, filters)
+	keys := db.candidateKeysLocked(domain, collection, organizationID, query.Filters)
 	if keys != nil {
 		for key := range keys {
 			rec, ok := db.records[key]
@@ -525,7 +531,7 @@ func (db *MemoryDB) CountRecords(ctx context.Context, domain, collection, organi
 			if err := ctxErr(ctx); err != nil {
 				return 0, err
 			}
-			if recordMatches(rec, domain, collection, organizationID, filters) {
+			if recordMatches(rec, domain, collection, organizationID, query.Filters) {
 				count++
 			}
 		}
@@ -535,7 +541,7 @@ func (db *MemoryDB) CountRecords(ctx context.Context, domain, collection, organi
 		if err := ctxErr(ctx); err != nil {
 			return 0, err
 		}
-		if recordMatches(rec, domain, collection, organizationID, filters) {
+		if recordMatches(rec, domain, collection, organizationID, query.Filters) {
 			count++
 		}
 	}
@@ -543,7 +549,7 @@ func (db *MemoryDB) CountRecords(ctx context.Context, domain, collection, organi
 }
 
 func (db *MemoryDB) EstimateCount(ctx context.Context, domain, collection, organizationID string) (int64, error) {
-	return db.CountRecords(ctx, domain, collection, organizationID, nil)
+	return db.CountRecords(ctx, domain, collection, organizationID, RecordQuery{})
 }
 
 // DeleteRecord removes a single domain record when present.
@@ -718,7 +724,7 @@ func (db *MemoryDB) removeRecordIndexesLocked(key string, rec DomainRecord) {
 	})
 }
 
-func (db *MemoryDB) orderedCandidatesLocked(domain, collection, organizationID string, filters map[string]any) []recordOrderEntry {
+func (db *MemoryDB) orderedCandidatesLocked(domain, collection, organizationID string, filters []RecordFilter) []recordOrderEntry {
 	if domain == "" || collection == "" || organizationID == "" {
 		return nil
 	}
@@ -735,12 +741,12 @@ func (db *MemoryDB) orderedCandidatesLocked(domain, collection, organizationID s
 		}
 	}
 	consider(db.byScopeOrder[scope], len(db.byScope[scope]))
-	for field, expected := range filters {
-		kind, value, ok := indexableFieldValue(expected)
+	for _, filter := range filters {
+		kind, value, ok := filter.Value.ScalarIndex()
 		if !ok {
 			continue
 		}
-		index := fieldIndex{scope: scope, field: field, kind: kind, value: value}
+		index := fieldIndex{scope: scope, field: filter.Field, kind: kind, value: value}
 		consider(db.byFieldOrder[index], len(db.byField[index]))
 	}
 	return selected
@@ -754,7 +760,7 @@ func (db *MemoryDB) recordForOrderEntryLocked(entry recordOrderEntry) (DomainRec
 	return rec, ok
 }
 
-func (db *MemoryDB) candidateKeysLocked(domain, collection, organizationID string, filters map[string]any) map[string]struct{} {
+func (db *MemoryDB) candidateKeysLocked(domain, collection, organizationID string, filters []RecordFilter) map[string]struct{} {
 	var selected map[string]struct{}
 	haveCandidate := false
 	consider := func(keys map[string]struct{}) {
@@ -767,12 +773,12 @@ func (db *MemoryDB) candidateKeysLocked(domain, collection, organizationID strin
 	if domain != "" && collection != "" && organizationID != "" {
 		scope := scopeKey(domain, collection, organizationID)
 		consider(db.byScope[scope])
-		for field, expected := range filters {
-			kind, value, ok := indexableFieldValue(expected)
+		for _, filter := range filters {
+			kind, value, ok := filter.Value.ScalarIndex()
 			if !ok {
 				continue
 			}
-			consider(db.byField[fieldIndex{scope: scope, field: field, kind: kind, value: value}])
+			consider(db.byField[fieldIndex{scope: scope, field: filter.Field, kind: kind, value: value}])
 		}
 		if selected == nil {
 			return emptyRecordKeys
@@ -792,49 +798,15 @@ func (db *MemoryDB) candidateKeysLocked(domain, collection, organizationID strin
 }
 
 func forEachRecordFieldIndex(rec DomainRecord, fn func(field string, kind byte, value string)) {
-	for field, value := range rec.Data {
-		if field == "organization_id" {
+	for _, field := range rec.Data {
+		if field.Name == "organization_id" {
 			continue
 		}
-		kind, indexValue, ok := indexableFieldValue(value)
+		kind, indexValue, ok := field.Value.ScalarIndex()
 		if !ok {
 			continue
 		}
-		fn(field, kind, indexValue)
-	}
-}
-
-func indexableFieldValue(value any) (byte, string, bool) {
-	switch typed := value.(type) {
-	case string:
-		return 's', typed, true
-	case bool:
-		if typed {
-			return 'b', "1", true
-		}
-		return 'b', "0", true
-	case int:
-		return 'i', strconv.Itoa(typed), true
-	case int8:
-		return 'i', strconv.FormatInt(int64(typed), 10), true
-	case int16:
-		return 'i', strconv.FormatInt(int64(typed), 10), true
-	case int32:
-		return 'i', strconv.FormatInt(int64(typed), 10), true
-	case int64:
-		return 'i', strconv.FormatInt(typed, 10), true
-	case uint:
-		return 'u', strconv.FormatUint(uint64(typed), 10), true
-	case uint8:
-		return 'u', strconv.FormatUint(uint64(typed), 10), true
-	case uint16:
-		return 'u', strconv.FormatUint(uint64(typed), 10), true
-	case uint32:
-		return 'u', strconv.FormatUint(uint64(typed), 10), true
-	case uint64:
-		return 'u', strconv.FormatUint(typed, 10), true
-	default:
-		return 0, "", false
+		fn(field.Name, kind, indexValue)
 	}
 }
 
@@ -845,7 +817,7 @@ func ctxErr(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func recordMatches(rec DomainRecord, domain, collection, organizationID string, filters map[string]any) bool {
+func recordMatches(rec DomainRecord, domain, collection, organizationID string, filters []RecordFilter) bool {
 	if domain != "" && rec.Domain != domain {
 		return false
 	}
@@ -855,126 +827,11 @@ func recordMatches(rec DomainRecord, domain, collection, organizationID string, 
 	if organizationID != "" && rec.OrganizationID != organizationID {
 		return false
 	}
-	return matchesFilter(rec.Data, filters)
+	return rec.Data.Matches(filters)
 }
 
 func copyRecord(in DomainRecord) DomainRecord {
 	out := in
-	out.Data = copyMap(in.Data)
+	out.Data = in.Data.Clone()
 	return out
-}
-
-func copyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	maps.Copy(out, in)
-	return out
-}
-
-func matchesFilter(record map[string]any, filters map[string]any) bool {
-	if len(filters) == 0 {
-		return true
-	}
-	for k, expected := range filters {
-		actual, ok := record[k]
-		if !ok {
-			return false
-		}
-		if !equalValue(actual, expected) {
-			return false
-		}
-	}
-	return true
-}
-
-func equalValue(actual any, expected any) bool {
-	switch a := actual.(type) {
-	case string:
-		if e, ok := expected.(string); ok {
-			return strings.TrimSpace(a) == strings.TrimSpace(e)
-		}
-	case bool:
-		if e, ok := expected.(bool); ok {
-			return a == e
-		}
-	case int:
-		if e, ok := expected.(int); ok {
-			return a == e
-		}
-	case int8:
-		if e, ok := expected.(int8); ok {
-			return a == e
-		}
-	case int16:
-		if e, ok := expected.(int16); ok {
-			return a == e
-		}
-	case int32:
-		if e, ok := expected.(int32); ok {
-			return a == e
-		}
-	case int64:
-		if e, ok := expected.(int64); ok {
-			return a == e
-		}
-	case uint:
-		if e, ok := expected.(uint); ok {
-			return a == e
-		}
-	case uint8:
-		if e, ok := expected.(uint8); ok {
-			return a == e
-		}
-	case uint16:
-		if e, ok := expected.(uint16); ok {
-			return a == e
-		}
-	case uint32:
-		if e, ok := expected.(uint32); ok {
-			return a == e
-		}
-	case uint64:
-		if e, ok := expected.(uint64); ok {
-			return a == e
-		}
-	}
-	as, aok := comparableString(actual)
-	es, eok := comparableString(expected)
-	if aok && eok {
-		return as == es
-	}
-	return strings.TrimSpace(fmt.Sprintf("%v", actual)) == strings.TrimSpace(fmt.Sprintf("%v", expected))
-}
-
-func comparableString(value any) (string, bool) {
-	switch v := value.(type) {
-	case string:
-		return strings.TrimSpace(v), true
-	case int:
-		return strconv.Itoa(v), true
-	case int8:
-		return strconv.FormatInt(int64(v), 10), true
-	case int16:
-		return strconv.FormatInt(int64(v), 10), true
-	case int32:
-		return strconv.FormatInt(int64(v), 10), true
-	case int64:
-		return strconv.FormatInt(v, 10), true
-	case uint:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint8:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint16:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint32:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint64:
-		return strconv.FormatUint(v, 10), true
-	case bool:
-		return strconv.FormatBool(v), true
-	default:
-		return "", false
-	}
 }

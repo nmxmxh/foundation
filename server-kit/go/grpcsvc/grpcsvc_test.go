@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	testprotos "github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi/testprotos"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -23,14 +24,14 @@ func TestDispatchOverBufconn(t *testing.T) {
 
 	res, err := Dispatch(context.Background(), conn, Envelope{
 		EventType:     "order:create:v1:requested",
-		Payload:       map[string]any{"id": "ord_1"},
+		Payload:       extension.Object{"id": extension.String("ord_1")},
 		CorrelationID: "corr_1",
 		SchemaVersion: "1.0",
 	})
 	if err != nil {
 		t.Fatalf("Dispatch() error = %v", err)
 	}
-	if res.EventType != "order:create:v1:success" || res.Payload["id"] != "ord_1" {
+	if id, _ := res.Payload.GetString("id"); res.EventType != "order:create:v1:success" || id != "ord_1" {
 		t.Fatalf("unexpected response: %+v", res)
 	}
 }
@@ -88,7 +89,7 @@ func TestDispatchRejectsOversizedMessage(t *testing.T) {
 
 	_, err := Dispatch(context.Background(), conn, Envelope{
 		EventType: "order:create:v1:requested",
-		Payload:   map[string]any{"body": string(make([]byte, 1024))},
+		Payload:   extension.Object{"body": extension.String(string(make([]byte, 1024)))},
 	})
 	if err == nil {
 		t.Fatalf("expected oversized message to fail")
@@ -123,13 +124,13 @@ func TestClientDispatchMethodsOverBufconn(t *testing.T) {
 
 	res, err := client.Dispatch(context.Background(), Envelope{
 		EventType:     "order:create:v1:requested",
-		Payload:       map[string]any{"id": "ord_2"},
+		Payload:       extension.Object{"id": extension.String("ord_2")},
 		CorrelationID: "corr_2",
 	})
 	if err != nil {
 		t.Fatalf("client Dispatch() error = %v", err)
 	}
-	if res.EventType != "order:create:v1:success" || res.Payload["id"] != "ord_2" {
+	if id, _ := res.Payload.GetString("id"); res.EventType != "order:create:v1:success" || id != "ord_2" {
 		t.Fatalf("unexpected response: %+v", res)
 	}
 
@@ -192,7 +193,7 @@ func TestDispatchCrossLaneRefinementPreservesIdentityPayloadAndErrorClass(t *tes
 
 	env, err := Dispatch(ctx, conn, Envelope{
 		EventType:     "order:create:v1:requested",
-		Payload:       map[string]any{"id": "ord_refine"},
+		Payload:       extension.Object{"id": extension.String("ord_refine")},
 		CorrelationID: "corr_refine",
 		SchemaVersion: "1.0",
 	})
@@ -202,7 +203,7 @@ func TestDispatchCrossLaneRefinementPreservesIdentityPayloadAndErrorClass(t *tes
 	if env.EventType != "order:create:v1:success" ||
 		env.CorrelationID != "corr_refine" ||
 		env.SchemaVersion != "1.0" ||
-		env.Payload["id"] != "ord_refine" {
+		func() bool { id, _ := env.Payload.GetString("id"); return id != "ord_refine" }() {
 		t.Fatalf("json compatibility lane broke visible semantics: %+v", env)
 	}
 
@@ -462,7 +463,7 @@ func BenchmarkDispatchOverBufconn(b *testing.B) {
 
 	req := Envelope{
 		EventType:     "order:create:v1:requested",
-		Payload:       map[string]any{"id": "ord_1"},
+		Payload:       extension.Object{"id": extension.String("ord_1")},
 		CorrelationID: "corr_1",
 		SchemaVersion: "1.0",
 	}
@@ -651,6 +652,66 @@ func BenchmarkBinaryFrameAppendViewRoundTrip(b *testing.B) {
 			b.Fatal("empty event type")
 		}
 	}
+}
+
+func BenchmarkBinaryFrameAppendOnly(b *testing.B) {
+	req := Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_1"}`),
+		CorrelationID: "corr_1",
+		SchemaVersion: "1.0",
+	}
+	buf := make([]byte, 0, 256)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf = AppendMarshalFrame(buf[:0], req)
+	}
+	_ = buf
+}
+
+func BenchmarkBinaryFrameViewReadOnly(b *testing.B) {
+	req := Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_1"}`),
+		CorrelationID: "corr_1",
+		SchemaVersion: "1.0",
+	}
+	buf := AppendMarshalFrame(make([]byte, 0, 256), req)
+	var view FrameView
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var err error
+		view, err = UnmarshalFrameView(buf)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(view.EventType) == 0 {
+			b.Fatal("empty event type")
+		}
+	}
+}
+
+func BenchmarkBinaryFrameReadFieldOnly(b *testing.B) {
+	req := Frame{
+		EventType:     "order:create:v1:frame",
+		Payload:       []byte(`{"id":"ord_1"}`),
+		CorrelationID: "corr_1",
+		SchemaVersion: "1.0",
+	}
+	buf := AppendMarshalFrame(make([]byte, 0, 256), req)
+	var offset int
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var err error
+		_, offset, err = readField(buf, 0)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	_ = offset
 }
 
 func BenchmarkGeneratedProtoMarshalAppendRoundTrip(b *testing.B) {

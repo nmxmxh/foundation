@@ -15,6 +15,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/wsrouting"
@@ -24,14 +25,14 @@ func TestScaleHarness_LocalDistributedPressure(t *testing.T) {
 	ctx := context.Background()
 
 	db := seedScaleDB(t, 100, 100)
-	count, err := db.CountRecords(ctx, "experience", "state", "org-0042", nil)
+	count, err := db.CountRecords(ctx, "experience", "state", "org-0042", database.RecordQuery{})
 	if err != nil {
 		t.Fatalf("count tenant records: %v", err)
 	}
 	if count != 100 {
 		t.Fatalf("tenant count = %d, want 100", count)
 	}
-	rows, err := db.ListRecords(ctx, "experience", "state", "org-0042", map[string]any{"state": "active"}, 10)
+	rows, err := db.ListRecords(ctx, "experience", "state", "org-0042", scaleRecordQuery(t, 10, "state", "active"))
 	if err != nil {
 		t.Fatalf("list tenant records: %v", err)
 	}
@@ -91,7 +92,7 @@ func BenchmarkScale_MemoryDBTenantCount100K(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		count, err := db.CountRecords(ctx, "experience", "state", "org-0420", nil)
+		count, err := db.CountRecords(ctx, "experience", "state", "org-0420", database.RecordQuery{})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -104,12 +105,12 @@ func BenchmarkScale_MemoryDBTenantCount100K(b *testing.B) {
 func BenchmarkScale_MemoryDBTenantListFiltered100K(b *testing.B) {
 	db := seedScaleDB(b, 1000, 100)
 	ctx := context.Background()
-	filters := map[string]any{"state": "active"}
+	filters := scaleRecordQuery(b, 50, "state", "active")
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rows, err := db.ListRecords(ctx, "experience", "state", "org-0420", filters, 50)
+		rows, err := db.ListRecords(ctx, "experience", "state", "org-0420", filters)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -126,7 +127,7 @@ func BenchmarkScale1M_MemoryDBTenantCount(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		count, err := db.CountRecords(ctx, "experience", "state", "org-4200", nil)
+		count, err := db.CountRecords(ctx, "experience", "state", "org-4200", database.RecordQuery{})
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -139,12 +140,12 @@ func BenchmarkScale1M_MemoryDBTenantCount(b *testing.B) {
 func BenchmarkScale1M_MemoryDBTenantListFiltered(b *testing.B) {
 	db := seedScaleDB(b, 10000, 100)
 	ctx := context.Background()
-	filters := map[string]any{"state": "active"}
+	filters := scaleRecordQuery(b, 50, "state", "active")
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rows, err := db.ListRecords(ctx, "experience", "state", "org-4200", filters, 50)
+		rows, err := db.ListRecords(ctx, "experience", "state", "org-4200", filters)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -157,12 +158,12 @@ func BenchmarkScale1M_MemoryDBTenantListFiltered(b *testing.B) {
 func BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit(b *testing.B) {
 	db := seedDenseScaleDB(b, 1_000_000)
 	ctx := context.Background()
-	filters := map[string]any{"state": "active"}
+	filters := scaleRecordQuery(b, 50, "state", "active")
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rows, err := db.ListRecords(ctx, "experience", "state", "org-dense", filters, 50)
+		rows, err := db.ListRecords(ctx, "experience", "state", "org-dense", filters)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -471,21 +472,9 @@ func BenchmarkScale_ConfigConvergence10K(b *testing.B) {
 }
 
 func BenchmarkScale_LocalOperationMixLatency(b *testing.B) {
-	ctx := context.Background()
-	db := seedScaleDB(b, 100, 100)
-	router := seedScaleRouter(b, 1000, 10)
-	bus := events.NewInMemoryBus(1024)
-	bus.Subscribe("tenant:org_0042:signal:success", func(context.Context, events.Envelope) {})
-	backend := cache.NewMemoryBackend()
-	defer func() { _ = backend.Close() }()
-	c := cache.New(cache.Config{Backend: backend, DefaultTTL: time.Minute})
-	if err := c.Set(ctx, "tenant:org_0042:profile", map[string]any{"status": "ready"}); err != nil {
-		b.Fatal(err)
-	}
-	cfg := scaleServerConfig()
-	env := scaleEnvelope("tenant:org_0042:signal:success")
-	target := wsrouting.TargetedDelivery{TargetType: "user", TargetID: "user-0042"}
-	targets := make([]string, 0, 10)
+	harness := newLocalOperationMixHarness(b)
+	defer harness.close()
+
 	sampleLimit := min(b.N, 100000)
 	samples := make([]int64, 0, sampleLimit)
 
@@ -493,23 +482,7 @@ func BenchmarkScale_LocalOperationMixLatency(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		start := time.Now()
-		if _, err := db.CountRecords(ctx, "experience", "state", "org-0042", nil); err != nil {
-			b.Fatal(err)
-		}
-		targets = targets[:0]
-		var err error
-		targets, err = router.ResolveTargetsInto(ctx, target, targets)
-		if err != nil {
-			b.Fatal(err)
-		}
-		var cached map[string]any
-		if err := c.Get(ctx, "tenant:org_0042:profile", &cached); err != nil {
-			b.Fatal(err)
-		}
-		if err := bus.Publish(ctx, env); err != nil {
-			b.Fatal(err)
-		}
-		if err := runtimeconfig.ValidateServer(cfg); err != nil {
+		if err := harness.runOnce(); err != nil {
 			b.Fatal(err)
 		}
 		if len(samples) < sampleLimit {
@@ -518,6 +491,192 @@ func BenchmarkScale_LocalOperationMixLatency(b *testing.B) {
 	}
 	b.StopTimer()
 	reportPercentiles(b, samples)
+}
+
+func BenchmarkScale_LocalOperationMixLatencyBreakdown(b *testing.B) {
+	harness := newLocalOperationMixHarness(b)
+	defer harness.close()
+
+	sampleLimit := min(b.N, 100000)
+	totalSamples := make([]int64, 0, sampleLimit)
+	dbSamples := make([]int64, 0, sampleLimit)
+	routeSamples := make([]int64, 0, sampleLimit)
+	cacheSamples := make([]int64, 0, sampleLimit)
+	eventSamples := make([]int64, 0, sampleLimit)
+	configSamples := make([]int64, 0, sampleLimit)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if len(totalSamples) >= sampleLimit {
+			if err := harness.runOnce(); err != nil {
+				b.Fatal(err)
+			}
+			continue
+		}
+		start := time.Now()
+		mark := start
+		if err := harness.countRecords(); err != nil {
+			b.Fatal(err)
+		}
+		now := time.Now()
+		dbSamples = append(dbSamples, now.Sub(mark).Nanoseconds())
+		mark = now
+		if err := harness.resolveTargets(); err != nil {
+			b.Fatal(err)
+		}
+		now = time.Now()
+		routeSamples = append(routeSamples, now.Sub(mark).Nanoseconds())
+		mark = now
+		if err := harness.cacheGet(); err != nil {
+			b.Fatal(err)
+		}
+		now = time.Now()
+		cacheSamples = append(cacheSamples, now.Sub(mark).Nanoseconds())
+		mark = now
+		if err := harness.publishEvent(); err != nil {
+			b.Fatal(err)
+		}
+		now = time.Now()
+		eventSamples = append(eventSamples, now.Sub(mark).Nanoseconds())
+		mark = now
+		if err := harness.validateConfig(); err != nil {
+			b.Fatal(err)
+		}
+		now = time.Now()
+		configSamples = append(configSamples, now.Sub(mark).Nanoseconds())
+		totalSamples = append(totalSamples, now.Sub(start).Nanoseconds())
+	}
+	b.StopTimer()
+	reportPercentilesNamed(b, "mix-total-", totalSamples)
+	reportPercentilesNamed(b, "mix-db-count-", dbSamples)
+	reportPercentilesNamed(b, "mix-route-resolve-", routeSamples)
+	reportPercentilesNamed(b, "mix-cache-get-", cacheSamples)
+	reportPercentilesNamed(b, "mix-event-publish-", eventSamples)
+	reportPercentilesNamed(b, "mix-config-validate-", configSamples)
+}
+
+type localOperationMixHarness struct {
+	ctx     context.Context
+	db      *database.MemoryDB
+	router  *wsrouting.Router
+	bus     *events.InMemoryBus
+	cache   *cache.Cache
+	cfg     runtimeconfig.ServerRuntimeConfig
+	env     events.Envelope
+	target  wsrouting.TargetedDelivery
+	targets []string
+	close   func()
+}
+
+func newLocalOperationMixHarness(tb testing.TB) *localOperationMixHarness {
+	tb.Helper()
+	ctx := context.Background()
+	db := seedScaleDB(tb, 100, 100)
+	router := seedScaleRouter(tb, 1000, 10)
+	bus := events.NewInMemoryBus(1024)
+	bus.Subscribe("tenant:org_0042:signal:success", func(context.Context, events.Envelope) {})
+	backend := cache.NewMemoryBackend()
+	c := cache.New(cache.Config{Backend: backend, DefaultTTL: time.Minute})
+	if err := c.Set(ctx, "tenant:org_0042:profile", map[string]any{"status": "ready"}); err != nil {
+		tb.Fatal(err)
+	}
+	return &localOperationMixHarness{
+		ctx:     ctx,
+		db:      db,
+		router:  router,
+		bus:     bus,
+		cache:   c,
+		cfg:     scaleServerConfig(),
+		env:     scaleEnvelope("tenant:org_0042:signal:success"),
+		target:  wsrouting.TargetedDelivery{TargetType: "user", TargetID: "user-0042"},
+		targets: make([]string, 0, 10),
+		close: func() {
+			_ = backend.Close()
+		},
+	}
+}
+
+func (h *localOperationMixHarness) runOnce() error {
+	if err := h.countRecords(); err != nil {
+		return err
+	}
+	if err := h.resolveTargets(); err != nil {
+		return err
+	}
+	if err := h.cacheGet(); err != nil {
+		return err
+	}
+	if err := h.publishEvent(); err != nil {
+		return err
+	}
+	return h.validateConfig()
+}
+
+func (h *localOperationMixHarness) countRecords() error {
+	if _, err := h.db.CountRecords(h.ctx, "experience", "state", "org-0042", database.RecordQuery{}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *localOperationMixHarness) resolveTargets() error {
+	h.targets = h.targets[:0]
+	targets, err := h.router.ResolveTargetsInto(h.ctx, h.target, h.targets)
+	if err != nil {
+		return err
+	}
+	h.targets = targets
+	return nil
+}
+
+func (h *localOperationMixHarness) cacheGet() error {
+	var cached map[string]any
+	if err := h.cache.Get(h.ctx, "tenant:org_0042:profile", &cached); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *localOperationMixHarness) publishEvent() error {
+	if err := h.bus.Publish(h.ctx, h.env); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *localOperationMixHarness) validateConfig() error {
+	return runtimeconfig.ValidateServer(h.cfg)
+}
+
+func scaleRecordData(tb testing.TB, fields ...any) database.RecordData {
+	tb.Helper()
+	if len(fields)%2 != 0 {
+		tb.Fatalf("scaleRecordData requires name/value pairs")
+	}
+	out := make(database.RecordData, 0, len(fields)/2)
+	for i := 0; i < len(fields); i += 2 {
+		name, ok := fields[i].(string)
+		if !ok {
+			tb.Fatalf("field name %d is %T", i, fields[i])
+		}
+		value, ok := database.RecordValueFromAny(fields[i+1])
+		if !ok {
+			tb.Fatalf("field value %q is unsupported", name)
+		}
+		out = append(out, database.RecordField{Name: name, Value: value})
+	}
+	return out.Normalize()
+}
+
+func scaleRecordQuery(tb testing.TB, limit int, fields ...any) database.RecordQuery {
+	tb.Helper()
+	data := scaleRecordData(tb, fields...)
+	filters := make([]database.RecordFilter, 0, len(data))
+	for _, field := range data {
+		filters = append(filters, database.RecordFilter{Field: field.Name, Value: field.Value})
+	}
+	return database.RecordQuery{Limit: limit, Filters: filters}.Normalize()
 }
 
 func seedScaleDB(tb testing.TB, tenants, recordsPerTenant int) *database.MemoryDB {
@@ -536,11 +695,7 @@ func seedScaleDB(tb testing.TB, tenants, recordsPerTenant int) *database.MemoryD
 				Collection:     "state",
 				OrganizationID: orgID,
 				RecordID:       fmt.Sprintf("record-%05d", rec),
-				Data: map[string]any{
-					"organization_id": orgID,
-					"state":           state,
-					"shard":           rec % 16,
-				},
+				Data:           scaleRecordData(tb, "organization_id", orgID, "state", state, "shard", rec%16),
 			})
 			if err != nil {
 				tb.Fatalf("seed db tenant=%d record=%d: %v", tenant, rec, err)
@@ -564,11 +719,7 @@ func seedDenseScaleDB(tb testing.TB, records int) *database.MemoryDB {
 			Collection:     "state",
 			OrganizationID: "org-dense",
 			RecordID:       fmt.Sprintf("record-%07d", rec),
-			Data: map[string]any{
-				"organization_id": "org-dense",
-				"state":           state,
-				"shard":           rec % 16,
-			},
+			Data:           scaleRecordData(tb, "organization_id", "org-dense", "state", state, "shard", rec%16),
 		})
 		if err != nil {
 			tb.Fatalf("seed dense db record=%d: %v", rec, err)
@@ -657,7 +808,7 @@ func assertScaleEventFanoutIsolation(t *testing.T, ctx context.Context, subscrib
 	var org42, org99 atomic.Int64
 	for range subscribers {
 		bus.Subscribe("tenant:org_0042:signal:success", func(_ context.Context, env events.Envelope) {
-			if env.Metadata["organization_id"] != "org-0042" {
+			if orgID, _ := env.Metadata.GetString("organization_id"); orgID != "org-0042" {
 				t.Errorf("org-0042 metadata leak: %+v", env.Metadata)
 			}
 			org42.Add(1)
@@ -667,7 +818,7 @@ func assertScaleEventFanoutIsolation(t *testing.T, ctx context.Context, subscrib
 		})
 	}
 	env := scaleEnvelope("tenant:org_0042:signal:success")
-	env.Metadata["organization_id"] = "org-0042"
+	env.Metadata["organization_id"] = extension.String("org-0042")
 	if err := bus.Publish(ctx, env); err != nil {
 		t.Fatalf("publish exact fanout event: %v", err)
 	}
@@ -858,8 +1009,8 @@ func scaleServerConfig() runtimeconfig.ServerRuntimeConfig {
 func scaleEnvelope(eventType string) events.Envelope {
 	env := events.Envelope{
 		EventType:     eventType,
-		Payload:       map[string]any{"ok": true},
-		Metadata:      map[string]any{"correlation_id": "corr-scale", "organization_id": "org-0042"},
+		Payload:       extension.Object{"ok": extension.Bool(true)},
+		Metadata:      extension.Object{"correlation_id": extension.String("corr-scale"), "organization_id": extension.String("org-0042")},
 		CorrelationID: "corr-scale",
 		SchemaVersion: "1.0",
 		Timestamp:     time.Now().UTC(),
@@ -870,14 +1021,19 @@ func scaleEnvelope(eventType string) events.Envelope {
 
 func reportPercentiles(b *testing.B, samples []int64) {
 	b.Helper()
+	reportPercentilesNamed(b, "", samples)
+}
+
+func reportPercentilesNamed(b *testing.B, prefix string, samples []int64) {
+	b.Helper()
 	if len(samples) == 0 {
 		return
 	}
 	slices.Sort(samples)
-	b.ReportMetric(float64(percentile(samples, 0.50)), "p50-ns/op")
-	b.ReportMetric(float64(percentile(samples, 0.95)), "p95-ns/op")
-	b.ReportMetric(float64(percentile(samples, 0.99)), "p99-ns/op")
-	b.ReportMetric(float64(samples[len(samples)-1]), "max-ns/op")
+	b.ReportMetric(float64(percentile(samples, 0.50)), prefix+"p50-ns/op")
+	b.ReportMetric(float64(percentile(samples, 0.95)), prefix+"p95-ns/op")
+	b.ReportMetric(float64(percentile(samples, 0.99)), prefix+"p99-ns/op")
+	b.ReportMetric(float64(samples[len(samples)-1]), prefix+"max-ns/op")
 }
 
 func percentile(samples []int64, quantile float64) int64 {

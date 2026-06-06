@@ -19,8 +19,10 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
+	transport "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/transport"
 	apperrors "github.com/nmxmxh/ovasabi_foundation/server-kit/go/errors"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/objectstore"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
@@ -101,7 +103,7 @@ func (m *Manager) Initiate(ctx context.Context, req InitiateRequest) (TransferPl
 		return m.replayInitiate(ctx, existing, plan)
 	}
 	if m.events != nil {
-		if err := m.emit(ctx, "bulk:transfer:initiate:v1:requested", planPayload(plan)); err != nil {
+		if err := m.emit(ctx, "bulk:transfer:initiate:v1:requested", planEventPayload(plan)); err != nil {
 			return TransferPlan{}, err
 		}
 	}
@@ -110,7 +112,7 @@ func (m *Manager) Initiate(ctx context.Context, req InitiateRequest) (TransferPl
 		return TransferPlan{}, apperrors.Wrap(err, apperrors.CodeDependency, "save transfer plan")
 	}
 	if m.events != nil {
-		if err := m.emit(ctx, "bulk:transfer:initiate:v1:success", planPayload(plan)); err != nil {
+		if err := m.emit(ctx, "bulk:transfer:initiate:v1:success", planEventPayload(plan)); err != nil {
 			return TransferPlan{}, err
 		}
 	}
@@ -131,7 +133,7 @@ func (m *Manager) AcceptPart(ctx context.Context, transferID string, desc PartDe
 		return PartReceipt{}, err
 	}
 	if m.events != nil {
-		if err := m.emit(ctx, "bulk:part:accept:v1:requested", partPayload(plan, desc)); err != nil {
+		if err := m.emit(ctx, "bulk:part:accept:v1:requested", partEventPayload(plan, desc)); err != nil {
 			return PartReceipt{}, err
 		}
 	}
@@ -146,7 +148,7 @@ func (m *Manager) AcceptPart(ctx context.Context, transferID string, desc PartDe
 	}
 	m.cacheReceipt(ctx, receipt)
 	if m.events != nil {
-		if err := m.emit(ctx, "bulk:part:accept:v1:success", receiptPayload(receipt)); err != nil {
+		if err := m.emit(ctx, "bulk:part:accept:v1:success", receiptEventPayload(receipt)); err != nil {
 			return PartReceipt{}, err
 		}
 	}
@@ -217,7 +219,7 @@ func (m *Manager) AcceptSignedPart(ctx context.Context, transferID string, desc 
 	}
 	m.cacheReceipt(ctx, receipt)
 	if m.events != nil {
-		if err := m.emit(ctx, "bulk:part:signed_accept:v1:success", receiptPayload(receipt)); err != nil {
+		if err := m.emit(ctx, "bulk:part:signed_accept:v1:success", receiptEventPayload(receipt)); err != nil {
 			return PartReceipt{}, err
 		}
 	}
@@ -230,7 +232,7 @@ func (m *Manager) Complete(ctx context.Context, transferID string, req CompleteR
 		return TransferManifest{}, err
 	}
 	if m.events != nil {
-		if err := m.emit(ctx, "bulk:transfer:complete:v1:requested", planPayload(plan)); err != nil {
+		if err := m.emit(ctx, "bulk:transfer:complete:v1:requested", planEventPayload(plan)); err != nil {
 			return TransferManifest{}, err
 		}
 	}
@@ -251,7 +253,7 @@ func (m *Manager) Complete(ctx context.Context, transferID string, req CompleteR
 	_ = m.state.SavePlan(ctx, plan)
 	m.cacheProgress(ctx, plan, manifest.TotalSize, StateCompleted)
 	if m.events != nil {
-		if err := m.emit(ctx, "bulk:transfer:complete:v1:success", manifestPayload(manifest)); err != nil {
+		if err := m.emit(ctx, "bulk:transfer:complete:v1:success", manifestEventPayload(manifest)); err != nil {
 			return TransferManifest{}, err
 		}
 	}
@@ -763,7 +765,7 @@ func (m *Manager) openPartRange(ctx context.Context, part PartReceipt, offset, l
 	return reader, end - start, err
 }
 
-func (m *Manager) emit(ctx context.Context, eventType string, payload map[string]any) error {
+func (m *Manager) emit(ctx context.Context, eventType string, payload extension.Object) error {
 	if m.events == nil {
 		return nil
 	}
@@ -773,7 +775,7 @@ func (m *Manager) emit(ctx context.Context, eventType string, payload map[string
 		EventType:       eventType,
 		Payload:         payload,
 		PayloadEncoding: events.PayloadEncodingJSON,
-		Metadata:        md.ToMap(),
+		Metadata:        md.ToObject(),
 		CorrelationID:   md.CorrelationID,
 		SchemaVersion:   events.EnvelopeSchemaVersion,
 		Timestamp:       m.clock(),
@@ -806,17 +808,25 @@ func (m *Manager) cacheProgress(ctx context.Context, plan TransferPlan, bytesAcc
 	if m.cache == nil {
 		return
 	}
-	payload, err := json.Marshal(map[string]any{
-		"transfer_id":     plan.TransferID,
-		"organization_id": plan.OrganizationID,
-		"bytes_accepted":  bytesAccepted,
-		"state":           state,
-		"updated_at":      m.clock().Format(time.RFC3339Nano),
+	payload, err := json.Marshal(progressCacheEntry{
+		TransferID:     plan.TransferID,
+		OrganizationID: plan.OrganizationID,
+		BytesAccepted:  bytesAccepted,
+		State:          state,
+		UpdatedAt:      m.clock().Format(time.RFC3339Nano),
 	})
 	if err != nil {
 		return
 	}
 	_ = m.cache.Set(ctx, m.cacheKey(plan.OrganizationID, plan.TransferID, "progress"), payload, m.receiptTTL)
+}
+
+type progressCacheEntry struct {
+	TransferID     string `json:"transfer_id"`
+	OrganizationID string `json:"organization_id"`
+	BytesAccepted  int64  `json:"bytes_accepted"`
+	State          string `json:"state"`
+	UpdatedAt      string `json:"updated_at"`
 }
 
 func (m *Manager) cacheKey(parts ...string) string {
@@ -980,110 +990,158 @@ func checkedAddInt64(a, b int64) (int64, bool) {
 	return a + b, true
 }
 
-func failurePayload(transferID string, err error) map[string]any {
-	return map[string]any{
-		"transfer_id": transferID,
-		"error":       err.Error(),
+func failurePayload(transferID string, err error) extension.Object {
+	return extension.Object{
+		"transfer_id": extension.String(transferID),
+		"error":       extension.String(err.Error()),
 	}
 }
 
-func planPayload(plan TransferPlan) map[string]any {
-	return map[string]any{
-		"transfer_id":     plan.TransferID,
-		"organization_id": plan.OrganizationID,
-		"total_size":      plan.TotalSize,
-		"chunk_size":      plan.ChunkSize,
-		"state":           plan.State,
+func failureTransportPayload(transferID string, err error) transport.Object {
+	return transport.Object{
+		"transfer_id": transport.String(transferID),
+		"error":       transport.String(err.Error()),
 	}
 }
 
-func partPayload(plan TransferPlan, desc PartDescriptor) map[string]any {
-	return map[string]any{
-		"transfer_id":     plan.TransferID,
-		"organization_id": plan.OrganizationID,
-		"part_number":     desc.PartNumber,
-		"offset":          desc.Offset,
-		"size":            desc.Size,
+func planEventPayload(plan TransferPlan) extension.Object {
+	return extension.Object{
+		"transfer_id":     extension.String(plan.TransferID),
+		"organization_id": extension.String(plan.OrganizationID),
+		"total_size":      extension.Int(plan.TotalSize),
+		"chunk_size":      extension.Int(plan.ChunkSize),
+		"state":           extension.String(plan.State),
 	}
 }
 
-func receiptPayload(receipt PartReceipt) map[string]any {
-	return map[string]any{
-		"transfer_id":     receipt.TransferID,
-		"organization_id": receipt.OrganizationID,
-		"part_number":     receipt.PartNumber,
-		"raw_size":        receipt.RawSize,
-		"raw_sha256":      receipt.RawSHA256,
-		"encoding":        receipt.Encoding,
+func partEventPayload(plan TransferPlan, desc PartDescriptor) extension.Object {
+	return extension.Object{
+		"transfer_id":     extension.String(plan.TransferID),
+		"organization_id": extension.String(plan.OrganizationID),
+		"part_number":     extension.Int(int64(desc.PartNumber)),
+		"offset":          extension.Int(desc.Offset),
+		"size":            extension.Int(desc.Size),
 	}
 }
 
-func manifestPayload(manifest TransferManifest) map[string]any {
-	return map[string]any{
-		"transfer_id":     manifest.TransferID,
-		"organization_id": manifest.OrganizationID,
-		"total_size":      manifest.TotalSize,
-		"root_sha256":     manifest.RootSHA256,
+func receiptEventPayload(receipt PartReceipt) extension.Object {
+	return extension.Object{
+		"transfer_id":     extension.String(receipt.TransferID),
+		"organization_id": extension.String(receipt.OrganizationID),
+		"part_number":     extension.Int(int64(receipt.PartNumber)),
+		"raw_size":        extension.Int(receipt.RawSize),
+		"raw_sha256":      extension.String(receipt.RawSHA256),
+		"encoding":        extension.String(receipt.Encoding),
 	}
 }
 
-func statusPayload(status TransferStatus) map[string]any {
-	missing := make([]map[string]any, 0, len(status.MissingParts))
+func manifestEventPayload(manifest TransferManifest) extension.Object {
+	return extension.Object{
+		"transfer_id":     extension.String(manifest.TransferID),
+		"organization_id": extension.String(manifest.OrganizationID),
+		"total_size":      extension.Int(manifest.TotalSize),
+		"root_sha256":     extension.String(manifest.RootSHA256),
+	}
+}
+
+func planPayload(plan TransferPlan) transport.Object {
+	return transport.Object{
+		"transfer_id":     transport.String(plan.TransferID),
+		"organization_id": transport.String(plan.OrganizationID),
+		"total_size":      transport.Int(plan.TotalSize),
+		"chunk_size":      transport.Int(plan.ChunkSize),
+		"state":           transport.String(plan.State),
+	}
+}
+
+func receiptPayload(receipt PartReceipt) transport.Object {
+	return transport.Object{
+		"transfer_id":     transport.String(receipt.TransferID),
+		"organization_id": transport.String(receipt.OrganizationID),
+		"part_number":     transport.Int(int64(receipt.PartNumber)),
+		"raw_size":        transport.Int(receipt.RawSize),
+		"raw_sha256":      transport.String(receipt.RawSHA256),
+		"encoding":        transport.String(receipt.Encoding),
+	}
+}
+
+func manifestPayload(manifest TransferManifest) transport.Object {
+	return transport.Object{
+		"transfer_id":     transport.String(manifest.TransferID),
+		"organization_id": transport.String(manifest.OrganizationID),
+		"total_size":      transport.Int(manifest.TotalSize),
+		"root_sha256":     transport.String(manifest.RootSHA256),
+	}
+}
+
+func statusPayload(status TransferStatus) transport.Object {
+	missing := make([]transport.Value, 0, len(status.MissingParts))
 	for _, part := range status.MissingParts {
-		missing = append(missing, map[string]any{
-			"part_number": part.PartNumber,
-			"offset":      part.Offset,
-			"size":        part.Size,
-		})
+		missing = append(missing, transport.ObjectValue(transport.Object{
+			"part_number": transport.Int(int64(part.PartNumber)),
+			"offset":      transport.Int(part.Offset),
+			"size":        transport.Int(part.Size),
+		}))
 	}
-	return map[string]any{
-		"transfer_id":     status.TransferID,
-		"organization_id": status.OrganizationID,
-		"state":           status.State,
-		"total_size":      status.TotalSize,
-		"chunk_size":      status.ChunkSize,
-		"bytes_accepted":  status.BytesAccepted,
-		"parts_accepted":  status.PartsAccepted,
-		"missing_parts":   missing,
-		"manifest_key":    status.ManifestKey,
-		"root_sha256":     status.RootSHA256,
-		"resume_token":    status.ResumeToken,
-		"updated_at":      status.UpdatedAt.Format(time.RFC3339Nano),
-	}
-}
-
-func lanePayload(lane LaneDiagnostics) map[string]any {
-	return map[string]any{
-		"ingress":              lane.Ingress,
-		"object_store_backend": lane.ObjectStoreBackend,
-		"chunk_size":           lane.ChunkSize,
-		"compression":          lane.Compression,
-		"copy_budget":          lane.CopyBudget,
-		"memory_budget":        lane.MemoryBudget,
-		"resume_supported":     lane.ResumeSupported,
-		"distributed_state":    lane.DistributedState,
-		"zero_copy_available":  lane.ZeroCopyAvailable,
-		"mptcp_available":      lane.MPTCPAvailable,
-		"quic_available":       lane.QUICAvailable,
-		"kernel_pacing":        lane.KernelPacing,
-		"deadline_risk":        lane.DeadlineRisk,
-		"fallback":             lane.Fallback,
-		"attributes":           cloneStringMap(lane.Attributes),
+	return transport.Object{
+		"transfer_id":     transport.String(status.TransferID),
+		"organization_id": transport.String(status.OrganizationID),
+		"state":           transport.String(status.State),
+		"total_size":      transport.Int(status.TotalSize),
+		"chunk_size":      transport.Int(status.ChunkSize),
+		"bytes_accepted":  transport.Int(status.BytesAccepted),
+		"parts_accepted":  transport.Int(int64(status.PartsAccepted)),
+		"missing_parts":   transport.List(missing),
+		"manifest_key":    transport.String(status.ManifestKey),
+		"root_sha256":     transport.String(status.RootSHA256),
+		"resume_token":    transport.String(status.ResumeToken),
+		"updated_at":      transport.String(status.UpdatedAt.Format(time.RFC3339Nano)),
 	}
 }
 
-func signedPartGrantPayload(grant SignedPartGrant) map[string]any {
-	return map[string]any{
-		"transfer_id":  grant.TransferID,
-		"part_number":  grant.PartNumber,
-		"offset":       grant.Offset,
-		"size":         grant.Size,
-		"object_key":   grant.ObjectKey,
-		"upload_url":   grant.UploadURL,
-		"content_type": grant.ContentType,
-		"headers":      cloneStringMap(grant.Headers),
-		"expires_at":   grant.ExpiresAt.Format(time.RFC3339Nano),
+func lanePayload(lane LaneDiagnostics) transport.Object {
+	return transport.Object{
+		"ingress":              transport.String(lane.Ingress),
+		"object_store_backend": transport.String(lane.ObjectStoreBackend),
+		"chunk_size":           transport.Int(lane.ChunkSize),
+		"compression":          transport.String(lane.Compression),
+		"copy_budget":          transport.String(lane.CopyBudget),
+		"memory_budget":        transport.Int(lane.MemoryBudget),
+		"resume_supported":     transport.Bool(lane.ResumeSupported),
+		"distributed_state":    transport.Bool(lane.DistributedState),
+		"zero_copy_available":  transport.Bool(lane.ZeroCopyAvailable),
+		"mptcp_available":      transport.Bool(lane.MPTCPAvailable),
+		"quic_available":       transport.Bool(lane.QUICAvailable),
+		"kernel_pacing":        transport.Bool(lane.KernelPacing),
+		"deadline_risk":        transport.String(lane.DeadlineRisk),
+		"fallback":             transport.String(lane.Fallback),
+		"attributes":           transport.ObjectValue(transportObjectFromStringMap(lane.Attributes)),
 	}
+}
+
+func signedPartGrantPayload(grant SignedPartGrant) transport.Object {
+	return transport.Object{
+		"transfer_id":  transport.String(grant.TransferID),
+		"part_number":  transport.Int(int64(grant.PartNumber)),
+		"offset":       transport.Int(grant.Offset),
+		"size":         transport.Int(grant.Size),
+		"object_key":   transport.String(grant.ObjectKey),
+		"upload_url":   transport.String(grant.UploadURL),
+		"content_type": transport.String(grant.ContentType),
+		"headers":      transport.ObjectValue(transportObjectFromStringMap(grant.Headers)),
+		"expires_at":   transport.String(grant.ExpiresAt.Format(time.RFC3339Nano)),
+	}
+}
+
+func transportObjectFromStringMap(values map[string]string) transport.Object {
+	if len(values) == 0 {
+		return transport.Object{}
+	}
+	object := make(transport.Object, len(values))
+	for key, value := range values {
+		object[key] = transport.String(value)
+	}
+	return object
 }
 
 type hashingReader struct {

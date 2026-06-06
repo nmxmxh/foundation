@@ -42,7 +42,7 @@ type Client interface {
 	PSubscribe(context.Context, ...string) ([]<-chan []byte, func(), error)
 
 	// Streams (Reliable event delivery)
-	XAdd(ctx context.Context, stream string, values map[string]any) (string, error)
+	XAdd(ctx context.Context, stream string, values Values) (string, error)
 	XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error)
 	XReadGroupPending(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error)
 	XAck(ctx context.Context, stream, group string, ids ...string) error
@@ -68,22 +68,96 @@ type Client interface {
 // hydration and write-through paths. Callers should use it when several
 // independent Redis keys cross the network boundary together.
 type BatchClient interface {
-	SetMany(ctx context.Context, values map[string]any, ttl time.Duration) error
+	SetMany(ctx context.Context, values Values, ttl time.Duration) error
 	GetMany(ctx context.Context, keys ...string) (map[string][]byte, error)
-	SetGetMany(ctx context.Context, values map[string]any, ttl time.Duration) (map[string][]byte, error)
+	SetGetMany(ctx context.Context, values Values, ttl time.Duration) (map[string][]byte, error)
 }
 
 // StreamBatchClient is the optional round-trip amortization surface for Redis
 // Stream append paths. It keeps durable event relay lanes from paying one
 // socket round trip per pending event.
 type StreamBatchClient interface {
-	XAddMany(ctx context.Context, stream string, entries []map[string]any) ([]string, []error)
+	XAddMany(ctx context.Context, stream string, entries []Values) ([]string, []error)
+	XAddManyField(ctx context.Context, stream string, field string, payloads [][]byte) ([]string, []error)
+}
+
+// CoordinationBatchClient is the optional round-trip amortization surface for
+// coordination keys that need counter+TTL updates and notification fanout.
+// WebSocket route registration uses this during reconnect storms so each
+// connection does not pay several sequential Redis round trips.
+type CoordinationBatchClient interface {
+	IncrExpireMany(ctx context.Context, keys []string, ttl time.Duration) []error
+	PublishMany(ctx context.Context, channel string, payloads [][]byte) []error
+}
+
+type Value struct {
+	Field string
+	Value any
+}
+
+type Values []Value
+
+func Field(field string, value any) Value {
+	return Value{Field: field, Value: value}
+}
+
+func (values Values) Get(field string) (any, bool) {
+	for i := range values {
+		if values[i].Field == field {
+			return values[i].Value, true
+		}
+	}
+	return nil, false
+}
+
+func (values Values) Clone() Values {
+	out := make(Values, 0, len(values))
+	for i := range values {
+		if values[i].Field == "" {
+			continue
+		}
+		out = append(out, Value{Field: values[i].Field, Value: copyInterfaceValue(values[i].Value)})
+	}
+	return out
+}
+
+func (values Values) InterfaceMap() map[string]any {
+	out := make(map[string]any, len(values))
+	for i := range values {
+		if values[i].Field == "" {
+			continue
+		}
+		out[values[i].Field] = values[i].Value
+	}
+	return out
+}
+
+func (values Values) InterfaceSlice() []any {
+	out := make([]any, 0, len(values)*2)
+	for i := range values {
+		if values[i].Field == "" {
+			continue
+		}
+		out = append(out, values[i].Field, values[i].Value)
+	}
+	return out
+}
+
+func valuesFromMap(input map[string]any) Values {
+	out := make(Values, 0, len(input))
+	for field, value := range input {
+		out = append(out, Value{Field: field, Value: value})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Field < out[j].Field
+	})
+	return out
 }
 
 // StreamMessage represents a message read from a Redis stream.
 type StreamMessage struct {
 	ID     string
-	Values map[string]any
+	Values Values
 }
 
 // Connect creates a redis pub/sub client using the selected driver.
@@ -212,6 +286,40 @@ func (c *memoryClient) Publish(_ context.Context, channel string, payload []byte
 	return nil
 }
 
+func (c *memoryClient) PublishMany(_ context.Context, channel string, payloads [][]byte) []error {
+	errs := make([]error, len(payloads))
+	if len(payloads) == 0 {
+		return errs
+	}
+	qualified := c.qualify(channel)
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		err := fmt.Errorf("memory redis client is closed")
+		for i := range errs {
+			errs[i] = err
+		}
+		return errs
+	}
+	for i, payload := range payloads {
+		if payload == nil {
+			continue
+		}
+		for _, sub := range c.subscribers[qualified] {
+			publishMemoryPayload(sub, payload)
+		}
+		for pattern, patternSubs := range c.patternSubscribers {
+			if redisPatternMatches(pattern, qualified) {
+				for _, sub := range patternSubs {
+					publishMemoryPayload(sub, payload)
+				}
+			}
+		}
+		errs[i] = nil
+	}
+	return errs
+}
+
 func (c *memoryClient) Subscribe(_ context.Context, channel string) (<-chan []byte, func(), error) {
 	qualified := c.qualify(channel)
 	ch := make(chan []byte, 256)
@@ -312,7 +420,48 @@ func (c *memoryClient) Expire(_ context.Context, key string, ttl time.Duration) 
 	return true, nil
 }
 
-func (c *memoryClient) XAdd(_ context.Context, stream string, values map[string]any) (string, error) {
+func (c *memoryClient) IncrExpireMany(_ context.Context, keys []string, ttl time.Duration) []error {
+	errs := make([]error, len(keys))
+	if len(keys) == 0 {
+		return errs
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		err := fmt.Errorf("memory redis client is closed")
+		for i := range errs {
+			errs[i] = err
+		}
+		return errs
+	}
+	now := time.Now()
+	for i, key := range keys {
+		if key == "" {
+			continue
+		}
+		qualified := c.qualify(key)
+		c.expireIfNeededLocked(qualified, now)
+		if value, ok := c.values[qualified]; ok {
+			current, err := strconv.ParseInt(string(value.data), 10, 64)
+			if err != nil {
+				errs[i] = fmt.Errorf("value is not an integer or out of range")
+				continue
+			}
+			current++
+			c.values[qualified] = memoryValue{data: []byte(strconv.FormatInt(current, 10))}
+			c.counters[qualified] = current
+		} else {
+			c.counters[qualified]++
+			c.values[qualified] = memoryValue{data: []byte(strconv.FormatInt(c.counters[qualified], 10))}
+		}
+		if ttl > 0 {
+			c.expiries[qualified] = now.Add(ttl)
+		}
+	}
+	return errs
+}
+
+func (c *memoryClient) XAdd(_ context.Context, stream string, values Values) (string, error) {
 	qualified := c.qualify(stream)
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -323,12 +472,12 @@ func (c *memoryClient) XAdd(_ context.Context, stream string, values map[string]
 	id := fmt.Sprintf("%d-%d", time.Now().UnixMilli(), c.streamSequences[qualified])
 	c.streams[qualified] = append(c.streams[qualified], StreamMessage{
 		ID:     id,
-		Values: copyInterfaceMap(values),
+		Values: values.Clone(),
 	})
 	return id, nil
 }
 
-func (c *memoryClient) XAddMany(_ context.Context, stream string, entries []map[string]any) ([]string, []error) {
+func (c *memoryClient) XAddMany(_ context.Context, stream string, entries []Values) ([]string, []error) {
 	ids := make([]string, len(entries))
 	errs := make([]error, len(entries))
 	if len(entries) == 0 {
@@ -350,7 +499,38 @@ func (c *memoryClient) XAddMany(_ context.Context, stream string, entries []map[
 		id := fmt.Sprintf("%d-%d", now, c.streamSequences[qualified])
 		c.streams[qualified] = append(c.streams[qualified], StreamMessage{
 			ID:     id,
-			Values: copyInterfaceMap(values),
+			Values: values.Clone(),
+		})
+		ids[i] = id
+	}
+	return ids, errs
+}
+
+func (c *memoryClient) XAddManyField(_ context.Context, stream string, field string, payloads [][]byte) ([]string, []error) {
+	ids := make([]string, len(payloads))
+	errs := make([]error, len(payloads))
+	if len(payloads) == 0 {
+		return ids, errs
+	}
+	qualified := c.qualify(stream)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		err := fmt.Errorf("memory redis client is closed")
+		for i := range errs {
+			errs[i] = err
+		}
+		return ids, errs
+	}
+	now := time.Now().UnixMilli()
+	for i, payload := range payloads {
+		c.streamSequences[qualified]++
+		id := fmt.Sprintf("%d-%d", now, c.streamSequences[qualified])
+		c.streams[qualified] = append(c.streams[qualified], StreamMessage{
+			ID: id,
+			Values: Values{
+				Field(field, append([]byte(nil), payload...)),
+			},
 		})
 		ids[i] = id
 	}
@@ -474,16 +654,19 @@ func (c *memoryClient) Set(_ context.Context, key string, value any, ttl time.Du
 	return nil
 }
 
-func (c *memoryClient) SetMany(_ context.Context, values map[string]any, ttl time.Duration) error {
+func (c *memoryClient) SetMany(_ context.Context, values Values, ttl time.Duration) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return fmt.Errorf("memory redis client is closed")
 	}
 	now := time.Now()
-	for key, value := range values {
-		qualified := c.qualify(key)
-		c.values[qualified] = memoryValue{data: bytesFromValue(value)}
+	for _, field := range values {
+		if field.Field == "" {
+			continue
+		}
+		qualified := c.qualify(field.Field)
+		c.values[qualified] = memoryValue{data: bytesFromValue(field.Value)}
 		if ttl > 0 {
 			c.expiries[qualified] = now.Add(ttl)
 		} else {
@@ -528,7 +711,7 @@ func (c *memoryClient) GetMany(_ context.Context, keys ...string) (map[string][]
 	return out, nil
 }
 
-func (c *memoryClient) SetGetMany(_ context.Context, values map[string]any, ttl time.Duration) (map[string][]byte, error) {
+func (c *memoryClient) SetGetMany(_ context.Context, values Values, ttl time.Duration) (map[string][]byte, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
@@ -536,16 +719,19 @@ func (c *memoryClient) SetGetMany(_ context.Context, values map[string]any, ttl 
 	}
 	now := time.Now()
 	out := make(map[string][]byte, len(values))
-	for key, value := range values {
-		qualified := c.qualify(key)
-		data := bytesFromValue(value)
+	for _, field := range values {
+		if field.Field == "" {
+			continue
+		}
+		qualified := c.qualify(field.Field)
+		data := bytesFromValue(field.Value)
 		c.values[qualified] = memoryValue{data: data}
 		if ttl > 0 {
 			c.expiries[qualified] = now.Add(ttl)
 		} else {
 			delete(c.expiries, qualified)
 		}
-		out[key] = append([]byte(nil), data...)
+		out[field.Field] = append([]byte(nil), data...)
 	}
 	return out, nil
 }
@@ -730,7 +916,7 @@ func bytesFromValue(value any) []byte {
 func cloneStreamMessage(message StreamMessage) StreamMessage {
 	return StreamMessage{
 		ID:     message.ID,
-		Values: copyInterfaceMap(message.Values),
+		Values: message.Values.Clone(),
 	}
 }
 
@@ -857,6 +1043,36 @@ func (c *redisClient) Publish(ctx context.Context, channel string, payload []byt
 	return err
 }
 
+func (c *redisClient) PublishMany(ctx context.Context, channel string, payloads [][]byte) []error {
+	errs := make([]error, len(payloads))
+	if len(payloads) == 0 {
+		return errs
+	}
+	start := time.Now()
+	qualified := c.qualify(channel)
+	pipe := c.client.Pipeline()
+	cmds := make([]*goredis.IntCmd, len(payloads))
+	for i, payload := range payloads {
+		cmds[i] = pipe.Publish(ctx, qualified, payload)
+	}
+	_, execErr := pipe.Exec(ctx)
+	var firstErr error
+	for i, cmd := range cmds {
+		if err := cmd.Err(); err != nil {
+			errs[i] = err
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	if execErr != nil && firstErr == nil {
+		firstErr = execErr
+		errs[0] = execErr
+	}
+	recordRedisOperation("publish_many", start, firstErr)
+	return errs
+}
+
 func relayRedisMessages(ctx context.Context, src <-chan *goredis.Message, stopPubSub func()) (<-chan []byte, func()) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -961,17 +1177,65 @@ func (c *redisClient) Expire(ctx context.Context, key string, ttl time.Duration)
 	return result, err
 }
 
-func (c *redisClient) XAdd(ctx context.Context, stream string, values map[string]any) (string, error) {
+func (c *redisClient) IncrExpireMany(ctx context.Context, keys []string, ttl time.Duration) []error {
+	errs := make([]error, len(keys))
+	if len(keys) == 0 {
+		return errs
+	}
+	start := time.Now()
+	pipe := c.client.Pipeline()
+	incrs := make([]*goredis.IntCmd, len(keys))
+	expires := make([]*goredis.BoolCmd, len(keys))
+	for i, key := range keys {
+		if key == "" {
+			continue
+		}
+		qualified := c.qualify(key)
+		incrs[i] = pipe.Incr(ctx, qualified)
+		if ttl > 0 {
+			expires[i] = pipe.Expire(ctx, qualified, ttl)
+		}
+	}
+	_, execErr := pipe.Exec(ctx)
+	var firstErr error
+	for i := range keys {
+		if incrs[i] != nil {
+			if err := incrs[i].Err(); err != nil {
+				errs[i] = err
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+		}
+		if expires[i] != nil {
+			if err := expires[i].Err(); err != nil {
+				errs[i] = err
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
+		}
+	}
+	if execErr != nil && firstErr == nil {
+		firstErr = execErr
+		errs[0] = execErr
+	}
+	recordRedisOperation("incr_expire_many", start, firstErr)
+	return errs
+}
+
+func (c *redisClient) XAdd(ctx context.Context, stream string, values Values) (string, error) {
 	start := time.Now()
 	result, err := c.client.XAdd(ctx, &goredis.XAddArgs{
 		Stream: c.qualify(stream),
-		Values: values,
+		Values: values.InterfaceSlice(),
 	}).Result()
 	recordRedisOperation("xadd", start, err)
 	return result, err
 }
 
-func (c *redisClient) XAddMany(ctx context.Context, stream string, entries []map[string]any) ([]string, []error) {
+func (c *redisClient) XAddMany(ctx context.Context, stream string, entries []Values) ([]string, []error) {
 	ids := make([]string, len(entries))
 	errs := make([]error, len(entries))
 	if len(entries) == 0 {
@@ -984,7 +1248,43 @@ func (c *redisClient) XAddMany(ctx context.Context, stream string, entries []map
 	for i, values := range entries {
 		cmds[i] = pipe.XAdd(ctx, &goredis.XAddArgs{
 			Stream: qualified,
-			Values: values,
+			Values: values.InterfaceSlice(),
+		})
+	}
+	_, execErr := pipe.Exec(ctx)
+	var firstErr error
+	for i, cmd := range cmds {
+		id, err := cmd.Result()
+		ids[i] = id
+		if err != nil {
+			errs[i] = err
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	if execErr != nil && firstErr == nil {
+		firstErr = execErr
+		errs[0] = execErr
+	}
+	recordRedisOperation("xadd_many", start, firstErr)
+	return ids, errs
+}
+
+func (c *redisClient) XAddManyField(ctx context.Context, stream string, field string, payloads [][]byte) ([]string, []error) {
+	ids := make([]string, len(payloads))
+	errs := make([]error, len(payloads))
+	if len(payloads) == 0 {
+		return ids, errs
+	}
+	start := time.Now()
+	qualified := c.qualify(stream)
+	pipe := c.client.Pipeline()
+	cmds := make([]*goredis.StringCmd, len(payloads))
+	for i, payload := range payloads {
+		cmds[i] = pipe.XAdd(ctx, &goredis.XAddArgs{
+			Stream: qualified,
+			Values: []any{field, payload},
 		})
 	}
 	_, execErr := pipe.Exec(ctx)
@@ -1052,7 +1352,7 @@ func (c *redisClient) xReadGroup(ctx context.Context, stream, group, consumer st
 		for _, xmsg := range xstream.Messages {
 			messages = append(messages, StreamMessage{
 				ID:     xmsg.ID,
-				Values: xmsg.Values,
+				Values: valuesFromMap(xmsg.Values),
 			})
 		}
 	}
@@ -1126,14 +1426,17 @@ func (c *redisClient) Set(ctx context.Context, key string, value any, ttl time.D
 	return err
 }
 
-func (c *redisClient) SetMany(ctx context.Context, values map[string]any, ttl time.Duration) error {
+func (c *redisClient) SetMany(ctx context.Context, values Values, ttl time.Duration) error {
 	if len(values) == 0 {
 		return nil
 	}
 	start := time.Now()
 	pipe := c.client.Pipeline()
-	for key, value := range values {
-		pipe.Set(ctx, c.qualify(key), value, ttl)
+	for _, field := range values {
+		if field.Field == "" {
+			continue
+		}
+		pipe.Set(ctx, c.qualify(field.Field), field.Value, ttl)
 	}
 	_, err := pipe.Exec(ctx)
 	recordRedisOperation("set_many", start, err)
@@ -1182,17 +1485,20 @@ func (c *redisClient) GetMany(ctx context.Context, keys ...string) (map[string][
 	return out, nil
 }
 
-func (c *redisClient) SetGetMany(ctx context.Context, values map[string]any, ttl time.Duration) (map[string][]byte, error) {
+func (c *redisClient) SetGetMany(ctx context.Context, values Values, ttl time.Duration) (map[string][]byte, error) {
 	if len(values) == 0 {
 		return map[string][]byte{}, nil
 	}
 	start := time.Now()
 	pipe := c.client.Pipeline()
 	gets := make(map[string]*goredis.StringCmd, len(values))
-	for key, value := range values {
-		qualified := c.qualify(key)
-		pipe.Set(ctx, qualified, value, ttl)
-		gets[key] = pipe.Get(ctx, qualified)
+	for _, field := range values {
+		if field.Field == "" {
+			continue
+		}
+		qualified := c.qualify(field.Field)
+		pipe.Set(ctx, qualified, field.Value, ttl)
+		gets[field.Field] = pipe.Get(ctx, qualified)
 	}
 	_, err := pipe.Exec(ctx)
 	if err != nil && !errors.Is(err, goredis.Nil) {
@@ -1276,6 +1582,22 @@ func (c *shardedClient) Publish(ctx context.Context, channel string, payload []b
 	return firstErr
 }
 
+func (c *shardedClient) PublishMany(ctx context.Context, channel string, payloads [][]byte) []error {
+	errs := make([]error, len(payloads))
+	if len(payloads) == 0 {
+		return errs
+	}
+	for _, shard := range c.shards {
+		shardErrs := shard.PublishMany(ctx, channel, payloads)
+		for i, err := range shardErrs {
+			if err != nil && errs[i] == nil {
+				errs[i] = err
+			}
+		}
+	}
+	return errs
+}
+
 func (c *shardedClient) Subscribe(ctx context.Context, channel string) (<-chan []byte, func(), error) {
 	return c.shards[0].Subscribe(ctx, channel)
 }
@@ -1284,12 +1606,16 @@ func (c *shardedClient) PSubscribe(ctx context.Context, patterns ...string) ([]<
 	return c.shards[0].PSubscribe(ctx, patterns...)
 }
 
-func (c *shardedClient) XAdd(ctx context.Context, stream string, values map[string]any) (string, error) {
+func (c *shardedClient) XAdd(ctx context.Context, stream string, values Values) (string, error) {
 	return c.shard(stream).XAdd(ctx, stream, values)
 }
 
-func (c *shardedClient) XAddMany(ctx context.Context, stream string, entries []map[string]any) ([]string, []error) {
+func (c *shardedClient) XAddMany(ctx context.Context, stream string, entries []Values) ([]string, []error) {
 	return c.shard(stream).XAddMany(ctx, stream, entries)
+}
+
+func (c *shardedClient) XAddManyField(ctx context.Context, stream string, field string, payloads [][]byte) ([]string, []error) {
+	return c.shard(stream).XAddManyField(ctx, stream, field, payloads)
 }
 
 func (c *shardedClient) XReadGroup(ctx context.Context, stream, group, consumer string, count int64) ([]StreamMessage, error) {
@@ -1310,6 +1636,38 @@ func (c *shardedClient) Incr(ctx context.Context, key string) (int64, error) {
 
 func (c *shardedClient) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
 	return c.shard(key).Expire(ctx, key, ttl)
+}
+
+func (c *shardedClient) IncrExpireMany(ctx context.Context, keys []string, ttl time.Duration) []error {
+	errs := make([]error, len(keys))
+	if len(keys) == 0 {
+		return errs
+	}
+	type indexedKey struct {
+		index int
+		key   string
+	}
+	grouped := make(map[*redisClient][]indexedKey, len(c.shards))
+	for i, key := range keys {
+		if key == "" {
+			continue
+		}
+		shard := c.shard(key)
+		grouped[shard] = append(grouped[shard], indexedKey{index: i, key: key})
+	}
+	for shard, shardKeys := range grouped {
+		batchKeys := make([]string, len(shardKeys))
+		for i, item := range shardKeys {
+			batchKeys[i] = item.key
+		}
+		shardErrs := shard.IncrExpireMany(ctx, batchKeys, ttl)
+		for i, err := range shardErrs {
+			if err != nil {
+				errs[shardKeys[i].index] = err
+			}
+		}
+	}
+	return errs
 }
 
 func (c *shardedClient) Lock(ctx context.Context, key string, ttl time.Duration) (string, error) {
@@ -1335,17 +1693,20 @@ func (c *shardedClient) Set(ctx context.Context, key string, value any, ttl time
 	return c.shard(key).Set(ctx, key, value, ttl)
 }
 
-func (c *shardedClient) SetMany(ctx context.Context, values map[string]any, ttl time.Duration) error {
+func (c *shardedClient) SetMany(ctx context.Context, values Values, ttl time.Duration) error {
 	if len(values) == 0 {
 		return nil
 	}
-	grouped := make(map[*redisClient]map[string]any, len(c.shards))
-	for key, value := range values {
-		shard := c.shard(key)
-		if grouped[shard] == nil {
-			grouped[shard] = map[string]any{}
+	grouped := make(map[*redisClient]Values, len(c.shards))
+	for _, field := range values {
+		if field.Field == "" {
+			continue
 		}
-		grouped[shard][key] = value
+		shard := c.shard(field.Field)
+		if grouped[shard] == nil {
+			grouped[shard] = Values{}
+		}
+		grouped[shard] = append(grouped[shard], field)
 	}
 	var firstErr error
 	for shard, shardValues := range grouped {
@@ -1379,17 +1740,20 @@ func (c *shardedClient) GetMany(ctx context.Context, keys ...string) (map[string
 	return out, firstErr
 }
 
-func (c *shardedClient) SetGetMany(ctx context.Context, values map[string]any, ttl time.Duration) (map[string][]byte, error) {
+func (c *shardedClient) SetGetMany(ctx context.Context, values Values, ttl time.Duration) (map[string][]byte, error) {
 	if len(values) == 0 {
 		return map[string][]byte{}, nil
 	}
-	grouped := make(map[*redisClient]map[string]any, len(c.shards))
-	for key, value := range values {
-		shard := c.shard(key)
-		if grouped[shard] == nil {
-			grouped[shard] = map[string]any{}
+	grouped := make(map[*redisClient]Values, len(c.shards))
+	for _, field := range values {
+		if field.Field == "" {
+			continue
 		}
-		grouped[shard][key] = value
+		shard := c.shard(field.Field)
+		if grouped[shard] == nil {
+			grouped[shard] = Values{}
+		}
+		grouped[shard] = append(grouped[shard], field)
 	}
 	out := make(map[string][]byte, len(values))
 	var firstErr error

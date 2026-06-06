@@ -52,7 +52,7 @@ func TestServiceBackedHermesPostgresRedisDriftProof(t *testing.T) {
 		Collection:     "ticks",
 		OrganizationID: orgID,
 		RecordID:       "tick-base",
-		Data:           map[string]any{"bucket": int64(1), "source": "postgres"},
+		Data:           serviceRecordData(map[string]any{"bucket": int64(1), "source": "postgres"}),
 	}
 	if _, err := state.UpsertRecord(ctx, baseRecord); err != nil {
 		t.Fatalf("postgres base upsert failed: %v", err)
@@ -66,7 +66,7 @@ func TestServiceBackedHermesPostgresRedisDriftProof(t *testing.T) {
 		Collection:     "ticks",
 		OrganizationID: orgID,
 		RecordID:       "tick-stream",
-		Data:           map[string]any{"bucket": int64(2), "source": "redis"},
+		Data:           serviceRecordData(map[string]any{"bucket": int64(2), "source": "redis"}),
 	}
 	if _, err := state.UpsertRecord(ctx, streamRecord); err != nil {
 		t.Fatalf("postgres stream upsert failed: %v", err)
@@ -93,7 +93,7 @@ func TestServiceBackedHermesPostgresRedisDriftProof(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Envelope.ToBinary() error = %v", err)
 	}
-	if _, err := redisClient.XAdd(ctx, stream, map[string]any{"envelope": raw}); err != nil {
+	if _, err := redisClient.XAdd(ctx, stream, serviceRedisValues(map[string]any{"envelope": raw})); err != nil {
 		t.Fatalf("redis XAdd() error = %v", err)
 	}
 
@@ -114,10 +114,7 @@ func TestServiceBackedHermesPostgresRedisDriftProof(t *testing.T) {
 		t.Fatalf("second PollOnce() result=%+v err=%v, want empty", empty, err)
 	}
 
-	count, err := store.Count(ctx, "svc_hermes_ticks", hermes.Query{
-		OrganizationID: orgID,
-		Filters:        map[string]any{"bucket": int64(2)},
-	}, hermes.Fence{})
+	count, err := store.Count(ctx, "svc_hermes_ticks", hermes.QueryFromRecordQuery(orgID, serviceRecordQuery(0, map[string]any{"bucket": int64(2)})), hermes.Fence{})
 	if err != nil || count != 1 {
 		t.Fatalf("Hermes Count() = %d err=%v, want 1", count, err)
 	}
@@ -163,7 +160,7 @@ func TestServiceBackedHermesRedisPendingWindowIsNotDuplicated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Envelope.ToBinary() error = %v", err)
 	}
-	if _, err := redisClient.XAdd(ctx, stream, map[string]any{"envelope": raw}); err != nil {
+	if _, err := redisClient.XAdd(ctx, stream, serviceRedisValues(map[string]any{"envelope": raw})); err != nil {
 		t.Fatalf("redis XAdd() error = %v", err)
 	}
 	source, err := hermes.NewRedisStreamEnvelopeSource(redisClient, stream, group, "consumer-a", "")

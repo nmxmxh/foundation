@@ -28,7 +28,8 @@ func TestRoutesFromHandlerMapDerivesStableCatalogue(t *testing.T) {
 		}
 	}
 	for _, route := range routes {
-		if route.Metadata["route_source"] != "event_type" {
+		routeSource, _ := route.Metadata.GetString("route_source")
+		if routeSource != "event_type" {
 			t.Fatalf("expected event_type route metadata, got %+v", route.Metadata)
 		}
 		if len(route.Tags) == 0 || route.Tags[0] != "identity" {

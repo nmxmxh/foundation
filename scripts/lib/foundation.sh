@@ -39,7 +39,12 @@ foundation_validate_project_identifier() {
 foundation_sed_in_place() {
     local expression="$1"
     local file="$2"
-    sed -i '' "$expression" "$file" 2>/dev/null || sed -i "$expression" "$file"
+    local body search replace
+    body="${expression#s|}"
+    search="${body%%|*}"
+    body="${body#*|}"
+    replace="${body%|g}"
+    PATCH_SEARCH="$search" PATCH_REPLACE="$replace" perl -0pi -e 's/\Q$ENV{PATCH_SEARCH}\E/$ENV{PATCH_REPLACE}/g' "$file"
 }
 
 foundation_render_file() {

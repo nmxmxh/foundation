@@ -10,6 +10,7 @@ import (
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap"
 	eventcontract "github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/intelligence"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
@@ -19,21 +20,60 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+func registryObject(values map[string]any) extension.Object {
+	value, err := extension.FromJSON(values)
+	if err != nil {
+		panic(err)
+	}
+	object, ok := value.ObjectValue()
+	if !ok {
+		panic("registry test value is not object")
+	}
+	return object
+}
+
+func dispatchMap(t *testing.T, registry *ServiceRegistry, ctx context.Context, eventType string, payload map[string]any) (map[string]any, bool, error) {
+	t.Helper()
+	result, ok, err := registry.DispatchInput(ctx, eventType, DispatchInput{
+		Payload:          registryObject(payload),
+		PayloadEncoding:  protoapi.PayloadEncodingJSON,
+		ResponseEncoding: protoapi.PayloadEncodingJSON,
+	})
+	if err != nil {
+		return nil, ok, err
+	}
+	return result.Payload.InterfaceMap(), ok, nil
+}
+
+func dispatchBytes(registry *ServiceRegistry, ctx context.Context, eventType string, payload []byte, metadata extension.Object) ([]byte, bool, error) {
+	result, ok, err := registry.DispatchInput(ctx, eventType, DispatchInput{
+		PayloadBytes:     payload,
+		PayloadEncoding:  protoapi.PayloadEncodingProtobuf,
+		ResponseEncoding: protoapi.PayloadEncodingProtobuf,
+		Metadata:         metadata,
+	})
+	if err != nil {
+		return nil, ok, err
+	}
+	return result.PayloadBytes, ok, nil
+}
+
 func TestRegisterAndDispatchMapHandler(t *testing.T) {
 	registry := NewWithOptions(nil, nil, nil, Options{DispatchWorkers: -1})
 	if registry.dispatchWorkers != 1 {
 		t.Fatalf("dispatchWorkers default = %d", registry.dispatchWorkers)
 	}
-	err := registry.RegisterWithOptions("orders:create:v1:requested", func(ctx context.Context, payload map[string]any) (any, error) {
-		if payload["name"] != "Ada" {
+	err := registry.RegisterWithOptions("orders:create:v1:requested", func(ctx context.Context, payload extension.Object) (any, error) {
+		name, _ := payload.GetString("name")
+		if name != "Ada" {
 			t.Fatalf("payload = %+v", payload)
 		}
-		return map[string]any{"ok": true}, nil
+		return registryObject(map[string]any{"ok": true}), nil
 	}, bootstrap.ConcurrencyOptions{})
 	if err != nil {
 		t.Fatalf("RegisterWithOptions() error = %v", err)
 	}
-	result, ok, err := registry.Dispatch(context.Background(), "orders:create:v1:requested", map[string]any{"name": "Ada"})
+	result, ok, err := dispatchMap(t, registry, context.Background(), "orders:create:v1:requested", map[string]any{"name": "Ada"})
 	if err != nil || !ok {
 		t.Fatalf("Dispatch() ok=%v err=%v", ok, err)
 	}
@@ -53,7 +93,7 @@ func TestDispatchInputInjectsIntelligenceSignal(t *testing.T) {
 			observed = signal
 		})),
 	})
-	err := registry.RegisterWithOptions("documents:index:v1:requested", func(ctx context.Context, payload map[string]any) (any, error) {
+	err := registry.RegisterWithOptions("documents:index:v1:requested", func(ctx context.Context, payload extension.Object) (any, error) {
 		signal, ok := intelligence.FromContext(ctx)
 		if !ok {
 			t.Fatalf("missing intelligence signal in handler context")
@@ -65,20 +105,22 @@ func TestDispatchInputInjectsIntelligenceSignal(t *testing.T) {
 		if !contains(md.Tags, "domain:documents") || !contains(md.Tags, "entity:document") {
 			t.Fatalf("metadata tags were not injected: %+v", md.Tags)
 		}
-		if payload["document_id"] != "doc_1" {
+		documentID, _ := payload.GetString("document_id")
+		if documentID != "doc_1" {
 			t.Fatalf("payload mismatch: %+v", payload)
 		}
-		return map[string]any{"ok": true}, nil
+		return registryObject(map[string]any{"ok": true}), nil
 	}, bootstrap.ConcurrencyOptions{})
 	if err != nil {
 		t.Fatalf("RegisterWithOptions() error = %v", err)
 	}
 
 	result, ok, err := registry.DispatchInput(context.Background(), "documents:index:v1:requested", DispatchInput{
-		Payload:  map[string]any{"document_id": "doc_1", "title": "Cross intelligence memo"},
-		Metadata: map[string]any{"tags": []string{"source:api"}},
+		Payload:  registryObject(map[string]any{"document_id": "doc_1", "title": "Cross intelligence memo"}),
+		Metadata: registryObject(map[string]any{"tags": []string{"source:api"}}),
 	})
-	if err != nil || !ok || result.Payload["ok"] != true {
+	okValue, _ := result.Payload["ok"].BoolValue()
+	if err != nil || !ok || !okValue {
 		t.Fatalf("DispatchInput() result=%+v ok=%v err=%v", result, ok, err)
 	}
 	if observed.EventType != "documents:index:v1:requested" || len(observed.Relevance) == 0 {
@@ -93,10 +135,10 @@ func TestRegisterValidationFailures(t *testing.T) {
 		eventType string
 		handler   bootstrap.HandlerFunc
 	}{
-		{"blank", " ", func(context.Context, map[string]any) (any, error) { return nil, nil }},
+		{"blank", " ", func(context.Context, extension.Object) (any, error) { return nil, nil }},
 		{"nil handler", "orders:create:v1:requested", nil},
-		{"terminal state", "orders:create:v1:success", func(context.Context, map[string]any) (any, error) { return nil, nil }},
-		{"invalid contract", "orders:create:bad state:requested", func(context.Context, map[string]any) (any, error) { return nil, nil }},
+		{"terminal state", "orders:create:v1:success", func(context.Context, extension.Object) (any, error) { return nil, nil }},
+		{"invalid contract", "orders:create:bad state:requested", func(context.Context, extension.Object) (any, error) { return nil, nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -137,13 +179,13 @@ func TestRegisterTypedValidationFailures(t *testing.T) {
 
 func TestDispatchInputMissesAndErrors(t *testing.T) {
 	registry := New(nil, nil, nil)
-	if _, ok, err := registry.Dispatch(context.Background(), "orders:create:bad state:requested", nil); err == nil || ok {
+	if _, ok, err := dispatchMap(t, registry, context.Background(), "orders:create:bad state:requested", nil); err == nil || ok {
 		t.Fatalf("expected invalid event error")
 	}
-	if _, ok, err := registry.Dispatch(context.Background(), "orders:create:v1:requested", nil); err != nil || ok {
+	if _, ok, err := dispatchMap(t, registry, context.Background(), "orders:create:v1:requested", nil); err != nil || ok {
 		t.Fatalf("missing handler ok=%v err=%v", ok, err)
 	}
-	if err := registry.Register("orders:create:v1:requested", func(context.Context, map[string]any) (any, error) {
+	if err := registry.Register("orders:create:v1:requested", func(context.Context, extension.Object) (any, error) {
 		return nil, errors.New("boom")
 	}); err != nil {
 		t.Fatalf("Register() error = %v", err)
@@ -153,14 +195,14 @@ func TestDispatchInputMissesAndErrors(t *testing.T) {
 	}); err == nil || !ok {
 		t.Fatalf("expected protobuf unsupported error, ok=%v err=%v", ok, err)
 	}
-	if _, ok, err := registry.Dispatch(context.Background(), "orders:create:v1:requested", nil); err == nil || !ok {
+	if _, ok, err := dispatchMap(t, registry, context.Background(), "orders:create:v1:requested", nil); err == nil || !ok {
 		t.Fatalf("expected handler error, ok=%v err=%v", ok, err)
 	}
 }
 
 func TestDispatchInputStreamResponseAndEncodingHelpers(t *testing.T) {
 	registry := New(nil, nil, nil)
-	if err := registry.Register("reports:stream:v1:requested", func(context.Context, map[string]any) (any, error) {
+	if err := registry.Register("reports:stream:v1:requested", func(context.Context, extension.Object) (any, error) {
 		return "stream-handle", nil
 	}); err != nil {
 		t.Fatalf("Register() error = %v", err)
@@ -187,7 +229,7 @@ func TestDispatchInputStreamResponseAndEncodingHelpers(t *testing.T) {
 
 func TestDispatchBytesMissAndDecodeError(t *testing.T) {
 	registry := New(nil, nil, nil)
-	if got, ok, err := registry.DispatchBytes(context.Background(), "media:process_asset:v1:requested", nil, nil); err != nil || ok || got != nil {
+	if got, ok, err := dispatchBytes(registry, context.Background(), "media:process_asset:v1:requested", nil, nil); err != nil || ok || got != nil {
 		t.Fatalf("missing DispatchBytes() got=%v ok=%v err=%v", got, ok, err)
 	}
 	binding := protoapi.Binding{
@@ -204,7 +246,7 @@ func TestDispatchBytesMissAndDecodeError(t *testing.T) {
 	); err != nil {
 		t.Fatalf("RegisterTypedWithOptions() error = %v", err)
 	}
-	if got, ok, err := registry.DispatchBytes(context.Background(), "media:process_asset:v1:requested", []byte{0xff}, nil); err == nil || !ok || got != nil {
+	if got, ok, err := dispatchBytes(registry, context.Background(), "media:process_asset:v1:requested", []byte{0xff}, nil); err == nil || !ok || got != nil {
 		t.Fatalf("expected DispatchBytes decode error, got=%v ok=%v err=%v", got, ok, err)
 	}
 }
@@ -242,8 +284,8 @@ func TestDispatchBytesKeepsTypedPayloadBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
-	responseBytes, ok, err := registry.DispatchBytes(context.Background(), "media:process_asset:v1:requested", payload, map[string]any{
-		"correlation_id": "corr_123",
+	responseBytes, ok, err := dispatchBytes(registry, context.Background(), "media:process_asset:v1:requested", payload, extension.Object{
+		"correlation_id": extension.String("corr_123"),
 	})
 	if err != nil {
 		t.Fatalf("DispatchBytes() error = %v", err)
@@ -290,11 +332,12 @@ func TestTypedRegistryAndFrameDispatchParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)
 	}
-	registryBytes, ok, err := registry.DispatchBytes(
+	registryBytes, ok, err := dispatchBytes(
+		registry,
 		context.Background(),
 		"media:process_asset:v1:requested",
 		payload,
-		map[string]any{"correlation_id": "corr_parity"},
+		extension.Object{"correlation_id": extension.String("corr_parity")},
 	)
 	if err != nil || !ok {
 		t.Fatalf("DispatchBytes() ok=%v err=%v", ok, err)
@@ -344,7 +387,7 @@ func TestTypedDispatchDefaultsResponseToRequestEncoding(t *testing.T) {
 	result, ok, err := registry.DispatchInput(context.Background(), "media:process_asset:v1:requested", DispatchInput{
 		PayloadBytes:    payload,
 		PayloadEncoding: protoapi.PayloadEncodingProtobuf,
-		Metadata:        map[string]any{"correlation_id": "corr_123"},
+		Metadata:        registryObject(map[string]any{"correlation_id": "corr_123"}),
 	})
 	if err != nil {
 		t.Fatalf("DispatchInput() error = %v", err)
@@ -424,10 +467,10 @@ func TestTypedDispatchOptInProtobufDecodeReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal() second error = %v", err)
 	}
-	if _, ok, err := registry.DispatchBytes(context.Background(), eventType, firstPayload, nil); err != nil || !ok {
+	if _, ok, err := dispatchBytes(registry, context.Background(), eventType, firstPayload, nil); err != nil || !ok {
 		t.Fatalf("first DispatchBytes() ok=%v err=%v", ok, err)
 	}
-	if _, ok, err := registry.DispatchBytes(context.Background(), eventType, secondPayload, nil); err != nil || !ok {
+	if _, ok, err := dispatchBytes(registry, context.Background(), eventType, secondPayload, nil); err != nil || !ok {
 		t.Fatalf("second DispatchBytes() ok=%v err=%v", ok, err)
 	}
 	if calls != 2 {
@@ -447,14 +490,14 @@ func TestListenValidationAndMemoryDispatch(t *testing.T) {
 		t.Fatalf("expected missing pattern error")
 	}
 
-	seen := make(chan map[string]any, 1)
-	if err := registry.Register("orders:create:v1:requested", func(ctx context.Context, payload map[string]any) (any, error) {
+	seen := make(chan extension.Object, 1)
+	if err := registry.Register("orders:create:v1:requested", func(ctx context.Context, payload extension.Object) (any, error) {
 		md := metadata.FromContext(ctx)
 		if md.CorrelationID != "corr_123" {
 			t.Fatalf("metadata correlation = %q", md.CorrelationID)
 		}
 		seen <- payload
-		return map[string]any{"ok": true}, nil
+		return registryObject(map[string]any{"ok": true}), nil
 	}); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -465,7 +508,7 @@ func TestListenValidationAndMemoryDispatch(t *testing.T) {
 	}
 	env := eventcontract.Envelope{
 		EventType:       "orders:create:v1:requested",
-		Payload:         map[string]any{"id": "ord_1"},
+		Payload:         registryObject(map[string]any{"id": "ord_1"}),
 		CorrelationID:   "corr_123",
 		PayloadEncoding: protoapi.PayloadEncodingJSON,
 	}
@@ -479,7 +522,8 @@ func TestListenValidationAndMemoryDispatch(t *testing.T) {
 
 	select {
 	case payload := <-seen:
-		if payload["id"] != "ord_1" {
+		id, _ := payload.GetString("id")
+		if id != "ord_1" {
 			t.Fatalf("unexpected payload: %+v", payload)
 		}
 	case <-time.After(time.Second):
@@ -491,14 +535,14 @@ func TestDispatchEnvelopeIgnoresDecodeMissAndProtobufLegacy(t *testing.T) {
 	registry := New(nil, nil, nil)
 	registry.dispatchEnvelope(context.Background(), []byte("not-json"))
 
-	env := eventcontract.Envelope{EventType: "orders:create:v1:requested", Payload: map[string]any{"id": "ord_1"}}
+	env := eventcontract.Envelope{EventType: "orders:create:v1:requested", Payload: registryObject(map[string]any{"id": "ord_1"})}
 	raw, err := env.ToBinary()
 	if err != nil {
 		t.Fatalf("ToBinary() error = %v", err)
 	}
 	registry.dispatchEnvelope(context.Background(), raw)
 
-	if err := registry.Register("orders:create:v1:requested", func(context.Context, map[string]any) (any, error) {
+	if err := registry.Register("orders:create:v1:requested", func(context.Context, extension.Object) (any, error) {
 		t.Fatalf("legacy handler should not receive protobuf payload")
 		return nil, nil
 	}); err != nil {

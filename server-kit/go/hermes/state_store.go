@@ -2,7 +2,6 @@ package hermes
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -128,10 +127,6 @@ func (s *ProjectedRuntimeStore) Query(ctx context.Context, query string, args ..
 	return queryer.Query(ctx, query, args...)
 }
 
-func (s *ProjectedRuntimeStore) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
-	return s.base.QueryMaps(ctx, query, args...)
-}
-
 func (s *ProjectedRuntimeStore) BeginTx(ctx context.Context) (database.Tx, error) {
 	if beginner, ok := s.base.(database.TxBeginner); ok {
 		return beginner.BeginTx(ctx)
@@ -182,30 +177,47 @@ func (s *ProjectedRuntimeStore) GetRecordJSON(ctx context.Context, domain, colle
 	return s.rawStore().GetRecordJSON(ctx, domain, collection, organizationID, recordID)
 }
 
-func (s *ProjectedRuntimeStore) ListRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any, limit int) ([]database.DomainRecord, error) {
+func (s *ProjectedRuntimeStore) ListRecords(ctx context.Context, domain, collection, organizationID string, query database.RecordQuery) ([]database.DomainRecord, error) {
+	records := make([]database.DomainRecord, 0)
+	err := s.ForEachRecord(ctx, domain, collection, organizationID, query, func(rec database.DomainRecord) error {
+		records = append(records, rec)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (s *ProjectedRuntimeStore) ForEachRecord(ctx context.Context, domain, collection, organizationID string, query database.RecordQuery, fn database.RecordVisitor) error {
+	if fn == nil {
+		return errors.New("record visitor is required")
+	}
 	if s.ensureWarm(ctx, domain, collection, organizationID) == nil {
 		name := s.ProjectionName(domain, collection, organizationID)
-		records, err := s.hot.ListRecords(ctx, name, Query{OrganizationID: organizationID, Filters: filters, Limit: limit}, Fence{})
+		_, err := s.hot.ForEachView(ctx, name, QueryFromRecordQuery(organizationID, query), Fence{}, func(view RecordView) error {
+			return fn(recordFromView(view))
+		})
 		if err == nil {
-			return records, nil
+			return nil
 		}
 		s.markDegraded(name)
 	}
 	s.recordFallback()
-	return s.base.ListRecords(ctx, domain, collection, organizationID, filters, limit)
+	return s.base.ForEachRecord(ctx, domain, collection, organizationID, query, fn)
 }
 
-func (s *ProjectedRuntimeStore) CountRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any) (int64, error) {
+func (s *ProjectedRuntimeStore) CountRecords(ctx context.Context, domain, collection, organizationID string, query database.RecordQuery) (int64, error) {
 	if s.ensureWarm(ctx, domain, collection, organizationID) == nil {
 		name := s.ProjectionName(domain, collection, organizationID)
-		count, err := s.hot.Count(ctx, name, Query{OrganizationID: organizationID, Filters: filters}, Fence{})
+		count, err := s.hot.Count(ctx, name, QueryFromRecordQuery(organizationID, query), Fence{})
 		if err == nil {
 			return count, nil
 		}
 		s.markDegraded(name)
 	}
 	s.recordFallback()
-	return s.base.CountRecords(ctx, domain, collection, organizationID, filters)
+	return s.base.CountRecords(ctx, domain, collection, organizationID, query)
 }
 
 func (s *ProjectedRuntimeStore) EstimateCount(ctx context.Context, domain, collection, organizationID string) (int64, error) {
@@ -228,7 +240,7 @@ func (s *ProjectedRuntimeStore) ensureWarm(ctx context.Context, domain, collecti
 	if _, ok := s.warm.Load(name); ok && !s.isDegraded(name) {
 		return nil
 	}
-	total, err := s.base.CountRecords(ctx, domain, collection, organizationID, nil)
+	total, err := s.base.CountRecords(ctx, domain, collection, organizationID, database.RecordQuery{})
 	if err != nil {
 		s.markDegraded(name)
 		return err
@@ -278,8 +290,8 @@ func (s *ProjectedRuntimeStore) projectUpsert(ctx context.Context, rec database.
 }
 
 func (s *ProjectedRuntimeStore) projectRaw(ctx context.Context, raw database.RawDomainRecord) {
-	data := map[string]any{}
-	if err := json.Unmarshal(raw.DataJSON, &data); err != nil {
+	var data database.RecordData
+	if err := data.UnmarshalJSON(raw.DataJSON); err != nil {
 		return
 	}
 	s.projectUpsert(ctx, database.DomainRecord{
@@ -427,8 +439,8 @@ func (tx passthroughTx) QueryRow(ctx context.Context, query string, args ...any)
 	return tx.db.QueryRow(ctx, query, args...)
 }
 
-func (tx passthroughTx) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
-	return tx.db.QueryMaps(ctx, query, args...)
+func (tx passthroughTx) Query(ctx context.Context, query string, args ...any) (database.Rows, error) {
+	return tx.db.Query(ctx, query, args...)
 }
 
 func (passthroughTx) Commit(context.Context) error {

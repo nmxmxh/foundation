@@ -76,6 +76,26 @@ check_no_service_dir() {
   fi
 }
 
+check_no_internal_path() {
+  local label="$1"
+  shift
+  local found=""
+  local root
+  for root in "$target/internal" "$target/backend/internal"; do
+    [[ -d "$root" ]] || continue
+    while IFS= read -r path; do
+      found+="${path#$target/}"$'\n'
+    done < <(find "$root" "$@" 2>/dev/null)
+  done
+  if [[ -n "$found" ]]; then
+    echo "[FAIL] $label"
+    echo "$found" | sed '/^$/d; s/^/  /'
+    failed=1
+  else
+    echo "[OK] $label"
+  fi
+}
+
 if [[ -d "$target/foundation/server-kit/go" ]]; then
   kit="$target/foundation/server-kit/go"
 else
@@ -126,6 +146,12 @@ if [[ -f "$target/.foundation" && -d "$target/internal" ]]; then
   check_no_project_match "services use Foundation cache/Redis clients" "type .*Cache struct|type .*Redis|redis\\.NewClient\\(|redis\\.NewClusterClient\\(" "$target/internal/service"
   check_no_project_match "services use Foundation database executors" "\"database/sql\"|sql\\.(DB|Tx|Rows|Row)|pgxpool\\.New|pgxpool\\.ParseConfig|pgx\\.Connect" "$target/internal/service"
   check_no_project_match "services use Foundation worker/runtime primitives" "type .*Worker|type .*Queue|go func\\(|time\\.NewTicker\\(" "$target/internal/service"
+  check_no_project_match "internal code avoids legacy map handler bridges" "NormalizeHandler|LegacyHandler|QueryMaps|func [A-Za-z0-9_]*Handler\\(fn func\\(context\\.Context, extension\\.Object\\) \\(map\\[string\\]any, error\\)\\)|func adaptHandler\\(" "$target/internal" "$target/cmd"
+  check_no_project_match "internal code avoids map payload handler contracts" "type HandlerFunc func\\(context\\.Context, map\\[string\\]any\\)|DomainEventExecutor func\\(context\\.Context, string, map\\[string\\]any\\)" "$target/internal" "$target/cmd"
+  check_no_project_match "internal code avoids map-return object handlers" "func .*extension\\.Object.*\\) \\(map\\[string\\]any, error\\)" "$target/internal" "$target/cmd"
+  check_no_project_match "internal code avoids ObjectResult map bridges" "ObjectResult\\(" "$target/internal" "$target/cmd"
+  check_no_internal_path "bootstrap avoids generated typed wrapper files" \( -path '*/bootstrap/typed.go' -o -path '*/bootstrap/typed_test.go' \)
+  check_no_internal_path "application internals avoid adapter package/file shapes" \( -type d -name adapters -o -type f -iname '*adapter*.go' \)
   check_no_service_dir "service tree avoids local persistence primitive packages" "persistence"
   check_no_service_dir "service tree avoids local shared primitive packages" "shared"
   check_no_service_dir "service tree avoids local adapter primitive packages" "adapters"

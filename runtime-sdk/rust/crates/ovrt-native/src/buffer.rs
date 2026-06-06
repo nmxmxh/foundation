@@ -21,9 +21,7 @@ impl NativeBuffer {
     }
 
     pub fn with_capacity() -> Self {
-        Self {
-            raw: vec![0; ovrt_core::BUFFER_TOTAL_BYTES as usize],
-        }
+        Self { raw: vec![0; ovrt_core::BUFFER_TOTAL_BYTES as usize] }
     }
 
     pub fn into_inner(self) -> Vec<u8> {
@@ -133,10 +131,7 @@ impl NativeBuffer {
         let start = OFFSET_DIAGNOSTIC_BYTES as usize;
         let end = start + DIAGNOSTIC_MAX_BYTES as usize;
         let payload = &self.raw[start..end];
-        let length = payload
-            .iter()
-            .rposition(|byte| *byte != 0)
-            .map_or(0, |index| index + 1);
+        let length = payload.iter().rposition(|byte| *byte != 0).map_or(0, |index| index + 1);
         String::from_utf8_lossy(&payload[..length]).into_owned()
     }
 
@@ -219,13 +214,9 @@ mod tests {
         buffer.initialize_control_plane(9).expect("init");
         buffer.write_input_bytes(b"asset").expect("write input");
         buffer.write_output_bytes(b"layout").expect("write output");
-        buffer
-            .set_diagnostics_text("degraded")
-            .expect("write diagnostics");
+        buffer.set_diagnostics_text("degraded").expect("write diagnostics");
         let _ = buffer.add_epoch(IDX_INPUT_WRITTEN, 1).expect("input epoch");
-        let _ = buffer
-            .add_epoch(IDX_OUTPUT_WRITTEN, 1)
-            .expect("output epoch");
+        let _ = buffer.add_epoch(IDX_OUTPUT_WRITTEN, 1).expect("output epoch");
 
         assert_eq!(buffer.read_input_bytes().expect("read input"), b"asset");
         assert_eq!(buffer.read_output_bytes().expect("read output"), b"layout");
@@ -240,32 +231,22 @@ mod tests {
     fn fast_writes_update_lengths_without_clearing_full_regions() {
         let mut buffer = NativeBuffer::new(vec![0; BUFFER_TOTAL_BYTES as usize]).expect("buffer");
 
-        buffer
-            .write_output_bytes(b"long-output")
-            .expect("write output");
-        buffer
-            .write_output_bytes_fast(b"short")
-            .expect("fast output");
+        buffer.write_output_bytes(b"long-output").expect("write output");
+        buffer.write_output_bytes_fast(b"short").expect("fast output");
 
         assert_eq!(buffer.output_bytes_view().expect("output view"), b"short");
         assert_eq!(buffer.read_output_bytes().expect("owned output"), b"short");
 
         let mut reused = Vec::with_capacity(16);
-        buffer
-            .read_output_bytes_into(&mut reused)
-            .expect("read output into");
+        buffer.read_output_bytes_into(&mut reused).expect("read output into");
         assert_eq!(reused, b"short");
     }
 
     #[test]
     fn rejects_negative_runtime_payload_lengths() {
         let mut buffer = NativeBuffer::new(vec![0; BUFFER_TOTAL_BYTES as usize]).expect("buffer");
-        buffer
-            .set_header_int(INT_IDX_INPUT_LENGTH, -1)
-            .expect("set invalid input length");
-        buffer
-            .set_header_int(INT_IDX_OUTPUT_LENGTH, -1)
-            .expect("set invalid output length");
+        buffer.set_header_int(INT_IDX_INPUT_LENGTH, -1).expect("set invalid input length");
+        buffer.set_header_int(INT_IDX_OUTPUT_LENGTH, -1).expect("set invalid output length");
 
         assert!(buffer
             .input_bytes_view()

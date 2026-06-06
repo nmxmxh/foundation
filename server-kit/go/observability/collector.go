@@ -56,6 +56,48 @@ type DatabasePoolPressure struct {
 	AcquireDurationMicro int64 `json:"acquire_duration_micro"`
 }
 
+type Snapshot struct {
+	Timestamp   string              `json:"timestamp"`
+	HTTP        HTTPMetrics         `json:"http"`
+	Dispatch    DurationMetrics     `json:"dispatch"`
+	Redis       DurationMetrics     `json:"redis"`
+	Database    DatabaseMetrics     `json:"database"`
+	Worker      WorkerMetrics       `json:"worker"`
+	Concurrency ConcurrencyMetrics  `json:"concurrency"`
+	Traces      TraceMetricsSummary `json:"traces"`
+}
+
+type HTTPMetrics struct {
+	RequestCount map[string]int64 `json:"request_count"`
+}
+
+type DurationMetrics struct {
+	Count            map[string]int64 `json:"count"`
+	AvgDurationMicro map[string]int64 `json:"avg_duration_micro"`
+}
+
+type DatabaseMetrics struct {
+	Count            map[string]int64                `json:"count"`
+	AvgDurationMicro map[string]int64                `json:"avg_duration_micro"`
+	Pool             map[string]DatabasePoolPressure `json:"pool"`
+}
+
+type WorkerMetrics struct {
+	Count      map[string]int64 `json:"count"`
+	QueueDepth map[string]int64 `json:"queue_depth"`
+}
+
+type ConcurrencyMetrics struct {
+	Count            map[string]int64 `json:"count"`
+	Gauge            map[string]int64 `json:"gauge"`
+	AvgDurationMicro map[string]int64 `json:"avg_duration_micro"`
+}
+
+type TraceMetricsSummary struct {
+	CorrelationCount int `json:"correlation_count"`
+	EventCount       int `json:"event_count"`
+}
+
 func NewCollector() *Collector {
 	return &Collector{
 		httpRequests:          map[string]int64{},
@@ -323,9 +365,9 @@ func (c *Collector) Trace(correlationID string, limit int) []TraceEvent {
 	return out
 }
 
-func (c *Collector) Snapshot() map[string]any {
+func (c *Collector) Snapshot() Snapshot {
 	if c == nil {
-		return map[string]any{}
+		return Snapshot{}
 	}
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -357,36 +399,36 @@ func (c *Collector) Snapshot() map[string]any {
 		}
 	}
 
-	return map[string]any{
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"http": map[string]any{
-			"request_count": http,
+	return Snapshot{
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		HTTP: HTTPMetrics{
+			RequestCount: http,
 		},
-		"dispatch": map[string]any{
-			"count":              dispatch,
-			"avg_duration_micro": dispatchAvgMicro,
+		Dispatch: DurationMetrics{
+			Count:            dispatch,
+			AvgDurationMicro: dispatchAvgMicro,
 		},
-		"redis": map[string]any{
-			"count":              redis,
-			"avg_duration_micro": redisAvgMicro,
+		Redis: DurationMetrics{
+			Count:            redis,
+			AvgDurationMicro: redisAvgMicro,
 		},
-		"database": map[string]any{
-			"count":              database,
-			"avg_duration_micro": databaseAvgMicro,
-			"pool":               databasePool,
+		Database: DatabaseMetrics{
+			Count:            database,
+			AvgDurationMicro: databaseAvgMicro,
+			Pool:             databasePool,
 		},
-		"worker": map[string]any{
-			"count":       worker,
-			"queue_depth": queueDepth,
+		Worker: WorkerMetrics{
+			Count:      worker,
+			QueueDepth: queueDepth,
 		},
-		"concurrency": map[string]any{
-			"count":              concurrency,
-			"gauge":              concurrencyGauge,
-			"avg_duration_micro": concurrencyAvgMicro,
+		Concurrency: ConcurrencyMetrics{
+			Count:            concurrency,
+			Gauge:            concurrencyGauge,
+			AvgDurationMicro: concurrencyAvgMicro,
 		},
-		"traces": map[string]any{
-			"correlation_count": traceCount,
-			"event_count":       traceEvents,
+		Traces: TraceMetricsSummary{
+			CorrelationCount: traceCount,
+			EventCount:       traceEvents,
 		},
 	}
 }

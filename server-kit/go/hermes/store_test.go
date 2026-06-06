@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker"
 )
 
@@ -34,24 +37,17 @@ func TestStoreApplyGetListCountAndCopies(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetRecord() ok=%v err=%v", ok, err)
 	}
-	rec.Data["symbol"] = "mutated"
+	rec.Data = rec.Data.With("symbol", database.StringValue("mutated"))
 	rec, ok, err = store.GetRecord(ctx, "signals_ticks", Query{OrganizationID: "org_1"}, "tick_1", Fence{})
-	if err != nil || !ok || rec.Data["symbol"] != "OVS" {
+	if err != nil || !ok || !recordDataStringEquals(rec.Data, "symbol", "OVS") {
 		t.Fatalf("GetRecord() copy isolation failed: %+v ok=%v err=%v", rec, ok, err)
 	}
 
-	items, err := store.ListRecords(ctx, "signals_ticks", Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"symbol": "OVS"},
-		Limit:          10,
-	}, Fence{})
+	items, err := store.ListRecords(ctx, "signals_ticks", QueryFromRecordQuery("org_1", testRecordQuery(10, map[string]any{"symbol": "OVS"})), Fence{})
 	if err != nil || len(items) != 2 {
 		t.Fatalf("ListRecords() len=%d err=%v", len(items), err)
 	}
-	count, err := store.Count(ctx, "signals_ticks", Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": 2},
-	}, Fence{})
+	count, err := store.Count(ctx, "signals_ticks", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 2})), Fence{})
 	if err != nil || count != 1 {
 		t.Fatalf("Count() = %d err=%v", count, err)
 	}
@@ -90,11 +86,7 @@ func TestStoreForEachViewPreservesBatchVersionOrder(t *testing.T) {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 	var got []string
-	seen, err := store.ForEachView(t.Context(), "ordered_ticks", Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": 7},
-		Limit:          3,
-	}, Fence{}, func(view RecordView) error {
+	seen, err := store.ForEachView(t.Context(), "ordered_ticks", QueryFromRecordQuery("org_1", testRecordQuery(3, map[string]any{"bucket": 7})), Fence{}, func(view RecordView) error {
 		got = append(got, view.RecordID)
 		return nil
 	})
@@ -202,6 +194,152 @@ func TestStoreIdempotentVersionAndTombstone(t *testing.T) {
 	}
 }
 
+func TestStorePatchArchiveDeleteAndStaleInvalidation(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name:          "patch_ticks",
+		Domain:        "signals",
+		Collection:    "ticks",
+		IndexedFields: []string{"status", "bucket"},
+		MaxRecords:    10,
+		MaxBytes:      1 << 20,
+	})
+	ctx := t.Context()
+	applyTestRecord(t, store, "patch_ticks", "org_1", "tick_1", 10, map[string]any{
+		"status": "active",
+		"bucket": 1,
+		"title":  "original",
+	})
+
+	result, err := store.Apply(ctx, "patch_ticks", Event{
+		Operation: OperationPatch,
+		SourceID:  "patch_archive_11",
+		Version:   11,
+		Record: testRecord("signals", "ticks", "org_1", "tick_1", map[string]any{
+			"status": "archived",
+			"bucket": 2,
+		}),
+	})
+	if err != nil || result.Applied != 1 || result.Epoch == 0 {
+		t.Fatalf("archive patch result=%+v err=%v", result, err)
+	}
+	rec, ok, err := store.GetRecord(ctx, "patch_ticks", Query{OrganizationID: "org_1"}, "tick_1", Fence{MinEpoch: result.Epoch})
+	if err != nil || !ok {
+		t.Fatalf("GetRecord() after patch ok=%v err=%v", ok, err)
+	}
+	if !recordDataStringEquals(rec.Data, "title", "original") ||
+		!recordDataStringEquals(rec.Data, "status", "archived") ||
+		!recordDataIntEquals(rec.Data, "bucket", 2) {
+		t.Fatalf("patch did not merge fields correctly: %+v", rec.Data)
+	}
+	assertHermesCount(t, store, "patch_ticks", "org_1", map[string]any{"status": "active"}, 0)
+	assertHermesCount(t, store, "patch_ticks", "org_1", map[string]any{"status": "archived"}, 1)
+	assertHermesCount(t, store, "patch_ticks", "org_1", map[string]any{"bucket": 1}, 0)
+	assertHermesCount(t, store, "patch_ticks", "org_1", map[string]any{"bucket": 2}, 1)
+
+	result, err = store.Apply(ctx, "patch_ticks", Event{
+		Operation: OperationPatch,
+		SourceID:  "stale_patch_9",
+		Version:   9,
+		Record:    testRecord("signals", "ticks", "org_1", "tick_1", map[string]any{"status": "active", "bucket": 1}),
+	})
+	if err != nil || result.Applied != 0 || result.Ignored != 1 {
+		t.Fatalf("stale patch result=%+v err=%v, want ignored", result, err)
+	}
+	assertHermesCount(t, store, "patch_ticks", "org_1", map[string]any{"status": "archived"}, 1)
+
+	result, err = store.Apply(ctx, "patch_ticks", Event{
+		Operation: OperationDelete,
+		SourceID:  "delete_12",
+		Version:   12,
+		Record:    testRecord("signals", "ticks", "org_1", "tick_1", nil),
+	})
+	if err != nil || result.Applied != 1 {
+		t.Fatalf("delete result=%+v err=%v", result, err)
+	}
+	_, ok, err = store.GetRecord(ctx, "patch_ticks", Query{OrganizationID: "org_1"}, "tick_1", Fence{MinEpoch: result.Epoch})
+	if err != nil || ok {
+		t.Fatalf("GetRecord() after delete ok=%v err=%v", ok, err)
+	}
+	assertHermesCount(t, store, "patch_ticks", "org_1", map[string]any{"status": "archived"}, 0)
+
+	result, err = store.Apply(ctx, "patch_ticks", Event{
+		Operation: OperationPatch,
+		SourceID:  "patch_after_delete_13",
+		Version:   13,
+		Record:    testRecord("signals", "ticks", "org_1", "tick_1", map[string]any{"status": "active"}),
+	})
+	if err != nil || result.Applied != 0 || result.Ignored != 1 {
+		t.Fatalf("patch after delete result=%+v err=%v, want ignored", result, err)
+	}
+	_, ok, err = store.GetRecord(ctx, "patch_ticks", Query{OrganizationID: "org_1"}, "tick_1", Fence{})
+	if err != nil || ok {
+		t.Fatalf("patch resurrected deleted record ok=%v err=%v", ok, err)
+	}
+}
+
+func TestStoreConcurrentPatchReadsNeverObserveTornArchiveState(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name:          "concurrent_patch_ticks",
+		Domain:        "signals",
+		Collection:    "ticks",
+		IndexedFields: []string{"status", "bucket"},
+		MaxRecords:    10,
+		MaxBytes:      1 << 20,
+	})
+	ctx := t.Context()
+	applyTestRecord(t, store, "concurrent_patch_ticks", "org_1", "tick_1", 1, map[string]any{
+		"status": "active",
+		"bucket": 1,
+	})
+
+	var done atomic.Bool
+	var failed atomic.Bool
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for !done.Load() {
+				rec, ok, err := store.GetRecord(ctx, "concurrent_patch_ticks", Query{OrganizationID: "org_1"}, "tick_1", Fence{})
+				if err != nil || !ok {
+					failed.Store(true)
+					return
+				}
+				status, _ := rec.Data.Get("status")
+				bucket, _ := rec.Data.Get("bucket")
+				_, bucketText, _ := bucket.ScalarIndex()
+				validActive := status.Text == "active" && bucketText == "1"
+				validArchived := status.Text == "archived" && bucketText == "2"
+				if !validActive && !validArchived {
+					failed.Store(true)
+					return
+				}
+			}
+		})
+	}
+
+	for i := 2; i < 502; i++ {
+		status := "active"
+		bucket := 1
+		if i%2 == 0 {
+			status = "archived"
+			bucket = 2
+		}
+		_, err := store.Apply(ctx, "concurrent_patch_ticks", Event{
+			Operation: OperationPatch,
+			SourceID:  fmt.Sprintf("patch_%d", i),
+			Version:   uint64(i),
+			Record:    testRecord("signals", "ticks", "org_1", "tick_1", map[string]any{"status": status, "bucket": bucket}),
+		})
+		if err != nil {
+			t.Fatalf("patch %d failed: %v", i, err)
+		}
+	}
+	done.Store(true)
+	wg.Wait()
+	if failed.Load() {
+		t.Fatalf("concurrent reader observed missing or torn patch state")
+	}
+}
+
 func TestStoreRebuildFromStateStore(t *testing.T) {
 	source := database.NewMemoryDB()
 	ctx := t.Context()
@@ -222,12 +360,35 @@ func TestStoreRebuildFromStateStore(t *testing.T) {
 	if err != nil || result.Applied != 3 || result.Epoch == 0 {
 		t.Fatalf("Rebuild() result=%+v err=%v", result, err)
 	}
-	items, err := store.ListRecords(ctx, "rebuilt_ticks", Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": 1},
-	}, Fence{MinEpoch: result.Epoch})
+	items, err := store.ListRecords(ctx, "rebuilt_ticks", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 1})), Fence{MinEpoch: result.Epoch})
 	if err != nil || len(items) != 1 {
 		t.Fatalf("ListRecords() after rebuild len=%d err=%v", len(items), err)
+	}
+}
+
+func TestStoreRebuildUsesStreamingStateStore(t *testing.T) {
+	ctx := t.Context()
+	source := streamingOnlyStateStore{
+		records: []database.DomainRecord{
+			testRecord("signals", "ticks", "org_1", "tick_1", map[string]any{"bucket": 1}),
+			testRecord("signals", "ticks", "org_1", "tick_2", map[string]any{"bucket": 1}),
+		},
+	}
+	store := newTestStore(t, ProjectionSpec{
+		Name:          "streaming_rebuild_ticks",
+		Domain:        "signals",
+		Collection:    "ticks",
+		IndexedFields: []string{"bucket"},
+		MaxRecords:    10,
+		MaxBytes:      1 << 20,
+	})
+	result, err := store.Rebuild(ctx, "streaming_rebuild_ticks", source, Query{OrganizationID: "org_1"})
+	if err != nil || result.Applied != 2 {
+		t.Fatalf("Rebuild() result=%+v err=%v, want 2 streamed records", result, err)
+	}
+	count, err := store.Count(ctx, "streaming_rebuild_ticks", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 1})), Fence{})
+	if err != nil || count != 2 {
+		t.Fatalf("Count() after streaming rebuild = %d err=%v, want 2", count, err)
 	}
 }
 
@@ -266,7 +427,7 @@ func TestStoreBulkLoadReplacesSnapshotAndKeepsOldStateOnLimitError(t *testing.T)
 	if err != nil || result.Applied != 2 {
 		t.Fatalf("BulkLoad() result=%+v err=%v", result, err)
 	}
-	count, err := store.Count(ctx, "bulk_ticks", Query{OrganizationID: "org_1", Filters: map[string]any{"bucket": 1}}, Fence{})
+	count, err := store.Count(ctx, "bulk_ticks", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 1})), Fence{})
 	if err != nil || count != 2 {
 		t.Fatalf("Count() after BulkLoad = %d err=%v", count, err)
 	}
@@ -289,7 +450,7 @@ func TestStoreBulkLoadReplacesSnapshotAndKeepsOldStateOnLimitError(t *testing.T)
 	if !errors.Is(err, ErrProjectionLimit) {
 		t.Fatalf("BulkLoad over limit err=%v, want ErrProjectionLimit", err)
 	}
-	count, err = store.Count(ctx, "bulk_ticks", Query{OrganizationID: "org_1", Filters: map[string]any{"bucket": 1}}, Fence{})
+	count, err = store.Count(ctx, "bulk_ticks", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 1})), Fence{})
 	if err != nil || count != 2 {
 		t.Fatalf("Count() after failed BulkLoad = %d err=%v", count, err)
 	}
@@ -300,6 +461,52 @@ func TestStoreBulkLoadReplacesSnapshotAndKeepsOldStateOnLimitError(t *testing.T)
 	if stats.RejectedApplies == 0 {
 		t.Fatalf("expected failed BulkLoad to record a rejected apply: %+v", stats)
 	}
+}
+
+type streamingOnlyStateStore struct {
+	records []database.DomainRecord
+}
+
+func (s streamingOnlyStateStore) UpsertRecord(context.Context, database.DomainRecord) (database.DomainRecord, error) {
+	return database.DomainRecord{}, errors.New("not implemented")
+}
+
+func (s streamingOnlyStateStore) GetRecord(context.Context, string, string, string, string) (database.DomainRecord, bool, error) {
+	return database.DomainRecord{}, false, errors.New("not implemented")
+}
+
+func (s streamingOnlyStateStore) ForEachRecord(ctx context.Context, domain, collection, organizationID string, query database.RecordQuery, fn database.RecordVisitor) error {
+	for _, rec := range s.records {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if rec.Domain != domain || rec.Collection != collection || rec.OrganizationID != organizationID {
+			continue
+		}
+		if !rec.Data.Matches(query.Filters) {
+			continue
+		}
+		if err := fn(rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s streamingOnlyStateStore) ListRecords(context.Context, string, string, string, database.RecordQuery) ([]database.DomainRecord, error) {
+	return nil, errors.New("ListRecords must not be used for Hermes rebuild")
+}
+
+func (s streamingOnlyStateStore) CountRecords(context.Context, string, string, string, database.RecordQuery) (int64, error) {
+	return int64(len(s.records)), nil
+}
+
+func (s streamingOnlyStateStore) EstimateCount(context.Context, string, string, string) (int64, error) {
+	return int64(len(s.records)), nil
+}
+
+func (s streamingOnlyStateStore) DeleteRecord(context.Context, string, string, string, string) error {
+	return errors.New("not implemented")
 }
 
 func TestStoreForEachViewBorrowed(t *testing.T) {
@@ -313,7 +520,7 @@ func TestStoreForEachViewBorrowed(t *testing.T) {
 	applyTestRecord(t, store, "views", "org_1", "tick_1", 1, map[string]any{"value": 7})
 	var got int
 	seen, err := store.ForEachView(t.Context(), "views", Query{OrganizationID: "org_1"}, Fence{}, func(view RecordView) error {
-		if view.Data["value"] != 7 || view.Epoch == 0 {
+		if !recordDataIntEquals(view.Data, "value", 7) || view.Epoch == 0 {
 			t.Fatalf("unexpected view: %+v", view)
 		}
 		got++
@@ -336,7 +543,7 @@ func TestWorkerProcessorAppliesBatch(t *testing.T) {
 		return []Event{{
 			Operation: OperationUpsert,
 			Version:   1,
-			Record:    testRecord("signals", "ticks", "org_1", "tick_1", job.Payload),
+			Record:    testRecord("signals", "ticks", "org_1", "tick_1", job.Payload.InterfaceMap()),
 		}}, nil
 	})
 	if err != nil {
@@ -345,13 +552,13 @@ func TestWorkerProcessorAppliesBatch(t *testing.T) {
 	err = processor.Handle(t.Context(), worker.Job{
 		CorrelationID:  "corr_1",
 		IdempotencyKey: "idem_1",
-		Payload:        map[string]any{"value": 42},
+		Payload:        extension.Object{"value": extension.Int(42)},
 	})
 	if err != nil {
 		t.Fatalf("Handle() error = %v", err)
 	}
 	rec, ok, err := store.GetRecord(t.Context(), "worker_ticks", Query{OrganizationID: "org_1"}, "tick_1", Fence{})
-	if err != nil || !ok || rec.Data["value"] != 42 {
+	if err != nil || !ok || !recordDataIntEquals(rec.Data, "value", 42) {
 		t.Fatalf("worker projection record = %+v ok=%v err=%v", rec, ok, err)
 	}
 }
@@ -378,6 +585,14 @@ func applyTestRecord(t *testing.T, store *Store, projection string, orgID string
 	}
 }
 
+func assertHermesCount(t *testing.T, store *Store, projection string, orgID string, filters map[string]any, want int64) {
+	t.Helper()
+	count, err := store.Count(t.Context(), projection, QueryFromRecordQuery(orgID, testRecordQuery(0, filters)), Fence{})
+	if err != nil || count != want {
+		t.Fatalf("Count(%v) = %d err=%v, want %d", filters, count, err, want)
+	}
+}
+
 func testRecord(domain string, collection string, orgID string, recordID string, data map[string]any) database.DomainRecord {
 	now := time.Unix(1700000000, 0).UTC()
 	return database.DomainRecord{
@@ -385,7 +600,7 @@ func testRecord(domain string, collection string, orgID string, recordID string,
 		Collection:     collection,
 		OrganizationID: orgID,
 		RecordID:       recordID,
-		Data:           data,
+		Data:           testRecordData(data),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

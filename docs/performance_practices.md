@@ -106,14 +106,19 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 3. Reuse temporary buffers with `sync.Pool` only for stateless, recreatable, high-churn objects. Always reset before reuse.
 4. Copy small retained subslices out of large buffers so long-lived records do not keep large backing arrays alive.
 5. Keep hot communication payloads as bytes until the owning handler validates and decodes them. Avoid `map[string]any` materialization in routing, observability, and registry dispatch.
-6. Prefer borrowed frame views for synchronous inspection; use owned decoded values only when data must outlive the input frame.
-7. Use concrete types on fixed hot paths. Interfaces are fine at boundaries, but hidden boxing and dynamic dispatch must not sit inside tight loops without measurement.
-8. Review struct layout when many instances are stored or scanned. Put larger fields before smaller fields when it materially reduces padding and cache waste.
-9. Use escape analysis (`go build -gcflags="-m"`) when a hot allocation is unexpected. Avoid contorting code unless the benchmark proves the heap move matters.
-10. For bounded stream copies, use caller-owned buffers or exact-size bounded reads when the size is part of the contract. Avoid accidental scratch allocation in byte loops, and benchmark both the materialized API and any callback/borrowed-view API separately.
-11. For fixed-size checksum and identifier encodings, prefer stack-backed `hex.Encode`/`hex.Decode` into fixed arrays before the final string conversion. Reserve `hex.EncodeToString`/`hex.DecodeString` for cold paths or tests where the extra allocation is irrelevant.
-12. Validate offset/length arithmetic with checked addition before slicing, issuing range reads, composing manifests, or building object-store byte ranges. Integer wraparound in a hot path is both a correctness bug and a potential unbounded allocation trigger.
-13. Return borrowed readers or views for immutable in-memory payloads when the caller consumes them synchronously. Make a defensive copy only when storing caller-provided bytes, exposing mutable data, or allowing the view to outlive the owner.
+6. Treat JSON encode/decode as a compatibility boundary cost. Product hot paths should use generated protobuf, Cap'n Proto, typed structs, borrowed binary frame views, raw JSON bytes where preservation is required, or shared-memory descriptors.
+7. For open extension fields, prefer Foundation's typed extension value container or protobuf `Struct/Value` at protobuf interop boundaries. Do not use `any` as a performance escape hatch; in Go it is an alias for `interface{}` and still requires dynamic dispatch and runtime type checks.
+7a. Typed open values improve structural integrity and can reduce dynamic-map pressure in indexed/query/list and frame-adapter lanes, but they can regress JSON ingress when the decoder materializes an owned extension tree too early. Measure typed/binary and JSON compatibility lanes separately.
+7b. JSON-to-typed adapters should use token-level decoders, generated field walkers, protobuf reflection walkers, or lazy raw payload preservation. Avoid `json.Unmarshal` into `interface{}` followed by a second typed conversion on any benchmarked ingress, event, or projection path.
+7c. For event envelopes and HTTP dispatch, preserve raw payload bytes until the owner requests a typed object. Eager object construction is only acceptable when the owner immediately validates or mutates the value and the benchmark budget covers the allocation.
+8. Prefer borrowed frame views for synchronous inspection; use owned decoded values only when data must outlive the input frame.
+9. Use concrete types on fixed hot paths. Interfaces are fine at boundaries, but hidden boxing and dynamic dispatch must not sit inside tight loops without measurement.
+10. Review struct layout when many instances are stored or scanned. Put larger fields before smaller fields when it materially reduces padding and cache waste.
+11. Use escape analysis (`go build -gcflags="-m"`) when a hot allocation is unexpected. Avoid contorting code unless the benchmark proves the heap move matters.
+12. For bounded stream copies, use caller-owned buffers or exact-size bounded reads when the size is part of the contract. Avoid accidental scratch allocation in byte loops, and benchmark both the materialized API and any callback/borrowed-view API separately.
+13. For fixed-size checksum and identifier encodings, prefer stack-backed `hex.Encode`/`hex.Decode` into fixed arrays before the final string conversion. Reserve `hex.EncodeToString`/`hex.DecodeString` for cold paths or tests where the extra allocation is irrelevant.
+14. Validate offset/length arithmetic with checked addition before slicing, issuing range reads, composing manifests, or building object-store byte ranges. Integer wraparound in a hot path is both a correctness bug and a potential unbounded allocation trigger.
+15. Return borrowed readers or views for immutable in-memory payloads when the caller consumes them synchronously. Make a defensive copy only when storing caller-provided bytes, exposing mutable data, or allowing the view to outlive the owner.
 
 ### CPU microarchitecture posture
 

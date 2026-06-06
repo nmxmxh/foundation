@@ -245,10 +245,7 @@ mod tests {
         }
 
         fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-            Ok(input
-                .iter()
-                .map(|value| value.to_ascii_uppercase())
-                .collect())
+            Ok(input.iter().map(|value| value.to_ascii_uppercase()).collect())
         }
     }
 
@@ -264,15 +261,7 @@ mod tests {
         let mut error = [0_i8; 256];
         assert_eq!(
             // SAFETY: The test supplies valid output and error buffers.
-            unsafe {
-                create_host(
-                    1,
-                    &mut raw_host,
-                    error.as_mut_ptr(),
-                    error.len(),
-                    build_host,
-                )
-            },
+            unsafe { create_host(1, &mut raw_host, error.as_mut_ptr(), error.len(), build_host,) },
             0
         );
         assert!(!raw_host.is_null());
@@ -280,9 +269,7 @@ mod tests {
         let mut buffer = vec![0_u8; BUFFER_TOTAL_BYTES as usize];
         let mut runtime_buffer = ovrt_native::NativeBuffer::new(buffer.clone()).expect("buffer");
         runtime_buffer.initialize_control_plane(1).expect("init");
-        runtime_buffer
-            .write_input_bytes(b"ffi")
-            .expect("write input");
+        runtime_buffer.write_input_bytes(b"ffi").expect("write input");
         buffer.copy_from_slice(runtime_buffer.into_inner().as_slice());
 
         let mut error = [0_i8; 256];
@@ -318,11 +305,8 @@ mod tests {
         let mut error = [0_i8; 8];
         write_error(error.as_mut_ptr(), error.len(), "err 🧑‍💻");
 
-        let bytes = error
-            .iter()
-            .take_while(|byte| **byte != 0)
-            .map(|byte| *byte as u8)
-            .collect::<Vec<_>>();
+        let bytes =
+            error.iter().take_while(|byte| **byte != 0).map(|byte| *byte as u8).collect::<Vec<_>>();
         let message = std::str::from_utf8(&bytes).expect("error must remain valid utf-8");
         assert_eq!(message, "err ");
     }
@@ -333,15 +317,7 @@ mod tests {
         let mut error = [0_i8; 256];
         assert_eq!(
             // SAFETY: The test supplies valid output and error buffers.
-            unsafe {
-                create_host(
-                    4,
-                    &mut raw_host,
-                    error.as_mut_ptr(),
-                    error.len(),
-                    build_host,
-                )
-            },
+            unsafe { create_host(4, &mut raw_host, error.as_mut_ptr(), error.len(), build_host,) },
             0
         );
 
@@ -356,9 +332,7 @@ mod tests {
                     let mut runtime_buffer =
                         ovrt_native::NativeBuffer::new(buffer.clone()).expect("buffer");
                     runtime_buffer.initialize_control_plane(1).expect("init");
-                    runtime_buffer
-                        .write_input_bytes(input.as_bytes())
-                        .expect("write input");
+                    runtime_buffer.write_input_bytes(input.as_bytes()).expect("write input");
                     buffer.copy_from_slice(runtime_buffer.into_inner().as_slice());
 
                     let mut error = [0_i8; 256];

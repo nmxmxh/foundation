@@ -2,10 +2,7 @@ package bulk
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"math"
-	"strconv"
 	"strings"
 	"time"
 
@@ -203,7 +200,7 @@ func (p *Pipeline) Diagnostics(plan TransferPlan) LaneDiagnostics {
 
 func (p *Pipeline) planEnvelope(request transport.Envelope, eventType string, plan TransferPlan) transport.Envelope {
 	payload := planPayload(plan)
-	payload["lane"] = lanePayload(p.Diagnostics(plan))
+	payload["lane"] = transport.ObjectValue(lanePayload(p.Diagnostics(plan)))
 	return p.envelope(request, eventType, payload)
 }
 
@@ -220,15 +217,13 @@ func (p *Pipeline) manifestEnvelope(request transport.Envelope, manifest Transfe
 }
 
 func (p *Pipeline) failureEnvelope(request transport.Envelope, transferID string, err error) transport.Envelope {
-	payload := failurePayload(transferID, err)
-	payload["request_event"] = request.EventType
+	payload := failureTransportPayload(transferID, err)
+	payload["request_event"] = transport.String(request.EventType)
 	return p.envelope(request, EventFailed, payload)
 }
 
-func (p *Pipeline) envelope(request transport.Envelope, eventType string, payload map[string]any) transport.Envelope {
-	env := transport.CreateEnvelope(eventType, payload, map[string]any{
-		"bulk_pipeline": true,
-	})
+func (p *Pipeline) envelope(request transport.Envelope, eventType string, payload transport.Object) transport.Envelope {
+	env := transport.CreateEnvelope(eventType, payload, transport.Object{"bulk_pipeline": transport.Bool(true)})
 	if request.Metadata.CorrelationID != "" {
 		env.Metadata.CorrelationID = request.Metadata.CorrelationID
 	}
@@ -245,7 +240,7 @@ func (p *Pipeline) envelope(request transport.Envelope, eventType string, payloa
 	return env
 }
 
-func decodeInitiateRequest(payload map[string]any) (InitiateRequest, error) {
+func decodeInitiateRequest(payload transport.Object) (InitiateRequest, error) {
 	totalSize, err := payloadInt64(payload, "total_size", true)
 	if err != nil {
 		return InitiateRequest{}, err
@@ -280,7 +275,7 @@ func decodeInitiateRequest(payload map[string]any) (InitiateRequest, error) {
 	}, nil
 }
 
-func decodePartDescriptor(payload map[string]any) (string, PartDescriptor, error) {
+func decodePartDescriptor(payload transport.Object) (string, PartDescriptor, error) {
 	transferID, err := payloadString(payload, "transfer_id", true)
 	if err != nil {
 		return "", PartDescriptor{}, err
@@ -310,7 +305,7 @@ func decodePartDescriptor(payload map[string]any) (string, PartDescriptor, error
 	}, nil
 }
 
-func decodeCompleteRequest(payload map[string]any) (string, CompleteRequest, error) {
+func decodeCompleteRequest(payload transport.Object) (string, CompleteRequest, error) {
 	transferID, err := payloadString(payload, "transfer_id", true)
 	if err != nil {
 		return "", CompleteRequest{}, err
@@ -320,7 +315,7 @@ func decodeCompleteRequest(payload map[string]any) (string, CompleteRequest, err
 	}, nil
 }
 
-func payloadString(payload map[string]any, key string, required bool) (string, error) {
+func payloadString(payload transport.Object, key string, required bool) (string, error) {
 	value := strings.TrimSpace(stringValue(payload[key]))
 	if value == "" && required {
 		return "", apperrors.New(apperrors.CodeValidation, key+" is required")
@@ -328,16 +323,16 @@ func payloadString(payload map[string]any, key string, required bool) (string, e
 	return value, nil
 }
 
-func payloadInt(payload map[string]any, key string, required bool) (int, error) {
+func payloadInt(payload transport.Object, key string, required bool) (int, error) {
 	value, ok := payload[key]
-	if !ok || value == nil {
+	if !ok {
 		if required {
 			return 0, apperrors.New(apperrors.CodeValidation, key+" is required")
 		}
 		return 0, nil
 	}
-	n, err := numberValue(value)
-	if err != nil {
+	n, ok := value.Int64Value()
+	if !ok {
 		return 0, apperrors.New(apperrors.CodeValidation, key+" must be numeric")
 	}
 	if n > maxIntValue() || n < minIntValue() {
@@ -354,42 +349,22 @@ func minIntValue() int64 {
 	return -maxIntValue() - 1
 }
 
-func payloadInt64(payload map[string]any, key string, required bool) (int64, error) {
+func payloadInt64(payload transport.Object, key string, required bool) (int64, error) {
 	value, ok := payload[key]
-	if !ok || value == nil {
+	if !ok {
 		if required {
 			return 0, apperrors.New(apperrors.CodeValidation, key+" is required")
 		}
 		return 0, nil
 	}
-	n, err := numberValue(value)
-	if err != nil {
+	n, ok := value.Int64Value()
+	if !ok {
 		return 0, apperrors.New(apperrors.CodeValidation, key+" must be numeric")
 	}
 	return n, nil
 }
 
-func numberValue(value any) (int64, error) {
-	switch typed := value.(type) {
-	case int:
-		return int64(typed), nil
-	case int64:
-		return typed, nil
-	case int32:
-		return int64(typed), nil
-	case float64:
-		if math.Trunc(typed) != typed {
-			return 0, fmt.Errorf("not an integer")
-		}
-		return int64(typed), nil
-	case string:
-		return strconv.ParseInt(strings.TrimSpace(typed), 10, 64)
-	default:
-		return 0, fmt.Errorf("unsupported number type")
-	}
-}
-
-func payloadTime(payload map[string]any, key string) (time.Time, error) {
+func payloadTime(payload transport.Object, key string) (time.Time, error) {
 	raw := stringValue(payload[key])
 	if strings.TrimSpace(raw) == "" {
 		return time.Time{}, nil
@@ -401,30 +376,21 @@ func payloadTime(payload map[string]any, key string) (time.Time, error) {
 	return value, nil
 }
 
-func stringValue(value any) string {
-	switch typed := value.(type) {
-	case string:
-		return typed
-	case fmt.Stringer:
-		return typed.String()
-	default:
-		return ""
-	}
+func stringValue(value transport.Value) string {
+	typed, _ := value.StringValue()
+	return typed
 }
 
-func stringMapValue(value any) map[string]string {
-	switch typed := value.(type) {
-	case map[string]string:
-		return cloneStringMap(typed)
-	case map[string]any:
-		out := make(map[string]string, len(typed))
-		for key, value := range typed {
-			if text := stringValue(value); text != "" {
-				out[key] = text
-			}
-		}
-		return out
-	default:
+func stringMapValue(value transport.Value) map[string]string {
+	object, ok := value.ObjectValue()
+	if !ok {
 		return nil
 	}
+	out := make(map[string]string, len(object))
+	for key, value := range object {
+		if text := stringValue(value); text != "" {
+			out[key] = text
+		}
+	}
+	return out
 }

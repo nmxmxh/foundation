@@ -18,7 +18,7 @@ func TestCollectorSnapshotResetAndNilSafety(t *testing.T) {
 	nilCollector.RecordConcurrencyGauge("", "", -1)
 	nilCollector.RecordConcurrencyDuration("", "", "", time.Millisecond)
 	nilCollector.Reset()
-	if len(nilCollector.Snapshot()) != 0 {
+	if nilCollector.Snapshot().Timestamp != "" {
 		t.Fatal("nil snapshot should be empty")
 	}
 
@@ -36,46 +36,46 @@ func TestCollectorSnapshotResetAndNilSafety(t *testing.T) {
 	c.RecordConcurrencyDuration("registry", "shutdown", "success", 6*time.Millisecond)
 	c.RecordTrace("corr-1", "requested", "media:probe:v1:requested", "requested", "accepted", map[string]string{"organization_id": "org-1"})
 	snapshot := c.Snapshot()
-	httpData := snapshot["http"].(map[string]any)["request_count"].(map[string]int64)
+	httpData := snapshot.HTTP.RequestCount
 	if httpData["GET /health 200"] != 1 {
 		t.Fatalf("unexpected http metrics: %+v", httpData)
 	}
-	dispatchAvg := snapshot["dispatch"].(map[string]any)["avg_duration_micro"].(map[string]int64)
+	dispatchAvg := snapshot.Dispatch.AvgDurationMicro
 	if dispatchAvg["unknown|unknown"] != 2000 {
 		t.Fatalf("unexpected dispatch avg: %+v", dispatchAvg)
 	}
-	worker := snapshot["worker"].(map[string]any)
-	if worker["queue_depth"].(map[string]int64)["default"] != 0 {
+	worker := snapshot.Worker
+	if worker.QueueDepth["default"] != 0 {
 		t.Fatalf("unexpected worker metrics: %+v", worker)
 	}
-	concurrency := snapshot["concurrency"].(map[string]any)
-	if concurrency["count"].(map[string]int64)["registry|goroutine|started"] != 1 {
+	concurrency := snapshot.Concurrency
+	if concurrency.Count["registry|goroutine|started"] != 1 {
 		t.Fatalf("unexpected concurrency counts: %+v", concurrency)
 	}
-	if concurrency["gauge"].(map[string]int64)["registry|active_goroutines"] != 2 {
+	if concurrency.Gauge["registry|active_goroutines"] != 2 {
 		t.Fatalf("unexpected concurrency gauges: %+v", concurrency)
 	}
-	if concurrency["avg_duration_micro"].(map[string]int64)["registry|shutdown|success"] != 6000 {
+	if concurrency.AvgDurationMicro["registry|shutdown|success"] != 6000 {
 		t.Fatalf("unexpected concurrency durations: %+v", concurrency)
 	}
-	redis := snapshot["redis"].(map[string]any)
-	if redis["avg_duration_micro"].(map[string]int64)["publish|success"] != 3000 {
+	redis := snapshot.Redis
+	if redis.AvgDurationMicro["publish|success"] != 3000 {
 		t.Fatalf("unexpected redis metrics: %+v", redis)
 	}
-	database := snapshot["database"].(map[string]any)
-	if database["avg_duration_micro"].(map[string]int64)["query|success"] != 5000 {
+	database := snapshot.Database
+	if database.AvgDurationMicro["query|success"] != 5000 {
 		t.Fatalf("unexpected database metrics: %+v", database)
 	}
-	pool := database["pool"].(map[string]DatabasePoolPressure)["primary"]
+	pool := database.Pool["primary"]
 	if pool.ActiveConns != 3 || pool.AcquireDurationMicro != 22000 {
 		t.Fatalf("unexpected database pool metrics: %+v", pool)
 	}
-	traces := snapshot["traces"].(map[string]any)
-	if traces["correlation_count"].(int) != 1 || traces["event_count"].(int) != 1 {
+	traces := snapshot.Traces
+	if traces.CorrelationCount != 1 || traces.EventCount != 1 {
 		t.Fatalf("unexpected trace summary: %+v", traces)
 	}
 	c.Reset()
-	if len(c.Snapshot()["http"].(map[string]any)["request_count"].(map[string]int64)) != 0 {
+	if len(c.Snapshot().HTTP.RequestCount) != 0 {
 		t.Fatal("expected reset metrics")
 	}
 	if itoa(-42) != "-42" || itoa(0) != "0" {
@@ -129,7 +129,7 @@ func TestHTTPMiddlewareAndRecorderInterfaces(t *testing.T) {
 		t.Fatalf("status = %d", rec.Code)
 	}
 	snapshot := Default().Snapshot()
-	count := snapshot["http"].(map[string]any)["request_count"].(map[string]int64)
+	count := snapshot.HTTP.RequestCount
 	if count["POST /items 201"] != 1 {
 		t.Fatalf("unexpected middleware count: %+v", count)
 	}

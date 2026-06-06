@@ -15,6 +15,7 @@ import (
 	kitcompress "github.com/nmxmxh/ovasabi_foundation/server-kit/go/compress"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/domainerr"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
 	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
@@ -623,7 +624,7 @@ func (s *Server) performDispatch(r *http.Request, req httpapi.DispatchRequest) (
 		return dispatchExecution{EventType: eventType, CorrelationID: req.CorrelationID}, false, domainerr.Validation("invalid_timestamp", "invalid timestamp")
 	}
 
-	md := metadata.FromMap(req.Metadata)
+	md := metadata.FromObject(req.Metadata)
 	httpapi.EnrichMetadataFromRequest(&md, r)
 	req.CorrelationID = md.EnsureCorrelation(req.CorrelationID)
 	md.ApplyDefaults("http.dispatch")
@@ -635,7 +636,7 @@ func (s *Server) performDispatch(r *http.Request, req httpapi.DispatchRequest) (
 	}
 
 	if req.Payload == nil {
-		req.Payload = map[string]any{}
+		req.Payload = extension.Object{}
 	}
 
 	env := events.Envelope{
@@ -643,7 +644,7 @@ func (s *Server) performDispatch(r *http.Request, req httpapi.DispatchRequest) (
 		Payload:         req.Payload,
 		PayloadBytes:    append([]byte(nil), req.PayloadBytes...),
 		PayloadEncoding: req.PayloadEncoding,
-		Metadata:        md.ToMap(),
+		Metadata:        md.ToObject(),
 		CorrelationID:   req.CorrelationID,
 		SchemaVersion:   req.SchemaVersion,
 		Timestamp:       t,
@@ -667,7 +668,7 @@ func (s *Server) performDispatch(r *http.Request, req httpapi.DispatchRequest) (
 		PayloadBytes:     req.PayloadBytes,
 		PayloadEncoding:  req.PayloadEncoding,
 		ResponseEncoding: req.ResponseEncoding,
-		Metadata:         md.ToMap(),
+		Metadata:         md.ToObject(),
 	})
 	if err != nil {
 		return dispatchExecution{EventType: eventType, CorrelationID: req.CorrelationID, Metadata: md}, ok, err

@@ -176,7 +176,7 @@ check_typed_proto_plane() {
   local search_root
   for search_root in "$target/internal" "$target/backend/internal"; do
     [[ -d "$search_root" ]] || continue
-    if rg -n 'typedHandler|GetTypedHandlers|BuildTypedServiceHandlers|func \(s \*Service\) [A-Za-z0-9_]+V1\(ctx context\.Context, req \*.*v1\.[A-Za-z0-9_]+Request\)' "$search_root" \
+    if rg -n 'ProtoHandler|typedHandler|GetTypedHandlers|BuildTypedServiceHandlers|func \(s \*Service\) [A-Za-z0-9_]+V1\(ctx context\.Context, req \*.*v1\.[A-Za-z0-9_]+Request\)' "$search_root" \
       --glob '*.go' \
       --glob '!**/*test.go' >/dev/null 2>&1; then
       typed_found="true"
@@ -336,6 +336,7 @@ check_exists "go concurrency practices check" "$target/scripts/checks/go_concurr
 check_exists "frontend script runner" "$target/scripts/checks/frontend_script_runner.sh"
 check_exists "logging practices check" "$target/scripts/checks/logging_practices_check.sh"
 check_exists "metadata practices check" "$target/scripts/checks/metadata_practices_check.sh"
+check_exists "dynamic payload practices check" "$target/scripts/checks/dynamic_payload_practices_check.sh"
 check_exists "river practices check" "$target/scripts/checks/river_practices_check.sh"
 check_exists "server-kit module contract check" "$target/scripts/checks/server_kit_module_contract_check.sh"
 check_exists "server-kit usage check" "$target/scripts/checks/server_kit_usage_check.sh"
@@ -496,6 +497,7 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "operational excellence check maps DORA SPACE SLSA" "$target/scripts/checks/operational_excellence_check.sh" "supply_chain"
   check_file_contains "logging check blocks raw slog drift" "$target/scripts/checks/logging_practices_check.sh" "application code avoids raw slog imports"
   check_file_contains "logging check requires Foundation declarative logger install" "$target/scripts/checks/logging_practices_check.sh" "logger.Install"
+  check_file_contains "dynamic payload check blocks map any in product hot paths" "$target/scripts/checks/dynamic_payload_practices_check.sh" "dynamic payload maps are not allowed in scaffolded product hot paths"
   check_file_contains "lint-foundation includes go fix modernization" "$target/Makefile" "check-go-fix"
   check_file_contains "make exposes combined Rust check target" "$target/Makefile" "check-rust:"
   check_file_contains "lint-foundation includes Go static analysis" "$target/Makefile" "check-go-static-analysis"
@@ -503,6 +505,7 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "lint-foundation includes Rust runtime practices" "$target/Makefile" "check-rust-runtime-practices"
   check_file_contains "lint-foundation includes logging practices" "$target/Makefile" "check-logging-practices"
   check_file_contains "lint-foundation includes metadata practices" "$target/Makefile" "check-metadata-practices"
+  check_file_contains "lint-foundation includes dynamic payload practices" "$target/Makefile" "check-dynamic-payload-practices"
   check_file_contains "lint-foundation includes server-kit module contract" "$target/Makefile" "check-server-kit-module-contract"
   check_file_contains "make resolves Docker CLI centrally" "$target/Makefile" "DOCKER_BIN ?="
   check_file_contains "make isolates test Compose project" "$target/Makefile" "TEST_COMPOSE_PROJECT_NAME ?="
@@ -510,7 +513,14 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "integration tests clean started Docker test env" "$target/Makefile" "started_test_env=1"
   check_file_contains "test env cleanup removes orphan containers" "$target/Makefile" "down -v --remove-orphans"
   check_file_contains "make delegates frontend scripts to Foundation runner" "$target/Makefile" "FRONTEND_SCRIPT_RUNNER ?="
+  check_file_contains "make leaves Vitest worker count unforced by default" "$target/Makefile" "FOUNDATION_VITEST_WORKERS ?= 0"
+  check_file_contains "make serializes frontend tests by default" "$target/Makefile" "FOUNDATION_VITEST_SERIAL ?= 1"
   check_file_contains "server-kit check rejects internal JSON grpc dispatch" "$target/scripts/checks/server_kit_usage_check.sh" "internal code avoids JSON gRPC compatibility dispatch"
+  check_file_contains "server-kit check rejects legacy map handler bridges" "$target/scripts/checks/server_kit_usage_check.sh" "internal code avoids legacy map handler bridges"
+  check_file_contains "server-kit check rejects map-return object handlers" "$target/scripts/checks/server_kit_usage_check.sh" "internal code avoids map-return object handlers"
+  check_file_contains "server-kit check rejects ObjectResult bridges" "$target/scripts/checks/server_kit_usage_check.sh" "internal code avoids ObjectResult map bridges"
+  check_file_contains "server-kit check rejects generated typed wrappers" "$target/scripts/checks/server_kit_usage_check.sh" "bootstrap avoids generated typed wrapper files"
+  check_file_contains "server-kit check rejects app adapter shapes" "$target/scripts/checks/server_kit_usage_check.sh" "application internals avoid adapter package/file shapes"
   check_file_contains "startup installs Foundation logger" "$target/internal/startup/logger.go" "server-kit/go/logger"
   check_file_contains "startup installs Foundation runtime logger" "$target/internal/startup/logger.go" "logger.Install"
   check_file_contains "startup declares Foundation runtime logger scope" "$target/internal/startup/logger.go" "logger.RuntimeConfig"
@@ -554,12 +564,14 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "foundation runtime transport" "$target/foundation/runtime-transport/go/go.mod"
   check_exists "foundation common proto envelope" "$target/foundation/runtime-transport/protos/foundation/v1/envelope.proto"
   check_exists "foundation common proto projection" "$target/foundation/runtime-transport/protos/foundation/v1/projection.proto"
+  check_file_contains "foundation projection proto supports patch" "$target/foundation/runtime-transport/protos/foundation/v1/projection.proto" "PROJECTION_OPERATION_PATCH"
   check_exists "foundation config contracts" "$target/foundation/config-contracts/go/go.mod"
   check_exists "foundation tooling" "$target/foundation/tooling/docs/enforcement.md"
   check_exists "api README" "$target/api/README.md"
   check_exists "proto README" "$target/api/protos/README.md"
   check_exists "scaffolded common Foundation proto envelope" "$target/api/protos/foundation/v1/envelope.proto"
   check_exists "scaffolded common Foundation proto projection" "$target/api/protos/foundation/v1/projection.proto"
+  check_file_contains "scaffolded projection proto supports patch" "$target/api/protos/foundation/v1/projection.proto" "PROJECTION_OPERATION_PATCH"
   check_absent "legacy scaffolded transport proto directory" "$target/api/protos/transport"
   check_absent "legacy scaffolded Hermes proto directory" "$target/api/protos/hermes"
   if [[ -f "$target/api/protos/common/v1/metadata.proto" || -f "$target/api/protos/common/v1/common.proto" ]]; then
@@ -592,6 +604,24 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     echo "[OK] Dockerfiles avoid removed nginx-brotli image"
   fi
   check_file_contains "compose Redis 8 baseline" "$target/docker-compose.yml" "redis:8-alpine"
+  check_file_contains "compose Postgres service" "$target/docker-compose.yml" "  postgres:"
+  check_file_contains "compose Postgres 18 mounts parent data directory" "$target/docker-compose.yml" "/var/lib/postgresql"
+  check_file_not_contains "compose Postgres 18 avoids legacy data mount" "$target/docker-compose.yml" "/var/lib/postgresql/data"
+  check_file_contains "compose server receives DB host" "$target/docker-compose.yml" 'DB_HOST: "${DB_HOST:-postgres}"'
+  check_file_contains "compose migrate defaults to Compose Postgres host" "$target/docker-compose.yml" 'DB_HOST=${DB_HOST:-postgres}'
+  check_file_contains "compose migrate waits for Postgres" "$target/docker-compose.yml" "condition: service_healthy"
+  check_file_contains "compose migrate rejects container-local DATABASE_URL" "$target/docker-compose.yml" "DATABASE_URL points at localhost"
+  if awk '
+    /^  frontend:/ { in_frontend = 1; next }
+    /^  [A-Za-z0-9_-]+:/ && in_frontend { in_frontend = 0 }
+    in_frontend && /postgres:/ { found = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$target/docker-compose.yml"; then
+    echo "[FAIL] compose frontend avoids direct Postgres dependency"
+    failed=1
+  else
+    echo "[OK] compose frontend avoids direct Postgres dependency"
+  fi
   check_exists "docker-compose.dev.yml" "$target/docker-compose.dev.yml"
   check_file_contains "dev Postgres 18 mounts parent data directory" "$target/docker-compose.dev.yml" "/var/lib/postgresql"
   check_file_not_contains "dev Postgres 18 avoids legacy data mount" "$target/docker-compose.dev.yml" "/var/lib/postgresql/data"
@@ -640,7 +670,11 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     check_exists "postgresql config" "$target/config/postgresql.conf"
     check_exists "redis config" "$target/config/redis.conf"
     check_file_contains "postgres timeout guardrail" "$target/config/postgresql.conf" "statement_timeout"
+    check_file_contains "postgres WAL headroom baseline" "$target/config/postgresql.conf" "max_wal_size = 4GB"
+    check_file_contains "postgres WAL floor baseline" "$target/config/postgresql.conf" "min_wal_size = 512MB"
+    check_file_contains "postgres checkpoint cadence baseline" "$target/config/postgresql.conf" "checkpoint_timeout = 15min"
     check_file_contains "postgres autovacuum guardrail" "$target/config/postgresql.conf" "autovacuum_vacuum_scale_factor"
+    check_file_contains "postgres autovacuum work memory baseline" "$target/config/postgresql.conf" "autovacuum_work_mem = 128MB"
     check_file_contains "postgres async I/O baseline" "$target/config/postgresql.conf" "io_method"
     check_file_contains "postgres I/O observability baseline" "$target/config/postgresql.conf" "track_io_timing"
     check_file_contains "redis LFU eviction guardrail" "$target/config/redis.conf" "maxmemory-policy allkeys-lfu"
@@ -720,6 +754,7 @@ if [[ "${WITH_NATIVE:-false}" == "true" ]]; then
   check_exists "native Tauri config" "$target/native/src-tauri/tauri.conf.json"
   check_exists "native Tauri dev config" "$target/native/src-tauri/tauri.dev.conf.json"
   check_exists "native Tauri prod config" "$target/native/src-tauri/tauri.prod.conf.json"
+  check_exists "native Tauri icon asset" "$target/native/src-tauri/icons/icon.png"
   check_exists "native Tauri Rust manifest" "$target/native/src-tauri/Cargo.toml"
   check_exists "native Tauri capability" "$target/native/src-tauri/capabilities/main.json"
   check_exists "native capability examples" "$target/native/src-tauri/capabilities/examples.md"
@@ -747,6 +782,8 @@ if [[ "${WITH_NATIVE:-false}" == "true" ]]; then
         frontend_root="$target/frontend"
       fi
     fi
+    check_file_contains "frontend vitest config honors worker cap" "$frontend_root/vitest.config.ts" "FOUNDATION_VITEST_WORKERS"
+    check_file_contains "frontend vitest config honors serial mode" "$frontend_root/vitest.config.ts" "FOUNDATION_VITEST_SERIAL"
     check_frontend_package_contains "frontend runtime native package" "$frontend_root/package.json" '"@ovasabi/runtime-native"'
   fi
 fi

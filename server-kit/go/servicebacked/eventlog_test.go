@@ -12,6 +12,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/eventlog"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes"
 )
 
@@ -66,14 +67,14 @@ func TestServiceBackedEventLogToRedisToHermes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewProjectionEnvelope() error = %v", err)
 	}
-	envelope.Metadata["organization_id"] = orgID
+	envelope.Metadata["organization_id"] = extension.String(orgID)
 
 	if _, err := state.UpsertRecord(ctx, database.DomainRecord{
 		Domain:         "signals",
 		Collection:     "ticks",
 		OrganizationID: orgID,
 		RecordID:       "tick-eventlog",
-		Data:           map[string]any{"bucket": "7", "source": "eventlog"},
+		Data:           serviceRecordData(map[string]any{"bucket": "7", "source": "eventlog"}),
 	}); err != nil {
 		t.Fatalf("state upsert failed: %v", err)
 	}
@@ -106,10 +107,7 @@ func TestServiceBackedEventLogToRedisToHermes(t *testing.T) {
 		t.Fatalf("PollOnce() result=%+v err=%v", applied, err)
 	}
 
-	count, err := store.Count(ctx, "svc_eventlog_ticks", hermes.Query{
-		OrganizationID: orgID,
-		Filters:        map[string]any{"bucket": "7"},
-	}, hermes.Fence{})
+	count, err := store.Count(ctx, "svc_eventlog_ticks", hermes.QueryFromRecordQuery(orgID, serviceRecordQuery(0, map[string]any{"bucket": "7"})), hermes.Fence{})
 	if err != nil || count != 1 {
 		t.Fatalf("Hermes Count() = %d err=%v, want 1", count, err)
 	}
@@ -145,11 +143,9 @@ func TestServiceBackedEventLogBatchPublishPending(t *testing.T) {
 			PayloadEncoding: events.PayloadEncodingJSON,
 			CorrelationID:   fmt.Sprintf("corr-service-batch-%d", i),
 			SchemaVersion:   events.EnvelopeSchemaVersion,
-			Metadata: map[string]any{
-				"organization_id": "org-service-batch",
-			},
-			Payload:   map[string]any{"record_id": fmt.Sprintf("record-%d", i)},
-			Timestamp: time.Now().UTC(),
+			Metadata:        serviceObject(map[string]any{"organization_id": "org-service-batch"}),
+			Payload:         serviceObject(map[string]any{"record_id": fmt.Sprintf("record-%d", i)}),
+			Timestamp:       time.Now().UTC(),
 		}
 		if _, err := eventlog.Append(ctx, state, envelope); err != nil {
 			t.Fatalf("Append(%d) error = %v", i, err)
@@ -197,11 +193,9 @@ func TestServiceBackedEventLogConcurrentPublishClaimsDoNotDuplicate(t *testing.T
 			PayloadEncoding: events.PayloadEncodingJSON,
 			CorrelationID:   fmt.Sprintf("corr-service-claim-%d", i),
 			SchemaVersion:   events.EnvelopeSchemaVersion,
-			Metadata: map[string]any{
-				"organization_id": "org-service-claim",
-			},
-			Payload:   map[string]any{"record_id": fmt.Sprintf("claim-record-%d", i)},
-			Timestamp: time.Now().UTC(),
+			Metadata:        serviceObject(map[string]any{"organization_id": "org-service-claim"}),
+			Payload:         serviceObject(map[string]any{"record_id": fmt.Sprintf("claim-record-%d", i)}),
+			Timestamp:       time.Now().UTC(),
 		}
 		if _, err := eventlog.Append(ctx, state, envelope); err != nil {
 			t.Fatalf("Append(%d) error = %v", i, err)
@@ -248,9 +242,10 @@ func TestServiceBackedEventLogConcurrentPublishClaimsDoNotDuplicate(t *testing.T
 	}
 	seen := make(map[string]struct{}, eventCount)
 	for _, message := range messages {
-		raw, ok := streamEnvelopeBytes(message.Values[eventlog.DefaultStreamField])
-		if !ok {
-			t.Fatalf("stream message %s missing envelope bytes: %#v", message.ID, message.Values[eventlog.DefaultStreamField])
+		rawValue, ok := message.Values.Get(eventlog.DefaultStreamField)
+		raw, rawOK := streamEnvelopeBytes(rawValue)
+		if !ok || !rawOK {
+			t.Fatalf("stream message %s missing envelope bytes: %#v", message.ID, message.Values)
 		}
 		envelope, err := events.FromBinary(raw)
 		if err != nil {

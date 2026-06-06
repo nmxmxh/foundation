@@ -269,12 +269,12 @@ func (p *partition) getRecord(ctx context.Context, query Query, recordID string,
 	if err := p.checkFence(fence); err != nil {
 		return database.DomainRecord{}, false, err
 	}
+	query = normalizeQuery(query)
 	recordID = strings.TrimSpace(recordID)
-	orgID := strings.TrimSpace(query.OrganizationID)
-	if recordID == "" || orgID == "" {
+	if recordID == "" || query.OrganizationID == "" {
 		return database.DomainRecord{}, false, ErrInvalidEvent
 	}
-	key := recordKey(p.spec.Domain, p.spec.Collection, orgID, recordID)
+	key := recordKey(p.spec.Domain, p.spec.Collection, query.OrganizationID, recordID)
 	entry, ok := p.recordEntry(p.activeRegistry(), key)
 	if !ok || !recordMatches(entry.record, p.spec, query) {
 		return database.DomainRecord{}, false, nil
@@ -289,7 +289,7 @@ func (p *partition) listRecords(ctx context.Context, query Query, fence Fence) (
 	if err := p.checkFence(fence); err != nil {
 		return nil, err
 	}
-	query.OrganizationID = strings.TrimSpace(query.OrganizationID)
+	query = normalizeQuery(query)
 	if query.OrganizationID == "" {
 		return nil, ErrInvalidEvent
 	}
@@ -316,7 +316,7 @@ func (p *partition) count(ctx context.Context, query Query, fence Fence) (int64,
 	if err := p.checkFence(fence); err != nil {
 		return 0, err
 	}
-	query.OrganizationID = strings.TrimSpace(query.OrganizationID)
+	query = normalizeQuery(query)
 	if query.OrganizationID == "" {
 		return 0, ErrInvalidEvent
 	}
@@ -334,21 +334,18 @@ func (p *partition) count(ctx context.Context, query Query, fence Fence) (int64,
 
 func (p *partition) fastCount(registry *partitionRegistry, query Query) (int64, bool) {
 	scope := scopeKey(p.spec.Domain, p.spec.Collection, query.OrganizationID)
-	if len(query.Filters) == 0 {
+	if query.Plan.count == 0 {
 		return int64(p.scopeSnapshot(registry, scope).len()), true
 	}
-	if len(query.Filters) != 1 {
-		return 0, false
-	}
-	for field, expected := range query.Filters {
-		if !p.isIndexedField(field) {
+	if query.Plan.count > 0 {
+		if query.Plan.count != 1 {
 			return 0, false
 		}
-		kind, value, ok := indexableFieldValue(expected)
-		if !ok {
+		filter := query.Plan.first
+		if !p.isIndexedField(filter.Field) {
 			return 0, false
 		}
-		index := fieldIndex{scope: scope, field: field, kind: kind, value: value}
+		index := fieldIndex{scope: scope, field: filter.Field, kind: filter.Kind, value: filter.Value}
 		return int64(p.fieldSnapshot(registry, index).len()), true
 	}
 	return 0, false
@@ -397,7 +394,7 @@ func (p *partition) forEachView(ctx context.Context, query Query, fence Fence, f
 	if err := p.checkFence(fence); err != nil {
 		return 0, err
 	}
-	query.OrganizationID = strings.TrimSpace(query.OrganizationID)
+	query = normalizeQuery(query)
 	if query.OrganizationID == "" {
 		return 0, ErrInvalidEvent
 	}

@@ -1,0 +1,16 @@
+# benchmark	ns_per_op	bytes_per_op	allocs_per_op	unit_per_op	source
+BenchmarkServiceBackedEventLogPublishPending64-8	4493415	197940	2358	64.00 events/op	service-backed
+BenchmarkServiceBackedHermesRebuild512-8	3431035	2166493	23810	512.0 records/op	service-backed
+BenchmarkServiceBackedHermesApplyBatch512-8	938239	1051102	5859	512.0 records/op	service-backed
+BenchmarkServiceBackedRedisSetGet-8	483930	888	26		service-backed
+BenchmarkServiceBackedRedisSet-8	243617	464	13		service-backed
+BenchmarkServiceBackedRedisGet-8	261901	408	12		service-backed
+BenchmarkServiceBackedRedisSetGetParallel-8	123445	1016	29		service-backed
+BenchmarkServiceBackedRedisSetManyGetMany64-8	813287	51520	1053	64.00 keys/op	service-backed
+BenchmarkServiceBackedRedisSetGetMany64-8	618240	49481	793	64.00 keys/op	service-backed
+BenchmarkServiceBackedRedisRawPipelineSetGet64-8	633589	31768	657	64.00 keys/op	service-backed
+BenchmarkServiceBackedPostgresUpsert-8	300718	3502	61		service-backed
+BenchmarkServiceBackedPostgresUpsertRawJSON-8	320663	2189	40		service-backed
+BenchmarkServiceBackedPostgresUpsertParallel-8	82522	3557	61		service-backed
+BenchmarkServiceBackedPostgresSendBatchUpsert64-8	2813318	73372	937	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresCopyFrom64-8	657138	37577	378	64.00 rows/op	service-backed

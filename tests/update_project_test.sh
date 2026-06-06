@@ -31,6 +31,7 @@ WITH_WASM=false
 BASELINE_GENERATION=legacy
 EOF
 
+test_step "update legacy fixture from current foundation"
 "$FOUNDATION_DIR/scripts/update-project.sh" "$PROJECT_DIR" >/dev/null
 
 assert_contains ".foundation" "^WITH_WASM=true$"
@@ -81,6 +82,7 @@ if [[ -e "$PROJECT_DIR/api/protos/transport" || -e "$PROJECT_DIR/api/protos/herm
     exit 1
 fi
 
+test_step "run updated project scaffold checks"
 "$PROJECT_DIR/scripts/checks/project_scaffold_check.sh" "$PROJECT_DIR"
 "$PROJECT_DIR/scripts/checks/agent_contract_check.sh" "$PROJECT_DIR"
 "$PROJECT_DIR/scripts/checks/practice_controls_check.sh" "$PROJECT_DIR"

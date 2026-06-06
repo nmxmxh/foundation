@@ -2,9 +2,6 @@ package hermes
 
 import (
 	"context"
-	"fmt"
-	"maps"
-	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -73,11 +70,7 @@ func normalizeRecord(rec database.DomainRecord) (database.DomainRecord, error) {
 	if rec.Domain == "" || rec.Collection == "" || rec.OrganizationID == "" || rec.RecordID == "" {
 		return database.DomainRecord{}, ErrInvalidEvent
 	}
-	rec.Data = copyMap(rec.Data)
-	if rec.Data == nil {
-		rec.Data = map[string]any{}
-	}
-	rec.Data["organization_id"] = rec.OrganizationID
+	rec.Data = normalizeRecordDataWithOrganization(rec.Data, rec.OrganizationID)
 	now := time.Now().UTC()
 	if rec.CreatedAt.IsZero() {
 		rec.CreatedAt = now
@@ -88,22 +81,57 @@ func normalizeRecord(rec database.DomainRecord) (database.DomainRecord, error) {
 	return rec, nil
 }
 
+func normalizePatchRecord(rec database.DomainRecord) (database.DomainRecord, error) {
+	rec.Domain = strings.TrimSpace(rec.Domain)
+	rec.Collection = strings.TrimSpace(rec.Collection)
+	rec.OrganizationID = strings.TrimSpace(rec.OrganizationID)
+	rec.RecordID = strings.TrimSpace(rec.RecordID)
+	if rec.Domain == "" || rec.Collection == "" || rec.OrganizationID == "" || rec.RecordID == "" {
+		return database.DomainRecord{}, ErrInvalidEvent
+	}
+	rec.Data = normalizeRecordDataWithOrganization(rec.Data, rec.OrganizationID)
+	if rec.UpdatedAt.IsZero() {
+		rec.UpdatedAt = time.Now().UTC()
+	}
+	return rec, nil
+}
+
+func normalizeRecordDataWithOrganization(data database.RecordData, organizationID string) database.RecordData {
+	normalized := data.Normalize()
+	orgValue := database.StringValue(organizationID)
+	idx := sort.Search(len(normalized), func(i int) bool {
+		return normalized[i].Name >= "organization_id"
+	})
+	if idx < len(normalized) && normalized[idx].Name == "organization_id" {
+		normalized[idx].Value = orgValue
+		return normalized
+	}
+	normalized = append(normalized, database.RecordField{})
+	copy(normalized[idx+1:], normalized[idx:])
+	normalized[idx] = database.RecordField{Name: "organization_id", Value: orgValue}
+	return normalized
+}
+
 func copyRecord(in database.DomainRecord) database.DomainRecord {
 	out := in
-	out.Data = copyMap(in.Data)
+	out.Data = in.Data.Clone()
 	if len(in.Vector) > 0 {
 		out.Vector = append([]float32(nil), in.Vector...)
 	}
 	return out
 }
 
-func copyMap(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(in))
-	maps.Copy(out, in)
-	return out
+func recordFromView(view RecordView) database.DomainRecord {
+	return copyRecord(database.DomainRecord{
+		Domain:         view.Domain,
+		Collection:     view.Collection,
+		OrganizationID: view.OrganizationID,
+		RecordID:       view.RecordID,
+		Data:           view.Data,
+		Vector:         view.Vector,
+		CreatedAt:      view.CreatedAt,
+		UpdatedAt:      view.UpdatedAt,
+	})
 }
 
 func recordKey(domain, collection, organizationID, recordID string) string {
@@ -128,100 +156,156 @@ func recordMatches(rec database.DomainRecord, spec ProjectionSpec, query Query) 
 	if strings.TrimSpace(query.OrganizationID) != "" && rec.OrganizationID != strings.TrimSpace(query.OrganizationID) {
 		return false
 	}
-	return matchesFilter(rec.Data, query.Filters)
-}
-
-func matchesFilter(record map[string]any, filters map[string]any) bool {
-	for key, expected := range filters {
-		actual, ok := record[key]
-		if !ok || !equalValue(actual, expected) {
-			return false
-		}
+	if query.Plan.count > 0 {
+		return matchesPlannedFilters(rec.Data, query.Plan)
 	}
 	return true
 }
 
-func equalValue(actual any, expected any) bool {
-	as, aok := comparableString(actual)
-	es, eok := comparableString(expected)
-	if aok && eok {
-		return as == es
-	}
-	return strings.TrimSpace(fmt.Sprintf("%v", actual)) == strings.TrimSpace(fmt.Sprintf("%v", expected))
+func matchesPlannedFilters(data database.RecordData, plan QueryPlan) bool {
+	return forEachPlannedFilter(plan, func(filter QueryFilter) bool {
+		actual, ok := data.Get(filter.Field)
+		if !ok {
+			return false
+		}
+		kind, value, ok := actual.ScalarIndex()
+		return ok && kind == filter.Kind && value == filter.Value
+	})
 }
 
-func comparableString(value any) (string, bool) {
-	switch v := value.(type) {
-	case string:
-		return strings.TrimSpace(v), true
-	case int:
-		return strconv.Itoa(v), true
-	case int8:
-		return strconv.FormatInt(int64(v), 10), true
-	case int16:
-		return strconv.FormatInt(int64(v), 10), true
-	case int32:
-		return strconv.FormatInt(int64(v), 10), true
-	case int64:
-		return strconv.FormatInt(v, 10), true
-	case uint:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint8:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint16:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint32:
-		return strconv.FormatUint(uint64(v), 10), true
-	case uint64:
-		return strconv.FormatUint(v, 10), true
-	case bool:
-		return strconv.FormatBool(v), true
-	case float64:
-		if v == math.Trunc(v) {
-			return strconv.FormatInt(int64(v), 10), true
-		}
-		return strconv.FormatFloat(v, 'f', -1, 64), true
+func forEachPlannedFilter(plan QueryPlan, fn func(QueryFilter) bool) bool {
+	switch plan.count {
+	case 0:
+		return true
+	case 1:
+		return fn(plan.first)
 	default:
-		return "", false
+		for _, filter := range plan.filters {
+			if !fn(filter) {
+				return false
+			}
+		}
+		return true
 	}
 }
 
-func indexableFieldValue(value any) (byte, string, bool) {
-	switch typed := value.(type) {
-	case string:
-		return 's', typed, true
-	case bool:
-		if typed {
-			return 'b', "1", true
+func normalizeQuery(query Query) Query {
+	query.OrganizationID = strings.TrimSpace(query.OrganizationID)
+	return query
+}
+
+func NewQueryFilter(field string, value any) (QueryFilter, bool) {
+	recordValue, ok := database.RecordValueFromAny(value)
+	if !ok {
+		return QueryFilter{}, false
+	}
+	kind, encoded, ok := recordValue.ScalarIndex()
+	if !ok {
+		return QueryFilter{}, false
+	}
+	field = strings.TrimSpace(field)
+	if field == "" {
+		return QueryFilter{}, false
+	}
+	return QueryFilter{Field: field, Kind: kind, Value: encoded}, true
+}
+
+func (q Query) RecordQuery() database.RecordQuery {
+	return database.RecordQuery{Limit: q.Limit, Filters: q.Plan.RecordFilters()}.Normalize()
+}
+
+func QueryWithFilters(organizationID string, limit int, filters ...QueryFilter) Query {
+	planned := make([]QueryFilter, 0, len(filters))
+	for _, filter := range filters {
+		filter.Field = strings.TrimSpace(filter.Field)
+		if filter.Field == "" {
+			continue
 		}
-		return 'b', "0", true
-	case int:
-		return 'i', strconv.Itoa(typed), true
-	case int8:
-		return 'i', strconv.FormatInt(int64(typed), 10), true
-	case int16:
-		return 'i', strconv.FormatInt(int64(typed), 10), true
-	case int32:
-		return 'i', strconv.FormatInt(int64(typed), 10), true
-	case int64:
-		return 'i', strconv.FormatInt(typed, 10), true
-	case uint:
-		return 'u', strconv.FormatUint(uint64(typed), 10), true
-	case uint8:
-		return 'u', strconv.FormatUint(uint64(typed), 10), true
-	case uint16:
-		return 'u', strconv.FormatUint(uint64(typed), 10), true
-	case uint32:
-		return 'u', strconv.FormatUint(uint64(typed), 10), true
-	case uint64:
-		return 'u', strconv.FormatUint(typed, 10), true
-	case float64:
-		if typed == math.Trunc(typed) {
-			return 'i', strconv.FormatInt(int64(typed), 10), true
+		planned = append(planned, filter)
+	}
+	sort.Slice(planned, func(i int, j int) bool {
+		return planned[i].Field < planned[j].Field
+	})
+	plan := QueryPlan{}
+	if len(planned) == 1 {
+		plan = QueryPlan{first: planned[0], count: 1}
+	} else if len(planned) > 1 {
+		plan = QueryPlan{first: planned[0], filters: planned, count: len(planned)}
+	}
+	return Query{
+		OrganizationID: organizationID,
+		Limit:          limit,
+		Plan:           plan,
+	}
+}
+
+func QueryFromRecordQuery(organizationID string, query database.RecordQuery) Query {
+	if len(query.Filters) == 1 {
+		filter := query.Filters[0]
+		filter.Field = strings.TrimSpace(filter.Field)
+		if filter.Field == "" {
+			return Query{OrganizationID: organizationID, Limit: query.Limit}
 		}
-		return 'f', strconv.FormatFloat(typed, 'f', -1, 64), true
+		kind, encoded, ok := filter.Value.ScalarIndex()
+		if !ok {
+			return Query{OrganizationID: organizationID, Limit: query.Limit}
+		}
+		queryFilter := QueryFilter{Field: filter.Field, Kind: kind, Value: encoded}
+		return Query{OrganizationID: organizationID, Limit: query.Limit, Plan: QueryPlan{first: queryFilter, count: 1}}
+	}
+	filters := make([]QueryFilter, 0, len(query.Filters))
+	for _, filter := range query.Filters {
+		filter.Field = strings.TrimSpace(filter.Field)
+		if filter.Field == "" {
+			continue
+		}
+		kind, encoded, ok := filter.Value.ScalarIndex()
+		if !ok {
+			continue
+		}
+		filters = append(filters, QueryFilter{Field: filter.Field, Kind: kind, Value: encoded})
+	}
+	return QueryWithFilters(organizationID, query.Limit, filters...)
+}
+
+func (p QueryPlan) RecordFilters() []database.RecordFilter {
+	if p.count == 0 {
+		return nil
+	}
+	filters := make([]database.RecordFilter, 0, p.count)
+	forEachPlannedFilter(p, func(filter QueryFilter) bool {
+		filters = append(filters, database.RecordFilter{Field: filter.Field, Value: queryFilterValue(filter)})
+		return true
+	})
+	return filters
+}
+
+func queryFilterValue(filter QueryFilter) database.RecordValue {
+	switch filter.Kind {
+	case 's':
+		return database.StringValue(filter.Value)
+	case 'b':
+		return database.BoolValue(filter.Value == "1" || strings.EqualFold(filter.Value, "true"))
+	case 'i':
+		value, err := strconv.ParseInt(filter.Value, 10, 64)
+		if err != nil {
+			return database.StringValue(filter.Value)
+		}
+		return database.IntValue(value)
+	case 'u':
+		value, err := strconv.ParseUint(filter.Value, 10, 64)
+		if err != nil {
+			return database.StringValue(filter.Value)
+		}
+		return database.UintValue(value)
+	case 'f':
+		value, err := strconv.ParseFloat(filter.Value, 64)
+		if err != nil {
+			return database.StringValue(filter.Value)
+		}
+		return database.FloatValue(value)
 	default:
-		return 0, "", false
+		return database.StringValue(filter.Value)
 	}
 }
 

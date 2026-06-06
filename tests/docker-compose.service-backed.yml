@@ -14,7 +14,7 @@ services:
     command:
       - postgres
       - -c
-      - max_connections=120
+      - max_connections=${SERVICE_BACKED_POSTGRES_MAX_CONNECTIONS:-120}
       - -c
       - shared_buffers=128MB
       - -c
@@ -24,13 +24,29 @@ services:
       - -c
       - maintenance_work_mem=64MB
       - -c
-      - checkpoint_timeout=15min
+      - checkpoint_timeout=${SERVICE_BACKED_POSTGRES_CHECKPOINT_TIMEOUT:-15min}
       - -c
       - checkpoint_completion_target=0.9
       - -c
-      - max_wal_size=1GB
+      - max_wal_size=${SERVICE_BACKED_POSTGRES_MAX_WAL_SIZE:-1GB}
+      - -c
+      - min_wal_size=${SERVICE_BACKED_POSTGRES_MIN_WAL_SIZE:-256MB}
       - -c
       - wal_compression=on
+      - -c
+      - autovacuum=on
+      - -c
+      - autovacuum_max_workers=${SERVICE_BACKED_POSTGRES_AUTOVACUUM_MAX_WORKERS:-5}
+      - -c
+      - autovacuum_work_mem=${SERVICE_BACKED_POSTGRES_AUTOVACUUM_WORK_MEM:-128MB}
+      - -c
+      - autovacuum_vacuum_insert_scale_factor=${SERVICE_BACKED_POSTGRES_AUTOVACUUM_INSERT_SCALE_FACTOR:-0.05}
+      - -c
+      - autovacuum_naptime=${SERVICE_BACKED_POSTGRES_AUTOVACUUM_NAPTIME:-10s}
+      - -c
+      - log_checkpoints=on
+      - -c
+      - log_autovacuum_min_duration=1s
       - -c
       - random_page_cost=1.1
       - -c
@@ -43,7 +59,7 @@ services:
       timeout: 3s
       retries: 30
     tmpfs:
-      - /var/lib/postgresql:size=768m
+      - /var/lib/postgresql:size=${SERVICE_BACKED_POSTGRES_TMPFS_SIZE:-768m}
 
   service-redis:
     image: ${SERVICE_BACKED_REDIS_IMAGE:-redis:8-alpine}
@@ -58,7 +74,7 @@ services:
       - --save
       - ""
       - --maxmemory
-      - 256mb
+      - ${SERVICE_BACKED_REDIS_MAXMEMORY:-256mb}
       - --maxmemory-policy
       - allkeys-lfu
       - --io-threads

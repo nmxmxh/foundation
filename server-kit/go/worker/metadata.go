@@ -7,25 +7,26 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 // JobMetadata stores extended context for queued workflows.
 type JobMetadata struct {
-	JobID         int64          `json:"job_id"`
-	WorkflowName  string         `json:"workflow_name"`
-	EntityType    string         `json:"entity_type"`
-	EntityID      string         `json:"entity_id"`
-	UserID        string         `json:"user_id"`
-	CorrelationID string         `json:"correlation_id"`
-	RawPayload    []byte         `json:"raw_payload"`
-	TrackingData  map[string]any `json:"tracking_data"`
+	JobID         int64            `json:"job_id"`
+	WorkflowName  string           `json:"workflow_name"`
+	EntityType    string           `json:"entity_type"`
+	EntityID      string           `json:"entity_id"`
+	UserID        string           `json:"user_id"`
+	CorrelationID string           `json:"correlation_id"`
+	RawPayload    []byte           `json:"raw_payload"`
+	TrackingData  extension.Object `json:"tracking_data"`
 }
 
 // MetadataStore is a minimal metadata persistence abstraction.
 type MetadataStore interface {
 	Save(context.Context, JobMetadata) error
 	Get(context.Context, int64) (JobMetadata, error)
-	UpdateTrackingData(context.Context, int64, map[string]any) error
+	UpdateTrackingData(context.Context, int64, extension.Object) error
 }
 
 // InMemoryMetadataStore is the local implementation for development/test.
@@ -52,7 +53,7 @@ func (s *InMemoryMetadataStore) Save(_ context.Context, metadata JobMetadata) er
 		return fmt.Errorf("entity_id is required")
 	}
 	if metadata.TrackingData == nil {
-		metadata.TrackingData = map[string]any{}
+		metadata.TrackingData = extension.Object{}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -70,7 +71,7 @@ func (s *InMemoryMetadataStore) Get(_ context.Context, jobID int64) (JobMetadata
 	return metadata, nil
 }
 
-func (s *InMemoryMetadataStore) UpdateTrackingData(_ context.Context, jobID int64, trackingData map[string]any) error {
+func (s *InMemoryMetadataStore) UpdateTrackingData(_ context.Context, jobID int64, trackingData extension.Object) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	metadata, ok := s.store[jobID]
@@ -132,7 +133,7 @@ func (s *PostgresMetadataStore) Get(ctx context.Context, jobID int64) (JobMetada
 	return m, nil
 }
 
-func (s *PostgresMetadataStore) UpdateTrackingData(ctx context.Context, jobID int64, trackingData map[string]any) error {
+func (s *PostgresMetadataStore) UpdateTrackingData(ctx context.Context, jobID int64, trackingData extension.Object) error {
 	query := `UPDATE river_job_metadata SET tracking_data = $1, updated_at = now() WHERE job_id = $2`
 	_, err := s.pool.Exec(ctx, query, trackingData, jobID)
 	return err

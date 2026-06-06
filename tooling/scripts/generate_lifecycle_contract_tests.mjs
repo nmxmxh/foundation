@@ -373,6 +373,7 @@ import (
 
 \t"${importRoot}/contracttest"
 \t"${importRoot}/events"
+\t"${importRoot}/extension"
 \t"${importRoot}/worker"
 )
 
@@ -403,10 +404,10 @@ ${emptyGuard}\tfor _, tc := range cases {
 \t\t\t\t\tIdempotencyKey: "idem_generated_contract",
 \t\t\t\t\tMaxAttempts: 2,
 \t\t\t\t\tMetadata: metadata,
-\t\t\t\t\tPayload: map[string]any{
-\t\t\t\t\t\t"request_message": tc.requestMessage,
-\t\t\t\t\t\t"response_message": tc.responseMessage,
-\t\t\t\t\t\t"source_proto": tc.sourceProto,
+\t\t\t\t\tPayload: extension.Object{
+\t\t\t\t\t\t"request_message": extension.String(tc.requestMessage),
+\t\t\t\t\t\t"response_message": extension.String(tc.responseMessage),
+\t\t\t\t\t\t"source_proto": extension.String(tc.sourceProto),
 \t\t\t\t\t},
 \t\t\t\t}},
 \t\t\t}
@@ -455,10 +456,10 @@ func generatedLifecycleContractByName(name string) (generatedLifecycleContractCa
 \treturn generatedLifecycleContractCase{}, false
 }
 
-func generatedLifecycleEnvelope(eventType string, metadata map[string]any) events.Envelope {
+func generatedLifecycleEnvelope(eventType string, metadata extension.Object) events.Envelope {
 \tenv := events.Envelope{
 \t\tEventType: eventType,
-\t\tPayload: map[string]any{"source": "generated_lifecycle_contract"},
+\t\tPayload: extension.Object{"source": extension.String("generated_lifecycle_contract")},
 \t\tMetadata: generatedLifecycleCopy(metadata),
 \t\tCorrelationID: "corr_generated_contract",
 \t\tSchemaVersion: events.EnvelopeSchemaVersion,
@@ -468,16 +469,16 @@ func generatedLifecycleEnvelope(eventType string, metadata map[string]any) event
 \treturn env
 }
 
-func generatedLifecycleMetadata() map[string]any {
-\treturn map[string]any{
-\t\t"correlation_id": "corr_generated_contract",
-\t\t"idempotency_key": "idem_generated_contract",
-\t\t"organization_id": "org_generated_contract",
+func generatedLifecycleMetadata() extension.Object {
+\treturn extension.Object{
+\t\t"correlation_id": extension.String("corr_generated_contract"),
+\t\t"idempotency_key": extension.String("idem_generated_contract"),
+\t\t"organization_id": extension.String("org_generated_contract"),
 \t}
 }
 
-func generatedLifecycleCopy(in map[string]any) map[string]any {
-\tout := make(map[string]any, len(in))
+func generatedLifecycleCopy(in extension.Object) extension.Object {
+\tout := make(extension.Object, len(in))
 \tfor key, value := range in {
 \t\tout[key] = value
 \t}

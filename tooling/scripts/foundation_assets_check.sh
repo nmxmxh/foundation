@@ -140,7 +140,10 @@ check_no_rg "templates avoid deprecated nginx brotli base image" "fholzer/nginx-
 check_no_rg "templates avoid PostgreSQL 18 data subdirectory mount" "/var/lib/postgresql/data" "$target/templates" --glob '*.yml'
 check_no_rg "templates avoid Redis 7 baseline" "redis:7" "$target/templates" --glob '*.yml'
 check_file_contains "template Redis baseline is Redis 8" "$target/templates/docker/docker-compose.yml" "redis:8-alpine"
+check_file_contains "template production Compose includes Postgres service" "$target/templates/docker/docker-compose.yml" "  postgres:"
 check_file_contains "template Postgres mount uses PostgreSQL root" "$target/templates/docker/docker-compose.yml" "/var/lib/postgresql"
+check_file_contains "template server receives DB host" "$target/templates/docker/docker-compose.yml" 'DB_HOST: "${DB_HOST:-postgres}"'
+check_file_contains "template migrate defaults to Compose Postgres host" "$target/templates/docker/docker-compose.yml" 'DB_HOST=${DB_HOST:-postgres}'
 
 if [[ "$failed" -ne 0 ]]; then
   echo "foundation assets check failed"

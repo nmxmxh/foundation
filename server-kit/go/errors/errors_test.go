@@ -44,11 +44,13 @@ func TestCodeHTTPStatusAndClassification(t *testing.T) {
 
 func TestErrorWrappingDetailsAndAPIResponse(t *testing.T) {
 	base := New(CodeNotFound, "missing").WithField("id", "123").WithRequestID("req_1")
-	wrapped := Wrap(base, CodeDependency, "lookup failed").WithFields(map[string]any{"dep": "db"})
+	wrapped := Wrap(base, CodeDependency, "lookup failed").WithField("dep", "db")
 	if wrapped == nil || !stderrors.Is(wrapped, base) {
 		t.Fatal("expected wrapped error to preserve cause")
 	}
-	if wrapped.Details["id"] != "123" || wrapped.Details["dep"] != "db" {
+	id, idOK := wrapped.Details.GetString("id")
+	dep, depOK := wrapped.Details.GetString("dep")
+	if !idOK || id != "123" || !depOK || dep != "db" {
 		t.Fatalf("details not preserved: %+v", wrapped.Details)
 	}
 	if !strings.Contains(wrapped.Error(), "DEPENDENCY_ERROR: lookup failed") {

@@ -1,0 +1,31 @@
+# benchmark	ns_per_op	bytes_per_op	allocs_per_op	unit_per_op	source
+BenchmarkServiceBackedEventLogPublishPending64-8	7055048	166214	2045	64.00 events/op	service-backed
+BenchmarkServiceBackedEventLogPublishPending64-8	5589535	166642	2047	64.00 events/op	service-backed
+BenchmarkServiceBackedHermesRebuild512-8	2747999	2334351	17154	512.0 records/op	service-backed
+BenchmarkServiceBackedHermesRebuild512-8	2972262	2334375	17154	512.0 records/op	service-backed
+BenchmarkServiceBackedHermesApplyBatch512-8	878209	981472	4323	512.0 records/op	service-backed
+BenchmarkServiceBackedHermesApplyBatch512-8	865090	981494	4324	512.0 records/op	service-backed
+BenchmarkServiceBackedRedisSetGet-8	523971	888	26		service-backed
+BenchmarkServiceBackedRedisSetGet-8	569733	888	26		service-backed
+BenchmarkServiceBackedRedisSet-8	264390	464	13		service-backed
+BenchmarkServiceBackedRedisSet-8	291938	464	13		service-backed
+BenchmarkServiceBackedRedisGet-8	330052	408	12		service-backed
+BenchmarkServiceBackedRedisGet-8	432365	408	12		service-backed
+BenchmarkServiceBackedRedisSetGetParallel-8	148895	1065	29		service-backed
+BenchmarkServiceBackedRedisSetGetParallel-8	137942	1062	29		service-backed
+BenchmarkServiceBackedRedisSetManyGetMany64-8	991460	51523	1053	64.00 keys/op	service-backed
+BenchmarkServiceBackedRedisSetManyGetMany64-8	1062024	51520	1053	64.00 keys/op	service-backed
+BenchmarkServiceBackedRedisSetGetMany64-8	928711	49480	793	64.00 keys/op	service-backed
+BenchmarkServiceBackedRedisSetGetMany64-8	843643	49485	793	64.00 keys/op	service-backed
+BenchmarkServiceBackedRedisRawPipelineSetGet64-8	567977	31768	657	64.00 keys/op	service-backed
+BenchmarkServiceBackedRedisRawPipelineSetGet64-8	623980	31768	657	64.00 keys/op	service-backed
+BenchmarkServiceBackedPostgresUpsert-8	339228	3322	56		service-backed
+BenchmarkServiceBackedPostgresUpsert-8	364503	3320	55		service-backed
+BenchmarkServiceBackedPostgresUpsertRawJSON-8	618192	2194	39		service-backed
+BenchmarkServiceBackedPostgresUpsertRawJSON-8	491886	2195	39		service-backed
+BenchmarkServiceBackedPostgresUpsertParallel-8	87221	3395	56		service-backed
+BenchmarkServiceBackedPostgresUpsertParallel-8	94344	3397	56		service-backed
+BenchmarkServiceBackedPostgresSendBatchUpsert64-8	2863080	73372	937	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresSendBatchUpsert64-8	3544482	73381	937	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresCopyFrom64-8	784365	36618	378	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresCopyFrom64-8	810238	36286	378	64.00 rows/op	service-backed

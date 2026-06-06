@@ -5,17 +5,18 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 )
 
 type staticScaffoldResponse struct {
-	EventType      string         `json:"event_type"`
-	Domain         string         `json:"domain"`
-	Status         string         `json:"status"`
-	RequestSchema  string         `json:"request_schema"`
-	ResponseSchema string         `json:"response_schema"`
-	Payload        map[string]any `json:"payload"`
+	EventType      string           `json:"event_type"`
+	Domain         string           `json:"domain"`
+	Status         string           `json:"status"`
+	RequestSchema  string           `json:"request_schema"`
+	ResponseSchema string           `json:"response_schema"`
+	Payload        extension.Object `json:"payload"`
 }
 
 // RouteOption mutates HTTP route metadata for docs/runtime wiring.
@@ -78,44 +79,40 @@ func WithRequestHeaders(headers ...string) RouteOption {
 	}
 }
 
-func WithStaticPayload(payload map[string]any) RouteOption {
+func WithStaticObject(payload extension.Object) RouteOption {
 	return func(route *registry.HTTPRoute) {
 		if payload == nil {
 			return
 		}
 		if route.StaticPayload == nil {
-			route.StaticPayload = map[string]any{}
+			route.StaticPayload = extension.Object{}
 		}
 		for key, value := range payload {
 			key = strings.TrimSpace(key)
 			if key == "" {
 				continue
 			}
-			route.StaticPayload[key] = value
+			route.StaticPayload[key] = value.Clone()
 		}
 	}
 }
 
-func WithMetadata(values map[string]any) RouteOption {
+func WithMetadataObject(values extension.Object) RouteOption {
 	return func(route *registry.HTTPRoute) {
 		if values == nil {
 			return
 		}
 		if route.Metadata == nil {
-			route.Metadata = map[string]any{}
+			route.Metadata = extension.Object{}
 		}
 		for key, value := range values {
 			key = strings.TrimSpace(key)
 			if key == "" {
 				continue
 			}
-			route.Metadata[key] = value
+			route.Metadata[key] = value.Clone()
 		}
 	}
-}
-
-func WithMetadataValue(key string, value any) RouteOption {
-	return WithMetadata(map[string]any{key: value})
 }
 
 func WithTags(tags ...string) RouteOption {
@@ -139,8 +136,8 @@ func MakeEventRoute(method, path, eventType, description, requestSchema, respons
 		Description:    strings.TrimSpace(description),
 		RequestSchema:  strings.TrimSpace(requestSchema),
 		ResponseSchema: strings.TrimSpace(responseSchema),
-		StaticPayload:  map[string]any{},
-		Metadata:       map[string]any{},
+		StaticPayload:  extension.Object{},
+		Metadata:       extension.Object{},
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -157,10 +154,10 @@ func MakeEventRoute(method, path, eventType, description, requestSchema, respons
 }
 
 // StaticRoute creates a scaffold route that returns a standard route metadata payload.
-func StaticRoute(method, path, eventType, description, requestSchema, responseSchema, domain string, payload map[string]any, opts ...RouteOption) registry.HTTPRoute {
+func StaticRoute(method, path, eventType, description, requestSchema, responseSchema, domain string, payload extension.Object, opts ...RouteOption) registry.HTTPRoute {
 	route := MakeEventRoute(method, path, eventType, description, requestSchema, responseSchema, opts...)
 	if payload != nil {
-		WithStaticPayload(payload)(&route)
+		WithStaticObject(payload)(&route)
 	}
 	route.Handler = func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -171,7 +168,7 @@ func StaticRoute(method, path, eventType, description, requestSchema, responseSc
 			Status:         "scaffold",
 			RequestSchema:  requestSchema,
 			ResponseSchema: responseSchema,
-			Payload:        payload,
+			Payload:        route.StaticPayload.Clone(),
 		}
 		_ = json.NewEncoder(w).Encode(response)
 	}

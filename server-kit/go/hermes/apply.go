@@ -97,7 +97,7 @@ func (p *partition) applyEventLocked(registry *partitionRegistry, publisher *ind
 	if p.alreadyAppliedLocked(event.SourceID) {
 		return applyStateDuplicate, 0, nil
 	}
-	rec, err := normalizeRecord(event.Record)
+	rec, err := normalizeEventRecord(event)
 	if err != nil {
 		return applyStateIgnored, 0, err
 	}
@@ -114,9 +114,19 @@ func (p *partition) applyEventLocked(registry *partitionRegistry, publisher *ind
 	return state, version, nil
 }
 
+func normalizeEventRecord(event Event) (database.DomainRecord, error) {
+	if event.Operation == OperationPatch {
+		return normalizePatchRecord(event.Record)
+	}
+	return normalizeRecord(event.Record)
+}
+
 func (p *partition) applyMutationLocked(registry *partitionRegistry, publisher *indexPublisher, key string, rec database.DomainRecord, event Event, version uint64) (applyState, error) {
 	if event.Operation == "" || event.Operation == OperationUpsert {
 		return p.upsertLocked(registry, publisher, key, rec, event.SourceID, version)
+	}
+	if event.Operation == OperationPatch {
+		return p.patchLocked(registry, publisher, key, rec, event.SourceID, version)
 	}
 	if event.Operation == OperationDelete {
 		return p.deleteLocked(registry, publisher, key, event.SourceID, version), nil
@@ -193,6 +203,48 @@ func (p *partition) upsertLocked(registry *partitionRegistry, publisher *indexPu
 	cell.ptr.Store(entry)
 	p.bytes.Store(nextBytes)
 	p.addIndexesLocked(publisher, registry, key, rec, version)
+	return applyStateApplied, nil
+}
+
+func (p *partition) patchLocked(registry *partitionRegistry, publisher *indexPublisher, key string, patch database.DomainRecord, source string, version uint64) (applyState, error) {
+	if p.blockedByNewerTombstoneLocked(key, version) {
+		return applyStateIgnored, nil
+	}
+	cell := p.recordCellLocked(registry, key)
+	existingPtr := cell.ptr.Load()
+	if existingPtr == nil {
+		return applyStateIgnored, nil
+	}
+	existing := *existingPtr
+	if version < existing.version {
+		return applyStateIgnored, nil
+	}
+	next := existing.record
+	next.Data = existing.record.Data.Merge(patch.Data)
+	if len(patch.Vector) > 0 {
+		next.Vector = append([]float32(nil), patch.Vector...)
+	}
+	if !patch.UpdatedAt.IsZero() {
+		next.UpdatedAt = patch.UpdatedAt
+	}
+	if next.UpdatedAt.Before(existing.record.UpdatedAt) {
+		next.UpdatedAt = existing.record.UpdatedAt
+	}
+	recBytes := estimateRecordBytes(next)
+	nextBytes := p.bytes.Load() + recBytes - existing.bytes
+	if nextBytes > p.spec.MaxBytes {
+		return applyStateIgnored, ErrProjectionLimit
+	}
+	p.removeIndexesLocked(publisher, registry, key, existing.record)
+	entry := &recordEntry{
+		record:  next,
+		source:  source,
+		version: version,
+		bytes:   recBytes,
+	}
+	cell.ptr.Store(entry)
+	p.bytes.Store(nextBytes)
+	p.addIndexesLocked(publisher, registry, key, next, version)
 	return applyStateApplied, nil
 }
 

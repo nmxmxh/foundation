@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 set -euo pipefail
 
 target="${1:-.}"
@@ -23,6 +23,49 @@ ok() {
   echo "[OK] $1"
 }
 
+run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+  if command -v perl >/dev/null 2>&1; then
+    perl -e '
+      use strict;
+      use warnings;
+      use POSIX ":sys_wait_h";
+
+      my $timeout = shift @ARGV;
+      my @cmd = @ARGV;
+      my $pid = fork();
+      die "fork failed: $!\n" unless defined $pid;
+      if ($pid == 0) {
+        setpgrp(0, 0) or die "setpgrp failed: $!\n";
+        exec @cmd or die "exec failed: $!\n";
+      }
+      my $deadline = time() + $timeout;
+      while (1) {
+        my $done = waitpid($pid, WNOHANG);
+        if ($done == $pid) {
+          my $status = $?;
+          if ($status & 127) {
+            exit 128 + ($status & 127);
+          }
+          exit($status >> 8);
+        }
+        if (time() >= $deadline) {
+          kill "TERM", -$pid;
+          select(undef, undef, undef, 0.5);
+          kill "KILL", -$pid;
+          waitpid($pid, 0);
+          print STDERR "command timed out after ${timeout}s: @cmd\n";
+          exit 124;
+        }
+        select(undef, undef, undef, 0.2);
+      }
+    ' "$timeout_sec" "$@"
+  else
+    "$@"
+  fi
+}
+
 check_exists() {
   local label="$1"
   local path="$2"
@@ -37,10 +80,16 @@ check_no_match() {
   local label="$1"
   local pattern="$2"
   shift 2
-  if rg -n "$pattern" "$@" >"$tmp_output" 2>/dev/null; then
+  echo "[RUN] $label"
+  if run_with_timeout "${SERVER_KIT_CONTRACT_RG_TIMEOUT_SEC:-30}" rg --no-config -n "$pattern" "$@" >"$tmp_output" 2>/dev/null; then
     fail "$label" "$(cat "$tmp_output")"
   else
-    ok "$label"
+    local exit_code=$?
+    if [[ "$exit_code" -eq 1 ]]; then
+      ok "$label"
+    else
+      fail "$label" "$(cat "$tmp_output" 2>/dev/null || true)"
+    fi
   fi
 }
 

@@ -20,7 +20,7 @@ EOF
       ;;
     --parallel)
       parallelism="${2:-}"
-      if [[ -z "$parallelism" || ! "$parallelism" =~ '^[1-9][0-9]*$' ]]; then
+      if [[ -z "$parallelism" ]] || ! printf '%s\n' "$parallelism" | grep -Eq '^[1-9][0-9]*$'; then
         echo "--parallel requires a positive integer" >&2
         exit 1
       fi
@@ -28,7 +28,7 @@ EOF
       ;;
     --parallel=*)
       parallelism="${1#--parallel=}"
-      if [[ -z "$parallelism" || ! "$parallelism" =~ '^[1-9][0-9]*$' ]]; then
+      if [[ -z "$parallelism" ]] || ! printf '%s\n' "$parallelism" | grep -Eq '^[1-9][0-9]*$'; then
         echo "--parallel requires a positive integer" >&2
         exit 1
       fi

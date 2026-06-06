@@ -2,13 +2,14 @@ package protoapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 const (
@@ -87,26 +88,26 @@ func (b Binding) NewResponse() (proto.Message, error) {
 	return msg, nil
 }
 
-func (b Binding) DecodeRequestMap(payload map[string]any, metadata map[string]any) (proto.Message, error) {
+func (b Binding) DecodeRequestObject(payload extension.Object, metadata extension.Object) (proto.Message, error) {
 	msg, err := b.NewRequest()
 	if err != nil {
 		return nil, err
 	}
-	if err := decodeMapIntoMessage(msg, payload, metadata); err != nil {
+	if err := decodeObjectIntoMessage(msg, payload, metadata); err != nil {
 		return nil, err
 	}
 	return msg, nil
 }
 
-func (b Binding) DecodeRequestBytes(payload []byte, metadata map[string]any) (proto.Message, error) {
+func (b Binding) DecodeRequestBytesObject(payload []byte, metadata extension.Object) (proto.Message, error) {
 	msg, err := b.NewRequest()
 	if err != nil {
 		return nil, err
 	}
-	return b.DecodeRequestBytesInto(msg, payload, metadata, DecodeRequestBytesIntoOptions{})
+	return b.DecodeRequestBytesIntoObject(msg, payload, metadata, DecodeRequestBytesIntoOptions{})
 }
 
-func (b Binding) DecodeRequestBytesInto(target proto.Message, payload []byte, metadata map[string]any, opts DecodeRequestBytesIntoOptions) (proto.Message, error) {
+func (b Binding) DecodeRequestBytesIntoObject(target proto.Message, payload []byte, metadata extension.Object, opts DecodeRequestBytesIntoOptions) (proto.Message, error) {
 	if target == nil {
 		return nil, errors.New("target request message is required")
 	}
@@ -125,21 +126,17 @@ func (b Binding) DecodeRequestBytesInto(target proto.Message, payload []byte, me
 	if len(metadata) == 0 || !hasMetadataField(target) {
 		return target, nil
 	}
-	asMap, err := MessageToMap(target)
-	if err != nil {
-		return nil, err
-	}
-	if err := decodeMapIntoMessage(target, asMap, metadata); err != nil {
+	if err := mergeMetadataIntoMessage(target.ProtoReflect(), metadata); err != nil {
 		return nil, err
 	}
 	return target, nil
 }
 
-func (b Binding) EncodeResponseMap(msg proto.Message) (map[string]any, error) {
+func (b Binding) EncodeResponseObject(msg proto.Message) (extension.Object, error) {
 	if msg == nil {
-		return map[string]any{}, nil
+		return extension.Object{}, nil
 	}
-	return MessageToMap(msg)
+	return MessageToObject(msg)
 }
 
 func (b Binding) EncodeResponseBytes(msg proto.Message) ([]byte, error) {
@@ -149,56 +146,33 @@ func (b Binding) EncodeResponseBytes(msg proto.Message) ([]byte, error) {
 	return proto.Marshal(msg)
 }
 
-func (b Binding) ResponseFromMap(payload map[string]any) (proto.Message, error) {
+func (b Binding) ResponseFromObject(payload extension.Object) (proto.Message, error) {
 	msg, err := b.NewResponse()
 	if err != nil {
 		return nil, err
 	}
-	if err := decodeMapIntoMessage(msg, payload, nil); err != nil {
+	if err := decodeObjectIntoMessage(msg, payload, nil); err != nil {
 		return nil, err
 	}
 	return msg, nil
 }
 
-func MessageToMap(msg proto.Message) (map[string]any, error) {
+func MessageToObject(msg proto.Message) (extension.Object, error) {
 	if msg == nil {
-		return map[string]any{}, nil
+		return extension.Object{}, nil
 	}
-	raw, err := protojson.MarshalOptions{
-		UseProtoNames:   true,
-		EmitUnpopulated: true,
-	}.Marshal(msg)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]any{}
-	if len(raw) == 0 {
-		return out, nil
-	}
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return messageToObject(msg.ProtoReflect()), nil
 }
 
-func decodeMapIntoMessage(msg proto.Message, payload map[string]any, metadata map[string]any) error {
-	working := cloneMap(payload)
-	if len(working) == 0 {
-		working = map[string]any{}
+func decodeObjectIntoMessage(msg proto.Message, payload extension.Object, metadata extension.Object) error {
+	if msg == nil {
+		return errors.New("message is required")
 	}
-	if field := metadataFieldDescriptor(msg); field != nil && len(metadata) > 0 {
-		filtered := filterMapForMessage(metadata, field.Message())
-		if len(filtered) > 0 {
-			working["metadata"] = mergeMetadataMap(asMap(working["metadata"]), filtered)
-		}
-	}
-	raw, err := json.Marshal(working)
-	if err != nil {
+	reflected := msg.ProtoReflect()
+	if err := objectIntoMessage(reflected, payload, true); err != nil {
 		return err
 	}
-	return protojson.UnmarshalOptions{
-		DiscardUnknown: false,
-	}.Unmarshal(raw, msg)
+	return mergeMetadataIntoMessage(reflected, metadata)
 }
 
 func hasMetadataField(msg proto.Message) bool {
@@ -216,87 +190,240 @@ func metadataFieldDescriptor(msg proto.Message) protoreflect.FieldDescriptor {
 	return field
 }
 
-func filterMapForMessage(input map[string]any, desc protoreflect.MessageDescriptor) map[string]any {
-	if len(input) == 0 || desc == nil {
-		return map[string]any{}
+func DecodeObjectByEncoding(binding Binding, encoding string, payload extension.Object, payloadBytes []byte, metadata extension.Object) (proto.Message, error) {
+	switch normalizeEncoding(encoding) {
+	case PayloadEncodingProtobuf:
+		return binding.DecodeRequestBytesObject(payloadBytes, metadata)
+	case PayloadEncodingJSON:
+		return binding.DecodeRequestObject(payload, metadata)
+	default:
+		return nil, fmt.Errorf("unsupported payload encoding %q", encoding)
 	}
-	out := make(map[string]any, len(input))
-	fields := desc.Fields()
-	for key, value := range input {
+}
+
+func objectIntoMessage(msg protoreflect.Message, payload extension.Object, strictUnknown bool) error {
+	if len(payload) == 0 {
+		return nil
+	}
+	fields := msg.Descriptor().Fields()
+	for key, value := range payload {
 		field := fields.ByJSONName(key)
 		if field == nil {
 			field = fields.ByName(protoreflect.Name(key))
 		}
 		if field == nil {
+			if strictUnknown {
+				return fmt.Errorf("unknown protobuf field %q", key)
+			}
 			continue
 		}
-		if field.Kind() == protoreflect.MessageKind {
-			if nested, ok := value.(map[string]any); ok && !field.IsMap() && !field.IsList() {
-				out[key] = filterMapForMessage(nested, field.Message())
-				continue
-			}
+		if err := setFieldValue(msg, field, value, strictUnknown); err != nil {
+			return fmt.Errorf("field %s: %w", field.FullName(), err)
 		}
-		out[key] = deepClone(value)
+	}
+	return nil
+}
+
+func mergeMetadataIntoMessage(msg protoreflect.Message, metadata extension.Object) error {
+	if len(metadata) == 0 {
+		return nil
+	}
+	field := metadataFieldDescriptorForMessage(msg)
+	if field == nil {
+		return nil
+	}
+	return objectIntoMessage(msg.Mutable(field).Message(), metadata, false)
+}
+
+func metadataFieldDescriptorForMessage(msg protoreflect.Message) protoreflect.FieldDescriptor {
+	if !msg.IsValid() {
+		return nil
+	}
+	field := msg.Descriptor().Fields().ByName("metadata")
+	if field == nil || field.Kind() != protoreflect.MessageKind || field.IsList() || field.IsMap() {
+		return nil
+	}
+	return field
+}
+
+func setFieldValue(msg protoreflect.Message, field protoreflect.FieldDescriptor, value extension.Value, strictUnknown bool) error {
+	if field.IsList() || field.IsMap() {
+		return errors.New("repeated and map protobuf fields are not supported by typed object binding yet")
+	}
+	if value.Kind() == extension.KindNull {
+		msg.Clear(field)
+		return nil
+	}
+	if field.Kind() == protoreflect.MessageKind || field.Kind() == protoreflect.GroupKind {
+		object, ok := value.ObjectValue()
+		if !ok {
+			return errors.New("expected object")
+		}
+		return objectIntoMessage(msg.Mutable(field).Message(), object, strictUnknown)
+	}
+	converted, err := scalarToProtoValue(field, value)
+	if err != nil {
+		return err
+	}
+	msg.Set(field, converted)
+	return nil
+}
+
+func scalarToProtoValue(field protoreflect.FieldDescriptor, value extension.Value) (protoreflect.Value, error) {
+	switch field.Kind() {
+	case protoreflect.BoolKind:
+		raw, ok := value.BoolValue()
+		if !ok {
+			return protoreflect.Value{}, errors.New("expected bool")
+		}
+		return protoreflect.ValueOfBool(raw), nil
+	case protoreflect.StringKind:
+		raw, ok := value.StringValue()
+		if !ok {
+			return protoreflect.Value{}, errors.New("expected string")
+		}
+		return protoreflect.ValueOfString(raw), nil
+	case protoreflect.BytesKind:
+		raw, ok := value.BytesValue()
+		if !ok {
+			return protoreflect.Value{}, errors.New("expected bytes")
+		}
+		return protoreflect.ValueOfBytes(raw), nil
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind:
+		raw, ok := int64FromValue(value)
+		if !ok || raw < math.MinInt32 || raw > math.MaxInt32 {
+			return protoreflect.Value{}, errors.New("expected int32")
+		}
+		return protoreflect.ValueOfInt32(int32(raw)), nil
+	case protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		raw, ok := int64FromValue(value)
+		if !ok {
+			return protoreflect.Value{}, errors.New("expected int64")
+		}
+		return protoreflect.ValueOfInt64(raw), nil
+	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind:
+		raw, ok := uint64FromValue(value)
+		if !ok || raw > math.MaxUint32 {
+			return protoreflect.Value{}, errors.New("expected uint32")
+		}
+		return protoreflect.ValueOfUint32(uint32(raw)), nil
+	case protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		raw, ok := uint64FromValue(value)
+		if !ok {
+			return protoreflect.Value{}, errors.New("expected uint64")
+		}
+		return protoreflect.ValueOfUint64(raw), nil
+	case protoreflect.FloatKind:
+		raw, ok := float64FromValue(value)
+		if !ok {
+			return protoreflect.Value{}, errors.New("expected float")
+		}
+		return protoreflect.ValueOfFloat32(float32(raw)), nil
+	case protoreflect.DoubleKind:
+		raw, ok := float64FromValue(value)
+		if !ok {
+			return protoreflect.Value{}, errors.New("expected double")
+		}
+		return protoreflect.ValueOfFloat64(raw), nil
+	case protoreflect.EnumKind:
+		raw, ok := value.StringValue()
+		if !ok {
+			return protoreflect.Value{}, errors.New("expected enum string")
+		}
+		enum := field.Enum().Values().ByName(protoreflect.Name(raw))
+		if enum == nil {
+			return protoreflect.Value{}, fmt.Errorf("unknown enum value %q", raw)
+		}
+		return protoreflect.ValueOfEnum(enum.Number()), nil
+	default:
+		return protoreflect.Value{}, fmt.Errorf("unsupported protobuf field kind %s", field.Kind())
+	}
+}
+
+func int64FromValue(value extension.Value) (int64, bool) {
+	if raw, ok := value.IntValue(); ok {
+		return raw, true
+	}
+	if raw, ok := value.UintValue(); ok && raw <= math.MaxInt64 {
+		return int64(raw), true
+	}
+	if raw, ok := value.FloatValue(); ok && math.Trunc(raw) == raw && raw >= math.MinInt64 && raw <= math.MaxInt64 {
+		return int64(raw), true
+	}
+	return 0, false
+}
+
+func uint64FromValue(value extension.Value) (uint64, bool) {
+	if raw, ok := value.UintValue(); ok {
+		return raw, true
+	}
+	if raw, ok := value.IntValue(); ok && raw >= 0 {
+		return uint64(raw), true
+	}
+	if raw, ok := value.FloatValue(); ok && math.Trunc(raw) == raw && raw >= 0 && raw <= math.MaxUint64 {
+		return uint64(raw), true
+	}
+	return 0, false
+}
+
+func float64FromValue(value extension.Value) (float64, bool) {
+	if raw, ok := value.FloatValue(); ok {
+		return raw, true
+	}
+	if raw, ok := value.IntValue(); ok {
+		return float64(raw), true
+	}
+	if raw, ok := value.UintValue(); ok {
+		return float64(raw), true
+	}
+	return 0, false
+}
+
+func messageToObject(msg protoreflect.Message) extension.Object {
+	if !msg.IsValid() {
+		return extension.Object{}
+	}
+	fields := msg.Descriptor().Fields()
+	out := make(extension.Object, fields.Len())
+	for i := 0; i < fields.Len(); i++ {
+		field := fields.Get(i)
+		if field.IsList() || field.IsMap() {
+			continue
+		}
+		out[string(field.Name())] = protoValueToExtension(field, msg.Get(field))
 	}
 	return out
 }
 
-func cloneMap(input map[string]any) map[string]any {
-	if len(input) == 0 {
-		return map[string]any{}
-	}
-	out := make(map[string]any, len(input))
-	for key, value := range input {
-		out[key] = deepClone(value)
-	}
-	return out
-}
-
-func deepClone(value any) any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return cloneMap(typed)
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, deepClone(item))
+func protoValueToExtension(field protoreflect.FieldDescriptor, value protoreflect.Value) extension.Value {
+	switch field.Kind() {
+	case protoreflect.BoolKind:
+		return extension.Bool(value.Bool())
+	case protoreflect.StringKind:
+		return extension.String(value.String())
+	case protoreflect.BytesKind:
+		return extension.Bytes(value.Bytes())
+	case protoreflect.Int32Kind, protoreflect.Sint32Kind, protoreflect.Sfixed32Kind,
+		protoreflect.Int64Kind, protoreflect.Sint64Kind, protoreflect.Sfixed64Kind:
+		return extension.Int(value.Int())
+	case protoreflect.Uint32Kind, protoreflect.Fixed32Kind,
+		protoreflect.Uint64Kind, protoreflect.Fixed64Kind:
+		return extension.Uint(value.Uint())
+	case protoreflect.FloatKind, protoreflect.DoubleKind:
+		return extension.Float(value.Float())
+	case protoreflect.EnumKind:
+		enum := field.Enum().Values().ByNumber(value.Enum())
+		if enum == nil {
+			return extension.Int(int64(value.Enum()))
 		}
-		return out
-	default:
-		return typed
-	}
-}
-
-func asMap(value any) map[string]any {
-	typed, ok := value.(map[string]any)
-	if !ok || typed == nil {
-		return map[string]any{}
-	}
-	return cloneMap(typed)
-}
-
-func mergeMetadataMap(current map[string]any, incoming map[string]any) map[string]any {
-	merged := cloneMap(current)
-	for key, value := range incoming {
-		if nestedCurrent, ok := merged[key].(map[string]any); ok {
-			if nestedIncoming, ok := value.(map[string]any); ok {
-				merged[key] = mergeMetadataMap(nestedCurrent, nestedIncoming)
-				continue
-			}
+		return extension.String(string(enum.Name()))
+	case protoreflect.MessageKind, protoreflect.GroupKind:
+		if !value.Message().IsValid() {
+			return extension.Null()
 		}
-		merged[key] = deepClone(value)
-	}
-	return merged
-}
-
-func DecodeByEncoding(binding Binding, encoding string, payload map[string]any, payloadBytes []byte, metadata map[string]any) (proto.Message, error) {
-	switch normalizeEncoding(encoding) {
-	case PayloadEncodingProtobuf:
-		return binding.DecodeRequestBytes(payloadBytes, metadata)
-	case PayloadEncodingJSON:
-		return binding.DecodeRequestMap(payload, metadata)
+		return extension.ObjectValue(messageToObject(value.Message()))
 	default:
-		return nil, fmt.Errorf("unsupported payload encoding %q", encoding)
+		return extension.Null()
 	}
 }
 

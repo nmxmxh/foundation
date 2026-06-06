@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 )
 
@@ -57,9 +58,9 @@ type Signal struct {
 
 type Input struct {
 	EventType    string
-	Payload      map[string]any
+	Payload      extension.Object
 	PayloadBytes []byte
-	Metadata     map[string]any
+	Metadata     extension.Object
 }
 
 type Observer interface {
@@ -137,11 +138,11 @@ func NewAsyncInjector(observer Observer, queueSize int) *Injector {
 	return NewInjector(NewAsyncObserver(observer, queueSize))
 }
 
-func (i *Injector) Inject(ctx context.Context, input Input) (context.Context, map[string]any, Signal) {
+func (i *Injector) Inject(ctx context.Context, input Input) (context.Context, extension.Object, Signal) {
 	signal := Extract(input, i.keywordLimit(), i.vectorDims())
 	patch := signal.MetadataPatch()
-	merged := metadata.MergeMaps(input.Metadata, patch)
-	ctx = metadata.NewContext(ctx, merged)
+	merged := metadata.MergeObjects(input.Metadata, patch)
+	ctx = metadata.NewContextObject(ctx, merged)
 	ctx = IntoContext(ctx, signal)
 	if i != nil && i.Observer != nil {
 		i.Observer.ObserveIntelligence(ctx, signal)
@@ -157,7 +158,7 @@ func (o *AsyncObserver) run() {
 
 func Extract(input Input, keywordLimit, vectorDims int) Signal {
 	domain, action, version := splitEventType(input.EventType)
-	md := metadata.FromMap(input.Metadata)
+	md := metadata.FromObject(input.Metadata)
 	keywords := collectKeywords(input.EventType, input.Payload, md, keywordLimit)
 	actors := collectActors(md)
 	entities := collectEntities(input.Payload)
@@ -205,12 +206,12 @@ func IntoContext(ctx context.Context, signal Signal) context.Context {
 	return context.WithValue(ctx, signalKey, signal)
 }
 
-func (s Signal) MetadataPatch() map[string]any {
-	patch := map[string]any{
-		"tags":            s.Tags,
-		"categories":      s.Categories,
-		"knowledge_graph": s.KnowledgeGraph,
-		"source_ref":      s.SourceRef,
+func (s Signal) MetadataPatch() extension.Object {
+	patch := extension.Object{
+		"tags":            extensionListFromStrings(s.Tags),
+		"categories":      extensionListFromStrings(s.Categories),
+		"knowledge_graph": extension.String(s.KnowledgeGraph),
+		"source_ref":      extension.String(s.SourceRef),
 	}
 	attrs := map[string]string{}
 	maps.Copy(attrs, s.Attributes)
@@ -221,7 +222,7 @@ func (s Signal) MetadataPatch() map[string]any {
 		attrs["intelligence_vector"] = "sparse-hash-v1"
 	}
 	if len(attrs) > 0 {
-		patch["attributes"] = attrs
+		patch["attributes"] = extension.ObjectValue(attributesObject(attrs))
 	}
 	return patch
 }
@@ -257,7 +258,7 @@ func splitEventType(eventType string) (string, string, string) {
 	return domain, action, version
 }
 
-func collectKeywords(eventType string, payload map[string]any, md metadata.EnvelopeMetadata, limit int) []string {
+func collectKeywords(eventType string, payload extension.Object, md metadata.EnvelopeMetadata, limit int) []string {
 	counts := map[string]int{}
 	addKeywordTokens(counts, eventType)
 	for _, tag := range md.Tags {
@@ -274,26 +275,29 @@ func collectKeywords(eventType string, payload map[string]any, md metadata.Envel
 	return topKeywords(counts, limit)
 }
 
-func collectPayloadKeywords(counts map[string]int, payload map[string]any, depth int) {
+func collectPayloadKeywords(counts map[string]int, payload extension.Object, depth int) {
 	if depth > 2 || len(counts) > 512 {
 		return
 	}
 	for key, value := range payload {
 		addKeywordTokens(counts, key)
-		switch typed := value.(type) {
-		case string:
+		if typed, ok := value.StringValue(); ok {
 			addKeywordTokens(counts, typed)
-		case map[string]any:
+			continue
+		}
+		if typed, ok := value.ObjectValue(); ok {
 			collectPayloadKeywords(counts, typed, depth+1)
-		case []any:
+			continue
+		}
+		if typed, ok := value.ListValue(); ok {
 			for idx, item := range typed {
 				if idx >= 8 {
 					break
 				}
-				if nested, ok := item.(map[string]any); ok {
+				if nested, ok := item.ObjectValue(); ok {
 					collectPayloadKeywords(counts, nested, depth+1)
 				}
-				if str, ok := item.(string); ok {
+				if str, ok := item.StringValue(); ok {
 					addKeywordTokens(counts, str)
 				}
 			}
@@ -350,7 +354,7 @@ func collectActors(md metadata.EnvelopeMetadata) []Reference {
 	return refs
 }
 
-func collectEntities(payload map[string]any) []Reference {
+func collectEntities(payload extension.Object) []Reference {
 	seen := map[string]struct{}{}
 	refs := make([]Reference, 0, 4)
 	for key, value := range payload {
@@ -358,7 +362,7 @@ func collectEntities(payload map[string]any) []Reference {
 		if !(strings.HasSuffix(key, "_id") || strings.HasSuffix(key, "_ref") || strings.HasSuffix(key, "public_id")) {
 			continue
 		}
-		ref, ok := value.(string)
+		ref, ok := value.StringValue()
 		if !ok {
 			continue
 		}
@@ -378,6 +382,22 @@ func collectEntities(payload map[string]any) []Reference {
 		}
 	}
 	return refs
+}
+
+func extensionListFromStrings(values []string) extension.Value {
+	list := make([]extension.Value, 0, len(values))
+	for _, value := range values {
+		list = append(list, extension.String(value))
+	}
+	return extension.List(list)
+}
+
+func attributesObject(values map[string]string) extension.Object {
+	object := make(extension.Object, len(values))
+	for key, value := range values {
+		object[key] = extension.String(value)
+	}
+	return object
 }
 
 func collectEdges(actors, entities []Reference) []Edge {

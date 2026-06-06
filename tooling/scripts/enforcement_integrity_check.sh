@@ -1,4 +1,4 @@
-#!/bin/zsh
+#!/bin/bash
 set -euo pipefail
 
 target="${1:-.}"
@@ -29,7 +29,9 @@ hash_file() {
 default_paths() {
   printf '%s\n' \
     Makefile \
+    rustfmt.toml \
     scripts/check-rust.sh \
+    scripts/lib/foundation.sh \
     scripts/lib/scaffold.sh \
     tooling/practice_controls.psv \
     tooling/foundation_ownership.tsv \

@@ -40,7 +40,7 @@ type ResultExecutor interface {
 type DBTX interface {
 	Exec(context.Context, string, ...any) error
 	QueryRow(context.Context, string, ...any) RowScanner
-	QueryMaps(context.Context, string, ...any) ([]map[string]any, error)
+	Query(context.Context, string, ...any) (Rows, error)
 }
 
 // Tx is the minimal transaction contract used by atomic application flows.
@@ -58,14 +58,14 @@ type TxBeginner interface {
 
 // DomainRecord is the canonical persisted record format for domain services.
 type DomainRecord struct {
-	Domain         string         `json:"domain"`
-	Collection     string         `json:"collection"`
-	OrganizationID string         `json:"organization_id"`
-	RecordID       string         `json:"record_id"`
-	Data           map[string]any `json:"data"`
-	Vector         []float32      `json:"vector,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
+	Domain         string     `json:"domain"`
+	Collection     string     `json:"collection"`
+	OrganizationID string     `json:"organization_id"`
+	RecordID       string     `json:"record_id"`
+	Data           RecordData `json:"data"`
+	Vector         []float32  `json:"vector,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // RawDomainRecord is the byte-preserving state-store shape for handlers that
@@ -84,10 +84,22 @@ type RawDomainRecord struct {
 type StateStore interface {
 	UpsertRecord(context.Context, DomainRecord) (DomainRecord, error)
 	GetRecord(context.Context, string, string, string, string) (DomainRecord, bool, error)
-	ListRecords(context.Context, string, string, string, map[string]any, int) ([]DomainRecord, error)
-	CountRecords(context.Context, string, string, string, map[string]any) (int64, error)
+	ForEachRecord(context.Context, string, string, string, RecordQuery, RecordVisitor) error
+	ListRecords(context.Context, string, string, string, RecordQuery) ([]DomainRecord, error)
+	CountRecords(context.Context, string, string, string, RecordQuery) (int64, error)
 	EstimateCount(ctx context.Context, domain, collection, organizationID string) (int64, error)
 	DeleteRecord(context.Context, string, string, string, string) error
+}
+
+// RecordVisitor receives one canonical record from a streaming snapshot. The
+// record is owned by the caller after the callback returns.
+type RecordVisitor func(DomainRecord) error
+
+// NormalizedSnapshotStore is an optional rebuild/read-model fast lane for
+// stores that can return already-normalized DomainRecord snapshots without
+// re-materializing dynamic JSON. StateStore remains the canonical contract.
+type NormalizedSnapshotStore interface {
+	ListNormalizedRecords(context.Context, string, string, string, RecordQuery) ([]DomainRecord, error)
 }
 
 // RawStateStore is an optional extension for byte-preserving JSON state paths.

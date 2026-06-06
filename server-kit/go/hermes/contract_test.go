@@ -7,6 +7,7 @@ import (
 
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	redispkg "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 )
 
@@ -34,12 +35,60 @@ func TestStoreApplyProjectionEnvelopeContract(t *testing.T) {
 	if err != nil || result.Applied != 1 {
 		t.Fatalf("ApplyEnvelopeBytes() result=%+v err=%v", result, err)
 	}
-	count, err := store.Count(t.Context(), "projection_contract", Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": int64(7)},
-	}, Fence{})
+	count, err := store.Count(t.Context(), "projection_contract", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": int64(7)})), Fence{})
 	if err != nil || count != 1 {
 		t.Fatalf("Count() = %d err=%v", count, err)
+	}
+}
+
+func TestStoreApplyProjectionEnvelopePatchPreservesExistingFields(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name:          "projection_patch_contract",
+		Domain:        "signals",
+		Collection:    "ticks",
+		IndexedFields: []string{"status", "bucket"},
+		MaxRecords:    10,
+		MaxBytes:      1 << 20,
+	})
+	ctx := t.Context()
+	applyTestRecord(t, store, "projection_patch_contract", "org_1", "tick_patch", 10, map[string]any{
+		"status": "active",
+		"bucket": 1,
+		"title":  "original",
+	})
+	patch := projectionMutation("tick_patch", 11, "corr_patch")
+	patch.Operation = foundationpb.ProjectionOperation_PROJECTION_OPERATION_PATCH
+	patch.SourceId = "projection:patch:tick_patch"
+	patch.Fields = []*foundationpb.FieldValue{
+		{
+			Name: "status",
+			Value: &foundationpb.ScalarValue{
+				Kind: &foundationpb.ScalarValue_StringValue{StringValue: "archived"},
+			},
+		},
+		{
+			Name: "bucket",
+			Value: &foundationpb.ScalarValue{
+				Kind: &foundationpb.ScalarValue_Int64Value{Int64Value: 2},
+			},
+		},
+	}
+	envelope, err := NewProjectionEnvelope([]*foundationpb.RecordMutation{patch}, "corr_patch")
+	if err != nil {
+		t.Fatalf("NewProjectionEnvelope() error = %v", err)
+	}
+	result, err := store.ApplyEnvelope(ctx, "projection_patch_contract", envelope)
+	if err != nil || result.Applied != 1 {
+		t.Fatalf("ApplyEnvelope() patch result=%+v err=%v", result, err)
+	}
+	rec, ok, err := store.GetRecord(ctx, "projection_patch_contract", Query{OrganizationID: "org_1"}, "tick_patch", Fence{MinEpoch: result.Epoch})
+	if err != nil || !ok {
+		t.Fatalf("GetRecord() after patch ok=%v err=%v", ok, err)
+	}
+	if !recordDataStringEquals(rec.Data, "title", "original") ||
+		!recordDataStringEquals(rec.Data, "status", "archived") ||
+		!recordDataIntEquals(rec.Data, "bucket", 2) {
+		t.Fatalf("protobuf patch did not merge correctly: %+v", rec.Data)
 	}
 }
 
@@ -63,7 +112,7 @@ func TestEnvelopeTailerPollOnceAppliesFoundationEnvelopeFromRedisStream(t *testi
 		t.Fatalf("ToBinary() error = %v", err)
 	}
 	client := redispkg.NewMemoryClient("test")
-	if _, err := client.XAdd(t.Context(), "hermes:projection", map[string]any{"envelope": raw}); err != nil {
+	if _, err := client.XAdd(t.Context(), "hermes:projection", redispkg.Values{redispkg.Field("envelope", raw)}); err != nil {
 		t.Fatalf("XAdd() error = %v", err)
 	}
 	source, err := NewRedisStreamEnvelopeSource(client, "hermes:projection", "hermes", "node_1", "")
@@ -79,10 +128,7 @@ func TestEnvelopeTailerPollOnceAppliesFoundationEnvelopeFromRedisStream(t *testi
 	if err != nil || result.Read != 1 || result.Decoded != 1 || result.Acked != 1 || result.Apply.Applied != 1 {
 		t.Fatalf("PollOnce() result=%+v err=%v", result, err)
 	}
-	count, err := store.Count(t.Context(), "projection_stream", Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"symbol": "OVS"},
-	}, Fence{})
+	count, err := store.Count(t.Context(), "projection_stream", QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"symbol": "OVS"})), Fence{})
 	if err != nil || count != 1 {
 		t.Fatalf("Count() = %d err=%v", count, err)
 	}
@@ -100,11 +146,11 @@ func TestRedisStreamEnvelopeSourceReplaysPendingBeforeNewMessages(t *testing.T) 
 		t.Fatalf("ToBinary() error = %v", err)
 	}
 	client := redispkg.NewMemoryClient("test")
-	firstID, err := client.XAdd(t.Context(), "hermes:pending", map[string]any{"envelope": raw})
+	firstID, err := client.XAdd(t.Context(), "hermes:pending", redispkg.Values{redispkg.Field("envelope", raw)})
 	if err != nil {
 		t.Fatalf("XAdd(first) error = %v", err)
 	}
-	if _, err := client.XAdd(t.Context(), "hermes:pending", map[string]any{"envelope": raw}); err != nil {
+	if _, err := client.XAdd(t.Context(), "hermes:pending", redispkg.Values{redispkg.Field("envelope", raw)}); err != nil {
 		t.Fatalf("XAdd(second) error = %v", err)
 	}
 	source, err := NewRedisStreamEnvelopeSource(client, "hermes:pending", "hermes", "node_1", "")
@@ -131,9 +177,9 @@ func TestRedisStreamEnvelopeSourceReplaysPendingBeforeNewMessages(t *testing.T) 
 func TestProjectionEnvelopeRejectsJSONPayload(t *testing.T) {
 	_, err := EventsFromEnvelope(events.Envelope{
 		EventType:       ProjectionEnvelopeEventType,
-		Payload:         map[string]any{"record_id": "tick_1"},
+		Payload:         extension.Object{"record_id": extension.String("tick_1")},
 		PayloadEncoding: events.PayloadEncodingJSON,
-		Metadata:        map[string]any{"correlation_id": "corr_json"},
+		Metadata:        extension.Object{"correlation_id": extension.String("corr_json")},
 		CorrelationID:   "corr_json",
 		SchemaVersion:   events.EnvelopeSchemaVersion,
 		Timestamp:       testTime(),

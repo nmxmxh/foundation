@@ -36,6 +36,31 @@ func TestStoreCheckDriftConsistentMerkle(t *testing.T) {
 	}
 }
 
+func TestStoreCheckDriftTreatsRawJSONSemantically(t *testing.T) {
+	ctx := t.Context()
+	source := database.NewMemoryDB()
+	_, err := source.UpsertRecord(ctx, testRecord("signals", "ticks", "org_1", "tick_raw", map[string]any{
+		"bucket":   1,
+		"metadata": []byte(`{"trace_id":"abc","actor_id":"u1","labels":["a","b"]}`),
+	}))
+	if err != nil {
+		t.Fatalf("source upsert failed: %v", err)
+	}
+	store := newDriftStore(t, 4)
+	applyTestRecord(t, store, "drift_ticks", "org_1", "tick_raw", 1, map[string]any{
+		"bucket":   1,
+		"metadata": []byte(`{"actor_id":"u1","labels":["a","b"],"trace_id":"abc"}`),
+	})
+
+	report, err := store.CheckDrift(ctx, "drift_ticks", source, Query{OrganizationID: "org_1"}, DriftOptions{MaxRecords: 4, SampleSize: 1})
+	if err != nil {
+		t.Fatalf("CheckDrift() error = %v", err)
+	}
+	if !report.OK() {
+		t.Fatalf("semantically equivalent raw JSON should not drift: %+v", report)
+	}
+}
+
 func TestStoreCheckDriftDetectsHashMismatch(t *testing.T) {
 	ctx := t.Context()
 	source := database.NewMemoryDB()

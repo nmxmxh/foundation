@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
 )
 
@@ -66,11 +67,11 @@ func RouteFromEventType(eventType string) registry.HTTPRoute {
 		"",
 		"",
 		WithTags(domain, actionParts[0]),
-		WithMetadata(map[string]any{
-			"route_source": "event_type",
-			"domain":       domain,
-			"action":       action,
-			"event_type":   eventType,
+		WithMetadataObject(extension.Object{
+			"route_source": extension.String("event_type"),
+			"domain":       extension.String(domain),
+			"action":       extension.String(action),
+			"event_type":   extension.String(eventType),
 		}),
 	)
 }

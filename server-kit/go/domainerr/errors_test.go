@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 func TestDomainErrorDefaultsAndMatching(t *testing.T) {
@@ -61,7 +63,7 @@ func TestDomainErrorHelpersAndHTTPStatus(t *testing.T) {
 }
 
 func TestBodyAndWriteHTTP(t *testing.T) {
-	details := map[string]any{"field": "name"}
+	details := extension.Object{"field": extension.String("name")}
 	body := Body(errors.New("method"), ResponseOptions{
 		Status:        http.StatusMethodNotAllowed,
 		EventType:     "user:create:failed",
@@ -71,8 +73,8 @@ func TestBodyAndWriteHTTP(t *testing.T) {
 	if body.State != "failed" || body.Error.Kind != string(KindValidation) || body.Error.Status != http.StatusMethodNotAllowed {
 		t.Fatalf("unexpected body: %+v", body)
 	}
-	details["field"] = "mutated"
-	if body.Error.Details["field"] != "name" {
+	details["field"] = extension.String("mutated")
+	if field, ok := body.Error.Details.GetString("field"); !ok || field != "name" {
 		t.Fatal("expected response details to be cloned")
 	}
 

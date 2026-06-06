@@ -48,9 +48,7 @@ impl RuntimeUnit for EchoUnit {
 
 fn main() {
     let mut bridge = NativeRuntimeBridge::with_role_limits(BTreeMap::new());
-    bridge
-        .register_allowed_unit(Arc::new(EchoUnit))
-        .expect("register benchmark unit");
+    bridge.register_allowed_unit(Arc::new(EchoUnit)).expect("register benchmark unit");
 
     println!("foundation native communication simulation");
     println!("iters: {ITERS}");
@@ -97,9 +95,7 @@ fn run_full_payload_frame(bridge: &NativeRuntimeBridge, payload_bytes: usize) {
 
     let stats = sample(|| {
         let frame = encode_dispatch_request(black_box(&request)).expect("encode request");
-        let response_frame = bridge
-            .dispatch_frame(black_box(&frame))
-            .expect("dispatch frame");
+        let response_frame = bridge.dispatch_frame(black_box(&frame)).expect("dispatch frame");
         let response = decode_dispatch_response(&response_frame, MAX_NATIVE_FRAME_BYTES)
             .expect("decode response");
         black_box(response.payload.len());
@@ -129,9 +125,7 @@ fn run_descriptor_control_frame(bridge: &NativeRuntimeBridge, external_payload_b
 
     let stats = sample(|| {
         let frame = encode_dispatch_request(black_box(&request)).expect("encode descriptor");
-        let response_frame = bridge
-            .dispatch_frame(black_box(&frame))
-            .expect("dispatch descriptor");
+        let response_frame = bridge.dispatch_frame(black_box(&frame)).expect("dispatch descriptor");
         let response = decode_dispatch_response(&response_frame, MAX_NATIVE_FRAME_BYTES)
             .expect("decode descriptor response");
         black_box(response.payload.len());
@@ -150,15 +144,12 @@ fn run_descriptor_control_frame(bridge: &NativeRuntimeBridge, external_payload_b
 
 fn run_runtime_buffer_control() {
     let host = NativeRuntimeHost::new(BTreeMap::new());
-    host.register_unit(Arc::new(EchoUnit))
-        .expect("register unit");
+    host.register_unit(Arc::new(EchoUnit)).expect("register unit");
 
     let input = vec![31_u8; 1024];
     let mut buffer = NativeBuffer::with_capacity();
     buffer.initialize_control_plane(1).expect("init buffer");
-    buffer
-        .write_input_bytes_fast(&input)
-        .expect("write runtime input");
+    buffer.write_input_bytes_fast(&input).expect("write runtime input");
     let mut raw = buffer.into_inner();
 
     let stats = sample(|| {
@@ -192,9 +183,7 @@ fn run_native_gpu_descriptor_contract() {
     };
 
     let stats = sample(|| {
-        let contract = descriptor
-            .contract_descriptor()
-            .expect("native gpu descriptor contract");
+        let contract = descriptor.contract_descriptor().expect("native gpu descriptor contract");
         black_box(contract);
     });
 
@@ -228,9 +217,7 @@ fn run_native_gpu_registry_lifecycle() {
         registry
             .register_stub(black_box(descriptor.clone()), owner.clone(), 1, 0)
             .expect("register native gpu");
-        registry
-            .acquire("camera.frame.registry", black_box(&owner))
-            .expect("acquire native gpu");
+        registry.acquire("camera.frame.registry", black_box(&owner)).expect("acquire native gpu");
         registry
             .release("camera.frame.registry", black_box(&owner))
             .expect("release native gpu ref");
@@ -315,12 +302,7 @@ fn run_native_gpu_unix_fd_registry_lifecycle() {
             .register_unix_fd(
                 black_box(descriptor.clone()),
                 owner.clone(),
-                NativeGpuUnixFdHandle {
-                    fd,
-                    sync_file: None,
-                    plane_count: 1,
-                    modifier: None,
-                },
+                NativeGpuUnixFdHandle { fd, sync_file: None, plane_count: 1, modifier: None },
                 1,
                 0,
             )

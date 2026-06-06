@@ -15,6 +15,7 @@ package featureflags
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"maps"
 	"os"
@@ -23,6 +24,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 // Flag represents a feature flag configuration.
@@ -56,7 +59,7 @@ type Flag struct {
 	EndTime *time.Time `json:"end_time,omitempty"`
 
 	// Metadata contains additional flag metadata.
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Metadata extension.Object `json:"metadata,omitempty"`
 }
 
 // EvaluationContext holds context for evaluating a feature flag.
@@ -64,7 +67,7 @@ type EvaluationContext struct {
 	UserID      string
 	OrgID       string
 	Environment string
-	Attributes  map[string]any
+	Attributes  extension.Object
 }
 
 // Option is a function that modifies EvaluationContext.
@@ -95,9 +98,13 @@ func WithEnvironment(env string) Option {
 func WithAttribute(key string, value any) Option {
 	return func(ctx *EvaluationContext) {
 		if ctx.Attributes == nil {
-			ctx.Attributes = make(map[string]any)
+			ctx.Attributes = extension.Object{}
 		}
-		ctx.Attributes[key] = value
+		typed, err := extension.FromJSON(value)
+		if err != nil {
+			typed = extension.String(fmt.Sprintf("%v", value))
+		}
+		ctx.Attributes[key] = typed
 	}
 }
 

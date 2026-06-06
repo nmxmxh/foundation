@@ -63,11 +63,69 @@ strict_vuln_check() {
   is_truthy "${CI:-}" || is_truthy "${GOVULNCHECK_STRICT:-}" || is_truthy "${FOUNDATION_STRICT_SECURITY:-}"
 }
 
+run_with_timeout() {
+  local timeout_sec="$1"
+  shift
+  if command -v perl >/dev/null 2>&1; then
+    perl -e '
+      use strict;
+      use warnings;
+      use POSIX ":sys_wait_h";
+
+      my $timeout = shift @ARGV;
+      my @cmd = @ARGV;
+      my $pid = fork();
+      die "fork failed: $!\n" unless defined $pid;
+
+      if ($pid == 0) {
+        setpgrp(0, 0) or die "setpgrp failed: $!\n";
+        exec @cmd or die "exec failed: $!\n";
+      }
+
+      my $deadline = time() + $timeout;
+      while (1) {
+        my $done = waitpid($pid, WNOHANG);
+        if ($done == $pid) {
+          my $status = $?;
+          if ($status & 127) {
+            exit 128 + ($status & 127);
+          }
+          exit($status >> 8);
+        }
+        if ($done == -1) {
+          print STDERR "waitpid failed: $!\n";
+          exit 1;
+        }
+        if (time() >= $deadline) {
+          kill "TERM", -$pid;
+          select(undef, undef, undef, 0.5);
+          kill "KILL", -$pid;
+          waitpid($pid, 0);
+          print STDERR "command timed out after ${timeout}s: @cmd\n";
+          exit 124;
+        }
+        select(undef, undef, undef, 0.2);
+      }
+    ' "$timeout_sec" "$@"
+  else
+    "$@"
+  fi
+}
+
+run_analysis_step() {
+  local label="$1"
+  local timeout_sec="$2"
+  shift 2
+  echo "[RUN] $label"
+  run_with_timeout "$timeout_sec" "$@"
+  echo "[OK] $label"
+}
+
 run_govulncheck() {
   local output_file
   output_file="$(mktemp "${TMPDIR:-/tmp}/govulncheck.XXXXXX")"
 
-  if govulncheck ./... >"$output_file" 2>&1; then
+  if run_with_timeout "${GO_ANALYSIS_TOOL_TIMEOUT_SEC:-120}" govulncheck ./... >"$output_file" 2>&1; then
     rm -f "$output_file"
     return 0
   fi
@@ -120,7 +178,7 @@ gopls_file="$(mktemp "${TMPDIR:-/tmp}/go-files.XXXXXX")"
 trap 'rm -f "$module_file" "$gopls_file"' EXIT
 
 find "$target" \
-  \( -path '*/.git' -o -path '*/node_modules' -o -path '*/vendor' -o -path '*/tmp' -o -path '*/dist' -o -path '*/build' \) -prune \
+  \( -path '*/.git' -o -path '*/.cache' -o -path '*/node_modules' -o -path '*/vendor' -o -path '*/tmp' -o -path '*/dist' -o -path '*/build' \) -prune \
   -o -name go.mod -type f -print | sort >"$module_file"
 
 go_modules=()
@@ -176,15 +234,19 @@ for mod_dir in "${go_modules[@]}"; do
       exit 0
     fi
 
-    go vet ./...
-    staticcheck ./...
+    run_analysis_step "go vet: $rel" "${GO_ANALYSIS_TOOL_TIMEOUT_SEC:-120}" go vet ./...
+    run_analysis_step "staticcheck: $rel" "${GO_ANALYSIS_TOOL_TIMEOUT_SEC:-120}" staticcheck ./...
     : >"$gopls_file"
     go list -f '{{range .GoFiles}}{{printf "%s/%s%c" $.Dir . 0}}{{end}}{{range .TestGoFiles}}{{printf "%s/%s%c" $.Dir . 0}}{{end}}' ./... | tr -d '\n' >"$gopls_file"
     if [[ -s "$gopls_file" ]]; then
-      xargs -0 gopls check <"$gopls_file"
+      echo "[RUN] gopls check: $rel"
+      run_with_timeout "${GO_ANALYSIS_TOOL_TIMEOUT_SEC:-120}" xargs -0 gopls check <"$gopls_file"
+      echo "[OK] gopls check: $rel"
     fi
+    echo "[RUN] govulncheck: $rel"
     run_govulncheck
-    gosec -quiet -exclude-generated -exclude-dir=.cache -exclude-dir="$target/.cache" -exclude-dir="$go_cache" -exclude-rules=".*/ovasabi-go-build/.*:*;.*/go-build/.*:*;.*/generated/.*:*;.*\\.pb\\.go:*" ./...
+    echo "[OK] govulncheck: $rel"
+    run_analysis_step "gosec: $rel" "${GO_ANALYSIS_TOOL_TIMEOUT_SEC:-120}" gosec -quiet -exclude-generated -exclude-dir=.cache -exclude-dir="$target/.cache" -exclude-dir="$go_cache" -exclude-rules=".*/ovasabi-go-build/.*:*;.*/go-build/.*:*;.*/generated/.*:*;.*\\.pb\\.go:*" ./...
   )
 
   echo "[OK] Go static analysis: $rel"

@@ -23,6 +23,13 @@ const (
 	// MaxTargetBatchSize caps borrowed batch slices so callbacks stay bounded.
 	MaxTargetBatchSize = 16384
 
+	// DefaultRegistrationBatchSize bounds Redis route-registration pipelines.
+	DefaultRegistrationBatchSize = 256
+
+	// MaxRegistrationBatchSize caps route-registration batches so reconnect
+	// storms do not create unbounded Redis pipelines.
+	MaxRegistrationBatchSize = 4096
+
 	// KeyPrefixDevice is the Redis key prefix for device-to-server mapping.
 	KeyPrefixDevice = "wsroute:device"
 
@@ -35,9 +42,10 @@ const (
 
 // Router manages WebSocket connection routing across server instances.
 type Router struct {
-	client   redis.Client
-	serverID string
-	ttl      time.Duration
+	client            redis.Client
+	serverID          string
+	ttl               time.Duration
+	registerBatchSize int
 
 	// Local connection tracking for this server instance
 	mu          sync.RWMutex
@@ -69,6 +77,16 @@ func WithTTL(ttl time.Duration) RouterOption {
 	}
 }
 
+// WithRegistrationBatchSize sets the maximum number of connections coordinated
+// in one Redis route-registration batch.
+func WithRegistrationBatchSize(size int) RouterOption {
+	return func(r *Router) {
+		if size > 0 {
+			r.registerBatchSize = clampRegistrationBatchSize(size)
+		}
+	}
+}
+
 // NewRouter creates a new WebSocket connection router.
 func NewRouter(client redis.Client, serverID string, opts ...RouterOption) *Router {
 	if serverID == "" {
@@ -76,14 +94,15 @@ func NewRouter(client redis.Client, serverID string, opts ...RouterOption) *Rout
 	}
 
 	r := &Router{
-		client:      client,
-		serverID:    serverID,
-		ttl:         DefaultTTL,
-		connections: make(map[string]*ConnectionInfo),
-		order:       make([]string, 0),
-		orderIndex:  make(map[string]int),
-		byDevice:    make(map[string]string),
-		byUser:      make(map[string]map[string]struct{}),
+		client:            client,
+		serverID:          serverID,
+		ttl:               DefaultTTL,
+		registerBatchSize: DefaultRegistrationBatchSize,
+		connections:       make(map[string]*ConnectionInfo),
+		order:             make([]string, 0),
+		orderIndex:        make(map[string]int),
+		byDevice:          make(map[string]string),
+		byUser:            make(map[string]map[string]struct{}),
 	}
 
 	for _, opt := range opts {
@@ -101,8 +120,58 @@ func (r *Router) ServerID() string {
 // Register registers a new WebSocket connection with the router.
 // It updates both Redis routing tables and local connection tracking.
 func (r *Router) Register(ctx context.Context, info ConnectionInfo) error {
+	return r.RegisterMany(ctx, []ConnectionInfo{info})
+}
+
+// RegisterMany registers multiple WebSocket connections with bounded local
+// index updates and bounded optional Redis coordination batches. Use this for
+// reconnect storms, replayed route snapshots, and service startup hydration.
+func (r *Router) RegisterMany(ctx context.Context, infos []ConnectionInfo) error {
+	if err := contextError(ctx); err != nil {
+		return err
+	}
+	if len(infos) == 0 {
+		return nil
+	}
+	normalized := make([]ConnectionInfo, len(infos))
+	for i := range infos {
+		info, err := r.normalizeConnectionInfo(infos[i])
+		if err != nil {
+			return err
+		}
+		normalized[i] = info
+	}
+
+	batchSize := r.registrationBatchSize()
+	for start := 0; start < len(normalized); start += batchSize {
+		end := min(start+batchSize, len(normalized))
+		r.addLocalConnections(normalized[start:end])
+	}
+
+	if r.client == nil {
+		return nil
+	}
+	return r.registerRoutes(ctx, normalized)
+}
+
+func (r *Router) addLocalConnections(infos []ConnectionInfo) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := range infos {
+		info := &infos[i]
+		if existing := r.connections[info.ConnectionID]; existing != nil {
+			r.removeIndexesLocked(existing)
+		} else {
+			r.addConnectionOrderLocked(info.ConnectionID)
+		}
+		r.connections[info.ConnectionID] = info
+		r.addIndexesLocked(info)
+	}
+}
+
+func (r *Router) normalizeConnectionInfo(info ConnectionInfo) (ConnectionInfo, error) {
 	if info.ConnectionID == "" {
-		return fmt.Errorf("connection_id is required")
+		return ConnectionInfo{}, fmt.Errorf("connection_id is required")
 	}
 	if info.DeviceID == "" {
 		info.DeviceID = info.ConnectionID
@@ -113,29 +182,69 @@ func (r *Router) Register(ctx context.Context, info ConnectionInfo) error {
 	if info.ConnectedAt.IsZero() {
 		info.ConnectedAt = time.Now().UTC()
 	}
+	return info, nil
+}
 
-	// Store in local tracking
-	r.mu.Lock()
-	if existing := r.connections[info.ConnectionID]; existing != nil {
-		r.removeIndexesLocked(existing)
-	} else {
-		r.addConnectionOrderLocked(info.ConnectionID)
-	}
-	r.connections[info.ConnectionID] = &info
-	r.addIndexesLocked(&info)
-	r.mu.Unlock()
-
-	// Update Redis routing tables
-	if r.client == nil {
+func (r *Router) registerRoutes(ctx context.Context, infos []ConnectionInfo) error {
+	batchSize := r.registrationBatchSize()
+	if batch, ok := r.client.(redis.CoordinationBatchClient); ok {
+		for start := 0; start < len(infos); start += batchSize {
+			end := min(start+batchSize, len(infos))
+			if err := r.registerRouteBatch(ctx, batch, infos[start:end]); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
+	for i := range infos {
+		if err := r.registerRoute(ctx, infos[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-	// Device → Server mapping
+func (r *Router) registerRouteBatch(ctx context.Context, batch redis.CoordinationBatchClient, infos []ConnectionInfo) error {
+	keys := make([]string, 0, len(infos)*2)
+	payloads := make([][]byte, 0, len(infos))
+	for i := range infos {
+		info := infos[i]
+		keys = append(keys, fmt.Sprintf("%s:%s", KeyPrefixDevice, info.DeviceID))
+		payloads = append(payloads, fmt.Appendf(nil, "%s:%s", info.DeviceID, r.serverID))
+		if info.UserID == "" {
+			continue
+		}
+		userKey := fmt.Sprintf("%s:%s", KeyPrefixUser, info.UserID)
+		keys = append(keys, userKey)
+	}
+	if err := firstRouteError(batch.IncrExpireMany(ctx, keys, r.ttl)); err != nil {
+		return fmt.Errorf("failed to set route keys: %w", err)
+	}
+	if err := firstRouteError(batch.PublishMany(ctx, "wsroute:register", payloads)); err != nil {
+		return fmt.Errorf("failed to publish routes: %w", err)
+	}
+	return nil
+}
+
+func (r *Router) registrationBatchSize() int {
+	return clampRegistrationBatchSize(r.registerBatchSize)
+}
+
+func clampRegistrationBatchSize(size int) int {
+	if size <= 0 {
+		return DefaultRegistrationBatchSize
+	}
+	if size > MaxRegistrationBatchSize {
+		return MaxRegistrationBatchSize
+	}
+	return size
+}
+
+func (r *Router) registerRoute(ctx context.Context, info ConnectionInfo) error {
 	deviceKey := fmt.Sprintf("%s:%s", KeyPrefixDevice, info.DeviceID)
 	if _, err := r.client.Incr(ctx, deviceKey); err != nil {
 		return fmt.Errorf("failed to set device routing: %w", err)
 	}
-	// Store the actual server ID by publishing to a routing channel
 	routePayload := fmt.Appendf(nil, "%s:%s", info.DeviceID, r.serverID)
 	if err := r.client.Publish(ctx, "wsroute:register", routePayload); err != nil {
 		return fmt.Errorf("failed to publish route: %w", err)
@@ -144,17 +253,25 @@ func (r *Router) Register(ctx context.Context, info ConnectionInfo) error {
 		return fmt.Errorf("failed to set device TTL: %w", err)
 	}
 
-	// User → Servers mapping (if authenticated)
-	if info.UserID != "" {
-		userKey := fmt.Sprintf("%s:%s", KeyPrefixUser, info.UserID)
-		if _, err := r.client.Incr(ctx, userKey); err != nil {
-			return fmt.Errorf("failed to add user routing: %w", err)
-		}
-		if _, err := r.client.Expire(ctx, userKey, r.ttl); err != nil {
-			return fmt.Errorf("failed to set user TTL: %w", err)
+	if info.UserID == "" {
+		return nil
+	}
+	userKey := fmt.Sprintf("%s:%s", KeyPrefixUser, info.UserID)
+	if _, err := r.client.Incr(ctx, userKey); err != nil {
+		return fmt.Errorf("failed to add user routing: %w", err)
+	}
+	if _, err := r.client.Expire(ctx, userKey, r.ttl); err != nil {
+		return fmt.Errorf("failed to set user TTL: %w", err)
+	}
+	return nil
+}
+
+func firstRouteError(errs []error) error {
+	for _, err := range errs {
+		if err != nil {
+			return err
 		}
 	}
-
 	return nil
 }
 

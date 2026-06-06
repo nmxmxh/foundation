@@ -40,10 +40,7 @@ func TestServiceBackedRedisStreamLagAndSlowSubscriberPressure(t *testing.T) {
 
 	const streamMessages = 256
 	for i := 0; i < streamMessages; i++ {
-		if _, err := client.XAdd(ctx, stream, map[string]any{
-			"kind":      "pressure",
-			"record_id": fmt.Sprintf("record-%03d", i),
-		}); err != nil {
+		if _, err := client.XAdd(ctx, stream, serviceRedisValues(map[string]any{"kind": "pressure", "record_id": fmt.Sprintf("record-%03d", i)})); err != nil {
 			t.Fatalf("redis xadd[%d] failed: %v", i, err)
 		}
 	}
@@ -164,7 +161,7 @@ func TestServiceBackedHermesProjectionLatencyProfile(t *testing.T) {
 		if err != nil {
 			t.Fatalf("hermes envelope binary[%d] failed: %v", i, err)
 		}
-		if _, err := redisClient.XAdd(ctx, stream, map[string]any{"envelope": raw}); err != nil {
+		if _, err := redisClient.XAdd(ctx, stream, serviceRedisValues(map[string]any{"envelope": raw})); err != nil {
 			t.Fatalf("redis xadd hermes[%d] failed: %v", i, err)
 		}
 	}
@@ -204,10 +201,7 @@ func TestServiceBackedHermesProjectionLatencyProfile(t *testing.T) {
 	countLatencies := make(chan time.Duration, 128)
 	for i := 0; i < 128; i++ {
 		start := time.Now()
-		count, err := store.Count(ctx, "svc_hermes_pressure", hermes.Query{
-			OrganizationID: orgID,
-			Filters:        map[string]any{"bucket": fmt.Sprintf("%02d", i%16)},
-		}, hermes.Fence{})
+		count, err := store.Count(ctx, "svc_hermes_pressure", hermes.QueryFromRecordQuery(orgID, serviceRecordQuery(0, map[string]any{"bucket": fmt.Sprintf("%02d", i%16)})), hermes.Fence{})
 		countLatencies <- time.Since(start)
 		if err != nil || count == 0 {
 			t.Fatalf("hermes hot count[%d] count=%d err=%v", i, count, err)
@@ -265,9 +259,9 @@ func TestServiceBackedMixedWorkflowLatencyProfile(t *testing.T) {
 					errCh <- err
 					return
 				}
-				values := map[string]any{
-					fmt.Sprintf("mixed:%03d:a", id): []byte("a"),
-					fmt.Sprintf("mixed:%03d:b", id): []byte("b"),
+				values := rediskit.Values{
+					rediskit.Field(fmt.Sprintf("mixed:%03d:a", id), []byte("a")),
+					rediskit.Field(fmt.Sprintf("mixed:%03d:b", id), []byte("b")),
 				}
 				if _, err := batch.SetGetMany(ctx, values, time.Minute); err != nil {
 					errCh <- err
@@ -282,7 +276,7 @@ func TestServiceBackedMixedWorkflowLatencyProfile(t *testing.T) {
 						Collection:     "pressure",
 						OrganizationID: orgID,
 						RecordID:       recordID,
-						Data:           map[string]any{"bucket": fmt.Sprintf("%02d", id%16), "source": "mixed"},
+						Data:           serviceRecordData(map[string]any{"bucket": fmt.Sprintf("%02d", id%16), "source": "mixed"}),
 					},
 				})
 				if err != nil {
@@ -320,7 +314,7 @@ func BenchmarkServiceBackedHermesRebuild512(b *testing.B) {
 			Collection:     "pressure",
 			OrganizationID: orgID,
 			RecordID:       fmt.Sprintf("record-%03d", i),
-			Data:           map[string]any{"bucket": fmt.Sprintf("%02d", i%16), "source": "bench"},
+			Data:           serviceRecordData(map[string]any{"bucket": fmt.Sprintf("%02d", i%16), "source": "bench"}),
 		}); err != nil {
 			b.Fatalf("postgres seed[%d] failed: %v", i, err)
 		}
@@ -353,7 +347,7 @@ func BenchmarkServiceBackedHermesApplyBatch512(b *testing.B) {
 				Collection:     "pressure",
 				OrganizationID: orgID,
 				RecordID:       fmt.Sprintf("record-%03d", i),
-				Data:           map[string]any{"bucket": fmt.Sprintf("%02d", i%16), "source": "bench"},
+				Data:           serviceRecordData(map[string]any{"bucket": fmt.Sprintf("%02d", i%16), "source": "bench"}),
 			},
 		})
 	}

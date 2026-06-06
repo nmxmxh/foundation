@@ -8,12 +8,12 @@ import (
 )
 
 type EnvelopeMetadata struct {
-	CorrelationID  string         `json:"correlation_id"`
-	RequestID      string         `json:"request_id"`
-	IdempotencyKey string         `json:"idempotency_key"`
-	SchemaVersion  string         `json:"schema_version"`
-	Timestamp      time.Time      `json:"timestamp"`
-	Extra          map[string]any `json:"extra,omitempty"`
+	CorrelationID  string    `json:"correlation_id"`
+	RequestID      string    `json:"request_id"`
+	IdempotencyKey string    `json:"idempotency_key"`
+	SchemaVersion  string    `json:"schema_version"`
+	Timestamp      time.Time `json:"timestamp"`
+	Extra          Object    `json:"extra,omitempty"`
 }
 
 type PayloadEncoding string
@@ -27,7 +27,7 @@ const (
 
 type Envelope struct {
 	EventType       string           `json:"event_type"`
-	Payload         map[string]any   `json:"payload"`
+	Payload         Object           `json:"payload"`
 	PayloadEncoding PayloadEncoding  `json:"payload_encoding"`
 	Metadata        EnvelopeMetadata `json:"metadata"`
 }
@@ -71,15 +71,14 @@ func (r *RouteIndex) Resolve(eventType string) *Route {
 	return &r.routes[index]
 }
 
-func CreateEnvelope(eventType string, payload map[string]any, extra map[string]any) Envelope {
+func CreateEnvelope(eventType string, payload any, extra any) Envelope {
 	now := time.Now().UTC()
 	correlationID := NewCorrelationID()
-	if payload == nil {
-		payload = map[string]any{}
-	}
+	payloadObject := objectArgument(payload)
+	extraObject := objectArgument(extra)
 	return Envelope{
 		EventType:       eventType,
-		Payload:         payload,
+		Payload:         payloadObject,
 		PayloadEncoding: PayloadEncodingJSON,
 		Metadata: EnvelopeMetadata{
 			CorrelationID:  correlationID,
@@ -87,8 +86,21 @@ func CreateEnvelope(eventType string, payload map[string]any, extra map[string]a
 			IdempotencyKey: "idem_" + strings.TrimPrefix(correlationID, "corr_"),
 			SchemaVersion:  EnvelopeSchemaVersion,
 			Timestamp:      now,
-			Extra:          extra,
+			Extra:          extraObject,
 		},
+	}
+}
+
+func objectArgument(value any) Object {
+	switch typed := value.(type) {
+	case nil:
+		return Object{}
+	case Object:
+		return typed
+	case map[string]any:
+		return ObjectFromMap(typed)
+	default:
+		return Object{}
 	}
 }
 

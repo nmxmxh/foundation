@@ -3,9 +3,12 @@ package worker
 import (
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 // Job is the transport shape used by the worker engine.
@@ -13,9 +16,9 @@ type Job struct {
 	ID              string             `json:"id"`
 	JobKind         string             `json:"kind"`
 	Queue           string             `json:"queue"`
-	Payload         map[string]any     `json:"payload,omitempty"`
+	Payload         extension.Object   `json:"payload,omitempty"`
 	RawPayload      []byte             `json:"raw_payload,omitempty"`
-	Metadata        map[string]any     `json:"metadata"`
+	Metadata        extension.Object   `json:"metadata"`
 	CorrelationID   string             `json:"correlation_id"`
 	IdempotencyKey  string             `json:"idempotency_key"`
 	Attempt         int                `json:"attempt"`
@@ -116,27 +119,24 @@ func (j Job) HealthKey() string {
 	return fmt.Sprintf("%s:%s:%s", strings.TrimSpace(j.Queue), strings.TrimSpace(j.JobKind), j.CreatedAt.UTC().Format(time.RFC3339Nano))
 }
 
-func positiveIntFromMetadata(metadata map[string]any, keys ...string) int {
+func positiveIntFromMetadata(metadata extension.Object, keys ...string) int {
 	for _, key := range keys {
 		value, ok := metadata[key]
 		if !ok {
 			continue
 		}
-		switch typed := value.(type) {
-		case int:
-			if typed > 0 {
-				return typed
-			}
-		case int32:
-			if typed > 0 {
+		if typed, ok := value.IntValue(); ok {
+			if typed > 0 && typed <= int64(math.MaxInt) {
 				return int(typed)
 			}
-		case int64:
-			if typed > 0 {
+		}
+		if typed, ok := value.UintValue(); ok {
+			if typed > 0 && typed <= uint64(math.MaxInt) {
 				return int(typed)
 			}
-		case float64:
-			if typed > 0 {
+		}
+		if typed, ok := value.FloatValue(); ok {
+			if typed > 0 && typed <= float64(math.MaxInt) {
 				return int(typed)
 			}
 		}

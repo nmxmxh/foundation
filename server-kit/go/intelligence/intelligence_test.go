@@ -6,15 +6,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 )
 
 func TestExtractBuildsGraphSignalAndSparseVector(t *testing.T) {
 	input := Input{
 		EventType: "brand:create:v1:requested",
-		Payload: map[string]any{
-			"brand_profile_id": "brand_123",
-			"name":             "Ovasabi Studio research memo",
+		Payload: extension.Object{
+			"brand_profile_id": extension.String("brand_123"),
+			"name":             extension.String("Ovasabi Studio research memo"),
 		},
 		Metadata: metadata.FromMap(map[string]any{
 			"global_context": map[string]any{
@@ -23,7 +24,7 @@ func TestExtractBuildsGraphSignalAndSparseVector(t *testing.T) {
 			},
 			"tags":       []string{"security:jwt", "intent:research"},
 			"categories": []string{"Content"},
-		}).ToMap(),
+		}).ToObject(),
 	}
 
 	signal := Extract(input, 12, 32)
@@ -55,8 +56,11 @@ func TestInjectorMergesMetadataAndObservesSignal(t *testing.T) {
 
 	ctx, merged, signal := injector.Inject(context.Background(), Input{
 		EventType: "document:index:v1:requested",
-		Payload:   map[string]any{"document_ref": "doc_1", "title": "Risk intelligence"},
-		Metadata:  map[string]any{"tags": []string{"source:api"}},
+		Payload: extension.Object{
+			"document_ref": extension.String("doc_1"),
+			"title":        extension.String("Risk intelligence"),
+		},
+		Metadata: metadata.FromMap(map[string]any{"tags": []string{"source:api"}}).ToObject(),
 	})
 	if observed.EventType != signal.EventType {
 		t.Fatalf("observer did not receive signal: %+v", observed)
@@ -64,7 +68,7 @@ func TestInjectorMergesMetadataAndObservesSignal(t *testing.T) {
 	if _, ok := FromContext(ctx); !ok {
 		t.Fatalf("signal was not injected into context")
 	}
-	md := metadata.FromMap(merged)
+	md := metadata.FromObject(merged)
 	if md.KnowledgeGraph != "document.intelligence" {
 		t.Fatalf("knowledge graph not merged: %+v", merged)
 	}

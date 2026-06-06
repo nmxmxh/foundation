@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
 )
 
@@ -21,7 +22,8 @@ func TestNewEventRouteHandlerValidationAndExecution(t *testing.T) {
 	called := false
 	handler := NewEventRouteHandler(route, func(w http.ResponseWriter, _ *http.Request, req DispatchRequest) {
 		called = true
-		if req.EventType != "orders:create:v1:requested" || req.Payload["name"] != "Ada" {
+		name, _ := req.Payload.GetString("name")
+		if req.EventType != "orders:create:v1:requested" || name != "Ada" {
 			t.Fatalf("dispatch request = %+v", req)
 		}
 		w.WriteHeader(http.StatusAccepted)
@@ -50,7 +52,7 @@ func TestBuildDispatchRequestPayloadVariants(t *testing.T) {
 		Method:         http.MethodGet,
 		Path:           "/v1/orders/{order_id}",
 		EventType:      "orders:get:v1:requested",
-		StaticPayload:  map[string]any{"source": "route", "order_id": "static"},
+		StaticPayload:  extension.Object{"source": extension.String("route"), "order_id": extension.String("static")},
 		IncludeHeaders: []string{"X-Trace-ID", " "},
 	}
 	req := httptest.NewRequest(http.MethodGet, "/v1/orders/ord_1?workspace_id=wrk_1", nil)
@@ -60,10 +62,15 @@ func TestBuildDispatchRequestPayloadVariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildDispatchRequest() error = %v", err)
 	}
-	if out.Payload["order_id"] != "ord_1" || out.Payload["source"] != "route" || out.Payload["workspace_id"] != "wrk_1" {
+	orderID, _ := out.Payload.GetString("order_id")
+	source, _ := out.Payload.GetString("source")
+	workspaceID, _ := out.Payload.GetString("workspace_id")
+	if orderID != "ord_1" || source != "route" || workspaceID != "wrk_1" {
 		t.Fatalf("payload = %+v", out.Payload)
 	}
-	if out.Payload["_request_headers"].(map[string]any)["x-trace-id"] != "trace_1" {
+	headersValue, _ := out.Payload["_request_headers"].ObjectValue()
+	traceID, _ := headersValue.GetString("x-trace-id")
+	if traceID != "trace_1" {
 		t.Fatalf("headers payload = %+v", out.Payload["_request_headers"])
 	}
 
@@ -85,6 +92,16 @@ func TestBuildDispatchRequestPayloadVariants(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodPost, "/v1/orders", bytes.NewReader([]byte(`{"id":"ord_1"}`)))
 	req.Header.Set("Content-Type", "application/json")
+	out, err = BuildDispatchRequest(req, registry.HTTPRoute{Method: http.MethodPost, EventType: "orders:create:v1:requested"})
+	if err != nil {
+		t.Fatalf("json BuildDispatchRequest() error = %v", err)
+	}
+	if len(out.PayloadBytes) != 0 {
+		t.Fatalf("json request retained raw payload bytes without IncludeRawBody: %d", len(out.PayloadBytes))
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/v1/orders", bytes.NewReader([]byte(`{"id":"ord_1"}`)))
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/protobuf")
 	out, err = BuildDispatchRequest(req, registry.HTTPRoute{
 		Method:         http.MethodPost,
@@ -94,7 +111,8 @@ func TestBuildDispatchRequestPayloadVariants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json BuildDispatchRequest() error = %v", err)
 	}
-	if out.ResponseEncoding != "protobuf" || out.Payload["_raw_body"] == "" {
+	rawBody, _ := out.Payload.GetString("_raw_body")
+	if out.ResponseEncoding != "protobuf" || rawBody == "" || len(out.PayloadBytes) == 0 {
 		t.Fatalf("json request = %+v", out)
 	}
 	metadataJSON, err := json.Marshal(out.Metadata)
@@ -103,5 +121,69 @@ func TestBuildDispatchRequestPayloadVariants(t *testing.T) {
 	}
 	if len(metadataJSON) == 0 {
 		t.Fatal("metadata JSON should not be empty")
+	}
+}
+
+func BenchmarkPayloadFromRequestJSONBody(b *testing.B) {
+	body := []byte(`{"include_permissions":true,"view":"full"}`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/users/user-123/profile", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		payload, raw, requestEncoding, responseEncoding, err := payloadFromRequest(req)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if requestEncoding != "json" || responseEncoding != "json" || len(raw) == 0 {
+			b.Fatalf("encoding/raw mismatch: %s %s %d", requestEncoding, responseEncoding, len(raw))
+		}
+		if view, _ := payload.GetString("view"); view != "full" {
+			b.Fatalf("payload view = %q", view)
+		}
+	}
+}
+
+func BenchmarkBuildDispatchRequestJSONBody(b *testing.B) {
+	route := registry.HTTPRoute{
+		Method:         http.MethodPost,
+		Path:           "/v1/users/{id}/profile",
+		EventType:      "user.profile.read",
+		StaticPayload:  extension.Object{"source": extension.String("api")},
+		IncludeHeaders: []string{"X-Request-ID", "X-Correlation-ID"},
+	}
+	body := []byte(`{"include_permissions":true,"view":"full"}`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/users/user-123/profile", bytes.NewReader(body))
+		req.SetPathValue("id", "user-123")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Request-ID", "req-123")
+		req.Header.Set("X-Correlation-ID", "corr-123")
+		if _, err := BuildDispatchRequest(req, route); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkPlannedDispatchRequestJSONBody(b *testing.B) {
+	route := registry.HTTPRoute{
+		Method:         http.MethodPost,
+		Path:           "/v1/users/{id}/profile",
+		EventType:      "user.profile.read",
+		StaticPayload:  extension.Object{"source": extension.String("api")},
+		IncludeHeaders: []string{"X-Request-ID", "X-Correlation-ID"},
+	}
+	plan := CompileDispatchRoute(route)
+	body := []byte(`{"include_permissions":true,"view":"full"}`)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/v1/users/user-123/profile", bytes.NewReader(body))
+		req.SetPathValue("id", "user-123")
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Request-ID", "req-123")
+		req.Header.Set("X-Correlation-ID", "corr-123")
+		if _, err := plan.Build(req); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

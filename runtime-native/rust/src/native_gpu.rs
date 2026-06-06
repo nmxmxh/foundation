@@ -105,11 +105,7 @@ impl NativeGpuOpaquePluginHandle {
         platform: RuntimeNativeGpuPlatform,
         has_external_sync: bool,
     ) -> Result<Self, NativeRuntimeError> {
-        let handle = Self {
-            token: token.into(),
-            platform,
-            has_external_sync,
-        };
+        let handle = Self { token: token.into(), platform, has_external_sync };
         validate_scope_text("opaque_token", &handle.token)?;
         Ok(handle)
     }
@@ -165,11 +161,7 @@ struct NativeFence {
 
 impl NativeFence {
     fn new(id: u64, required_value: u64) -> Self {
-        Self {
-            id,
-            required_value,
-            signaled_value: 0,
-        }
+        Self { id, required_value, signaled_value: 0 }
     }
 
     fn signal(&mut self, value: u64) {
@@ -203,10 +195,7 @@ impl Default for NativeGpuHandleRegistry {
 
 impl NativeGpuHandleRegistry {
     pub fn new(max_records: usize) -> Self {
-        Self {
-            records: RwLock::new(BTreeMap::new()),
-            max_records,
-        }
+        Self { records: RwLock::new(BTreeMap::new()), max_records }
     }
 
     pub fn register_stub(
@@ -220,10 +209,7 @@ impl NativeGpuHandleRegistry {
         let token = stable_descriptor_token(&descriptor.id);
         self.register_private(
             descriptor,
-            PlatformHandle::Stub {
-                _token: token,
-                platform,
-            },
+            PlatformHandle::Stub { _token: token, platform },
             NativeFence::new(fence_id, required_fence_value),
             owner_scope,
         )
@@ -285,9 +271,7 @@ impl NativeGpuHandleRegistry {
             .write()
             .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
         let record = guard.get_mut(descriptor_id).ok_or_else(|| {
-            gpu_unavailable(format!(
-                "native GPU descriptor {descriptor_id} is unavailable"
-            ))
+            gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
         })?;
         assert_owner(record, owner_scope)?;
         record.ref_count = record
@@ -308,9 +292,7 @@ impl NativeGpuHandleRegistry {
             .write()
             .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
         let record = guard.get_mut(descriptor_id).ok_or_else(|| {
-            gpu_unavailable(format!(
-                "native GPU descriptor {descriptor_id} is unavailable"
-            ))
+            gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
         })?;
         assert_owner(record, owner_scope)?;
 
@@ -343,9 +325,7 @@ impl NativeGpuHandleRegistry {
             .write()
             .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
         let record = guard.get_mut(descriptor_id).ok_or_else(|| {
-            gpu_unavailable(format!(
-                "native GPU descriptor {descriptor_id} is unavailable"
-            ))
+            gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
         })?;
         record.fence.signal(signaled_value);
         Ok(record.fence.snapshot())
@@ -362,9 +342,7 @@ impl NativeGpuHandleRegistry {
             .read()
             .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
         let record = guard.get(descriptor_id).ok_or_else(|| {
-            gpu_unavailable(format!(
-                "native GPU descriptor {descriptor_id} is unavailable"
-            ))
+            gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
         })?;
         assert_owner(record, owner_scope)?;
         Ok(NativeGpuMaterializationPlan {
@@ -384,9 +362,7 @@ impl NativeGpuHandleRegistry {
             .read()
             .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
         let record = guard.get(descriptor_id).ok_or_else(|| {
-            gpu_unavailable(format!(
-                "native GPU descriptor {descriptor_id} is unavailable"
-            ))
+            gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
         })?;
         assert_owner(record, owner_scope)?;
         Ok(NativeGpuRegistrySnapshot {
@@ -446,13 +422,7 @@ impl NativeGpuHandleRegistry {
         let public_descriptor = descriptor.clone();
         guard.insert(
             descriptor.id.clone(),
-            NativeGpuHandleRecord {
-                descriptor,
-                platform_handle,
-                fence,
-                owner_scope,
-                ref_count: 1,
-            },
+            NativeGpuHandleRecord { descriptor, platform_handle, fence, owner_scope, ref_count: 1 },
         );
         Ok(public_descriptor)
     }
@@ -477,27 +447,22 @@ impl PlatformHandle {
                 has_external_sync: false,
             },
             #[cfg(unix)]
-            PlatformHandle::UnixFd {
-                platform,
-                plane_count,
-                _sync_file,
-                ..
-            } => NativeGpuPlatformHandleSnapshot {
-                kind: NativeGpuPlatformHandleKind::UnixFd,
-                platform: *platform,
-                plane_count: *plane_count,
-                has_external_sync: _sync_file.is_some(),
-            },
-            PlatformHandle::PluginOpaque {
-                platform,
-                has_external_sync,
-                ..
-            } => NativeGpuPlatformHandleSnapshot {
-                kind: NativeGpuPlatformHandleKind::PluginOpaque,
-                platform: *platform,
-                plane_count: 0,
-                has_external_sync: *has_external_sync,
-            },
+            PlatformHandle::UnixFd { platform, plane_count, _sync_file, .. } => {
+                NativeGpuPlatformHandleSnapshot {
+                    kind: NativeGpuPlatformHandleKind::UnixFd,
+                    platform: *platform,
+                    plane_count: *plane_count,
+                    has_external_sync: _sync_file.is_some(),
+                }
+            }
+            PlatformHandle::PluginOpaque { platform, has_external_sync, .. } => {
+                NativeGpuPlatformHandleSnapshot {
+                    kind: NativeGpuPlatformHandleKind::PluginOpaque,
+                    platform: *platform,
+                    plane_count: 0,
+                    has_external_sync: *has_external_sync,
+                }
+            }
         }
     }
 }
@@ -594,9 +559,7 @@ mod tests {
     #[test]
     fn registers_descriptor_without_exposing_platform_handle() {
         let registry = NativeGpuHandleRegistry::new(4);
-        let public = registry
-            .register_stub(descriptor(), owner(), 7, 1)
-            .expect("register");
+        let public = registry.register_stub(descriptor(), owner(), 7, 1).expect("register");
 
         assert_eq!(public.id, "frame-1");
         assert_eq!(registry.len().expect("len"), 1);
@@ -610,19 +573,11 @@ mod tests {
     #[test]
     fn acquire_and_release_preserve_owner_scope_and_ref_counts() {
         let registry = NativeGpuHandleRegistry::new(4);
-        registry
-            .register_stub(descriptor(), owner(), 1, 0)
-            .expect("register");
+        registry.register_stub(descriptor(), owner(), 1, 0).expect("register");
 
         let acquired = registry.acquire("frame-1", &owner()).expect("acquire");
         assert_eq!(acquired.id, "frame-1");
-        assert_eq!(
-            registry
-                .snapshot("frame-1", &owner())
-                .expect("snapshot")
-                .ref_count,
-            2
-        );
+        assert_eq!(registry.snapshot("frame-1", &owner()).expect("snapshot").ref_count, 2);
 
         let first_release = registry.release("frame-1", &owner()).expect("release");
         assert_eq!(first_release.remaining_refs, 1);
@@ -635,23 +590,17 @@ mod tests {
     #[test]
     fn rejects_owner_scope_mismatch() {
         let registry = NativeGpuHandleRegistry::new(4);
-        registry
-            .register_stub(descriptor(), owner(), 1, 0)
-            .expect("register");
+        registry.register_stub(descriptor(), owner(), 1, 0).expect("register");
         let other = NativeGpuOwnerScope::new("tenant-2", "camera-plugin", "gpu-0").expect("owner");
 
-        let error = registry
-            .acquire("frame-1", &other)
-            .expect_err("owner mismatch");
+        let error = registry.acquire("frame-1", &other).expect_err("owner mismatch");
         assert_eq!(error.code, NativeErrorCode::NativeGpuUnauthorized);
     }
 
     #[test]
     fn pending_fence_blocks_final_release_until_signaled() {
         let registry = NativeGpuHandleRegistry::new(4);
-        registry
-            .register_stub(descriptor(), owner(), 42, 3)
-            .expect("register");
+        registry.register_stub(descriptor(), owner(), 42, 3).expect("register");
 
         let blocked = registry.release("frame-1", &owner()).expect_err("pending");
         assert_eq!(blocked.code, NativeErrorCode::NativeGpuBusy);
@@ -659,39 +608,26 @@ mod tests {
 
         let fence = registry.signal_fence("frame-1", 3).expect("signal");
         assert!(fence.complete);
-        assert!(
-            registry
-                .release("frame-1", &owner())
-                .expect("release")
-                .removed
-        );
+        assert!(registry.release("frame-1", &owner()).expect("release").removed);
     }
 
     #[test]
     fn record_limit_is_enforced() {
         let registry = NativeGpuHandleRegistry::new(1);
-        registry
-            .register_stub(descriptor(), owner(), 1, 0)
-            .expect("register");
+        registry.register_stub(descriptor(), owner(), 1, 0).expect("register");
         let mut second = descriptor();
         second.id = "frame-2".to_string();
 
-        let error = registry
-            .register_stub(second, owner(), 2, 0)
-            .expect_err("limit");
+        let error = registry.register_stub(second, owner(), 2, 0).expect_err("limit");
         assert_eq!(error.code, NativeErrorCode::NativeGpuBusy);
     }
 
     #[test]
     fn duplicate_descriptor_id_is_rejected() {
         let registry = NativeGpuHandleRegistry::new(4);
-        registry
-            .register_stub(descriptor(), owner(), 1, 0)
-            .expect("register");
+        registry.register_stub(descriptor(), owner(), 1, 0).expect("register");
 
-        let error = registry
-            .register_stub(descriptor(), owner(), 2, 0)
-            .expect_err("duplicate");
+        let error = registry.register_stub(descriptor(), owner(), 2, 0).expect_err("duplicate");
         assert_eq!(error.code, NativeErrorCode::NativeGpuBusy);
         assert_eq!(registry.len().expect("len"), 1);
     }
@@ -749,14 +685,9 @@ mod tests {
             )
             .expect("register fd");
 
-        let snapshot = registry
-            .snapshot("dmabuf-frame-1", &owner())
-            .expect("snapshot");
+        let snapshot = registry.snapshot("dmabuf-frame-1", &owner()).expect("snapshot");
         assert_eq!(snapshot.handle.kind, NativeGpuPlatformHandleKind::UnixFd);
-        assert_eq!(
-            snapshot.handle.platform,
-            RuntimeNativeGpuPlatform::LinuxDmabuf
-        );
+        assert_eq!(snapshot.handle.platform, RuntimeNativeGpuPlatform::LinuxDmabuf);
         assert_eq!(snapshot.handle.plane_count, 2);
         assert!(snapshot.handle.has_external_sync);
     }
@@ -773,12 +704,7 @@ mod tests {
             .register_unix_fd(
                 descriptor,
                 owner(),
-                NativeGpuUnixFdHandle {
-                    fd,
-                    sync_file: None,
-                    plane_count: 0,
-                    modifier: None,
-                },
+                NativeGpuUnixFdHandle { fd, sync_file: None, plane_count: 0, modifier: None },
                 1,
                 0,
             )
@@ -802,14 +728,8 @@ mod tests {
             .expect("register opaque");
 
         let snapshot = registry.snapshot("frame-1", &owner()).expect("snapshot");
-        assert_eq!(
-            snapshot.handle.kind,
-            NativeGpuPlatformHandleKind::PluginOpaque
-        );
-        assert_eq!(
-            snapshot.handle.platform,
-            RuntimeNativeGpuPlatform::AppleIosurface
-        );
+        assert_eq!(snapshot.handle.kind, NativeGpuPlatformHandleKind::PluginOpaque);
+        assert_eq!(snapshot.handle.platform, RuntimeNativeGpuPlatform::AppleIosurface);
         assert!(snapshot.handle.has_external_sync);
     }
 
@@ -827,9 +747,7 @@ mod tests {
         let mut invalid = descriptor();
         invalid.width = None;
 
-        let error = registry
-            .register_stub(invalid, owner(), 1, 0)
-            .expect_err("invalid");
+        let error = registry.register_stub(invalid, owner(), 1, 0).expect_err("invalid");
         assert_eq!(error.code, NativeErrorCode::MalformedFrame);
         assert_eq!(registry.len().expect("len"), 0);
     }
@@ -837,13 +755,9 @@ mod tests {
     #[test]
     fn materialization_plan_returns_public_fallback_only() {
         let registry = NativeGpuHandleRegistry::new(4);
-        registry
-            .register_stub(descriptor(), owner(), 1, 0)
-            .expect("register");
+        registry.register_stub(descriptor(), owner(), 1, 0).expect("register");
 
-        let plan = registry
-            .materialization_plan("frame-1", &owner())
-            .expect("plan");
+        let plan = registry.materialization_plan("frame-1", &owner()).expect("plan");
         assert_eq!(plan.descriptor.id, "frame-1");
         assert_eq!(plan.fallback, RuntimeNativeGpuFallback::CopyToWebGpu);
     }

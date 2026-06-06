@@ -10,6 +10,7 @@ import (
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	redispkg "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"google.golang.org/protobuf/proto"
 )
@@ -51,7 +52,7 @@ func NewProjectionEnvelope(mutations []*foundationpb.RecordMutation, correlation
 		EventType:       ProjectionEnvelopeEventType,
 		PayloadBytes:    raw,
 		PayloadEncoding: events.PayloadEncodingProtobuf,
-		Metadata:        map[string]any{"correlation_id": correlationID},
+		Metadata:        extension.Object{"correlation_id": extension.String(correlationID)},
 		CorrelationID:   correlationID,
 		SchemaVersion:   events.EnvelopeSchemaVersion,
 		Timestamp:       time.Now().UTC(),
@@ -143,27 +144,33 @@ func eventFromMutation(envelope events.Envelope, mutation *foundationpb.RecordMu
 }
 
 func recordFromMutation(mutation *foundationpb.RecordMutation) (database.DomainRecord, error) {
-	data := make(map[string]any, len(mutation.GetFields()))
+	data := make(database.RecordData, 0, len(mutation.GetFields()))
+	seen := make(map[string]struct{}, len(mutation.GetFields()))
 	for _, field := range mutation.GetFields() {
 		name := strings.TrimSpace(field.GetName())
 		if name == "" {
 			return database.DomainRecord{}, fmt.Errorf("%w: hermes projection field name is required", ErrInvalidEvent)
 		}
-		if _, exists := data[name]; exists {
+		if _, exists := seen[name]; exists {
 			return database.DomainRecord{}, fmt.Errorf("%w: duplicate hermes projection field %q", ErrInvalidEvent, name)
 		}
+		seen[name] = struct{}{}
 		value, err := scalarFromProto(field.GetValue())
 		if err != nil {
 			return database.DomainRecord{}, err
 		}
-		data[name] = value
+		recordValue, ok := database.RecordValueFromAny(value)
+		if !ok {
+			return database.DomainRecord{}, fmt.Errorf("%w: unsupported hermes projection field %q", ErrInvalidEvent, name)
+		}
+		data = append(data, database.RecordField{Name: name, Value: recordValue})
 	}
 	return database.DomainRecord{
 		Domain:         strings.TrimSpace(mutation.GetDomain()),
 		Collection:     strings.TrimSpace(mutation.GetCollection()),
 		OrganizationID: strings.TrimSpace(mutation.GetOrganizationId()),
 		RecordID:       strings.TrimSpace(mutation.GetRecordId()),
-		Data:           data,
+		Data:           data.Normalize(),
 		Vector:         append([]float32(nil), mutation.GetVector()...),
 		CreatedAt:      timestampTime(mutation.GetCreatedAt()),
 		UpdatedAt:      timestampTime(mutation.GetUpdatedAt()),
@@ -193,10 +200,14 @@ func scalarFromProto(value *foundationpb.ScalarValue) (any, error) {
 }
 
 func operationFromMutation(operation foundationpb.ProjectionOperation) Operation {
-	if operation == foundationpb.ProjectionOperation_PROJECTION_OPERATION_DELETE {
+	switch operation {
+	case foundationpb.ProjectionOperation_PROJECTION_OPERATION_PATCH:
+		return OperationPatch
+	case foundationpb.ProjectionOperation_PROJECTION_OPERATION_DELETE:
 		return OperationDelete
+	default:
+		return OperationUpsert
 	}
-	return OperationUpsert
 }
 
 func sourceIDFromMutation(envelope events.Envelope, mutation *foundationpb.RecordMutation, index int, total int) string {

@@ -129,11 +129,7 @@ fn input_bytes_view_raw(raw_buffer: &[u8]) -> Result<&[u8], String> {
 
 fn write_output_bytes_raw(raw_buffer: &mut [u8], bytes: &[u8]) -> Result<(), String> {
     if bytes.len() > OUTPUT_MAX_BYTES as usize {
-        return Err(format!(
-            "output payload too large: {} > {}",
-            bytes.len(),
-            OUTPUT_MAX_BYTES
-        ));
+        return Err(format!("output payload too large: {} > {}", bytes.len(), OUTPUT_MAX_BYTES));
     }
     clear_output_region_raw(raw_buffer)?;
     let output = region_raw_mut(raw_buffer, OFFSET_OUTPUT_BYTES, bytes.len() as u32)?;
@@ -176,9 +172,7 @@ fn load_epoch_raw(raw_buffer: &[u8], index: u32) -> i32 {
         return 0;
     }
     let offset = (OFFSET_EPOCHS + index * EPOCH_SLOT_BYTES) as usize;
-    let bytes: [u8; 4] = raw_buffer[offset..offset + 4]
-        .try_into()
-        .unwrap_or_default();
+    let bytes: [u8; 4] = raw_buffer[offset..offset + 4].try_into().unwrap_or_default();
     i32::from_le_bytes(bytes)
 }
 
@@ -253,9 +247,7 @@ fn read_frame_bounded<R: Read>(
         )));
     }
     let mut payload = vec![0_u8; length];
-    reader
-        .read_exact(&mut payload)
-        .map_err(FrameReadError::Io)?;
+    reader.read_exact(&mut payload).map_err(FrameReadError::Io)?;
     Ok(payload)
 }
 
@@ -275,10 +267,9 @@ fn write_frame<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
 pub(crate) fn read_frame_for_test<R: Read>(reader: &mut R) -> io::Result<Vec<u8>> {
     match read_frame_bounded(reader, BUFFER_TOTAL_BYTES as usize) {
         Ok(payload) => Ok(payload),
-        Err(FrameReadError::EndOfStream) => Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "end of stream",
-        )),
+        Err(FrameReadError::EndOfStream) => {
+            Err(io::Error::new(io::ErrorKind::UnexpectedEof, "end of stream"))
+        }
         Err(FrameReadError::Io(error)) => Err(error),
     }
 }

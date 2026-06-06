@@ -92,10 +92,11 @@ scaffold_copy_tree() {
     name="$(basename "$source")"
     local dest="$dest_parent/$name"
 
-    rm -rf "$dest"
     mkdir -p "$dest_parent"
     if command -v rsync >/dev/null 2>&1; then
+        mkdir -p "$dest"
         rsync -a \
+            --delete \
             --exclude '.cache/' \
             --exclude '.gocache/' \
             --exclude 'node_modules/' \
@@ -112,7 +113,11 @@ scaffold_copy_tree() {
         return
     fi
 
-    cp -R "$source" "$dest_parent/"
+    local tmp
+    tmp="$(mktemp -d "$dest_parent/.${name}.tmp.XXXXXX")"
+    cp -R "$source/." "$tmp/"
+    rm -rf "$dest"
+    mv "$tmp" "$dest"
     find "$dest" \( \
         -name '.cache' -o \
         -name '.gocache' -o \

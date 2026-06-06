@@ -1,7 +1,7 @@
-.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-bench test-bench-go test-bench-native-rust test-bench-history lint verify docker-up docker-down migrate-up help \
+.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-history lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator \
 	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
-	check-rust-runtime-practices check-logging-practices check-metadata-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage
+	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage
 
 .DEFAULT_GOAL := help
 
@@ -27,6 +27,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-go-concurrency-practices \
 	check-logging-practices \
 	check-metadata-practices \
+	check-dynamic-payload-practices \
 	check-database-practices \
 	check-redis-practices \
 	check-river-practices \
@@ -40,6 +41,9 @@ FOUNDATION_LINT_CHECKS := \
 
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 FOUNDATION_GO_CACHE_DIR ?= /tmp/ovasabi-foundation-go-build
+FOUNDATION_VITEST_WORKERS ?= 0
+FOUNDATION_CARGO_TEST_JOBS ?= 1
+FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY ?= never
 
 all: build
 
@@ -74,22 +78,28 @@ test-go:
 
 test-ts:
 	@echo "Running TypeScript tests..."
-	@if [ -d runtime-transport/ts/node_modules ]; then tooling/scripts/run_vitest.sh runtime-transport/ts run; else echo "Skipping runtime-transport/ts tests; run npm install first"; fi
-	@if [ -d runtime-sdk/ts/browser-host/node_modules ]; then tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host run; else echo "Skipping runtime-sdk/ts/browser-host tests; run npm install first"; fi
-	@if [ -d runtime-native/ts/node_modules ]; then tooling/scripts/run_vitest.sh runtime-native/ts run; else echo "Skipping runtime-native/ts tests; run npm install first"; fi
+	@if [ -d runtime-transport/ts/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-transport/ts run; else echo "Skipping runtime-transport/ts tests; run npm install first"; fi
+	@if [ -d runtime-sdk/ts/browser-host/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host run; else echo "Skipping runtime-sdk/ts/browser-host tests; run npm install first"; fi
+	@if [ -d runtime-native/ts/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-native/ts run; else echo "Skipping runtime-native/ts tests; run npm install first"; fi
 
 test-rust: test-rust-sdk test-native-rust
 
 test-service-backed:
 	@tests/service_backed_foundation_test.sh
 
+test-service-backed-load:
+	@tests/service_backed_load_research.sh
+
+test-load-research:
+	@tooling/scripts/load_research.sh
+
 test-rust-sdk:
 	@echo "Running runtime-sdk Rust tests..."
-	@cargo test --manifest-path runtime-sdk/rust/Cargo.toml
+	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo test --manifest-path runtime-sdk/rust/Cargo.toml --lib --bins -j "$(FOUNDATION_CARGO_TEST_JOBS)"
 
 test-native-rust:
 	@echo "Running runtime-native Rust tests..."
-	@cargo test --manifest-path runtime-native/rust/Cargo.toml
+	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo test --manifest-path runtime-native/rust/Cargo.toml --lib -j "$(FOUNDATION_CARGO_TEST_JOBS)"
 
 check-rust:
 	@scripts/check-rust.sh .
@@ -191,6 +201,12 @@ check-logging-practices:
 check-metadata-practices:
 	@tooling/scripts/metadata_practices_check.sh .
 
+check-dynamic-payload-practices:
+	@tooling/scripts/dynamic_payload_practices_check.sh .
+
+check-platform-boundary-debt:
+	@tooling/scripts/platform_boundary_debt_check.sh .
+
 check-database-practices:
 	@tooling/scripts/database_practices_check.sh .
 
@@ -213,7 +229,7 @@ check-foundation-assets:
 	@tooling/scripts/foundation_assets_check.sh .
 
 check-server-kit-module-contract:
-	@tooling/scripts/server_kit_module_contract_check.sh .
+	@bash tooling/scripts/server_kit_module_contract_check.sh .
 
 check-domain-contract-consistency:
 	@tooling/scripts/domain_contract_consistency_check.sh .
@@ -242,6 +258,8 @@ help:
 	@echo "  make test-rust           Run runtime-sdk and runtime-native Rust tests"
 	@echo "  make check-rust          Run Rust fmt, clippy, practice checks, and tests"
 	@echo "  make test-bench          Run bounded local Foundation benchmarks"
+	@echo "  make test-load-research  Run opt-in staged 1K->1M local load research"
+	@echo "  make test-service-backed-load  Run opt-in staged service-backed load research"
 	@echo "  make test-bench-native-rust  Run native GPU/runtime Rust benchmark simulation"
 	@echo "  make lint                Run foundation scaffold/practice checks"
 	@echo "  make verify              Run lint, tests, TS typechecks, and generated scaffold smoke"

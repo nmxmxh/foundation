@@ -65,6 +65,12 @@ else
   ok "backend template avoids primitive infrastructure folders"
 fi
 
+if find "$target/templates/backend/internal" \( -path '*/bootstrap/typed.go' -o -path '*/bootstrap/typed_test.go' -o -path '*/adapters' -o -iname '*adapter*.go' \) | grep -q .; then
+  fail "backend template avoids typed wrapper and adapter shapes" "use internal/bootstrap/services.go plus Foundation handler helpers"
+else
+  ok "backend template avoids typed wrapper and adapter shapes"
+fi
+
 if [[ -d "$target/server-kit/go" ]]; then
   if find "$target/server-kit/go" -mindepth 1 -maxdepth 1 -type d \( -name persistence -o -name shared -o -name utils -o -name common \) | grep -q .; then
     fail "server-kit modules use explicit domain names" "avoid generic module names like persistence/shared/utils/common"

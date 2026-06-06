@@ -13,6 +13,7 @@ import (
 	"time"
 
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 const (
@@ -77,7 +78,7 @@ type EnvelopeMetadata struct {
 	Locale            string            `json:"locale,omitempty"`
 	TenantRegion      string            `json:"tenant_region,omitempty"`
 	Attributes        map[string]string `json:"attributes,omitempty"`
-	Extras            map[string]any    `json:"extras,omitempty"`
+	Extras            extension.Object  `json:"extras,omitempty"`
 }
 
 type contextKey string
@@ -89,7 +90,7 @@ func New() EnvelopeMetadata {
 		Tags:       []string{},
 		Categories: []string{},
 		Attributes: map[string]string{},
-		Extras:     map[string]any{},
+		Extras:     extension.Object{},
 	}
 }
 
@@ -160,7 +161,7 @@ func FromContextOK(ctx context.Context) (EnvelopeMetadata, bool) {
 		value.Attributes = map[string]string{}
 	}
 	if value.Extras == nil {
-		value.Extras = map[string]any{}
+		value.Extras = extension.Object{}
 	}
 	return value, true
 }
@@ -169,33 +170,51 @@ func NewContext(ctx context.Context, raw map[string]any) context.Context {
 	return IntoContext(ctx, FromMap(raw))
 }
 
+func NewContextObject(ctx context.Context, raw extension.Object) context.Context {
+	return IntoContext(ctx, FromObject(raw))
+}
+
 func FromContextMap(ctx context.Context, overlays ...map[string]any) map[string]any {
-	base := FromContext(ctx).ToMap()
-	return MergeMaps(base, overlays...)
+	base := FromContext(ctx).ToObject()
+	typedOverlays := make([]extension.Object, 0, len(overlays))
+	for _, overlay := range overlays {
+		typedOverlays = append(typedOverlays, objectFromRawMap(overlay))
+	}
+	return MergeObjects(base, typedOverlays...).InterfaceMap()
+}
+
+func FromContextObject(ctx context.Context, overlays ...extension.Object) extension.Object {
+	base := FromContext(ctx).ToObject()
+	return MergeObjects(base, overlays...)
 }
 
 func MergeMaps(base map[string]any, overlays ...map[string]any) map[string]any {
-	merged := copyMap(base)
+	typedOverlays := make([]extension.Object, 0, len(overlays))
 	for _, overlay := range overlays {
-		if overlay == nil {
-			continue
-		}
+		typedOverlays = append(typedOverlays, objectFromRawMap(overlay))
+	}
+	return MergeObjects(objectFromRawMap(base), typedOverlays...).InterfaceMap()
+}
+
+func MergeObjects(base extension.Object, overlays ...extension.Object) extension.Object {
+	merged := base.Clone()
+	for _, overlay := range overlays {
 		for key, value := range overlay {
-			if str, ok := value.(string); ok && strings.TrimSpace(str) == "" {
+			if str, ok := value.StringValue(); ok && strings.TrimSpace(str) == "" {
 				continue
 			}
 			if isMergeableStringSliceField(key) {
-				merged[key] = mergeStringSlices(key, merged[key], value)
+				merged[key] = extensionListFromStrings(mergeStringSliceValues(key, merged[key], value))
 				continue
 			}
 			if key == "global_context" || key == "globalContext" {
-				merged[key] = MergeMaps(asMap(merged[key]), asMap(value))
+				merged[key] = extension.ObjectValue(MergeObjects(objectFromValue(merged[key]), objectFromValue(value)))
 				continue
 			}
-			merged[key] = value
+			merged[key] = value.Clone()
 		}
 	}
-	return FromMap(merged).ToMap()
+	return FromObject(merged).ToObject()
 }
 
 func BuildTag(namespace, value string) (string, bool) {
@@ -224,59 +243,67 @@ func NormalizeCategories(categories []string) []string {
 }
 
 func FromMap(raw map[string]any) EnvelopeMetadata {
+	return FromObject(objectFromRawMap(raw))
+}
+
+func FromObject(raw extension.Object) EnvelopeMetadata {
 	md := New()
 	if raw == nil {
 		return md
 	}
 
-	if gc := pickMap(raw, "global_context", "globalContext"); gc != nil {
+	if gc := pickObject(raw, "global_context", "globalContext"); gc != nil {
 		metaGC := &GlobalContext{
-			UserID:         pickString(gc, "user_id", "userId"),
-			SessionID:      pickString(gc, "session_id", "sessionId"),
-			Source:         pickString(gc, "source"),
-			DeviceID:       pickString(gc, "device_id", "deviceId"),
-			OrganizationID: pickString(gc, "organization_id", "organizationId"),
-			RoleID:         pickString(gc, "role_id", "roleId"),
-			AuditContext:   pickString(gc, "audit_context", "auditContext"),
-			IPAddress:      pickString(gc, "ip_address", "ipAddress"),
-			UserAgent:      pickString(gc, "user_agent", "userAgent"),
+			UserID:         pickObjectString(gc, "user_id", "userId"),
+			SessionID:      pickObjectString(gc, "session_id", "sessionId"),
+			Source:         pickObjectString(gc, "source"),
+			DeviceID:       pickObjectString(gc, "device_id", "deviceId"),
+			OrganizationID: pickObjectString(gc, "organization_id", "organizationId"),
+			RoleID:         pickObjectString(gc, "role_id", "roleId"),
+			AuditContext:   pickObjectString(gc, "audit_context", "auditContext"),
+			IPAddress:      pickObjectString(gc, "ip_address", "ipAddress"),
+			UserAgent:      pickObjectString(gc, "user_agent", "userAgent"),
 		}
 		if !isGlobalContextEmpty(metaGC) {
 			md.GlobalContext = metaGC
 		}
 	}
 
-	md.Tags = NormalizeTags(parseStringSlice(raw["tags"]))
-	md.Categories = NormalizeCategories(parseStringSlice(raw["categories"]))
-	md.AIConfidence = pickFloat64(raw, "ai_confidence", "aiConfidence")
-	md.EmbeddingID = pickString(raw, "embedding_id", "embeddingId")
-	md.KnowledgeGraph = pickString(raw, "knowledge_graph", "knowledgeGraph")
-	md.SourceRef = pickString(raw, "source_ref", "sourceRef")
-	md.GamificationState = pickString(raw, "gamification_state", "gamificationState")
-	md.CorrelationID = pickString(raw, "correlation_id", "correlationId")
-	md.CausationID = pickString(raw, "causation_id", "causationId")
-	md.RequestID = pickString(raw, "request_id", "requestId")
-	md.IdempotencyKey = pickString(raw, "idempotency_key", "idempotencyKey")
-	md.TraceID = pickString(raw, "trace_id", "traceId")
-	md.SpanID = pickString(raw, "span_id", "spanId")
-	md.Channel = pickString(raw, "channel")
-	md.Locale = pickString(raw, "locale")
-	md.TenantRegion = pickString(raw, "tenant_region", "tenantRegion")
+	md.Tags = NormalizeTags(parseStringSliceValue(raw["tags"]))
+	md.Categories = NormalizeCategories(parseStringSliceValue(raw["categories"]))
+	md.AIConfidence = pickObjectFloat64(raw, "ai_confidence", "aiConfidence")
+	md.EmbeddingID = pickObjectString(raw, "embedding_id", "embeddingId")
+	md.KnowledgeGraph = pickObjectString(raw, "knowledge_graph", "knowledgeGraph")
+	md.SourceRef = pickObjectString(raw, "source_ref", "sourceRef")
+	md.GamificationState = pickObjectString(raw, "gamification_state", "gamificationState")
+	md.CorrelationID = pickObjectString(raw, "correlation_id", "correlationId")
+	md.CausationID = pickObjectString(raw, "causation_id", "causationId")
+	md.RequestID = pickObjectString(raw, "request_id", "requestId")
+	md.IdempotencyKey = pickObjectString(raw, "idempotency_key", "idempotencyKey")
+	md.TraceID = pickObjectString(raw, "trace_id", "traceId")
+	md.SpanID = pickObjectString(raw, "span_id", "spanId")
+	md.Channel = pickObjectString(raw, "channel")
+	md.Locale = pickObjectString(raw, "locale")
+	md.TenantRegion = pickObjectString(raw, "tenant_region", "tenantRegion")
 
-	if vp := pickMap(raw, "validity_period", "validityPeriod"); vp != nil {
+	if vp := pickObject(raw, "validity_period", "validityPeriod"); vp != nil {
 		period := &ValidityPeriod{
-			EffectiveFrom: pickString(vp, "effective_from", "effectiveFrom"),
-			EffectiveTo:   pickString(vp, "effective_to", "effectiveTo"),
+			EffectiveFrom: pickObjectString(vp, "effective_from", "effectiveFrom"),
+			EffectiveTo:   pickObjectString(vp, "effective_to", "effectiveTo"),
 		}
 		if period.EffectiveFrom != "" || period.EffectiveTo != "" {
 			md.ValidityPeriod = period
 		}
 	}
 
-	if attrs := pickMap(raw, "attributes"); attrs != nil {
+	if attrs := pickObject(raw, "attributes"); attrs != nil {
 		md.Attributes = map[string]string{}
 		for key, value := range attrs {
-			md.Attributes[key] = fmt.Sprintf("%v", value)
+			if str, ok := value.StringValue(); ok {
+				md.Attributes[key] = str
+			} else {
+				md.Attributes[key] = fmt.Sprintf("%v", value.Interface())
+			}
 		}
 	}
 
@@ -284,16 +311,9 @@ func FromMap(raw map[string]any) EnvelopeMetadata {
 		if isKnownField(key) {
 			continue
 		}
-		md.Extras[key] = value
+		md.Extras[key] = value.Clone()
 	}
 	return md
-}
-
-func copyMap(raw map[string]any) map[string]any {
-	if raw == nil {
-		return map[string]any{}
-	}
-	return maps.Clone(raw)
 }
 
 func isMergeableStringSliceField(key string) bool {
@@ -345,10 +365,10 @@ func containsUnsafeTagFragment(value string) bool {
 	return false
 }
 
-func mergeStringSlices(key string, values ...any) []string {
+func mergeStringSliceValues(key string, values ...extension.Value) []string {
 	merged := make([]string, 0)
 	for _, value := range values {
-		merged = append(merged, parseStringSlice(value)...)
+		merged = append(merged, parseStringSliceValue(value)...)
 	}
 	if key == "categories" {
 		return NormalizeCategories(merged)
@@ -356,124 +376,151 @@ func mergeStringSlices(key string, values ...any) []string {
 	return NormalizeTags(merged)
 }
 
-func asMap(value any) map[string]any {
-	switch typed := value.(type) {
-	case map[string]any:
-		return typed
-	default:
-		return map[string]any{}
+func extensionListFromStrings(values []string) extension.Value {
+	list := make([]extension.Value, 0, len(values))
+	for _, value := range values {
+		list = append(list, extension.String(value))
 	}
+	return extension.List(list)
+}
+
+func objectFromValue(value extension.Value) extension.Object {
+	object, ok := value.ObjectValue()
+	if !ok {
+		return nil
+	}
+	return object
+}
+
+func objectFromRawMap(raw map[string]any) extension.Object {
+	if len(raw) == 0 {
+		return extension.Object{}
+	}
+	value, err := extension.FromJSON(raw)
+	if err != nil {
+		return extension.Object{}
+	}
+	object, ok := value.ObjectValue()
+	if !ok {
+		return extension.Object{}
+	}
+	return object
 }
 
 func (m EnvelopeMetadata) ToMap() map[string]any {
-	result := map[string]any{}
+	return m.ToObject().InterfaceMap()
+}
 
-	m.appendGlobalContext(result)
-	m.appendCollections(result)
-	m.appendScalarFields(result)
-	m.appendValidityPeriod(result)
-	m.appendAttributes(result)
+func (m EnvelopeMetadata) ToObject() extension.Object {
+	result := extension.Object{}
+	m.appendGlobalContextObject(result)
+	m.appendCollectionsObject(result)
+	m.appendScalarFieldsObject(result)
+	m.appendValidityPeriodObject(result)
+	m.appendAttributesObject(result)
 	for key, value := range m.Extras {
 		if _, exists := result[key]; !exists {
-			result[key] = value
+			result[key] = value.Clone()
 		}
 	}
 	return result
 }
 
-func (m EnvelopeMetadata) appendGlobalContext(result map[string]any) {
-	if m.GlobalContext == nil {
-		return
-	}
-	result["global_context"] = map[string]any{
-		"user_id":         m.GlobalContext.UserID,
-		"session_id":      m.GlobalContext.SessionID,
-		"source":          m.GlobalContext.Source,
-		"device_id":       m.GlobalContext.DeviceID,
-		"organization_id": m.GlobalContext.OrganizationID,
-		"role_id":         m.GlobalContext.RoleID,
-		"audit_context":   m.GlobalContext.AuditContext,
-		"ip_address":      m.GlobalContext.IPAddress,
-		"user_agent":      m.GlobalContext.UserAgent,
-	}
-}
-
-func (m EnvelopeMetadata) appendCollections(result map[string]any) {
-	if len(m.Tags) > 0 {
-		result["tags"] = m.Tags
-	}
-	if len(m.Categories) > 0 {
-		result["categories"] = m.Categories
-	}
-}
-
-func (m EnvelopeMetadata) appendScalarFields(result map[string]any) {
-	setIfNotZero(result, "ai_confidence", m.AIConfidence)
-	setIfNotEmpty(result, "embedding_id", m.EmbeddingID)
-	setIfNotEmpty(result, "knowledge_graph", m.KnowledgeGraph)
-	setIfNotEmpty(result, "source_ref", m.SourceRef)
-	setIfNotEmpty(result, "gamification_state", m.GamificationState)
-	setIfNotEmpty(result, "correlation_id", m.CorrelationID)
-	setIfNotEmpty(result, "causation_id", m.CausationID)
-	setIfNotEmpty(result, "request_id", m.RequestID)
-	setIfNotEmpty(result, "idempotency_key", m.IdempotencyKey)
-	setIfNotEmpty(result, "trace_id", m.TraceID)
-	setIfNotEmpty(result, "span_id", m.SpanID)
-	setIfNotEmpty(result, "channel", m.Channel)
-	setIfNotEmpty(result, "locale", m.Locale)
-	setIfNotEmpty(result, "tenant_region", m.TenantRegion)
-}
-
 // PrepareForEmit restores routing fields from request context before emission.
 func PrepareForEmit(ctx context.Context, raw map[string]any) map[string]any {
-	md := FromContext(ctx)
-	emitted := MergeMaps(md.ToMap(), raw)
+	return PrepareObjectForEmit(ctx, objectFromRawMap(raw)).InterfaceMap()
+}
 
-	if emitted["correlation_id"] == nil || emitted["correlation_id"] == "" {
-		if corr := correlationFromGlobalContext(raw); corr != "" {
-			emitted["correlation_id"] = corr
+func PrepareObjectForEmit(ctx context.Context, raw extension.Object) extension.Object {
+	md := FromContext(ctx)
+	emitted := MergeObjects(md.ToObject(), raw)
+
+	if corr, ok := emitted.GetString("correlation_id"); !ok || corr == "" {
+		if corr := correlationFromGlobalContextObject(raw); corr != "" {
+			emitted["correlation_id"] = extension.String(corr)
 		}
 	}
 	return emitted
 }
 
-func correlationFromGlobalContext(meta map[string]any) string {
-	gc, ok := meta["global_context"].(map[string]any)
-	if !ok || gc == nil {
+func correlationFromGlobalContextObject(meta extension.Object) string {
+	gc := objectFromValue(meta["global_context"])
+	if gc == nil {
 		return ""
 	}
-
-	if corr, ok := gc["correlation_id"].(string); ok && corr != "" {
-		return corr
-	}
-	return ""
+	corr, _ := gc.GetString("correlation_id")
+	return corr
 }
 
-func (m EnvelopeMetadata) appendValidityPeriod(result map[string]any) {
+func (m EnvelopeMetadata) appendGlobalContextObject(result extension.Object) {
+	if m.GlobalContext == nil {
+		return
+	}
+	result["global_context"] = extension.ObjectValue(extension.Object{
+		"user_id":         extension.String(m.GlobalContext.UserID),
+		"session_id":      extension.String(m.GlobalContext.SessionID),
+		"source":          extension.String(m.GlobalContext.Source),
+		"device_id":       extension.String(m.GlobalContext.DeviceID),
+		"organization_id": extension.String(m.GlobalContext.OrganizationID),
+		"role_id":         extension.String(m.GlobalContext.RoleID),
+		"audit_context":   extension.String(m.GlobalContext.AuditContext),
+		"ip_address":      extension.String(m.GlobalContext.IPAddress),
+		"user_agent":      extension.String(m.GlobalContext.UserAgent),
+	})
+}
+
+func (m EnvelopeMetadata) appendCollectionsObject(result extension.Object) {
+	if len(m.Tags) > 0 {
+		result["tags"] = extensionListFromStrings(m.Tags)
+	}
+	if len(m.Categories) > 0 {
+		result["categories"] = extensionListFromStrings(m.Categories)
+	}
+}
+
+func (m EnvelopeMetadata) appendScalarFieldsObject(result extension.Object) {
+	setObjectString(result, "embedding_id", m.EmbeddingID)
+	setObjectString(result, "knowledge_graph", m.KnowledgeGraph)
+	setObjectString(result, "source_ref", m.SourceRef)
+	setObjectString(result, "gamification_state", m.GamificationState)
+	setObjectString(result, "correlation_id", m.CorrelationID)
+	setObjectString(result, "causation_id", m.CausationID)
+	setObjectString(result, "request_id", m.RequestID)
+	setObjectString(result, "idempotency_key", m.IdempotencyKey)
+	setObjectString(result, "trace_id", m.TraceID)
+	setObjectString(result, "span_id", m.SpanID)
+	setObjectString(result, "channel", m.Channel)
+	setObjectString(result, "locale", m.Locale)
+	setObjectString(result, "tenant_region", m.TenantRegion)
+	if m.AIConfidence != 0 {
+		result["ai_confidence"] = extension.Float(m.AIConfidence)
+	}
+}
+
+func (m EnvelopeMetadata) appendValidityPeriodObject(result extension.Object) {
 	if m.ValidityPeriod == nil {
 		return
 	}
-	result["validity_period"] = map[string]any{
-		"effective_from": m.ValidityPeriod.EffectiveFrom,
-		"effective_to":   m.ValidityPeriod.EffectiveTo,
-	}
+	result["validity_period"] = extension.ObjectValue(extension.Object{
+		"effective_from": extension.String(m.ValidityPeriod.EffectiveFrom),
+		"effective_to":   extension.String(m.ValidityPeriod.EffectiveTo),
+	})
 }
 
-func (m EnvelopeMetadata) appendAttributes(result map[string]any) {
-	if len(m.Attributes) > 0 {
-		result["attributes"] = m.Attributes
+func (m EnvelopeMetadata) appendAttributesObject(result extension.Object) {
+	if len(m.Attributes) == 0 {
+		return
 	}
+	attrs := make(extension.Object, len(m.Attributes))
+	for key, value := range m.Attributes {
+		attrs[key] = extension.String(value)
+	}
+	result["attributes"] = extension.ObjectValue(attrs)
 }
 
-func setIfNotEmpty(target map[string]any, key, value string) {
+func setObjectString(target extension.Object, key, value string) {
 	if value != "" {
-		target[key] = value
-	}
-}
-
-func setIfNotZero(target map[string]any, key string, value float64) {
-	if value != 0 {
-		target[key] = value
+		target[key] = extension.String(value)
 	}
 }
 
@@ -498,7 +545,7 @@ func (m *EnvelopeMetadata) ApplyDefaults(channel string) {
 		m.Attributes = map[string]string{}
 	}
 	if m.Extras == nil {
-		m.Extras = map[string]any{}
+		m.Extras = extension.Object{}
 	}
 	if strings.TrimSpace(m.Channel) == "" {
 		m.Channel = strings.TrimSpace(channel)
@@ -551,7 +598,7 @@ func (m EnvelopeMetadata) Validate() error {
 }
 
 func (m EnvelopeMetadata) ToJSON() ([]byte, error) {
-	return json.Marshal(m.ToMap())
+	return json.Marshal(m.ToObject())
 }
 
 func (m EnvelopeMetadata) ToTransportProto() (*foundationpb.Metadata, error) {
@@ -604,11 +651,11 @@ func (m EnvelopeMetadata) ToTransportProto() (*foundationpb.Metadata, error) {
 }
 
 func FromJSON(data []byte) (EnvelopeMetadata, error) {
-	var raw map[string]any
+	var raw extension.Object
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return New(), err
 	}
-	return FromMap(raw), nil
+	return FromObject(raw), nil
 }
 
 func FromTransportProto(pb *foundationpb.Metadata) (EnvelopeMetadata, error) {
@@ -663,48 +710,38 @@ func FromTransportProto(pb *foundationpb.Metadata) (EnvelopeMetadata, error) {
 	return md, nil
 }
 
-func parseStringSlice(value any) []string {
-	switch typed := value.(type) {
-	case []string:
-		return append([]string(nil), typed...)
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			str, ok := item.(string)
-			if ok && strings.TrimSpace(str) != "" {
-				out = append(out, str)
-			}
-		}
-		return out
-	default:
+func parseStringSliceValue(value extension.Value) []string {
+	list, ok := value.ListValue()
+	if !ok {
 		return []string{}
 	}
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		str, ok := item.StringValue()
+		if ok && strings.TrimSpace(str) != "" {
+			out = append(out, str)
+		}
+	}
+	return out
 }
 
-func pickMap(values map[string]any, keys ...string) map[string]any {
+func pickObject(values extension.Object, keys ...string) extension.Object {
 	for _, key := range keys {
 		raw, ok := values[key]
 		if !ok {
 			continue
 		}
-		switch typed := raw.(type) {
-		case map[string]any:
-			return typed
-		case map[string]string:
-			out := map[string]any{}
-			for subKey, subValue := range typed {
-				out[subKey] = subValue
-			}
-			return out
+		if object := objectFromValue(raw); object != nil {
+			return object
 		}
 	}
 	return nil
 }
 
-func pickString(values map[string]any, keys ...string) string {
+func pickObjectString(values extension.Object, keys ...string) string {
 	for _, key := range keys {
 		if raw, ok := values[key]; ok {
-			if str, ok := raw.(string); ok {
+			if str, ok := raw.StringValue(); ok {
 				return str
 			}
 		}
@@ -712,19 +749,20 @@ func pickString(values map[string]any, keys ...string) string {
 	return ""
 }
 
-func pickFloat64(values map[string]any, keys ...string) float64 {
+func pickObjectFloat64(values extension.Object, keys ...string) float64 {
 	for _, key := range keys {
-		if raw, ok := values[key]; ok {
-			switch value := raw.(type) {
-			case float64:
-				return value
-			case float32:
-				return float64(value)
-			case int:
-				return float64(value)
-			case int64:
-				return float64(value)
-			}
+		raw, ok := values[key]
+		if !ok {
+			continue
+		}
+		if value, ok := raw.FloatValue(); ok {
+			return value
+		}
+		if value, ok := raw.IntValue(); ok {
+			return float64(value)
+		}
+		if value, ok := raw.UintValue(); ok {
+			return float64(value)
 		}
 	}
 	return 0

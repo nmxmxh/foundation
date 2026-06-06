@@ -40,19 +40,22 @@ func TestEnvelopeJSONMapAndBinaryErrors(t *testing.T) {
 	env := Envelope{
 		ID:            "evt_1",
 		EventType:     "orders:create:v1:requested",
-		Payload:       map[string]any{"ok": true},
-		Metadata:      map[string]any{"correlation_id": "corr_1"},
+		Payload:       ObjectFromMap(map[string]any{"ok": true}),
+		Metadata:      ObjectFromMap(map[string]any{"correlation_id": "corr_1"}),
 		CorrelationID: "corr_1",
 		Timestamp:     time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	env.Normalize()
-	asMap := env.ToMap()
-	if asMap["id"] != "evt_1" || asMap["payload_encoding"] != PayloadEncodingJSON {
-		t.Fatalf("ToMap() = %+v", asMap)
-	}
 	raw, err := env.ToJSON()
 	if err != nil {
 		t.Fatalf("ToJSON() error = %v", err)
+	}
+	var encoded envelopeJSON
+	if err := json.Unmarshal(raw, &encoded); err != nil {
+		t.Fatalf("decode ToJSON() = %v", err)
+	}
+	if encoded.ID != "evt_1" || encoded.PayloadEncoding != PayloadEncodingJSON {
+		t.Fatalf("ToJSON() = %+v", encoded)
 	}
 	var decoded map[string]any
 	if err := json.Unmarshal(raw, &decoded); err != nil || decoded["event_type"] != env.EventType {

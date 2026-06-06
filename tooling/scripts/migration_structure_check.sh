@@ -35,7 +35,7 @@ check_pair() {
 
 for file in "${up_files[@]}"; do
   prefix="${file%%_*}"
-  if [[ ! "$prefix" =~ '^[0-9]+$' ]]; then
+  if ! printf '%s\n' "$prefix" | grep -Eq '^[0-9]+$'; then
     echo "[FAIL] migration prefix must be numeric: $file"
     failed=1
     continue

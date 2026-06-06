@@ -1,14 +1,13 @@
 package hermes
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
@@ -25,7 +24,7 @@ type DriftReport struct {
 	Domain         string
 	Collection     string
 	OrganizationID string
-	Filters        map[string]any
+	Filters        []database.RecordFilter
 	SourceCount    int64
 	HermesCount    int64
 	SourceRoot     string
@@ -82,24 +81,26 @@ func (s *Store) CheckDrift(ctx context.Context, projection string, source databa
 	if err != nil {
 		return DriftReport{}, err
 	}
-	query.OrganizationID = strings.TrimSpace(query.OrganizationID)
+	query = normalizeQuery(query)
 	if query.OrganizationID == "" {
 		return DriftReport{}, ErrInvalidEvent
 	}
+	recordQuery := query.RecordQuery()
+	recordQuery.Limit = opts.MaxRecords
 	opts = normalizeDriftOptions(opts, part.spec)
 	report := DriftReport{
 		Projection:     part.spec.Name,
 		Domain:         part.spec.Domain,
 		Collection:     part.spec.Collection,
 		OrganizationID: query.OrganizationID,
-		Filters:        copyMap(query.Filters),
+		Filters:        append([]database.RecordFilter(nil), recordQuery.Filters...),
 		Complete:       true,
 	}
-	sourceCount, err := source.CountRecords(ctx, part.spec.Domain, part.spec.Collection, query.OrganizationID, query.Filters)
+	sourceCount, err := source.CountRecords(ctx, part.spec.Domain, part.spec.Collection, query.OrganizationID, recordQuery)
 	if err != nil {
 		return DriftReport{}, err
 	}
-	hermesCount, err := s.Count(ctx, projection, Query{OrganizationID: query.OrganizationID, Filters: query.Filters}, Fence{})
+	hermesCount, err := s.Count(ctx, projection, query, Fence{})
 	if err != nil {
 		return DriftReport{}, err
 	}
@@ -113,14 +114,14 @@ func (s *Store) CheckDrift(ctx context.Context, projection string, source databa
 	if report.Truncated {
 		report.Mismatches = append(report.Mismatches, DriftMismatch{Reason: "bounded_sample_truncated"})
 	}
-	sourceRecords, err := source.ListRecords(ctx, part.spec.Domain, part.spec.Collection, query.OrganizationID, query.Filters, opts.MaxRecords)
+	sourceRecords, err := source.ListRecords(ctx, part.spec.Domain, part.spec.Collection, query.OrganizationID, recordQuery)
 	if err != nil {
 		return DriftReport{}, err
 	}
 	hermesSet, err := s.driftRecordSet(ctx, projection, Query{
 		OrganizationID: query.OrganizationID,
-		Filters:        query.Filters,
 		Limit:          opts.MaxRecords,
+		Plan:           query.Plan,
 	})
 	if err != nil {
 		return DriftReport{}, err
@@ -224,7 +225,7 @@ func (b *driftRecordSetBuilder) addLeaf(recordID string, sum [32]byte) {
 	b.hashes[recordID] = sum
 }
 
-func (b *driftRecordSetBuilder) hashRecordParts(domain, collection, organizationID, recordID string, data map[string]any, vector []float32) [32]byte {
+func (b *driftRecordSetBuilder) hashRecordParts(domain, collection, organizationID, recordID string, data database.RecordData, vector []float32) [32]byte {
 	b.buffer = b.buffer[:0]
 	b.keys = b.keys[:0]
 	b.buffer = appendHashPart(b.buffer, "hermes-drift-v1")
@@ -232,7 +233,7 @@ func (b *driftRecordSetBuilder) hashRecordParts(domain, collection, organization
 	b.buffer = appendHashPart(b.buffer, collection)
 	b.buffer = appendHashPart(b.buffer, organizationID)
 	b.buffer = appendHashPart(b.buffer, recordID)
-	b.buffer, b.keys = appendCanonicalMap(b.buffer, data, b.keys)
+	b.buffer = appendCanonicalRecordData(b.buffer, data)
 	b.buffer = appendCanonicalVector(b.buffer, vector)
 	return sha256.Sum256(b.buffer)
 }
@@ -278,58 +279,70 @@ func appendCanonicalVector(out []byte, values []float32) []byte {
 	return out
 }
 
-func appendCanonicalValue(out []byte, value any) []byte {
-	switch typed := value.(type) {
-	case nil:
-		return appendHashPart(out, "null")
-	case string:
-		out = appendHashPart(out, "string")
-		return appendHashPart(out, typed)
-	case bool:
-		out = appendHashPart(out, "bool")
-		out = strconv.AppendBool(out, typed)
-		return append(out, 0)
-	case int:
-		return appendCanonicalInt(out, int64(typed))
-	case int8:
-		return appendCanonicalInt(out, int64(typed))
-	case int16:
-		return appendCanonicalInt(out, int64(typed))
-	case int32:
-		return appendCanonicalInt(out, int64(typed))
-	case int64:
-		return appendCanonicalInt(out, typed)
-	case uint:
-		return appendCanonicalUint(out, uint64(typed))
-	case uint8:
-		return appendCanonicalUint(out, uint64(typed))
-	case uint16:
-		return appendCanonicalUint(out, uint64(typed))
-	case uint32:
-		return appendCanonicalUint(out, uint64(typed))
-	case uint64:
-		return appendCanonicalUint(out, typed)
-	case float32:
-		return appendCanonicalFloat(out, float64(typed), 32)
-	case float64:
-		return appendCanonicalFloat(out, typed, 64)
-	case map[string]any:
-		return appendCanonicalMapSlow(out, typed)
-	case []any:
-		out = appendHashPart(out, "array")
-		out = strconv.AppendInt(out, int64(len(typed)), 10)
-		out = append(out, 0)
-		for _, item := range typed {
-			out = appendCanonicalValue(out, item)
-		}
-		return out
-	default:
-		raw, err := json.Marshal(typed)
-		if err != nil {
-			return appendHashPart(out, fmt.Sprintf("%v", typed))
-		}
-		return appendHashPart(out, string(raw))
+func appendCanonicalRecordData(out []byte, values database.RecordData) []byte {
+	out = appendHashPart(out, "object")
+	values = values.Normalize()
+	out = strconv.AppendInt(out, int64(len(values)), 10)
+	out = append(out, 0)
+	for _, field := range values {
+		out = appendHashPart(out, field.Name)
+		out = appendCanonicalRecordValue(out, field.Value)
 	}
+	return out
+}
+
+func appendCanonicalRecordValue(out []byte, value database.RecordValue) []byte {
+	switch value.Kind {
+	case database.RecordValueNull:
+		return appendHashPart(out, "null")
+	case database.RecordValueString:
+		out = appendHashPart(out, "string")
+		return appendHashPart(out, value.Text)
+	case database.RecordValueBool:
+		out = appendHashPart(out, "bool")
+		out = strconv.AppendBool(out, value.Text == "true" || value.Text == "1")
+		return append(out, 0)
+	case database.RecordValueInt:
+		parsed, err := strconv.ParseInt(value.Text, 10, 64)
+		if err != nil {
+			return appendHashPart(out, value.Text)
+		}
+		return appendCanonicalInt(out, parsed)
+	case database.RecordValueUint:
+		parsed, err := strconv.ParseUint(value.Text, 10, 64)
+		if err != nil {
+			return appendHashPart(out, value.Text)
+		}
+		return appendCanonicalUint(out, parsed)
+	case database.RecordValueFloat:
+		parsed, err := strconv.ParseFloat(value.Text, 64)
+		if err != nil {
+			return appendHashPart(out, value.Text)
+		}
+		return appendCanonicalFloat(out, parsed, 64)
+	case database.RecordValueRaw:
+		return appendHashPart(out, canonicalRawJSONForDrift(value.Raw))
+	default:
+		return appendHashPart(out, value.Text)
+	}
+}
+
+func canonicalRawJSONForDrift(raw []byte) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || !json.Valid(trimmed) {
+		return string(trimmed)
+	}
+	var decoded any
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
+		return string(trimmed)
+	}
+	canonical, err := json.Marshal(decoded)
+	if err != nil {
+		return string(trimmed)
+	}
+	return string(canonical)
 }
 
 func appendCanonicalInt(out []byte, value int64) []byte {
@@ -348,27 +361,6 @@ func appendCanonicalFloat(out []byte, value float64, bitSize int) []byte {
 	out = appendHashPart(out, "number")
 	out = strconv.AppendFloat(out, value, 'g', -1, bitSize)
 	return append(out, 0)
-}
-
-func appendCanonicalMap(out []byte, values map[string]any, keys []string) ([]byte, []string) {
-	out = appendHashPart(out, "object")
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out = strconv.AppendInt(out, int64(len(keys)), 10)
-	out = append(out, 0)
-	for _, key := range keys {
-		out = appendHashPart(out, key)
-		out = appendCanonicalValue(out, values[key])
-	}
-	return out, keys[:0]
-}
-
-func appendCanonicalMapSlow(out []byte, values map[string]any) []byte {
-	keys := make([]string, 0, len(values))
-	out, _ = appendCanonicalMap(out, values, keys)
-	return out
 }
 
 type merkleTree struct {

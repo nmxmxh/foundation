@@ -27,6 +27,7 @@ type Operation string
 
 const (
 	OperationUpsert Operation = "upsert"
+	OperationPatch  Operation = "patch"
 	OperationDelete Operation = "delete"
 )
 
@@ -60,8 +61,20 @@ type Fence struct {
 
 type Query struct {
 	OrganizationID string
-	Filters        map[string]any
 	Limit          int
+	Plan           QueryPlan
+}
+
+type QueryPlan struct {
+	first   QueryFilter
+	filters []QueryFilter
+	count   int
+}
+
+type QueryFilter struct {
+	Field string
+	Kind  byte
+	Value string
 }
 
 type ApplyResult struct {
@@ -99,7 +112,7 @@ type RecordView struct {
 	Collection     string
 	OrganizationID string
 	RecordID       string
-	Data           map[string]any
+	Data           database.RecordData
 	Vector         []float32
 	CreatedAt      time.Time
 	UpdatedAt      time.Time

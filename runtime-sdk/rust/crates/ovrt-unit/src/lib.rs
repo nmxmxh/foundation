@@ -20,27 +20,21 @@ impl UnitRegistry {
         let descriptor = unit.descriptor();
         descriptor.validate()?;
 
-        let mut guard = self
-            .units
-            .write()
-            .map_err(|_| "runtime unit registry lock poisoned".to_string())?;
+        let mut guard =
+            self.units.write().map_err(|_| "runtime unit registry lock poisoned".to_string())?;
         guard.insert(descriptor.unit_id, unit);
         Ok(())
     }
 
     pub fn get(&self, unit_id: &str) -> Result<Option<Arc<dyn RuntimeUnit>>, String> {
-        let guard = self
-            .units
-            .read()
-            .map_err(|_| "runtime unit registry lock poisoned".to_string())?;
+        let guard =
+            self.units.read().map_err(|_| "runtime unit registry lock poisoned".to_string())?;
         Ok(guard.get(unit_id).cloned())
     }
 
     pub fn descriptors(&self) -> Result<Vec<RuntimeUnitDescriptor>, String> {
-        let guard = self
-            .units
-            .read()
-            .map_err(|_| "runtime unit registry lock poisoned".to_string())?;
+        let guard =
+            self.units.read().map_err(|_| "runtime unit registry lock poisoned".to_string())?;
         Ok(guard.values().map(|unit| unit.descriptor()).collect())
     }
 }
@@ -78,14 +72,9 @@ mod tests {
     #[test]
     fn registers_and_reads_units() {
         let registry = UnitRegistry::default();
-        registry
-            .register(Arc::new(EchoUnit))
-            .expect("register unit");
+        registry.register(Arc::new(EchoUnit)).expect("register unit");
 
-        let unit = registry
-            .get("echo.compute")
-            .expect("registry access")
-            .expect("unit must exist");
+        let unit = registry.get("echo.compute").expect("registry access").expect("unit must exist");
         assert_eq!(unit.run(b"ping").expect("run unit"), b"ping");
     }
 }

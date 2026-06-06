@@ -36,9 +36,7 @@ impl RuntimeUnit for EchoUnit {
 
 fn main() {
     let mut bridge = NativeRuntimeBridge::with_role_limits(BTreeMap::new());
-    bridge
-        .register_allowed_unit(Arc::new(EchoUnit))
-        .expect("register benchmark unit");
+    bridge.register_allowed_unit(Arc::new(EchoUnit)).expect("register benchmark unit");
 
     println!("foundation runtime-native report-only benchmark");
     println!("iters: {ITERS}");
@@ -61,9 +59,8 @@ fn run_size(bridge: &NativeRuntimeBridge, size: usize) {
 
     for _ in 0..ITERS {
         let started = Instant::now();
-        let response_frame = bridge
-            .dispatch_frame(black_box(&frame))
-            .expect("dispatch benchmark frame");
+        let response_frame =
+            bridge.dispatch_frame(black_box(&frame)).expect("dispatch benchmark frame");
         let response = decode_dispatch_response(&response_frame, MAX_NATIVE_FRAME_BYTES)
             .expect("decode benchmark response");
         black_box(response.payload);

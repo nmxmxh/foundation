@@ -326,7 +326,7 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 
 			if ms != nil {
 				workflowName := job.Kind()
-				if v, ok := job.Metadata["workflow_name"].(string); ok {
+				if v, ok := job.Metadata.GetString("workflow_name"); ok {
 					workflowName = v
 				}
 
@@ -528,7 +528,7 @@ func recordJobTrace(job Job, stage, state, detail string) {
 	if job.IdempotencyKey != "" {
 		fields["idempotency_key"] = job.IdempotencyKey
 	}
-	if orgID, ok := job.Metadata["organization_id"].(string); ok && orgID != "" {
+	if orgID, ok := job.Metadata.GetString("organization_id"); ok && orgID != "" {
 		fields["organization_id"] = orgID
 	}
 	observability.Default().RecordTrace(job.CorrelationID, stage, "", state, detail, fields)
@@ -567,7 +567,7 @@ func dedupeKey(job Job) string {
 	if job.IdempotencyKey != "" {
 		return job.Kind() + ":" + job.IdempotencyKey
 	}
-	if v, ok := job.Metadata["idempotency_key"].(string); ok && v != "" {
+	if v, ok := job.Metadata.GetString("idempotency_key"); ok && v != "" {
 		return job.Kind() + ":" + v
 	}
 	return ""

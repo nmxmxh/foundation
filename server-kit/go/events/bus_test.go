@@ -15,8 +15,8 @@ import (
 func makeTestEnvelope(eventType, correlationID string) Envelope {
 	env := Envelope{
 		EventType:     eventType,
-		Payload:       map[string]any{"key": "value"},
-		Metadata:      map[string]any{"correlation_id": correlationID, "organization_id": "org_1"},
+		Payload:       ObjectFromMap(map[string]any{"key": "value"}),
+		Metadata:      ObjectFromMap(map[string]any{"correlation_id": correlationID, "organization_id": "org_1"}),
 		CorrelationID: correlationID,
 		SchemaVersion: "1.0",
 		Timestamp:     time.Now().UTC(),
@@ -64,7 +64,7 @@ func TestInMemoryBus_PublishInjectsContextMetadata(t *testing.T) {
 
 	if err := bus.Publish(ctx, Envelope{
 		EventType:     "media:upload:requested",
-		Payload:       map[string]any{"key": "value"},
+		Payload:       ObjectFromMap(map[string]any{"key": "value"}),
 		CorrelationID: "corr_ctx",
 		SchemaVersion: "1.0",
 		Timestamp:     time.Now().UTC(),
@@ -76,7 +76,7 @@ func TestInMemoryBus_PublishInjectsContextMetadata(t *testing.T) {
 	if len(recent) != 1 {
 		t.Fatalf("recent len = %d, want 1", len(recent))
 	}
-	md := metadata.FromMap(recent[0].Metadata)
+	md := metadata.FromMap(recent[0].Metadata.InterfaceMap())
 	if md.CorrelationID != "corr_ctx" || md.GlobalContext == nil || md.GlobalContext.OrganizationID != "org_ctx" || md.GlobalContext.UserID != "user_ctx" {
 		t.Fatalf("metadata was not injected from context: %#v", recent[0].Metadata)
 	}
@@ -92,8 +92,8 @@ func TestInMemoryBus_PublishMergesContextTags(t *testing.T) {
 
 	if err := bus.Publish(ctx, Envelope{
 		EventType:     "media:upload:requested",
-		Payload:       map[string]any{"key": "value"},
-		Metadata:      map[string]any{"tags": []string{"domain:tag", "shared"}, "categories": []any{"domain"}},
+		Payload:       ObjectFromMap(map[string]any{"key": "value"}),
+		Metadata:      ObjectFromMap(map[string]any{"tags": []string{"domain:tag", "shared"}, "categories": []any{"domain"}}),
 		CorrelationID: "corr_ctx",
 		SchemaVersion: "1.0",
 		Timestamp:     time.Now().UTC(),
@@ -102,7 +102,7 @@ func TestInMemoryBus_PublishMergesContextTags(t *testing.T) {
 	}
 
 	recent := bus.Recent(1)
-	md := metadata.FromMap(recent[0].Metadata)
+	md := metadata.FromMap(recent[0].Metadata.InterfaceMap())
 	if got, want := fmt.Sprint(md.Tags), "[request:tag shared domain:tag]"; got != want {
 		t.Fatalf("tags = %s, want %s", got, want)
 	}
@@ -317,13 +317,13 @@ func TestInMemoryBusFanoutPressureIsSynchronousAndIsolated(t *testing.T) {
 		all.Add(1)
 	})
 	bus.Subscribe("tenant:a:*", func(_ context.Context, env Envelope) {
-		if env.Metadata["organization_id"] != "org_a" {
+		if orgID, _ := env.Metadata.GetString("organization_id"); orgID != "org_a" {
 			t.Errorf("tenant a metadata leaked: %+v", env.Metadata)
 		}
 		tenantA.Add(1)
 	})
 	bus.Subscribe("tenant:b:*", func(_ context.Context, env Envelope) {
-		if env.Metadata["organization_id"] != "org_b" {
+		if orgID, _ := env.Metadata.GetString("organization_id"); orgID != "org_b" {
 			t.Errorf("tenant b metadata leaked: %+v", env.Metadata)
 		}
 		tenantB.Add(1)
@@ -337,7 +337,7 @@ func TestInMemoryBusFanoutPressureIsSynchronousAndIsolated(t *testing.T) {
 			eventType = "tenant:b:signal:requested"
 		}
 		env := makeTestEnvelope(eventType, fmt.Sprintf("corr-%03d", i))
-		env.Metadata["organization_id"] = org
+		env.Metadata["organization_id"] = objectFromMap(map[string]any{"value": org})["value"]
 		if err := bus.Publish(context.Background(), env); err != nil {
 			t.Fatalf("publish %d: %v", i, err)
 		}

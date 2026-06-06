@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	metautil "github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 )
 
@@ -400,7 +401,7 @@ func contextAttrs(ctx context.Context) []slog.Attr {
 	return attrs
 }
 
-func appendMetadataValue(attrs *[]slog.Attr, stringValues map[string]string, anyValues map[string]any, key string) {
+func appendMetadataValue(attrs *[]slog.Attr, stringValues map[string]string, anyValues extension.Object, key string) {
 	if stringValues != nil {
 		if value := strings.TrimSpace(stringValues[key]); value != "" {
 			*attrs = append(*attrs, slog.String(key, value))
@@ -409,7 +410,7 @@ func appendMetadataValue(attrs *[]slog.Attr, stringValues map[string]string, any
 	}
 	if anyValues != nil {
 		if value, ok := anyValues[key]; ok {
-			*attrs = append(*attrs, slog.Any(key, value))
+			*attrs = append(*attrs, slog.Any(key, value.Interface()))
 		}
 	}
 }

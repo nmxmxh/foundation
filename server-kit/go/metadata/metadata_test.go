@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 func TestFromMapAndToMap(t *testing.T) {
@@ -58,7 +59,7 @@ func TestFromMapAndToMap(t *testing.T) {
 	if md.Attributes["priority"] != "high" {
 		t.Fatalf("missing attributes")
 	}
-	if md.Extras["extra_field"] != "preserved" {
+	if value, ok := md.Extras.GetString("extra_field"); !ok || value != "preserved" {
 		t.Fatalf("expected extras preservation")
 	}
 
@@ -200,7 +201,7 @@ func TestMetadataMapVariantsAndPrepareForEmit(t *testing.T) {
 	if md.GlobalContext == nil || md.GlobalContext.UserID != "user_2" || md.GlobalContext.OrganizationID != "org_2" {
 		t.Fatalf("global context variant was not parsed: %+v", md.GlobalContext)
 	}
-	if len(md.Tags) != 2 || len(md.Categories) != 1 || md.Attributes["attempt"] != "2" || md.Extras["custom"] != "preserved" {
+	if custom, ok := md.Extras.GetString("custom"); len(md.Tags) != 2 || len(md.Categories) != 1 || md.Attributes["attempt"] != "2" || !ok || custom != "preserved" {
 		t.Fatalf("collection parsing mismatch: %+v", md)
 	}
 
@@ -282,10 +283,7 @@ func TestMergeMapsPreservesGraphMetadataAndUnionsTags(t *testing.T) {
 			"source_ref":      "",
 		},
 	)
-	tags, ok := merged["tags"].([]string)
-	if !ok {
-		t.Fatalf("tags have unexpected type: %T", merged["tags"])
-	}
+	tags := stringsFromAny(t, merged["tags"])
 	wantTags := []string{"actor:user_1", "domain:docuos", "entity:brand_profile"}
 	if len(tags) != len(wantTags) {
 		t.Fatalf("tags length = %d, want %d: %#v", len(tags), len(wantTags), tags)
@@ -295,12 +293,33 @@ func TestMergeMapsPreservesGraphMetadataAndUnionsTags(t *testing.T) {
 			t.Fatalf("tag[%d] = %q, want %q", i, tags[i], want)
 		}
 	}
-	categories := merged["categories"].([]string)
+	categories := stringsFromAny(t, merged["categories"])
 	if len(categories) != 2 || categories[0] != "workflow" || categories[1] != "security" {
 		t.Fatalf("categories mismatch: %#v", categories)
 	}
 	if merged["knowledge_graph"] != "docuos.documents" || merged["source_ref"] != "request:req_1" {
 		t.Fatalf("graph provenance should survive empty overlays: %#v", merged)
+	}
+}
+
+func stringsFromAny(t *testing.T, value any) []string {
+	t.Helper()
+	switch typed := value.(type) {
+	case []string:
+		return typed
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			str, ok := item.(string)
+			if !ok {
+				t.Fatalf("list item has unexpected type: %T", item)
+			}
+			out = append(out, str)
+		}
+		return out
+	default:
+		t.Fatalf("list has unexpected type: %T", value)
+		return nil
 	}
 }
 
@@ -353,7 +372,7 @@ func TestTransportProtoRoundTrip(t *testing.T) {
 		ValidityPeriod: &ValidityPeriod{EffectiveFrom: "2026-01-01", EffectiveTo: "2026-01-02"},
 		CorrelationID:  "corr_1",
 		Attributes:     map[string]string{"k": "v"},
-		Extras:         map[string]any{"extra": "value"},
+		Extras:         extension.Object{"extra": extension.String("value")},
 	}
 	pb, err := md.ToTransportProto()
 	if err != nil {
@@ -363,7 +382,7 @@ func TestTransportProtoRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FromTransportProto() error = %v", err)
 	}
-	if roundTrip.CorrelationID != "corr_1" || roundTrip.GlobalContext.UserID != "user_1" || roundTrip.Extras["extra"] != "value" {
+	if extra, ok := roundTrip.Extras.GetString("extra"); roundTrip.CorrelationID != "corr_1" || roundTrip.GlobalContext.UserID != "user_1" || !ok || extra != "value" {
 		t.Fatalf("transport roundtrip mismatch: %+v", roundTrip)
 	}
 	empty, err := FromTransportProto(nil)

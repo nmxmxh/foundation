@@ -13,9 +13,9 @@ func TestEnvelopeBinaryRoundTripWithJSONPayload(t *testing.T) {
 	envelope := Envelope{
 		ID:              "evt_123",
 		EventType:       "media:freeze_manifest:v1:requested",
-		Payload:         map[string]any{"asset_public_id": "asset_123", "attempt": float64(1)},
+		Payload:         ObjectFromMap(map[string]any{"asset_public_id": "asset_123", "attempt": float64(1)}),
 		PayloadEncoding: PayloadEncodingJSON,
-		Metadata: map[string]any{
+		Metadata: ObjectFromMap(map[string]any{
 			"correlation_id":  "corr_123",
 			"request_id":      "req_123",
 			"idempotency_key": "idem_123",
@@ -26,7 +26,7 @@ func TestEnvelopeBinaryRoundTripWithJSONPayload(t *testing.T) {
 				"source":    "api",
 			},
 			"custom_flag": true,
-		},
+		}),
 		CorrelationID: "corr_123",
 		SchemaVersion: "1.0",
 		Timestamp:     time.Date(2026, 3, 14, 11, 0, 0, 0, time.UTC),
@@ -52,13 +52,19 @@ func TestEnvelopeBinaryRoundTripWithJSONPayload(t *testing.T) {
 	if decoded.PayloadEncoding != PayloadEncodingJSON {
 		t.Fatalf("payload encoding mismatch: got %s", decoded.PayloadEncoding)
 	}
-	if got, _ := decoded.Payload["asset_public_id"].(string); got != "asset_123" {
+	if decoded.Payload != nil {
+		t.Fatalf("json payload should stay lazy before materialization: %+v", decoded.Payload)
+	}
+	if err := decoded.MaterializePayload(); err != nil {
+		t.Fatalf("MaterializePayload() error = %v", err)
+	}
+	if got, _ := decoded.Payload.GetString("asset_public_id"); got != "asset_123" {
 		t.Fatalf("asset_public_id mismatch: got %q", got)
 	}
-	if got, _ := decoded.Metadata["channel"].(string); got != "http" {
+	if got, _ := decoded.Metadata.GetString("channel"); got != "http" {
 		t.Fatalf("channel mismatch: got %q", got)
 	}
-	if got, ok := decoded.Metadata["custom_flag"].(bool); !ok || !got {
+	if got, ok := decoded.Metadata["custom_flag"].BoolValue(); !ok || !got {
 		t.Fatalf("custom_flag mismatch: got %#v", decoded.Metadata["custom_flag"])
 	}
 	if decoded.SourceNodeID != "bus_1" {
@@ -86,7 +92,10 @@ func TestDecodeFallsBackToLegacyJSONEnvelope(t *testing.T) {
 	if decoded.PayloadEncoding != PayloadEncodingJSON {
 		t.Fatalf("unexpected payload encoding: %s", decoded.PayloadEncoding)
 	}
-	if got, _ := decoded.Payload["session_id"].(string); got != "sess_123" {
+	if err := decoded.MaterializePayload(); err != nil {
+		t.Fatalf("MaterializePayload() error = %v", err)
+	}
+	if got, _ := decoded.Payload.GetString("session_id"); got != "sess_123" {
 		t.Fatalf("session_id mismatch: got %q", got)
 	}
 }
@@ -96,9 +105,9 @@ func TestEnvelopeBinaryRoundTripWithProtobufPayloadBytes(t *testing.T) {
 		EventType:       "publish:webhook_ingest:v1:requested",
 		PayloadBytes:    []byte{0x01, 0x02, 0x03},
 		PayloadEncoding: PayloadEncodingProtobuf,
-		Metadata: map[string]any{
+		Metadata: ObjectFromMap(map[string]any{
 			"correlation_id": "corr_proto",
-		},
+		}),
 		CorrelationID: "corr_proto",
 		SchemaVersion: "1.0",
 		Timestamp:     time.Date(2026, 3, 14, 11, 30, 0, 0, time.UTC),
@@ -126,9 +135,9 @@ func TestEnvelopeBinaryRoundTripWithCapnpPayloadBytes(t *testing.T) {
 		EventType:       "publish:webhook_ingest:v1:requested",
 		PayloadBytes:    []byte{0x0a, 0x0b, 0x0c},
 		PayloadEncoding: PayloadEncodingCapnp,
-		Metadata: map[string]any{
+		Metadata: ObjectFromMap(map[string]any{
 			"correlation_id": "corr_capnp",
-		},
+		}),
 		CorrelationID: "corr_capnp",
 		SchemaVersion: "1.0",
 		Timestamp:     time.Date(2026, 3, 14, 11, 35, 0, 0, time.UTC),
@@ -168,7 +177,14 @@ func TestBatchBinaryRejectsInvalidJSONPayload(t *testing.T) {
 		t.Fatalf("marshal test batch: %v", err)
 	}
 
-	if _, err := FromBatchBinary(raw); err == nil {
-		t.Fatal("FromBatchBinary() expected invalid JSON payload error, got nil")
+	batch, err := FromBatchBinary(raw)
+	if err != nil {
+		t.Fatalf("FromBatchBinary() error = %v", err)
+	}
+	if len(batch.Envelopes) != 1 {
+		t.Fatalf("batch envelopes = %d, want 1", len(batch.Envelopes))
+	}
+	if err := batch.Envelopes[0].MaterializePayload(); err == nil {
+		t.Fatal("MaterializePayload() expected invalid JSON payload error, got nil")
 	}
 }

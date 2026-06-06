@@ -13,6 +13,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/circuitbreaker"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
@@ -106,7 +107,7 @@ func BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest(b *testing.B) {
 		Method:         http.MethodPost,
 		Path:           "/v1/users/{id}/profile",
 		EventType:      "user.profile.read",
-		StaticPayload:  map[string]any{"source": "api"},
+		StaticPayload:  extension.Object{"source": extension.String("api")},
 		IncludeHeaders: []string{"X-Request-ID", "X-Correlation-ID"},
 	}
 	body := []byte(`{"include_permissions":true,"view":"full"}`)

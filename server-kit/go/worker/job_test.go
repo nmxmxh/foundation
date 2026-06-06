@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 func TestJobNextBackoffCapsLargeAttempts(t *testing.T) {
@@ -22,7 +24,7 @@ func TestJobNextBackoffCapsLargeAttempts(t *testing.T) {
 func TestJobNormalizeValidateTimeoutAndHealthKey(t *testing.T) {
 	var nilJob *Job
 	nilJob.Normalize()
-	job := Job{JobKind: "kind", Metadata: map[string]any{"timeout_ms": float64(1500)}, Attempt: -1}
+	job := Job{JobKind: "kind", Metadata: extension.Object{"timeout_ms": extension.Float(1500)}, Attempt: -1}
 	job.Normalize()
 	if job.Queue != "default" || job.MaxAttempts != 3 || job.Attempt != 0 || job.ExecutionPolicy.TimeoutMS != 1500 || job.CreatedAt.IsZero() {
 		t.Fatalf("normalized job = %+v", job)
@@ -46,9 +48,9 @@ func TestJobNormalizeValidateTimeoutAndHealthKey(t *testing.T) {
 	if (Job{ID: "id"}).HealthKey() != "id" || (Job{CorrelationID: "corr"}).HealthKey() != "corr:corr" || (Job{IdempotencyKey: "idem"}).HealthKey() != "idem:idem" {
 		t.Fatal("HealthKey priority failed")
 	}
-	if positiveIntFromMetadata(map[string]any{"a": int32(3)}, "a") != 3 ||
-		positiveIntFromMetadata(map[string]any{"a": int64(4)}, "a") != 4 ||
-		positiveIntFromMetadata(map[string]any{"a": -1}, "a") != 0 {
+	if positiveIntFromMetadata(extension.Object{"a": extension.Int(3)}, "a") != 3 ||
+		positiveIntFromMetadata(extension.Object{"a": extension.Int(4)}, "a") != 4 ||
+		positiveIntFromMetadata(extension.Object{"a": extension.Int(-1)}, "a") != 0 {
 		t.Fatal("positiveIntFromMetadata failed")
 	}
 }
@@ -82,7 +84,7 @@ func TestInMemoryMetadataStore(t *testing.T) {
 	if err := store.Save(context.Background(), JobMetadata{}); err == nil {
 		t.Fatal("expected missing metadata fields to fail")
 	}
-	meta := JobMetadata{JobID: 1, WorkflowName: "wf", EntityType: "asset", EntityID: "a1", TrackingData: map[string]any{"state": "queued"}}
+	meta := JobMetadata{JobID: 1, WorkflowName: "wf", EntityType: "asset", EntityID: "a1", TrackingData: extension.Object{"state": extension.String("queued")}}
 	if err := store.Save(context.Background(), meta); err != nil {
 		t.Fatalf("Save() error = %v", err)
 	}
@@ -90,11 +92,11 @@ func TestInMemoryMetadataStore(t *testing.T) {
 	if err != nil || got.WorkflowName != "wf" {
 		t.Fatalf("Get() = %+v err=%v", got, err)
 	}
-	if err := store.UpdateTrackingData(context.Background(), 1, map[string]any{"state": "done"}); err != nil {
+	if err := store.UpdateTrackingData(context.Background(), 1, extension.Object{"state": extension.String("done")}); err != nil {
 		t.Fatalf("UpdateTrackingData() error = %v", err)
 	}
 	got, _ = store.Get(context.Background(), 1)
-	if got.TrackingData["state"] != "done" {
+	if state, _ := got.TrackingData.GetString("state"); state != "done" {
 		t.Fatalf("tracking data = %+v", got.TrackingData)
 	}
 	if _, err := store.Get(context.Background(), 2); err == nil {

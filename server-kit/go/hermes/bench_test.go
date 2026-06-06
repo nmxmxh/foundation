@@ -25,11 +25,30 @@ func BenchmarkHermesGetRecordCopied(b *testing.B) {
 func BenchmarkHermesForEachViewLimit50(b *testing.B) {
 	store := benchmarkStore(b, 10000)
 	ctx := context.Background()
-	query := Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": 7},
-		Limit:          50,
+	query := QueryFromRecordQuery("org_1", testRecordQuery(50, map[string]any{"bucket": 7}))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		seen, err := store.ForEachView(ctx, "bench_ticks", query, Fence{}, func(view RecordView) error {
+			if view.RecordID == "" {
+				b.Fatal("empty view")
+			}
+			return nil
+		})
+		if err != nil || seen != 50 {
+			b.Fatalf("ForEachView() seen=%d err=%v", seen, err)
+		}
 	}
+}
+
+func BenchmarkHermesForEachViewTypedFilterLimit50(b *testing.B) {
+	store := benchmarkStore(b, 10000)
+	ctx := context.Background()
+	filter, ok := NewQueryFilter("bucket", 7)
+	if !ok {
+		b.Fatal("filter not indexable")
+	}
+	query := QueryWithFilters("org_1", 50, filter)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -48,10 +67,25 @@ func BenchmarkHermesForEachViewLimit50(b *testing.B) {
 func BenchmarkHermesCountIndexed(b *testing.B) {
 	store := benchmarkStore(b, 10000)
 	ctx := context.Background()
-	query := Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": 7},
+	query := QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 7}))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		count, err := store.Count(ctx, "bench_ticks", query, Fence{})
+		if err != nil || count == 0 {
+			b.Fatalf("Count() count=%d err=%v", count, err)
+		}
 	}
+}
+
+func BenchmarkHermesCountTypedFilterIndexed(b *testing.B) {
+	store := benchmarkStore(b, 10000)
+	ctx := context.Background()
+	filter, ok := NewQueryFilter("bucket", 7)
+	if !ok {
+		b.Fatal("filter not indexable")
+	}
+	query := QueryWithFilters("org_1", 0, filter)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -65,11 +99,25 @@ func BenchmarkHermesCountIndexed(b *testing.B) {
 func BenchmarkHermesListRecordsCopiedLimit50(b *testing.B) {
 	store := benchmarkStore(b, 10000)
 	ctx := context.Background()
-	query := Query{
-		OrganizationID: "org_1",
-		Filters:        map[string]any{"bucket": 7},
-		Limit:          50,
+	query := QueryFromRecordQuery("org_1", testRecordQuery(50, map[string]any{"bucket": 7}))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		items, err := store.ListRecords(ctx, "bench_ticks", query, Fence{})
+		if err != nil || len(items) != 50 {
+			b.Fatalf("ListRecords() len=%d err=%v", len(items), err)
+		}
 	}
+}
+
+func BenchmarkHermesListRecordsTypedFilterCopiedLimit50(b *testing.B) {
+	store := benchmarkStore(b, 10000)
+	ctx := context.Background()
+	filter, ok := NewQueryFilter("bucket", 7)
+	if !ok {
+		b.Fatal("filter not indexable")
+	}
+	query := QueryWithFilters("org_1", 50, filter)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -95,11 +143,48 @@ func BenchmarkHermesApplyEventUpsert(b *testing.B) {
 				Collection:     "ticks",
 				OrganizationID: "org_1",
 				RecordID:       fmt.Sprintf("tick_%06d", i%100000),
-				Data:           map[string]any{"bucket": i % 16, "symbol": "OVS"},
+				Data:           testRecordData(map[string]any{"bucket": i % 16, "symbol": "OVS"}),
 			},
 		})
 		if err != nil {
 			b.Fatalf("Apply() error = %v", err)
+		}
+	}
+}
+
+func BenchmarkHermesApplyEventPatchIndexedFields(b *testing.B) {
+	store := newBenchStore(b)
+	ctx := context.Background()
+	records := make([]database.DomainRecord, 4096)
+	for i := range records {
+		records[i] = database.DomainRecord{
+			Domain:         "signals",
+			Collection:     "ticks",
+			OrganizationID: "org_1",
+			RecordID:       fmt.Sprintf("tick_%06d", i),
+			Data:           testRecordData(map[string]any{"bucket": i % 16, "symbol": "OVS", "payload": "unchanged"}),
+		}
+	}
+	if _, err := store.BulkLoad(ctx, "bench_ticks", records); err != nil {
+		b.Fatalf("BulkLoad() error = %v", err)
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := store.Apply(ctx, "bench_ticks", Event{
+			Operation: OperationPatch,
+			SourceID:  fmt.Sprintf("patch_%d", i),
+			Version:   uint64(i + 1 + len(records)),
+			Record: database.DomainRecord{
+				Domain:         "signals",
+				Collection:     "ticks",
+				OrganizationID: "org_1",
+				RecordID:       fmt.Sprintf("tick_%06d", i%len(records)),
+				Data:           testRecordData(map[string]any{"bucket": (i + 1) % 16, "symbol": "OVS"}),
+			},
+		})
+		if err != nil {
+			b.Fatalf("Apply() patch error = %v", err)
 		}
 	}
 }
@@ -122,7 +207,7 @@ func BenchmarkHermesApplyBatch64(b *testing.B) {
 					Collection:     "ticks",
 					OrganizationID: "org_1",
 					RecordID:       fmt.Sprintf("tick_%06d", id%100000),
-					Data:           map[string]any{"bucket": id % 16, "symbol": "OVS"},
+					Data:           testRecordData(map[string]any{"bucket": id % 16, "symbol": "OVS"}),
 				},
 			}
 		}
@@ -146,7 +231,7 @@ func BenchmarkHermesApplyRecords64(b *testing.B) {
 				Collection:     "ticks",
 				OrganizationID: "org_1",
 				RecordID:       fmt.Sprintf("tick_%06d", id%100000),
-				Data:           map[string]any{"bucket": id % 16, "symbol": "OVS"},
+				Data:           testRecordData(map[string]any{"bucket": id % 16, "symbol": "OVS"}),
 			}
 		}
 		if _, err := store.ApplyRecords(ctx, "bench_ticks", "records", uint64(i*len(records)+1), records); err != nil {
@@ -165,7 +250,7 @@ func BenchmarkHermesBulkLoad512(b *testing.B) {
 			Collection:     "ticks",
 			OrganizationID: "org_1",
 			RecordID:       fmt.Sprintf("tick_%06d", i),
-			Data:           map[string]any{"bucket": i % 16, "symbol": "OVS"},
+			Data:           testRecordData(map[string]any{"bucket": i % 16, "symbol": "OVS"}),
 		}
 	}
 	b.ReportAllocs()
@@ -239,7 +324,7 @@ func BenchmarkHermesProjectedRuntimeStoreHotGet(b *testing.B) {
 func BenchmarkHermesProjectedRuntimeStoreWarmCount(b *testing.B) {
 	store := benchmarkProjectedRuntimeStore(b, 10000)
 	ctx := context.Background()
-	filters := map[string]any{"bucket": 7}
+	filters := testRecordQuery(0, map[string]any{"bucket": 7})
 	if _, err := store.CountRecords(ctx, "signals", "ticks", "org_1", filters); err != nil {
 		b.Fatalf("warm CountRecords() error = %v", err)
 	}
@@ -262,7 +347,7 @@ func BenchmarkHermesDriftCheckMerkle(b *testing.B) {
 			Collection:     "ticks",
 			OrganizationID: "org_1",
 			RecordID:       fmt.Sprintf("tick_%06d", i),
-			Data:           map[string]any{"bucket": i % 16, "symbol": "OVS"},
+			Data:           testRecordData(map[string]any{"bucket": i % 16, "symbol": "OVS"}),
 		})
 		if err != nil {
 			b.Fatalf("source UpsertRecord() error = %v", err)
@@ -298,7 +383,7 @@ func benchmarkStore(b *testing.B, records int) *Store {
 				Collection:     "ticks",
 				OrganizationID: "org_1",
 				RecordID:       fmt.Sprintf("tick_%06d", i),
-				Data:           map[string]any{"bucket": i % 16, "symbol": "OVS"},
+				Data:           testRecordData(map[string]any{"bucket": i % 16, "symbol": "OVS"}),
 			},
 		}
 	}
@@ -326,7 +411,7 @@ func benchmarkProjectedRuntimeStore(b *testing.B, records int) *ProjectedRuntime
 			Collection:     "ticks",
 			OrganizationID: "org_1",
 			RecordID:       fmt.Sprintf("tick_%06d", i),
-			Data:           map[string]any{"bucket": i % 16, "symbol": "OVS"},
+			Data:           testRecordData(map[string]any{"bucket": i % 16, "symbol": "OVS"}),
 		})
 		if err != nil {
 			b.Fatalf("seed UpsertRecord() error = %v", err)
@@ -344,7 +429,7 @@ func benchPayloadDecoder(_ context.Context, payload RecordPayload) (database.Dom
 		Collection:     "ticks",
 		OrganizationID: "org_1",
 		RecordID:       payload.SourceID,
-		Data:           map[string]any{"bucket": int(payload.Payload[0]), "symbol": "OVS"},
+		Data:           testRecordData(map[string]any{"bucket": int(payload.Payload[0]), "symbol": "OVS"}),
 	}, nil
 }
 
@@ -362,7 +447,7 @@ func benchPayloadEventDecoder(ctx context.Context, payloads []RecordPayload, eve
 				Collection:     "ticks",
 				OrganizationID: "org_1",
 				RecordID:       payload.SourceID,
-				Data:           map[string]any{"bucket": int(payload.Payload[0]), "symbol": "OVS"},
+				Data:           testRecordData(map[string]any{"bucket": int(payload.Payload[0]), "symbol": "OVS"}),
 			},
 		})
 	}

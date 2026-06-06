@@ -63,10 +63,6 @@ func (s sqlStoreExecutor) Query(ctx context.Context, query string, args ...any) 
 	return s.store.Query(ctx, query, args...)
 }
 
-func (s sqlStoreExecutor) QueryMaps(context.Context, string, ...any) ([]map[string]any, error) {
-	return nil, ErrUnsupportedFilterShape
-}
-
 func (s sqlStoreExecutor) BeginTx(ctx context.Context) (Tx, error) {
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
@@ -98,10 +94,6 @@ func (s sqlTxExecutor) QueryRow(ctx context.Context, query string, args ...any) 
 
 func (s sqlTxExecutor) Query(ctx context.Context, query string, args ...any) (Rows, error) {
 	return s.tx.Query(ctx, query, args...)
-}
-
-func (s sqlTxExecutor) QueryMaps(context.Context, string, ...any) ([]map[string]any, error) {
-	return nil, ErrUnsupportedFilterShape
 }
 
 func (s sqlTxExecutor) Commit(ctx context.Context) error {

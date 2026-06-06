@@ -18,6 +18,20 @@ import (
 	"{{MODULE_PATH}}/tests/testutil"
 )
 
+func hermesRecordData(t testing.TB, values map[string]any) database.RecordData {
+	t.Helper()
+	data, err := database.RecordDataFromMap(values)
+	require.NoError(t, err)
+	return data
+}
+
+func hermesRecordQuery(t testing.TB, limit int, values map[string]any) database.RecordQuery {
+	t.Helper()
+	query, err := database.RecordQueryFromMap(values, limit)
+	require.NoError(t, err)
+	return query
+}
+
 func TestIntegrationHermes_RebuildAndRedisProjectionEnvelope(t *testing.T) {
 	env := setupTestWithDB(t)
 	require.NotNil(t, env.Redis, "redis should be available for Hermes stream integration")
@@ -59,7 +73,7 @@ func TestIntegrationHermes_RebuildAndRedisProjectionEnvelope(t *testing.T) {
 		Collection:     "hermes_probe",
 		OrganizationID: orgID,
 		RecordID:       baseID,
-		Data:           map[string]any{"bucket": int64(1), "source": "postgres"},
+		Data:           hermesRecordData(t, map[string]any{"bucket": int64(1), "source": "postgres"}),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -121,10 +135,7 @@ func TestIntegrationHermes_RebuildAndRedisProjectionEnvelope(t *testing.T) {
 	require.Equal(t, 1, result.Acked)
 	require.Equal(t, 1, result.Apply.Applied)
 
-	count, err := store.Count(ctx, projection, hermes.Query{
-		OrganizationID: orgID,
-		Filters:        map[string]any{"bucket": int64(2)},
-	}, hermes.Fence{})
+	count, err := store.Count(ctx, projection, hermes.QueryFromRecordQuery(orgID, hermesRecordQuery(t, 0, map[string]any{"bucket": int64(2)})), hermes.Fence{})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, count)
 }

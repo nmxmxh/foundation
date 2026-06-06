@@ -85,6 +85,8 @@ make test-bench-history
 make test-bench
 FOUNDATION_NATIVE_SKIP_BASELINE=1 tooling/scripts/native_benchmark.sh .
 make test-service-backed
+make test-load-research
+make test-service-backed-load
 ```
 
 For the Go-only server-kit slice:
@@ -96,6 +98,344 @@ go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFra
 ```
 
 Set `PROFILE=1` when you need CPU and heap profiles under `/tmp/ovasabi-foundation-profiles`.
+
+## 2026-06-03 staged local load research
+
+Foundation now includes an opt-in staged local load harness for the cardinality
+ramp:
+
+```bash
+make test-load-research
+```
+
+Default steps:
+
+```text
+1k -> 10k -> 50k -> 100k -> 250k -> 500k -> 1M
+```
+
+The harness writes a TSV under `benchmark-results/load_research_*.tsv` and logs
+per-lane setup time, p50/p95/p99/max, sample count, operations per sample,
+heap allocation delta, heap after setup, and goroutine count. It is deliberately
+opt-in because it creates large local fixtures and is a research/pressure tool,
+not a routine unit test.
+
+Latest artifact:
+
+| Artifact | Contents |
+| --- | --- |
+| `benchmark-results/load_research_20260603T190357Z.tsv` | Full local staged ramp from 1K through 1M, 3 samples per lane. |
+| `benchmark-results/load_research_20260603T190357Z.log` | Raw verbose Go test output for the same run. |
+
+Selected 1M results from the 2026-06-03 run:
+
+| Lane | Setup | p50 | p99 | Heap after | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `memorydb_count` | 3.09 s | 5.29 us | 5.54 us | 1.09 GB | Indexed tenant count stays microsecond-scale at 1M local records. |
+| `memorydb_list_limit50` | 3.21 s | 11.66 us | 13.07 us | 1.23 GB | Defensive copied filtered list remains bounded by tenant/filter/limit, not total rows. |
+| `hermes_count` | 4.42 s | 113 ns | 143 ns | 2.02 GB | Hermes indexed hotplane count is effectively flat through 1M records. |
+| `hermes_get` | 4.12 s | 305 ns | 507 ns | 2.31 GB | Copied point reads stay sub-microsecond after a 1M-record projection. |
+| `hermes_foreach_limit50` | 4.05 s | 6.95 us | 9.37 us | 2.20 GB | Borrowed view iteration avoids response-copy pressure and stays bounded by the limit. |
+| `hermes_apply_records64_prebuilt` | 4.07 s | 158.54 us | 167.88 us | 2.06 GB | Applying a caller-prebuilt 64-record pure-upsert batch costs about 2.5 us/record in this staged harness. |
+| `hermes_build_apply_records64` | 4.45 s | 278.50 us | 378.63 us | 1.98 GB | Building record structs inside the hot lane is visibly more expensive than applying prebuilt records. |
+| `event_exact_dispatch` | 439 ms | 353 ns | 392 ns | 193 MB | Exact event dispatch at 1M subscriptions remains nanosecond-scale. |
+| `router_broadcast_batch` | 1.17 s | 731 ns | 793 ns | 498 MB | Borrowed broadcast batch routing stays sub-microsecond before actual socket writes. |
+| `router_broadcast_materialize` | 1.21 s | 486.55 us | 520.38 us | 567 MB | Owning/materializing one million targets costs about half a millisecond before network I/O. |
+
+This result supports the architectural bet: the local hotplane and exact-indexed
+communication paths scale by keeping hot reads and routing on indexed, borrowed,
+or batch-shaped lanes. The expensive part is not the lookup itself; it is setup
+memory, owned materialization, record construction, and eventually real network
+or storage I/O.
+
+The result also clarifies the difference between one-million cardinality and
+one-million live clients. The harness proves local structures can hold and
+route million-scale state. A true one-million live HTTP/WebSocket test must use
+a distributed load lab with kernel/socket tuning, multiple load generators,
+connection lifecycle metrics, and explicit failure criteria. The next useful
+step is to connect this local ramp to service-backed Redis/Postgres pressure
+with the same staged summary format.
+
+## 2026-06-03 staged service-backed load research
+
+Foundation now also includes an opt-in live Postgres/Redis saturation harness:
+
+```bash
+make test-service-backed-load
+```
+
+Default steps match the local cardinality harness:
+
+```text
+1k -> 10k -> 50k -> 100k -> 250k -> 500k -> 1M
+```
+
+The service-backed harness is Foundation-only. Generated applications inherit
+the APIs, runtime knobs, and checks, but not this Docker-backed pressure lab.
+It writes `benchmark-results/service_backed_load_research_*.tsv` with:
+
+1. step, lane, total units, batch size, batch count, and workers
+2. setup time separated from measured operation time
+3. p50/p95/p99/max for both batch latency and per-unit latency
+4. throughput in units/second
+5. heap/goroutine deltas
+6. Postgres pool stats when the lane uses the live pool
+7. Hermes records, bytes, epoch, source watermark, rejected applies, and index
+   compactions when the lane uses a projection
+
+Default service-backed lanes:
+
+| Lane | What it proves |
+| --- | --- |
+| `postgres_send_batch64` | Batched semantic upsert pressure under bounded pgxpool acquire/query budgets. |
+| `postgres_copy_from1024` | Append/import bulk lane where COPY is the correct primitive. |
+| `redis_set_get_many64` | Hot multi-key cache hydration/write-through with round-trip amortization. |
+| `redis_xadd_many64` | Durable Redis Stream append pressure for event/projector relay. |
+| `redis_stream_drain64` | Redis Stream read-group drain plus ack lag. |
+| `hermes_rebuild_postgres_snapshot` | Hermes control-plane warmup/repair from live Postgres. |
+| `hermes_redis_tailer64` | Hermes projector tail from live Redis Streams, apply before ack. |
+| `hermes_hot_count` | Indexed Hermes reads after live Postgres rebuild. |
+| `mixed_pg_redis_hermes64` | A realistic bounded batch: Postgres SendBatch + Redis SetGetMany + Hermes ApplyRecords. |
+| `pipeline_pg_redis_hermes` | Concurrent durable Postgres writes, Redis projection relay, Hermes tail/apply, and hot reads with lag backpressure. |
+| `wsroute_register_redis` | WebSocket routing registration with live Redis coordination. |
+| `wsroute_broadcast_after_register` | Borrowed broadcast fanout batches after Redis-backed registration. |
+
+Useful controls:
+
+```bash
+SERVICE_BACKED_LOAD_RESEARCH_STEPS=1000,10000
+SERVICE_BACKED_LOAD_RESEARCH_LANES=postgres_send_batch64,redis_set_get_many64
+SERVICE_BACKED_POSTGRES_TMPFS_SIZE=8g
+SERVICE_BACKED_POSTGRES_MAX_CONNECTIONS=120
+SERVICE_BACKED_POSTGRES_MAX_WAL_SIZE=4GB
+SERVICE_BACKED_POSTGRES_MIN_WAL_SIZE=1GB
+SERVICE_BACKED_LOAD_RESEARCH_DB_RESERVED_CONNS=24
+SERVICE_BACKED_LOAD_RESEARCH_DB_ACQUIRE_TIMEOUT=2s
+SERVICE_BACKED_LOAD_RESEARCH_DB_QUERY_TIMEOUT=10s
+SERVICE_BACKED_REDIS_MAXMEMORY=4gb
+make test-service-backed-load
+```
+
+The 1M default is a serious local pressure test, not a routine CI lane. For
+future 10M research, increase `SERVICE_BACKED_POSTGRES_TMPFS_SIZE`,
+`SERVICE_BACKED_REDIS_MAXMEMORY`, Docker memory, and OS file/socket limits, then
+run focused lanes first. The correct question is not "can every lane hold 10M
+full records?" It is "which lane should own this workload, with what batch size,
+pool budget, projection cap, and fallback?"
+
+2026-06-04 adaptive harness note:
+
+The full all-lane 1M run exposed three benchmark-resource problems before it
+produced a clean baseline. A 2GB Postgres tmpfs ran out of space at 250K, a
+fixed 1GB WAL budget triggered checkpoint pressure during the 1M write ramp,
+and using the database hard cap as the application pool budget caused
+acquire/query timeouts at 500K. The service-backed load runner now adapts its
+default tmpfs and WAL budgets to the largest requested step, and reserves
+database headroom. With the local Postgres service at 120 max connections, the
+default application pool budget is 96, leaving 24 control connections. The
+cooperative
+`pipeline_pg_redis_hermes` lane also defaults to the measured better shape:
+512-record durable batches, 256-record tailer batches, and a conservative DB
+writer count of `min(cpu-2, 6)` rather than inheriting broad dispatch
+concurrency.
+
+If a service-backed run logs "consider increasing max_wal_size", tune WAL and
+checkpoint headroom before increasing workers. If it logs an autovacuum
+cancellation, keep the event visible and inspect bloat, dead tuples, vacuum lag,
+and index churn before changing the table/index shape. Autovacuum pressure is
+part of the write-lane truth the benchmark is meant to reveal.
+
+The clean 2026-06-04 full all-lane pass used
+`benchmark-results/service_backed_load_research_20260604T015349Z.tsv`. At 1M,
+the pipeline wrote, published, and applied all records with zero rejected
+Hermes applies. The all-lane pipeline baseline was `45.4K/s`; the earlier
+focused tuned pipeline remained faster at `62.8K/s`, confirming the important
+lesson: the architecture scales when each lane is tuned for its job, and the
+all-lane lab is a saturation profile, not the optimal product profile.
+
+Hermes partial update note:
+
+`PATCH` is now a projection operation alongside `UPSERT` and `DELETE`. It
+merges supplied fields into an existing hot record, preserves unchanged fields,
+moves indexes atomically, and does not resurrect missing/deleted records. In a
+focused local benchmark, indexed-field patching measured about `6.0 us/op`
+versus `16.4 us/op` for full event upsert. The important point is not only raw
+speed: active/archive/status changes can now move the hot index with a compact
+projection mutation instead of resending the entire hot record.
+
+Smoke artifact:
+
+| Artifact | Contents |
+| --- | --- |
+| `benchmark-results/service_backed_load_research_20260603T193114Z.tsv` | 1K live Postgres/Redis/Hermes/WebSocket-routing smoke with the default lane set. |
+| `benchmark-results/service_backed_load_research_20260603T194116Z.tsv` | 10K full-lane baseline before WebSocket route-registration batching. |
+| `benchmark-results/service_backed_load_research_20260603T194647Z.tsv` | Focused 10K WebSocket route-registration rerun after Redis coordination batching. |
+| `benchmark-results/service_backed_load_research_20260603T194721Z.tsv` | 100K full-lane run after adding route-registration batching. |
+| `benchmark-results/service_backed_load_research_20260603T195219Z.tsv` | Focused 100K route-registration rerun with tuned default batch size 256. |
+| `benchmark-results/service_backed_load_research_20260603T200758Z.tsv` | 1M WebSocket route-registration and broadcast planning with live Redis coordination. |
+| `benchmark-results/service_backed_load_research_20260603T202605Z.tsv` | 1M Postgres/Redis diagnostic run after dynamic DB pool sizing. |
+| `benchmark-results/service_backed_load_research_20260603T204357Z.tsv` | 1M Hermes/Postgres/Redis focused run after streaming StateStore rebuild became the default contract. |
+| `benchmark-results/service_backed_load_research_20260603T210735Z.tsv` | Corrected 10K/100K concurrent Postgres -> Redis -> Hermes pipeline run with stage pressure notes. |
+| `benchmark-results/service_backed_load_research_20260603T211633Z.tsv` | Tuned 1M concurrent pipeline run: 512-record durable batches, 6 DB workers, Redis batch envelopes, Hermes watermark backpressure. |
+
+Smoke results:
+
+| Lane | Units | Workers | p99 batch | p99 unit | Throughput | Interpretation |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `postgres_send_batch64` | 1,000 | 8 | 23.97 ms | 374 us | 39.6K/s | Semantic Postgres write pressure is bounded and visible through pool stats. |
+| `postgres_copy_from1024` | 1,000 | 1 | 6.06 ms | 6.06 us | 164.7K/s | COPY is excellent for append/import, but it is not the normal command path. |
+| `redis_set_get_many64` | 1,000 | 8 | 6.48 ms | 101 us | 138.5K/s | Hot multi-key cache lanes should batch across the Redis network boundary. |
+| `redis_xadd_many64` | 1,000 | 8 | 5.71 ms | 89.2 us | 172.2K/s | Stream append batching is a viable projector/event relay path. |
+| `redis_stream_drain64` | 1,000 | 1 | 1.56 ms | 25.7 us | 65.6K/s | Stream read-group drain+ack lag is low at 1K. |
+| `hermes_rebuild_postgres_snapshot` | 1,000 | 1 | 6.61 ms | 6.61 us | 151.3K/s | Hermes warmup/repair from live Postgres is fast at this scope. |
+| `hermes_redis_tailer64` | 1,000 | 1 | 2.59 ms | 40.5 us | 33.2K/s | Redis Stream tailing plus Hermes apply/ack is healthy and bounded. |
+| `hermes_hot_count` | 1,000 | 4 | 93.3 us | 402 ns | 6.2M/s | Once warm, indexed Hermes reads are the right live dashboard/fanout read lane. |
+| `mixed_pg_redis_hermes64` | 1,000 | 8 | 26.58 ms | 415 us | 28.7K/s | The combined substrate path stays bounded; Postgres dominates. |
+| `wsroute_register_redis` | 1,000 | 8 | 168.7 ms | 2.73 ms | 3.0K/s | Live registration currently pays several Redis operations per connection; reconnect storms need batching/pipelining or admission control. |
+| `wsroute_broadcast_after_register` | 1,000 | 1 | 26.8 us | 26 ns | 25.7M/s | Borrowed broadcast planning is cheap once local routing state exists. |
+
+The service-backed result is intentionally slower than local Hermes/router
+numbers because it pays real network, database, Redis, and Docker scheduling
+costs. That is the point: local benchmarks prove the shape; service-backed
+ramps prove the substrate under live I/O.
+
+10K/100K route-registration tuning:
+
+| Lane / experiment | Units | Batch | p99 unit | Throughput | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `wsroute_register_redis`, pre-batch baseline | 10,000 | 64 | 5.40 ms | 3.1K/s | One live Redis coordination path per connection was the dominant reconnect-storm bottleneck. |
+| `wsroute_register_redis`, `RegisterMany` + Redis pipeline | 10,000 | 64 | 233 us | 112.4K/s | Batching registration keys and notifications improved the lane by about 36x in throughput and about 23x in p99 unit latency. |
+| `wsroute_register_redis`, 100K full run | 100,000 | 64 | 486 us | 128.1K/s | The batched API held at 100K, but the default batch still left throughput on the table. |
+| `wsroute_register_redis`, tuned default | 100,000 | 256 | 223 us | 180.6K/s | Batch 256 is the best local default from this run shape. |
+
+Focused 100K batch experiments:
+
+| Batch | p99 unit | Throughput | Result |
+| ---: | ---: | ---: | --- |
+| 128 | 320 us | 166.9K/s | Better than 64, worse than 256. |
+| 256 | 209-223 us | 180.6K-196.0K/s | Best local range across repeated focused runs. |
+| 512 | 292 us | 145.0K/s | Too large for this local Redis/Docker shape; pipeline size increased tail cost. |
+
+Implementation follow-up:
+
+1. `wsrouting.Router.RegisterMany` is now the preferred route-registration API
+   for reconnect bursts, resume storms, and startup hydration.
+2. `server-kit/go/redis.CoordinationBatchClient` exposes the narrow
+   `IncrExpireMany` and `PublishMany` pipeline surface needed by routing
+   coordination without leaking raw go-redis into applications.
+3. Single `Register` remains valid for ordinary one-connection lifecycle work,
+   but large callers should batch and let the router preserve the same local
+   indexes, TTL counters, and registration notifications.
+4. Broadcast planning stayed effectively free after registration; the measured
+   bottleneck was coordination writes, not borrowed fanout lookup.
+
+1M service-backed results:
+
+| Lane | Units | Batch | p99 unit | Throughput | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `postgres_send_batch64` | 1,000,000 | 64 | 2.27 ms | 75.7K/s | Semantic write throughput remains bounded by Postgres pool/WAL/index work. |
+| `postgres_copy_from1024` | 1,000,000 | 1024 | 227 us | 459.9K/s | COPY/import is the correct bulk append lane and remains far ahead of semantic upsert. |
+| `redis_set_get_many64` | 1,000,000 | 64 | 408 us | 256.7K/s | Redis batch cache lanes stay healthy through 1M key operations. |
+| `redis_xadd_many64` | 1,000,000 | 64 | 313 us | 358.2K/s | Stream append pressure is viable for projector/event relay, with tailer drain as the slower side. |
+| `redis_stream_drain64` | 1,000,000 | 64 | 25.7 us | 73.6K/s | Read-group drain+ack remains bounded; setup is the million XADD pressure. |
+| `wsroute_register_redis` | 1,000,000 | 256 | 670 us | 171.6K/s | Bounded registration batches scale to million-route hydration on one local Redis service. |
+| `wsroute_broadcast_after_register` | 1,000,000 | 4096 | ~1 ns/unit | 3.36B/s planning | Borrowed broadcast planning is not the bottleneck once local route indexes exist; socket writes and slow-client queues are the real live-client problem. |
+| `hermes_rebuild_postgres_snapshot` | 1,000,000 | snapshot | 6.23 us | 160.6K/s | Streaming StateStore rebuild avoids pre-materializing a million-record slice and swaps the rebuilt projection at the end. |
+| `hermes_redis_tailer64` | 1,000,000 | 64 | 132 us | 28.7K/s | Redis Stream tailing plus Hermes apply/ack is correct but slower than direct rebuild; batch/tailer tuning is the next hotplane bridge target. |
+| `hermes_hot_count` | 100,000 reads over 1M projection | 256 | 8.16 us | 6.85M/s | Once warm, indexed Hermes reads are millions/sec even when the projection holds 1M records. |
+| `mixed_pg_redis_hermes64` | 1,000,000 | 64 | 10.7 ms | 39.9K/s | Combined durable write + Redis cache + Hermes apply is Postgres/tail-latency dominated and proves why lanes should stay separated and batched. |
+| `pipeline_pg_redis_hermes` | 1,000,000 | 512 | 15.9 us end-to-end unit | 62.8K/s | Concurrent durable writes, batched Redis projection envelopes, Hermes tail/apply, and live hot reads completed with watermark `1,000,000`, zero rejected applies, max Redis lag `4,096`, and max Hermes lag `3,072`. |
+
+Pipeline tuning observations:
+
+| Units | Batch | DB workers | Throughput | Postgres p99 unit | Redis p99 unit | Hermes tail p99 unit | Max Redis lag | Interpretation |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 100,000 | 256 | 64 | 48.2K/s | 2.07 ms | 62.8 us | 67.0 us | 7,072 | Too much DB concurrency; Postgres p99 dominates while Redis/Hermes wait cleanly. |
+| 100,000 | 512 | 32 | 58.4K/s | 796 us | 37.6 us | 26.7 us | 8,192 | Larger durable batches help, but 32 DB workers still overdrives the write lane. |
+| 100,000 | 1024 | 32 | 48.0K/s | 856 us | 66.7 us | 25.9 us | 17,408 | Batch 1024 is too large locally; Redis and tailer batch latency rise. |
+| 100,000 | 512 | 16 | 58.1K/s | 458 us | 37.6 us | 51.5 us | 5,632 | Lower DB concurrency improves p99 without materially changing throughput. |
+| 100,000 | 512 | 8 | 64.6K/s | 276 us | 34.1 us | 25.9 us | 3,072 | Best low-lag 100K shape before the final middle-point check. |
+| 100,000 | 512 | 6 | 67.4K/s | 257 us | 31.9 us | 48.1 us | 2,560 | Best 100K throughput on this local Docker host. |
+| 1,000,000 | 512 | 6 | 62.8K/s | 284 us | 95.7 us | 55.0 us | 4,096 | Tuned 1M pipeline stayed coherent: Postgres remained the pressure point, Redis/Hermes lag stayed bounded, and hot reads held sub-microsecond p99. |
+
+Runtime changes from the 1M pass:
+
+1. `database.StateStore` now requires `ForEachRecord`; streaming record
+   iteration is the default store contract, not an optional optimization.
+2. `PostgresDB.ListRecords` is now a materializing wrapper over
+   `ForEachRecordWithOptions`; repositories can consume the streaming default
+   when they do not need a full slice.
+3. `Hermes.Rebuild` streams canonical records into a replacement partition and
+   atomically swaps the rebuilt registry. Existing hotplane state remains
+   readable while the control-plane rebuild is prepared.
+4. The load harness now sizes Postgres pool workers with the actual pool budget.
+   The first 1M diagnostic exposed this directly: 64 workers against a 40-conn
+   pool caused acquire pressure; the corrected run used `pg_max=64`.
+5. Hermes rebuild has a separate control-plane query/acquire budget in the
+   service-backed harness. This keeps normal hot-path query budgets strict while
+   allowing million-row repair/warmup work to be measured honestly.
+6. `redis.StreamBatchClient` now exposes `XAddManyField` as a first-class
+   field/payload pipeline API. Hermes projection relay can append ordered binary
+   envelope payloads without rebuilding per-entry maps.
+7. The service-backed pipeline lane uses batch projection envelopes: one Redis
+   Stream entry can carry hundreds of record mutations, while Hermes still
+   applies and acks only after the projection update succeeds.
+8. Backpressure is expressed as projected-record lag. Redis relay pauses when
+   published projection records get too far ahead of Hermes applied watermark,
+   which keeps the hotplane fresh without collapsing durable writes, relay, and
+   reads into one serial path.
+
+The surprising part is not that one lane is universally fast. The surprising
+part is that the ladder behaves coherently at 1M: Postgres owns durable truth,
+Redis owns ephemeral coordination and stream relay, Hermes owns the warm indexed
+read plane, and WebSocket routing owns borrowed local fanout planning. The
+system performs well because each substrate is doing the work it is built for,
+not because one component is asked to solve every workload.
+
+## 2026-06-03 focused hot-lane cleanup
+
+This pass targeted the remaining measured costs after the typed payload refactor:
+EventLog Redis Stream append allocation, HTTP JSON request body retention,
+binary envelope payload copying, and the suspected binary append/view frame
+regression.
+
+Commands:
+
+```bash
+cd foundation/server-kit/go
+go test ./...
+go test -run='^$' -bench='BenchmarkBinaryFrame(AppendViewRoundTrip|AppendOnly|ViewReadOnly|ReadFieldOnly)$' -benchmem -count=5 ./grpcsvc
+go test -run='^$' -bench='Benchmark(PayloadFromRequestJSONBody|BuildDispatchRequestJSONBody|PlannedDispatchRequestJSONBody)$' -benchmem -count=5 ./httpapi
+go test -run='^$' -bench='BenchmarkEnvelope_(FromBinary|FromJSON)$' -benchmem -count=5 ./events
+make test-service-backed
+```
+
+Artifacts:
+
+| Artifact | Contents |
+| --- | --- |
+| `benchmark-results/service_backed_20260603T034518Z.tsv` | Service-backed Postgres/Redis run after Redis Stream field-batch append. |
+| `benchmark-results/service_backed_20260603T034518Z.log` | Raw service-backed benchmark output and race-test evidence. |
+
+Focused comparison:
+
+| Benchmark | Before | After | Interpretation |
+| --- | ---: | ---: | --- |
+| `BenchmarkServiceBackedEventLogPublishPending64-8` | 5816571 ns/op, 184562 B/op, 2102 allocs/op | 4709855 ns/op, 164662 B/op, 2038 allocs/op | Removing per-entry Redis Stream map adapters recovered about 1.1 ms, 19.9 KB, and 64 allocations per 64-event batch. |
+| `BenchmarkEnvelope_FromBinary-8` | 2734-2801 ns/op, 6224 B/op, 28 allocs/op | 2583-2622 ns/op, 6200 B/op, 27 allocs/op | Protobuf unmarshal already owns payload bytes; `FromBinary` no longer copies them a second time. |
+| `BenchmarkPlannedDispatchRequestJSONBody-8` | 6050-6275 ns/op, 16582-16583 B/op, 54 allocs/op | 5858-6310 ns/op, 16582-16583 B/op, 54 allocs/op | JSON raw-body retention is now explicit through `IncludeRawBody`; allocation shape is unchanged because the current decoder still reads the body into bytes before parsing. |
+| `BenchmarkBinaryFrameAppendViewRoundTrip-8` | noisy 31 ns/op outlier | 19.5-24.3 ns/op, 0 B/op, 0 allocs/op | The suspected regression did not reproduce when split and rerun. Append-only is about 13 ns; view-read-only is about 12 ns. Keep the split guard benches. |
+
+The EventLog result confirms that the live regression was not caused by
+`eventlog.PublishPending` logging directly. The hot allocation was the generic
+Redis Stream boundary building a `map[string]any` for every pending event. The
+new field-batch path preserves the generic fallback for multi-field stream
+entries while keeping the durable envelope relay on an ordered field/value lane.
+
+The HTTP result confirms the next real win still requires streaming/direct JSON
+decode or metadata object slimming. Dropping retained JSON body bytes is the
+right contract shape, but it cannot remove the `io.ReadAll` allocation by
+itself.
 
 ## 2026-05-31 full benchmark pass
 
@@ -1883,3 +2223,204 @@ Operational interpretation:
 3. Redis remains ephemeral coordination/cache; batch APIs are materially better than sequential calls.
 4. Rebuild and drift checks are control-plane operations. Hot reads should use Hermes indexed queries after projection.
 5. Mixed p95/p99 service-backed tests are now the next truth layer after local microbenchmarks.
+
+## 2026-06-02 typed payload and JSON compatibility pass
+
+Commands:
+
+```bash
+make test-bench-history
+make test-bench
+FOUNDATION_NATIVE_SKIP_BASELINE=1 tooling/scripts/native_benchmark.sh .
+make test-service-backed
+```
+
+Artifacts:
+
+- `benchmark-results/foundation_bench_20260602T224218Z.log`
+- `benchmark-results/foundation_bench_20260602T224218Z.tsv`
+- `benchmark-results/service_backed_20260602T225316Z.log`
+- `benchmark-results/service_backed_20260602T225316Z.tsv`
+
+Contract-debt guard after the pass:
+
+- `map[string]any`: `29` production occurrences, all explicit boundary or compatibility code.
+- JSON encode/decode calls: `47` production occurrences.
+- Guard: `make check-platform-boundary-debt`.
+
+Useful improvements:
+
+| Benchmark | Before | After | Interpretation |
+| --- | ---: | ---: | --- |
+| `BenchmarkTypedFrameAdapterDispatch` | `6293 ns/op`, `3829 B/op`, `80 allocs/op` | `1126 ns/op`, `1824 B/op`, `13 allocs/op` | Direct typed/proto reflection dispatch removed map and JSON bridge churn from the frame adapter lane. |
+| `BenchmarkScale1M_MemoryDBTenantListFiltered` | `21598 ns/op`, `33400 B/op`, `105 allocs/op` | `12255 ns/op`, `26280 B/op`, `56 allocs/op` | Typed state records and indexed filters reduce dynamic field inspection and list materialization. |
+| `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit` | `16836 ns/op`, `33400 B/op`, `105 allocs/op` | `11870 ns/op`, `26280 B/op`, `56 allocs/op` | Dense tenant filtering benefits from the same typed/indexed path and earlier bounded result construction. |
+| `BenchmarkMemoryDBListRecordsTenantScopedFiltered` | `12520 ns/op`, `25304 B/op`, `69 allocs/op` | `10506 ns/op`, `22696 B/op`, `38 allocs/op` | Local list paths now spend less time converting open maps to filterable state. |
+| `BenchmarkServiceBackedPostgresSendBatchUpsert64` | `3061392 ns/op` | `2530127 ns/op` | Batched typed record writes kept semantic validation while reducing some payload conversion overhead. |
+| `BenchmarkServiceBackedPostgresCopyFrom64` | `698505 ns/op` | `602784 ns/op` | Copy/import remains the right append lane, and typed record preparation did not hurt it. |
+
+Watch items and regressions:
+
+| Benchmark | Before | After | Interpretation |
+| --- | ---: | ---: | --- |
+| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | `5399 ns/op`, `9219 B/op`, `71 allocs/op` | `10980 ns/op`, `20720 B/op`, `76 allocs/op` | HTTP JSON ingress now builds typed extension values where the old path carried dynamic maps. Structural safety improved, but decode is doing more owned object work. |
+| `BenchmarkDispatchOverBufconn` | `30175 ns/op`, `12624 B/op` | `46544 ns/op`, `19660 B/op` | The compatibility dispatch path inherits the JSON/object conversion cost even when the transport itself is still local. |
+| `BenchmarkEnvelope_FromJSON` | `3777 ns/op`, `2072 B/op`, `40 allocs/op` | `6818 ns/op`, `15416 B/op`, `58 allocs/op` | Event JSON decode is the clearest evidence that typed object construction needs a direct decoder instead of generic staging. |
+| `BenchmarkEnvelope_FromBinary` with JSON payloads | `2258 ns/op`, `2984 B/op`, `35 allocs/op` | `3757 ns/op`, `8744 B/op`, `35 allocs/op` | Binary framing stayed structurally healthy, but JSON payload compatibility decode now retains larger owned values. |
+| `BenchmarkServiceBackedHermesRebuild512` | `3206715 ns/op`, `1703672 B/op`, `19202 allocs/op` | `3477844 ns/op`, `2653848 B/op`, `26881 allocs/op` | Rebuild is safer and more typed, but trusted projector refresh now pays extra per-field record/value ownership. |
+| `BenchmarkServiceBackedHermesApplyBatch512` | `899371 ns/op`, `956955 B/op`, `4836 allocs/op` | `1070326 ns/op`, `1284592 B/op`, `8420 allocs/op` | Durable mixed-event apply still works, but typed value construction increased allocation pressure in batch projection. |
+
+Why the mixed result happened:
+
+1. The typed refactor removed dynamic map contracts from frame adapters, proto
+   binding, record data, metadata, event metadata, registry, worker, and Hermes
+   query surfaces. Paths that stayed typed after ingress improved because they
+   avoid repeated `InterfaceMap` conversion, type assertions, and map-shaped
+   filtering.
+2. JSON compatibility lanes did not receive the same low-level decoder treatment.
+   Several paths now decode JSON into typed `extension.Object`/`Value` ownership
+   graphs. That is safer and more explicit than `map[string]any`, but it can
+   allocate more when the owner only needs routing, validation, or delayed
+   payload access.
+3. Binary lanes remained healthy when they stayed borrowed or byte-preserving.
+   Same-process frame dispatch and runtime borrowed views are still nanosecond,
+   near-zero-allocation paths. The slower binary envelope case is specifically
+   the JSON-payload compatibility decode inside the frame, not the frame boundary.
+4. Service-backed Hermes regressions are mostly allocation shape, not a contract
+   failure. Trusted rebuild/apply paths now own more typed field values per
+   record. That makes projector state more explicit but shows where builder or
+   borrowed `RecordData` APIs should be introduced.
+
+What this tells us:
+
+1. Removing `map[string]any` is a contract and maintainability win, but it is not
+   automatically a performance win for JSON ingress.
+2. The Foundation performance model needs two separate budgets: typed/binary hot
+   lanes and JSON compatibility lanes. A refactor can improve one while
+   regressing the other.
+3. The next optimization is not to reintroduce maps. It is to decode external
+   JSON directly into the final typed representation, or preserve bytes lazily
+   until a typed object is actually required.
+4. Baseline-beating potential is still good: a direct token decoder can avoid
+   both the old dynamic-map materialization and the current typed-object
+   re-materialization, while retaining stronger typed contracts.
+
+Next target:
+
+1. Implement a streaming/token JSON decoder for `extension.Object` and
+   `extension.Value` that parses scalars with append/strconv paths, pre-sizes
+   objects/lists where possible, and never stages through `interface{}`.
+2. Route HTTP JSON body dispatch, `events.FromJSON`, and JSON payload handling in
+   `events.FromBinary` through that decoder.
+3. Preserve raw payload bytes on envelope decode until the owning handler asks
+   for a typed object. The fallback remains external JSON wire compatibility.
+4. Add benchmark guards for `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest`,
+   `BenchmarkEnvelope_FromJSON`, `BenchmarkEnvelope_FromBinary`, and
+   service-backed Hermes rebuild/apply allocations.
+5. Add trusted Hermes batch builders that populate `RecordData` from validated
+   projector rows without per-field generic conversion, then compare
+   `BulkLoad`, `ApplyRecords`, and `ApplyBatch` again.
+
+## 2026-06-03 JSON ingress, lazy payload, and Hermes normalization follow-up
+
+Commands:
+
+```bash
+cd server-kit/go
+go test ./extension ./events ./httpapi ./appbench ./hermes
+go test -run=^$ -bench='Benchmark(AppLane_HTTPIngress_JSONToDispatchRequest|Envelope_(ToJSON|FromJSON|FromBinary))$' -benchmem -count=5 ./appbench ./events
+go test -run=^$ -bench='Benchmark(PayloadFromRequestJSONBody|BuildDispatchRequestJSONBody)$' -benchmem -count=5 ./httpapi
+go test -run=^$ -bench='BenchmarkHermes(ApplyBatch64|ApplyRecords64|BulkLoad512)$' -benchmem -count=5 ./hermes
+cd ../..
+make test-service-backed
+make check-platform-boundary-debt
+tooling/scripts/coding_practices_check.sh .
+tooling/scripts/dynamic_payload_practices_check.sh .
+```
+
+Artifacts:
+
+- `benchmark-results/service_backed_20260602T230927Z.log`
+- `benchmark-results/service_backed_20260602T230927Z.tsv`
+- `benchmark-results/service_backed_20260602T232656Z.log`
+- `benchmark-results/service_backed_20260602T232656Z.tsv`
+- `benchmark-results/service_backed_20260602T233709Z.log`
+- `benchmark-results/service_backed_20260602T233709Z.tsv`
+- `benchmark-results/service_backed_20260602T235909Z.log`
+- `benchmark-results/service_backed_20260602T235909Z.tsv`
+
+Implementation changes:
+
+1. `extension.Value.UnmarshalJSON` and `extension.Object.UnmarshalJSON` now avoid
+   `interface{}` and `json.RawMessage` object/list materialization. They walk
+   bytes directly into typed extension values and parse scalars with
+   `strconv`/`json.Number`.
+2. `extension.Object.MarshalJSON`, extension lists, and event payload encoding
+   now use deterministic append-style encoders instead of generic JSON map/list
+   marshaling.
+3. HTTP JSON body dispatch and event JSON payload decode use the shared
+   `extension.ObjectFromJSON` boundary.
+4. Binary event envelope decode now preserves JSON `PayloadBytes` lazily. Callers
+   that need the object call `MaterializePayload`, so binary frame decode does
+   not pay JSON object construction upfront.
+5. `RecordData.Normalize` now has an already-sorted/unique fast path, and Hermes
+   record normalization injects `organization_id` after one normalized pass
+   instead of `Normalize().With(...)`.
+6. HTTP dispatch-owned request bodies are no longer restored after read, and
+   dispatch metadata no longer re-reads headers already folded into
+   `MetadataFromRequest`.
+7. Event JSON decode parses through the typed extension byte parser and borrows
+   the just-parsed payload/metadata object views instead of unmarshaling into a
+   temporary envelope struct.
+8. `RecordData.UnmarshalJSON` now uses the typed byte parser instead of
+   `json.RawMessage` map staging, which moves Postgres-backed Hermes rebuild off
+   the generic JSON map path.
+9. HTTP route dispatch can now be compiled with `CompileDispatchRoute`, so
+   generated/scaffolded handlers avoid repeated route path/header planning while
+   the compatibility `BuildDispatchRequest` API remains available.
+10. Event JSON decode now uses a true single-pass top-level parser: scalar fields
+    parse directly, metadata parses once, and payload bytes remain lazy until
+    `MaterializePayload`.
+11. `extension.Object.MarshalJSONFast` is available for non-canonical JSON
+    response paths; deterministic `MarshalJSON` remains the canonical/signing
+    path.
+12. Hermes rebuild can opt into `database.NormalizedSnapshotStore` when a source
+    can provide already-normalized records without changing the canonical
+    `StateStore` contract.
+
+Debt guard after the slice:
+
+- `map[string]any`: `29` production occurrences.
+- JSON encode/decode calls: `43` production occurrences after the first follow-up,
+  then expected to remain within the guard after the byte-scanner/lazy-decode
+  slice.
+
+Focused benchmark result on Apple M1 Pro:
+
+| Benchmark | Old baseline | Typed regression | Now | Honest result |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | `5399 ns/op`, `9219 B/op`, `71 allocs/op` | `10980 ns/op`, `20720 B/op`, `76 allocs/op` | `7251-7913 ns/op`, `16615 B/op`, `56 allocs/op` | Compatibility API allocs beat old baseline, but bytes/time remain worse. Use compiled route plans for generated/scaffolded handlers. |
+| `BenchmarkPayloadFromRequestJSONBody` | n/a | n/a | `2534-2688 ns/op`, `7339 B/op`, `19 allocs/op` | Split guard. Body decode is bounded but still retains one raw body plus typed object ownership. |
+| `BenchmarkBuildDispatchRequestJSONBody` | n/a | n/a | `6468-6786 ns/op`, `16615 B/op`, `56 allocs/op` | Compatibility builder keeps dynamic route parsing. It is allocation-better than old app ingress but not byte/time better. |
+| `BenchmarkPlannedDispatchRequestJSONBody` | n/a | n/a | `6472-6657 ns/op`, `16582-16583 B/op`, `52 allocs/op` | New compiled route-plan lane. It saves path/header planning allocations, but body and metadata ownership still dominate bytes. |
+| `BenchmarkEnvelope_FromJSON` | `3777 ns/op`, `2072 B/op`, `40 allocs/op` | `6818 ns/op`, `15416 B/op`, `58 allocs/op` | `3035-3140 ns/op`, `4184 B/op`, `40 allocs/op` | Time beats old baseline and allocations match old baseline. Bytes remain higher because metadata is typed and payload is retained lazily as raw bytes. |
+| `BenchmarkEnvelope_FromBinary` | `2258 ns/op`, `2984 B/op`, `35 allocs/op` | `3757 ns/op`, `8744 B/op`, `35 allocs/op` | `2885-3072 ns/op`, `6224 B/op`, `28 allocs/op` | Allocation count beats old baseline because JSON payload decode is lazy; bytes/time are better than regression but still above old baseline. |
+| `BenchmarkEnvelope_ToJSON` | `3330 ns/op`, `2681 B/op`, `49 allocs/op` | `4068 ns/op`, `4508 B/op`, `38 allocs/op` | `4070-4319 ns/op`, `3619 B/op`, `24 allocs/op` | Allocation count beats old baseline, but deterministic encoding remains slower/larger than old dynamic-map encoding. Use fast unordered encoding only where canonical order is irrelevant. |
+| `BenchmarkServiceBackedHermesApplyBatch512` | `899371 ns/op`, `956955 B/op`, `4836 allocs/op` | `1070326 ns/op`, `1284592 B/op`, `8420 allocs/op` | `876915 ns/op`, `981530 B/op`, `4324 allocs/op` | Beats old baseline on time and allocation count; bytes are close but still slightly above old best. |
+| `BenchmarkServiceBackedHermesRebuild512` | `3206715 ns/op`, `1703672 B/op`, `19202 allocs/op` | `3477844 ns/op`, `2653848 B/op`, `26881 allocs/op` | `2892654 ns/op`, `2342601 B/op`, `17154 allocs/op` | Time and allocation count beat old baseline; bytes remain higher until a source implements the optional normalized snapshot lane. |
+
+Remaining opportunity:
+
+1. HTTP JSON ingress is now allocation-better than baseline but still byte/time
+   worse. The remaining target is route-specific generated dispatch assembly:
+   pre-sized payload objects, generated path-param extraction, and optional
+   single-consume body readers for hot scaffolded routes.
+2. Event JSON decode now beats old time and allocation count but not bytes. The
+   remaining byte pressure is typed extension object size; further work should be
+   justified by compatibility-lane traffic, not by raw count chasing.
+3. Binary event decode is lazy for payloads, but metadata/proto ownership is
+   still visible. Optimize only if binary JSON compatibility decode remains on a
+   real hot path.
+4. Hermes rebuild now beats old time and allocation count, but not bytes. The
+   next improvement would need a true normalized snapshot source that bypasses
+   durable JSONB materialization, not more `BulkLoad` tuning.

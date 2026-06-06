@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 )
@@ -90,7 +91,7 @@ func envelopeWithContextMetadata(ctx context.Context, envelope Envelope) Envelop
 		return envelope
 	}
 	md.EnsureCorrelation(envelope.CorrelationID)
-	envelope.Metadata = metadata.MergeMaps(md.ToMap(), envelope.Metadata)
+	envelope.Metadata = metadata.MergeObjects(md.ToObject(), envelope.Metadata)
 	return envelope
 }
 
@@ -209,13 +210,20 @@ func envelopeDispatchReady(envelope Envelope) bool {
 	if envelope.Metadata == nil {
 		return false
 	}
-	if correlationID, _ := envelope.Metadata["correlation_id"].(string); correlationID == envelope.CorrelationID {
+	if correlationID, _ := envelope.Metadata.GetString("correlation_id"); correlationID == envelope.CorrelationID {
 		return true
 	}
-	if correlationID, _ := envelope.Metadata["correlationId"].(string); correlationID == envelope.CorrelationID {
+	if correlationID, _ := envelope.Metadata.GetString("correlationId"); correlationID == envelope.CorrelationID {
 		return true
 	}
 	return false
+}
+
+func cloneObject(input extension.Object) extension.Object {
+	if len(input) == 0 {
+		return extension.Object{}
+	}
+	return input.Clone()
 }
 
 func Matches(pattern, eventType string) bool {

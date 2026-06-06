@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker"
 )
 
@@ -21,10 +22,10 @@ func TestVerifyCommandLifecycle(t *testing.T) {
 			CorrelationID:  "corr-1",
 			IdempotencyKey: "idem-1",
 			MaxAttempts:    2,
-			Metadata: map[string]any{
-				"correlation_id":  "corr-1",
-				"idempotency_key": "idem-1",
-				"organization_id": "org-1",
+			Metadata: extension.Object{
+				"correlation_id":  extension.String("corr-1"),
+				"idempotency_key": extension.String("idem-1"),
+				"organization_id": extension.String("org-1"),
 			},
 		}},
 	}
@@ -44,10 +45,10 @@ func TestLifecycleRecorderVerifiesObservedBusAndJobs(t *testing.T) {
 		CorrelationID:  "corr-1",
 		IdempotencyKey: "idem-1",
 		MaxAttempts:    2,
-		Metadata: map[string]any{
-			"correlation_id":  "corr-1",
-			"idempotency_key": "idem-1",
-			"organization_id": "org-1",
+		Metadata: extension.Object{
+			"correlation_id":  extension.String("corr-1"),
+			"idempotency_key": extension.String("idem-1"),
+			"organization_id": extension.String("org-1"),
 		},
 	})
 	if err := bus.Publish(context.Background(), lifecycleEnvelope("orders:create:v1:requested", "corr-1", "idem-1", "org-1")); err != nil {
@@ -114,7 +115,7 @@ func TestVerifyCommandLifecycleRejectsJobTenantDrift(t *testing.T) {
 			CorrelationID:  "corr-1",
 			IdempotencyKey: "idem-1",
 			MaxAttempts:    2,
-			Metadata:       map[string]any{"organization_id": "org-2"},
+			Metadata:       extension.Object{"organization_id": extension.String("org-2")},
 		}},
 	}
 
@@ -127,12 +128,12 @@ func TestVerifyCommandLifecycleRejectsJobTenantDrift(t *testing.T) {
 func lifecycleEnvelope(eventType, correlationID, idempotencyKey, orgID string) events.Envelope {
 	env := events.Envelope{
 		EventType: eventType,
-		Payload:   map[string]any{"id": "order-1"},
-		Metadata: map[string]any{
+		Payload:   contractObject(map[string]any{"id": "order-1"}),
+		Metadata: contractObject(map[string]any{
 			"correlation_id":  correlationID,
 			"idempotency_key": idempotencyKey,
 			"organization_id": orgID,
-		},
+		}),
 		CorrelationID: correlationID,
 		SchemaVersion: "1.0",
 		Timestamp:     time.Now().UTC(),

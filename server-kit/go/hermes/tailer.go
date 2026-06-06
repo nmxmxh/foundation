@@ -17,7 +17,7 @@ const (
 
 type SourceMessage struct {
 	ID     string
-	Values map[string]any
+	Values redispkg.Values
 }
 
 type MessageSource interface {

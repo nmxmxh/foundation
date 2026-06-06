@@ -6,7 +6,7 @@ import (
 )
 
 func TestCreateEnvelopeIncludesRequiredMetadata(t *testing.T) {
-	envelope := CreateEnvelope("workspace.v1.created", map[string]any{"workspace_id": "ws_1"}, nil)
+	envelope := CreateEnvelope("workspace.v1.created", ObjectFromMap(map[string]any{"workspace_id": "ws_1"}), nil)
 	if envelope.Metadata.CorrelationID == "" || envelope.Metadata.RequestID == "" || envelope.Metadata.IdempotencyKey == "" {
 		t.Fatalf("envelope metadata is incomplete: %+v", envelope.Metadata)
 	}
@@ -25,11 +25,11 @@ func TestCreateEnvelopeIncludesRequiredMetadata(t *testing.T) {
 }
 
 func TestCreateEnvelopeNormalizesNilPayload(t *testing.T) {
-	envelope := CreateEnvelope("workspace.v1.created", nil, map[string]any{"source": "test"})
+	envelope := CreateEnvelope("workspace.v1.created", nil, ObjectFromMap(map[string]any{"source": "test"}))
 	if envelope.Payload == nil {
 		t.Fatal("expected nil payload to be normalized to an empty map")
 	}
-	if envelope.Metadata.Extra["source"] != "test" {
+	if source, _ := envelope.Metadata.Extra["source"].Interface().(string); source != "test" {
 		t.Fatalf("extra metadata not preserved: %+v", envelope.Metadata.Extra)
 	}
 	if !strings.HasPrefix(envelope.Metadata.IdempotencyKey, "idem_") {

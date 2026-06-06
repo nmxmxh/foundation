@@ -124,10 +124,7 @@ pub struct NativeRuntimeError {
 
 impl NativeRuntimeError {
     pub fn new(code: NativeErrorCode, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-        }
+        Self { code, message: message.into() }
     }
 }
 
@@ -147,11 +144,7 @@ pub struct NativeRuntimeBridge {
 
 impl NativeRuntimeBridge {
     pub fn new(host: NativeRuntimeHost) -> Self {
-        Self {
-            host,
-            allowed_units: BTreeSet::new(),
-            max_frame_bytes: MAX_NATIVE_FRAME_BYTES,
-        }
+        Self { host, allowed_units: BTreeSet::new(), max_frame_bytes: MAX_NATIVE_FRAME_BYTES }
     }
 
     pub fn with_role_limits(role_limits: BTreeMap<RuntimeRole, usize>) -> Self {
@@ -187,10 +180,8 @@ impl NativeRuntimeBridge {
                 format!("runtime unit {} is not allowlisted", request.unit_id),
             ));
         }
-        let output = self
-            .host
-            .dispatch_direct(&request.unit_id, &request.payload)
-            .map_err(|error| {
+        let output =
+            self.host.dispatch_direct(&request.unit_id, &request.payload).map_err(|error| {
                 NativeRuntimeError::new(NativeErrorCode::RuntimeDispatchFailed, error)
             })?;
         encode_dispatch_response(&NativeDispatchResponse {
@@ -214,10 +205,7 @@ impl NativeSecureStore {
     pub fn put(&self, key: &str, value: &[u8]) -> Result<(), NativeRuntimeError> {
         validate_store_key(key)?;
         let mut guard = self.values.write().map_err(|_| {
-            NativeRuntimeError::new(
-                NativeErrorCode::StoreUnavailable,
-                "secure store lock poisoned",
-            )
+            NativeRuntimeError::new(NativeErrorCode::StoreUnavailable, "secure store lock poisoned")
         })?;
         guard.insert(key.to_string(), value.to_vec());
         Ok(())
@@ -226,10 +214,7 @@ impl NativeSecureStore {
     pub fn get(&self, key: &str) -> Result<Option<Vec<u8>>, NativeRuntimeError> {
         validate_store_key(key)?;
         let guard = self.values.read().map_err(|_| {
-            NativeRuntimeError::new(
-                NativeErrorCode::StoreUnavailable,
-                "secure store lock poisoned",
-            )
+            NativeRuntimeError::new(NativeErrorCode::StoreUnavailable, "secure store lock poisoned")
         })?;
         Ok(guard.get(key).cloned())
     }
@@ -237,10 +222,7 @@ impl NativeSecureStore {
     pub fn delete(&self, key: &str) -> Result<bool, NativeRuntimeError> {
         validate_store_key(key)?;
         let mut guard = self.values.write().map_err(|_| {
-            NativeRuntimeError::new(
-                NativeErrorCode::StoreUnavailable,
-                "secure store lock poisoned",
-            )
+            NativeRuntimeError::new(NativeErrorCode::StoreUnavailable, "secure store lock poisoned")
         })?;
         Ok(guard.remove(key).is_some())
     }
@@ -295,10 +277,7 @@ pub fn decode_dispatch_request(
     if frame.len() > max_frame_bytes {
         return Err(NativeRuntimeError::new(
             NativeErrorCode::OversizedFrame,
-            format!(
-                "native frame has {} bytes; max is {max_frame_bytes}",
-                frame.len()
-            ),
+            format!("native frame has {} bytes; max is {max_frame_bytes}", frame.len()),
         ));
     }
     if frame.len() < 20 || &frame[0..4] != REQUEST_MAGIC {
@@ -325,10 +304,7 @@ pub fn decode_dispatch_request(
         .and_then(|value| value.checked_add(payload_len))
         .and_then(|value| value.checked_add(metadata_len))
         .ok_or_else(|| {
-            NativeRuntimeError::new(
-                NativeErrorCode::OversizedFrame,
-                "native frame length overflow",
-            )
+            NativeRuntimeError::new(NativeErrorCode::OversizedFrame, "native frame length overflow")
         })?;
     if total != frame.len() {
         return Err(NativeRuntimeError::new(
@@ -349,13 +325,7 @@ pub fn decode_dispatch_request(
     let payload = read_bytes(frame, &mut cursor, payload_len)?.to_vec();
     let metadata = read_bytes(frame, &mut cursor, metadata_len)?.to_vec();
 
-    Ok(NativeDispatchRequest {
-        unit_id,
-        schema_version,
-        encoding,
-        payload,
-        metadata,
-    })
+    Ok(NativeDispatchRequest { unit_id, schema_version, encoding, payload, metadata })
 }
 
 pub fn encode_dispatch_response(
@@ -387,10 +357,7 @@ pub fn decode_dispatch_response(
     if frame.len() > max_frame_bytes {
         return Err(NativeRuntimeError::new(
             NativeErrorCode::OversizedFrame,
-            format!(
-                "native response has {} bytes; max is {max_frame_bytes}",
-                frame.len()
-            ),
+            format!("native response has {} bytes; max is {max_frame_bytes}", frame.len()),
         ));
     }
     if frame.len() < 16 || &frame[0..4] != RESPONSE_MAGIC {
@@ -438,10 +405,7 @@ fn read_utf8(
 ) -> Result<String, NativeRuntimeError> {
     let bytes = read_bytes(frame, cursor, len)?;
     let value = std::str::from_utf8(bytes).map_err(|_| {
-        NativeRuntimeError::new(
-            NativeErrorCode::MalformedFrame,
-            format!("{label} is not utf-8"),
-        )
+        NativeRuntimeError::new(NativeErrorCode::MalformedFrame, format!("{label} is not utf-8"))
     })?;
     if value.trim().is_empty() {
         return Err(NativeRuntimeError::new(
@@ -458,10 +422,7 @@ fn read_bytes<'a>(
     len: usize,
 ) -> Result<&'a [u8], NativeRuntimeError> {
     let end = cursor.checked_add(len).ok_or_else(|| {
-        NativeRuntimeError::new(
-            NativeErrorCode::OversizedFrame,
-            "native frame cursor overflow",
-        )
+        NativeRuntimeError::new(NativeErrorCode::OversizedFrame, "native frame cursor overflow")
     })?;
     if end > frame.len() {
         return Err(NativeRuntimeError::new(
@@ -607,18 +568,14 @@ mod tests {
             metadata: Vec::new(),
         };
         let frame = encode_dispatch_request(&request).expect("encode request");
-        let err = bridge
-            .dispatch_frame(&frame)
-            .expect_err("unit must be unauthorized");
+        let err = bridge.dispatch_frame(&frame).expect_err("unit must be unauthorized");
         assert_eq!(err.code, NativeErrorCode::UnauthorizedUnit);
     }
 
     #[test]
     fn runtime_bridge_dispatches_allowlisted_units() {
         let mut bridge = NativeRuntimeBridge::with_role_limits(BTreeMap::new());
-        bridge
-            .register_allowed_unit(Arc::new(EchoUnit))
-            .expect("register allowed unit");
+        bridge.register_allowed_unit(Arc::new(EchoUnit)).expect("register allowed unit");
         let request = NativeDispatchRequest {
             unit_id: "bench.echo".to_string(),
             schema_version: "1.0".to_string(),
@@ -641,10 +598,7 @@ mod tests {
         assert!(capabilities.native);
         assert!(capabilities.native_ffi);
         assert!(!capabilities.platform.trim().is_empty());
-        assert_eq!(
-            capabilities.native_gpu,
-            !capabilities.native_gpu_platforms.is_empty()
-        );
+        assert_eq!(capabilities.native_gpu, !capabilities.native_gpu_platforms.is_empty());
         for platform in &capabilities.native_gpu_platforms {
             assert!(matches!(
                 platform.as_str(),
@@ -657,10 +611,7 @@ mod tests {
     fn secure_store_roundtrips_without_frontend_storage() {
         let store = NativeSecureStore::default();
         store.put("session:token", b"secret").expect("put");
-        assert_eq!(
-            store.get("session:token").expect("get"),
-            Some(b"secret".to_vec())
-        );
+        assert_eq!(store.get("session:token").expect("get"), Some(b"secret".to_vec()));
         assert!(store.delete("session:token").expect("delete"));
         assert_eq!(store.get("session:token").expect("get"), None);
     }
@@ -668,9 +619,7 @@ mod tests {
     #[test]
     fn secure_store_rejects_invalid_keys() {
         let store = NativeSecureStore::default();
-        let err = store
-            .put("../session", b"secret")
-            .expect_err("invalid key must fail");
+        let err = store.put("../session", b"secret").expect_err("invalid key must fail");
         assert_eq!(err.code, NativeErrorCode::MalformedFrame);
     }
 }

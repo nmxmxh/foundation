@@ -4,33 +4,47 @@ import (
 	"context"
 	"testing"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	testprotos "github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi/testprotos"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-func TestBindingDecodeRequestMapMergesEnvelopeMetadata(t *testing.T) {
+func protoObject(t *testing.T, values map[string]any) extension.Object {
+	t.Helper()
+	value, err := extension.FromJSON(values)
+	if err != nil {
+		t.Fatalf("extension.FromJSON() error = %v", err)
+	}
+	object, ok := value.ObjectValue()
+	if !ok {
+		t.Fatalf("value is not object: %T", value)
+	}
+	return object
+}
+
+func TestBindingDecodeRequestObjectMergesEnvelopeMetadata(t *testing.T) {
 	binding := Binding{
 		Request:  factory(func() anyProto { return &testprotos.TestRequest{} }).toFactory(),
 		Response: factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
 	}
-	request, err := binding.DecodeRequestMap(map[string]any{
+	request, err := binding.DecodeRequestObject(protoObject(t, map[string]any{
 		"workspace_id": "wrk_123",
 		"content_type": "image/jpeg",
-		"size":         1024,
+		"size":         float64(1024),
 		"hash":         "sha256:abc",
 		"metadata": map[string]any{
 			"locale": "en-US",
 		},
-	}, map[string]any{
+	}), protoObject(t, map[string]any{
 		"correlation_id": "corr_123",
 		"request_id":     "req_123",
 		"global_context": map[string]any{
 			"source": "api",
 		},
-	})
+	}))
 	if err != nil {
-		t.Fatalf("DecodeRequestMap failed: %v", err)
+		t.Fatalf("DecodeRequestObject failed: %v", err)
 	}
 	typed, ok := request.(*testprotos.TestRequest)
 	if !ok {
@@ -53,24 +67,24 @@ func TestBindingDecodeRequestMapMergesEnvelopeMetadata(t *testing.T) {
 	}
 }
 
-func TestBindingDecodeRequestMapFiltersMetadataForTargetMessage(t *testing.T) {
+func TestBindingDecodeRequestObjectFiltersMetadataForTargetMessage(t *testing.T) {
 	binding := Binding{
 		Request:  factory(func() anyProto { return &testprotos.TestRequest{} }).toFactory(),
 		Response: factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
 	}
-	request, err := binding.DecodeRequestMap(map[string]any{
+	request, err := binding.DecodeRequestObject(protoObject(t, map[string]any{
 		"workspace_id": "wrk_123",
 		"content_type": "image/jpeg",
-	}, map[string]any{
+	}), protoObject(t, map[string]any{
 		"correlation_id":      "corr_123",
 		"policy_snapshot_ref": "policy_ignored",
 		"global_context": map[string]any{
 			"source":       "api",
 			"jurisdiction": "ignored",
 		},
-	})
+	}))
 	if err != nil {
-		t.Fatalf("DecodeRequestMap failed: %v", err)
+		t.Fatalf("DecodeRequestObject failed: %v", err)
 	}
 	typed := request.(*testprotos.TestRequest)
 	if typed.Metadata.GetCorrelationId() != "corr_123" {
@@ -81,33 +95,33 @@ func TestBindingDecodeRequestMapFiltersMetadataForTargetMessage(t *testing.T) {
 	}
 }
 
-func TestMessageToMapUsesProtoFieldNames(t *testing.T) {
-	payload, err := MessageToMap(&testprotos.TestResponse{
+func TestMessageToObjectUsesProtoFieldNames(t *testing.T) {
+	payload, err := MessageToObject(&testprotos.TestResponse{
 		ResourceId: "asset_123",
 		Status:     "complete",
 	})
 	if err != nil {
-		t.Fatalf("MessageToMap failed: %v", err)
+		t.Fatalf("MessageToObject failed: %v", err)
 	}
-	if payload["resource_id"] != "asset_123" {
-		t.Fatalf("resource_id = %#v", payload["resource_id"])
+	if got, ok := payload.GetString("resource_id"); !ok || got != "asset_123" {
+		t.Fatalf("resource_id = %q ok=%v", got, ok)
 	}
-	if payload["status"] != "complete" {
-		t.Fatalf("status = %#v", payload["status"])
+	if got, ok := payload.GetString("status"); !ok || got != "complete" {
+		t.Fatalf("status = %q ok=%v", got, ok)
 	}
 }
 
-func TestResponseFromMap(t *testing.T) {
+func TestResponseFromObject(t *testing.T) {
 	binding := Binding{
 		Request:  factory(func() anyProto { return &testprotos.Metadata{} }).toFactory(),
 		Response: factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
 	}
-	msg, err := binding.ResponseFromMap(map[string]any{
+	msg, err := binding.ResponseFromObject(protoObject(t, map[string]any{
 		"resource_id": "asset_123",
 		"status":      "complete",
-	})
+	}))
 	if err != nil {
-		t.Fatalf("ResponseFromMap failed: %v", err)
+		t.Fatalf("ResponseFromObject failed: %v", err)
 	}
 	response := msg.(*testprotos.TestResponse)
 	if response.ResourceId != "asset_123" || response.Status != "complete" {
@@ -147,8 +161,8 @@ func TestBindingValidationAndNilResponses(t *testing.T) {
 	if _, err := (Binding{Response: func() proto.Message { return nil }}).NewResponse(); err == nil {
 		t.Fatalf("expected nil response factory result error")
 	}
-	if got, err := valid.EncodeResponseMap(nil); err != nil || len(got) != 0 {
-		t.Fatalf("EncodeResponseMap(nil) = %+v err=%v", got, err)
+	if got, err := valid.EncodeResponseObject(nil); err != nil || len(got) != 0 {
+		t.Fatalf("EncodeResponseObject(nil) = %+v err=%v", got, err)
 	}
 	if got, err := valid.EncodeResponseBytes(nil); err != nil || len(got) != 0 {
 		t.Fatalf("EncodeResponseBytes(nil) = %+v err=%v", got, err)
@@ -172,11 +186,11 @@ func TestDecodeByEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal failed: %v", err)
 	}
-	msg, err := DecodeByEncoding(binding, PayloadEncodingProtobuf, nil, requestBytes, map[string]any{
+	msg, err := DecodeObjectByEncoding(binding, PayloadEncodingProtobuf, nil, requestBytes, protoObject(t, map[string]any{
 		"request_id": "req_bytes",
-	})
+	}))
 	if err != nil {
-		t.Fatalf("DecodeByEncoding failed: %v", err)
+		t.Fatalf("DecodeObjectByEncoding failed: %v", err)
 	}
 	typed := msg.(*testprotos.TestRequest)
 	if typed.Metadata.GetCorrelationId() != "corr_bytes" || typed.Metadata.GetRequestId() != "req_bytes" {
@@ -222,16 +236,16 @@ func TestDecodeRequestBytesIntoCompleteReuseOptIn(t *testing.T) {
 	}
 
 	target := &testprotos.TestRequest{Metadata: &testprotos.Metadata{GlobalContext: &testprotos.GlobalContext{}}}
-	msg, err := binding.DecodeRequestBytesInto(target, first, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true})
+	msg, err := binding.DecodeRequestBytesIntoObject(target, first, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true})
 	if err != nil {
-		t.Fatalf("DecodeRequestBytesInto() first error = %v", err)
+		t.Fatalf("DecodeRequestBytesIntoObject() first error = %v", err)
 	}
 	if msg != target || target.GetMetadata().GetCorrelationId() != "corr_1" || target.GetHash() != "sha256:one" {
 		t.Fatalf("first decode mismatch: msg=%p target=%+v", msg, target)
 	}
-	msg, err = binding.DecodeRequestBytesInto(target, second, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true})
+	msg, err = binding.DecodeRequestBytesIntoObject(target, second, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true})
 	if err != nil {
-		t.Fatalf("DecodeRequestBytesInto() second error = %v", err)
+		t.Fatalf("DecodeRequestBytesIntoObject() second error = %v", err)
 	}
 	if msg != target {
 		t.Fatalf("expected caller-owned target to be reused")
@@ -266,23 +280,23 @@ func TestDecodeRequestBytesIntoAbsentFieldCaveatAndResetLane(t *testing.T) {
 	}
 
 	target := &testprotos.TestRequest{}
-	if _, err := binding.DecodeRequestBytesInto(target, withHash, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true}); err != nil {
-		t.Fatalf("DecodeRequestBytesInto() withHash error = %v", err)
+	if _, err := binding.DecodeRequestBytesIntoObject(target, withHash, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true}); err != nil {
+		t.Fatalf("DecodeRequestBytesIntoObject() withHash error = %v", err)
 	}
-	if _, err := binding.DecodeRequestBytesInto(target, withoutHash, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true}); err != nil {
-		t.Fatalf("DecodeRequestBytesInto() withoutHash merge error = %v", err)
+	if _, err := binding.DecodeRequestBytesIntoObject(target, withoutHash, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true}); err != nil {
+		t.Fatalf("DecodeRequestBytesIntoObject() withoutHash merge error = %v", err)
 	}
 	if target.GetWorkspaceId() != "wrk_new" || target.GetHash() != "sha256:old" {
 		t.Fatalf("merge reuse caveat mismatch: %+v", target)
 	}
 
-	if _, err := binding.DecodeRequestBytesInto(target, withoutHash, nil, DecodeRequestBytesIntoOptions{}); err != nil {
-		t.Fatalf("DecodeRequestBytesInto() reset lane error = %v", err)
+	if _, err := binding.DecodeRequestBytesIntoObject(target, withoutHash, nil, DecodeRequestBytesIntoOptions{}); err != nil {
+		t.Fatalf("DecodeRequestBytesIntoObject() reset lane error = %v", err)
 	}
 	if target.GetWorkspaceId() != "wrk_new" || target.GetHash() != "" {
 		t.Fatalf("reset lane should clear absent hash: %+v", target)
 	}
-	if _, err := binding.DecodeRequestBytesInto(nil, withoutHash, nil, DecodeRequestBytesIntoOptions{}); err == nil {
+	if _, err := binding.DecodeRequestBytesIntoObject(nil, withoutHash, nil, DecodeRequestBytesIntoOptions{}); err == nil {
 		t.Fatalf("expected nil target error")
 	}
 }
@@ -292,54 +306,51 @@ func TestDecodeByEncodingJSONUnsupportedAndInvalidBytes(t *testing.T) {
 		Request:  factory(func() anyProto { return &testprotos.TestRequest{} }).toFactory(),
 		Response: factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
 	}
-	msg, err := DecodeByEncoding(binding, "", map[string]any{"workspace_id": "wrk_json"}, nil, nil)
+	msg, err := DecodeObjectByEncoding(binding, "", protoObject(t, map[string]any{"workspace_id": "wrk_json"}), nil, nil)
 	if err != nil {
-		t.Fatalf("JSON DecodeByEncoding() error = %v", err)
+		t.Fatalf("JSON DecodeObjectByEncoding() error = %v", err)
 	}
 	if msg.(*testprotos.TestRequest).WorkspaceId != "wrk_json" {
 		t.Fatalf("JSON request mismatch: %+v", msg)
 	}
-	if _, err := DecodeByEncoding(binding, PayloadEncodingProtobuf, nil, []byte("bad"), nil); err == nil {
+	if _, err := DecodeObjectByEncoding(binding, PayloadEncodingProtobuf, nil, []byte("bad"), nil); err == nil {
 		t.Fatalf("expected invalid protobuf bytes error")
 	}
-	if _, err := DecodeByEncoding(binding, "xml", nil, nil, nil); err == nil {
+	if _, err := DecodeObjectByEncoding(binding, "xml", nil, nil, nil); err == nil {
 		t.Fatalf("expected unsupported encoding error")
 	}
-	if _, err := binding.DecodeRequestMap(map[string]any{"metadata": func() {}}, nil); err == nil {
-		t.Fatalf("expected map decode marshal error")
-	}
-	if _, err := binding.ResponseFromMap(map[string]any{"resource_id": 10}); err == nil {
+	if _, err := binding.ResponseFromObject(extension.Object{"resource_id": extension.Int(10)}); err == nil {
 		t.Fatalf("expected response decode type error")
 	}
 }
 
-func TestMapCloneHelpersAndMetadataDetection(t *testing.T) {
-	original := map[string]any{
-		"nested": map[string]any{"k": "v"},
-		"items":  []any{map[string]any{"x": "y"}},
-	}
-	cloned := cloneMap(original)
-	cloned["nested"].(map[string]any)["k"] = "changed"
-	if original["nested"].(map[string]any)["k"] != "v" {
-		t.Fatalf("cloneMap did not deep clone nested maps")
-	}
-	if len(asMap(nil)) != 0 || len(asMap("bad")) != 0 {
-		t.Fatalf("asMap should return empty map for non-maps")
-	}
+func TestReflectionBindingMetadataDetectionAndUnknownFields(t *testing.T) {
 	if !hasMetadataField(&testprotos.TestRequest{}) {
 		t.Fatalf("TestRequest should have metadata field")
 	}
 	if hasMetadataField(&testprotos.TestResponse{}) || hasMetadataField(nil) {
 		t.Fatalf("metadata field detection mismatch")
 	}
-	merged := mergeMetadataMap(map[string]any{
-		"global_context": map[string]any{"source": "web", "device_id": "old"},
-	}, map[string]any{
-		"global_context": map[string]any{"device_id": "new"},
-		"request_id":     "req",
+	binding := Binding{
+		Request:  factory(func() anyProto { return &testprotos.TestRequest{} }).toFactory(),
+		Response: factory(func() anyProto { return &testprotos.TestResponse{} }).toFactory(),
+	}
+	if _, err := binding.DecodeRequestObject(extension.Object{"unknown": extension.String("bad")}, nil); err == nil {
+		t.Fatalf("expected unknown payload field error")
+	}
+	request, err := binding.DecodeRequestObject(nil, extension.Object{
+		"policy_snapshot_ref": extension.String("ignored"),
+		"global_context": extension.ObjectValue(extension.Object{
+			"source":       extension.String("web"),
+			"jurisdiction": extension.String("ignored"),
+		}),
 	})
-	if merged["request_id"] != "req" || merged["global_context"].(map[string]any)["source"] != "web" || merged["global_context"].(map[string]any)["device_id"] != "new" {
-		t.Fatalf("metadata merge mismatch: %+v", merged)
+	if err != nil {
+		t.Fatalf("metadata overlay error = %v", err)
+	}
+	typed := request.(*testprotos.TestRequest)
+	if typed.Metadata.GetGlobalContext().GetSource() != "web" {
+		t.Fatalf("metadata overlay did not preserve known nested field: %+v", typed.Metadata)
 	}
 }
 
@@ -434,7 +445,7 @@ func BenchmarkDecodeRequestBytesIntoCompleteReuse(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if _, err := binding.DecodeRequestBytesInto(target, payload, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true}); err != nil {
+		if _, err := binding.DecodeRequestBytesIntoObject(target, payload, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true}); err != nil {
 			b.Fatal(err)
 		}
 	}

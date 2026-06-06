@@ -71,5 +71,29 @@ fi
 
 (
   cd "$package_dir"
-  "$node_bin" ./node_modules/vitest/dist/cli.js "$@"
+  args=("$@")
+  if [[ "${FOUNDATION_VITEST_SERIAL:-1}" == "1" ]]; then
+    has_workers=0
+    has_file_parallelism=0
+    for arg in "${args[@]}"; do
+      case "$arg" in
+      --maxWorkers|--maxWorkers=*|--poolOptions.*.maxThreads=*)
+        has_workers=1
+        ;;
+      --fileParallelism|--fileParallelism=*|--no-file-parallelism)
+        has_file_parallelism=1
+        ;;
+      esac
+    done
+    worker_count="${FOUNDATION_VITEST_WORKERS:-0}"
+    if [[ "$has_workers" -eq 0 && "$worker_count" == <-> && "$worker_count" -gt 0 ]]; then
+      args+=("--maxWorkers=${worker_count}")
+    fi
+    if [[ "$has_file_parallelism" -eq 0 ]]; then
+      args+=("--no-file-parallelism")
+    fi
+  fi
+  printf '[RUN] vitest %s %s\n' "$package_dir" "${args[*]}"
+  "$node_bin" ./node_modules/vitest/dist/cli.js "${args[@]}"
+  printf '[OK] vitest %s\n' "$package_dir"
 )

@@ -97,6 +97,7 @@ templates/native/src-tauri/build.rs	native/src-tauri/build.rs	full,frontend	nati
 templates/native/src-tauri/tauri.conf.json	native/src-tauri/tauri.conf.json	full,frontend	native	create
 templates/native/src-tauri/tauri.dev.conf.json	native/src-tauri/tauri.dev.conf.json	full,frontend	native	create
 templates/native/src-tauri/tauri.prod.conf.json	native/src-tauri/tauri.prod.conf.json	full,frontend	native	create
+templates/native/src-tauri/icons/icon.png	native/src-tauri/icons/icon.png	full,frontend	native	create
 templates/native/src-tauri/capabilities/main.json	native/src-tauri/capabilities/main.json	full,frontend	native	create
 templates/native/src-tauri/capabilities/examples.md	native/src-tauri/capabilities/examples.md	full,frontend	native	create
 templates/native/src-tauri/src/main.rs	native/src-tauri/src/main.rs	full,frontend	native	create

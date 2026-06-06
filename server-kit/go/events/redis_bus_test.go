@@ -25,8 +25,8 @@ func TestRedisBusPublishAndSubscribeWithMemoryDriver(t *testing.T) {
 
 	err = bus.Publish(context.Background(), Envelope{
 		EventType:     "operations:create_work_order:v1:requested",
-		Payload:       map[string]any{"work_order_id": "wo_1"},
-		Metadata:      map[string]any{"correlation_id": "corr_1"},
+		Payload:       ObjectFromMap(map[string]any{"work_order_id": "wo_1"}),
+		Metadata:      ObjectFromMap(map[string]any{"correlation_id": "corr_1"}),
 		CorrelationID: "corr_1",
 		SchemaVersion: "1.0",
 		Timestamp:     time.Now().UTC(),

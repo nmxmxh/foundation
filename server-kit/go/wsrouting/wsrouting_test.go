@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,9 +26,12 @@ func TestNewRouterWithOptions(t *testing.T) {
 	client := redis.NewMemoryClient("test")
 	defer func() { _ = client.Close() }()
 
-	r := NewRouter(client, "server-1", WithTTL(1*time.Hour))
+	r := NewRouter(client, "server-1", WithTTL(1*time.Hour), WithRegistrationBatchSize(64))
 	if r.ttl != 1*time.Hour {
 		t.Errorf("ttl = %v, want %v", r.ttl, 1*time.Hour)
+	}
+	if r.registerBatchSize != 64 {
+		t.Errorf("registerBatchSize = %d, want 64", r.registerBatchSize)
 	}
 }
 
@@ -89,6 +93,82 @@ func TestRegisterEmptyConnectionID(t *testing.T) {
 	}
 }
 
+func TestRegisterManyIndexesAndPublishesBatch(t *testing.T) {
+	client := redis.NewMemoryClient("test")
+	defer func() { _ = client.Close() }()
+	ctx := context.Background()
+	registered, stop, err := client.Subscribe(ctx, "wsroute:register")
+	if err != nil {
+		t.Fatalf("Subscribe register channel error = %v", err)
+	}
+	defer stop()
+
+	r := NewRouter(client, "server-1")
+	err = r.RegisterMany(ctx, []ConnectionInfo{
+		{ConnectionID: "conn-1", DeviceID: "device-1", UserID: "user-1"},
+		{ConnectionID: "conn-2", DeviceID: "device-2", UserID: "user-1"},
+		{ConnectionID: "conn-3", DeviceID: "device-3", UserID: "user-2"},
+	})
+	if err != nil {
+		t.Fatalf("RegisterMany() error = %v", err)
+	}
+	if got := r.LocalConnectionCount(); got != 3 {
+		t.Fatalf("LocalConnectionCount = %d, want 3", got)
+	}
+	userOne := r.GetLocalConnectionsByUser("user-1")
+	if len(userOne) != 2 {
+		t.Fatalf("user-1 local connections = %d, want 2", len(userOne))
+	}
+	for i := range 3 {
+		select {
+		case payload := <-registered:
+			if !strings.Contains(string(payload), "server-1") {
+				t.Fatalf("register payload %q missing server id", string(payload))
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for register payload %d", i)
+		}
+	}
+}
+
+func TestRegisterManyInvalidBatchDoesNotMutate(t *testing.T) {
+	r := NewRouter(nil, "server-1")
+	err := r.RegisterMany(context.Background(), []ConnectionInfo{
+		{ConnectionID: "conn-1"},
+		{},
+	})
+	if err == nil {
+		t.Fatal("RegisterMany should reject empty connection_id")
+	}
+	if got := r.LocalConnectionCount(); got != 0 {
+		t.Fatalf("LocalConnectionCount after invalid batch = %d, want 0", got)
+	}
+}
+
+func TestRegisterManyChunksCoordinationBatches(t *testing.T) {
+	client := &recordingCoordinationClient{}
+	r := NewRouter(client, "server-1", WithRegistrationBatchSize(2))
+	err := r.RegisterMany(context.Background(), []ConnectionInfo{
+		{ConnectionID: "conn-1", DeviceID: "device-1", UserID: "user-1"},
+		{ConnectionID: "conn-2", DeviceID: "device-2", UserID: "user-1"},
+		{ConnectionID: "conn-3", DeviceID: "device-3", UserID: "user-2"},
+		{ConnectionID: "conn-4", DeviceID: "device-4", UserID: "user-2"},
+		{ConnectionID: "conn-5", DeviceID: "device-5", UserID: "user-3"},
+	})
+	if err != nil {
+		t.Fatalf("RegisterMany() error = %v", err)
+	}
+	if got := r.LocalConnectionCount(); got != 5 {
+		t.Fatalf("LocalConnectionCount = %d, want 5", got)
+	}
+	if got, want := client.keyBatches, []int{4, 4, 2}; !intSlicesEqual(got, want) {
+		t.Fatalf("key batch sizes = %v, want %v", got, want)
+	}
+	if got, want := client.payloadBatches, []int{2, 2, 1}; !intSlicesEqual(got, want) {
+		t.Fatalf("payload batch sizes = %v, want %v", got, want)
+	}
+}
+
 func TestGetLocalConnectionByDevice(t *testing.T) {
 	client := redis.NewMemoryClient("test")
 	defer func() { _ = client.Close() }()
@@ -108,6 +188,108 @@ func TestGetLocalConnectionByDevice(t *testing.T) {
 	if got.ConnectionID != "conn-1" {
 		t.Errorf("ConnectionID = %q, want %q", got.ConnectionID, "conn-1")
 	}
+}
+
+type recordingCoordinationClient struct {
+	mu             sync.Mutex
+	keyBatches     []int
+	payloadBatches []int
+}
+
+func (c *recordingCoordinationClient) Publish(_ context.Context, _ string, _ []byte) error {
+	return nil
+}
+
+func (c *recordingCoordinationClient) Subscribe(context.Context, string) (<-chan []byte, func(), error) {
+	ch := make(chan []byte)
+	close(ch)
+	return ch, func() {}, nil
+}
+
+func (c *recordingCoordinationClient) PSubscribe(context.Context, ...string) ([]<-chan []byte, func(), error) {
+	return nil, func() {}, nil
+}
+
+func (c *recordingCoordinationClient) XAdd(context.Context, string, redis.Values) (string, error) {
+	return "", nil
+}
+
+func (c *recordingCoordinationClient) XReadGroup(context.Context, string, string, string, int64) ([]redis.StreamMessage, error) {
+	return nil, nil
+}
+
+func (c *recordingCoordinationClient) XReadGroupPending(context.Context, string, string, string, int64) ([]redis.StreamMessage, error) {
+	return nil, nil
+}
+
+func (c *recordingCoordinationClient) XAck(context.Context, string, string, ...string) error {
+	return nil
+}
+
+func (c *recordingCoordinationClient) Incr(context.Context, string) (int64, error) {
+	return 1, nil
+}
+
+func (c *recordingCoordinationClient) Expire(context.Context, string, time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (c *recordingCoordinationClient) IncrExpireMany(_ context.Context, keys []string, _ time.Duration) []error {
+	c.mu.Lock()
+	c.keyBatches = append(c.keyBatches, len(keys))
+	c.mu.Unlock()
+	return make([]error, len(keys))
+}
+
+func (c *recordingCoordinationClient) PublishMany(_ context.Context, _ string, payloads [][]byte) []error {
+	c.mu.Lock()
+	c.payloadBatches = append(c.payloadBatches, len(payloads))
+	c.mu.Unlock()
+	return make([]error, len(payloads))
+}
+
+func (c *recordingCoordinationClient) Lock(context.Context, string, time.Duration) (string, error) {
+	return "", nil
+}
+
+func (c *recordingCoordinationClient) Unlock(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+
+func (c *recordingCoordinationClient) PFAdd(context.Context, string, ...any) (int64, error) {
+	return 1, nil
+}
+
+func (c *recordingCoordinationClient) PFCount(context.Context, ...string) (int64, error) {
+	return 1, nil
+}
+
+func (c *recordingCoordinationClient) Set(context.Context, string, any, time.Duration) error {
+	return nil
+}
+
+func (c *recordingCoordinationClient) Get(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+
+func (c *recordingCoordinationClient) Del(context.Context, ...string) error {
+	return nil
+}
+
+func (c *recordingCoordinationClient) Close() error {
+	return nil
+}
+
+func intSlicesEqual(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestGetLocalConnectionsByUser(t *testing.T) {

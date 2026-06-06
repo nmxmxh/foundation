@@ -118,6 +118,51 @@ This document tracks the deliberate performance and architecture carryovers fold
     projector batches use `ApplyRecords`, and durable mixed mutation streams use
     `ApplyBatch`. Byte-bound estimation must stay approximate and allocation
     light; do not format every record field just to maintain a guardrail.
+67. Typed payload contracts and JSON compatibility performance are separate
+    optimization lanes. The 2026-06-02 typed refactor improved indexed/query/list
+    and frame adapter paths by removing dynamic maps and conversion churn, but
+    regressed HTTP/event JSON decode where compatibility adapters still build
+    owned typed object trees early.
+68. JSON ingress optimization now means direct decode, not map removal. Hot
+    adapters should walk JSON tokens, generated schema fields, or protobuf
+    reflection directly into `extension.Object`, domain structs, or preserved raw
+    payload bytes. A `json.Unmarshal` to `interface{}` followed by typed
+    conversion is an explicit compatibility fallback.
+69. Binary/event envelopes should preserve raw payload bytes until the owner
+    needs a typed object. Lazy object decode, borrowed views, and schema-guided
+    validation are the preferred way to keep binary lanes healthy while retaining
+    external JSON support.
+70. Hermes service-backed projector performance depends on avoiding per-field
+    object churn in trusted batch lanes. `BulkLoad` and `ApplyRecords` should keep
+    growing toward borrowed or builder-backed `RecordData` flows, while
+    `ApplyBatch` remains the durable mixed-mutation path.
+71. Route-planned HTTP dispatch is now an opt-in generated/scaffolded lane.
+    Compile path params and included headers once with `CompileDispatchRoute`,
+    but do not copy an already-decoded payload merely to pre-size it; the copy
+    can cost more than ordinary map growth.
+72. Event JSON compatibility should parse envelope control fields separately from
+    payload ownership. Single-pass top-level parsing plus lazy payload
+    materialization gives the best current balance: time below the old baseline,
+    old allocation count retained, and typed payload safety preserved.
+73. JSON encoders now have two lanes: deterministic `MarshalJSON` for canonical
+    output, drift, signing, and stable logs; unordered `MarshalJSONFast` for
+    non-canonical compatibility responses where key order is irrelevant.
+74. Hermes rebuild now supports an optional normalized snapshot interface. Keep
+    `StateStore` canonical, and let high-performance sources opt into
+    `NormalizedSnapshotStore` only when they can hand over already-normalized
+    `RecordData` without JSONB re-materialization.
+75. HTTP JSON dispatch should not retain raw request bytes unless the route
+    explicitly asks for `IncludeRawBody`. Protobuf request bytes are the payload
+    contract and remain retained; JSON routes should carry typed payload objects
+    and preserve raw body only for audit/replay/streaming compatibility.
+76. Redis Stream eventlog drains should avoid per-entry map adapters. Durable
+    relay bursts use an ordered field/value append path for the common
+    single-envelope field shape, while generic `XAddMany` remains available for
+    multi-field stream entries.
+77. Binary frame regressions must be split before optimization. Keep separate
+    append-only, view-read-only, and full append/view benchmarks so nanosecond
+    hot-lane movement can be attributed to write growth, field validation, or
+    benchmark noise before changing the codec.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 
@@ -158,3 +203,6 @@ This document tracks the deliberate performance and architecture carryovers fold
 6. Add a recurring benchmark/profile review note for runtime lanes, database hot queries, WebSocket saturation paths, and worker queues.
 7. Add a docs-tracking check in PR review templates for optimization changes that alter defaults, budgets, or benchmark expectations.
 8. Add a Go concurrency review helper that flags risky `WaitGroup`, channel-close, timer, select, and lock/message combinations, then promote only low-noise patterns into hard CP checks.
+9. Build a direct streaming JSON decoder for `extension.Object`/`extension.Value`, then route HTTP JSON dispatch, `events.FromJSON`, and JSON payload handling through it without `any` staging.
+10. Add benchmark guards for `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest`, `BenchmarkEnvelope_FromJSON`, `BenchmarkEnvelope_FromBinary`, and service-backed Hermes rebuild/apply allocation budgets so typed-contract work cannot silently move cost into compatibility lanes.
+11. Add a Hermes trusted-batch builder that can populate `RecordData` from validated projector rows with fewer per-field owned conversions, then compare it against the current `ApplyRecords` and `ApplyBatch` lanes.

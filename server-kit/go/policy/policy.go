@@ -28,6 +28,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 // Effect represents the effect of a policy (allow or deny).
@@ -48,20 +50,20 @@ const (
 
 // Principal represents an entity making a request.
 type Principal struct {
-	ID         string         `json:"id"`
-	Type       string         `json:"type"`
-	Roles      []string       `json:"roles,omitempty"`
-	Groups     []string       `json:"groups,omitempty"`
-	Attributes map[string]any `json:"attributes,omitempty"`
+	ID         string           `json:"id"`
+	Type       string           `json:"type"`
+	Roles      []string         `json:"roles,omitempty"`
+	Groups     []string         `json:"groups,omitempty"`
+	Attributes extension.Object `json:"attributes,omitempty"`
 }
 
 // Resource represents the target of an action.
 type Resource struct {
-	ID         string         `json:"id"`
-	Type       string         `json:"type"`
-	Owner      string         `json:"owner,omitempty"`
-	OrgID      string         `json:"org_id,omitempty"`
-	Attributes map[string]any `json:"attributes,omitempty"`
+	ID         string           `json:"id"`
+	Type       string           `json:"type"`
+	Owner      string           `json:"owner,omitempty"`
+	OrgID      string           `json:"org_id,omitempty"`
+	Attributes extension.Object `json:"attributes,omitempty"`
 }
 
 // Condition represents a policy condition.
@@ -135,10 +137,10 @@ type ResourceMatcher struct {
 
 // Request represents an authorization request.
 type Request struct {
-	Principal Principal      `json:"principal"`
-	Action    string         `json:"action"`
-	Resource  Resource       `json:"resource"`
-	Context   map[string]any `json:"context,omitempty"`
+	Principal Principal        `json:"principal"`
+	Action    string           `json:"action"`
+	Resource  Resource         `json:"resource"`
+	Context   extension.Object `json:"context,omitempty"`
 }
 
 // Result represents the result of policy evaluation.
@@ -433,6 +435,14 @@ func (e *Engine) evaluateCondition(cond Condition, req Request) bool {
 				return true
 			}
 		}
+		if arr, ok := value.([]any); ok {
+			needle := fmt.Sprintf("%v", cond.Value)
+			for _, item := range arr {
+				if fmt.Sprintf("%v", item) == needle {
+					return true
+				}
+			}
+		}
 		if str, ok := value.(string); ok {
 			return strings.Contains(str, fmt.Sprintf("%v", cond.Value))
 		}
@@ -482,42 +492,76 @@ func (e *Engine) resolveField(field string, req Request) any {
 	if len(parts) == 0 {
 		return nil
 	}
-
-	var current any
 	switch parts[0] {
 	case "principal":
-		current = map[string]any{
-			"id":         req.Principal.ID,
-			"type":       req.Principal.Type,
-			"roles":      req.Principal.Roles,
-			"groups":     req.Principal.Groups,
-			"attributes": req.Principal.Attributes,
-		}
+		return resolvePrincipalField(req.Principal, parts[1:])
 	case "resource":
-		current = map[string]any{
-			"id":         req.Resource.ID,
-			"type":       req.Resource.Type,
-			"owner":      req.Resource.Owner,
-			"org_id":     req.Resource.OrgID,
-			"attributes": req.Resource.Attributes,
-		}
+		return resolveResourceField(req.Resource, parts[1:])
 	case "action":
 		return req.Action
 	case "context":
-		current = req.Context
+		return resolveObjectField(req.Context, parts[1:])
 	default:
 		return nil
 	}
+}
 
-	for _, part := range parts[1:] {
-		if m, ok := current.(map[string]any); ok {
-			current = m[part]
-		} else {
-			return nil
-		}
+func resolvePrincipalField(principal Principal, parts []string) any {
+	if len(parts) == 0 {
+		return principal
 	}
+	switch parts[0] {
+	case "id":
+		return principal.ID
+	case "type":
+		return principal.Type
+	case "roles":
+		return principal.Roles
+	case "groups":
+		return principal.Groups
+	case "attributes":
+		return resolveObjectField(principal.Attributes, parts[1:])
+	default:
+		return nil
+	}
+}
 
-	return current
+func resolveResourceField(resource Resource, parts []string) any {
+	if len(parts) == 0 {
+		return resource
+	}
+	switch parts[0] {
+	case "id":
+		return resource.ID
+	case "type":
+		return resource.Type
+	case "owner":
+		return resource.Owner
+	case "org_id":
+		return resource.OrgID
+	case "attributes":
+		return resolveObjectField(resource.Attributes, parts[1:])
+	default:
+		return nil
+	}
+}
+
+func resolveObjectField(object extension.Object, parts []string) any {
+	if len(parts) == 0 {
+		return object
+	}
+	value, ok := object[parts[0]]
+	if !ok {
+		return nil
+	}
+	if len(parts) == 1 {
+		return value.Interface()
+	}
+	next, ok := value.ObjectValue()
+	if !ok {
+		return nil
+	}
+	return resolveObjectField(next, parts[1:])
 }
 
 // Middleware returns an HTTP middleware that enforces policies.

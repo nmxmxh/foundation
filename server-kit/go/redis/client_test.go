@@ -151,7 +151,7 @@ func TestMemoryClientPubSubAndPrimitives(t *testing.T) {
 	if got, err := client.Incr(context.Background(), "count"); err != nil || got != 1 {
 		t.Fatalf("expired Incr() = %d err=%v", got, err)
 	}
-	if id, err := client.XAdd(context.Background(), "stream", map[string]any{"x": 1}); err != nil || id == "" {
+	if id, err := client.XAdd(context.Background(), "stream", Values{Field("x", 1)}); err != nil || id == "" {
 		t.Fatalf("XAdd() = %q err=%v", id, err)
 	}
 	msgs, err := client.XReadGroup(context.Background(), "stream", "group", "consumer", 1)
@@ -264,9 +264,9 @@ func TestMemoryClientSetManyGetMany(t *testing.T) {
 	if !ok {
 		t.Fatal("memory client should implement BatchClient")
 	}
-	err := batch.SetMany(context.Background(), map[string]any{
-		"cache:a": []byte("alpha"),
-		"cache:b": "beta",
+	err := batch.SetMany(context.Background(), Values{
+		Field("cache:a", []byte("alpha")),
+		Field("cache:b", "beta"),
 	}, time.Second)
 	if err != nil {
 		t.Fatalf("SetMany() error = %v", err)
@@ -283,11 +283,11 @@ func TestMemoryClientSetManyGetMany(t *testing.T) {
 	if err != nil || string(got["cache:a"]) != "alpha" {
 		t.Fatalf("GetMany() copy = %#v err=%v", got, err)
 	}
-	got, err = batch.SetGetMany(context.Background(), map[string]any{"cache:c": "gamma"}, time.Second)
+	got, err = batch.SetGetMany(context.Background(), Values{Field("cache:c", "gamma")}, time.Second)
 	if err != nil || string(got["cache:c"]) != "gamma" {
 		t.Fatalf("SetGetMany() = %#v err=%v", got, err)
 	}
-	if err := batch.SetMany(context.Background(), map[string]any{"cache:ttl": "gone"}, time.Nanosecond); err != nil {
+	if err := batch.SetMany(context.Background(), Values{Field("cache:ttl", "gone")}, time.Nanosecond); err != nil {
 		t.Fatalf("SetMany(ttl) error = %v", err)
 	}
 	time.Sleep(time.Millisecond)
@@ -324,11 +324,11 @@ func TestMemoryClientLocksRequireMatchingTokenAndExpire(t *testing.T) {
 
 func TestMemoryClientStreamsReadGroupsAreMonotonicAndAckable(t *testing.T) {
 	client := NewMemoryClient("app")
-	firstID, err := client.XAdd(context.Background(), "events", map[string]any{"n": 1})
+	firstID, err := client.XAdd(context.Background(), "events", Values{Field("n", 1)})
 	if err != nil {
 		t.Fatalf("XAdd(first) error = %v", err)
 	}
-	secondID, err := client.XAdd(context.Background(), "events", map[string]any{"n": 2})
+	secondID, err := client.XAdd(context.Background(), "events", Values{Field("n", 2)})
 	if err != nil {
 		t.Fatalf("XAdd(second) error = %v", err)
 	}
@@ -367,9 +367,9 @@ func TestMemoryClientXAddManyOwnsStreamPayloads(t *testing.T) {
 		t.Fatal("memory client should implement StreamBatchClient")
 	}
 	payload := []byte("one")
-	ids, errs := batch.XAddMany(context.Background(), "events", []map[string]any{
-		{"payload": payload},
-		{"payload": []byte("two")},
+	ids, errs := batch.XAddMany(context.Background(), "events", []Values{
+		{Field("payload", payload)},
+		{Field("payload", []byte("two"))},
 	})
 	if len(ids) != 2 || len(errs) != 2 || ids[0] == "" || ids[1] == "" || ids[0] == ids[1] {
 		t.Fatalf("XAddMany ids=%v errs=%v", ids, errs)
@@ -384,7 +384,47 @@ func TestMemoryClientXAddManyOwnsStreamPayloads(t *testing.T) {
 	if err != nil || len(messages) != 2 {
 		t.Fatalf("XReadGroup after XAddMany len=%d err=%v", len(messages), err)
 	}
-	if got := messages[0].Values["payload"].([]byte); string(got) != "one" {
+	raw, _ := messages[0].Values.Get("payload")
+	if got := raw.([]byte); string(got) != "one" {
+		t.Fatalf("stream payload was not owned: %q", got)
+	}
+}
+
+func TestValuesInterfaceSlicePreservesFieldValueOrder(t *testing.T) {
+	args := Values{Field("first", "one"), Field("", "skip"), Field("second", []byte("two"))}.InterfaceSlice()
+	if len(args) != 4 {
+		t.Fatalf("InterfaceSlice len = %d, want 4", len(args))
+	}
+	if args[0] != "first" || args[1] != "one" || args[2] != "second" || string(args[3].([]byte)) != "two" {
+		t.Fatalf("InterfaceSlice args = %#v", args)
+	}
+}
+
+func TestMemoryClientXAddManyFieldOwnsStreamPayloads(t *testing.T) {
+	client := NewMemoryClient("app")
+	batch, ok := client.(interface {
+		XAddManyField(context.Context, string, string, [][]byte) ([]string, []error)
+	})
+	if !ok {
+		t.Fatal("memory client should implement XAddManyField")
+	}
+	payload := []byte("one")
+	ids, errs := batch.XAddManyField(context.Background(), "events", "payload", [][]byte{payload, []byte("two")})
+	if len(ids) != 2 || len(errs) != 2 || ids[0] == "" || ids[1] == "" || ids[0] == ids[1] {
+		t.Fatalf("XAddManyField ids=%v errs=%v", ids, errs)
+	}
+	for _, err := range errs {
+		if err != nil {
+			t.Fatalf("XAddManyField unexpected error: %v", err)
+		}
+	}
+	payload[0] = 'x'
+	messages, err := client.XReadGroup(context.Background(), "events", "workers", "worker-1", 10)
+	if err != nil || len(messages) != 2 {
+		t.Fatalf("XReadGroup after XAddManyField len=%d err=%v", len(messages), err)
+	}
+	raw, _ := messages[0].Values.Get("payload")
+	if got := raw.([]byte); string(got) != "one" {
 		t.Fatalf("stream payload was not owned: %q", got)
 	}
 }
@@ -458,11 +498,11 @@ func BenchmarkMemoryClientSetManyGetMany64(b *testing.B) {
 	client := NewMemoryClient("bench")
 	batch := client.(BatchClient)
 	ctx := context.Background()
-	values := make(map[string]any, 64)
+	values := make(Values, 0, 64)
 	keys := make([]string, 0, 64)
 	for i := range 64 {
 		key := fmt.Sprintf("cache:%d", i)
-		values[key] = []byte("value")
+		values = append(values, Field(key, []byte("value")))
 		keys = append(keys, key)
 	}
 
@@ -495,12 +535,12 @@ func BenchmarkMemoryClientSetGetMany64(b *testing.B) {
 	}
 }
 
-func memoryBatchValues(size int) (map[string]any, []string) {
-	values := make(map[string]any, size)
+func memoryBatchValues(size int) (Values, []string) {
+	values := make(Values, 0, size)
 	keys := make([]string, 0, size)
 	for i := range size {
 		key := fmt.Sprintf("cache:%d", i)
-		values[key] = []byte("value")
+		values = append(values, Field(key, []byte("value")))
 		keys = append(keys, key)
 	}
 	return values, keys
@@ -567,7 +607,7 @@ func BenchmarkMemoryClientStreamXAddReadAck(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		id, err := client.XAdd(ctx, "events", map[string]any{"n": i})
+		id, err := client.XAdd(ctx, "events", Values{Field("n", i)})
 		if err != nil {
 			b.Fatal(err)
 		}

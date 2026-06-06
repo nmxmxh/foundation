@@ -7,6 +7,7 @@ import (
 	"time"
 
 	eventcontract "github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	metautil "github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/riverqueue/river"
@@ -38,7 +39,7 @@ func TestHandlerSuccessEmitsEvent(t *testing.T) {
 	ctx := metautil.IntoContext(context.Background(), metautil.FromMap(map[string]any{
 		"correlation_id": "corr_123",
 	}))
-	handler.Success(ctx, "operations:create_work_order:v1:requested", "done", map[string]any{"id": "wo_1"}, nil, "wo_1", nil)
+	handler.Success(ctx, "operations:create_work_order:v1:requested", "done", extension.Object{"id": extension.String("wo_1")}, nil, "wo_1", nil)
 
 	recent := bus.Recent(10)
 	if len(recent) == 0 {
@@ -97,7 +98,7 @@ func TestHandlerErrorEmitsFailure(t *testing.T) {
 		"sensor:verify_proof:v1:requested",
 		"verification failed",
 		errors.New("signature mismatch"),
-		map[string]any{"correlation_id": "corr_fail"},
+		extension.Object{"correlation_id": extension.String("corr_fail")},
 		"proof_1",
 	)
 
@@ -138,7 +139,7 @@ func TestEventEmittersNilInvalidAndRedisPaths(t *testing.T) {
 	if err := inMemoryEmitter.EmitEvent(context.Background(), "bad event", nil, nil); err == nil {
 		t.Fatalf("expected invalid in-memory event error")
 	}
-	if err := inMemoryEmitter.EmitEventTx(context.Background(), nil, "orders:create:v1:success", map[string]any{"id": "o1"}, map[string]any{"correlation_id": "corr_memory"}); err != nil {
+	if err := inMemoryEmitter.EmitEventTx(context.Background(), nil, "orders:create:v1:success", extension.Object{"id": extension.String("o1")}, extension.Object{"correlation_id": extension.String("corr_memory")}); err != nil {
 		t.Fatalf("in-memory EmitEventTx() error = %v", err)
 	}
 	if recent := inMemoryBus.Recent(1); len(recent) != 1 || recent[0].CorrelationID != "corr_memory" {
@@ -157,7 +158,11 @@ func TestEventEmittersNilInvalidAndRedisPaths(t *testing.T) {
 		t.Fatalf("EmitEventTx() error = %v", err)
 	}
 	recent := bus.Recent(1)
-	if len(recent) != 1 || recent[0].Payload["result"] != "ok" || recent[0].CorrelationID != "corr_redis" {
+	if len(recent) != 1 {
+		t.Fatalf("unexpected redis emitter event: %+v", recent)
+	}
+	result, _ := recent[0].Payload.GetString("result")
+	if result != "ok" || recent[0].CorrelationID != "corr_redis" {
 		t.Fatalf("unexpected redis emitter event: %+v", recent)
 	}
 	if err := (*RedisEventEmitter)(nil).EmitEvent(context.Background(), "orders:create:v1:success", nil, nil); err != nil {
@@ -192,17 +197,17 @@ func TestPublishEventArgsAndHelpers(t *testing.T) {
 	if got := (PublishEventArgs{}).Kind(); got != "publish_event" {
 		t.Fatalf("Kind() = %q", got)
 	}
-	if got := asMap(nil); len(got) != 0 {
-		t.Fatalf("asMap(nil) = %+v", got)
+	if got := objectFromPayload(nil); len(got) != 0 {
+		t.Fatalf("objectFromPayload(nil) = %+v", got)
 	}
-	payload := map[string]any{"ok": true}
-	if got := asMap(payload); got["ok"] != true {
-		t.Fatalf("asMap(map) = %+v", got)
+	payload := extension.Object{"ok": extension.Bool(true)}
+	if got := objectFromPayload(payload); got["ok"].Interface() != true {
+		t.Fatalf("objectFromPayload(object) = %+v", got)
 	}
-	if got := asMap("value"); got["result"] != "value" {
-		t.Fatalf("asMap(value) = %+v", got)
+	if got := objectFromPayload("value"); got["result"].Interface() != "value" {
+		t.Fatalf("objectFromPayload(value) = %+v", got)
 	}
-	if got := pickCorrelation(map[string]any{"correlation_id": "corr"}); got != "corr" {
+	if got := pickCorrelation(extension.Object{"correlation_id": extension.String("corr")}); got != "corr" {
 		t.Fatalf("pickCorrelation = %q", got)
 	}
 	if got := pickCorrelation(nil); got != "" {

@@ -10,10 +10,7 @@ pub const fn header_byte_offset(index: u32) -> u32 {
 
 pub fn validate_buffer_size(size: usize) -> Result<(), String> {
     if size < BUFFER_TOTAL_BYTES as usize {
-        return Err(format!(
-            "runtime buffer too small: {} < {}",
-            size, BUFFER_TOTAL_BYTES
-        ));
+        return Err(format!("runtime buffer too small: {} < {}", size, BUFFER_TOTAL_BYTES));
     }
     Ok(())
 }
@@ -21,10 +18,7 @@ pub fn validate_buffer_size(size: usize) -> Result<(), String> {
 pub fn validate_region(offset: u32, length: u32, capacity: usize) -> Result<(), String> {
     let start = offset as usize;
     let end = start.checked_add(length as usize).ok_or_else(|| {
-        format!(
-            "runtime region offset overflow: {} + {} exceeds addressable space",
-            offset, length
-        )
+        format!("runtime region offset overflow: {} + {} exceeds addressable space", offset, length)
     })?;
     if end > capacity {
         return Err(format!(
@@ -37,30 +31,21 @@ pub fn validate_region(offset: u32, length: u32, capacity: usize) -> Result<(), 
 
 pub fn validate_input_length(length: u32) -> Result<(), String> {
     if length > INPUT_MAX_BYTES {
-        return Err(format!(
-            "input payload too large: {} > {}",
-            length, INPUT_MAX_BYTES
-        ));
+        return Err(format!("input payload too large: {} > {}", length, INPUT_MAX_BYTES));
     }
     Ok(())
 }
 
 pub fn validate_output_length(length: u32) -> Result<(), String> {
     if length > OUTPUT_MAX_BYTES {
-        return Err(format!(
-            "output payload too large: {} > {}",
-            length, OUTPUT_MAX_BYTES
-        ));
+        return Err(format!("output payload too large: {} > {}", length, OUTPUT_MAX_BYTES));
     }
     Ok(())
 }
 
 pub fn validate_diagnostic_length(length: u32) -> Result<(), String> {
     if length > DIAGNOSTIC_MAX_BYTES {
-        return Err(format!(
-            "diagnostic payload too large: {} > {}",
-            length, DIAGNOSTIC_MAX_BYTES
-        ));
+        return Err(format!("diagnostic payload too large: {} > {}", length, DIAGNOSTIC_MAX_BYTES));
     }
     Ok(())
 }
@@ -78,10 +63,7 @@ pub const fn columnar_descriptor_payload_bytes(column_count: u32) -> u32 {
 
 pub fn validate_columnar_batch_shape(row_count: u32, column_count: u32) -> Result<(), String> {
     if column_count == 0 || column_count > COLUMNAR_BATCH_MAX_COLUMNS {
-        return Err(format!(
-            "invalid columnar batch column count: {}",
-            column_count
-        ));
+        return Err(format!("invalid columnar batch column count: {}", column_count));
     }
     if row_count == 0 {
         return Err("columnar batch row count is required".to_string());

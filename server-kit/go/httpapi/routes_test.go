@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 func TestMakeEventRouteWithOptions(t *testing.T) {
@@ -67,7 +69,7 @@ func TestRouteOptionsCoverRawStreamingHeadersAndStaticPayload(t *testing.T) {
 		WithRequestHeaders("X-Trace-ID", "X-Trace-ID", " "),
 		WithRequiredCapability(" assets.override "),
 		WithPermission("nonsense"),
-		WithStaticPayload(map[string]any{" ": "ignored", "mode": "test"}),
+		WithStaticObject(extension.Object{" ": extension.String("ignored"), "mode": extension.String("test")}),
 	)
 	if route.Method != "PATCH" || route.Path != "/v1/assets" || route.Description != "update" {
 		t.Fatalf("route normalization failed: %+v", route)
@@ -81,7 +83,8 @@ func TestRouteOptionsCoverRawStreamingHeadersAndStaticPayload(t *testing.T) {
 	if route.RequiredCapability != "assets.override" || route.Permission != "write" {
 		t.Fatalf("unexpected RBAC: %q %q", route.RequiredCapability, route.Permission)
 	}
-	if route.StaticPayload["mode"] != "test" {
+	mode, _ := route.StaticPayload.GetString("mode")
+	if mode != "test" {
 		t.Fatalf("static payload missing: %+v", route.StaticPayload)
 	}
 }
@@ -95,7 +98,7 @@ func TestEmptyRouteOptionsAreNoops(t *testing.T) {
 		"PingRequest",
 		"PingResponse",
 		WithAnyOfQueryParams(" ", ""),
-		WithStaticPayload(nil),
+		WithStaticObject(nil),
 		nil,
 	)
 	if len(route.AnyOfQueryParams) != 0 {
@@ -115,13 +118,14 @@ func TestStaticRouteBuildsScaffoldHandler(t *testing.T) {
 		"ListAssetsRequest",
 		"ListAssetsResponse",
 		"media",
-		map[string]any{"kind": "scaffold"},
+		extension.Object{"kind": extension.String("scaffold")},
 	)
 
 	if route.Handler == nil {
 		t.Fatalf("expected scaffold handler")
 	}
-	if route.StaticPayload["kind"] != "scaffold" {
+	kind, _ := route.StaticPayload.GetString("kind")
+	if kind != "scaffold" {
 		t.Fatalf("expected static payload on route metadata")
 	}
 	rec := httptest.NewRecorder()
@@ -133,7 +137,8 @@ func TestStaticRouteBuildsScaffoldHandler(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
 		t.Fatalf("decode static response: %v", err)
 	}
-	if body.EventType != "media:list_assets:v1:requested" || body.Payload["kind"] != "scaffold" {
+	responseKind, _ := body.Payload.GetString("kind")
+	if body.EventType != "media:list_assets:v1:requested" || responseKind != "scaffold" {
 		t.Fatalf("unexpected static response: %+v", body)
 	}
 }

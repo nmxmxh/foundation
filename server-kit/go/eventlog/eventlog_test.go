@@ -2,7 +2,6 @@ package eventlog
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -11,7 +10,21 @@ import (
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+	redispkg "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 )
+
+func eventlogObject(values map[string]any) extension.Object {
+	value, err := extension.FromJSON(values)
+	if err != nil {
+		panic(err)
+	}
+	object, ok := value.ObjectValue()
+	if !ok {
+		panic("eventlog test value is not object")
+	}
+	return object
+}
 
 func TestAppendPersistsBinaryEnvelope(t *testing.T) {
 	db := &fakeDB{
@@ -20,12 +33,12 @@ func TestAppendPersistsBinaryEnvelope(t *testing.T) {
 	envelope := events.Envelope{
 		ID:              "evt_existing",
 		EventType:       "media:upload:success",
-		Payload:         map[string]any{"media_id": "m1"},
+		Payload:         eventlogObject(map[string]any{"media_id": "m1"}),
 		PayloadEncoding: events.PayloadEncodingJSON,
-		Metadata: map[string]any{
+		Metadata: eventlogObject(map[string]any{
 			"correlation_id":  "corr_append",
 			"organization_id": "org_1",
-		},
+		}),
 		CorrelationID: "corr_append",
 		SchemaVersion: events.EnvelopeSchemaVersion,
 		Timestamp:     time.Unix(9, 0).UTC(),
@@ -56,21 +69,7 @@ func TestFetchPendingParsesStoredEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := &fakeDB{
-		maps: []map[string]any{{
-			"id":                 int64(2),
-			"event_id":           "evt_fetch",
-			"event_type":         "orders:create:success",
-			"organization_id":    "org_fetch",
-			"correlation_id":     "corr_fetch",
-			"schema_version":     events.EnvelopeSchemaVersion,
-			"payload_encoding":   events.PayloadEncodingProtobuf,
-			"envelope_base64":    base64.StdEncoding.EncodeToString([]byte("envelope")),
-			"metadata_json":      string(rawMetadata),
-			"occurred_at":        time.Unix(11, 0).UTC(),
-			"created_at":         time.Unix(12, 0).UTC(),
-			"publish_attempts":   int64(3),
-			"last_publish_error": "redis unavailable",
-		}},
+		rows: []fakeRow{pendingRowWithMetadata(2, "evt_fetch", "corr_fetch", []byte("envelope"), string(rawMetadata), 3, "redis unavailable")},
 	}
 	entries, err := FetchPending(context.Background(), db, 0, 0)
 	if err != nil {
@@ -83,21 +82,7 @@ func TestFetchPendingParsesStoredEnvelope(t *testing.T) {
 
 func TestPublishPendingLeavesFailedEventUnpublished(t *testing.T) {
 	db := &fakeDB{
-		maps: []map[string]any{{
-			"id":                 int64(5),
-			"event_id":           "evt_fail",
-			"event_type":         "orders:create:success",
-			"organization_id":    "org_1",
-			"correlation_id":     "corr_1",
-			"schema_version":     events.EnvelopeSchemaVersion,
-			"payload_encoding":   events.PayloadEncodingProtobuf,
-			"envelope_base64":    base64.StdEncoding.EncodeToString([]byte("envelope")),
-			"metadata_json":      `{}`,
-			"occurred_at":        time.Unix(11, 0).UTC(),
-			"created_at":         time.Unix(12, 0).UTC(),
-			"publish_attempts":   int64(0),
-			"last_publish_error": "",
-		}},
+		rows: []fakeRow{pendingRow(5, "evt_fail", "corr_1", []byte("envelope"))},
 	}
 	result, err := PublishPending(context.Background(), db, failingAppender{}, PublishOptions{Stream: "events"})
 	if err == nil {
@@ -113,9 +98,9 @@ func TestPublishPendingLeavesFailedEventUnpublished(t *testing.T) {
 
 func TestPublishPendingUsesBatchAppenderAndBatchMark(t *testing.T) {
 	db := &fakeDB{
-		maps: []map[string]any{
-			pendingMap(10, "evt_batch_1", "corr_1", []byte("one")),
-			pendingMap(11, "evt_batch_2", "corr_2", []byte("two")),
+		rows: []fakeRow{
+			pendingRow(10, "evt_batch_1", "corr_1", []byte("one")),
+			pendingRow(11, "evt_batch_2", "corr_2", []byte("two")),
 		},
 	}
 	appender := &recordingBatchAppender{ids: []string{"1-0", "2-0"}}
@@ -166,25 +151,11 @@ func TestPublishPendingClaimsRowsBeforeBatchPublish(t *testing.T) {
 	}
 }
 
-func pendingMap(id int64, eventID string, correlationID string, envelope []byte) map[string]any {
-	return map[string]any{
-		"id":                 id,
-		"event_id":           eventID,
-		"event_type":         "orders:create:success",
-		"organization_id":    "org_1",
-		"correlation_id":     correlationID,
-		"schema_version":     events.EnvelopeSchemaVersion,
-		"payload_encoding":   events.PayloadEncodingProtobuf,
-		"envelope_base64":    base64.StdEncoding.EncodeToString(envelope),
-		"metadata_json":      `{}`,
-		"occurred_at":        time.Unix(11, 0).UTC(),
-		"created_at":         time.Unix(12, 0).UTC(),
-		"publish_attempts":   int64(0),
-		"last_publish_error": "",
-	}
+func pendingRow(id int64, eventID string, correlationID string, envelope []byte) fakeRow {
+	return pendingRowWithMetadata(id, eventID, correlationID, envelope, `{}`, 0, "")
 }
 
-func pendingRow(id int64, eventID string, correlationID string, envelope []byte) fakeRow {
+func pendingRowWithMetadata(id int64, eventID string, correlationID string, envelope []byte, metadataJSON string, attempts int64, lastError string) fakeRow {
 	return fakeRow{values: []any{
 		id,
 		eventID,
@@ -194,17 +165,17 @@ func pendingRow(id int64, eventID string, correlationID string, envelope []byte)
 		events.EnvelopeSchemaVersion,
 		events.PayloadEncodingProtobuf,
 		envelope,
-		`{}`,
+		metadataJSON,
 		time.Unix(11, 0).UTC(),
 		time.Unix(12, 0).UTC(),
-		int64(0),
-		"",
+		attempts,
+		lastError,
 	}}
 }
 
 type fakeDB struct {
 	row       fakeRow
-	maps      []map[string]any
+	rows      []fakeRow
 	lastQuery string
 	execs     []string
 }
@@ -219,9 +190,9 @@ func (f *fakeDB) QueryRow(_ context.Context, query string, _ ...any) database.Ro
 	return f.row
 }
 
-func (f *fakeDB) QueryMaps(_ context.Context, query string, _ ...any) ([]map[string]any, error) {
+func (f *fakeDB) Query(_ context.Context, query string, _ ...any) (database.Rows, error) {
 	f.lastQuery = query
-	return f.maps, nil
+	return &fakeRows{rows: f.rows}, nil
 }
 
 type fakeQueryDB struct {
@@ -287,7 +258,7 @@ func (r *fakeRows) Err() error {
 
 type failingAppender struct{}
 
-func (failingAppender) XAdd(context.Context, string, map[string]any) (string, error) {
+func (failingAppender) XAdd(context.Context, string, redispkg.Values) (string, error) {
 	return "", errors.New("redis unavailable")
 }
 
@@ -295,16 +266,16 @@ type recordingBatchAppender struct {
 	ids         []string
 	errs        []error
 	batchCalls  int
-	batchValues []map[string]any
+	batchValues []redispkg.Values
 }
 
-func (a *recordingBatchAppender) XAdd(context.Context, string, map[string]any) (string, error) {
+func (a *recordingBatchAppender) XAdd(context.Context, string, redispkg.Values) (string, error) {
 	return "", errors.New("single append should not be used")
 }
 
-func (a *recordingBatchAppender) XAddMany(_ context.Context, _ string, entries []map[string]any) ([]string, []error) {
+func (a *recordingBatchAppender) XAddMany(_ context.Context, _ string, entries []redispkg.Values) ([]string, []error) {
 	a.batchCalls++
-	a.batchValues = append([]map[string]any(nil), entries...)
+	a.batchValues = append([]redispkg.Values(nil), entries...)
 	ids := append([]string(nil), a.ids...)
 	errs := append([]error(nil), a.errs...)
 	for len(ids) < len(entries) {

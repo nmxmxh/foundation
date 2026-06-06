@@ -26,6 +26,8 @@ import (
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 // Status represents the health status of a component.
@@ -40,11 +42,11 @@ const (
 
 // CheckResult is the result of a health check.
 type CheckResult struct {
-	Status    Status         `json:"status"`
-	Message   string         `json:"message,omitempty"`
-	Duration  time.Duration  `json:"duration_ms"`
-	Timestamp time.Time      `json:"timestamp"`
-	Details   map[string]any `json:"details,omitempty"`
+	Status    Status           `json:"status"`
+	Message   string           `json:"message,omitempty"`
+	Duration  time.Duration    `json:"duration_ms"`
+	Timestamp time.Time        `json:"timestamp"`
+	Details   extension.Object `json:"details,omitempty"`
 }
 
 // CheckFunc is a function that performs a health check.
@@ -312,10 +314,10 @@ func DatabaseCheck(db *sql.DB) CheckFunc {
 
 			// Get stats
 			stats := db.Stats()
-			result.Details = map[string]any{
-				"open_connections": stats.OpenConnections,
-				"in_use":           stats.InUse,
-				"idle":             stats.Idle,
+			result.Details = extension.Object{
+				"open_connections": extension.Int(int64(stats.OpenConnections)),
+				"in_use":           extension.Int(int64(stats.InUse)),
+				"idle":             extension.Int(int64(stats.Idle)),
 			}
 		}
 
@@ -379,8 +381,8 @@ func HTTPCheck(url string) CheckFunc {
 				result.Status = StatusUnhealthy
 				result.Message = fmt.Sprintf("HTTP %d", resp.StatusCode)
 			}
-			result.Details = map[string]any{
-				"status_code": resp.StatusCode,
+			result.Details = extension.Object{
+				"status_code": extension.Int(int64(resp.StatusCode)),
 			}
 		}
 
@@ -424,11 +426,11 @@ func MemoryCheck(maxUsedPct float64) CheckFunc {
 		var m runtime.MemStats
 		runtime.ReadMemStats(&m)
 
-		result.Details = map[string]any{
-			"alloc_mb":       m.Alloc / 1024 / 1024,
-			"total_alloc_mb": m.TotalAlloc / 1024 / 1024,
-			"sys_mb":         m.Sys / 1024 / 1024,
-			"num_gc":         m.NumGC,
+		result.Details = extension.Object{
+			"alloc_mb":       extension.Uint(m.Alloc / 1024 / 1024),
+			"total_alloc_mb": extension.Uint(m.TotalAlloc / 1024 / 1024),
+			"sys_mb":         extension.Uint(m.Sys / 1024 / 1024),
+			"num_gc":         extension.Uint(uint64(m.NumGC)),
 		}
 
 		result.Status = StatusHealthy

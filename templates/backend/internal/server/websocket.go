@@ -17,6 +17,7 @@ import (
 	kitcompress "github.com/nmxmxh/ovasabi_foundation/server-kit/go/compress"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/domainerr"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
@@ -381,9 +382,9 @@ func (s *Server) sendWSAck(conn *wsConnection) {
 	}
 	env := events.Envelope{
 		EventType: "identity:connection_open:v1:ack",
-		Payload: map[string]any{
-			"connection_id": conn.id,
-			"state":         "guest",
+		Payload: extension.Object{
+			"connection_id": extension.String(conn.id),
+			"state":         extension.String("guest"),
 		},
 		Metadata:      metadataForWSConnection(conn),
 		CorrelationID: httpapi.NewCorrelationID(),
@@ -399,7 +400,7 @@ func (s *Server) dispatchWSRequest(ctx context.Context, conn *wsConnection, env 
 	if conn == nil {
 		return errors.New("connection is required")
 	}
-	md := metadata.FromMap(env.Metadata)
+	md := metadata.FromObject(env.Metadata)
 	if md.GlobalContext == nil {
 		md.GlobalContext = &metadata.GlobalContext{}
 	}
@@ -422,13 +423,13 @@ func (s *Server) dispatchWSRequest(ctx context.Context, conn *wsConnection, env 
 		PayloadBytes:     append([]byte(nil), env.PayloadBytes...),
 		PayloadEncoding:  env.PayloadEncoding,
 		ResponseEncoding: env.PayloadEncoding,
-		Metadata:         md.ToMap(),
+		Metadata:         md.ToObject(),
 		CorrelationID:    env.CorrelationID,
 		SchemaVersion:    env.SchemaVersion,
 		Timestamp:        env.Timestamp.UTC().Format(time.RFC3339),
 	}
 	if req.Payload == nil {
-		req.Payload = map[string]any{}
+		req.Payload = extension.Object{}
 	}
 
 	wsCtx := ctx
@@ -480,10 +481,7 @@ func (s *Server) dispatchWSRequest(ctx context.Context, conn *wsConnection, env 
 }
 
 func (s *Server) handleWSSubscribe(conn *wsConnection, env events.Envelope) {
-	pattern, ok := env.Payload["pattern"].(string)
-	if !ok {
-		pattern = ""
-	}
+	pattern, _ := env.Payload.GetString("pattern")
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
 		s.sendWSDomainError(conn, domainerr.Validation("pattern_required", "subscription pattern is required"), env.CorrelationID)
@@ -504,7 +502,7 @@ func (s *Server) handleWSSubscribe(conn *wsConnection, env events.Envelope) {
 
 	if err := s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_subscribe:v1:success",
-		Payload:       map[string]any{"pattern": pattern},
+		Payload:       extension.Object{"pattern": extension.String(pattern)},
 		Metadata:      metadataForWSEnvelope(conn, env),
 		CorrelationID: env.CorrelationID,
 		SchemaVersion: events.EnvelopeSchemaVersion,
@@ -515,10 +513,7 @@ func (s *Server) handleWSSubscribe(conn *wsConnection, env events.Envelope) {
 }
 
 func (s *Server) handleWSUnsubscribe(conn *wsConnection, env events.Envelope) {
-	pattern, ok := env.Payload["pattern"].(string)
-	if !ok {
-		pattern = ""
-	}
+	pattern, _ := env.Payload.GetString("pattern")
 	pattern = strings.TrimSpace(pattern)
 	if pattern == "" {
 		s.sendWSDomainError(conn, domainerr.Validation("pattern_required", "unsubscription pattern is required"), env.CorrelationID)
@@ -538,7 +533,7 @@ func (s *Server) handleWSUnsubscribe(conn *wsConnection, env events.Envelope) {
 
 	if err := s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_unsubscribe:v1:success",
-		Payload:       map[string]any{"pattern": pattern},
+		Payload:       extension.Object{"pattern": extension.String(pattern)},
 		Metadata:      metadataForWSEnvelope(conn, env),
 		CorrelationID: env.CorrelationID,
 		SchemaVersion: events.EnvelopeSchemaVersion,
@@ -548,7 +543,7 @@ func (s *Server) handleWSUnsubscribe(conn *wsConnection, env events.Envelope) {
 	}
 }
 
-func (s *Server) maybeUpgradeConnectionAuth(ctx context.Context, conn *wsConnection, eventType string, payload map[string]any) {
+func (s *Server) maybeUpgradeConnectionAuth(ctx context.Context, conn *wsConnection, eventType string, payload extension.Object) {
 	switch eventType {
 	case "identity:authenticate_connection:v1:requested", "identity:refresh_connection:v1:requested", "identity:bind_connection_token:v1:requested":
 	default:
@@ -557,25 +552,16 @@ func (s *Server) maybeUpgradeConnectionAuth(ctx context.Context, conn *wsConnect
 	if payload == nil {
 		return
 	}
-	userID, ok := payload["user_id"].(string)
-	if !ok {
-		userID = ""
-	}
-	orgID, ok := payload["organization_id"].(string)
-	if !ok {
-		orgID = ""
-	}
-	roleID, ok := payload["role_id"].(string)
-	if !ok {
-		roleID = ""
-	}
-	rawCaps, ok := payload["capabilities"].([]any)
-	if !ok {
-		rawCaps = nil
+	userID, _ := payload.GetString("user_id")
+	orgID, _ := payload.GetString("organization_id")
+	roleID, _ := payload.GetString("role_id")
+	rawCaps := []extension.Value{}
+	if value, ok := payload["capabilities"]; ok {
+		rawCaps, _ = value.ListValue()
 	}
 	caps := make([]string, 0, len(rawCaps))
 	for _, capability := range rawCaps {
-		if text, ok := capability.(string); ok && strings.TrimSpace(text) != "" {
+		if text, ok := capability.StringValue(); ok && strings.TrimSpace(text) != "" {
 			caps = append(caps, strings.TrimSpace(text))
 		}
 	}
@@ -672,7 +658,7 @@ func (s *Server) sendWSDomainError(conn *wsConnection, err error, correlationID 
 	}
 	if err := s.enqueueWSEnvelope(conn, events.Envelope{
 		EventType:     "system:websocket_error:v1:failed",
-		Payload:       payload,
+		Payload:       objectFromJSONValue(payload),
 		Metadata:      metadataForWSConnection(conn),
 		CorrelationID: correlationID,
 		SchemaVersion: events.EnvelopeSchemaVersion,
@@ -680,6 +666,18 @@ func (s *Server) sendWSDomainError(conn *wsConnection, err error, correlationID 
 	}); err != nil {
 		s.log.Warn("failed to enqueue websocket error", "connection_id", conn.id, "error", err)
 	}
+}
+
+func objectFromJSONValue(value any) extension.Object {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return extension.Object{}
+	}
+	payload, err := extension.ObjectFromJSON(raw)
+	if err != nil {
+		return extension.Object{}
+	}
+	return payload
 }
 
 func (s *Server) ensureEventSubscription() {
@@ -707,7 +705,7 @@ func (s *Server) ensureEventSubscription() {
 }
 
 func (s *Server) forwardEventToConnections(_ context.Context, envelope events.Envelope) {
-	md := metadata.FromMap(envelope.Metadata)
+	md := metadata.FromObject(envelope.Metadata)
 	targetUser := ""
 	targetDevice := ""
 	if md.GlobalContext != nil {
@@ -747,16 +745,16 @@ func (s *Server) forwardEventToConnections(_ context.Context, envelope events.En
 	})
 }
 
-func metadataForWSEnvelope(conn *wsConnection, env events.Envelope) map[string]any {
-	md := metadata.FromMap(env.Metadata)
+func metadataForWSEnvelope(conn *wsConnection, env events.Envelope) extension.Object {
+	md := metadata.FromObject(env.Metadata)
 	enrichWSMetadata(conn, &md)
-	return md.ToMap()
+	return md.ToObject()
 }
 
-func metadataForWSConnection(conn *wsConnection) map[string]any {
+func metadataForWSConnection(conn *wsConnection) extension.Object {
 	md := metadata.New()
 	enrichWSMetadata(conn, &md)
-	return md.ToMap()
+	return md.ToObject()
 }
 
 func enrichWSMetadata(conn *wsConnection, md *metadata.EnvelopeMetadata) {
@@ -862,8 +860,8 @@ func (s *Server) decodeWSEnvelope(messageType int, payload []byte) (events.Envel
 }
 
 func buildWSDispatchResponseEnvelope(request events.Envelope, md metadata.EnvelopeMetadata, result registry.DispatchResult) events.Envelope {
-	meta := md.ToMap()
-	meta["status"] = http.StatusOK
+	meta := md.ToObject()
+	meta["status"] = extension.Int(int64(http.StatusOK))
 	envelope := events.Envelope{
 		EventType:       terminalEventType(request.EventType, "success"),
 		Payload:         result.Payload,
@@ -879,7 +877,6 @@ func buildWSDispatchResponseEnvelope(request events.Envelope, md metadata.Envelo
 }
 
 func buildWSDispatchErrorEnvelope(request events.Envelope, md metadata.EnvelopeMetadata, err error) (events.Envelope, error) {
-	payload := map[string]any{}
 	body := domainerr.Body(err, domainerr.ResponseOptions{
 		CorrelationID: request.CorrelationID,
 		EventType:     request.EventType,
@@ -888,11 +885,12 @@ func buildWSDispatchErrorEnvelope(request events.Envelope, md metadata.EnvelopeM
 	if marshalErr != nil {
 		return events.Envelope{}, marshalErr
 	}
-	if decodeErr := json.Unmarshal(raw, &payload); decodeErr != nil {
+	payload, decodeErr := extension.ObjectFromJSON(raw)
+	if decodeErr != nil {
 		return events.Envelope{}, decodeErr
 	}
-	meta := md.ToMap()
-	meta["status"] = domainerr.HTTPStatus(err)
+	meta := md.ToObject()
+	meta["status"] = extension.Int(int64(domainerr.HTTPStatus(err)))
 	return events.Envelope{
 		EventType:     terminalEventType(request.EventType, "failed"),
 		Payload:       payload,

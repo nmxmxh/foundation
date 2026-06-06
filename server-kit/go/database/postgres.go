@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -338,31 +337,6 @@ func (db *PostgresDB) Query(ctx context.Context, query string, args ...any) (Row
 	return budgetedRows{rows: rows, ctx: queryCtx, cancel: cancel, release: conn.Release, start: start}, nil
 }
 
-func (db *PostgresDB) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
-	if db == nil || db.pool == nil {
-		return nil, errors.New("postgres pool is nil")
-	}
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "query_maps")
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		conn.Release()
-		cancel()
-	}()
-	rows, err := conn.Query(queryCtx, query, args...)
-	if err != nil {
-		err = normalizePostgresOperationError(contextErr(queryCtx), err)
-		recordDatabaseOperation("query_maps", start, err)
-		return nil, err
-	}
-	defer rows.Close()
-	result, err := scanToMaps(rows)
-	err = normalizePostgresOperationError(contextErr(queryCtx), err)
-	recordDatabaseOperation("query_maps", start, err)
-	return result, err
-}
-
 func (db *PostgresDB) Stats() StoreStats {
 	if db == nil || db.pool == nil {
 		return StoreStats{}
@@ -503,45 +477,6 @@ func (tx *postgresTx) Query(ctx context.Context, query string, args ...any) (Row
 		return nil, errors.New("postgres tx is nil")
 	}
 	return tx.tx.Query(ctx, query, args...)
-}
-
-func (tx *postgresTx) QueryMaps(ctx context.Context, query string, args ...any) ([]map[string]any, error) {
-	if tx == nil || tx.tx == nil {
-		return nil, errors.New("postgres tx is nil")
-	}
-	rows, err := tx.tx.Query(ctx, query, args...)
-	if err != nil {
-		return nil, normalizePostgresOperationError(contextErr(ctx), err)
-	}
-	defer rows.Close()
-	result, err := scanToMaps(rows)
-	return result, normalizePostgresOperationError(contextErr(ctx), err)
-}
-
-func scanToMaps(rows pgx.Rows) ([]map[string]any, error) {
-	fields := rows.FieldDescriptions()
-	numFields := len(fields)
-	items := make([]map[string]any, 0, 32)
-
-	for rows.Next() {
-		values, err := rows.Values()
-		if err != nil {
-			return nil, err
-		}
-
-		item := make(map[string]any, numFields)
-		for i := range numFields {
-			val := values[i]
-			if b, ok := val.([]byte); ok {
-				item[fields[i].Name] = string(b)
-			} else {
-				item[fields[i].Name] = val
-			}
-		}
-		items = append(items, item)
-	}
-
-	return items, rows.Err()
 }
 
 func (tx *postgresTx) Commit(ctx context.Context) error {
@@ -702,22 +637,52 @@ func (db *PostgresDB) GetRecordJSON(ctx context.Context, domain, collection, org
 	}, true, nil
 }
 
-func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any, limit int) ([]DomainRecord, error) {
-	return db.ListRecordsWithOptions(ctx, domain, collection, organizationID, filters, StateListOptions{Limit: limit})
+func (db *PostgresDB) ListRecords(ctx context.Context, domain, collection, organizationID string, query RecordQuery) ([]DomainRecord, error) {
+	return db.ListRecordsWithOptions(ctx, domain, collection, organizationID, query, StateListOptions{Limit: query.Limit})
 }
 
-func (db *PostgresDB) ListRecordsWithOptions(ctx context.Context, domain, collection, organizationID string, filters map[string]any, options StateListOptions) ([]DomainRecord, error) {
-	filters = copyMap(filters)
+func (db *PostgresDB) ListRecordsWithOptions(ctx context.Context, domain, collection, organizationID string, query RecordQuery, options StateListOptions) ([]DomainRecord, error) {
+	query = query.Normalize()
+	if options.Limit == 0 {
+		options.Limit = query.Limit
+	}
+	recordCap := 64
+	if options.Limit > 0 && options.Limit < recordCap {
+		recordCap = options.Limit
+	}
+	records := make([]DomainRecord, 0, recordCap)
+	err := db.ForEachRecordWithOptions(ctx, domain, collection, organizationID, query, options, func(rec DomainRecord) error {
+		records = append(records, rec)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func (db *PostgresDB) ForEachRecord(ctx context.Context, domain, collection, organizationID string, query RecordQuery, fn RecordVisitor) error {
+	return db.ForEachRecordWithOptions(ctx, domain, collection, organizationID, query, StateListOptions{Limit: query.Limit}, fn)
+}
+
+func (db *PostgresDB) ForEachRecordWithOptions(ctx context.Context, domain, collection, organizationID string, query RecordQuery, options StateListOptions, fn RecordVisitor) error {
+	if fn == nil {
+		return errors.New("record visitor is required")
+	}
 	domain = strings.TrimSpace(domain)
 	collection = strings.TrimSpace(collection)
 	organizationID = strings.TrimSpace(organizationID)
+	query = query.Normalize()
+	if options.Limit == 0 {
+		options.Limit = query.Limit
+	}
 
-	where, args, pushedAllFilters := buildPostgresRecordWhere(domain, collection, organizationID, filters, 1)
+	where, args, pushedAllFilters := buildPostgresRecordWhere(domain, collection, organizationID, query.Filters, 1)
 	if !pushedAllFilters && options.RequirePushdown {
-		return nil, ErrUnsupportedFilterShape
+		return ErrUnsupportedFilterShape
 	}
 	if db == nil || db.pool == nil {
-		return nil, errors.New("postgres pool is nil")
+		return errors.New("postgres pool is nil")
 	}
 
 	limit := options.Limit
@@ -727,28 +692,28 @@ func (db *PostgresDB) ListRecordsWithOptions(ctx context.Context, domain, collec
 		queryLimit = recheckBudget
 	}
 
-	query := `
+	sql := `
 		SELECT domain, collection_name, organization_id, record_id, data, created_at, updated_at
 		FROM governance_state_records
 		WHERE ` + where + `
 		ORDER BY updated_at DESC, record_id ASC
 	`
 	if queryLimit > 0 {
-		query += fmt.Sprintf(" LIMIT $%d", len(args)+1)
+		sql += fmt.Sprintf(" LIMIT $%d", len(args)+1)
 		args = append(args, queryLimit)
 	}
 
 	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "list_records")
 	if err != nil {
-		return nil, err
+		return err
 	}
-	rows, err := conn.Query(queryCtx, query, args...)
+	rows, err := conn.Query(queryCtx, sql, args...)
 	if err != nil {
 		err = normalizePostgresOperationError(contextErr(queryCtx), err)
 		conn.Release()
 		cancel()
 		recordDatabaseOperation("list_records", start, err)
-		return nil, err
+		return err
 	}
 	var opErr error
 	defer func() {
@@ -758,12 +723,8 @@ func (db *PostgresDB) ListRecordsWithOptions(ctx context.Context, domain, collec
 		recordDatabaseOperation("list_records", start, opErr)
 	}()
 
-	recordCap := 64
-	if limit > 0 && limit < recordCap {
-		recordCap = limit
-	}
-	records := make([]DomainRecord, 0, recordCap)
 	scanned := 0
+	emitted := 0
 	for rows.Next() {
 		scanned++
 		var (
@@ -775,45 +736,50 @@ func (db *PostgresDB) ListRecordsWithOptions(ctx context.Context, domain, collec
 		if err := rows.Scan(&rec.Domain, &rec.Collection, &rec.OrganizationID, &rec.RecordID, &dataRaw, &created, &updated); err != nil {
 			err = normalizePostgresOperationError(contextErr(queryCtx), err)
 			opErr = err
-			return nil, err
+			return err
 		}
 		data, err := parseDataJSON(dataRaw)
 		if err != nil {
 			opErr = err
-			return nil, err
+			return err
 		}
-		if !matchesFilter(data, filters) {
+		if !data.Matches(query.Filters) {
 			continue
 		}
 		rec.Data = data
 		rec.CreatedAt = created.UTC()
 		rec.UpdatedAt = updated.UTC()
-		records = append(records, rec)
-		if limit > 0 && !pushedAllFilters && len(records) >= limit {
+		if err := fn(rec); err != nil {
+			opErr = err
+			return err
+		}
+		emitted++
+		if limit > 0 && !pushedAllFilters && emitted >= limit {
 			break
 		}
 	}
 	if err := normalizePostgresOperationError(contextErr(queryCtx), rows.Err()); err != nil {
 		opErr = err
-		return nil, err
+		return err
 	}
-	if !pushedAllFilters && scanned >= recheckBudget && (limit <= 0 || len(records) < limit) {
+	if !pushedAllFilters && scanned >= recheckBudget && (limit <= 0 || emitted < limit) {
 		opErr = ErrQueryLimitReached
-		return nil, fmt.Errorf("%w: scanned %d rows for unsupported filter shape", ErrQueryLimitReached, scanned)
+		return fmt.Errorf("%w: scanned %d rows for unsupported filter shape", ErrQueryLimitReached, scanned)
 	}
-	return records, nil
+	return nil
 }
 
-func (db *PostgresDB) CountRecords(ctx context.Context, domain, collection, organizationID string, filters map[string]any) (int64, error) {
-	return db.CountRecordsWithOptions(ctx, domain, collection, organizationID, filters, StateCountOptions{})
+func (db *PostgresDB) CountRecords(ctx context.Context, domain, collection, organizationID string, query RecordQuery) (int64, error) {
+	return db.CountRecordsWithOptions(ctx, domain, collection, organizationID, query, StateCountOptions{})
 }
 
-func (db *PostgresDB) CountRecordsWithOptions(ctx context.Context, domain, collection, organizationID string, filters map[string]any, options StateCountOptions) (int64, error) {
+func (db *PostgresDB) CountRecordsWithOptions(ctx context.Context, domain, collection, organizationID string, query RecordQuery, options StateCountOptions) (int64, error) {
 	domain = strings.TrimSpace(domain)
 	collection = strings.TrimSpace(collection)
 	organizationID = strings.TrimSpace(organizationID)
+	query = query.Normalize()
 
-	where, args, pushedAllFilters := buildPostgresRecordWhere(domain, collection, organizationID, copyMap(filters), 1)
+	where, args, pushedAllFilters := buildPostgresRecordWhere(domain, collection, organizationID, query.Filters, 1)
 	if !pushedAllFilters {
 		if options.RequirePushdown {
 			return 0, ErrUnsupportedFilterShape
@@ -821,7 +787,7 @@ func (db *PostgresDB) CountRecordsWithOptions(ctx context.Context, domain, colle
 		if db == nil || db.pool == nil {
 			return 0, errors.New("postgres pool is nil")
 		}
-		items, err := db.ListRecordsWithOptions(ctx, domain, collection, organizationID, filters, StateListOptions{
+		items, err := db.ListRecordsWithOptions(ctx, domain, collection, organizationID, query, StateListOptions{
 			Limit:            normalizedRecheckRowBudget(options.RecheckRowBudget),
 			RecheckRowBudget: options.RecheckRowBudget,
 		})
@@ -843,8 +809,8 @@ func (db *PostgresDB) CountRecordsWithOptions(ctx context.Context, domain, colle
 		conn.Release()
 		cancel()
 	}()
-	query := `SELECT COUNT(*) FROM governance_state_records WHERE ` + where
-	err = conn.QueryRow(queryCtx, query, args...).Scan(&count)
+	sql := `SELECT COUNT(*) FROM governance_state_records WHERE ` + where
+	err = conn.QueryRow(queryCtx, sql, args...).Scan(&count)
 	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("count_records", start, err)
 	return count, err
@@ -988,7 +954,7 @@ func (db *PostgresDB) DeleteRecordsByOrganization(ctx context.Context, organizat
 	return commandTag.RowsAffected(), nil
 }
 
-func buildPostgresRecordWhere(domain, collection, organizationID string, filters map[string]any, startArg int) (string, []any, bool) {
+func buildPostgresRecordWhere(domain, collection, organizationID string, filters []RecordFilter, startArg int) (string, []any, bool) {
 	args := make([]any, 0, 3+len(filters)*2)
 	clauses := make([]string, 0, 3+len(filters))
 	argPos := startArg
@@ -1008,18 +974,14 @@ func buildPostgresRecordWhere(domain, collection, organizationID string, filters
 	}
 
 	pushedAllFilters := true
-	filterKeys := make([]string, 0, len(filters))
-	for field := range filters {
-		filterKeys = append(filterKeys, field)
-	}
-	sort.Strings(filterKeys)
-	for _, field := range filterKeys {
-		value, ok := postgresScalarFilterText(filters[field])
+	filters = normalizeRecordFilters(filters)
+	for _, filter := range filters {
+		value, ok := postgresScalarFilterText(filter.Value)
 		if !ok {
 			pushedAllFilters = false
 			continue
 		}
-		expr := "btrim(data ->> " + quoteSQLString(field) + ")"
+		expr := "btrim(data ->> " + quoteSQLString(filter.Field) + ")"
 		addClause(fmt.Sprintf("%s = $%d", expr, argPos), value)
 	}
 
@@ -1039,18 +1001,15 @@ func normalizedRecheckRowBudget(value int) int {
 	return value
 }
 
-func postgresScalarFilterText(value any) (string, bool) {
-	if text, ok := comparableString(value); ok {
-		return strings.TrimSpace(text), true
+func postgresScalarFilterText(value RecordValue) (string, bool) {
+	if value.Kind == RecordValueBool {
+		if value.Text == "1" || strings.EqualFold(value.Text, "true") {
+			return "true", true
+		}
+		return "false", true
 	}
-	switch typed := value.(type) {
-	case float32:
-		return strings.TrimSpace(fmt.Sprintf("%v", typed)), true
-	case float64:
-		return strings.TrimSpace(fmt.Sprintf("%v", typed)), true
-	default:
-		return "", false
-	}
+	_, text, ok := value.ScalarIndex()
+	return strings.TrimSpace(text), ok
 }
 
 func quoteSQLString(value string) string {
@@ -1099,12 +1058,9 @@ func validateDomainRecord(rec *DomainRecord) error {
 	rec.Collection = strings.TrimSpace(rec.Collection)
 	rec.OrganizationID = strings.TrimSpace(rec.OrganizationID)
 	rec.RecordID = strings.TrimSpace(rec.RecordID)
-	rec.Data = copyMap(rec.Data)
-	if rec.Data == nil {
-		rec.Data = map[string]any{}
-	}
+	rec.Data = rec.Data.Normalize()
 	if rec.OrganizationID != "" {
-		rec.Data["organization_id"] = rec.OrganizationID
+		rec.Data = rec.Data.With("organization_id", StringValue(rec.OrganizationID))
 	}
 	if rec.Domain == "" {
 		return errors.New("domain is required")
@@ -1118,16 +1074,13 @@ func validateDomainRecord(rec *DomainRecord) error {
 	return nil
 }
 
-func parseDataJSON(data []byte) (map[string]any, error) {
+func parseDataJSON(data []byte) (RecordData, error) {
 	if len(data) == 0 {
-		return map[string]any{}, nil
+		return nil, nil
 	}
-	parsed := map[string]any{}
+	var parsed RecordData
 	if err := json.Unmarshal(data, &parsed); err != nil {
 		return nil, err
-	}
-	if parsed == nil {
-		return map[string]any{}, nil
 	}
 	return parsed, nil
 }

@@ -55,5 +55,17 @@ if [[ "$node_bin" == /Applications/Codex.app/* ]] && grep -Eq '"(vite|vitest|@vi
 fi
 
 echo "[RUN] frontend $script_name: ${frontend_root#$target/}"
+if [[ -f "$script_dir/run_vitest.sh" ]] && grep -Eq "\"$script_name\"[[:space:]]*:[[:space:]]*\"[^\"]*vitest" "$package_json"; then
+  case "$script_name" in
+  test)
+    zsh "$script_dir/run_vitest.sh" "$frontend_root" run
+    exit $?
+    ;;
+  test:coverage)
+    zsh "$script_dir/run_vitest.sh" "$frontend_root" run --coverage
+    exit $?
+    ;;
+  esac
+fi
 cd "$frontend_root"
 "$package_manager" run "$script_name"

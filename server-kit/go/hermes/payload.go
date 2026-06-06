@@ -204,14 +204,18 @@ func (s *RedisStreamPayloadSource) ReadPayloads(ctx context.Context, count int) 
 		if !ok {
 			return nil, fmt.Errorf("%w: redis stream payload field %q is required", ErrInvalidEvent, s.payloadField)
 		}
+		operation, _ := message.Values.Get("operation")
+		version, _ := message.Values.Get("version")
+		eventType, _ := message.Values.Get("event_type")
+		schemaVersion, _ := message.Values.Get("schema_version")
 		out = append(out, PayloadMessage{
 			AckID: message.ID,
 			Payload: RecordPayload{
-				Operation:     operationValue(message.Values["operation"]),
+				Operation:     operationValue(operation),
 				SourceID:      sourceIDValue(message),
-				Version:       uint64Value(message.Values["version"]),
-				EventType:     stringValue(message.Values["event_type"]),
-				SchemaVersion: stringValue(message.Values["schema_version"]),
+				Version:       uint64Value(version),
+				EventType:     stringValue(eventType),
+				SchemaVersion: stringValue(schemaVersion),
 				Payload:       payload,
 			},
 		})
@@ -230,8 +234,8 @@ func SourceMessagePayload(message SourceMessage, field string) ([]byte, bool) {
 	return payloadBytes(message.Values, field)
 }
 
-func payloadBytes(values map[string]any, field string) ([]byte, bool) {
-	value, ok := values[field]
+func payloadBytes(values redispkg.Values, field string) ([]byte, bool) {
+	value, ok := values.Get(field)
 	if !ok {
 		return nil, false
 	}
@@ -246,7 +250,8 @@ func payloadBytes(values map[string]any, field string) ([]byte, bool) {
 }
 
 func sourceIDValue(message redispkg.StreamMessage) string {
-	if value := strings.TrimSpace(stringValue(message.Values["source_id"])); value != "" {
+	raw, _ := message.Values.Get("source_id")
+	if value := strings.TrimSpace(stringValue(raw)); value != "" {
 		return value
 	}
 	return message.ID
@@ -254,6 +259,8 @@ func sourceIDValue(message redispkg.StreamMessage) string {
 
 func operationValue(value any) Operation {
 	switch strings.ToLower(strings.TrimSpace(stringValue(value))) {
+	case string(OperationPatch):
+		return OperationPatch
 	case string(OperationDelete):
 		return OperationDelete
 	default:

@@ -277,16 +277,16 @@ func (p *partition) orderedCandidateIndex(registry *partitionRegistry, query Que
 		}
 	}
 	consider(p.scopeSnapshot(registry, scope))
-	for field, expected := range query.Filters {
-		if !p.isIndexedField(field) {
-			continue
+	forEachPlannedFilter(query.Plan, func(filter QueryFilter) bool {
+		if !p.isIndexedField(filter.Field) {
+			return true
 		}
-		kind, value, ok := indexableFieldValue(expected)
-		if !ok {
-			continue
-		}
-		index := fieldIndex{scope: scope, field: field, kind: kind, value: value}
+		index := fieldIndex{scope: scope, field: filter.Field, kind: filter.Kind, value: filter.Value}
 		consider(p.fieldSnapshot(registry, index))
+		return true
+	})
+	if query.Plan.count > 0 {
+		return selected
 	}
 	return selected
 }
@@ -294,18 +294,21 @@ func (p *partition) orderedCandidateIndex(registry *partitionRegistry, query Que
 func (p *partition) candidateIndex(registry *partitionRegistry, query Query) *indexSnapshot {
 	scope := scopeKey(p.spec.Domain, p.spec.Collection, query.OrganizationID)
 	selected := p.scopeSnapshot(registry, scope)
-	for field, expected := range query.Filters {
-		if !p.isIndexedField(field) {
-			continue
+	forEachPlannedFilter(query.Plan, func(filter QueryFilter) bool {
+		if !p.isIndexedField(filter.Field) {
+			return true
 		}
-		kind, value, ok := indexableFieldValue(expected)
-		if !ok {
-			continue
-		}
-		index := p.fieldSnapshot(registry, fieldIndex{scope: scope, field: field, kind: kind, value: value})
+		index := p.fieldSnapshot(registry, fieldIndex{scope: scope, field: filter.Field, kind: filter.Kind, value: filter.Value})
 		if selected == nil || index.len() < selected.len() {
 			selected = index
 		}
+		return true
+	})
+	if query.Plan.count > 0 {
+		if selected == nil || selected.len() == 0 {
+			return emptyIndex
+		}
+		return selected
 	}
 	if selected == nil || selected.len() == 0 {
 		return emptyIndex
@@ -598,11 +601,11 @@ func (p *partition) isIndexedField(field string) bool {
 
 func forEachIndexedField(rec database.DomainRecord, spec ProjectionSpec, fn func(field string, kind byte, value string)) {
 	for _, field := range spec.IndexedFields {
-		value, ok := rec.Data[field]
+		value, ok := rec.Data.Get(field)
 		if !ok {
 			continue
 		}
-		kind, indexValue, ok := indexableFieldValue(value)
+		kind, indexValue, ok := value.ScalarIndex()
 		if ok {
 			fn(field, kind, indexValue)
 		}
@@ -628,14 +631,19 @@ func recordView(entry recordEntry, epoch uint64) RecordView {
 func estimateRecordBytes(rec database.DomainRecord) int64 {
 	total := len(rec.Domain) + len(rec.Collection) + len(rec.OrganizationID) + len(rec.RecordID)
 	total += len(rec.Vector) * 4
-	for key, value := range rec.Data {
-		total += len(key) + estimateValueBytes(value) + 32
+	for _, field := range rec.Data {
+		total += len(field.Name) + estimateValueBytes(field.Value) + 32
 	}
 	return int64(total + 128)
 }
 
 func estimateValueBytes(value any) int {
 	switch typed := value.(type) {
+	case database.RecordValue:
+		if len(typed.Raw) > 0 {
+			return len(typed.Raw)
+		}
+		return len(typed.Text)
 	case nil:
 		return 0
 	case string:
