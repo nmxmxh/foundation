@@ -71,6 +71,7 @@ func TestRecurringInfrastructureLoad(t *testing.T) {
 	thinkTime := loadThinkTimeFromEnv(profile.ThinkTime)
 	opTimeout := loadOpTimeoutFromEnv(profile.OpTimeout)
 	mix := loadMixFromEnv()
+	prepareLoadArtifacts(ctx, t, env, opTimeout)
 
 	fmt.Println("\n--- Starting Scaffold Recurring Infrastructure Load Test ---")
 	fmt.Printf("Profile: class=%s cpu_cores=%d\n", profile.Class, profile.CPUCores)
@@ -99,6 +100,7 @@ type loadStepReport struct {
 	TotalOps      int64
 	RPS           float64
 	AvgLatencyMs  float64
+	Latency       loadLatencySummary
 	ErrorRate     float64
 	QueueBefore   map[string]int64
 	QueueAfter    map[string]int64
@@ -109,9 +111,130 @@ type loadStepReport struct {
 	LatencyMicros [opCount]int64
 }
 
+const loadLatencyBucketCount = 29
+
+var loadLatencyBucketUpperMicros = [loadLatencyBucketCount - 1]int64{
+	100,
+	250,
+	500,
+	750,
+	1_000,
+	1_500,
+	2_000,
+	3_000,
+	4_000,
+	5_000,
+	7_500,
+	10_000,
+	15_000,
+	20_000,
+	30_000,
+	40_000,
+	50_000,
+	75_000,
+	100_000,
+	150_000,
+	200_000,
+	300_000,
+	500_000,
+	750_000,
+	1_000_000,
+	1_500_000,
+	2_000_000,
+	3_000_000,
+}
+
+type loadLatencyHistogram struct {
+	buckets   [loadLatencyBucketCount]int64
+	maxMicros int64
+}
+
+type loadLatencySummary struct {
+	Count    int64
+	P50      int64
+	P95      int64
+	P99      int64
+	Max      int64
+	Overflow int64
+}
+
+func (h *loadLatencyHistogram) record(micros int64) {
+	if micros < 0 {
+		micros = 0
+	}
+	bucket := loadLatencyBucketCount - 1
+	for idx, upper := range loadLatencyBucketUpperMicros {
+		if micros <= upper {
+			bucket = idx
+			break
+		}
+	}
+	atomic.AddInt64(&h.buckets[bucket], 1)
+	h.recordMax(micros)
+}
+
+func (h *loadLatencyHistogram) recordMax(micros int64) {
+	for {
+		current := atomic.LoadInt64(&h.maxMicros)
+		if micros <= current {
+			return
+		}
+		if atomic.CompareAndSwapInt64(&h.maxMicros, current, micros) {
+			return
+		}
+	}
+}
+
+func (h *loadLatencyHistogram) summary() loadLatencySummary {
+	var buckets [loadLatencyBucketCount]int64
+	var count int64
+	for idx := range buckets {
+		buckets[idx] = atomic.LoadInt64(&h.buckets[idx])
+		count += buckets[idx]
+	}
+	return loadLatencySummary{
+		Count:    count,
+		P50:      percentileFromLatencyBuckets(buckets, count, 50),
+		P95:      percentileFromLatencyBuckets(buckets, count, 95),
+		P99:      percentileFromLatencyBuckets(buckets, count, 99),
+		Max:      atomic.LoadInt64(&h.maxMicros),
+		Overflow: buckets[loadLatencyBucketCount-1],
+	}
+}
+
+func percentileFromLatencyBuckets(buckets [loadLatencyBucketCount]int64, count int64, percentile int64) int64 {
+	if count <= 0 {
+		return 0
+	}
+	rank := (count*percentile + 99) / 100
+	if rank < 1 {
+		rank = 1
+	}
+	var seen int64
+	for idx, bucketCount := range buckets {
+		seen += bucketCount
+		if seen < rank {
+			continue
+		}
+		if idx >= len(loadLatencyBucketUpperMicros) {
+			return loadLatencyBucketUpperMicros[len(loadLatencyBucketUpperMicros)-1]
+		}
+		return loadLatencyBucketUpperMicros[idx]
+	}
+	return loadLatencyBucketUpperMicros[len(loadLatencyBucketUpperMicros)-1]
+}
+
+func formatLoadLatencyMicros(micros int64) string {
+	if micros < 1_000 {
+		return fmt.Sprintf("%dus", micros)
+	}
+	return fmt.Sprintf("%.2fms", float64(micros)/1000.0)
+}
+
 func runLoadStep(ctx context.Context, t *testing.T, env *testutil.RealTestEnv, concurrency int, duration, thinkTime, opTimeout time.Duration, mix loadMix) {
 	t.Helper()
 	fmt.Printf("\n[Scaffold Step] Concurrency: %d\n", concurrency)
+	prewarmLoadStep(ctx, t, env, concurrency, opTimeout)
 
 	var attempts [opCount]int64
 	var errors [opCount]int64
@@ -119,6 +242,7 @@ func runLoadStep(ctx context.Context, t *testing.T, env *testutil.RealTestEnv, c
 	var totalSuccess int64
 	var totalError int64
 	var totalLatency int64
+	var latencyHistogram loadLatencyHistogram
 
 	probeCtx, probeCancel := context.WithTimeout(ctx, opTimeout)
 	queueBefore := fetchRiverStateCounts(probeCtx, env)
@@ -156,6 +280,7 @@ func runLoadStep(ctx context.Context, t *testing.T, env *testutil.RealTestEnv, c
 				atomic.AddInt64(&attempts[op], 1)
 				atomic.AddInt64(&latencyMicros[op], durationMicros)
 				atomic.AddInt64(&totalLatency, durationMicros)
+				latencyHistogram.record(durationMicros)
 				if err != nil {
 					atomic.AddInt64(&errors[op], 1)
 					atomic.AddInt64(&totalError, 1)
@@ -190,6 +315,7 @@ func runLoadStep(ctx context.Context, t *testing.T, env *testutil.RealTestEnv, c
 		TotalOps:      totalOps,
 		RPS:           rps,
 		AvgLatencyMs:  avgLatencyMs,
+		Latency:       latencyHistogram.summary(),
 		ErrorRate:     errorRate,
 		QueueBefore:   queueBefore,
 		QueueAfter:    queueAfter,
@@ -205,11 +331,92 @@ func runLoadStep(ctx context.Context, t *testing.T, env *testutil.RealTestEnv, c
 	}
 }
 
+func prepareLoadArtifacts(ctx context.Context, t *testing.T, env *testutil.RealTestEnv, opTimeout time.Duration) {
+	t.Helper()
+	ddlCtx, cancel := context.WithTimeout(ctx, opTimeout)
+	defer cancel()
+	_, err := env.DB.Exec(ddlCtx, `
+CREATE TABLE IF NOT EXISTS scaffold_load_events (
+	id BIGSERIAL PRIMARY KEY,
+	worker_key TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+)`)
+	if err != nil {
+		t.Fatalf("prepare load table: %v", err)
+	}
+	_, err = env.DB.Exec(ddlCtx, "TRUNCATE TABLE scaffold_load_events")
+	if err != nil {
+		t.Fatalf("truncate load table: %v", err)
+	}
+
+	env.AddCleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cleanupCancel()
+		_, _ = env.DB.Exec(cleanupCtx, "TRUNCATE TABLE scaffold_load_events")
+	})
+}
+
+func prewarmLoadStep(ctx context.Context, t *testing.T, env *testutil.RealTestEnv, concurrency int, opTimeout time.Duration) {
+	t.Helper()
+	warmConcurrency := concurrency
+	if maxConns := int(env.DB.Config().MaxConns); maxConns > 0 && warmConcurrency > maxConns {
+		warmConcurrency = maxConns
+	}
+	if warmConcurrency < 1 {
+		warmConcurrency = 1
+	}
+
+	warmTimeout := opTimeout
+	if warmTimeout < 5*time.Second {
+		warmTimeout = 5 * time.Second
+	}
+	warmCtx, cancel := context.WithTimeout(ctx, warmTimeout)
+	defer cancel()
+
+	start := make(chan struct{})
+	errs := make(chan error, warmConcurrency)
+	wg := sync.WaitGroup{}
+	for workerIdx := range warmConcurrency {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			<-start
+			var one int
+			if err := env.DB.QueryRow(warmCtx, "SELECT 1").Scan(&one); err != nil {
+				errs <- fmt.Errorf("db warmup %d: %w", idx, err)
+				return
+			}
+			if env.Redis != nil {
+				if err := env.Redis.Ping(warmCtx).Err(); err != nil {
+					errs <- fmt.Errorf("redis warmup %d: %w", idx, err)
+				}
+			}
+		}(workerIdx)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("prewarm load step: %v", err)
+		}
+	}
+}
+
 func reportLoadStep(report loadStepReport) {
 	fmt.Printf("  Duration: %.2fs\n", report.Elapsed)
 	fmt.Printf("  Total Ops: %d\n", report.TotalOps)
 	fmt.Printf("  RPS: %.2f\n", report.RPS)
 	fmt.Printf("  Avg Latency: %.2f ms\n", report.AvgLatencyMs)
+	fmt.Printf(
+		"  Latency Distribution: p50<=%s p95<=%s p99<=%s max=%s overflow=%d\n",
+		formatLoadLatencyMicros(report.Latency.P50),
+		formatLoadLatencyMicros(report.Latency.P95),
+		formatLoadLatencyMicros(report.Latency.P99),
+		formatLoadLatencyMicros(report.Latency.Max),
+		report.Latency.Overflow,
+	)
 	fmt.Printf("  Error Rate: %.2f%%\n", report.ErrorRate)
 	for op := range opCount {
 		opAttempts := atomic.LoadInt64(&report.Attempts[op])
@@ -238,24 +445,8 @@ func executeOperation(ctx context.Context, env *testutil.RealTestEnv, sequence i
 		var now time.Time
 		return env.DB.QueryRow(ctx, "SELECT NOW()").Scan(&now)
 	case opDBWrite:
-		tx, err := env.DB.Begin(ctx)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if rollbackErr := tx.Rollback(ctx); rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
-				return
-			}
-		}()
-		_, err = tx.Exec(ctx, "CREATE TEMP TABLE IF NOT EXISTS scaffold_load_events (id BIGSERIAL PRIMARY KEY, worker_key TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()) ON COMMIT PRESERVE ROWS")
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, "INSERT INTO scaffold_load_events (worker_key) VALUES ($1)", fmt.Sprintf("w-%d", sequence%1024))
-		if err != nil {
-			return err
-		}
-		return tx.Commit(ctx)
+		_, err := env.DB.Exec(ctx, "INSERT INTO scaffold_load_events (worker_key) VALUES ($1)", fmt.Sprintf("w-%d", sequence%1024))
+		return err
 	case opRedis:
 		if env.Redis == nil {
 			return nil

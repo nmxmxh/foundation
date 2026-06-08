@@ -20,16 +20,24 @@ import (
 
 func hermesRecordData(t testing.TB, values map[string]any) database.RecordData {
 	t.Helper()
-	data, err := database.RecordDataFromMap(values)
-	require.NoError(t, err)
-	return data
+	fields := make([]database.RecordField, 0, len(values))
+	for name, raw := range values {
+		value, ok := database.RecordValueFromAny(raw)
+		require.Truef(t, ok, "unsupported Hermes record data field %q", name)
+		fields = append(fields, database.RecordField{Name: name, Value: value})
+	}
+	return database.RecordDataFromPairs(fields...)
 }
 
 func hermesRecordQuery(t testing.TB, limit int, values map[string]any) database.RecordQuery {
 	t.Helper()
-	query, err := database.RecordQueryFromMap(values, limit)
-	require.NoError(t, err)
-	return query
+	filters := make([]database.RecordFilter, 0, len(values))
+	for field, raw := range values {
+		value, ok := database.RecordValueFromAny(raw)
+		require.Truef(t, ok, "unsupported Hermes record query field %q", field)
+		filters = append(filters, database.RecordFilter{Field: field, Value: value})
+	}
+	return database.RecordQuery{Filters: filters, Limit: limit}
 }
 
 func TestIntegrationHermes_RebuildAndRedisProjectionEnvelope(t *testing.T) {
@@ -122,7 +130,7 @@ func TestIntegrationHermes_RebuildAndRedisProjectionEnvelope(t *testing.T) {
 		defer deleteCancel()
 		_ = redisClient.Del(deleteCtx, stream)
 	})
-	_, err = redisClient.XAdd(ctx, stream, map[string]any{"envelope": raw})
+	_, err = redisClient.XAdd(ctx, stream, rediskit.Values{rediskit.Field("envelope", raw)})
 	require.NoError(t, err)
 
 	source, err := hermes.NewRedisStreamEnvelopeSource(redisClient, stream, "hermes", "integration", "")

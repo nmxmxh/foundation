@@ -405,6 +405,10 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "integration test DB helper" "$target/tests/integration/setup_helpers_test.go"
   check_file_contains "Hermes integration covers Postgres rebuild" "$target/tests/integration/hermes_test.go" "store.Rebuild"
   check_file_contains "Hermes integration covers Redis stream envelope" "$target/tests/integration/hermes_test.go" "NewRedisStreamEnvelopeSource"
+  check_file_contains "Hermes integration uses typed record values" "$target/tests/integration/hermes_test.go" "database.RecordValueFromAny"
+  check_file_contains "Hermes integration uses typed Redis stream values" "$target/tests/integration/hermes_test.go" "rediskit.Values{rediskit.Field(\"envelope\", raw)}"
+  check_file_not_contains "Hermes integration avoids removed RecordDataFromMap helper" "$target/tests/integration/hermes_test.go" "RecordDataFromMap"
+  check_file_not_contains "Hermes integration avoids removed RecordQueryFromMap helper" "$target/tests/integration/hermes_test.go" "RecordQueryFromMap"
   check_file_contains "managed test env defaults" "$target/tests/testutil/env.go" "ApplyTestEnvDefaults"
   check_file_contains "managed test infra required flag" "$target/tests/testutil/env.go" "TEST_INFRA_REQUIRED"
   check_exists "testutil scaffold tests" "$target/tests/testutil/storage_env_test.go"
@@ -413,9 +417,17 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "load tests cover Redis path" "$target/tests/load/load_test.go" "opRedis"
   check_file_contains "load tests cover DB write path" "$target/tests/load/load_test.go" "opDBWrite"
   check_file_contains "load tests expose River queue state" "$target/tests/load/load_test.go" "fetchRiverStateCounts"
+  check_file_contains "load tests report latency distribution" "$target/tests/load/load_test.go" "Latency Distribution: p50<="
+  check_file_contains "load tests prewarm measured steps" "$target/tests/load/load_test.go" "prewarmLoadStep(ctx, t, env, concurrency, opTimeout)"
+  check_file_contains "load tests prepare write table outside hot loop" "$target/tests/load/load_test.go" "prepareLoadArtifacts(ctx, t, env, opTimeout)"
   check_file_not_contains "load tests avoid nolint suppressions" "$target/tests/load/load_test.go" "nolint"
   check_file_not_contains "load tests avoid weak random traffic mix" "$target/tests/load/load_test.go" "math/rand"
+  check_file_not_contains "load tests avoid hot-loop temp table DDL" "$target/tests/load/load_test.go" "CREATE TEMP TABLE"
   check_file_contains "make integration target" "$target/Makefile" "test-integration"
+  check_file_contains "make local full target" "$target/Makefile" "test-local-full: communication-contracts test-unit test-wasm test-frontend test-integration test-e2e"
+  check_file_contains "make local services target" "$target/Makefile" "test-local-services: test-local-full test-load test-bench"
+  check_file_contains "make local full covers infrastructure" "$target/Makefile" "Local full test path complete"
+  check_file_contains "make local services marks opt-in evidence" "$target/Makefile" "Opt-in local service evidence path complete"
   check_file_contains "make coverage target" "$target/Makefile" "test-coverage:"
   check_file_contains "make coverage threshold" "$target/Makefile" "GO_COVERAGE_THRESHOLD ?= 95.0"
   check_file_contains "make load target" "$target/Makefile" "test-load:"
@@ -570,17 +582,13 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "api README" "$target/api/README.md"
   check_exists "proto README" "$target/api/protos/README.md"
   check_exists "scaffolded common Foundation proto envelope" "$target/api/protos/foundation/v1/envelope.proto"
+  check_exists "scaffolded common Foundation proto metadata" "$target/api/protos/foundation/v1/metadata.proto"
   check_exists "scaffolded common Foundation proto projection" "$target/api/protos/foundation/v1/projection.proto"
   check_file_contains "scaffolded projection proto supports patch" "$target/api/protos/foundation/v1/projection.proto" "PROJECTION_OPERATION_PATCH"
   check_absent "legacy scaffolded transport proto directory" "$target/api/protos/transport"
   check_absent "legacy scaffolded Hermes proto directory" "$target/api/protos/hermes"
-  if [[ -f "$target/api/protos/common/v1/metadata.proto" || -f "$target/api/protos/common/v1/common.proto" ]]; then
-    echo "[OK] common proto metadata"
-  else
-    echo "[FAIL] common proto metadata"
-    echo "  missing: api/protos/common/v1/metadata.proto or api/protos/common/v1/common.proto"
-    failed=1
-  fi
+  check_absent "deprecated common proto metadata" "$target/api/protos/common/v1/metadata.proto"
+  check_absent "deprecated common proto common metadata" "$target/api/protos/common/v1/common.proto"
   check_file_contains "proto README documents lifecycle generator" "$target/api/protos/README.md" "make lifecycle-contracts"
 fi
 
@@ -710,6 +718,11 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then
   check_file_not_contains "vitest does not alias runtime-transport source" "$frontend_root/vitest.config.ts" "foundation/runtime-transport/ts/src"
   check_exists "frontend vite env" "$frontend_root/src/vite-env.d.ts"
   check_exists "frontend test setup" "$frontend_root/src/test/setup.ts"
+  check_exists "frontend prototype store bootstrap" "$frontend_root/src/stores/prototype.ts"
+  check_file_contains "frontend prototype context factory" "$frontend_root/src/stores/prototype.ts" "createPrototypeRuntimeContext"
+  check_file_contains "frontend prototype generated stores" "$frontend_root/src/stores/prototype.ts" "createPrototypeTenantStores"
+  check_file_contains "frontend prototype persistence binding" "$frontend_root/src/stores/prototype.ts" "createTenantSnapshotPersistence"
+  check_file_contains "frontend prototype persistence hydrate" "$frontend_root/src/stores/prototype.ts" "hydratePersistence"
   check_frontend_package_contains "frontend preview script" "$frontend_root/package.json" '"preview": "vite preview"'
   check_frontend_package_contains "frontend test script" "$frontend_root/package.json" '"test": "vitest run"'
   check_frontend_package_contains "frontend test watch script" "$frontend_root/package.json" '"test:watch": "vitest"'
@@ -724,8 +737,20 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then
   check_frontend_package_contains "frontend kit package" "$frontend_root/package.json" '"@ovasabi/frontend-kit"'
   check_frontend_package_contains "frontend ui minimal package" "$frontend_root/package.json" '"@ovasabi/ui-minimal"'
   check_file_contains "make proto-ts target" "$target/Makefile" "proto-ts:"
+  check_file_contains "make frontend prototype runtime target" "$target/Makefile" "frontend-prototype-runtime:"
+  check_file_contains "build frontend depends on prototype runtime" "$target/Makefile" "build-frontend: frontend-prototype-runtime"
+  check_file_contains "test frontend depends on prototype runtime" "$target/Makefile" "test-frontend: frontend-prototype-runtime"
+  check_file_contains "lint frontend depends on prototype runtime" "$target/Makefile" "lint-frontend: frontend-prototype-runtime"
+  check_file_contains "frontend benchmark target depends on prototype runtime" "$target/Makefile" "test-bench-frontend: frontend-prototype-runtime"
+  check_file_contains "frontend benchmark target captures workbench profile" "$target/Makefile" "frontend_workbench_profile.sh"
+  check_file_contains "make wasm test target rebuilds runtime" "$target/Makefile" "test-wasm: build-runtime"
+  check_file_contains "wasm optimizer enables Go non-trapping float-to-int" "$target/Makefile" "--enable-nontrapping-float-to-int"
+  check_file_contains "make e2e target regenerates contracts" "$target/Makefile" "test-e2e: communication-contracts"
+  check_file_contains "make e2e target supports explicit frontend script" "$target/Makefile" 'zsh $(FRONTEND_SCRIPT_RUNNER) . e2e'
+  check_file_contains "make e2e target supports test e2e script" "$target/Makefile" 'zsh $(FRONTEND_SCRIPT_RUNNER) . test:e2e'
   check_file_contains "make foundation transport proto target" "$target/Makefile" "foundation-transport-proto:"
   check_file_contains "make communication contract aggregate" "$target/Makefile" "communication-contracts:"
+  check_file_contains "communication contracts include frontend prototype runtime" "$target/Makefile" "communication-contracts: proto proto-ts frontend-prototype-runtime"
   check_file_contains "proto-ts writes generated app contracts" "$target/Makefile" "--ts_proto_out=frontend/src/types/protos"
 fi
 

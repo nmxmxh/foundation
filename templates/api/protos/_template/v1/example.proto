@@ -5,7 +5,7 @@ package example.v1;
 
 option go_package = "github.com/ovasabi/{{PROJECT_NAME}}/api/protos/example/v1;examplev1";
 
-import "common/v1/metadata.proto";
+import "foundation/v1/metadata.proto";
 import "google/protobuf/timestamp.proto";
 
 message ExampleEntity {
@@ -18,58 +18,58 @@ message ExampleEntity {
 }
 
 message CreateExampleRequest {
-  common.v1.RequestMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   string name = 11;
   string description = 12;
 }
 
 message CreateExampleResponse {
-  common.v1.ResponseMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   ExampleEntity entity = 2;
 }
 
 message GetExampleRequest {
-  common.v1.RequestMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   string id = 2;
 }
 
 message GetExampleResponse {
-  common.v1.ResponseMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   ExampleEntity entity = 2;
 }
 
 message ListExampleRequest {
-  common.v1.RequestMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   int32 page_size = 11;
   string page_token = 12;
 }
 
 message ListExampleResponse {
-  common.v1.ResponseMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   repeated ExampleEntity entities = 2;
   string next_page_token = 3;
   int32 total_count = 4;
 }
 
 message UpdateExampleRequest {
-  common.v1.RequestMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   string id = 2;
   string name = 11;
   string description = 12;
 }
 
 message UpdateExampleResponse {
-  common.v1.ResponseMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   ExampleEntity entity = 2;
 }
 
 message DeleteExampleRequest {
-  common.v1.RequestMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   string id = 2;
 }
 
 message DeleteExampleResponse {
-  common.v1.ResponseMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   string id = 2;
   bool deleted = 3;
 }

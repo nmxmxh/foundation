@@ -69,7 +69,7 @@ else
   check_exists "TLA spec template directory" "$spec_dir"
   check_exists "TLA spec template index" "$spec_dir/README.md"
 
-  for spec in WorkerRetryQueue CacheProjectionFreshness WebSocketBackpressure; do
+  for spec in WorkerRetryQueue CacheProjectionFreshness WebSocketBackpressure FrontendLiveProjection; do
     file="$spec_dir/${spec}.tla"
     check_exists "TLA template $spec" "$file"
     check_contains "$spec defines Init" "$file" "Init =="

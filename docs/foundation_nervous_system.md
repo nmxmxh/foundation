@@ -67,7 +67,7 @@ Generated read commands should include correlation metadata and identity-safe ca
 
 The generator intentionally uses the scaffold example proto as the reference shape:
 
-1. shared `common.v1.RequestMetadata metadata = 1`
+1. shared `foundation.v1.Metadata metadata = 1`
 2. mutating pairs such as `CreateExampleRequest` and `CreateExampleResponse`
 3. event names derived as `example:create:v1:requested`, `example:create:v1:success`, and `example:create:v1:failed`
 4. worker metadata vectors that preserve correlation, idempotency, and organization scope

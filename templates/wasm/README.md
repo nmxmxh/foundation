@@ -11,6 +11,12 @@ make build-wasm
 
 Build output is written to `frontend/public/`.
 
+For new low-latency browser compute, prefer the Rust `foundation/runtime-sdk`
+path: generated Cap'n Proto runtime contracts, host-managed shared memory,
+worker-owned blocking waits, and exported module entrypoints. This Go WASM file
+is not the public performance ABI and should not be expanded into app state or
+network orchestration.
+
 ## Contract
 
 - Runtime-transport owns websocket/http dispatch, binary envelope encoding, compression, and fallback behavior.

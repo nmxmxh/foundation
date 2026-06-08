@@ -68,6 +68,30 @@ func TestInferLoadProfileForCores(t *testing.T) {
 	}
 }
 
+func TestLoadLatencyHistogramSummary(t *testing.T) {
+	var histogram loadLatencyHistogram
+	for _, micros := range []int64{100, 500, 900, 1_200, 1_900, 9_000, 11_000, 21_000, 101_000, 2_400_000} {
+		histogram.record(micros)
+	}
+
+	summary := histogram.summary()
+	if summary.Count != 10 {
+		t.Fatalf("summary.Count = %d, want 10", summary.Count)
+	}
+	if summary.P50 != 2_000 {
+		t.Fatalf("summary.P50 = %d, want 2000", summary.P50)
+	}
+	if summary.P95 != 3_000_000 {
+		t.Fatalf("summary.P95 = %d, want 3000000", summary.P95)
+	}
+	if summary.P99 != 3_000_000 {
+		t.Fatalf("summary.P99 = %d, want 3000000", summary.P99)
+	}
+	if summary.Max != 2_400_000 {
+		t.Fatalf("summary.Max = %d, want 2400000", summary.Max)
+	}
+}
+
 func withEnv(t *testing.T, key, value string) {
 	t.Helper()
 	prev, had := os.LookupEnv(key)

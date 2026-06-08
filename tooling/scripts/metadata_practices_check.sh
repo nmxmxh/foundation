@@ -138,19 +138,52 @@ perl -MFile::Find -MFile::Spec -MFile::Basename - "$target" <<'PERL'
   }
   ok("service event metadata practices");
 
-  my $proto_root = "$target/api/protos/common/v1";
-  my $metadata_proto = "$proto_root/metadata.proto";
-  $metadata_proto = "$proto_root/common.proto" if !-e $metadata_proto;
+  for my $legacy_metadata (
+    "$target/api/protos/common/v1/metadata.proto",
+    "$target/api/protos/common/v1/common.proto",
+  ) {
+    push @violations, rel($legacy_metadata) . ": common metadata is deprecated; use foundation.v1.Metadata"
+      if -e $legacy_metadata;
+  }
+
+  my $metadata_proto = "$target/api/protos/foundation/v1/metadata.proto";
+  $metadata_proto = "$target/foundation/runtime-transport/protos/foundation/v1/metadata.proto" if !-e $metadata_proto;
+  $metadata_proto = "$target/runtime-transport/protos/foundation/v1/metadata.proto" if !-e $metadata_proto;
   if (-e $metadata_proto) {
     my $proto_text = read_file($metadata_proto);
-    push @violations, "api/protos/common/v1/metadata.proto: common metadata must expose repeated string tags"
+    push @violations, rel($metadata_proto) . ": foundation metadata must expose GlobalContext"
+      if $proto_text !~ /\bmessage\s+GlobalContext\b/;
+    push @violations, rel($metadata_proto) . ": foundation metadata must expose repeated string tags"
       if $proto_text !~ /\brepeated\s+string\s+tags\s*=/;
-    push @violations, "api/protos/common/v1/metadata.proto: common metadata must expose repeated string categories"
+    push @violations, rel($metadata_proto) . ": foundation metadata must expose repeated string categories"
       if $proto_text !~ /\brepeated\s+string\s+categories\s*=/;
-    push @violations, "api/protos/common/v1/metadata.proto: common metadata must expose knowledge_graph for intelligence graph scope"
+    push @violations, rel($metadata_proto) . ": foundation metadata must expose knowledge_graph for intelligence graph scope"
       if $proto_text !~ /\bstring\s+knowledge_graph\s*=/;
-    push @violations, "api/protos/common/v1/metadata.proto: common metadata must expose map<string,string> attributes for bounded graph facts"
+    push @violations, rel($metadata_proto) . ": foundation metadata must expose correlation_id"
+      if $proto_text !~ /\bstring\s+correlation_id\s*=/;
+    push @violations, rel($metadata_proto) . ": foundation metadata must expose idempotency_key"
+      if $proto_text !~ /\bstring\s+idempotency_key\s*=/;
+    push @violations, rel($metadata_proto) . ": foundation metadata must expose map<string,string> attributes for bounded graph facts"
       if $proto_text !~ /\bmap\s*<\s*string\s*,\s*string\s*>\s+attributes\s*=/;
+  } else {
+    push @violations, "api/protos/foundation/v1/metadata.proto: foundation metadata proto is required";
+  }
+
+  my $api_protos = "$target/api/protos";
+  if (-d $api_protos) {
+    find({
+      wanted => sub {
+        return unless -f $_ && $_ =~ /[.]proto\z/;
+        my $path = $File::Find::name;
+        my $text = read_file($path);
+        my $rel = rel($path);
+        push @violations, "$rel: common metadata imports are deprecated; import foundation/v1/metadata.proto"
+          if $text =~ /import\s+"common\/v1\/metadata[.]proto"\s*;/;
+        push @violations, "$rel: common RequestMetadata/ResponseMetadata is deprecated; use foundation.v1.Metadata"
+          if $text =~ /\bcommon[.]v1[.](?:RequestMetadata|ResponseMetadata)\b/;
+      },
+      no_chdir => 1,
+    }, $api_protos);
   }
 
   my $migrations = "$target/migrations";

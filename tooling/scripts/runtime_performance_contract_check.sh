@@ -73,6 +73,18 @@ performance_script="$(first_existing \
   "$target/tooling/scripts/performance_check.sh" \
   "$target/scripts/checks/performance_check.sh" \
   "$target/foundation/tooling/scripts/performance_check.sh" || true)"
+frontend_profile_script="$(first_existing \
+  "$target/tooling/scripts/frontend_workbench_profile.sh" \
+  "$target/scripts/checks/frontend_workbench_profile.sh" \
+  "$target/foundation/tooling/scripts/frontend_workbench_profile.sh" || true)"
+vitest_runner="$(first_existing \
+  "$target/tooling/scripts/run_vitest.sh" \
+  "$target/scripts/checks/run_vitest.sh" \
+  "$target/foundation/tooling/scripts/run_vitest.sh" || true)"
+benchmark_history_script="$(first_existing \
+  "$target/tooling/scripts/benchmark_history.sh" \
+  "$target/scripts/checks/benchmark_history.sh" \
+  "$target/foundation/tooling/scripts/benchmark_history.sh" || true)"
 if [[ -z "${performance_script:-}" ]]; then
   fail "performance check script exists" "expected tooling/scripts/performance_check.sh or scripts/checks/performance_check.sh"
 else
@@ -86,6 +98,27 @@ else
   check_contains "performance runner resolves generated app module layout" "$performance_script" "foundation/server-kit/go"
   check_contains "performance runner resolves runtime-sdk module path" "$performance_script" "RUNTIME_SDK_GO"
   check_contains "performance runner resolves Vitest runner" "$performance_script" "RUN_VITEST"
+  check_contains "performance runner resolves frontend-kit module path" "$performance_script" "FRONTEND_KIT_TS"
+  check_contains "performance runner captures frontend workbench profile" "$performance_script" "FRONTEND_WORKBENCH_PROFILE"
+fi
+
+if [[ -z "${frontend_profile_script:-}" ]]; then
+  fail "frontend workbench profile script exists" "expected tooling/scripts/frontend_workbench_profile.sh or scripts/checks/frontend_workbench_profile.sh"
+else
+  check_contains "frontend profile captures PROFILE metrics" "$frontend_profile_script" "PROFILE"
+  check_contains "frontend profile writes benchmark results" "$frontend_profile_script" "benchmark-results"
+fi
+
+if [[ -z "${vitest_runner:-}" ]]; then
+  fail "Vitest runner exists" "expected tooling/scripts/run_vitest.sh or scripts/checks/run_vitest.sh"
+else
+  check_contains "Vitest runner supports GC-exposed profile runs" "$vitest_runner" "FOUNDATION_VITEST_EXPOSE_GC"
+fi
+
+if [[ -z "${benchmark_history_script:-}" ]]; then
+  fail "benchmark history script exists" "expected tooling/scripts/benchmark_history.sh or scripts/checks/benchmark_history.sh"
+else
+  check_contains "benchmark history captures frontend profile metrics" "$benchmark_history_script" "frontend-profile"
 fi
 
 rust_runtime_script="$(first_existing \

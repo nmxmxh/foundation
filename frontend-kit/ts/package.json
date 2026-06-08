@@ -16,6 +16,9 @@
     "typescript": "^5.9.3"
   },
   "scripts": {
+    "test": "../../tooling/scripts/run_vitest.sh . run",
+    "bench": "../../tooling/scripts/run_vitest.sh . bench --run",
+    "profile": "FOUNDATION_VITEST_EXPOSE_GC=1 ../../tooling/scripts/run_vitest.sh . run src/runtimeWorkbench.profile.test.ts --reporter=verbose",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   }
 }

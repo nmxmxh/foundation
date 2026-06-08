@@ -54,7 +54,30 @@ internal/service/<domain>/
 
 ### 3. Frontend Integration
 
-Your frontend connects through `@ovasabi/runtime-transport`, which owns WebSocket, HTTP fallback, binary envelopes, compression, and route metadata. Domain payloads are generated from your app protos into `frontend/src/types/protos`.
+Your frontend gets two generated paths from the same app protos:
+
+- `frontend/src/types/protos` contains protobuf TypeScript payloads for backend
+  service calls.
+- `frontend/src/generated/prototypeRuntime.ts` contains schema-derived dummy
+  data, tenant stores, live projection bindings, hooks, fixture states, and
+  benchmark fixtures.
+
+Run all communication generation together:
+
+```bash
+make communication-contracts
+```
+
+The scaffolded `frontend/src/stores/prototype.ts` creates an offline
+`offlinePrototypeRuntime` from generated stores. Use that path for UI
+prototypes, fixture-driven tests, and offline workflows before backend handlers
+are complete. When Hermes/live projection wiring is ready, pass a projection
+source to `createPrototypeRuntimeContext`; generated UI code should still read
+the same tenant stores.
+
+Transport calls go through `@ovasabi/runtime-transport`, which owns WebSocket,
+HTTP fallback, binary envelopes, compression, and route metadata. Domain
+payloads are generated from your app protos into `frontend/src/types/protos`.
 
 ```typescript
 import { createEnvelope } from '@ovasabi/runtime-transport'
@@ -68,6 +91,52 @@ const envelope = createEnvelope({
 ```
 
 See `foundation/runtime-transport/ts/` for TypeScript envelope utilities.
+
+The browser WASM template is a compatibility shim for legacy globals. Shared
+memory and low-latency compute should use the Rust `foundation/runtime-sdk`
+path, generated Cap'n Proto runtime contracts, workers, and benchmarks. Treat
+performance as measured evidence from your generated fixtures and target
+browsers, not a hard guarantee from the scaffold.
+
+Frontend prototype evidence commands:
+
+```bash
+make test-frontend
+make test-bench-frontend
+SCAFFOLD_SMOKE_FRONTEND=1 SCAFFOLD_SMOKE_INSTALL=1 make -C foundation check-scaffold-smoke
+```
+
+The scaffold smoke frontend path captures install/build/test logs, build/test
+timings, and bundle-size metrics under `foundation/test-results/` unless
+`SCAFFOLD_SMOKE_ARTIFACT_DIR` is provided.
+
+### 4. Local Full Test Path
+
+Use the inherited local path when you need to prove the app still works across
+generated contracts, backend code, frontend prototype stores, runtime/WASM
+artifacts, Hermes, Redis, and Postgres:
+
+```bash
+make test-local-full
+```
+
+That command regenerates communication contracts, runs Go unit tests, rebuilds
+runtime/WASM artifacts and the manifest, runs frontend tests through the
+Foundation runner, starts the scaffolded Docker test services, applies
+migrations, and runs integration tests with infrastructure marked as required.
+If the frontend declares an `e2e` or `test:e2e` script, it also runs that
+browser path; otherwise the e2e hook is skipped explicitly.
+
+Keep heavier service evidence opt-in:
+
+```bash
+make test-local-services
+```
+
+This extends the local full path with load tests and benchmark/allocation
+evidence. Use it before large runtime, transport, store, worker, or database
+changes, and capture logs in your normal artifact directory when running it in
+CI or a release branch.
 
 ## Detailed Checklist
 

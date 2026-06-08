@@ -6,8 +6,10 @@ Application-specific protocol buffer definitions.
 
 ```
 protos/
-├── common/v1/           # Shared types (metadata, pagination, errors)
-│   └── metadata.proto
+├── foundation/v1/       # Scaffolded copy of Foundation transport contracts
+│   ├── envelope.proto
+│   ├── metadata.proto
+│   └── projection.proto
 ├── <domain>/v1/         # Domain-specific contracts
 │   └── <domain>.proto
 └── _template/v1/        # Reference templates
@@ -26,7 +28,7 @@ Every mutating request MUST include shared metadata:
 
 ```protobuf
 message CreateFooRequest {
-  common.v1.RequestMetadata metadata = 1;  // Required
+  foundation.v1.Metadata metadata = 1;  // Required
   // ... domain fields
 }
 ```
@@ -38,6 +40,7 @@ message CreateFooRequest {
 
 ### 4. Hermes Projection Contract
 - App-owned domain protos remain in `api/protos/<domain>/v1`
+- Domain request and response messages use `foundation.v1.Metadata metadata = 1`
 - Foundation-owned transport and hotplane contracts live together in `foundation/runtime-transport/protos/foundation/v1`
 - The scaffolded `database.RuntimeStore` is wrapped with Hermes by default for bounded tenant/domain/collection StateStore reads
 - Projectors emit `foundation.v1.RecordMutationBatch` inside the Foundation `EventEnvelope`
@@ -111,7 +114,7 @@ See `_template/v1/example.proto` for a complete domain example with:
 - Entity definition
 - CRUD operations
 - Pagination
-- Proper metadata usage
+- Proper Foundation metadata usage
 
 ---
 *Foundation Proto Contracts v{{FOUNDATION_VERSION}}*

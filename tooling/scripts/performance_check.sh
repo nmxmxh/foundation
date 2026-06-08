@@ -37,8 +37,10 @@ RUNTIME_SDK_GO="$(first_existing_dir "$ROOT/runtime-sdk/go" "$ROOT/foundation/ru
 RUNTIME_TRANSPORT_GO="$(first_existing_dir "$ROOT/runtime-transport/go" "$ROOT/foundation/runtime-transport/go" || true)"
 RUNTIME_SDK_TS_BROWSER_HOST="$(first_existing_dir "$ROOT/runtime-sdk/ts/browser-host" "$ROOT/foundation/runtime-sdk/ts/browser-host" || true)"
 RUNTIME_TRANSPORT_TS="$(first_existing_dir "$ROOT/runtime-transport/ts" "$ROOT/foundation/runtime-transport/ts" || true)"
+FRONTEND_KIT_TS="$(first_existing_dir "$ROOT/frontend-kit/ts" "$ROOT/foundation/frontend-kit/ts" || true)"
 RUNTIME_SDK_RUST="$(first_existing_dir "$ROOT/runtime-sdk/rust" "$ROOT/foundation/runtime-sdk/rust" || true)"
 RUN_VITEST="$(first_existing_file "$ROOT/tooling/scripts/run_vitest.sh" "$ROOT/scripts/checks/run_vitest.sh" "$ROOT/foundation/tooling/scripts/run_vitest.sh" || true)"
+FRONTEND_WORKBENCH_PROFILE="$(first_existing_file "$ROOT/tooling/scripts/frontend_workbench_profile.sh" "$ROOT/scripts/checks/frontend_workbench_profile.sh" "$ROOT/foundation/tooling/scripts/frontend_workbench_profile.sh" || true)"
 
 require_dir() {
   local label="$1"
@@ -175,6 +177,20 @@ if [[ -n "$RUNTIME_SDK_TS_BROWSER_HOST" && -n "$RUN_VITEST" && -d "$RUNTIME_SDK_
 	"$RUN_VITEST" "$RUNTIME_SDK_TS_BROWSER_HOST" bench --run
 else
 	echo "skip runtime-sdk TS benchmarks: node_modules not installed"
+fi
+
+if [[ -n "$FRONTEND_KIT_TS" && -n "$RUN_VITEST" && -d "$FRONTEND_KIT_TS/node_modules" ]]; then
+	echo "== foundation frontend-kit workbench benchmarks =="
+	"$RUN_VITEST" "$FRONTEND_KIT_TS" bench --run src/runtimeWorkbench.bench.ts
+else
+	echo "skip frontend-kit workbench benchmarks: node_modules not installed"
+fi
+
+if [[ -n "$FRONTEND_WORKBENCH_PROFILE" ]]; then
+	echo "== foundation frontend-kit workbench allocation profile =="
+	"$FRONTEND_WORKBENCH_PROFILE" "$ROOT"
+else
+	echo "skip frontend workbench profile: script not found"
 fi
 
 if command -v cargo >/dev/null 2>&1; then

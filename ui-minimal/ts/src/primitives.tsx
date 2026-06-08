@@ -26,7 +26,7 @@ import React, {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import styled, { css, keyframes } from "styled-components";
+import { css, keyframes, styled } from "styled-components";
 
 import { useMinimalMotion } from "./motion";
 import { useMinimalTheme } from "./theme";

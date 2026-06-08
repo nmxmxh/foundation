@@ -248,8 +248,8 @@ function parseProtoFile(file, protoRoot) {
       continue;
     }
 
-    if (!hasRequestMetadata(message.body)) {
-      errors.push(`${relativeFile}: ${message.name} must declare common.v1.RequestMetadata metadata = 1`);
+    if (!hasFoundationMetadata(message.body)) {
+      errors.push(`${relativeFile}: ${message.name} must declare foundation.v1.Metadata metadata = 1`);
       continue;
     }
 
@@ -310,8 +310,8 @@ function findMatchingBrace(text, openIndex) {
   return -1;
 }
 
-function hasRequestMetadata(body) {
-  return /\b(?:[A-Za-z0-9_.]+\.)?RequestMetadata\s+metadata\s*=\s*1\s*;/.test(body);
+function hasFoundationMetadata(body) {
+  return /\bfoundation\.v1\.Metadata\s+metadata\s*=\s*1\s*;/.test(body);
 }
 
 function actionFromOperation(operation) {

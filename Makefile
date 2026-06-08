@@ -1,6 +1,6 @@
-.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-history lint verify docker-up docker-down migrate-up help \
-	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator \
-	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
+.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history lint verify docker-up docker-down migrate-up help \
+	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator \
+	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage
 
 .DEFAULT_GOAL := help
@@ -9,12 +9,15 @@ FOUNDATION_LINT_CHECKS := \
 	check-scaffold-manifest \
 	check-init-project \
 	check-update-project \
+	check-scaffold-smoke \
 	check-migration-seed-policy \
 	check-lifecycle-contract-generator \
+	check-frontend-prototype-generator \
 	check-contract-drift \
 	check-agent-contract \
 	check-practice-controls \
 	check-runtime-performance-contracts \
+	check-frontend-runtime-workbench \
 	check-formal-methods \
 	check-operational-excellence \
 	check-go-fix \
@@ -51,6 +54,7 @@ generate-contracts:
 	@echo "Generating shared runtime contracts..."
 	@if [ -x runtime-transport/scripts/generate_bindings.sh ]; then runtime-transport/scripts/generate_bindings.sh; fi
 	@if [ -x runtime-sdk/scripts/generate_system_bindings.sh ]; then runtime-sdk/scripts/generate_system_bindings.sh; fi
+	@node tooling/scripts/generate_runtime_contract_manifest.mjs
 
 build: test-go test-rust frontend-build
 
@@ -81,6 +85,7 @@ test-ts:
 	@if [ -d runtime-transport/ts/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-transport/ts run; else echo "Skipping runtime-transport/ts tests; run npm install first"; fi
 	@if [ -d runtime-sdk/ts/browser-host/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host run; else echo "Skipping runtime-sdk/ts/browser-host tests; run npm install first"; fi
 	@if [ -d runtime-native/ts/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-native/ts run; else echo "Skipping runtime-native/ts tests; run npm install first"; fi
+	@if [ -d frontend-kit/ts/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh frontend-kit/ts run; else echo "Skipping frontend-kit/ts tests; run npm install first"; fi
 
 test-rust: test-rust-sdk test-native-rust
 
@@ -104,7 +109,7 @@ test-native-rust:
 check-rust:
 	@scripts/check-rust.sh .
 
-test-bench: test-bench-go test-bench-native-rust
+test-bench: test-bench-go test-bench-native-rust test-bench-frontend
 
 test-bench-history:
 	@tooling/scripts/benchmark_history.sh .
@@ -117,6 +122,15 @@ test-bench-go:
 test-bench-native-rust:
 	@echo "Running native GPU/runtime Rust benchmark simulation..."
 	@cargo run --manifest-path runtime-native/rust/Cargo.toml --release --bin native_flow_sim
+
+test-bench-frontend:
+	@echo "Running frontend workbench benchmarks and allocation profile..."
+	@if [ -d frontend-kit/ts/node_modules ]; then \
+		tooling/scripts/run_vitest.sh frontend-kit/ts bench --run src/runtimeWorkbench.bench.ts; \
+		tooling/scripts/frontend_workbench_profile.sh .; \
+	else \
+		echo "Skipping frontend workbench benchmarks; run npm install in frontend-kit/ts first"; \
+	fi
 
 lint:
 	@echo "Running foundation checks..."
@@ -153,6 +167,9 @@ check-migration-seed-policy:
 check-lifecycle-contract-generator:
 	@tests/lifecycle_contract_generator_test.sh
 
+check-frontend-prototype-generator:
+	@tests/frontend_prototype_generator_test.sh
+
 check-contract-drift:
 	@tooling/scripts/contract_drift_check.sh .
 
@@ -164,6 +181,9 @@ check-practice-controls:
 
 check-runtime-performance-contracts:
 	@tooling/scripts/runtime_performance_contract_check.sh .
+
+check-frontend-runtime-workbench:
+	@tooling/scripts/frontend_runtime_workbench_check.sh .
 
 check-formal-methods:
 	@tooling/scripts/formal_methods_check.sh .
@@ -258,6 +278,7 @@ help:
 	@echo "  make test-rust           Run runtime-sdk and runtime-native Rust tests"
 	@echo "  make check-rust          Run Rust fmt, clippy, practice checks, and tests"
 	@echo "  make test-bench          Run bounded local Foundation benchmarks"
+	@echo "  make test-bench-frontend Run frontend workbench benchmarks and allocation profile"
 	@echo "  make test-load-research  Run opt-in staged 1K->1M local load research"
 	@echo "  make test-service-backed-load  Run opt-in staged service-backed load research"
 	@echo "  make test-bench-native-rust  Run native GPU/runtime Rust benchmark simulation"
@@ -267,6 +288,8 @@ help:
 	@echo "  make check-agent-contract  Run the agent workflow/documentation contract check"
 	@echo "  make check-practice-controls  Validate the machine-readable practice controls matrix"
 	@echo "  make check-runtime-performance-contracts  Validate low-level runtime performance evidence hooks"
+	@echo "  make check-frontend-runtime-workbench  Validate frontend runtime/workbench separation"
+	@echo "  make check-frontend-prototype-generator  Validate generated prototype schemas, stores, hooks, fixtures, and benchmark fixtures"
 	@echo "  make check-formal-methods  Validate formal-method templates and spec coverage"
 	@echo "  make check-operational-excellence  Validate DORA/SPACE/SLSA/OTel delivery evidence hooks"
 	@echo "  make check-database-practices  Run a single foundation check"

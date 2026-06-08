@@ -264,7 +264,7 @@ wasm_compile() {
   (
     cd "$module_dir"
     export GOCACHE="$go_cache"
-    GOOS=js GOARCH=wasm go test -c -o "${TMPDIR:-/tmp}/${output_name}.wasm" "$package_path"
+    GOWORK=off GOOS=js GOARCH=wasm go test -c -o "${TMPDIR:-/tmp}/${output_name}.wasm" "$package_path"
   )
 }
 

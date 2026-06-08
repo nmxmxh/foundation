@@ -63,7 +63,6 @@ templates/backend/tests/testutil/storage.go	tests/testutil/storage.go	full,backe
 templates/backend/tests/testutil/storage_env_test.go	tests/testutil/storage_env_test.go	full,backend	always	force
 templates/api/README.md	api/README.md	full,backend	always	create
 templates/api/protos/README.md	api/protos/README.md	full,backend	always	create
-templates/api/protos/common/v1/metadata.proto	api/protos/common/v1/metadata.proto	full,backend	always	create
 templates/api/protos/_template/v1/example.proto	api/protos/_template/v1/example.proto	full,backend	always	create
 templates/frontend/package.json	{{FRONTEND_ROOT}}/package.json	full,frontend	always	create
 templates/frontend/tsconfig.json	{{FRONTEND_ROOT}}/tsconfig.json	full,frontend	always	create
@@ -85,6 +84,7 @@ templates/frontend/src/features/.gitkeep	{{FRONTEND_ROOT}}/src/features/.gitkeep
 templates/frontend/src/hooks/useApi.ts	{{FRONTEND_ROOT}}/src/hooks/useApi.ts	full,frontend	always	create
 templates/frontend/src/lib/api.ts	{{FRONTEND_ROOT}}/src/lib/api.ts	full,frontend	always	create
 templates/frontend/src/stores/app.ts	{{FRONTEND_ROOT}}/src/stores/app.ts	full,frontend	always	create
+templates/frontend/src/stores/prototype.ts	{{FRONTEND_ROOT}}/src/stores/prototype.ts	full,frontend	always	create
 templates/frontend/src/styles/theme.ts	{{FRONTEND_ROOT}}/src/styles/theme.ts	full,frontend	always	create
 templates/frontend/src/test/setup.ts	{{FRONTEND_ROOT}}/src/test/setup.ts	full,frontend	always	create
 templates/frontend/src/App.test.tsx	{{FRONTEND_ROOT}}/src/App.test.tsx	full,frontend	always	create

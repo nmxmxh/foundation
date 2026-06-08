@@ -19,7 +19,7 @@ Your application needs domain-specific contracts. Foundation provides the transp
 
 - [ ] Identify 3-5 core domains for your application
 - [ ] Create proto files in `api/protos/<domain>/v1/`
-- [ ] Define shared metadata in `api/protos/common/v1/metadata.proto`
+- [ ] Use `foundation.v1.Metadata metadata = 1` in request and response messages
 - [ ] Run `make proto` to generate Go bindings
 
 **Domain Examples by Category:**

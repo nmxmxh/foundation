@@ -13,6 +13,7 @@ const baseCaps: RuntimeLanePlannerCapabilities = {
   nativeFfi: true,
   nativeSharedMemory: true,
   cpuSimd: true,
+  webSocketTransport: true,
 };
 
 describe("runtime lane planner", () => {

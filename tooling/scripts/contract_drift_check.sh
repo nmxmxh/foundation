@@ -98,6 +98,82 @@ check_lifecycle_contracts() {
   fi
 }
 
+check_frontend_prototype_runtime() {
+  [[ -d "$target/api/protos" ]] || return 0
+  [[ -d "$target/frontend/src" ]] || return 0
+
+  local generator=""
+  local generator_timeout_sec="${FRONTEND_PROTOTYPE_RUNTIME_CHECK_TIMEOUT_SEC:-${FOUNDATION_LINT_CHECK_TIMEOUT_SEC:-300}}"
+  if [[ -f "$target/scripts/checks/generate_frontend_prototype_runtime.mjs" ]]; then
+    generator="$target/scripts/checks/generate_frontend_prototype_runtime.mjs"
+  elif generator="$(resolve_path "foundation/tooling/scripts/generate_frontend_prototype_runtime.mjs" 2>/dev/null)"; then
+    :
+  elif generator="$(resolve_path "tooling/scripts/generate_frontend_prototype_runtime.mjs" 2>/dev/null)"; then
+    :
+  else
+    echo "[FAIL] frontend prototype runtime generator present"
+    echo "  missing: foundation/tooling/scripts/generate_frontend_prototype_runtime.mjs"
+    failed=1
+    return 0
+  fi
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "[FAIL] frontend prototype runtime generator requires node"
+    failed=1
+    return 0
+  fi
+
+  if run_with_timeout "$generator_timeout_sec" node "$generator" \
+      --proto-root "$target/api/protos" \
+      --out "$target/frontend/src/generated/prototypeRuntime.ts" \
+      --check; then
+    :
+  else
+    failed=1
+  fi
+}
+
+check_runtime_contract_manifest() {
+  local generator schema_root out_path generator_timeout_sec
+  if ! generator="$(resolve_path "foundation/tooling/scripts/generate_runtime_contract_manifest.mjs" 2>/dev/null)"; then
+    if ! generator="$(resolve_path "tooling/scripts/generate_runtime_contract_manifest.mjs" 2>/dev/null)"; then
+      echo "[FAIL] runtime contract manifest generator present"
+      echo "  missing: foundation/tooling/scripts/generate_runtime_contract_manifest.mjs"
+      failed=1
+      return 0
+    fi
+  fi
+
+  if ! schema_root="$(resolve_path "foundation/runtime-sdk/protocols/system/v1" 2>/dev/null)"; then
+    if ! schema_root="$(resolve_path "runtime-sdk/protocols/system/v1" 2>/dev/null)"; then
+      return 0
+    fi
+  fi
+
+  if ! out_path="$(resolve_path "foundation/runtime-sdk/ts/browser-host/src/generated/runtimeContracts.ts" 2>/dev/null)"; then
+    if ! out_path="$(resolve_path "runtime-sdk/ts/browser-host/src/generated/runtimeContracts.ts" 2>/dev/null)"; then
+      echo "[OK] runtime contract manifest not committed: foundation/runtime-sdk/ts/browser-host/src/generated/runtimeContracts.ts"
+      return 0
+    fi
+  fi
+
+  if ! command -v node >/dev/null 2>&1; then
+    echo "[FAIL] runtime contract manifest generator requires node"
+    failed=1
+    return 0
+  fi
+
+  generator_timeout_sec="${RUNTIME_CONTRACT_MANIFEST_CHECK_TIMEOUT_SEC:-${FOUNDATION_LINT_CHECK_TIMEOUT_SEC:-300}}"
+  if run_with_timeout "$generator_timeout_sec" node "$generator" \
+      --schema-root "$schema_root" \
+      --out "$out_path" \
+      --check; then
+    :
+  else
+    failed=1
+  fi
+}
+
 run_with_timeout() {
   local timeout_sec="$1"
   shift
@@ -161,6 +237,8 @@ check_generated_if_present \
 if resolve_path "foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp" >/dev/null; then
   check_exists "runtime sdk generation script present" "foundation/runtime-sdk/scripts/generate_system_bindings.sh"
   check_exists "runtime shared arena contract present" "foundation/runtime-sdk/protocols/system/v1/runtime_shared_arena.capnp"
+  check_exists "runtime syscall contract present" "foundation/runtime-sdk/protocols/system/v1/runtime_syscall.capnp"
+  check_exists "runtime compute contract present" "foundation/runtime-sdk/protocols/system/v1/runtime_compute.capnp"
   check_generated_if_present \
     "foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp" \
     "foundation/runtime-sdk/go/runtimehost/generated/runtime_buffer_gen.go"
@@ -170,6 +248,7 @@ if resolve_path "foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp
   check_generated_if_present \
     "foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp" \
     "foundation/runtime-sdk/rust/crates/ovrt-core/src/generated.rs"
+  check_runtime_contract_manifest
 else
   echo "[OK] runtime-sdk not vendored for this project"
 fi
@@ -197,6 +276,7 @@ else
 fi
 
 check_lifecycle_contracts
+check_frontend_prototype_runtime
 
 if [[ "$app_proto_count" -gt 0 && -d "$target/internal" ]]; then
   typed_hits="$(rg -n "typedHandler|GetTypedHandlers|BuildTypedServiceHandlers|TypedServiceHandlers|func \\(s \\*Service\\) [A-Za-z0-9_]+V1\\(ctx context\\.Context, req \\*.*v1\\.[A-Za-z0-9_]+Request\\)" "$target/internal" \

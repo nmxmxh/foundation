@@ -3,7 +3,9 @@
 // Domain API contracts belong in generated protobuf types under:
 //   src/types/protos
 //
-// Run `make proto-ts` from the project root after changing files in api/protos.
+// Run `make communication-contracts` from the project root after changing files
+// in api/protos. That regenerates protobuf TypeScript plus frontend prototype
+// stores, hooks, fixture states, and benchmark fixtures.
 
 // API response types
 export interface ApiResponse<T> {

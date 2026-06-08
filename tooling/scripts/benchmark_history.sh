@@ -41,6 +41,9 @@ set -e
       }
       printf "%s\t%s\t\t\trust\n", bench, $(NF-1)
     }
+    /^PROFILE\t/ {
+      printf "%s\t\t%s\t\tfrontend-profile\n", $2, $3
+    }
     NF >= 11 && $(NF-1) ~ /%$/ && $(NF) ~ /^[0-9]+$/ && $(NF-9) ~ /^[0-9][0-9,.]*$/ && $(NF-6) ~ /^[0-9.]+$/ {
       bench=""
       for (i=2; i<=NF-10; i++) {

@@ -24,10 +24,21 @@ fi
 
 EOF
   awk '
+    function export_name(name, out, i, ch) {
+      if (name ~ /^[A-Z0-9_]+$/) return name
+      out=""
+      for (i=1; i<=length(name); i++) {
+        ch=substr(name, i, 1)
+        if (ch ~ /[A-Z]/ && i > 1) out=out "_"
+        out=out toupper(ch)
+      }
+      gsub(/__+/, "_", out)
+      return out
+    }
     /^const / {
       value=$5
       gsub(/;/, "", value)
-      printf "pub const %s: u32 = %s;\n", $2, value
+      printf "pub const %s: u32 = %s;\n", export_name($2), value
     }
   ' "${schema_paths[@]}"
 } > "$RUST_OUT"
@@ -38,10 +49,21 @@ EOF
 
 EOF
   awk '
+    function export_name(name, out, i, ch) {
+      if (name ~ /^[A-Z0-9_]+$/) return name
+      out=""
+      for (i=1; i<=length(name); i++) {
+        ch=substr(name, i, 1)
+        if (ch ~ /[A-Z]/ && i > 1) out=out "_"
+        out=out toupper(ch)
+      }
+      gsub(/__+/, "_", out)
+      return out
+    }
     /^const / {
       value=$5
       gsub(/;/, "", value)
-      printf "export const %s = %s;\n", $2, value
+      printf "export const %s = %s;\n", export_name($2), value
     }
   ' "${schema_paths[@]}"
 } > "$TS_OUT"
@@ -54,10 +76,21 @@ package generated
 
 EOF
   awk '
+    function export_name(name, out, i, ch) {
+      if (name ~ /^[A-Z0-9_]+$/) return name
+      out=""
+      for (i=1; i<=length(name); i++) {
+        ch=substr(name, i, 1)
+        if (ch ~ /[A-Z]/ && i > 1) out=out "_"
+        out=out toupper(ch)
+      }
+      gsub(/__+/, "_", out)
+      return out
+    }
     /^const / {
       value=$5
       gsub(/;/, "", value)
-      printf "const %s uint32 = %s\n", $2, value
+      printf "const %s uint32 = %s\n", export_name($2), value
     }
   ' "${schema_paths[@]}"
 } > "$GO_OUT"

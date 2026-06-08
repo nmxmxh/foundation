@@ -25,6 +25,7 @@ export type RuntimeExecutionLane =
   | "wasm-sab"
   | "wasm-transfer"
   | "packet-ring"
+  | "websocket"
   | "stream"
   | "http";
 
@@ -41,6 +42,7 @@ export type RuntimeLanePlannerCapabilities = Pick<
   hardwareMedia?: boolean;
   specializedAi?: boolean;
   packetRing?: boolean;
+  webSocketTransport?: boolean;
 };
 
 export type RuntimeLanePlanInput = {
@@ -123,7 +125,11 @@ export const planRuntimeLane = (input: RuntimeLanePlanInput): RuntimeLanePlan =>
     return plan("wasm-transfer", roundBatch(batchItems, 8), "single-copy", "bounded-heap", "microseconds", deadlineRisk(deadlineMs, 0.5), false, "browser worker fallback can transfer bounded payloads without SAB", fallbacks);
   }
 
-  return plan("http", 1, "bounded-copy", "runtime-managed", "milliseconds", deadlineRisk(deadlineMs, 5), false, "no lower-level local lane is available for this trust/locality/capability mix", fallbacks);
+  if (input.capabilities.webSocketTransport) {
+    return plan("websocket", roundBatch(batchItems, 4), "bounded-copy", "runtime-managed", "milliseconds", deadlineRisk(deadlineMs, 5), false, "server websocket transport is the lowest available controlled runtime lane", fallbacks);
+  }
+
+  return plan("http", 1, "bounded-copy", "runtime-managed", "milliseconds", deadlineRisk(deadlineMs, 10), false, "no lower-level local or controlled transport lane is available for this trust/locality/capability mix", fallbacks);
 };
 
 const shouldUseGpu = (input: RuntimeLanePlanInput, byteLength: number, batchItems: number, deadlineMs: number): boolean => {
@@ -214,6 +220,9 @@ const fallbackOrder = (input: RuntimeLanePlanInput): RuntimeExecutionLane[] => {
   }
   if (input.capabilities.packetRing) {
     lanes.push("packet-ring");
+  }
+  if (input.capabilities.webSocketTransport) {
+    lanes.push("websocket");
   }
   lanes.push("stream", "http");
   return [...new Set(lanes)];

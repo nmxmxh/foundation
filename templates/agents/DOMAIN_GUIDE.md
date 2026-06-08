@@ -84,7 +84,7 @@ package <domain>.v1;
 option go_package = "github.com/ovasabi/<project>/api/protos/<domain>/v1;<domain>v1";
 
 import "google/protobuf/timestamp.proto";
-import "common/v1/metadata.proto";
+import "foundation/v1/metadata.proto";
 
 // Core entity
 message <Entity> {
@@ -98,59 +98,59 @@ message <Entity> {
 
 // Request messages (what clients send)
 message Create<Entity>Request {
-  common.v1.RequestMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   string name = 11;
   // ... creation fields
 }
 
 message Get<Entity>Request {
-  common.v1.RequestMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   string id = 2;
 }
 
 message List<Entity>Request {
-  common.v1.RequestMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   int32 page_size = 11;
   string page_token = 12;
 }
 
 message Update<Entity>Request {
-  common.v1.RequestMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   string id = 2;
   string name = 11;
   // ... mutable fields
 }
 
 message Delete<Entity>Request {
-  common.v1.RequestMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   string id = 2;
 }
 
 // Response messages (what server returns)
 message Create<Entity>Response {
-  common.v1.ResponseMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   <Entity> entity = 2;
 }
 
 message Get<Entity>Response {
-  common.v1.ResponseMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   <Entity> entity = 2;
 }
 
 message List<Entity>Response {
-  common.v1.ResponseMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   repeated <Entity> entities = 2;
   string next_page_token = 3;
   int32 total_count = 4;
 }
 
 message Update<Entity>Response {
-  common.v1.ResponseMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   <Entity> entity = 2;
 }
 
 message Delete<Entity>Response {
-  common.v1.ResponseMetadata metadata = 1;
+  foundation.v1.Metadata metadata = 1;
   string id = 2;
   bool deleted = 3;
 }
@@ -162,33 +162,43 @@ message Delete<Entity>Response {
 make communication-contracts
 ```
 
-## Common Metadata Pattern
+## Foundation Metadata Pattern
 
-All requests should include metadata for tracing and context:
+All request and response messages should include Foundation metadata for
+tracing, tenant scope, idempotency, tags, source references, and bounded
+attributes:
 
 ```protobuf
-// api/protos/common/v1/metadata.proto
+// foundation/runtime-transport/protos/foundation/v1/metadata.proto
 syntax = "proto3";
 
-package common.v1;
+package foundation.v1;
 
-option go_package = "github.com/ovasabi/<project>/api/protos/common/v1;commonv1";
+option go_package = "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1;foundationpb";
 
-import "google/protobuf/timestamp.proto";
-
-message RequestMetadata {
-  string correlation_id = 1;      // Request tracing
-  string idempotency_key = 2;     // Duplicate prevention
-  string device_id = 3;           // Client device identifier
-  string user_id = 4;             // Authenticated user (server-set)
-  string organization_id = 5;     // Tenant context (server-set)
-  google.protobuf.Timestamp timestamp = 6;
+message GlobalContext {
+  string user_id = 1;
+  string session_id = 2;
+  string source = 3;
+  string device_id = 4;
+  string organization_id = 5;
+  string role_id = 6;
 }
 
-message ResponseMetadata {
-  string correlation_id = 1;
-  string request_id = 2;
-  int64 processing_time_ms = 3;
+message Metadata {
+  GlobalContext global_context = 1;
+  repeated string tags = 2;
+  repeated string categories = 5;
+  string knowledge_graph = 6;
+  string source_ref = 7;
+  string correlation_id = 10;
+  string request_id = 12;
+  string idempotency_key = 13;
+  string channel = 16;
+  string locale = 17;
+  string tenant_region = 18;
+  map<string, string> attributes = 19;
+  bytes extras_json = 20;
 }
 ```
 
@@ -268,7 +278,7 @@ The server-kit handles this automatically. Clients can request binary format wit
 ## Quick Reference: Domain Checklist
 
 - [ ] Create `api/protos/<domain>/v1/<domain>.proto`
-- [ ] Include `common.v1.RequestMetadata` in requests
+- [ ] Include `foundation.v1.Metadata metadata = 1` in requests and responses
 - [ ] Follow event naming: `<domain>:<action>:v1:<state>`
 - [ ] Run `make communication-contracts` to generate bindings and lifecycle tests
 - [ ] Create `internal/service/<domain>/service.go`

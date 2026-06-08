@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-unit test-coverage test-integration test-load test-bench test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts frontend-prototype-runtime runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -8,7 +8,7 @@ WASM_PUBLIC_DIR ?= frontend/public
 WASM_MODULE_DIR ?= $(WASM_PUBLIC_DIR)/modules
 WASM_MANIFEST ?= $(WASM_PUBLIC_DIR)/runtime/wasm-manifest.json
 WASM_OPT ?= wasm-opt
-WASM_OPT_FLAGS ?= -Oz --enable-bulk-memory-opt
+WASM_OPT_FLAGS ?= -Oz --enable-bulk-memory-opt --enable-nontrapping-float-to-int
 BROTLI ?= brotli
 RUST_TARGET ?= wasm32-unknown-unknown
 RUST_WASM_PROFILE ?= release
@@ -147,6 +147,20 @@ proto-ts:
 		fi; \
 	done
 
+frontend-prototype-runtime:
+	@echo "Generating frontend prototype runtime..."
+	@[ -d frontend/src ] || exit 0
+	@[ -d $(PROTO_PATH) ] || exit 0
+	@if [ -f scripts/checks/generate_frontend_prototype_runtime.mjs ]; then \
+		node scripts/checks/generate_frontend_prototype_runtime.mjs --proto-root "$(PROTO_PATH)" --out "frontend/src/generated/prototypeRuntime.ts"; \
+	elif [ -f foundation/tooling/scripts/generate_frontend_prototype_runtime.mjs ]; then \
+		node foundation/tooling/scripts/generate_frontend_prototype_runtime.mjs --proto-root "$(PROTO_PATH)" --out "frontend/src/generated/prototypeRuntime.ts"; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -f "$(FOUNDATION_PATH)/tooling/scripts/generate_frontend_prototype_runtime.mjs" ]; then \
+		node "$(FOUNDATION_PATH)/tooling/scripts/generate_frontend_prototype_runtime.mjs" --proto-root "$(PROTO_PATH)" --out "frontend/src/generated/prototypeRuntime.ts"; \
+	else \
+		echo "Frontend prototype runtime generator not found; skipping"; \
+	fi
+
 foundation-transport-proto:
 	@if [ -x foundation/runtime-transport/scripts/generate_bindings.sh ]; then \
 		foundation/runtime-transport/scripts/generate_bindings.sh; \
@@ -156,7 +170,7 @@ foundation-transport-proto:
 		echo "Runtime transport binding generator not found; skipping"; \
 	fi
 
-communication-contracts: proto proto-ts lifecycle-contracts foundation-transport-proto runtime-bindings
+communication-contracts: proto proto-ts frontend-prototype-runtime lifecycle-contracts foundation-transport-proto runtime-bindings
 	@echo "Communication contracts generated"
 
 lifecycle-contracts:
@@ -192,7 +206,7 @@ build-server:
 		echo "No Go module; skipping server build"; \
 	fi
 
-build-frontend:
+build-frontend: frontend-prototype-runtime
 	@if [ -f frontend/package.json ]; then \
 		zsh $(FRONTEND_SCRIPT_RUNNER) . build; \
 	else \
@@ -319,6 +333,26 @@ delivery-metrics:
 	fi
 
 test: test-unit test-frontend
+
+test-local-full: communication-contracts test-unit test-wasm test-frontend test-integration test-e2e
+	@echo "Local full test path complete"
+
+test-local-services: test-local-full test-load test-bench
+	@echo "Opt-in local service evidence path complete"
+
+test-wasm: build-runtime
+	@echo "Runtime and WASM artifacts are current"
+
+test-e2e: communication-contracts
+	@if [ -f frontend/package.json ]; then \
+		if grep -Eq '"e2e"[[:space:]]*:' frontend/package.json; then \
+			zsh $(FRONTEND_SCRIPT_RUNNER) . e2e; \
+		else \
+			zsh $(FRONTEND_SCRIPT_RUNNER) . test:e2e; \
+		fi; \
+	else \
+		echo "No frontend package; skipping frontend e2e"; \
+	fi
 
 test-unit:
 	@if [ -f go.mod ]; then \
@@ -474,10 +508,22 @@ test-bench:
 	else \
 		echo "No Go module; skipping benchmarks"; \
 	fi
+	@$(MAKE) --no-print-directory test-bench-frontend
+
+test-bench-frontend: frontend-prototype-runtime
+	@if [ -x scripts/checks/frontend_workbench_profile.sh ]; then \
+		scripts/checks/frontend_workbench_profile.sh .; \
+	elif [ -x foundation/tooling/scripts/frontend_workbench_profile.sh ]; then \
+		foundation/tooling/scripts/frontend_workbench_profile.sh .; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -x "$(FOUNDATION_PATH)/tooling/scripts/frontend_workbench_profile.sh" ]; then \
+		"$(FOUNDATION_PATH)/tooling/scripts/frontend_workbench_profile.sh" .; \
+	else \
+		echo "No frontend workbench profile target found; skipping"; \
+	fi
 
 test-all: lint-foundation test-unit test-integration test-frontend
 
-test-frontend:
+test-frontend: frontend-prototype-runtime
 	@if [ -f frontend/package.json ]; then \
 		FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" FOUNDATION_VITEST_SERIAL="$(FOUNDATION_VITEST_SERIAL)" zsh $(FRONTEND_SCRIPT_RUNNER) . test; \
 	else \
@@ -612,7 +658,7 @@ check-rust:
 		$(MAKE) --no-print-directory check-rust-runtime-practices; \
 	fi
 
-lint-frontend:
+lint-frontend: frontend-prototype-runtime
 	@if [ -f frontend/package.json ]; then \
 		zsh $(FRONTEND_SCRIPT_RUNNER) . lint; \
 	else \
@@ -791,10 +837,15 @@ help:
 	@echo "  build            - Build backend and frontend"
 	@echo "  build-runtime    - Generate runtime bindings, build WASM artifacts, and emit runtime manifest"
 	@echo "  test             - Run unit and frontend tests"
+	@echo "  test-local-full  - Regenerate contracts, run backend/frontend/runtime/WASM tests, and run DB/Redis/Hermes integration"
+	@echo "  test-local-services - Run local full path plus opt-in load and benchmark evidence"
+	@echo "  test-wasm        - Generate runtime bindings, build WASM artifacts, and emit runtime manifest"
+	@echo "  test-e2e         - Run optional frontend e2e script when declared"
 	@echo "  test-unit        - Run Go tests without integration tag"
 	@echo "  test-integration - Start scaffolded DB/Redis, migrate, and run integration tests"
 	@echo "  test-load        - Run opt-in DB/Redis/queue recurring load tests"
-	@echo "  test-bench       - Run Go benchmarks with benchmem"
+	@echo "  test-bench       - Run Go benchmarks plus frontend workbench profile where available"
+	@echo "  test-bench-frontend - Run frontend workbench allocation profile"
 	@echo "  test-all         - Run foundation checks, unit tests, integration tests, and frontend tests"
 	@echo "  lint             - Run linters and scaffold checks"
 	@echo "  check-rust       - Run Rust fmt, clippy, runtime practices, and tests"
@@ -805,6 +856,7 @@ help:
 	@echo "  foundation-status - Print foundation metadata"
 	@echo "  runtime-bindings  - Regenerate runtime-sdk buffer bindings"
 	@echo "  lifecycle-contracts - Generate proto-derived VerifyCommandLifecycle tests"
+	@echo "  frontend-prototype-runtime - Generate proto-derived frontend prototype stores, hooks, fixtures, and benchmarks"
 	@echo "  wasm-manifest     - Emit frontend runtime/WASM artifact manifest"
 	@echo "  native-dev        - Start the Tauri native shell against the frontend dev server"
 	@echo "  native-build      - Build runtime, frontend, and native shell"

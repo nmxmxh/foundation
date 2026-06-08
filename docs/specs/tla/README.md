@@ -17,6 +17,9 @@ Default template set:
    watermarks, and repair.
 3. `WebSocketBackpressure.tla`: authenticated subscriptions, bounded write
    queues, slow-client policy, and disconnect cleanup.
+4. `FrontendLiveProjection.tla`: generated frontend stores connected to Hermes
+   projections, including loading state, buffered live updates, tenant
+   rejection, disconnect cleanup, and monotonic versions.
 
 The templates are not production proofs. They are executable design contracts:
 name the visible state, name the hidden state, then map every invariant to a

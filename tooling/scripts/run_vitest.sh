@@ -8,6 +8,7 @@ fi
 
 package_dir="$1"
 shift
+package_dir="$(cd "$package_dir" && pwd)"
 
 is_codex_bundled_node() {
   local node_path="$1"
@@ -54,9 +55,17 @@ if [[ ! -d "$package_dir/node_modules" ]]; then
   exit 0
 fi
 
-if [[ ! -f "$package_dir/node_modules/vitest/dist/cli.js" ]]; then
-  echo "Skipping ${package_dir}: vitest is not installed"
-  exit 0
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+FOUNDATION_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+vitest_cli="$package_dir/node_modules/vitest/dist/cli.js"
+if [[ ! -f "$vitest_cli" ]]; then
+  shared_vitest="$FOUNDATION_DIR/runtime-sdk/ts/browser-host/node_modules/vitest/dist/cli.js"
+  if [[ -f "$shared_vitest" ]]; then
+    vitest_cli="$shared_vitest"
+  else
+    echo "Skipping ${package_dir}: vitest is not installed"
+    exit 0
+  fi
 fi
 
 if ! node_bin="$(find_vitest_node)"; then
@@ -94,6 +103,10 @@ fi
     fi
   fi
   printf '[RUN] vitest %s %s\n' "$package_dir" "${args[*]}"
-  "$node_bin" ./node_modules/vitest/dist/cli.js "${args[@]}"
+  node_args=()
+  if [[ "${FOUNDATION_VITEST_EXPOSE_GC:-0}" == "1" ]]; then
+    node_args+=("--expose-gc")
+  fi
+  "$node_bin" "${node_args[@]}" "$vitest_cli" "${args[@]}"
   printf '[OK] vitest %s\n' "$package_dir"
 )
