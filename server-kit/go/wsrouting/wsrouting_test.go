@@ -849,3 +849,73 @@ func BenchmarkRouterForEachLocalValue1024(b *testing.B) {
 		}
 	}
 }
+
+type mockSingleflightRedisClient struct {
+	redis.Client
+	mu        sync.Mutex
+	incrCount int
+	pubCount  int
+	delay     time.Duration
+}
+
+func (m *mockSingleflightRedisClient) Incr(ctx context.Context, key string) (int64, error) {
+	m.mu.Lock()
+	m.incrCount++
+	m.mu.Unlock()
+	time.Sleep(m.delay)
+	return 1, nil
+}
+
+func (m *mockSingleflightRedisClient) Publish(ctx context.Context, channel string, message []byte) error {
+	m.mu.Lock()
+	m.pubCount++
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *mockSingleflightRedisClient) Expire(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	return true, nil
+}
+
+func (m *mockSingleflightRedisClient) Close() error { return nil }
+
+func TestRouter_Register_SingleflightCoalescing(t *testing.T) {
+	mockClient := &mockSingleflightRedisClient{
+		delay: 50 * time.Millisecond,
+	}
+	r := NewRouter(mockClient, "server-1")
+	ctx := context.Background()
+
+	const concurrency = 10
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+
+	for i := range concurrency {
+		go func(id int) {
+			defer wg.Done()
+			err := r.Register(ctx, ConnectionInfo{
+				ConnectionID: fmt.Sprintf("conn-%d", id),
+				DeviceID:     "device-sf-1",
+				UserID:       "user-sf-1",
+			})
+			if err != nil {
+				t.Errorf("Register failed: %v", err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	mockClient.mu.Lock()
+	incrs := mockClient.incrCount
+	pubs := mockClient.pubCount
+	mockClient.mu.Unlock()
+
+	// Since they are concurrent and same DeviceID, singleflight should coalesce them to 1.
+	if incrs > 2 { // Give a tiny buffer for scheduling, but normally 1.
+		t.Errorf("expected Incr calls to be coalesced, got %d", incrs)
+	}
+	if pubs > 2 {
+		t.Errorf("expected Publish calls to be coalesced, got %d", pubs)
+	}
+}

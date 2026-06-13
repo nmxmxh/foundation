@@ -194,6 +194,9 @@ This document tracks the deliberate performance and architecture carryovers fold
 - **Memory Client Batch Allocation Reduction**: reused buffer allocations within the Redis memory client when retrieving key arrays.
 - **Lazy Metadata Deserialization**: Binary envelope decoders (`FromBinary`/`FromBatchBinary`) now defer metadata map creation by utilizing a `lazyMetadata` field, materializing the map only when `MaterializeMetadata()` is explicitly called. A zero-allocation fast-path validation is executed directly on the un-materialized protobuf structure.
 - **Direct Struct Reflection Mapping**: Added direct `reflect.Struct` mapping support in `extension.valueFromReflect` to dynamically convert Go structs to `extension.Object` maps without a heavy `json.Marshal`/`json.Unmarshal` round-trip fallback.
+- **Binary Envelope Allocation Regression Gates**: Added regression check test case ensuring binary envelope decoding allocations remain bounded under 10 allocs/op to prevent performance drift.
+- **WebSocket Routing Singleflight Coalescer**: Implemented singleflight coalescing keyed by Device ID in route registration to eliminate Redis connection lock storm bottlenecks during reconnect spikes.
+- **Columnar Projection Lane Design**: Authored specification and interface layout for Arrow-compatible Columnar Projection Lane (Structure-of-Arrays) in Hermes to optimize scan-heavy analytical telemetry queries.
 
 ## Deferred behind stubs
 

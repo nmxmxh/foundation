@@ -283,124 +283,92 @@ func (p *partition) getRecord(ctx context.Context, query Query, recordID string,
 }
 
 func (p *partition) listRecords(ctx context.Context, query Query, fence Fence) ([]database.DomainRecord, error) {
-	if err := p.waitForStable(ctx); err != nil {
-		return nil, err
-	}
-	if err := p.checkFence(fence); err != nil {
-		return nil, err
-	}
-	query = normalizeQuery(query)
-	if query.OrganizationID == "" {
-		return nil, ErrInvalidEvent
-	}
-	candidates, err := p.collectRecords(ctx, p.activeRegistry(), query)
+	batch, err := p.getColumnarBatch(ctx, query, []string{"_record"}, fence)
 	if err != nil {
 		return nil, err
 	}
-	if query.Limit <= 0 || len(candidates) > 1 {
-		sort.Slice(candidates, func(i int, j int) bool {
-			return recordBefore(candidates[i], candidates[j])
-		})
+
+	out := make([]database.DomainRecord, batch.Rows)
+	var recordVec *DomainRecordVector
+	for _, col := range batch.Columns {
+		if col.Name == "_record" {
+			if rv, ok := col.Data.(*DomainRecordVector); ok {
+				recordVec = rv
+			}
+		}
 	}
-	out := make([]database.DomainRecord, len(candidates))
-	for i, rec := range candidates {
-		out[i] = copyRecord(rec)
+
+	if recordVec == nil {
+		return nil, errors.New("hermes list records missing _record vector")
 	}
+
+	for i := 0; i < batch.Rows; i++ {
+		out[i] = copyRecord(recordVec.values[i])
+	}
+
 	return out, nil
 }
 
 func (p *partition) count(ctx context.Context, query Query, fence Fence) (int64, error) {
-	if err := p.waitForStable(ctx); err != nil {
+	batch, err := p.getColumnarBatch(ctx, query, []string{"record_id"}, fence)
+	if err != nil {
 		return 0, err
 	}
-	if err := p.checkFence(fence); err != nil {
-		return 0, err
-	}
-	query = normalizeQuery(query)
-	if query.OrganizationID == "" {
-		return 0, ErrInvalidEvent
-	}
-	query.Limit = 0
-	registry := p.activeRegistry()
-	if count, ok := p.fastCount(registry, query); ok {
-		return count, nil
-	}
-	index := p.candidateIndex(registry, query)
-	if index != nil {
-		return p.countIndex(ctx, registry, query, index)
-	}
-	return p.countAll(ctx, registry, query)
-}
-
-func (p *partition) fastCount(registry *partitionRegistry, query Query) (int64, bool) {
-	scope := scopeKey(p.spec.Domain, p.spec.Collection, query.OrganizationID)
-	if query.Plan.count == 0 {
-		return int64(p.scopeSnapshot(registry, scope).len()), true
-	}
-	if query.Plan.count > 0 {
-		if query.Plan.count != 1 {
-			return 0, false
-		}
-		filter := query.Plan.first
-		if !p.isIndexedField(filter.Field) {
-			return 0, false
-		}
-		index := fieldIndex{scope: scope, field: filter.Field, kind: filter.Kind, value: filter.Value}
-		return int64(p.fieldSnapshot(registry, index).len()), true
-	}
-	return 0, false
-}
-
-func (p *partition) countIndex(ctx context.Context, registry *partitionRegistry, query Query, index *indexSnapshot) (int64, error) {
-	var count int64
-	var err error
-	index.forEachKey(func(key string) bool {
-		entry, ok := p.recordEntry(registry, key)
-		if !ok {
-			return true
-		}
-		if err = ctxErr(ctx); err != nil {
-			return false
-		}
-		if recordMatches(entry.record, p.spec, query) {
-			count++
-		}
-		return true
-	})
-	return count, err
-}
-
-func (p *partition) countAll(ctx context.Context, registry *partitionRegistry, query Query) (int64, error) {
-	var count int64
-	var err error
-	registry.records.Range(func(_ any, value any) bool {
-		entry, ok := recordEntryFromCell(value)
-		if !ok || !recordMatches(entry.record, p.spec, query) {
-			return true
-		}
-		if err = ctxErr(ctx); err != nil {
-			return false
-		}
-		count++
-		return true
-	})
-	return count, err
+	return int64(batch.Rows), nil
 }
 
 func (p *partition) forEachView(ctx context.Context, query Query, fence Fence, fn func(RecordView) error) (int, error) {
-	if err := p.waitForStable(ctx); err != nil {
+	batch, err := p.getColumnarBatch(ctx, query, []string{"_record", "version"}, fence)
+	if err != nil {
 		return 0, err
 	}
-	if err := p.checkFence(fence); err != nil {
-		return 0, err
+
+	var recordVec *DomainRecordVector
+	var versionVec Vector
+	for _, col := range batch.Columns {
+		switch col.Name {
+		case "_record":
+			if rv, ok := col.Data.(*DomainRecordVector); ok {
+				recordVec = rv
+			}
+		case "version":
+			versionVec = col.Data
+		}
 	}
-	query = normalizeQuery(query)
-	if query.OrganizationID == "" {
-		return 0, ErrInvalidEvent
+
+	if recordVec == nil || versionVec == nil {
+		return 0, errors.New("hermes view batch missing record or version vector")
 	}
-	registry := p.activeRegistry()
+
 	epoch := p.epoch.Load()
-	return p.forEachViewSnapshot(ctx, registry, query, epoch, fn)
+	seen := 0
+	versions := versionVec.Int64Values()
+
+	for i := 0; i < batch.Rows; i++ {
+		if err := ctxErr(ctx); err != nil {
+			return seen, err
+		}
+		rec := recordVec.values[i]
+		view := RecordView{
+			Domain:         rec.Domain,
+			Collection:     rec.Collection,
+			OrganizationID: rec.OrganizationID,
+			RecordID:       rec.RecordID,
+			Data:           rec.Data,
+			Vector:         rec.Vector,
+			CreatedAt:      rec.CreatedAt,
+			UpdatedAt:      rec.UpdatedAt,
+			// #nosec G115
+			Version:        uint64(versions[i]),
+			Epoch:          epoch,
+		}
+		if err := fn(view); err != nil {
+			return seen, err
+		}
+		seen++
+	}
+
+	return seen, nil
 }
 
 func (p *partition) checkFence(fence Fence) error {

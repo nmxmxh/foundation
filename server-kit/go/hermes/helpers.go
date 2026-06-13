@@ -309,33 +309,6 @@ func queryFilterValue(filter QueryFilter) database.RecordValue {
 	}
 }
 
-func appendListCandidate(candidates []database.DomainRecord, rec database.DomainRecord, limit int) []database.DomainRecord {
-	if limit <= 0 {
-		return append(candidates, rec)
-	}
-	insertAt := sort.Search(len(candidates), func(i int) bool {
-		return recordBefore(rec, candidates[i])
-	})
-	if insertAt >= limit {
-		return candidates
-	}
-	if len(candidates) < limit {
-		candidates = append(candidates, database.DomainRecord{})
-		copy(candidates[insertAt+1:], candidates[insertAt:])
-		candidates[insertAt] = rec
-		return candidates
-	}
-	copy(candidates[insertAt+1:], candidates[insertAt:len(candidates)-1])
-	candidates[insertAt] = rec
-	return candidates
-}
-
-func recordBefore(left, right database.DomainRecord) bool {
-	if left.UpdatedAt.Equal(right.UpdatedAt) {
-		return left.RecordID < right.RecordID
-	}
-	return left.UpdatedAt.After(right.UpdatedAt)
-}
 
 func ctxErr(ctx context.Context) error {
 	if ctx == nil {

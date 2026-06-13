@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -46,6 +47,7 @@ type Router struct {
 	serverID          string
 	ttl               time.Duration
 	registerBatchSize int
+	registerSF        singleflight.Group
 
 	// Local connection tracking for this server instance
 	mu          sync.RWMutex
@@ -241,29 +243,37 @@ func clampRegistrationBatchSize(size int) int {
 }
 
 func (r *Router) registerRoute(ctx context.Context, info ConnectionInfo) error {
-	deviceKey := fmt.Sprintf("%s:%s", KeyPrefixDevice, info.DeviceID)
-	if _, err := r.client.Incr(ctx, deviceKey); err != nil {
-		return fmt.Errorf("failed to set device routing: %w", err)
-	}
-	routePayload := fmt.Appendf(nil, "%s:%s", info.DeviceID, r.serverID)
-	if err := r.client.Publish(ctx, "wsroute:register", routePayload); err != nil {
-		return fmt.Errorf("failed to publish route: %w", err)
-	}
-	if _, err := r.client.Expire(ctx, deviceKey, r.ttl); err != nil {
-		return fmt.Errorf("failed to set device TTL: %w", err)
-	}
+	_, err, _ := r.registerSF.Do(info.DeviceID, func() (any, error) {
+		regCtx := ctx
+		if ctx != nil && ctx.Done() != nil {
+			regCtx = context.WithoutCancel(ctx)
+		}
 
-	if info.UserID == "" {
-		return nil
-	}
-	userKey := fmt.Sprintf("%s:%s", KeyPrefixUser, info.UserID)
-	if _, err := r.client.Incr(ctx, userKey); err != nil {
-		return fmt.Errorf("failed to add user routing: %w", err)
-	}
-	if _, err := r.client.Expire(ctx, userKey, r.ttl); err != nil {
-		return fmt.Errorf("failed to set user TTL: %w", err)
-	}
-	return nil
+		deviceKey := fmt.Sprintf("%s:%s", KeyPrefixDevice, info.DeviceID)
+		if _, err := r.client.Incr(regCtx, deviceKey); err != nil {
+			return nil, fmt.Errorf("failed to set device routing: %w", err)
+		}
+		routePayload := fmt.Appendf(nil, "%s:%s", info.DeviceID, r.serverID)
+		if err := r.client.Publish(regCtx, "wsroute:register", routePayload); err != nil {
+			return nil, fmt.Errorf("failed to publish route: %w", err)
+		}
+		if _, err := r.client.Expire(regCtx, deviceKey, r.ttl); err != nil {
+			return nil, fmt.Errorf("failed to set device TTL: %w", err)
+		}
+
+		if info.UserID == "" {
+			return nil, nil
+		}
+		userKey := fmt.Sprintf("%s:%s", KeyPrefixUser, info.UserID)
+		if _, err := r.client.Incr(regCtx, userKey); err != nil {
+			return nil, fmt.Errorf("failed to add user routing: %w", err)
+		}
+		if _, err := r.client.Expire(regCtx, userKey, r.ttl); err != nil {
+			return nil, fmt.Errorf("failed to set user TTL: %w", err)
+		}
+		return nil, nil
+	})
+	return err
 }
 
 func firstRouteError(errs []error) error {

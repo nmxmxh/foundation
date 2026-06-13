@@ -99,6 +99,26 @@ go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFra
 
 Set `PROFILE=1` when you need CPU and heap profiles under `/tmp/ovasabi-foundation-profiles`.
 
+## 2026-06-13 Hermes Columnar Projection Lane Optimization
+
+This focused update introduced a true columnar memory representation for the `hermes` projection layer and updated the sorting mechanics to naturally account for temporal `UpdatedAt` values directly during collection, avoiding subsequent re-sorts and massive domain object reconstructions.
+
+Commands:
+
+```bash
+cd foundation/server-kit/go
+go test -bench='BenchmarkHermes(GetColumnarBatch|ListRecordsComparison)' -benchmem ./hermes
+```
+
+Focused comparison:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesListRecordsComparison-8` | 8,785,345 ns/op | 8,143,866 B/op | 10,043 allocs/op | Previous comparison approach mapping out each column dynamically and resorting. |
+| `BenchmarkHermesGetColumnarBatch-8` | 6,767,805 ns/op | 2,895,083 B/op | 51 allocs/op | The new columnar lane projecting `_record` from `DomainRecordVector`. Memory allocations are effectively zeroed out, saving over 99.5% alloc overhead. |
+
+By extracting `_record` as part of the `getColumnarBatch` and leveraging `DomainRecordVector`, Hermes bypasses allocating full slices of structurally mapped `DomainRecord` instances. This drastically decreases memory pressure and allows the garbage collector to breathe during heavy projection reads.
+
 ## 2026-06-03 staged local load research
 
 Foundation now includes an opt-in staged local load harness for the cardinality

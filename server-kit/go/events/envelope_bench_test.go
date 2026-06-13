@@ -56,3 +56,24 @@ func BenchmarkEnvelope_FromBinary(b *testing.B) {
 		_, _ = FromBinary(data)
 	}
 }
+
+func TestRegression_EnvelopeFromBinary_Allocations(t *testing.T) {
+	env := makeTestEnvelope("media:upload:requested", "corr-123")
+	env.PayloadBytes = []byte(`{"id":"file-123"}`)
+	env.PayloadEncoding = PayloadEncodingProtobuf
+	data, err := env.ToBinary()
+	if err != nil {
+		t.Fatalf("failed to serialize test envelope: %v", err)
+	}
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		_, err := FromBinary(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if allocs > 10.5 {
+		t.Errorf("BenchmarkEnvelope_FromBinary allocations exceeded limit: got %f, want <= 10", allocs)
+	}
+}
