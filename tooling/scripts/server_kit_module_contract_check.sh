@@ -161,6 +161,14 @@ check_file_contains "eventlog has append-only contract" "$kit/eventlog/eventlog.
 check_file_contains "eventlog batches pending stream publication" "$kit/eventlog/eventlog.go" "publishPendingBatch"
 check_file_contains "eventlog claims pending publication leases" "$kit/eventlog/eventlog.go" "FOR UPDATE SKIP LOCKED"
 check_file_contains "eventlog detects lost publish claims" "$kit/eventlog/eventlog.go" "ErrPublishClaimLost"
+check_file_contains "graceful guards missing River client" "$kit/graceful/graceful.go" "ErrRiverClientRequired"
+check_file_contains "graceful respects context cancellation before emit" "$kit/graceful/graceful.go" "ctx.Err()"
+check_file_contains "graceful publish args carry idempotency" "$kit/graceful/graceful.go" "IdempotencyKey"
+check_file_contains "graceful exposes owned extension payload fast path" "$kit/graceful/graceful.go" "type OwnedObject struct"
+check_file_contains "registry validates HTTP route manifests" "$kit/registry/http_route.go" "func (r HTTPRoute) Validate() error"
+check_file_contains "registry exposes dispatch metrics snapshot" "$kit/registry/registry.go" "func (r *ServiceRegistry) MetricsSnapshot() MetricsSnapshot"
+check_file_contains "registry tracks unknown event types" "$kit/registry/registry.go" "unknownEvents"
+check_file_contains "registry tests unknown event metrics" "$kit/registry/registry_test.go" "UnknownEvents"
 
 check_no_match "server-kit avoids raw process exits in library code" "\\bos\\.Exit\\s*\\(" "$kit" --glob '*.go' --glob '!**/*test.go'
 check_no_match "server-kit avoids stdlib log package outside logger module" "\"log\"|\"log/slog\"" "$kit" --glob '*.go' --glob '!**/logger/**' --glob '!**/*test.go'

@@ -321,7 +321,14 @@ lock contention fail as controlled database errors instead of silent queueing.
 11. High-value or uniqueness-sensitive mutations must use unique constraints, row/advisory locks, or `SERIALIZABLE` transactions to prevent race-driven double execution, quota bypass, or state desynchronization.
 12. Audit tables or append-only logs must capture privilege changes, exports, payout/billing actions, and destructive operations with actor and correlation data.
 
-## Migration policy (active development)
+## Migration policy
+
+Detailed migration rules live in `migration_practices.md`. The database lane has
+two phases:
+
+1. Active development before schema freeze.
+2. Production incremental migration stream after real user data requires
+   backward-compatible rollout.
 
 During active v1 development, use the three-group structure:
 
@@ -332,11 +339,17 @@ During active v1 development, use the three-group structure:
 Rules:
 
 1. Edit these migration groups directly during active model evolution.
-2. Do not add `0004+` migration groups without ADR and rollout justification.
+2. Do not add `0004+` migration groups without a Phase 2 ADR and rollout
+   justification.
 3. Provide paired `up` and `down` scripts for each active migration group.
 4. Seed data must carry stable markers (example: `seed_version`) for safe rollback.
 5. When databases are resettable, fold new indexes and constraints back into `0001_schema` before release. Temporary incremental migrations are acceptable only as rollout aids and should be squashed on the next reset.
-6. Maintain the strict three-group migration structure during active development. Folding changes back into `0001_schema`, `0002_seed_system_data`, and `0003_seed_demo_data` keeps the bootstrap path deterministic.
+6. Maintain the strict three-group migration structure during active development.
+   Folding changes back into `0001_schema`, `0002_seed_system_data`, and
+   `0003_seed_demo_data` keeps the bootstrap path deterministic.
+7. Once schema freeze is declared for a live product, use expand/contract
+   migrations, lock estimation, rollback logs, restartable backfills, and
+   verified backups as defined in `migration_practices.md`.
 
 ## Performance and operations
 
@@ -390,13 +403,13 @@ Foundation write-amplification rules:
 10. Treat canceled autovacuum work as a signal, not noise. Under high write or
    cleanup pressure, inspect dead tuples, bloat, vacuum lag, and index churn
    before changing indexes, table fillfactor, batch size, or retention policy.
-10. For SSD/NVMe hosts, random-page-cost tuning should be evidence-based and
+11. For SSD/NVMe hosts, random-page-cost tuning should be evidence-based and
     paired with plan review. Lower random I/O cost can make index access more
     attractive, but a bad index still creates write amplification.
-11. For high-volume ingest, use `COPY`, batched statements, staging tables, and
+12. For high-volume ingest, use `COPY`, batched statements, staging tables, and
     set-based merge/upsert. Per-row command loops multiply parse, round-trip,
     WAL, and index maintenance cost.
-12. For append-only and insert-mostly tables, configure insert-triggered vacuum
+13. For append-only and insert-mostly tables, configure insert-triggered vacuum
     and analyze thresholds when index-only scans, visibility maps, or planner
     estimates matter.
 

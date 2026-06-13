@@ -63,7 +63,17 @@ Generated mutating commands should include:
 
 Generated read commands should include correlation metadata and identity-safe cache keys. They should opt into dedupe/coalescing only when the request is replay-safe and the cache key excludes volatile metadata.
 
-`tooling/scripts/generate_lifecycle_contract_tests.mjs` is the first compiler pass for this rule. It scans `api/protos`, derives mutating command lifecycles from request/response message pairs, and emits `tests/contract/generated_lifecycle_test.go`. The generated cases call `server-kit/go/contracttest.VerifyCommandLifecycle` for both `:success` and `:failed` terminal refinements.
+`tooling/scripts/generate_lifecycle_manifest.mjs` is the machine-readable
+source pass for this rule. It scans `api/protos`, derives mutating command
+lifecycles from request/response message pairs, and emits
+`docs/references/lifecycle/lifecycle_contract.json` plus a generated guide. The
+manifest is deterministic and carries event names, worker job kinds, queues,
+invariants, and agent review vectors.
+
+`tooling/scripts/generate_lifecycle_contract_tests.mjs` is the test compiler
+pass. It emits `tests/contract/generated_lifecycle_test.go`; the generated cases
+call `server-kit/go/contracttest.VerifyCommandLifecycle` for both `:success`
+and `:failed` terminal refinements.
 
 The generator intentionally uses the scaffold example proto as the reference shape:
 
@@ -101,6 +111,27 @@ The substrate should expose these views locally before production dashboards exi
 The scaffold exposes this local surface at `/metricsz/trace?correlation_id=<id>`. It also records event publish/receive, worker enqueue/process, Redis operation latency, database operation latency, DB pool pressure, and queue depth in the same bounded collector. Service-backed benchmark processes stay outside the scaffold; generated projects inherit the minimal observability surface and runtime budgets, not benchmark orchestration.
 
 Production scaffolds must protect `/metricsz`, `/metricsz/trace`, and operational event views behind authenticated operator/admin access. Development can keep the local endpoints open, but the generated config defaults to protected operational endpoints when `APP_ENV=production`.
+
+## Machine-Readable Lifecycle Source
+
+Agents and generators must not invent lifecycle event names from memory. The
+contract source order is:
+
+1. `docs/references/lifecycle/lifecycle_contract.json`
+2. `docs/references/lifecycle/lifecycle_contract_guide.md`
+3. proto request/response definitions under `api/protos`
+4. generated lifecycle tests under `tests/contract/`
+
+When a new mutating proto command is added, run:
+
+```bash
+make lifecycle-manifest
+make lifecycle-contracts
+```
+
+Then use the manifest review vectors as the implementation checklist for tenant
+isolation, correlation propagation, idempotency, requested-before-terminal
+ordering, bounded work, and failure fallback.
 
 ## Delivery Metrics
 

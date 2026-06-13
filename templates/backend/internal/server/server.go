@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/apidocs"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
 	kitcompress "github.com/nmxmxh/ovasabi_foundation/server-kit/go/compress"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/domainerr"
@@ -37,6 +38,7 @@ type Server struct {
 	jwt      *auth.JWTManager
 	rbac     *security.Authorizer
 	routes   []registry.HTTPRoute
+	apiDocs  *apidocs.Handler
 
 	// Public paths that bypass authentication
 	publicPaths []string
@@ -100,7 +102,10 @@ func New(cfg *config.Config, reg *registry.ServiceRegistry, handler ...*graceful
 			"/healthz",
 			"/health",
 			"/ws",
+			"/openapi.json",
+			"/docs",
 		},
+		apiDocs:                 apidocs.New(apidocs.Options{}),
 		apiRateLimitEnabled:     true,
 		apiRateLimitRequests:    200,
 		apiRateLimitWindow:      time.Minute,
@@ -217,6 +222,15 @@ func configuredAllowedOrigins(cfg *config.Config) []string {
 // Handler returns the configured HTTP handler with all middleware
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
+
+	if s.apiDocs != nil {
+		s.apiDocs.Register(mux)
+		if s.apiDocs.Loaded() {
+			s.log.Info("api docs registered", "spec_path", s.apiDocs.SpecPath())
+		} else if err := s.apiDocs.LoadError(); err != nil {
+			s.log.Warn("openapi spec not found; api docs will return 404", "error", err)
+		}
+	}
 
 	// Health endpoints
 	mux.HandleFunc("/healthz", s.healthz)

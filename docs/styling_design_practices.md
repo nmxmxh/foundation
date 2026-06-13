@@ -198,7 +198,7 @@ Avoid:
 Default timings:
 
 | Interaction | Duration | Easing |
-|-------------|----------|--------|
+| ------------- | ---------- | -------- |
 | Button press | 100-160ms | `cubic-bezier(0.22, 1, 0.36, 1)` |
 | Tooltips and small popovers | 125-200ms | `ease-out` or enter curve |
 | Dropdowns and selects | 150-250ms | `cubic-bezier(0.22, 1, 0.36, 1)` |
@@ -290,11 +290,11 @@ Before merging frontend work, verify:
 Use the animation reference notes in `docs/references/`:
 
 1. [Reference Index](./references/README.md)
-2. [Decision Framework](./references/decision-framework.md)
-3. [Spring Animations](./references/spring-animations.md)
-4. [Component Patterns](./references/component-patterns.md)
-5. [Clip-Path Techniques](./references/clip-path-techniques.md)
-6. [Gesture And Drag](./references/gesture-drag.md)
-7. [Performance Deep Dive](./references/performance-deep-dive.md)
-8. [Review Format](./references/review-format.md)
-9. [Contextual Animations](./references/contextual-animations.md)
+2. [Decision Framework](./references/animation/decision-framework.md)
+3. [Spring Animations](./references/animation/spring-animations.md)
+4. [Component Patterns](./references/animation/component-patterns.md)
+5. [Clip-Path Techniques](./references/animation/clip-path-techniques.md)
+6. [Gesture And Drag](./references/animation/gesture-drag.md)
+7. [Performance Deep Dive](./references/animation/performance-deep-dive.md)
+8. [Review Format](./references/animation/review-format.md)
+9. [Contextual Animations](./references/animation/contextual-animations.md)

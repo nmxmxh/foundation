@@ -228,6 +228,234 @@ COPY foundation/runtime-native/ts ./foundation/runtime-native/ts'
   fi
 }
 
+patch_openapi_dockerfile() {
+  local file="$target/Dockerfile"
+  [[ -f "$file" ]] || return 0
+
+  if ! grep -Fq 'go run ./cmd/docgen > /tmp/openapi.json' "$file"; then
+    local search='    --mount=type=cache,id=${CACHE_NAMESPACE}-gobuild,target=/root/.cache/go-build,sharing=locked \
+    CGO_ENABLED="${CGO_ENABLED:-0}" go build \'
+    local replace='    --mount=type=cache,id=${CACHE_NAMESPACE}-gobuild,target=/root/.cache/go-build,sharing=locked \
+    go run ./cmd/docgen > /tmp/openapi.json && \
+    CGO_ENABLED="${CGO_ENABLED:-0}" go build \'
+    replace_in_file "$file" "$search" "$replace" "Docker server image generates OpenAPI spec"
+  fi
+
+  if ! grep -Fq 'COPY --from=builder /tmp/openapi.json ./openapi.json' "$file"; then
+    replace_in_file "$file" 'COPY --from=builder /bin/server ./server' 'COPY --from=builder /bin/server ./server
+COPY --from=builder /tmp/openapi.json ./openapi.json' "Docker server image embeds OpenAPI spec"
+  fi
+}
+
+patch_apidocs_server() {
+  local file="$target/internal/server/server.go"
+  [[ -f "$file" ]] || return 0
+
+  if ! grep -Fq 'server-kit/go/apidocs' "$file"; then
+    replace_in_file "$file" '	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"' '	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/apidocs"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"' "server imports Foundation API docs handler"
+  fi
+
+  if ! grep -Fq 'apiDocs  *apidocs.Handler' "$file"; then
+    if grep -Fq '	routes   []registry.HTTPRoute' "$file"; then
+      replace_in_file "$file" '	routes   []registry.HTTPRoute' '	routes   []registry.HTTPRoute
+	apiDocs  *apidocs.Handler' "server stores API docs handler"
+    elif grep -Fq '	rbac     *security.Authorizer' "$file"; then
+      replace_in_file "$file" '	rbac     *security.Authorizer' '	rbac     *security.Authorizer
+	apiDocs  *apidocs.Handler' "server stores API docs handler"
+    else
+      replace_in_file "$file" '	jwt      *auth.JWTManager' '	jwt      *auth.JWTManager
+	apiDocs  *apidocs.Handler' "server stores API docs handler"
+    fi
+  fi
+
+  if ! grep -Fq '"/openapi.json"' "$file"; then
+    local before_public_paths
+    before_public_paths="$(mktemp)"
+    cp "$file" "$before_public_paths"
+    perl -0pi -e 's/(publicPaths:\s*\[\]string\{\n(?:(?!\n\t\t\},).)*?\n\t\t\t"\/ws",)/$1\n\t\t\t"\/openapi.json",\n\t\t\t"\/docs",/s' "$file"
+    if ! cmp -s "$before_public_paths" "$file"; then
+      log_patch "server marks API docs public: ${file#$target/}"
+    fi
+    rm -f "$before_public_paths"
+  fi
+
+  if ! grep -Fq 'apidocs.New(apidocs.Options{})' "$file"; then
+    if grep -Fq '		apiRateLimitEnabled:     true,' "$file"; then
+      replace_in_file "$file" '		apiRateLimitEnabled:     true,' '		apiDocs:                 apidocs.New(apidocs.Options{}),
+		apiRateLimitEnabled:     true,' "server initializes API docs handler"
+    else
+      replace_in_file "$file" '		apiRateLimitEnabled:  true,' '		apiDocs:              apidocs.New(apidocs.Options{}),
+		apiRateLimitEnabled:  true,' "server initializes API docs handler"
+    fi
+  fi
+
+  if ! grep -Fq 's.apiDocs.Register(mux)' "$file"; then
+    if grep -Fq '	mux := http.NewServeMux()
+
+	// Health endpoints' "$file"; then
+      local search='	mux := http.NewServeMux()
+
+	// Health endpoints'
+      local replace='	mux := http.NewServeMux()
+
+	if s.apiDocs != nil {
+		s.apiDocs.Register(mux)
+		if s.apiDocs.Loaded() {
+			s.log.Info("api docs registered", "spec_path", s.apiDocs.SpecPath())
+		} else if err := s.apiDocs.LoadError(); err != nil {
+			s.log.Warn("openapi spec not found; api docs will return 404", "error", err)
+		}
+	}
+
+	// Health endpoints'
+      replace_in_file "$file" "$search" "$replace" "server registers public API docs endpoints"
+    else
+      local search='	mux := http.NewServeMux()'
+      local replace='	mux := http.NewServeMux()
+	if s.apiDocs != nil {
+		s.apiDocs.Register(mux)
+		if s.apiDocs.Loaded() {
+			s.log.Info("api docs registered", "spec_path", s.apiDocs.SpecPath())
+		} else if err := s.apiDocs.LoadError(); err != nil {
+			s.log.Warn("openapi spec not found; api docs will return 404", "error", err)
+		}
+	}'
+      replace_in_file "$file" "$search" "$replace" "server registers public API docs endpoints"
+    fi
+  fi
+}
+
+patch_docgen_pointer_helper() {
+  local file="$target/cmd/docgen/main.go"
+  [[ -f "$file" ]] || return 0
+
+  replace_in_file "$file" 'schema.MinLength = intPtr(8)' 'schema.MinLength = new(8)' "docgen password min length pointer modernization"
+
+  if grep -Fq 'func intPtr(v int) *int' "$file"; then
+    local before
+    before="$(mktemp)"
+    cp "$file" "$before"
+    perl -0pi -e 's/\nfunc intPtr\(v int\) \*int \{\n\treturn &v\n\}\n//g' "$file"
+    if ! cmp -s "$before" "$file"; then
+      log_patch "docgen removes obsolete int pointer helper: ${file#$target/}"
+    fi
+    rm -f "$before"
+  fi
+}
+
+patch_docgen_named_schema_refs() {
+  local file="$target/cmd/docgen/main.go"
+  [[ -f "$file" ]] || return 0
+
+  if ! grep -Fq 'ensureNamedSchema' "$file"; then
+    local request_search='		if route.RequestSchema != "" && method != "get" && method != "delete" {
+			op.RequestBody = &RequestBody{
+				Required: true,
+				Content: map[string]MediaType{
+					"application/json": {
+						Schema: Schema{Ref: "#/components/schemas/" + route.RequestSchema},
+					},
+				},
+			}
+		} else if route.RequestType != nil {'
+    local request_replace='		if route.RequestType != nil {'
+    replace_in_file "$file" "$request_search" "$request_replace" "docgen prefers typed request schemas"
+
+    local request_tail_search='			}
+		}
+
+		successStatus := route.SuccessStatusCode'
+    local request_tail_replace='			}
+		} else if route.RequestSchema != "" && method != "get" && method != "delete" {
+			requestSchemaName := generator.ensureNamedSchema(route.RequestSchema, "Request body for "+route.EventType)
+			op.RequestBody = &RequestBody{
+				Required: true,
+				Content: map[string]MediaType{
+					"application/json": {
+						Schema: Schema{Ref: "#/components/schemas/" + requestSchemaName},
+					},
+				},
+			}
+		}
+
+		successStatus := route.SuccessStatusCode'
+    replace_in_file "$file" "$request_tail_search" "$request_tail_replace" "docgen registers string request schemas"
+
+    local response_search='		if route.NoContentResponse {
+			op.Responses[successCode] = Response{Description: successDescription}
+		} else if route.ResponseSchema != "" {
+			op.Responses[successCode] = Response{
+				Description: successDescription,
+				Content: map[string]MediaType{
+					"application/json": {
+						Schema: Schema{Ref: "#/components/schemas/" + route.ResponseSchema},
+					},
+				},
+			}
+		} else if route.ResponseType != nil {
+			responseSchemaName := generator.generateSchema(route.ResponseType)'
+    local response_replace='		if route.NoContentResponse {
+			op.Responses[successCode] = Response{Description: successDescription}
+		} else if route.ResponseType != nil {
+			responseSchemaName := generator.generateSchema(route.ResponseType)'
+    replace_in_file "$file" "$response_search" "$response_replace" "docgen prefers typed response schemas"
+
+    local response_tail_search='			}
+		} else {
+			defaultSchemaRef := "#/components/schemas/StandardSuccessResponse"'
+    local response_tail_replace='			}
+		} else if route.ResponseSchema != "" {
+			responseSchemaName := generator.ensureNamedSchema(route.ResponseSchema, "Successful response for "+route.EventType)
+			op.Responses[successCode] = Response{
+				Description: successDescription,
+				Content: map[string]MediaType{
+					"application/json": {
+						Schema: Schema{Ref: "#/components/schemas/" + responseSchemaName},
+					},
+				},
+			}
+		} else {
+			defaultSchemaRef := "#/components/schemas/StandardSuccessResponse"'
+    replace_in_file "$file" "$response_tail_search" "$response_tail_replace" "docgen registers string response schemas"
+
+    local schema_search='func (g *schemaGenerator) generateSchema(msg proto.Message) string {
+	if msg == nil {
+		return ""
+	}
+	return g.generateMessage(msg.ProtoReflect().Descriptor())
+}
+'
+    local schema_replace='func (g *schemaGenerator) generateSchema(msg proto.Message) string {
+	if msg == nil {
+		return ""
+	}
+	return g.generateMessage(msg.ProtoReflect().Descriptor())
+}
+
+func (g *schemaGenerator) ensureNamedSchema(name, description string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if _, exists := g.schemas[name]; !exists {
+		anySchema := Schema{}
+		g.schemas[name] = Schema{
+			Type:                 "object",
+			Description:          strings.TrimSpace(description),
+			AdditionalProperties: &anySchema,
+		}
+	}
+	if _, exists := g.bySchemaName[name]; !exists {
+		g.bySchemaName[name] = ""
+	}
+	return name
+}
+'
+    replace_in_file "$file" "$schema_search" "$schema_replace" "docgen named schema fallback"
+  fi
+}
+
 patch_native_tauri_startup_expect() {
   local file="$target/native/src-tauri/src/lib.rs"
   [[ -f "$file" ]] || return 0
@@ -975,6 +1203,10 @@ patch_compose_targets "$target/docker-compose.test.yml"
 patch_compose_database_contract
 patch_reframe_frontend_dockerfile
 patch_runtime_native_dockerfile
+patch_openapi_dockerfile
+patch_apidocs_server
+patch_docgen_pointer_helper
+patch_docgen_named_schema_refs
 patch_native_tauri_startup_expect
 patch_go_dependency_manifests
 patch_server_binary_path

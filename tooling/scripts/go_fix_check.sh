@@ -3,7 +3,6 @@ set -euo pipefail
 
 target="${1:-.}"
 failed=0
-tmp_output="/tmp/ovasabi_go_fix_check.out"
 
 if [[ "$target" == "." && -d "./foundation" && ! -f "./go.mod" && ! -f "./package.json" && ! -f "./Cargo.toml" ]]; then
   target="./foundation"
@@ -54,13 +53,16 @@ for module_dir in "${module_dirs[@]}"; do
     done
   }
   trap cleanup_ignored_mods EXIT
-  if GOCACHE="$cache_dir" go fix -C "$module_dir" -diff ./... >"$tmp_output" 2>&1; then
+  tmp_output="$(mktemp "${TMPDIR:-/tmp}/ovasabi_go_fix_check.XXXXXX")"
+  if GOWORK=off GOCACHE="$cache_dir" go fix -C "$module_dir" -diff ./... >"$tmp_output" 2>&1; then
     cleanup_ignored_mods
+    rm -f "$tmp_output"
     echo "[OK] go fix modernization check: ${module_dir#$target/}"
   else
     cleanup_ignored_mods
     echo "[FAIL] go fix modernization check: ${module_dir#$target/}"
     cat "$tmp_output"
+    rm -f "$tmp_output"
     failed=1
   fi
   trap - EXIT

@@ -169,7 +169,24 @@ Requirements:
 14b. JSON encode/decode is a boundary adapter, not an internal communication primitive. New scaffolded app commands, workers, realtime events, and projections must default to generated types or byte-preserving transport and may expose JSON only as an explicit compatibility edge.
 14c. Typed open containers do not make a JSON path fast by themselves. A compatibility decoder that reads JSON into `interface{}`, a generic object tree, or an owned extension object before the owner needs it can be slower and larger than the former dynamic map path.
 14d. JSON compatibility adapters on measured ingress, event, and projection paths must decode directly into the target typed structure with a token decoder, generated field walker, protobuf reflection walker, or raw-byte-preserving lazy payload. Do not stage through `any` or `map[string]any` just to populate the typed value later.
-14e. Typed-contract refactors must benchmark both lanes separately: the binary/typed hot lane and the JSON compatibility lane. An improvement in frame dispatch, indexed query, or typed list paths does not prove that HTTP JSON ingress or event JSON decode stayed healthy.
+14e. Typed-contract refactors must benchmark every active lane separately: the
+     binary/typed hot lane, HTTP JSON ingress, event JSON decode, and any
+     compatibility adapter that remains shipped. An improvement in frame
+     dispatch, indexed query, or typed list paths does not prove that JSON
+     compatibility stayed healthy.
+14f. If a typed payload change touches a public command, event, transport frame,
+     scaffolded handler, or projection, the regression guard must include a
+     JSON compatibility fixture or benchmark before the optimization is treated
+     as complete. This exists because a 2026-06 typed payload pass improved
+     typed lanes while a reviewed JSON ingress path regressed roughly 2x.
+14g. Graceful event emission, registry dispatch, and extension-value hot paths
+     should receive already-typed `extension.Object`, generated protobuf, raw
+     bytes, or an explicit owned-object fast path. Generic `any` conversion is a
+     compatibility fallback, not the preferred path for high-throughput domain
+     events.
+14h. Declarative route manifests must be validated before publication or doc
+     generation. Unknown registry event types must leave a debug signal or
+     metric so contract drift is observable instead of silently hidden.
 15. Same-process hot communication must not use gRPC, HTTP, Redis, or JSON. Use direct typed calls, direct frame dispatch, worker channels, or shared-memory descriptors so the hot path can remain zero-copy or near-zero allocation.
 16. Serialization boundaries should expose both owned and borrowed decode APIs where safe. Borrowed views are preferred inside synchronous hot paths; owned decoded values are required when data escapes the frame lifetime.
 17. Prefer Foundation database executor helpers for repository code. Use `QueryOne`, `QueryEach`, `QueryAll`, `ExecRowsAffected`, `AtomicLane`, and only then driver-native `pgx.Batch`/`CopyFrom` through the Foundation Postgres adapter for high-volume paths. `AtomicLane` closures must stay pure database work so query, lock, and idle-transaction budgets remain meaningful.
@@ -752,8 +769,16 @@ Requirements:
 5. **Postgres Pool Integration**: Metadata stores and job persistence logic must use `*pgxpool.Pool` directly for performance and connection lifecycle management, rather than generic/wrapped database interfaces that may obscure driver-specific optimizations.
 6. **Idempotent Migrations**: SQL setup scripts for queue infrastructure must be idempotent. Avoid destructive `DROP TABLE` statements at the top of migrations that might fire against non-empty production environments; use `CREATE TABLE IF NOT EXISTS` and separate reset scripts.
 7. **Production-Representative Benchmarks**: Performance-critical workers must include benchmarks that hit the River/Postgres path (using `testcontainers-go`) to capture serialization, indexing, and fsync costs, not just the in-memory fallback path.
-8. **State-Machine Contract**: Worker queues must document accepted visible states, hidden retry/lease state, terminal states, and liveness expectations. Every accepted job must eventually reach success, failed, cancelled, quarantined, or expired under its retry/deadline budget.
-9. **Finite Model Candidate**: New queue semantics that alter leases, retries, dedupe, cancellation, or terminal-state rules should be small enough to model with two workers, queue depth two, and retry cap two, even if implemented only as table-driven tests rather than TLC.
+8. **Publish Idempotency**: Event-publish jobs should carry an idempotency key
+   derived from command metadata where available. River insert options may own
+   uniqueness policy, but Foundation job args must preserve the key so callers
+   can configure deduplication without re-parsing payloads.
+9. **Controlled River Absence**: Server-kit helpers that wrap River must return
+   a controlled error when the River client is absent. Library code must not
+   panic just because a project uses in-memory or direct Redis emitters instead
+   of River.
+10. **State-Machine Contract**: Worker queues must document accepted visible states, hidden retry/lease state, terminal states, and liveness expectations. Every accepted job must eventually reach success, failed, cancelled, quarantined, or expired under its retry/deadline budget.
+11. **Finite Model Candidate**: New queue semantics that alter leases, retries, dedupe, cancellation, or terminal-state rules should be small enough to model with two workers, queue depth two, and retry cap two, even if implemented only as table-driven tests rather than TLC.
 
 Enforcement:
 

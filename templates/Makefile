@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts frontend-prototype-runtime runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -170,7 +170,7 @@ foundation-transport-proto:
 		echo "Runtime transport binding generator not found; skipping"; \
 	fi
 
-communication-contracts: proto proto-ts frontend-prototype-runtime lifecycle-contracts foundation-transport-proto runtime-bindings
+communication-contracts: proto proto-ts frontend-prototype-runtime lifecycle-contracts lifecycle-manifest foundation-transport-proto runtime-bindings
 	@echo "Communication contracts generated"
 
 lifecycle-contracts:
@@ -184,6 +184,19 @@ lifecycle-contracts:
 		node "$(FOUNDATION_PATH)/tooling/scripts/generate_lifecycle_contract_tests.mjs" --proto-root "$(PROTO_PATH)" --out "tests/contract/generated_lifecycle_test.go"; \
 	else \
 		echo "Lifecycle contract generator not found; skipping"; \
+	fi
+
+lifecycle-manifest:
+	@echo "Generating lifecycle manifest..."
+	@[ -d $(PROTO_PATH) ] || exit 0
+	@if [ -f scripts/checks/generate_lifecycle_manifest.mjs ]; then \
+		node scripts/checks/generate_lifecycle_manifest.mjs --proto-root "$(PROTO_PATH)" --manifest-out "docs/references/lifecycle/lifecycle_contract.json" --guide-out "docs/references/lifecycle/lifecycle_contract_guide.md"; \
+	elif [ -f foundation/tooling/scripts/generate_lifecycle_manifest.mjs ]; then \
+		node foundation/tooling/scripts/generate_lifecycle_manifest.mjs --proto-root "$(PROTO_PATH)" --manifest-out "docs/references/lifecycle/lifecycle_contract.json" --guide-out "docs/references/lifecycle/lifecycle_contract_guide.md"; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -f "$(FOUNDATION_PATH)/tooling/scripts/generate_lifecycle_manifest.mjs" ]; then \
+		node "$(FOUNDATION_PATH)/tooling/scripts/generate_lifecycle_manifest.mjs" --proto-root "$(PROTO_PATH)" --manifest-out "docs/references/lifecycle/lifecycle_contract.json" --guide-out "docs/references/lifecycle/lifecycle_contract_guide.md"; \
+	else \
+		echo "Lifecycle manifest generator not found; skipping"; \
 	fi
 
 build: build-server build-frontend
@@ -204,6 +217,16 @@ build-server:
 		$(GOBUILD) -o bin/server ./cmd/server; \
 	else \
 		echo "No Go module; skipping server build"; \
+	fi
+
+docgen:
+	@if [ -f go.mod ] && [ -d cmd/docgen ]; then \
+		set -e; \
+		mkdir -p "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"; \
+		GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" $(GOCMD) run ./cmd/docgen > openapi.json; \
+		echo "API documentation generated: openapi.json"; \
+	else \
+		echo "No docgen command; skipping OpenAPI generation"; \
 	fi
 
 build-frontend: frontend-prototype-runtime
@@ -665,7 +688,7 @@ lint-frontend: frontend-prototype-runtime
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-FOUNDATION_LINT_CHECKS := check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+FOUNDATION_LINT_CHECKS := check-doc-references check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 
 lint-foundation:
@@ -715,6 +738,9 @@ check-rust-runtime-practices:
 check-agent-contract:
 	@zsh ./scripts/checks/agent_contract_check.sh .
 
+check-doc-references:
+	@node ./scripts/checks/docs_reference_check.mjs .
+
 check-practice-controls:
 	@zsh ./scripts/checks/practice_controls_check.sh .
 
@@ -756,6 +782,12 @@ check-river-practices:
 
 check-migration-structure:
 	@zsh ./scripts/checks/migration_structure_check.sh .
+
+check-lifecycle-manifest:
+	@zsh ./scripts/checks/check_lifecycle_manifest.sh .
+
+check-app-security-profile:
+	@zsh ./scripts/checks/app_security_profile_check.sh .
 
 check-domain-contract-consistency:
 	@zsh ./scripts/checks/domain_contract_consistency_check.sh .
@@ -856,6 +888,7 @@ help:
 	@echo "  foundation-status - Print foundation metadata"
 	@echo "  runtime-bindings  - Regenerate runtime-sdk buffer bindings"
 	@echo "  lifecycle-contracts - Generate proto-derived VerifyCommandLifecycle tests"
+	@echo "  lifecycle-manifest - Generate machine-readable lifecycle event/review vectors"
 	@echo "  frontend-prototype-runtime - Generate proto-derived frontend prototype stores, hooks, fixtures, and benchmarks"
 	@echo "  wasm-manifest     - Emit frontend runtime/WASM artifact manifest"
 	@echo "  native-dev        - Start the Tauri native shell against the frontend dev server"
@@ -866,6 +899,7 @@ help:
 	@echo "  delivery-metrics  - Emit a local DORA/incident collection event"
 	@echo ""
 	@echo "Checks:"
+	@echo "  check-doc-references"
 	@echo "  check-agent-contract"
 	@echo "  check-practice-controls"
 	@echo "  check-runtime-performance-contracts"
@@ -880,6 +914,8 @@ help:
 	@echo "  check-redis-practices"
 	@echo "  check-river-practices"
 	@echo "  check-migration-structure"
+	@echo "  check-lifecycle-manifest"
+	@echo "  check-app-security-profile"
 	@echo "  check-domain-contract-consistency"
 	@echo "  check-contract-drift"
 	@echo "  check-project-scaffold"

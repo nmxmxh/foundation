@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
@@ -232,7 +233,7 @@ function parseProtoFile(file, protoRoot) {
   }
   const domain = lowerSnake(packageParts.slice(0, versionIndex).join("_"));
   const version = packageParts[versionIndex];
-  if (domain === "common" || domain === "transport") {
+  if (domain === "common" || domain === "transport" || domain === "foundation") {
     return { cases, errors };
   }
 
@@ -243,10 +244,11 @@ function parseProtoFile(file, protoRoot) {
       continue;
     }
     const operation = message.name.slice(0, -"Request".length);
-    const action = actionFromOperation(operation);
-    if (!mutatingActions.has(action)) {
+    const verb = actionFromOperation(operation);
+    if (!mutatingActions.has(verb)) {
       continue;
     }
+    const action = lowerSnake(operation);
 
     if (!hasFoundationMetadata(message.body)) {
       errors.push(`${relativeFile}: ${message.name} must declare foundation.v1.Metadata metadata = 1`);
@@ -488,17 +490,25 @@ func generatedLifecycleCopy(in extension.Object) extension.Object {
 }
 
 function formatGo(source) {
-  const result = spawnSync("gofmt", [], {
-    input: source,
-    encoding: "utf8",
-  });
-  if (result.error) {
-    throw new Error(`gofmt failed: ${result.error.message}`);
+  const dir = mkdtempSync(path.join(tmpdir(), "ovasabi-lifecycle-contracts-"));
+  const file = path.join(dir, "generated_lifecycle_test.go");
+  try {
+    writeFileSync(file, source);
+    const result = spawnSync("gofmt", ["-w", file], {
+      encoding: "utf8",
+      timeout: 15_000,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    if (result.error) {
+      throw new Error(`gofmt failed: ${result.error.message}`);
+    }
+    if (result.status !== 0) {
+      throw new Error(`gofmt failed: ${result.stderr.trim()}`);
+    }
+    return readFileSync(file, "utf8");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
-  if (result.status !== 0) {
-    throw new Error(`gofmt failed: ${result.stderr.trim()}`);
-  }
-  return result.stdout;
 }
 
 function escapeGo(value) {

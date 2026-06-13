@@ -54,7 +54,36 @@ Raw Vite/Vitest aliases into `foundation/*/ts/src` are not a supported extension
 
 Generated projects should not treat `server-kit` as optional sample code. The scaffolded runtime must actively use the package surfaces it ships with: startup registers database, Redis, object storage, Hermes, and other critical dependencies with `resilience`; server ingress goes through registry/httpapi/metadata/graceful/security/compress/observability; WebSocket ingress uses routing and metrics; worker queues use bounded server-kit defaults. `tooling/scripts/server_kit_usage_check.sh` is the Foundation source for the generated `scripts/checks/server_kit_usage_check.sh` gate that enforces this deeper wiring for `.foundation` projects while limiting custom or mid-migration apps to package-presence checks until they adopt the managed scaffold profile.
 
+The registry/graceful spine has its own contract: route manifests validate
+method/path/event shape, unknown event types leave an observable metric/debug
+signal, graceful emitters respect context cancellation before auxiliary work,
+and River-backed emitters/schedulers fail with controlled errors when no River
+client is installed. Hot event payloads should arrive as typed extension
+objects, protobuf messages, or raw bytes rather than ad hoc `any` conversion.
+
 Generated projects should also keep operational readiness scaffolded but app-owned. Foundation provides `docs/operations` templates, `make delivery-metrics`, and CI artifact capture; app deployment platforms own dashboard aggregation, incident process, and production alert policies.
+
+## Foundation Profiles
+
+Foundation has one strict contract, but projects may adopt it through profiles.
+Profiles change which scaffold surfaces are present by default; they do not
+weaken tenant isolation, correlation, idempotency, lifecycle events,
+authorization, bounded work, or evidence requirements.
+
+- `core`: backend, database, Redis, transport, security, lifecycle events,
+  workers, generated contracts, and scaffold checks. This is the default for
+  serious multi-tenant applications.
+- `lite`: the smallest profile for early projects that need Foundation
+  ownership, metadata, security, testing, and scaffold checks without GPU,
+  native, formal-method, or advanced performance lanes enabled by default.
+- `performance`: opt-in runtime/native/WASM/GPU/Hermes-heavy lanes for measured
+  workloads with benchmark and fallback evidence.
+- `regulated`: app-owned security profile, audit, retention, policy, migration,
+  delivery-metrics, and evidence requirements emphasized for high-risk domains.
+
+A profile may remove optional surfaces from a generated project, but it must not
+create a parallel architecture. If a lite project later adopts Hermes, native,
+GPU, or formal-method lanes, it inherits the same contracts as a core project.
 
 ## Agent Ownership Contract
 
@@ -81,7 +110,14 @@ client command -> RuntimeEnvelope -> auth/tenant/correlation/idempotency validat
 -> success/failed event -> frontend projection/store update
 ```
 
-Any optimized lane, template helper, code generator, or app-owned service must refine that lifecycle rather than inventing a parallel path. `tooling/scripts/generate_lifecycle_contract_tests.mjs` derives baseline lifecycle vectors from mutating proto request/response pairs and emits tests that call `server-kit/go/contracttest.VerifyCommandLifecycle`. App integration tests should reuse the same verifier with real observed envelopes/jobs.
+Any optimized lane, template helper, code generator, or app-owned service must
+refine that lifecycle rather than inventing a parallel path.
+`tooling/scripts/generate_lifecycle_manifest.mjs` derives the
+machine-readable lifecycle manifest from mutating proto request/response pairs.
+`tooling/scripts/generate_lifecycle_contract_tests.mjs` derives baseline
+lifecycle test vectors from the same source and emits tests that call
+`server-kit/go/contracttest.VerifyCommandLifecycle`. App integration tests
+should reuse the same verifier with real observed envelopes/jobs.
 
 Hermes is the current Foundation hotplane refinement of that lifecycle. It is
 documented in `docs/hermes_hotplane.md` and implemented in `server-kit/go/hermes`;

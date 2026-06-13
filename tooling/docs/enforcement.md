@@ -11,6 +11,9 @@ It does not replace app-specific CI, but it sets the baseline for:
 5. contract drift
 6. agent operating contracts and evidence ledgers
 7. delivery metrics and operational scaffold posture
+8. documentation link integrity
+9. machine-readable lifecycle manifests
+10. app-owned security profile contracts
 
 Contract drift is expected to fail hard when:
 
@@ -39,6 +42,14 @@ Foundation uses a strict-core lint model:
    maps every `CP-*` and `TE-*` heading plus cross-cutting controls to owning
    docs, automation class, evidence, merge-gate posture, and valid script
    references
+7. `docs_reference_check.mjs` verifies that local Markdown references resolve
+   after documentation moves and rejects machine-local `file://` links
+8. `check_lifecycle_manifest.sh` verifies the proto-derived lifecycle manifest
+   and guide used by agents to generate event names and review vectors
+9. `app_security_profile_check.sh` verifies that generated applications own
+   `docs/security/profile.md`, keep required sections, and review it within 90
+   days. In Foundation core it validates only the generic scaffold template and
+   rejects concrete product posture docs.
 
 Native tool mapping:
 
@@ -153,6 +164,8 @@ agents. The check enforces:
    pre-production work
 5. the machine-readable controls matrix remains present and checkable from
    both Foundation source and generated-project layouts
+6. the reorganized references tree remains present for animation guidance and
+   lifecycle manifests, while concrete security profiles stay app-owned
 
 This is intentionally a documentation and workflow gate, not a substitute for
 tests or static analysis. The evidence itself still belongs in the relevant

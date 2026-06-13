@@ -13,6 +13,7 @@ mkdir -p "$TS_OUT_DIR"
 
 PROTO_FILES=(
   "$PROTO_DIR/foundation/v1/metadata.proto"
+  "$PROTO_DIR/foundation/v1/types.proto"
   "$PROTO_DIR/foundation/v1/envelope.proto"
   "$PROTO_DIR/foundation/v1/projection.proto"
 )

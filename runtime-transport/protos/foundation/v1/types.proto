@@ -1,0 +1,261 @@
+syntax = "proto3";
+
+package foundation.v1;
+
+option go_package = "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1;foundationpb";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+import "foundation/v1/metadata.proto";
+
+message Pagination {
+  int32 page = 1;
+  int32 page_size = 2;
+  string cursor = 3;
+}
+
+message ResponseMeta {
+  string correlation_id = 1;
+  string request_id = 2;
+  int64 total_count = 3;
+  int32 page = 4;
+  int32 page_size = 5;
+  string next_cursor = 6;
+  bool has_more = 7;
+}
+
+message PageRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  string cursor = 3;
+  int32 limit = 4;
+  int32 offset = 5;
+}
+
+message PageResponse {
+  string next_page_token = 1;
+  int32 total_count = 2;
+  bool has_more = 3;
+  string next_cursor = 4;
+  int32 total = 5;
+  int32 limit = 6;
+  int32 offset = 7;
+}
+
+message PaginationRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+  string cursor = 5;
+}
+
+message PaginationResponse {
+  string next_page_token = 1;
+  int64 total_count = 2;
+  int32 total = 3;
+  int32 limit = 4;
+  int32 offset = 5;
+  string next_cursor = 6;
+  bool has_more = 7;
+}
+
+message AuditInfo {
+  google.protobuf.Timestamp created_at = 1;
+  string created_by = 2;
+  google.protobuf.Timestamp updated_at = 3;
+  string updated_by = 4;
+}
+
+message AuditStamp {
+  string created_by_user_ref = 1;
+  string updated_by_user_ref = 2;
+  string created_by_actor_type = 3;
+  string updated_by_actor_type = 4;
+  string created_by_source = 5;
+  string updated_by_source = 6;
+  string correlation_id = 7;
+  string idempotency_key = 8;
+  string policy_snapshot_ref = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
+
+message Address {
+  string line1 = 1;
+  string line2 = 2;
+  string city = 3;
+  string state = 4;
+  string postal_code = 5;
+  string country_code = 6;
+}
+
+message ContactInfo {
+  string email = 1;
+  string phone = 2;
+  string website = 3;
+}
+
+message Decimal {
+  string value = 1;
+  int32 scale = 2;
+}
+
+message Money {
+  string asset_code = 1;
+  string amount_minor = 2;
+  int64 minor_units = 3;
+  string currency = 4;
+}
+
+message ExternalMoneyReference {
+  string quote_id = 1;
+  string currency = 2;
+  string amount_minor = 3;
+  string external_settlement_ref = 4;
+}
+
+message TimeWindow {
+  google.protobuf.Timestamp starts_at = 1;
+  google.protobuf.Timestamp ends_at = 2;
+}
+
+message TimeRange {
+  google.protobuf.Timestamp start = 1;
+  google.protobuf.Timestamp end = 2;
+}
+
+message Location {
+  double latitude = 1;
+  double longitude = 2;
+  string address = 3;
+  string city = 4;
+  string place_id = 5;
+}
+
+message CoarseLocation {
+  string country_code = 1;
+  string region_code = 2;
+  string city = 3;
+  string h3_cell_id = 4;
+}
+
+message PreciseLocation {
+  double latitude = 1;
+  double longitude = 2;
+  string h3_cell_id = 3;
+  string source = 4;
+}
+
+message LanguageTag {
+  string bcp47 = 1;
+  string display_name = 2;
+}
+
+message ViewerContext {
+  string user_id = 1;
+  string tree_id = 2;
+  string organization_id = 3;
+  string locale = 4;
+  string region_code = 5;
+  repeated string roles = 6;
+}
+
+message LocalizedText {
+  string locale = 1;
+  string text = 2;
+}
+
+message LocalizedContent {
+  string locale = 1;
+  string title = 2;
+  string summary = 3;
+  string body = 4;
+}
+
+message UserSummary {
+  string id = 1;
+  string name = 2;
+  string avatar_url = 3;
+  float rating = 4;
+  int32 total_rides = 5;
+  bool verified = 6;
+  string verification_level = 7;
+}
+
+message VehicleSummary {
+  string id = 1;
+  string make = 2;
+  string model = 3;
+  int32 year = 4;
+  string color = 5;
+  string plate = 6;
+  string vehicle_type = 7;
+  int32 seat_capacity = 8;
+}
+
+message CommandStatus {
+  string state = 1;
+  string code = 2;
+  string message = 3;
+}
+
+message Error {
+  string code = 1;
+  string message = 2;
+  string field = 3;
+  map<string, string> details = 4;
+}
+
+message ErrorDetail {
+  string code = 1;
+  string message = 2;
+  string record_ref = 3;
+  string stage = 4;
+  map<string, string> attributes = 5;
+  string severity = 6;
+  string retry_hint = 7;
+  Metadata metadata = 8;
+  string field = 9;
+}
+
+message PolicySnapshot {
+  string policy_snapshot_ref = 1;
+  string compliance_profile = 2;
+  repeated string jurisdiction_tags = 3;
+  google.protobuf.Timestamp effective_at = 4;
+}
+
+message StandardResponse {
+  string code = 1;
+  string message = 2;
+  string correlation_id = 3;
+  bytes payload = 4;
+}
+
+message StandardError {
+  string code = 1;
+  string message = 2;
+  string correlation_id = 3;
+  string retry_hint = 4;
+}
+
+message GenericEvent {
+  string event_type = 1;
+  google.protobuf.Struct payload = 2;
+  Metadata metadata = 3;
+  string correlation_id = 4;
+  string schema_version = 5;
+  string timestamp = 6;
+  string id = 7;
+  google.protobuf.Timestamp occurred_at = 8;
+  string payload_encoding = 9;
+}
+
+enum EntityStatus {
+  ENTITY_STATUS_UNSPECIFIED = 0;
+  ENTITY_STATUS_ACTIVE = 1;
+  ENTITY_STATUS_RESTRICTED = 2;
+  ENTITY_STATUS_SUSPENDED = 3;
+  ENTITY_STATUS_CLOSED = 4;
+}

@@ -9,7 +9,8 @@ protos/
 ├── foundation/v1/       # Scaffolded copy of Foundation transport contracts
 │   ├── envelope.proto
 │   ├── metadata.proto
-│   └── projection.proto
+│   ├── projection.proto
+│   └── types.proto
 ├── <domain>/v1/         # Domain-specific contracts
 │   └── <domain>.proto
 └── _template/v1/        # Reference templates
@@ -41,6 +42,9 @@ message CreateFooRequest {
 ### 4. Hermes Projection Contract
 - App-owned domain protos remain in `api/protos/<domain>/v1`
 - Domain request and response messages use `foundation.v1.Metadata metadata = 1`
+- Shared value objects such as pagination, audit stamps, money, locations, and localized content use `foundation.v1.*`
+- Governance and lineage details such as actor type, jurisdiction, policy snapshot, legal basis, reason code, request timestamps, payload hashes, and source queue/channel also live in `foundation.v1.Metadata`
+- Do not create app-local shared proto packages; promote reusable primitives to Foundation instead
 - Foundation-owned transport and hotplane contracts live together in `foundation/runtime-transport/protos/foundation/v1`
 - The scaffolded `database.RuntimeStore` is wrapped with Hermes by default for bounded tenant/domain/collection StateStore reads
 - Projectors emit `foundation.v1.RecordMutationBatch` inside the Foundation `EventEnvelope`
@@ -48,7 +52,7 @@ message CreateFooRequest {
 - Do not invent JSON projection envelopes for Hermes
 
 ### 5. Field Numbering
-- Reserve 1-10 for common fields (id, metadata, timestamps)
+- Reserve 1-10 for shared fields such as id, metadata, and timestamps
 - Domain-specific fields start at 11
 - Never reuse deleted field numbers
 

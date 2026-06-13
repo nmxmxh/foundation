@@ -138,13 +138,9 @@ perl -MFile::Find -MFile::Spec -MFile::Basename - "$target" <<'PERL'
   }
   ok("service event metadata practices");
 
-  for my $legacy_metadata (
-    "$target/api/protos/common/v1/metadata.proto",
-    "$target/api/protos/common/v1/common.proto",
-  ) {
-    push @violations, rel($legacy_metadata) . ": common metadata is deprecated; use foundation.v1.Metadata"
-      if -e $legacy_metadata;
-  }
+  my $common_dir = "$target/api/protos/common";
+  push @violations, rel($common_dir) . ": app-local common protos are deprecated; use foundation.v1.Metadata and foundation.v1 shared types"
+    if -e $common_dir;
 
   my $metadata_proto = "$target/api/protos/foundation/v1/metadata.proto";
   $metadata_proto = "$target/foundation/runtime-transport/protos/foundation/v1/metadata.proto" if !-e $metadata_proto;
@@ -165,8 +161,29 @@ perl -MFile::Find -MFile::Spec -MFile::Basename - "$target" <<'PERL'
       if $proto_text !~ /\bstring\s+idempotency_key\s*=/;
     push @violations, rel($metadata_proto) . ": foundation metadata must expose map<string,string> attributes for bounded graph facts"
       if $proto_text !~ /\bmap\s*<\s*string\s*,\s*string\s*>\s+attributes\s*=/;
+    for my $field (qw(actor_type regulated_entity_ref jurisdiction)) {
+      push @violations, rel($metadata_proto) . ": foundation GlobalContext must expose $field"
+        if $proto_text !~ /\bstring\s+\Q$field\E\s*=/;
+    }
+    for my $field (qw(requested_at processed_at policy_snapshot_ref legal_basis_code reason_code data_classification retention_class jurisdiction_tags route_key source_service source_queue source_channel payload_hash signature_ref)) {
+      push @violations, rel($metadata_proto) . ": foundation Metadata must expose $field"
+        if $proto_text !~ /(?:\bstring\s+|\brepeated\s+string\s+|\bgoogle[.]protobuf[.]Timestamp\s+)\Q$field\E\s*=/;
+    }
   } else {
     push @violations, "api/protos/foundation/v1/metadata.proto: foundation metadata proto is required";
+  }
+
+  my $types_proto = "$target/api/protos/foundation/v1/types.proto";
+  $types_proto = "$target/foundation/runtime-transport/protos/foundation/v1/types.proto" if !-e $types_proto;
+  $types_proto = "$target/runtime-transport/protos/foundation/v1/types.proto" if !-e $types_proto;
+  if (-e $types_proto) {
+    my $types_text = read_file($types_proto);
+    for my $message (qw(PaginationRequest PaginationResponse PageRequest PageResponse Money Decimal Location AuditInfo AuditStamp)) {
+      push @violations, rel($types_proto) . ": foundation shared types must expose $message"
+        if $types_text !~ /\bmessage\s+\Q$message\E\b/;
+    }
+  } else {
+    push @violations, "api/protos/foundation/v1/types.proto: foundation shared types proto is required";
   }
 
   my $api_protos = "$target/api/protos";
@@ -177,10 +194,10 @@ perl -MFile::Find -MFile::Spec -MFile::Basename - "$target" <<'PERL'
         my $path = $File::Find::name;
         my $text = read_file($path);
         my $rel = rel($path);
-        push @violations, "$rel: common metadata imports are deprecated; import foundation/v1/metadata.proto"
-          if $text =~ /import\s+"common\/v1\/metadata[.]proto"\s*;/;
-        push @violations, "$rel: common RequestMetadata/ResponseMetadata is deprecated; use foundation.v1.Metadata"
-          if $text =~ /\bcommon[.]v1[.](?:RequestMetadata|ResponseMetadata)\b/;
+        push @violations, "$rel: app-local common imports are deprecated; import foundation/v1/metadata.proto or foundation/v1/types.proto"
+          if $text =~ /import\s+"common\/v1\/[^"]+[.]proto"\s*;/;
+        push @violations, "$rel: common.v1 references are deprecated; use foundation.v1.*"
+          if $text =~ /\bcommon[.]v1[.]/ || $text =~ /\btrotters[.]common[.]v1[.]/;
       },
       no_chdir => 1,
     }, $api_protos);

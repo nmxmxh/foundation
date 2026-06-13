@@ -40,7 +40,7 @@ move it into the owning practice document and, where possible, into tooling.
 | Document | Future optimization to add or research |
 | --- | --- |
 | `README.md` | Add architect, agent, and reviewer reading paths plus enforceability level per doc. |
-| `agent_operating_contract.md` | Keep current with AI-agent benchmarks, tool security, and multi-agent handoff practice. |
+| `agent_operating_contract.md` | Keep current with AI-agent benchmarks, tool security, multi-agent handoff practice, and succession continuity when the primary architect is unavailable. |
 | `practice_controls.md` | Keep the machine-readable controls matrix aligned with every CP/TE rule, cross-cutting agent/security/performance control, and scaffolded enforcement path. |
 | `ai_threat_model.md` | Track OWASP LLM/agentic/MCP threat classes, tool sandbox research, provenance scoring, and contamination-resistant agent evaluations. |
 | `ai_practices.md` | Add prompt-injection, tool poisoning, memory poisoning, agent identity, generated-code provenance, model/tool eval gates, and MCP permission review. |
@@ -56,17 +56,17 @@ move it into the owning practice document and, where possible, into tooling.
 | `database_practices.md` | Track PostgreSQL 18/19 async I/O, skip-scan caveats, virtual generated columns, `pg_stat_io`, WAL bytes/op, RLS tests, vector recall, and projection-lag fences. |
 | `redis_practices.md` | Track Redis 8 behavior, client-side cache invalidation, Streams pending recovery, shard policy, script safety, big-key automation, and eviction simulation. |
 | `websocket_scaling.md` | Add reconnect storm modeling, browser backpressure, slow-client fairness, auth-expiry mid-socket tests, QUIC/WebTransport research, and topic fanout complexity budgets. |
-| `runtime_foundation.md` | Add lane-selection proof tables: direct Go, Rust, WASM/SAB, FFI, shared memory, stdio, native GPU, WebGPU, WebSocket, HTTP, and JSON fallback. |
+| `runtime_foundation.md` | Add lane-selection proof tables: direct Go, Rust, WASM/SAB, FFI, shared memory, stdio, native GPU, WebGPU, WebSocket, HTTP, registry dispatch, graceful event emission, and JSON fallback. |
 | `runtime_native.md` | Add native plugin provenance, OS permission matrices, fd/handle leak checks, sensor/camera/audio latency budgets, and mobile store/privacy review. |
 | `rust_runtime_practices.md` | Track Rust 2024 unsafe discipline, Miri eligibility, Loom concurrency tests, `cargo-semver-checks`, panic strategy, Criterion profiles, and FFI fuzzing. |
 | `gpu_practices.md` | Add WebGPU compatibility matrix, WGSL layout generator, device-loss chaos tests, CUDA graph invalidation, occupancy-vs-latency guidance, and capture bundle schema. |
 | `game_runtime_practices.md` | Add hitch ledger, browser trace bundle, input latency vs frame latency, quality-tier contracts, and streaming priority scheduler rules. |
 | `hermes_hotplane.md` | Add freshness taxonomy: monotonic, read-your-write, bounded-stale, stale-while-revalidate, and fallback-required. Add Merkle/count/watermark drift repair. |
 | `projection_freshness_contract.md` | Keep projection, cache, search, materialized-view, and Hermes freshness modes synchronized with tests and metrics. |
-| `foundation_nervous_system.md` | Add machine-readable lifecycle source so agents can generate event names, tests, and review vectors from one contract. |
-| `foundation_architecture_contract.md` | Add multi-agent ownership conflict policy for platform, scaffold, and project-owned edits. |
+| `foundation_nervous_system.md` | Promoted 2026-06-08: `docs/references/lifecycle/lifecycle_contract.json` is now the machine-readable lifecycle source for event names, worker metadata, and review vectors. Next research: generated handler skeletons and richer implementation-test scaffolds from the same manifest. |
+| `foundation_architecture_contract.md` | Track profile adoption evidence for Core, Lite, Performance, and Regulated scaffold modes without weakening mandatory lifecycle/security invariants. |
 | `foundation_guide.md` | Split into architect, agent, and operator paths. Keep examples current with runtime and scaffold contracts. |
-| `foundation_tour.md` | Add failure tours for duplicate command, tenant mismatch, stale Hermes, Redis down, worker timeout, and partial batch failure. |
+| `foundation_tour.md` | Add failure tours for duplicate command, tenant mismatch, stale Hermes, Redis down, worker timeout, partial batch failure, and typed-payload JSON compatibility regressions. |
 | `optimization_points.md` | Convert future targets into hypothesis cards: bottleneck, expected win, invariant, benchmark, rollout, and rollback. |
 | `delivery_metrics_practices.md` | Add DevEx/SPACE metrics: cognitive load, review latency, agent rework, escaped defects, flaky-test rate, and local setup time. |
 | `frontend_scaffold_sync.md` | Add UI agent protocol: read `DESIGN.md`, inspect primitives, avoid raw aliases, run screenshots, check responsive text fit and reduced motion. |

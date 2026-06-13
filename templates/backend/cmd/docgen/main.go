@@ -11,9 +11,9 @@ import (
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
-	"{{MODULE_PATH}}/internal/bootstrap"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+	"{{MODULE_PATH}}/internal/bootstrap"
 )
 
 // OpenAPISpec represents OpenAPI 3.0 specification.
@@ -194,16 +194,7 @@ func Generate(cfg Config) OpenAPISpec {
 			op.Responses["401"] = buildErrorResponse("Unauthorized")
 		}
 
-		if route.RequestSchema != "" && method != "get" && method != "delete" {
-			op.RequestBody = &RequestBody{
-				Required: true,
-				Content: map[string]MediaType{
-					"application/json": {
-						Schema: Schema{Ref: "#/components/schemas/" + route.RequestSchema},
-					},
-				},
-			}
-		} else if route.RequestType != nil {
+		if route.RequestType != nil {
 			requestSchemaName := generator.generateSchema(route.RequestType)
 			if method == "get" || method == "delete" {
 				op.Parameters = buildQueryParameters(route.RequestType, route.RequiredQueryParams)
@@ -223,6 +214,16 @@ func Generate(cfg Config) OpenAPISpec {
 					},
 				}
 			}
+		} else if route.RequestSchema != "" && method != "get" && method != "delete" {
+			requestSchemaName := generator.ensureNamedSchema(route.RequestSchema, "Request body for "+route.EventType)
+			op.RequestBody = &RequestBody{
+				Required: true,
+				Content: map[string]MediaType{
+					"application/json": {
+						Schema: Schema{Ref: "#/components/schemas/" + requestSchemaName},
+					},
+				},
+			}
 		}
 
 		successStatus := route.SuccessStatusCode
@@ -237,17 +238,18 @@ func Generate(cfg Config) OpenAPISpec {
 
 		if route.NoContentResponse {
 			op.Responses[successCode] = Response{Description: successDescription}
-		} else if route.ResponseSchema != "" {
+		} else if route.ResponseType != nil {
+			responseSchemaName := generator.generateSchema(route.ResponseType)
 			op.Responses[successCode] = Response{
 				Description: successDescription,
 				Content: map[string]MediaType{
 					"application/json": {
-						Schema: Schema{Ref: "#/components/schemas/" + route.ResponseSchema},
+						Schema: Schema{Ref: "#/components/schemas/" + responseSchemaName},
 					},
 				},
 			}
-		} else if route.ResponseType != nil {
-			responseSchemaName := generator.generateSchema(route.ResponseType)
+		} else if route.ResponseSchema != "" {
+			responseSchemaName := generator.ensureNamedSchema(route.ResponseSchema, "Successful response for "+route.EventType)
 			op.Responses[successCode] = Response{
 				Description: successDescription,
 				Content: map[string]MediaType{
@@ -317,6 +319,25 @@ func (g *schemaGenerator) generateSchema(msg proto.Message) string {
 		return ""
 	}
 	return g.generateMessage(msg.ProtoReflect().Descriptor())
+}
+
+func (g *schemaGenerator) ensureNamedSchema(name, description string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if _, exists := g.schemas[name]; !exists {
+		anySchema := Schema{}
+		g.schemas[name] = Schema{
+			Type:                 "object",
+			Description:          strings.TrimSpace(description),
+			AdditionalProperties: &anySchema,
+		}
+	}
+	if _, exists := g.bySchemaName[name]; !exists {
+		g.bySchemaName[name] = ""
+	}
+	return name
 }
 
 func (g *schemaGenerator) generateMessage(md protoreflect.MessageDescriptor) string {
@@ -577,16 +598,12 @@ func applyFieldValidationHints(fieldName string, schema *Schema) {
 	case strings.HasSuffix(name, "url") || strings.Contains(name, "_url"):
 		schema.Format = "uri"
 	case strings.Contains(name, "password"):
-		schema.MinLength = intPtr(8)
+		schema.MinLength = new(8)
 	case strings.HasSuffix(name, "_at") || strings.Contains(name, "timestamp"):
 		schema.Format = "date-time"
 	case strings.Contains(name, "date"):
 		schema.Format = "date"
 	}
-}
-
-func intPtr(v int) *int {
-	return &v
 }
 
 func dedupeStrings(items []string) []string {

@@ -170,6 +170,23 @@ func TestEventEmittersNilInvalidAndRedisPaths(t *testing.T) {
 	}
 }
 
+func TestEventEmittersRespectContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	bus := eventcontract.NewInMemoryBus(10)
+	if err := NewInMemoryEventEmitter(bus).EmitEvent(ctx, "orders:create:v1:success", nil, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("in-memory EmitEvent() error = %v, want context.Canceled", err)
+	}
+	if recent := bus.Recent(1); len(recent) != 0 {
+		t.Fatalf("cancelled in-memory emit published event: %+v", recent)
+	}
+
+	if err := NewRedisEventEmitter(bus).EmitEvent(ctx, "orders:create:v1:success", nil, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("redis EmitEvent() error = %v, want context.Canceled", err)
+	}
+}
+
 func TestInMemorySchedulerStoresJobs(t *testing.T) {
 	scheduler := NewInMemoryScheduler()
 	err := scheduler.Schedule(context.Background(), PublishEventArgs{EventType: "governance:record_audit:v1:requested"}, time.Now().UTC())
@@ -204,6 +221,12 @@ func TestPublishEventArgsAndHelpers(t *testing.T) {
 	if got := objectFromPayload(payload); got["ok"].Interface() != true {
 		t.Fatalf("objectFromPayload(object) = %+v", got)
 	}
+	owned := extension.Object{"owned": extension.String("yes")}
+	gotOwned := objectFromPayload(OwnObject(owned))
+	owned["owned"] = extension.String("mutated")
+	if gotOwned["owned"].Interface() != "mutated" {
+		t.Fatalf("owned payload should avoid clone: %+v", gotOwned)
+	}
 	if got := objectFromPayload("value"); got["result"].Interface() != "value" {
 		t.Fatalf("objectFromPayload(value) = %+v", got)
 	}
@@ -212,6 +235,9 @@ func TestPublishEventArgsAndHelpers(t *testing.T) {
 	}
 	if got := pickCorrelation(nil); got != "" {
 		t.Fatalf("pickCorrelation(nil) = %q", got)
+	}
+	if got := pickIdempotency(extension.Object{"idempotency_key": extension.String("idem_1")}); got != "idem_1" {
+		t.Fatalf("pickIdempotency = %q", got)
 	}
 
 	scheduler := NewInMemoryScheduler()
@@ -228,6 +254,14 @@ func TestPublishEventArgsAndHelpers(t *testing.T) {
 	if err := scheduler.ScheduleTxWithOpts(context.Background(), nil, PublishEventArgs{}, runAt, nil); err != nil {
 		t.Fatalf("ScheduleTxWithOpts nil opts error = %v", err)
 	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := scheduler.Schedule(cancelled, PublishEventArgs{}, runAt); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Schedule cancelled error = %v, want context.Canceled", err)
+	}
+	if err := scheduler.ScheduleTxWithOpts(cancelled, nil, PublishEventArgs{}, runAt, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("ScheduleTxWithOpts cancelled error = %v, want context.Canceled", err)
+	}
 }
 
 func TestRiverConstructorsAndValidationBranches(t *testing.T) {
@@ -236,13 +270,29 @@ func TestRiverConstructorsAndValidationBranches(t *testing.T) {
 		t.Fatalf("expected river emitter")
 	}
 	if err := emitter.EmitEvent(context.Background(), "bad event", nil, nil); err == nil {
-		t.Fatalf("expected invalid river event error before client use")
+		t.Fatalf("expected river event error before client use")
 	}
 	if err := emitter.EmitEventTx(context.Background(), nil, "bad event", nil, nil); err == nil {
-		t.Fatalf("expected invalid river tx event error before client use")
+		t.Fatalf("expected river tx event error before client use")
 	}
 	scheduler := NewRiverScheduler(nil)
 	if scheduler == nil {
 		t.Fatalf("expected river scheduler")
+	}
+	if err := emitter.EmitEvent(context.Background(), "orders:create:v1:success", nil, nil); !errors.Is(err, ErrRiverClientRequired) {
+		t.Fatalf("EmitEvent nil client error = %v, want ErrRiverClientRequired", err)
+	}
+	if err := emitter.EmitEventTx(context.Background(), nil, "orders:create:v1:success", nil, nil); !errors.Is(err, ErrRiverClientRequired) {
+		t.Fatalf("EmitEventTx nil client error = %v, want ErrRiverClientRequired", err)
+	}
+	runAt := time.Now().UTC()
+	if err := scheduler.Schedule(context.Background(), PublishEventArgs{}, runAt); !errors.Is(err, ErrRiverClientRequired) {
+		t.Fatalf("Schedule nil client error = %v, want ErrRiverClientRequired", err)
+	}
+	if err := scheduler.ScheduleTx(context.Background(), nil, PublishEventArgs{}, runAt); !errors.Is(err, ErrRiverClientRequired) {
+		t.Fatalf("ScheduleTx nil client error = %v, want ErrRiverClientRequired", err)
+	}
+	if err := scheduler.ScheduleTxWithOpts(context.Background(), nil, PublishEventArgs{}, runAt, nil); !errors.Is(err, ErrRiverClientRequired) {
+		t.Fatalf("ScheduleTxWithOpts nil client error = %v, want ErrRiverClientRequired", err)
 	}
 }

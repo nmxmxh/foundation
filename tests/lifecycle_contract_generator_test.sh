@@ -20,11 +20,11 @@ node "$FOUNDATION_DIR/tooling/scripts/generate_lifecycle_contract_tests.mjs" \
   --check >/tmp/ovasabi-lifecycle-generator-check.out
 
 for expected in \
-  "example:create:v1:requested" \
-  "example:create:v1:success" \
-  "example:create:v1:failed" \
-  "example:update:v1:requested" \
-  "example:delete:v1:success" \
+  "example:create_example:v1:requested" \
+  "example:create_example:v1:success" \
+  "example:create_example:v1:failed" \
+  "example:update_example:v1:requested" \
+  "example:delete_example:v1:success" \
   "verifyGeneratedLifecycleObservation" \
   "VerifyCommandLifecycle"; do
   if ! rg -n "$expected" "$OUT_FILE" >/dev/null; then

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"slices"
 	"testing"
 	"time"
@@ -174,6 +175,42 @@ func TestRegisterTypedValidationFailures(t *testing.T) {
 				t.Fatalf("expected typed registration error")
 			}
 		})
+	}
+}
+
+func TestHTTPRouteValidate(t *testing.T) {
+	valid := HTTPRoute{
+		Method:        http.MethodPost,
+		Path:          "/orders",
+		EventType:     "orders:create:v1:requested",
+		Handler:       func(http.ResponseWriter, *http.Request) {},
+		StaticPayload: nil,
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	cases := []HTTPRoute{
+		{Method: "FOO", Path: "/orders", EventType: "orders:create:v1:requested", Handler: valid.Handler},
+		{Method: http.MethodPost, Path: "orders", EventType: "orders:create:v1:requested", Handler: valid.Handler},
+		{Method: http.MethodPost, Path: "/orders", EventType: "bad event", Handler: valid.Handler},
+		{Method: http.MethodPost, Path: "/orders", EventType: "orders:create:v1:requested", SuccessStatusCode: 301, Handler: valid.Handler},
+		{Method: http.MethodPost, Path: "/orders", EventType: "orders:create:v1:requested"},
+	}
+	for _, route := range cases {
+		if err := route.Validate(); err == nil {
+			t.Fatalf("expected validation error for route %+v", route)
+		}
+	}
+
+	static := HTTPRoute{
+		Method:        http.MethodGet,
+		Path:          "/healthz",
+		EventType:     "system:health_check:v1:success",
+		StaticPayload: extension.Object{"ok": extension.Bool(true)},
+	}
+	if err := static.Validate(); err != nil {
+		t.Fatalf("static route Validate() error = %v", err)
 	}
 }
 
@@ -541,6 +578,9 @@ func TestDispatchEnvelopeIgnoresDecodeMissAndProtobufLegacy(t *testing.T) {
 		t.Fatalf("ToBinary() error = %v", err)
 	}
 	registry.dispatchEnvelope(context.Background(), raw)
+	if got := registry.MetricsSnapshot().UnknownEvents; got != 1 {
+		t.Fatalf("unknown events = %d, want 1", got)
+	}
 
 	if err := registry.Register("orders:create:v1:requested", func(context.Context, extension.Object) (any, error) {
 		t.Fatalf("legacy handler should not receive protobuf payload")
@@ -555,6 +595,10 @@ func TestDispatchEnvelopeIgnoresDecodeMissAndProtobufLegacy(t *testing.T) {
 		t.Fatalf("ToBinary() error = %v", err)
 	}
 	registry.dispatchEnvelope(context.Background(), raw)
+	metrics := registry.MetricsSnapshot()
+	if metrics.RegisteredHandlers != 1 || metrics.DispatchWorkers != 1 || metrics.UnknownEvents != 1 {
+		t.Fatalf("unexpected metrics snapshot: %+v", metrics)
+	}
 }
 
 func TestDispatchEnvelopeTypedDecodeAndHandlerErrors(t *testing.T) {

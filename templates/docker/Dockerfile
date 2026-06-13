@@ -69,6 +69,7 @@ COPY . .
 # foundation projects on the same Docker builder.
 RUN --mount=type=cache,id=${CACHE_NAMESPACE}-gomod,target=/go/pkg/mod,sharing=locked \
     --mount=type=cache,id=${CACHE_NAMESPACE}-gobuild,target=/root/.cache/go-build,sharing=locked \
+    go run ./cmd/docgen > /tmp/openapi.json && \
     CGO_ENABLED="${CGO_ENABLED:-0}" go build \
     -trimpath \
     -ldflags="-s -w -X main.Version=${VERSION:-dev}" \
@@ -86,6 +87,7 @@ RUN --mount=type=cache,id=${CACHE_NAMESPACE}-apk-final,target=/var/cache/apk,sha
 RUN addgroup -S app && adduser -S app -G app
 
 COPY --from=builder /bin/server ./server
+COPY --from=builder /tmp/openapi.json ./openapi.json
 
 # Copy additional assets if the application needs them.
 # COPY --from=builder /app/assets ./assets

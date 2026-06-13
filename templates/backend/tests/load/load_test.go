@@ -206,10 +206,7 @@ func percentileFromLatencyBuckets(buckets [loadLatencyBucketCount]int64, count i
 	if count <= 0 {
 		return 0
 	}
-	rank := (count*percentile + 99) / 100
-	if rank < 1 {
-		rank = 1
-	}
+	rank := max((count*percentile+99)/100, 1)
 	var seen int64
 	for idx, bucketCount := range buckets {
 		seen += bucketCount
@@ -366,10 +363,7 @@ func prewarmLoadStep(ctx context.Context, t *testing.T, env *testutil.RealTestEn
 		warmConcurrency = 1
 	}
 
-	warmTimeout := opTimeout
-	if warmTimeout < 5*time.Second {
-		warmTimeout = 5 * time.Second
-	}
+	warmTimeout := max(opTimeout, 5*time.Second)
 	warmCtx, cancel := context.WithTimeout(ctx, warmTimeout)
 	defer cancel()
 

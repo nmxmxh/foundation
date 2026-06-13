@@ -453,6 +453,6 @@ make foundation-update
 
 ## 6. Version History
 
-See [CHANGELOG.md](../CHANGELOG.md) for detailed release notes.
+See CHANGELOG.md in the Foundation source repository for detailed release notes.
 
 Current foundation version: **1.0.0**

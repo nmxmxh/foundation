@@ -38,22 +38,16 @@ fn foundation_runtime_dispatch(
     let InvokeBody::Raw(bytes) = request.body() else {
         return Err("foundation_runtime_dispatch requires a raw binary request body".to_string());
     };
-    let bridge = state
-        .bridge
-        .lock()
-        .map_err(|_| "native runtime bridge lock poisoned".to_string())?;
-    let response = bridge
-        .dispatch_frame(bytes)
-        .map_err(|error| error.to_string())?;
+    let bridge =
+        state.bridge.lock().map_err(|_| "native runtime bridge lock poisoned".to_string())?;
+    let response = bridge.dispatch_frame(bytes).map_err(|error| error.to_string())?;
     Ok(Response::new(response))
 }
 
 #[tauri::command]
 fn foundation_runtime_capabilities(state: State<'_, NativeState>) -> Result<Capabilities, String> {
-    let bridge = state
-        .bridge
-        .lock()
-        .map_err(|_| "native runtime bridge lock poisoned".to_string())?;
+    let bridge =
+        state.bridge.lock().map_err(|_| "native runtime bridge lock poisoned".to_string())?;
     let capabilities = bridge.capabilities();
     Ok(Capabilities {
         native: capabilities.native,
@@ -70,10 +64,7 @@ fn foundation_secure_store_get(
     key: String,
     state: State<'_, NativeState>,
 ) -> Result<Option<Vec<u8>>, String> {
-    state
-        .secure_store
-        .get(&key)
-        .map_err(|error| error.to_string())
+    state.secure_store.get(&key).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -82,10 +73,7 @@ fn foundation_secure_store_put(
     value: Vec<u8>,
     state: State<'_, NativeState>,
 ) -> Result<(), String> {
-    state
-        .secure_store
-        .put(&key, &value)
-        .map_err(|error| error.to_string())
+    state.secure_store.put(&key, &value).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -93,10 +81,7 @@ fn foundation_secure_store_delete(
     key: String,
     state: State<'_, NativeState>,
 ) -> Result<bool, String> {
-    state
-        .secure_store
-        .delete(&key)
-        .map_err(|error| error.to_string())
+    state.secure_store.delete(&key).map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

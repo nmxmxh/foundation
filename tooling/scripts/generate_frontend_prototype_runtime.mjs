@@ -229,6 +229,9 @@ function readDescriptorSet(protoRoot, protoFiles, errors) {
     "protoc",
     [
       `--proto_path=${protoRoot}`,
+      `--proto_path=${foundationDir}/templates/api/protos`,
+      `--proto_path=${foundationDir}/api/protos`,
+      `--proto_path=${foundationDir}/runtime-transport/protos`,
       `--descriptor_set_out=${descriptorPath}`,
       "--include_imports",
       ...relativeFiles,

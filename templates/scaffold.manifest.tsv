@@ -10,6 +10,8 @@ templates/Makefile	Makefile	all	always	force
 templates/NEXT_STEPS.md	NEXT_STEPS.md	all	always	create
 templates/ops/README.md	docs/operations/README.md	all	always	create
 templates/ops/incident_record_template.md	docs/operations/incident_record_template.md	all	always	create
+templates/ops/migration_log.md	docs/operations/migration_log.md	all	always	create
+templates/ops/security_profile.md	docs/security/profile.md	all	always	create
 templates/github/workflows/ci.yml	.github/workflows/ci.yml	all	always	overwrite
 templates/github/workflows/security.yml	.github/workflows/security.yml	all	always	overwrite
 templates/agents/POST_INIT.md	.agents/POST_INIT.md	all	always	create

@@ -4,6 +4,8 @@ package foundation.v1;
 
 option go_package = "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1;foundationpb";
 
+import "google/protobuf/timestamp.proto";
+
 message ValidityPeriod {
   string effective_from = 1;
   string effective_to = 2;
@@ -19,6 +21,9 @@ message GlobalContext {
   string audit_context = 7;
   string ip_address = 8;
   string user_agent = 9;
+  string actor_type = 10;
+  string regulated_entity_ref = 11;
+  string jurisdiction = 12;
 }
 
 message Metadata {
@@ -42,4 +47,18 @@ message Metadata {
   string tenant_region = 18;
   map<string, string> attributes = 19;
   bytes extras_json = 20;
+  google.protobuf.Timestamp requested_at = 21;
+  google.protobuf.Timestamp processed_at = 22;
+  string policy_snapshot_ref = 23;
+  string legal_basis_code = 24;
+  string reason_code = 25;
+  string data_classification = 26;
+  string retention_class = 27;
+  repeated string jurisdiction_tags = 28;
+  string route_key = 29;
+  string source_service = 30;
+  string source_queue = 31;
+  string source_channel = 32;
+  string payload_hash = 33;
+  string signature_ref = 34;
 }

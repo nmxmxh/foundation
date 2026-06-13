@@ -21,6 +21,13 @@ AI, MCP, tool, and generated-code threat classes are owned by
 retrieved source, package script, browser capture, model output, or generated
 snippet influences a security-sensitive change.
 
+Application-specific threat models live in generated applications at
+`docs/security/profile.md`. Foundation must not store concrete product security
+postures or copy one product's threat model into another application. The shared
+Foundation posture is only the floor; each application owns its own data
+classes, abuse paths, regulatory obligations, and incident-response contacts.
+Keep the app-owned profile current with `make check-app-security-profile`.
+
 ## 2026 Threat Model Emphasis
 
 Foundation modules must assume active abuse of APIs, automation, identity edges, and dependency supply chains:
@@ -119,3 +126,5 @@ Every exposed feature should add tests for the vulnerability families it touches
 - [ ] Are dependency, generated-code, and CI changes covered by audit/SCA or reproducible verification?
 - [ ] Did any AI/tool/retrieved content influence the change, and is that
       influence validated by tests, source attribution, or review?
+- [ ] If the change belongs to an application, is its project-owned
+      `docs/security/profile.md` current and referenced?

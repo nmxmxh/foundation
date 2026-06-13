@@ -47,11 +47,13 @@ the role split explicit in handoff notes.
 Before an agent edits architecture-sensitive code, it must read the smallest
 set that covers the change:
 
-1. `README.md` for the documentation map.
-2. `foundation_architecture_contract.md` for ownership.
-3. `foundation_nervous_system.md` for lifecycle semantics.
-4. This document for agent workflow.
-5. The practice document for the affected lane: coding, testing, security,
+1. `foundation_quick_start.md` for the minimum viable path, first questions,
+   and common high-impact mistakes.
+2. `README.md` for the documentation map.
+3. `foundation_architecture_contract.md` for ownership.
+4. `foundation_nervous_system.md` for lifecycle semantics.
+5. This document for agent workflow.
+6. The practice document for the affected lane: coding, testing, security,
    performance, database, Redis, WebSocket, runtime, native, GPU, Rust, or UI.
 
 Generated projects use the same files under `docs/foundation/`.
@@ -103,6 +105,28 @@ Benchmarks prove only the lane they measure. A memory benchmark does not prove
 Postgres/Redis behavior, a kernel-only GPU timing does not prove user-visible
 latency, and a passing unit test does not prove production backpressure.
 
+## Agent Memory Sources
+
+Agent memory is advisory. Repository-owned, machine-readable sources outrank
+chat memory, prior handoffs, and model recall whenever they conflict.
+
+Authoritative sources:
+
+1. `tooling/practice_controls.psv` for control ownership, automation strength,
+   evidence requirements, and merge-gate posture.
+2. `docs/references/lifecycle/lifecycle_contract.json` for lifecycle event
+   names, worker job kinds, queues, invariants, and review vectors.
+3. Project-owned `docs/security/profile.md` files in generated applications for
+   app-specific threat models layered above `security_practices.md`.
+4. `templates/scaffold.manifest.tsv` for generated-project file ownership and
+   propagation mode.
+5. Current command output from `git status`, tests, benchmarks, and lint checks.
+
+If an agent uses remembered context for an architecture decision, it must name
+the repo source or check that validated the memory. If no source exists, treat
+the memory as a hypothesis and leave a review note instead of changing a
+contract silently.
+
 ## Multi-Agent File Ownership
 
 Agents must not overwrite each other's work.
@@ -118,6 +142,25 @@ Agents must not overwrite each other's work.
 6. Do not change benchmark guardrails, safety checks, or scaffold defaults
    without updating `tooling/enforcement_manifest.tsv` through the supervised
    integrity workflow.
+
+## Succession And Continuity
+
+Foundation must remain operable when the primary architect is unavailable.
+Agents and reviewers must leave enough state for another qualified person to
+continue safely.
+
+1. Handoffs must name the current objective, touched scope, evidence already
+   gathered, known failing checks, and files that must not be overwritten.
+2. Architecture-sensitive work must prefer repository-owned sources over private
+   chat context. If a decision depends on discussion outside the repo, promote
+   the durable rule, exception, or open question into the owning doc.
+3. New practice, scaffold, benchmark, or enforcement work must identify the
+   next reviewer role that can validate it without the original author.
+4. A blocked agent must leave a concrete restart point: command to run, failing
+   output location, suspected owner doc, and the invariant at risk.
+5. Do not encode critical process knowledge only in personal notes, hidden
+   prompts, or chat transcripts. Repository docs and checks are the continuity
+   path.
 
 ## AI-Specific Security Rules
 

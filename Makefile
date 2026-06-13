@@ -1,7 +1,9 @@
 .PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator \
 	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
-	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage
+	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
+	check-doc-references \
+	check-lifecycle-manifest check-app-security-profile lifecycle-manifest
 
 .DEFAULT_GOAL := help
 
@@ -14,6 +16,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-lifecycle-contract-generator \
 	check-frontend-prototype-generator \
 	check-contract-drift \
+	check-doc-references \
 	check-agent-contract \
 	check-practice-controls \
 	check-runtime-performance-contracts \
@@ -40,7 +43,9 @@ FOUNDATION_LINT_CHECKS := \
 	check-foundation-assets \
 	check-server-kit-module-contract \
 	check-domain-contract-consistency \
-	check-server-kit-usage
+	check-server-kit-usage \
+	check-lifecycle-manifest \
+	check-app-security-profile
 
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 FOUNDATION_GO_CACHE_DIR ?= /tmp/ovasabi-foundation-go-build
@@ -173,6 +178,9 @@ check-frontend-prototype-generator:
 check-contract-drift:
 	@tooling/scripts/contract_drift_check.sh .
 
+check-doc-references:
+	@node tooling/scripts/docs_reference_check.mjs .
+
 check-agent-contract:
 	@tooling/scripts/agent_contract_check.sh .
 
@@ -257,6 +265,18 @@ check-domain-contract-consistency:
 check-server-kit-usage:
 	@tooling/scripts/server_kit_usage_check.sh .
 
+check-lifecycle-manifest:
+	@tooling/scripts/check_lifecycle_manifest.sh .
+
+check-app-security-profile:
+	@tooling/scripts/app_security_profile_check.sh .
+
+lifecycle-manifest:
+	@proto_root=api/protos; \
+	if [ ! -d "$$proto_root" ]; then proto_root=templates/api/protos; fi; \
+	node tooling/scripts/generate_lifecycle_manifest.mjs --proto-root "$$proto_root"
+
+
 verify: lint test frontend-build check-scaffold-smoke
 
 docker-up:
@@ -286,6 +306,9 @@ help:
 	@echo "  make verify              Run lint, tests, TS typechecks, and generated scaffold smoke"
 	@echo "  make docker-up/down      Start/stop core service-backed test stack"
 	@echo "  make check-agent-contract  Run the agent workflow/documentation contract check"
+	@echo "  make check-doc-references  Validate local Markdown links and portable docs paths"
+	@echo "  make check-lifecycle-manifest  Validate proto-derived lifecycle manifest and guide"
+	@echo "  make check-app-security-profile  Validate the app-owned security profile contract"
 	@echo "  make check-practice-controls  Validate the machine-readable practice controls matrix"
 	@echo "  make check-runtime-performance-contracts  Validate low-level runtime performance evidence hooks"
 	@echo "  make check-frontend-runtime-workbench  Validate frontend runtime/workbench separation"

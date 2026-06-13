@@ -21,6 +21,7 @@ fi
 
 failed=0
 typeset -A widths
+max_prefix=0
 
 check_pair() {
   local file="$1"
@@ -42,6 +43,9 @@ for file in "${up_files[@]}"; do
   fi
 
   widths[${#prefix}]=1
+  if (( 10#$prefix > max_prefix )); then
+    max_prefix=$((10#$prefix))
+  fi
   check_pair "$file" "${file%.up.sql}.down.sql" "down"
 done
 
@@ -80,7 +84,36 @@ for ((i=2; i<=${#up_files[@]}; i++)); do
     echo "[FAIL] migration prefixes must be strictly increasing: ${up_files[$((i-1))]} -> ${up_files[$i]}"
     failed=1
   fi
+  if (( 10#$current_prefix != 10#$previous_prefix + 1 )); then
+    echo "[FAIL] migration prefixes must not have gaps: ${up_files[$((i-1))]} -> ${up_files[$i]}"
+    failed=1
+  fi
 done
+
+if (( max_prefix > 3 )); then
+  phase2_adr=""
+  for decisions_dir in "$target/docs/decisions" "$target/docs/adr" "$target/docs/architecture/decisions"; do
+    [[ -d "$decisions_dir" ]] || continue
+    phase2_adr="$(rg -il "Phase 2|schema freeze|expand/contract|migration stream" "$decisions_dir" --glob '*.md' 2>/dev/null | head -1 || true)"
+    [[ -n "$phase2_adr" ]] && break
+  done
+
+  if [[ -z "$phase2_adr" ]]; then
+    echo "[FAIL] migrations 0004+ require a Phase 2 migration ADR"
+    echo "  add docs/decisions/<date>-migration-phase-2.md with schema freeze, expand/contract, rollback, and backup policy"
+    failed=1
+  else
+    echo "[OK] Phase 2 migration ADR present: ${phase2_adr#$target/}"
+  fi
+
+  migration_log="$target/docs/operations/migration_log.md"
+  if [[ ! -f "$migration_log" ]]; then
+    echo "[FAIL] Phase 2 migrations require docs/operations/migration_log.md"
+    failed=1
+  else
+    echo "[OK] Phase 2 migration log present"
+  fi
+fi
 
 if [[ "$failed" -ne 0 ]]; then
   echo "migration structure check failed"

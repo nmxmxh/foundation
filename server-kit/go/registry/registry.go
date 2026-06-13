@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap"
@@ -45,6 +46,12 @@ type DispatchResult struct {
 	Stream          any
 }
 
+type MetricsSnapshot struct {
+	RegisteredHandlers uint64
+	DispatchWorkers    int
+	UnknownEvents      uint64
+}
+
 // ServiceRegistry routes request events to registered domain handlers.
 type ServiceRegistry struct {
 	mu              sync.RWMutex
@@ -54,6 +61,7 @@ type ServiceRegistry struct {
 	log             logger.Logger
 	dispatchWorkers int
 	intelligence    *intelligence.Injector
+	unknownEvents   atomic.Uint64
 }
 
 type Options struct {
@@ -248,7 +256,8 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 	r.mu.RUnlock()
 
 	if !ok {
-		// Silent ignore or debug/warn?
+		r.unknownEvents.Add(1)
+		r.log.DebugContext(ctx, "unknown event type ignored", "event_type", env.EventType)
 		return
 	}
 	if env.PayloadEncoding != protoapi.PayloadEncodingProtobuf {
@@ -297,6 +306,17 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 	_, err = method.handler(ctx, payloadObject)
 	if err != nil && r.handler != nil {
 		r.handler.Error(ctx, strings.TrimSuffix(env.EventType, ":requested"), "event processing failed", err, metaObject, "")
+	}
+}
+
+func (r *ServiceRegistry) MetricsSnapshot() MetricsSnapshot {
+	r.mu.RLock()
+	registered := len(r.methods)
+	r.mu.RUnlock()
+	return MetricsSnapshot{
+		RegisteredHandlers: uint64(registered),
+		DispatchWorkers:    r.dispatchWorkers,
+		UnknownEvents:      r.unknownEvents.Load(),
 	}
 }
 

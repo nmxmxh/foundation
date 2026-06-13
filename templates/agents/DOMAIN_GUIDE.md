@@ -29,13 +29,15 @@ api/
 ├── README.md                    # API boundary explanation
 └── protos/
     ├── README.md                # Contract rules
-    ├── common/v1/
-    │   └── metadata.proto       # Shared metadata fields
     ├── <domain>/v1/
     │   └── <domain>.proto       # Domain-specific messages
     └── _template/v1/
         └── example.proto        # Reference template
 ```
+
+Shared request metadata, pagination, money, location, audit, policy, and
+standard response types come from `foundation.v1`. Do not create app-local
+`common/v1` proto packages.
 
 ## Event Naming Convention
 

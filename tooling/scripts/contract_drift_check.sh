@@ -233,6 +233,12 @@ check_generated_if_present \
 check_generated_if_present \
   "foundation/runtime-transport/protos/foundation/v1/metadata.proto" \
   "foundation/runtime-transport/ts/src/generated/foundation/v1/metadata.ts"
+check_generated_if_present \
+  "foundation/runtime-transport/protos/foundation/v1/types.proto" \
+  "foundation/runtime-transport/go/generated/foundation/v1/types.pb.go"
+check_generated_if_present \
+  "foundation/runtime-transport/protos/foundation/v1/types.proto" \
+  "foundation/runtime-transport/ts/src/generated/foundation/v1/types.ts"
 
 if resolve_path "foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp" >/dev/null; then
   check_exists "runtime sdk generation script present" "foundation/runtime-sdk/scripts/generate_system_bindings.sh"

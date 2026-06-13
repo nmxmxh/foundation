@@ -2,6 +2,7 @@ package graceful
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -13,6 +14,8 @@ import (
 	metautil "github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/riverqueue/river"
 )
+
+var ErrRiverClientRequired = errors.New("graceful: river client is required")
 
 // EventEmitter emits lifecycle events for command outcomes.
 type EventEmitter interface {
@@ -219,10 +222,11 @@ func withCorrelationIDFromContext(ctx context.Context, metadata extension.Object
 
 // PublishEventArgs captures event publication job arguments for River.
 type PublishEventArgs struct {
-	EventType     string           `json:"event_type"`
-	Payload       any              `json:"payload"`
-	Metadata      extension.Object `json:"metadata"`
-	SchemaVersion string           `json:"schema_version,omitempty"`
+	EventType      string           `json:"event_type"`
+	Payload        any              `json:"payload"`
+	Metadata       extension.Object `json:"metadata"`
+	SchemaVersion  string           `json:"schema_version,omitempty"`
+	IdempotencyKey string           `json:"idempotency_key,omitempty"`
 }
 
 func (PublishEventArgs) Kind() string { return "publish_event" }
@@ -232,6 +236,17 @@ type InsertOptions struct {
 	Queue       string
 	MaxAttempts int
 	ScheduledAt time.Time
+}
+
+// OwnedObject marks an extension object as uniquely owned by the caller.
+// Emitters may use it without cloning. Use only when no other goroutine or
+// caller will mutate the object after the emit call begins.
+type OwnedObject struct {
+	Object extension.Object
+}
+
+func OwnObject(object extension.Object) OwnedObject {
+	return OwnedObject{Object: object}
 }
 
 // InMemoryEventEmitter emits directly to an in-memory bus (Local/Dev).
@@ -246,6 +261,9 @@ func NewInMemoryEventEmitter(bus eventcontract.Bus) *InMemoryEventEmitter {
 func (e *InMemoryEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error {
 	if e == nil || e.Bus == nil {
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := eventcontract.ValidateEventType(eventType); err != nil {
 		return err
@@ -285,7 +303,10 @@ func NewInMemoryScheduler() *InMemoryScheduler {
 	return &InMemoryScheduler{jobs: make([]ScheduledJob, 0, 32)}
 }
 
-func (s *InMemoryScheduler) Schedule(_ context.Context, job river.JobArgs, runAt time.Time) error {
+func (s *InMemoryScheduler) Schedule(ctx context.Context, job river.JobArgs, runAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.jobs = append(s.jobs, ScheduledJob{Job: job, RunAt: runAt.UTC()})
@@ -296,7 +317,10 @@ func (s *InMemoryScheduler) ScheduleTx(ctx context.Context, _ pgx.Tx, job river.
 	return s.Schedule(ctx, job, runAt)
 }
 
-func (s *InMemoryScheduler) ScheduleTxWithOpts(_ context.Context, _ pgx.Tx, job river.JobArgs, runAt time.Time, opts *river.InsertOpts) error {
+func (s *InMemoryScheduler) ScheduleTxWithOpts(ctx context.Context, _ pgx.Tx, job river.JobArgs, runAt time.Time, opts *river.InsertOpts) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.jobs = append(s.jobs, ScheduledJob{
@@ -326,6 +350,9 @@ func NewRedisEventEmitter(bus eventcontract.Bus) *RedisEventEmitter {
 func (e *RedisEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error {
 	if e == nil || e.Bus == nil {
 		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := eventcontract.ValidateEventType(eventType); err != nil {
 		return err
@@ -358,29 +385,43 @@ func NewRiverEventEmitter(client *river.Client[pgx.Tx]) *RiverEventEmitter {
 }
 
 func (e *RiverEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := eventcontract.ValidateEventType(eventType); err != nil {
 		return err
 	}
+	if e == nil || e.riverClient == nil {
+		return ErrRiverClientRequired
+	}
 	meta := withCorrelationIDFromContext(ctx, metadata)
 	_, err := e.riverClient.Insert(ctx, PublishEventArgs{
-		EventType:     eventType,
-		Payload:       payload,
-		Metadata:      meta,
-		SchemaVersion: eventcontract.EnvelopeSchemaVersion,
+		EventType:      eventType,
+		Payload:        payload,
+		Metadata:       meta,
+		SchemaVersion:  eventcontract.EnvelopeSchemaVersion,
+		IdempotencyKey: pickIdempotency(meta),
 	}, nil)
 	return err
 }
 
 func (e *RiverEventEmitter) EmitEventTx(ctx context.Context, tx pgx.Tx, eventType string, payload any, metadata extension.Object) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := eventcontract.ValidateEventType(eventType); err != nil {
 		return err
 	}
+	if e == nil || e.riverClient == nil {
+		return ErrRiverClientRequired
+	}
 	meta := withCorrelationIDFromContext(ctx, metadata)
 	_, err := e.riverClient.InsertTx(ctx, tx, PublishEventArgs{
-		EventType:     eventType,
-		Payload:       payload,
-		Metadata:      meta,
-		SchemaVersion: eventcontract.EnvelopeSchemaVersion,
+		EventType:      eventType,
+		Payload:        payload,
+		Metadata:       meta,
+		SchemaVersion:  eventcontract.EnvelopeSchemaVersion,
+		IdempotencyKey: pickIdempotency(meta),
 	}, nil)
 	return err
 }
@@ -395,16 +436,34 @@ func NewRiverScheduler(client *river.Client[pgx.Tx]) *RiverScheduler {
 }
 
 func (s *RiverScheduler) Schedule(ctx context.Context, job river.JobArgs, runAt time.Time) error {
+	if s == nil || s.riverClient == nil {
+		return ErrRiverClientRequired
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	_, err := s.riverClient.Insert(ctx, job, &river.InsertOpts{ScheduledAt: runAt})
 	return err
 }
 
 func (s *RiverScheduler) ScheduleTx(ctx context.Context, tx pgx.Tx, job river.JobArgs, runAt time.Time) error {
+	if s == nil || s.riverClient == nil {
+		return ErrRiverClientRequired
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	_, err := s.riverClient.InsertTx(ctx, tx, job, &river.InsertOpts{ScheduledAt: runAt})
 	return err
 }
 
 func (s *RiverScheduler) ScheduleTxWithOpts(ctx context.Context, tx pgx.Tx, job river.JobArgs, runAt time.Time, opts *river.InsertOpts) error {
+	if s == nil || s.riverClient == nil {
+		return ErrRiverClientRequired
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if opts == nil {
 		opts = &river.InsertOpts{ScheduledAt: runAt}
 	} else if opts.ScheduledAt.IsZero() {
@@ -421,6 +480,11 @@ func objectFromPayload(payload any) extension.Object {
 	switch value := payload.(type) {
 	case extension.Object:
 		return value.Clone()
+	case OwnedObject:
+		if value.Object == nil {
+			return extension.Object{}
+		}
+		return value.Object
 	default:
 		return extension.Object{"result": extensionValueFromAny(value)}
 	}
@@ -440,4 +504,12 @@ func pickCorrelation(metadata extension.Object) string {
 	}
 	corr, _ := metadata.GetString("correlation_id")
 	return corr
+}
+
+func pickIdempotency(metadata extension.Object) string {
+	if metadata == nil {
+		return ""
+	}
+	key, _ := metadata.GetString("idempotency_key")
+	return key
 }

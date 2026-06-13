@@ -144,6 +144,20 @@ const encodeMetadata = (metadata: EnvelopeMetadata): ProtoMetadata => ({
   tenantRegion: "",
   attributes: {},
   extrasJson: encodeExtras(metadata.extra),
+  requestedAt: undefined,
+  processedAt: undefined,
+  policySnapshotRef: "",
+  legalBasisCode: "",
+  reasonCode: "",
+  dataClassification: "",
+  retentionClass: "",
+  jurisdictionTags: [],
+  routeKey: "",
+  sourceService: "",
+  sourceQueue: "",
+  sourceChannel: "",
+  payloadHash: "",
+  signatureRef: "",
 });
 
 const decodeMetadata = (envelope: EventEnvelope): EnvelopeMetadata => {

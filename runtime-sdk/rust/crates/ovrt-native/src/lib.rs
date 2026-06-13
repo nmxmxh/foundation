@@ -319,8 +319,8 @@ mod tests {
             RuntimeUnitDescriptor {
                 unit_id: "text.compute".to_string(),
                 role: RuntimeRole::Compute,
-                input_schema: "common/v1/envelope.capnp".to_string(),
-                output_schema: "common/v1/envelope.capnp".to_string(),
+                input_schema: "foundation/v1/envelope.capnp".to_string(),
+                output_schema: "foundation/v1/envelope.capnp".to_string(),
                 supports_wasm: true,
                 supports_native: true,
                 requires_shared_memory: false,
@@ -369,8 +369,8 @@ mod tests {
             RuntimeUnitDescriptor {
                 unit_id: "panic.compute".to_string(),
                 role: RuntimeRole::Compute,
-                input_schema: "common/v1/envelope.capnp".to_string(),
-                output_schema: "common/v1/envelope.capnp".to_string(),
+                input_schema: "foundation/v1/envelope.capnp".to_string(),
+                output_schema: "foundation/v1/envelope.capnp".to_string(),
                 supports_wasm: false,
                 supports_native: true,
                 requires_shared_memory: false,
@@ -404,8 +404,8 @@ mod tests {
             RuntimeUnitDescriptor {
                 unit_id: "slow.compute".to_string(),
                 role: RuntimeRole::Compute,
-                input_schema: "common/v1/envelope.capnp".to_string(),
-                output_schema: "common/v1/envelope.capnp".to_string(),
+                input_schema: "foundation/v1/envelope.capnp".to_string(),
+                output_schema: "foundation/v1/envelope.capnp".to_string(),
                 supports_wasm: false,
                 supports_native: true,
                 requires_shared_memory: false,

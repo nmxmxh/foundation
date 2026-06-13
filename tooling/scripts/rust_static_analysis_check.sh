@@ -59,9 +59,47 @@ clippy_lints=(
   -D clippy::missing_safety_doc
 )
 
+temp_dist_dirs=()
+temp_dist_files=()
+
+cleanup_tauri_frontend_dist() {
+  local file dir
+  for file in "${temp_dist_files[@]}"; do
+    [[ -f "$file" ]] && rm -f "$file"
+  done
+  for dir in "${temp_dist_dirs[@]}"; do
+    [[ -d "$dir" ]] && rmdir "$dir" >/dev/null 2>&1 || true
+  done
+}
+trap cleanup_tauri_frontend_dist EXIT
+
+prepare_tauri_frontend_dist() {
+  local manifest="$1"
+  [[ "$manifest" == */native/src-tauri/Cargo.toml ]] || return 0
+
+  local app_root dist index
+  app_root="$(cd "$(dirname "$manifest")/../.." && pwd -P)"
+  dist="$app_root/frontend/dist"
+  index="$dist/index.html"
+
+  if [[ ! -d "$dist" ]]; then
+    mkdir -p "$dist"
+    printf '<!doctype html><html><head><meta charset="utf-8"><title>Static Analysis</title></head><body></body></html>\n' > "$index"
+    temp_dist_dirs+=("$dist")
+    return 0
+  fi
+
+  if [[ ! -f "$index" ]]; then
+    printf '<!doctype html><html><head><meta charset="utf-8"><title>Static Analysis</title></head><body></body></html>\n' > "$index"
+    temp_dist_files+=("$index")
+  fi
+}
+
 checked=0
 for manifest in "${manifests[@]}"; do
   rel="${manifest#$target/}"
+  prepare_tauri_frontend_dist "$manifest"
+
   echo "[RUN] Rust fmt: $rel"
   cargo fmt --manifest-path "$manifest" --all -- --check
   echo "[OK] Rust fmt: $rel"

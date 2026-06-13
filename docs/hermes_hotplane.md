@@ -160,6 +160,10 @@ Required properties:
 
 Read modes:
 
+The stable v1 behavior is owned by `docs/hermes_read_modes.md`. This table is a
+summary only; changes to stable mode semantics require an ADR and a contract
+version bump.
+
 | Mode | Behavior |
 | --- | --- |
 | `fenced` | Requires a minimum source watermark, event ID, revision, or updated-at fence. If Hermes is behind, wait within a tiny bound, then fall back or fail visibly. |

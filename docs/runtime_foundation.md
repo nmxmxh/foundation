@@ -99,8 +99,11 @@ The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_archite
 
 ## Hermes hotplane posture
 
-Hermes is an experimental node-local hotplane for live operational reads. The
-server-kit slice lives in `server-kit/go/hermes`: bounded projection specs,
+Hermes is the Foundation node-local hotplane for live operational reads. The
+implementation continues to evolve, but the read-mode behavior is stable in
+`docs/hermes_read_modes.md`; generated projects may rely on that v1 contract
+while keeping Postgres as the default correctness path. The server-kit slice
+lives in `server-kit/go/hermes`: bounded projection specs,
 tenant-scoped segmented indexes, copied public reads, borrowed internal views,
 atomic epoch publication, `database.StateStore` rebuild, typed record batch
 ingestion, trusted snapshot `BulkLoad`, generated

@@ -66,13 +66,23 @@ if [[ -d "$target/docs/foundation" ]]; then
 fi
 
 check_exists "agent operating contract doc" "$docs_dir/agent_operating_contract.md"
+check_exists "foundation quick start doc" "$docs_dir/foundation_quick_start.md"
 check_exists "future practices research doc" "$docs_dir/future_practices_research.md"
 check_exists "foundation docs index" "$docs_dir/README.md"
+check_file_contains "docs index links quick start" "$docs_dir/README.md" "foundation_quick_start.md"
 check_file_contains "docs index links agent contract" "$docs_dir/README.md" "agent_operating_contract.md"
 check_file_contains "docs index links future practices research" "$docs_dir/README.md" "future_practices_research.md"
+check_file_contains "quick start names common mistakes" "$docs_dir/foundation_quick_start.md" "Common High-Impact Mistakes"
+check_file_contains "quick start names typed payload regression" "$docs_dir/foundation_quick_start.md" "regresses JSON compatibility"
 check_file_contains "agent contract defines definition of done" "$docs_dir/agent_operating_contract.md" "Definition of Done"
 check_file_contains "agent contract defines evidence ledger" "$docs_dir/agent_operating_contract.md" "Evidence Ledger"
+check_file_contains "agent contract defines memory sources" "$docs_dir/agent_operating_contract.md" "Agent Memory Sources"
+check_file_contains "agent contract defines succession continuity" "$docs_dir/agent_operating_contract.md" "Succession And Continuity"
+check_file_contains "agent contract names lifecycle manifest" "$docs_dir/agent_operating_contract.md" "lifecycle_contract.json"
+check_file_contains "agent contract names app security profile" "$docs_dir/agent_operating_contract.md" "docs/security/profile.md"
 check_file_contains "research ledger maps document gaps" "$docs_dir/future_practices_research.md" "Document Gap Map"
+check_file_contains "architecture contract defines profiles" "$docs_dir/foundation_architecture_contract.md" "Foundation Profiles"
+check_file_contains "coding practices require JSON compatibility regression guard" "$docs_dir/coding_practices.md" "JSON compatibility fixture or benchmark"
 
 check_exists "agents guide" "$target/AGENTS.md"
 check_file_contains "agents guide links agent contract" "$target/AGENTS.md" "agent_operating_contract.md"
@@ -96,6 +106,19 @@ check_optional_file_contains "domain guide links agent contract" "$target/.agent
 check_optional_file_contains "post-init checklist links agent contract" "$target/.agents/POST_INIT.md" "agent_operating_contract.md"
 check_optional_file_contains "domain guide template links agent contract" "$target/templates/agents/DOMAIN_GUIDE.md" "agent_operating_contract.md"
 check_optional_file_contains "post-init template links agent contract" "$target/templates/agents/POST_INIT.md" "agent_operating_contract.md"
+
+# Reorganized references structure check
+check_exists "references README index" "$docs_dir/references/README.md"
+check_exists "references animation directory" "$docs_dir/references/animation"
+check_exists "references lifecycle directory" "$docs_dir/references/lifecycle"
+
+check_exists "lifecycle contract json" "$docs_dir/references/lifecycle/lifecycle_contract.json"
+check_exists "lifecycle contract guide" "$docs_dir/references/lifecycle/lifecycle_contract_guide.md"
+if [[ -d "$docs_dir/references/security" && -n "$(find "$docs_dir/references/security" -type f -print -quit 2>/dev/null)" ]]; then
+  fail "foundation docs avoid product security postures" "unexpected files under: ${docs_dir#$target/}/references/security"
+else
+  ok "foundation docs avoid product security postures"
+fi
 
 if [[ -d "$target/scripts/checks" ]]; then
   check_exists "scaffolded agent contract check" "$target/scripts/checks/agent_contract_check.sh"

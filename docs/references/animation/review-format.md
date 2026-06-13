@@ -3,7 +3,7 @@
 When reviewing motion code, use this table first:
 
 | Before | After | Why |
-|--------|-------|-----|
+| -------- | ------- | ----- |
 | What the interaction did previously | What now animates or transitions | Why the change improves feedback, orientation, continuity, or delight |
 
 Then check this issue list:
