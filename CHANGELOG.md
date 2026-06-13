@@ -2,22 +2,42 @@
 
 All notable changes to the Ovasabi Foundation will be documented in this file.
 
-## [1.1.0] - 2026-05-03
+## [1.2.0-dev] - 2026-06-13
 
 ### Added
+
+- Direct reflection-based serialization/deserialization for custom structs in `extension.Value` and `extension.FromJSON` to remove the costly JSON marshal/unmarshal round-trip.
+- Queue capacity and queue current length tracking fields in `registry.MetricsSnapshot`.
+- High-level test coverage in `graceful_test.go` and `registry_test.go` for struct payloads, context cancellation, and queue metrics.
+
+### Changed
+
+- Refactored `graceful.Handler` to perform early check of `ctx.Err()` to abort event emission on cancelled contexts.
+- Removed duplicate correlation extraction from metadata inside `InMemoryEventEmitter` and `RedisEventEmitter`.
+- Skipped redundant cloning of decoded metadata and payload envelopes in `registry.dispatchEnvelope`.
+- Swapped sort-and-copy iteration in observability `cloneMap` and `cloneDatabasePoolMap` for optimized `maps.Copy`.
+- Cleaned up dead `cloneObject` code from `events/bus.go`.
+
+### Fixed
+
+- Fixed timer leak in worker retry backoff loops in `worker/engine.go` by stopping the timer before returning or looping.
+
+## [1.1.0] - 2026-05-03
+
+### Added (1.1)
 
 - **policy**: Policy-as-code authorization engine (Cedar-inspired)
 - **redis**: Native Redis client integration for server-kit
 - **worker**: River-based background job handling infrastructure
 - **docgen**: Automated documentation generation for generated projects
 
-### Changed
+### Changed (1.1)
 
 - Updated tech stack standards to Go 1.26, React 19.2, TypeScript 5.9+, Rust 1.95, PostgreSQL 18, Redis 8
 - Refined **AGENTS.md** with clearer terminology (Core vs Project vs Template)
 - Formalized Foundation Dependency Boundary rules
 
-### Fixed
+### Fixed (1.1)
 
 - Sync issues between template scaffold and foundation core package boundaries
 

@@ -296,3 +296,89 @@ func TestRiverConstructorsAndValidationBranches(t *testing.T) {
 		t.Fatalf("ScheduleTxWithOpts nil client error = %v, want ErrRiverClientRequired", err)
 	}
 }
+
+func TestHandlerSuccessRespectsCancelledContext(t *testing.T) {
+	bus := eventcontract.NewInMemoryBus(10)
+	emitter := NewInMemoryEventEmitter(bus)
+	handler := NewHandler(
+		WithEventEmitter(emitter),
+		WithEventEnabled(true),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	handler.Success(ctx, "orders:create:v1:requested", "done", "result", nil, "o1", nil)
+
+	if len(bus.Recent(10)) != 0 {
+		t.Fatalf("expected no events on cancelled context")
+	}
+}
+
+func TestHandlerErrorRespectsCancelledContext(t *testing.T) {
+	bus := eventcontract.NewInMemoryBus(10)
+	emitter := NewInMemoryEventEmitter(bus)
+	handler := NewHandler(
+		WithEventEmitter(emitter),
+		WithEventEnabled(true),
+	)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	handler.Error(ctx, "orders:create:v1:requested", "failed", errors.New("boom"), nil, "o1")
+
+	if len(bus.Recent(10)) != 0 {
+		t.Fatalf("expected no events on cancelled context")
+	}
+}
+
+func TestObjectFromPayloadStruct(t *testing.T) {
+	type SimpleStruct struct {
+		ID    int    `json:"id"`
+		Name  string `json:"name"`
+		Count int64  `json:"count"`
+	}
+
+	val := SimpleStruct{ID: 42, Name: "testing", Count: 100}
+	obj := objectFromPayload(val)
+
+	idVal, ok := obj["id"]
+	if !ok {
+		t.Fatalf("expected id key directly in obj: %+v", obj)
+	}
+	idInt, ok := idVal.IntValue()
+	if !ok || idInt != 42 {
+		t.Fatalf("expected id = 42, got %v", idVal)
+	}
+
+	countVal, ok := obj["count"]
+	if !ok {
+		t.Fatalf("expected count key directly in obj: %+v", obj)
+	}
+	countInt, ok := countVal.IntValue()
+	if !ok || countInt != 100 {
+		t.Fatalf("expected count = 100, got %v", countVal)
+	}
+}
+
+func BenchmarkObjectFromPayload(b *testing.B) {
+	type ComplexStruct struct {
+		ID        int      `json:"id"`
+		Tags      []string `json:"tags"`
+		IsActive  bool     `json:"is_active"`
+		NestedVal float64  `json:"nested_val"`
+	}
+
+	val := ComplexStruct{
+		ID:        99,
+		Tags:      []string{"a", "b", "c"},
+		IsActive:  true,
+		NestedVal: 3.14,
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = objectFromPayload(val)
+	}
+}

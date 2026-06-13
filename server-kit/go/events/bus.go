@@ -5,7 +5,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
 )
@@ -217,13 +216,6 @@ func envelopeDispatchReady(envelope Envelope) bool {
 		return true
 	}
 	return false
-}
-
-func cloneObject(input extension.Object) extension.Object {
-	if len(input) == 0 {
-		return extension.Object{}
-	}
-	return input.Clone()
 }
 
 func Matches(pattern, eventType string) bool {

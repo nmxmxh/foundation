@@ -119,6 +119,8 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 13. For fixed-size checksum and identifier encodings, prefer stack-backed `hex.Encode`/`hex.Decode` into fixed arrays before the final string conversion. Reserve `hex.EncodeToString`/`hex.DecodeString` for cold paths or tests where the extra allocation is irrelevant.
 14. Validate offset/length arithmetic with checked addition before slicing, issuing range reads, composing manifests, or building object-store byte ranges. Integer wraparound in a hot path is both a correctness bug and a potential unbounded allocation trigger.
 15. Return borrowed readers or views for immutable in-memory payloads when the caller consumes them synchronously. Make a defensive copy only when storing caller-provided bytes, exposing mutable data, or allowing the view to outlive the owner.
+15a. De-serialize protobuf event envelope metadata lazily. Store raw metadata pointers and parse the metadata map only when explicitly requested (e.g., via `MaterializeMetadata()`). Perform fast-path validations directly on the protobuf structure to bypass map allocations.
+15b. Convert custom structs directly to generic extension containers (like `extension.Object` maps) using reflection (`reflect.Struct` kinds) instead of performing expensive `json.Marshal`/`json.Unmarshal` round-trips in hot paths.
 
 ### CPU microarchitecture posture
 

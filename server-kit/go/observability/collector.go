@@ -2,7 +2,6 @@ package observability
 
 import (
 	"maps"
-	"sort"
 	"sync"
 	"time"
 )
@@ -487,14 +486,7 @@ func cloneMap(in map[string]int64) map[string]int64 {
 		return map[string]int64{}
 	}
 	out := make(map[string]int64, len(in))
-	keys := make([]string, 0, len(in))
-	for key := range in {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		out[key] = in[key]
-	}
+	maps.Copy(out, in)
 	return out
 }
 
@@ -503,13 +495,7 @@ func averageMap(counts, durations map[string]int64) map[string]int64 {
 	if len(counts) == 0 {
 		return out
 	}
-	keys := make([]string, 0, len(counts))
-	for key := range counts {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		count := counts[key]
+	for key, count := range counts {
 		if count <= 0 {
 			continue
 		}
@@ -523,14 +509,7 @@ func cloneDatabasePoolMap(in map[string]DatabasePoolPressure) map[string]Databas
 		return map[string]DatabasePoolPressure{}
 	}
 	out := make(map[string]DatabasePoolPressure, len(in))
-	keys := make([]string, 0, len(in))
-	for key := range in {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		out[key] = in[key]
-	}
+	maps.Copy(out, in)
 	return out
 }
 

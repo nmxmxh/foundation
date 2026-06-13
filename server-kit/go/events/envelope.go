@@ -8,6 +8,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
@@ -24,6 +25,21 @@ const (
 	PayloadEncodingBinary   = "binary"
 )
 
+var (
+	internCache   sync.Map
+)
+
+func internString(s string) string {
+	if s == "" {
+		return ""
+	}
+	if val, ok := internCache.Load(s); ok {
+		return val.(string)
+	}
+	internCache.Store(s, s)
+	return s
+}
+
 type Envelope struct {
 	ID              string           `json:"id,omitempty"`
 	EventType       string           `json:"event_type"`
@@ -35,11 +51,80 @@ type Envelope struct {
 	SchemaVersion   string           `json:"schema_version"`
 	Timestamp       time.Time        `json:"timestamp"`
 	SourceNodeID    string           `json:"-"`
+
+	lazyMetadata    *foundationpb.Metadata `json:"-"`
 }
 
-func (e Envelope) Validate() error {
+func (e *Envelope) MaterializeMetadata() error {
+	if e == nil || e.Metadata != nil {
+		return nil
+	}
+	if e.lazyMetadata == nil {
+		e.Metadata = extension.Object{}
+		return nil
+	}
+	md, err := metadata.FromTransportProto(e.lazyMetadata)
+	if err != nil {
+		return err
+	}
+	e.Metadata = md.ToObject()
+	e.lazyMetadata = nil
+	return nil
+}
+
+func (e *Envelope) Validate() error {
 	if err := ValidateEventType(e.EventType); err != nil {
 		return err
+	}
+
+	if e.lazyMetadata != nil {
+		pb := e.lazyMetadata
+		if pb.AiConfidence != 0 || pb.ValidityPeriod != nil || len(pb.Tags) > 0 || len(pb.Categories) > 0 || len(pb.Attributes) > 0 || len(pb.ExtrasJson) > 0 {
+			if err := e.MaterializeMetadata(); err != nil {
+				return err
+			}
+		} else {
+			correlationID := strings.TrimSpace(e.CorrelationID)
+			metadataCorrelationID := strings.TrimSpace(pb.CorrelationId)
+			if correlationID == "" {
+				correlationID = metadataCorrelationID
+			}
+			if correlationID == "" {
+				return errors.New("missing correlation_id")
+			}
+			if e.CorrelationID != "" && pb.CorrelationId != "" && pb.CorrelationId != e.CorrelationID {
+				return errors.New("metadata.correlation_id must match envelope correlation_id")
+			}
+			if err := validateMetadataTokenFast("correlation_id", correlationID); err != nil {
+				return err
+			}
+			tokens := [...]string{pb.CausationId, pb.RequestId, pb.IdempotencyKey, pb.TraceId, pb.SpanId}
+			for _, tok := range tokens {
+				t := strings.TrimSpace(tok)
+				if t != "" {
+					if err := validateMetadataTokenFast("token", t); err != nil {
+						return err
+					}
+				}
+			}
+			if err := ValidateSchemaVersion(e.SchemaVersion); err != nil {
+				return err
+			}
+			if e.Timestamp.IsZero() {
+				return errors.New("missing timestamp")
+			}
+			switch normalized := normalizePayloadEncoding(e.PayloadEncoding); normalized {
+			case PayloadEncodingJSON:
+				return nil
+			case PayloadEncodingProtobuf, PayloadEncodingCapnp, PayloadEncodingBinary:
+				if len(e.PayloadBytes) == 0 {
+					return fmt.Errorf("%s payload_encoding requires payload bytes", normalized)
+				}
+				return nil
+			default:
+				return errors.New("unsupported payload_encoding")
+			}
+		}
 	}
 
 	if fast, err := validateEnvelopeMetadataFast(e.Metadata, e.CorrelationID); fast {
@@ -162,6 +247,7 @@ func (e *Envelope) Normalize() {
 	if e.PayloadEncoding == PayloadEncodingJSON && e.Payload == nil && len(e.PayloadBytes) == 0 {
 		e.Payload = extension.Object{}
 	}
+	_ = e.MaterializeMetadata()
 	md := metadata.FromObject(e.Metadata)
 	if e.CorrelationID != "" && md.CorrelationID != "" && e.CorrelationID != md.CorrelationID {
 		return
@@ -366,32 +452,48 @@ func unquoteJSONField(raw []byte) (string, error) {
 	if raw[0] != '"' {
 		return "", errors.New("json envelope field must be a string")
 	}
+	if len(raw) >= 2 && raw[len(raw)-1] == '"' {
+		escaped := false
+		for i := 1; i < len(raw)-1; i++ {
+			if raw[i] == '\\' {
+				escaped = true
+				break
+			}
+		}
+		if !escaped {
+			return string(raw[1 : len(raw)-1]), nil
+		}
+	}
 	return strconv.Unquote(string(raw))
 }
 
 func (s *jsonFieldScanner) scanString() (string, error) {
-	start := s.pos
-	if !s.consume('"') {
+	s.skipSpace()
+	if s.pos >= len(s.data) || s.data[s.pos] != '"' {
 		return "", errors.New("json string expected")
 	}
+	s.pos++ // consume '"'
+	start := s.pos
 	escaped := false
 	for s.pos < len(s.data) {
 		ch := s.data[s.pos]
-		s.pos++
-		if escaped {
-			escaped = false
-			continue
-		}
 		if ch == '\\' {
 			escaped = true
+			s.pos += 2
 			continue
 		}
 		if ch == '"' {
-			return strconv.Unquote(string(s.data[start:s.pos]))
+			strData := s.data[start:s.pos]
+			s.pos++ // consume '"'
+			if escaped {
+				return strconv.Unquote(string(s.data[start-1 : s.pos]))
+			}
+			return string(strData), nil
 		}
 		if ch < 0x20 {
 			return "", errors.New("json string contains control character")
 		}
+		s.pos++
 	}
 	return "", io.ErrUnexpectedEOF
 }
@@ -485,25 +587,22 @@ func FromBinary(data []byte) (Envelope, error) {
 		return Envelope{}, err
 	}
 
-	md, err := metadata.FromTransportProto(message.GetMetadata())
-	if err != nil {
-		return Envelope{}, err
-	}
-
 	env := Envelope{
 		ID:              message.GetId(),
-		EventType:       message.GetEventType(),
+		EventType:       internString(message.GetEventType()),
 		PayloadBytes:    message.GetPayload(),
 		PayloadEncoding: payloadEncodingFromProto(message.GetPayloadEncoding()),
-		Metadata:        md.ToObject(),
 		CorrelationID:   message.GetCorrelationId(),
-		SchemaVersion:   NormalizeSchemaVersion(message.GetSchemaVersion()),
+		SchemaVersion:   internString(NormalizeSchemaVersion(message.GetSchemaVersion())),
 		SourceNodeID:    message.GetSourceNodeId(),
+		lazyMetadata:    message.GetMetadata(),
 	}
 	if occurredAt := message.GetOccurredAt(); occurredAt != nil {
 		env.Timestamp = occurredAt.AsTime().UTC()
 	}
-	env.Normalize()
+	if env.Timestamp.IsZero() {
+		env.Timestamp = time.Now().UTC()
+	}
 	return env, nil
 }
 
@@ -628,25 +727,22 @@ func FromBatchBinary(data []byte) (Batch, error) {
 		Envelopes: make([]Envelope, len(message.GetEnvelopes())),
 	}
 	for i, me := range message.GetEnvelopes() {
-		md, err := metadata.FromTransportProto(me.GetMetadata())
-		if err != nil {
-			return Batch{}, err
-		}
-
 		env := Envelope{
 			ID:              me.GetId(),
-			EventType:       me.GetEventType(),
+			EventType:       internString(me.GetEventType()),
 			PayloadBytes:    me.GetPayload(),
 			PayloadEncoding: payloadEncodingFromProto(me.GetPayloadEncoding()),
-			Metadata:        md.ToObject(),
 			CorrelationID:   me.GetCorrelationId(),
-			SchemaVersion:   NormalizeSchemaVersion(me.GetSchemaVersion()),
+			SchemaVersion:   internString(NormalizeSchemaVersion(me.GetSchemaVersion())),
 			SourceNodeID:    me.GetSourceNodeId(),
+			lazyMetadata:    me.GetMetadata(),
 		}
 		if occurredAt := me.GetOccurredAt(); occurredAt != nil {
 			env.Timestamp = occurredAt.AsTime().UTC()
 		}
-		env.Normalize()
+		if env.Timestamp.IsZero() {
+			env.Timestamp = time.Now().UTC()
+		}
 		batch.Envelopes[i] = env
 	}
 	return batch, nil

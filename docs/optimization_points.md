@@ -185,6 +185,15 @@ This document tracks the deliberate performance and architecture carryovers fold
 - **Scale Harness**: `appbench` now exercises DB pressure, Redis fanout, WebSocket churn, cache stampedes, queue saturation, config convergence, and mixed p95/p99 latency without external services.
 - **1M Scale Slice**: `BenchmarkScale1M_*` validates 1M record/connection/subscription shapes with fixed benchmark iteration counts.
 - **Postgres State Store Alignment**: scalar JSONB filters push down before `LIMIT`, state-store methods use acquire/query budgets, raw JSON writes preserve bytes when map mutation is unnecessary, and the scaffold migration creates `governance_state_records` plus scoped indexes.
+- **EventEmitter Struct Payload Optimization**: removed `json.Marshal` round-trip from the event publication path by implementing direct reflection-based conversion for custom structs within `extension.FromJSON`.
+- **Deduplicated Correlation Extraction**: extracted correlation ID once from prepared metadata context to avoid redundant map lookups.
+- **Registry Envelope Ownership**: skipped redundant envelope metadata cloning after decoding fresh payloads in the service registry dispatch.
+- **Extended Registry Metrics**: added queue capacity and current length fields to `MetricsSnapshot` to monitor backpressure.
+- **Handler Context Cancellation Check**: added context error checks in `graceful.Handler` to prune event emission on aborted requests.
+- **Worker Backoff Timer Leak Fix**: ensured `timer.Stop` is always invoked when retrying worker jobs to prevent memory leaks.
+- **Memory Client Batch Allocation Reduction**: reused buffer allocations within the Redis memory client when retrieving key arrays.
+- **Lazy Metadata Deserialization**: Binary envelope decoders (`FromBinary`/`FromBatchBinary`) now defer metadata map creation by utilizing a `lazyMetadata` field, materializing the map only when `MaterializeMetadata()` is explicitly called. A zero-allocation fast-path validation is executed directly on the un-materialized protobuf structure.
+- **Direct Struct Reflection Mapping**: Added direct `reflect.Struct` mapping support in `extension.valueFromReflect` to dynamically convert Go structs to `extension.Object` maps without a heavy `json.Marshal`/`json.Unmarshal` round-trip fallback.
 
 ## Deferred behind stubs
 

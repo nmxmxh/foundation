@@ -655,6 +655,24 @@ func TestDispatchEnvelopeTypedDecodeAndHandlerErrors(t *testing.T) {
 	}
 }
 
+func TestMetricsSnapshotQueueFields(t *testing.T) {
+	client := redis.NewMemoryClient("test")
+	registry := NewWithOptions(client, nil, nil, Options{DispatchWorkers: 2})
+	ctx := t.Context()
+
+	if err := registry.Listen(ctx, "orders:create:v1:requested"); err != nil {
+		t.Fatalf("Listen() error = %v", err)
+	}
+
+	metrics := registry.MetricsSnapshot()
+	if metrics.PayloadQueueCapacity != 256 {
+		t.Fatalf("expected PayloadQueueCapacity = 256, got %d", metrics.PayloadQueueCapacity)
+	}
+	if metrics.PayloadQueueLength < 0 {
+		t.Fatalf("expected PayloadQueueLength >= 0, got %d", metrics.PayloadQueueLength)
+	}
+}
+
 func contains(values []string, want string) bool {
 	return slices.Contains(values, want)
 }

@@ -65,7 +65,7 @@ func NewRedisBus(client rediskit.Client, channel string, maxRecent int, l logger
 func (b *RedisBus) Publish(ctx context.Context, envelope Envelope) error {
 	envelope = envelopeWithContextMetadata(ctx, envelope)
 	envelope.Normalize()
-	envelope.Metadata = cloneObject(envelope.Metadata)
+	envelope.Metadata = envelope.Metadata.Clone()
 	envelope.SourceNodeID = b.nodeID
 	if err := envelope.Validate(); err != nil {
 		return err
@@ -181,6 +181,10 @@ func (b *RedisBus) consumeLoop(msgs <-chan []byte) {
 				b.logger.WarnContext(b.ctx, "invalid event envelope from redis", "error", err)
 				continue
 			}
+			if err := envelope.MaterializeMetadata(); err != nil {
+				b.logger.WarnContext(b.ctx, "failed to materialize metadata for event", "error", err)
+				continue
+			}
 			if sourceNode := envelope.SourceNodeID; sourceNode == "" {
 				if legacySourceNode, _ := envelope.Metadata.GetString("_bus_node_id"); legacySourceNode == b.nodeID {
 					continue
@@ -188,7 +192,7 @@ func (b *RedisBus) consumeLoop(msgs <-chan []byte) {
 			} else if sourceNode == b.nodeID {
 				continue
 			}
-			envelope.Metadata = cloneObject(envelope.Metadata)
+			envelope.Metadata = envelope.Metadata.Clone()
 			delete(envelope.Metadata, "_bus_node_id")
 			envelope.SourceNodeID = ""
 			b.record(envelope)

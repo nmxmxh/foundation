@@ -61,6 +61,12 @@ func TestEnvelopeBinaryRoundTripWithJSONPayload(t *testing.T) {
 	if got, _ := decoded.Payload.GetString("asset_public_id"); got != "asset_123" {
 		t.Fatalf("asset_public_id mismatch: got %q", got)
 	}
+	if decoded.Metadata != nil {
+		t.Fatalf("metadata should stay lazy before materialization: %+v", decoded.Metadata)
+	}
+	if err := decoded.MaterializeMetadata(); err != nil {
+		t.Fatalf("MaterializeMetadata() error = %v", err)
+	}
 	if got, _ := decoded.Metadata.GetString("channel"); got != "http" {
 		t.Fatalf("channel mismatch: got %q", got)
 	}

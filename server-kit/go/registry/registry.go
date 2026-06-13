@@ -47,9 +47,11 @@ type DispatchResult struct {
 }
 
 type MetricsSnapshot struct {
-	RegisteredHandlers uint64
-	DispatchWorkers    int
-	UnknownEvents      uint64
+	RegisteredHandlers   uint64 `json:"registered_handlers"`
+	DispatchWorkers      int    `json:"dispatch_workers"`
+	UnknownEvents        uint64 `json:"unknown_events"`
+	PayloadQueueCapacity int    `json:"payload_queue_capacity"`
+	PayloadQueueLength   int    `json:"payload_queue_length"`
 }
 
 // ServiceRegistry routes request events to registered domain handlers.
@@ -62,6 +64,7 @@ type ServiceRegistry struct {
 	dispatchWorkers int
 	intelligence    *intelligence.Injector
 	unknownEvents   atomic.Uint64
+	payloadCh       chan []byte // set by Listen for metrics visibility
 }
 
 type Options struct {
@@ -176,6 +179,8 @@ func (r *ServiceRegistry) RegisterTypedWithOptions(eventType string, binding pro
 }
 
 // Listen starts the Redis subscription and dispatches events to registered handlers.
+// The caller must ensure the Redis client is healthy before calling Listen;
+// connection failures will surface as PSubscribe errors.
 func (r *ServiceRegistry) Listen(ctx context.Context, patterns ...string) error {
 	if r.redis == nil {
 		return errors.New("redis client is required for Listen")
@@ -192,6 +197,9 @@ func (r *ServiceRegistry) Listen(ctx context.Context, patterns ...string) error 
 	r.log.InfoContext(ctx, "listening for events", "patterns", patterns, "dispatch_workers", r.dispatchWorkers)
 
 	payloadCh := make(chan []byte, 256)
+	r.mu.Lock()
+	r.payloadCh = payloadCh
+	r.mu.Unlock()
 	uniqueChannels := make(map[<-chan []byte]struct{}, len(channels))
 	for _, ch := range channels {
 		uniqueChannels[ch] = struct{}{}
@@ -267,12 +275,21 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 		}
 	}
 
-	// Prepare metadata and inject correlation
-	metaObject := env.Metadata.Clone()
+	if err := env.MaterializeMetadata(); err != nil {
+		r.log.ErrorContext(ctx, "failed to materialize event metadata", "event_type", env.EventType, "error", err)
+		return
+	}
+
+	// The envelope was just decoded from raw bytes: we own the data.
+	// Skip Clone() to avoid redundant allocations on every dispatch.
+	metaObject := env.Metadata
+	if metaObject == nil {
+		metaObject = extension.Object{}
+	}
 	if env.CorrelationID != "" {
 		metaObject["correlation_id"] = extension.String(env.CorrelationID)
 	}
-	payloadObject := env.Payload.Clone()
+	payloadObject := env.Payload
 
 	ctx = metadata.NewContextObject(ctx, metaObject)
 	if r.intelligence != nil {
@@ -312,11 +329,18 @@ func (r *ServiceRegistry) dispatchEnvelope(ctx context.Context, payload []byte) 
 func (r *ServiceRegistry) MetricsSnapshot() MetricsSnapshot {
 	r.mu.RLock()
 	registered := len(r.methods)
+	var queueCap, queueLen int
+	if r.payloadCh != nil {
+		queueCap = cap(r.payloadCh)
+		queueLen = len(r.payloadCh)
+	}
 	r.mu.RUnlock()
 	return MetricsSnapshot{
-		RegisteredHandlers: uint64(registered),
-		DispatchWorkers:    r.dispatchWorkers,
-		UnknownEvents:      r.unknownEvents.Load(),
+		RegisteredHandlers:   uint64(registered),
+		DispatchWorkers:      r.dispatchWorkers,
+		UnknownEvents:        r.unknownEvents.Load(),
+		PayloadQueueCapacity: queueCap,
+		PayloadQueueLength:   queueLen,
 	}
 }
 

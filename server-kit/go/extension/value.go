@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -515,28 +516,31 @@ func (p *jsonParser) parseList() ([]Value, error) {
 
 func (p *jsonParser) parseString() (string, error) {
 	p.skipSpace()
-	start := p.pos
-	if !p.consumeByte('"') {
+	if p.pos >= len(p.data) || p.data[p.pos] != '"' {
 		return "", errors.New("extension JSON string must start with quote")
 	}
+	p.pos++ // consume '"'
+	start := p.pos
 	escaped := false
 	for p.pos < len(p.data) {
 		ch := p.data[p.pos]
-		p.pos++
-		if escaped {
-			escaped = false
-			continue
-		}
 		if ch == '\\' {
 			escaped = true
+			p.pos += 2 // skip escape character and the next character
 			continue
 		}
 		if ch == '"' {
-			return strconv.Unquote(string(p.data[start:p.pos]))
+			strData := p.data[start:p.pos]
+			p.pos++ // consume '"'
+			if escaped {
+				return strconv.Unquote(string(p.data[start-1 : p.pos]))
+			}
+			return string(strData), nil
 		}
 		if ch < 0x20 {
 			return "", errors.New("extension JSON string contains control character")
 		}
+		p.pos++
 	}
 	return "", io.ErrUnexpectedEOF
 }
@@ -810,6 +814,32 @@ func valueFromReflect(raw reflect.Value) (Value, error) {
 				return Null(), err
 			}
 			out[key.String()] = value
+		}
+		return objectValueOwned(out), nil
+	case reflect.Struct:
+		t := raw.Type()
+		out := make(Object, t.NumField())
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			if !field.IsExported() {
+				continue
+			}
+			name := field.Name
+			tag := field.Tag.Get("json")
+			if tag != "" {
+				parts := strings.Split(tag, ",")
+				if parts[0] == "-" {
+					continue
+				}
+				if parts[0] != "" {
+					name = parts[0]
+				}
+			}
+			value, err := valueFromReflect(raw.Field(i))
+			if err != nil {
+				return Null(), err
+			}
+			out[name] = value
 		}
 		return objectValueOwned(out), nil
 	default:

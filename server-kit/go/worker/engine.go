@@ -488,11 +488,12 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 		recordJobTrace(job, "worker.process", "retry_scheduled", err.Error())
 		e.recordHealth(job, JobHealthRetryScheduled, err, startedAt, finishedAt)
 		timer := time.NewTimer(backoff)
-		defer timer.Stop()
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
 		case <-timer.C:
+			timer.Stop()
 			e.handleJob(ctx, queue, workerIndex, job)
 		}
 		return

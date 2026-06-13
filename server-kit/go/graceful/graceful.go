@@ -158,7 +158,7 @@ func (h *Handler) Success(ctx context.Context, action string, msg string, result
 		}
 	}
 
-	if h.EventEnabled && h.EventEmitter != nil {
+	if h.EventEnabled && h.EventEmitter != nil && ctx.Err() == nil {
 		eventType := ensureTerminalState(action, "success")
 		meta := withCorrelationIDFromContext(ctx, metadata)
 		if err := h.EventEmitter.EmitEvent(ctx, eventType, success, meta); err != nil && h.Log != nil {
@@ -193,7 +193,7 @@ func (h *Handler) Error(ctx context.Context, action string, msg string, cause er
 		)
 	}
 
-	if h.EventEnabled && h.EventEmitter != nil {
+	if h.EventEnabled && h.EventEmitter != nil && ctx.Err() == nil {
 		eventType := ensureTerminalState(action, "failed")
 		meta := withCorrelationIDFromContext(ctx, metadata)
 		if err := h.EventEmitter.EmitEvent(ctx, eventType, errContext, meta); err != nil && h.Log != nil {
@@ -270,11 +270,14 @@ func (e *InMemoryEventEmitter) EmitEvent(ctx context.Context, eventType string, 
 	}
 
 	meta := withCorrelationIDFromContext(ctx, metadata)
+	// correlation_id is always set by PrepareObjectForEmit; read it directly
+	// instead of scanning the map again via pickCorrelation.
+	corr, _ := meta.GetString("correlation_id")
 	envelope := eventcontract.Envelope{
 		EventType:     eventType,
 		Payload:       objectFromPayload(payload),
 		Metadata:      meta,
-		CorrelationID: pickCorrelation(meta),
+		CorrelationID: corr,
 		SchemaVersion: eventcontract.EnvelopeSchemaVersion,
 		Timestamp:     time.Now().UTC(),
 	}
@@ -359,11 +362,12 @@ func (e *RedisEventEmitter) EmitEvent(ctx context.Context, eventType string, pay
 	}
 
 	meta := withCorrelationIDFromContext(ctx, metadata)
+	corr, _ := meta.GetString("correlation_id")
 	envelope := eventcontract.Envelope{
 		EventType:     eventType,
 		Payload:       objectFromPayload(payload),
 		Metadata:      meta,
-		CorrelationID: pickCorrelation(meta),
+		CorrelationID: corr,
 		SchemaVersion: eventcontract.EnvelopeSchemaVersion,
 		Timestamp:     time.Now().UTC(),
 	}
@@ -484,18 +488,19 @@ func objectFromPayload(payload any) extension.Object {
 		if value.Object == nil {
 			return extension.Object{}
 		}
+		// Caller explicitly promises exclusive ownership, so we avoid cloning
 		return value.Object
 	default:
-		return extension.Object{"result": extensionValueFromAny(value)}
+		// Convert the payload struct or value directly using reflection via extension.FromJSON
+		typed, err := extension.FromJSON(value)
+		if err != nil {
+			return extension.Object{"result": extension.String(fmt.Sprint(value))}
+		}
+		if obj, ok := typed.ObjectValue(); ok {
+			return obj
+		}
+		return extension.Object{"result": typed}
 	}
-}
-
-func extensionValueFromAny(value any) extension.Value {
-	typed, err := extension.FromJSON(value)
-	if err != nil {
-		return extension.String(fmt.Sprint(value))
-	}
-	return typed
 }
 
 func pickCorrelation(metadata extension.Object) string {
