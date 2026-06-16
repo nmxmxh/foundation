@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -340,6 +341,7 @@ func normalizeStringSet(values []string, limit, maxLength int, rejectSecrets boo
 			break
 		}
 	}
+	sort.Strings(normalized)
 	return normalized
 }
 

@@ -253,7 +253,7 @@ func TestMetadataTagsAreCanonicalAndSafe(t *testing.T) {
 		},
 		"categories": []string{" Intelligence ", "intelligence", "Search"},
 	})
-	wantTags := []string{"actor:user_123", "search:invoice", "kg:brand-profile"}
+	wantTags := []string{"actor:user_123", "kg:brand-profile", "search:invoice"}
 	if got := md.Tags; len(got) != len(wantTags) {
 		t.Fatalf("tags length = %d, want %d: %#v", len(got), len(wantTags), got)
 	}
@@ -294,7 +294,7 @@ func TestMergeMapsPreservesGraphMetadataAndUnionsTags(t *testing.T) {
 		}
 	}
 	categories := stringsFromAny(t, merged["categories"])
-	if len(categories) != 2 || categories[0] != "workflow" || categories[1] != "security" {
+	if len(categories) != 2 || categories[0] != "security" || categories[1] != "workflow" {
 		t.Fatalf("categories mismatch: %#v", categories)
 	}
 	if merged["knowledge_graph"] != "docuos.documents" || merged["source_ref"] != "request:req_1" {

@@ -103,10 +103,10 @@ func TestInMemoryBus_PublishMergesContextTags(t *testing.T) {
 
 	recent := bus.Recent(1)
 	md := metadata.FromMap(recent[0].Metadata.InterfaceMap())
-	if got, want := fmt.Sprint(md.Tags), "[request:tag shared domain:tag]"; got != want {
+	if got, want := fmt.Sprint(md.Tags), "[domain:tag request:tag shared]"; got != want {
 		t.Fatalf("tags = %s, want %s", got, want)
 	}
-	if got, want := fmt.Sprint(md.Categories), "[request domain]"; got != want {
+	if got, want := fmt.Sprint(md.Categories), "[domain request]"; got != want {
 		t.Fatalf("categories = %s, want %s", got, want)
 	}
 }

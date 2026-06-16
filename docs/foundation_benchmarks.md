@@ -55,6 +55,27 @@ Metric meanings:
 6. `rme`: relative margin of error. Large values mean the result is noisy and should not be over-interpreted.
 7. `samples`: number of benchmark samples collected. More samples usually gives a steadier distribution, but only for the same machine/load shape.
 
+### Statistical rules (see `mathematical_practices.md`)
+
+The numbers above are only sound under the constraints in
+`foundation/docs/mathematical_practices.md` (control `MATH-01`):
+
+1. **Percentile definition.** All p95/p99/p999 use the nearest-rank (ceiling)
+   method — rank `⌈p/100 · n⌉` — matching `server-kit/go/wsmetrics`. Do not mix
+   nearest-rank and linear-interpolation percentiles in one ledger; their
+   deltas are not comparable (§3.1).
+2. **Minimum sample size.** p95 requires `n ≥ 100`, p99 requires `n ≥ 1000`,
+   p999 requires `n ≥ 10000`. Below the floor the tail value is the max in
+   disguise; report it but mark it under-sampled and never gate on it (§3.2).
+3. **Margin of error.** `rme` and run-to-run variance are part of the result.
+   A gating tail metric needs a confidence/variance band (binomial rank
+   interval is sufficient); compare distributions, not single tail points
+   (§3.3).
+4. **Float tolerances.** SIMD/GPU/parallel reductions (e.g.
+   `server-kit/go/hermes` `sumFloat64s`) are validated against the scalar
+   reference with an absolute+relative tolerance scaled with `n` — never
+   bit-equality — because float addition is non-associative (§4).
+
 ## Go concurrency silver-lining metrics
 
 The Go concurrency study in `docs/go_concurrency_bug_practices.md` gives Foundation a positive measurement checklist, not only a bug checklist.

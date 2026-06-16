@@ -57,5 +57,10 @@ contract:
    valid after scaffold sync.
 3. Human-only controls must still name concrete evidence.
 4. Cross-cutting controls use stable prefixes:
-   `AOC-*`, `EVID-*`, `FPR-*`, `AISEC-*`, `PERFLAB-*`, `PROJFRESH-*`, and
-   `CTRL-*`.
+   `AOC-*`, `EVID-*`, `FPR-*`, `AISEC-*`, `PERFLAB-*`, `RUNTIME-*`, `FORMAL-*`,
+   `OPS-*`, `PROJFRESH-*`, `MATH-*`, and `CTRL-*`.
+   - `MATH-*` owns numerical-analysis, probability, statistics, floating-point,
+     and algebraic-convergence rules in `mathematical_practices.md`. `MATH-01`
+     requires the `mathematical-practices-checklist` evidence on changes to
+     financial arithmetic, probabilistic structures, statistical metrics,
+     floating-point reductions, or CRDT-shaped merges.

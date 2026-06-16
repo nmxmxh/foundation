@@ -113,7 +113,7 @@ if [[ -f "$matrix" ]]; then
     if [[ -n "${rest:-}" ]]; then
       fail "extra matrix columns" "$control_id line $line_no"
     fi
-    if ! printf '%s\n' "$control_id" | grep -Eq '^(CP|TE|AOC|EVID|FPR|AISEC|PERFLAB|RUNTIME|FORMAL|OPS|PROJFRESH|CTRL)-[0-9A-Z]+$'; then
+    if ! printf '%s\n' "$control_id" | grep -Eq '^(CP|TE|AOC|EVID|FPR|AISEC|PERFLAB|RUNTIME|FORMAL|OPS|PROJFRESH|CTRL|MATH)-[0-9A-Z]+$'; then
       fail "control id format" "$control_id line $line_no"
     fi
     if [[ -z "${owner_doc:-}" ]] || ! doc_exists "$owner_doc"; then
@@ -151,7 +151,7 @@ fi
 add_expected_from_doc "$docs_dir/coding_practices.md" "CP"
 add_expected_from_doc "$docs_dir/testing_practices.md" "TE"
 
-for required in CTRL-01 AOC-01 EVID-01 FPR-01 AISEC-01 PERFLAB-01 RUNTIME-01 FORMAL-01 OPS-01 PROJFRESH-01; do
+for required in CTRL-01 AOC-01 EVID-01 FPR-01 AISEC-01 PERFLAB-01 RUNTIME-01 FORMAL-01 OPS-01 PROJFRESH-01 MATH-01; do
   expected_ids["$required"]=1
 done
 
