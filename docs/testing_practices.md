@@ -130,14 +130,20 @@ Level: `Mandatory`
 
 Requirements:
 
-1. New or changed production code targets at least 95% line coverage.
+1. New or changed production code targets at least 95% statement coverage
+   (the figure `go test -cover` reports; the policy is enforced in those terms).
 2. Coverage reports must not be used as the only adequacy argument.
 3. Missing coverage in error handling, tenant denial, retry exhaustion, cancellation, and timeout paths is a correctness gap.
 4. Coverage drops in touched legacy modules require an approved exception.
 
 Enforcement:
 
-- `scripts/coverage-go.sh` and package-level TypeScript/Rust coverage where configured.
+- `make check-coverage-ratchet` (`tooling/scripts/coverage_ratchet_check.sh`)
+  records a per-package floor in `tooling/coverage_baseline.psv` and fails any
+  package that regresses below it. New packages are held to the 95% target. The
+  baseline is a ratchet: floors only rise, and only under
+  `HUMAN_SUPERVISED_CHECK_UPDATE=1 UPDATE=1` — a coverage drop on a touched
+  legacy module is the "approved exception" of requirement 4, made explicit.
 - Reviewer gate on untested critical branches.
 
 ### TE-07: Test loops and retries at zero, one, two, many, and exhausted

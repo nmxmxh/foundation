@@ -1,0 +1,50 @@
+# OVASABI Foundation Community License Agreement v1.0
+
+Copyright (c) 2024–2026 OVASABI STUDIOS LTD. All rights reserved.
+
+---
+
+## 1. Purpose and Scope
+
+This License Agreement governs your use of the software known as "Foundation" and all accompanying source code, documentation, schema configurations, and scaffolding scripts (the "Software") owned by OVASABI STUDIOS LTD ("Licensor").
+
+## 2. Permitted Uses (The "Community" & Open Source License)
+
+Subject to the restrictions in Section 3, Licensor grants you a worldwide, royalty-free, non-exclusive, non-sublicensable license to:
+
+* Use, copy, modify, and distribute the Software for **non-commercial** purposes.
+* Use, copy, modify, and distribute the Software for **open-source development**, provided that any derivative work or application utilizing the Software is also published under a license approved by the Open Source Initiative (OSI).
+
+For the scope of these permitted uses, the terms and permissions of the **Apache License 2.0** apply to and are incorporated into this Agreement.
+
+## 3. License Restrictions & Exclusions
+
+You may not do any of the following without obtaining a separate, written, commercial license agreement from OVASABI STUDIOS LTD:
+
+### 3.1. Commercial Use
+
+You may not use the Software, or any derivative works of the Software, for any commercial purpose if:
+
+* You use the Software to run, support, or enable a commercial product, service, or business.
+* Your organization (including affiliates and subsidiaries) exceeds **$1,000,000 USD** in annual revenue or has raised more than **$1,000,000 USD** in total venture funding.
+
+### 3.2. Machine Learning and AI Training Data Exclusion
+
+You are strictly prohibited from using the Software, including its source code, comments, documentation, test suites, architecture schemas, and benchmark records:
+
+* As training data, fine-tuning data, reinforcement learning (RLHF/RLAIF) data, or input datasets for any machine learning models, neural networks, or artificial intelligence systems.
+* To generate, train, or optimize code-generation or software-synthesis models.
+
+This restriction applies regardless of whether your use of the AI system or the resulting model is commercial or non-commercial.
+
+## 4. Obtaining a Commercial License
+
+To obtain a commercial license, permission for enterprise deployment, or a license to utilize the Software as machine learning training data, please contact:
+
+* **Email:** <licensing@ovasabi.studio>
+* **Company:** OVASABI STUDIOS LTD
+* **Company Registration No:** 7357449 (Federal Republic of Nigeria)
+
+## 5. Limitation of Liability & Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

@@ -12,6 +12,7 @@ package bulk
 import (
 	"context"
 	"io"
+	"os"
 	"time"
 
 	transport "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/transport"
@@ -44,6 +45,17 @@ type ObjectStore interface {
 type PresignObjectStore interface {
 	ObjectStore
 	PresignPut(context.Context, string, string, time.Duration) (string, error)
+}
+
+// FileRangeObjectStore is an optional ObjectStore capability: it can ingest a
+// part directly from a source file using kernel zero-copy (copy_file_range)
+// where the platform supports it, falling back to a portable copy otherwise.
+// The bool result reports whether the zero-copy path executed. The bulk manager
+// uses it opportunistically for the same-host descriptor lane; any store that
+// does not implement it transparently uses the streaming lane.
+type FileRangeObjectStore interface {
+	ObjectStore
+	PutFileRange(ctx context.Context, key string, src *os.File, size int64, opts objectstore.PutOptions) (objectstore.Object, bool, error)
 }
 
 type CacheStore interface {
@@ -147,6 +159,7 @@ type PartReceipt struct {
 	ObjectETag       string    `json:"object_etag,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	IdempotentReplay bool      `json:"idempotent_replay,omitempty"`
+	ZeroCopy         bool      `json:"zero_copy,omitempty"`
 }
 
 type CompleteRequest struct {

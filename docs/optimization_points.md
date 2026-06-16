@@ -163,6 +163,19 @@ This document tracks the deliberate performance and architecture carryovers fold
     append-only, view-read-only, and full append/view benchmarks so nanosecond
     hot-lane movement can be attributed to write growth, field validation, or
     benchmark noise before changing the codec.
+78. JSON encoding is an append-down lane, not a per-node lane. `extension`
+    `MarshalJSON`/`MarshalJSONFast` write through one growing buffer via internal
+    `appendJSON` helpers; canonical output stays byte-identical while allocations
+    drop ~81%/93% on a nested document (2026-06-14). This mirrors the decode-side
+    token parser — the encode side had the same intermediate-allocation shape.
+79. Go SIMD is now a real, opt-in lane behind one experimental gate.
+    `Float64Vector.Sum` is the first instance: an AVX2 `float64` column reduction
+    over the Arrow SoA buffer, behind `amd64 && goexperiment.simd` with a scalar
+    fallback, runtime feature check, tolerance-based parity test, and the
+    `make bench-simd` gate. Public APIs stay portable and never expose archsimd
+    vector types; ordinary builds stay scalar. Measured ~33% faster than scalar
+    on amd64 (Rosetta-emulated; native AVX2 host expected larger). Validity-masked
+    reduction and additional numeric kernels (filter, min/max) are the next steps.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 

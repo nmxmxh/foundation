@@ -56,7 +56,7 @@ TE-02|docs/testing_practices.md|testing|medium|human|review|black-box-case|conte
 TE-03|docs/testing_practices.md|testing|high|human|review|oracle-statement|yes
 TE-04|docs/testing_practices.md|testing|medium|human|review|case-table|contextual
 TE-05|docs/testing_practices.md|testing|medium|human|review|interaction-matrix|contextual
-TE-06|docs/testing_practices.md|testing|high|partial|script:tooling/scripts/testing_practices_check.sh;review|coverage-report|yes
+TE-06|docs/testing_practices.md|testing|high|strong|script:tooling/scripts/testing_practices_check.sh;script:tooling/scripts/coverage_ratchet_check.sh;review|coverage-floor-ratchet|yes
 TE-07|docs/testing_practices.md|testing|high|partial|script:tooling/scripts/testing_practices_check.sh;review|retry-boundary-test|yes
 TE-08|docs/testing_practices.md|contracts|high|partial|script:tooling/scripts/contract_drift_check.sh;review|correlation-idempotency-test|yes
 TE-09|docs/testing_practices.md|security|critical|human|review|tenant-negative-test|yes

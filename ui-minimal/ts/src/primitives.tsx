@@ -482,6 +482,21 @@ const actionJustify = {
 const floatingYOffset = 8;
 const enterCurve = "cubic-bezier(0.22, 1, 0.36, 1)";
 const moveCurve = "cubic-bezier(0.25, 1, 0.5, 1)";
+// Press settles fast and flat — a mechanical click, not a bounce. Kept separate
+// from enter/move so a lift can be soft while the press stays crisp.
+const pressCurve = "cubic-bezier(0.2, 0, 0, 1)";
+
+// tonalShadow casts a short, soft shadow tinted to the element's own accent
+// rather than a generic grey. The negative spread keeps it close to the edge so
+// a 1px lift reads as the surface catching light, not floating away — the single
+// biggest tell of hand-built vs. default UI, so it lives in one place.
+const tonalShadow = (accent: string, strength = 52, y = 10, blur = 22, spread = -12) =>
+  `0 ${y}px ${blur}px ${spread}px color-mix(in srgb, ${accent} ${strength}%, transparent)`;
+
+// litEdge is a hairline highlight along the top of a filled surface so the fill
+// reads as a lit material with a real top edge, the way a physical control does.
+const litEdge = (strength: number) =>
+  `inset 0 1px 0 color-mix(in srgb, #ffffff ${strength}%, transparent)`;
 export const minimalMainScrollAttribute = "data-minimal-main-scroll";
 const skeletonSweep = keyframes`
   0% {
@@ -599,28 +614,74 @@ const Style = {
     line-height: 1;
     min-height: ${({ $size }) => buttonMinHeight[$size]};
     padding: ${({ $size }) => sizePadding[$size]};
+    /* Per-property timing: the lift eases out slowly, colour moves a touch
+       faster, and the press transform is its own quick curve. Uniform timing is
+       what makes default transitions feel mechanical-but-dead. */
     transition:
-      background-color 240ms ${moveCurve},
-      border-color 240ms ${moveCurve},
-      box-shadow 240ms ${moveCurve},
-      color 240ms ${moveCurve},
-      filter 240ms ${moveCurve},
-      transform 240ms ${moveCurve};
+      background-color 220ms ${moveCurve},
+      border-color 220ms ${moveCurve},
+      box-shadow 260ms ${enterCurve},
+      color 200ms ${moveCurve},
+      transform 180ms ${pressCurve};
     width: ${({ $fullWidth }) => ($fullWidth ? "100%" : "auto")};
     font-size: ${({ $size }) => sizeFont[$size]};
     font-weight: ${({ theme }) => theme.typography.weightSemibold};
 
+    /* Filled buttons rest with a hairline lit top edge so the fill is a material,
+       not a swatch. Quiet/ghost buttons stay flat until touched. */
+    ${({ $variant }) =>
+      $variant === "primary"
+        ? css`
+            box-shadow: ${litEdge(14)};
+          `
+        : null}
+
     @media (hover: hover) and (pointer: fine) {
       &:not(:disabled):hover {
-        box-shadow: ${({ theme, $variant }) => ($variant === "quiet" ? "none" : theme.shadow.subtle)};
-        filter: brightness(0.98);
+        transform: translateY(-1px);
+        /* The shadow is tinted to the button's own tone and cast short + soft,
+           so the lift feels owned by the colour instead of a generic float. */
+        box-shadow: ${({ theme, $tone, $variant }) =>
+          $variant === "quiet"
+            ? "none"
+            : $variant === "primary"
+              ? `${litEdge(18)}, ${tonalShadow(toneAccent(theme, $tone).color, 52)}`
+              : tonalShadow(toneAccent(theme, $tone).color, 30)};
       }
+    }
+
+    /* Active is a real press: it settles back onto the surface with a tighter,
+       quicker shadow rather than fading out. */
+    &:not(:disabled):active {
+      transform: translateY(0);
+      transition-duration: 70ms;
+      box-shadow: ${({ theme, $tone, $variant }) =>
+        $variant === "quiet"
+          ? "none"
+          : $variant === "primary"
+            ? `${litEdge(8)}, ${tonalShadow(toneAccent(theme, $tone).color, 46, 3, 8, -6)}`
+            : tonalShadow(toneAccent(theme, $tone).color, 26, 3, 8, -6)};
     }
 
     &:disabled {
       cursor: not-allowed;
       opacity: 0.56;
       transform: none;
+      box-shadow: none;
+    }
+
+    /* No motion, no lie: drop the transform but keep colour/shadow feedback. */
+    @media (prefers-reduced-motion: reduce) {
+      transition:
+        background-color 220ms ${moveCurve},
+        border-color 220ms ${moveCurve},
+        box-shadow 200ms ${enterCurve},
+        color 200ms ${moveCurve};
+
+      &:hover,
+      &:active {
+        transform: none;
+      }
     }
   `,
   Spinner: styled.span`
@@ -662,6 +723,14 @@ const Style = {
                 border-color: ${theme.color.borderStrong};
                 box-shadow: ${theme.shadow.floating};
                 transform: translateY(-1px);
+              }
+
+              /* Don't move the surface for reduced-motion users — deepen the
+                 shadow and border so the affordance still reads. */
+              @media (prefers-reduced-motion: reduce) {
+                &:hover {
+                  transform: none;
+                }
               }
             }
           `

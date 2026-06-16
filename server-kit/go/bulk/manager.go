@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -152,6 +153,87 @@ func (m *Manager) AcceptPart(ctx context.Context, transferID string, desc PartDe
 			return PartReceipt{}, err
 		}
 	}
+	return receipt, nil
+}
+
+// AcceptDescriptorFilePart ingests a part directly from a same-host source file.
+// When the object store implements FileRangeObjectStore and the transfer uses
+// identity encoding, the bytes move via kernel zero-copy (copy_file_range) after
+// a streamed integrity check; otherwise it transparently falls back to the
+// streaming lane. The returned receipt's ZeroCopy field reports whether the
+// kernel path actually ran. This is the executable form of the descriptor /
+// kernel-zero-copy lanes the planner advertises.
+func (m *Manager) AcceptDescriptorFilePart(ctx context.Context, transferID string, desc PartDescriptor, src *os.File) (PartReceipt, error) {
+	if src == nil {
+		return PartReceipt{}, apperrors.New(apperrors.CodeValidation, "source file is required")
+	}
+	plan, err := m.loadPlanForMutation(ctx, transferID, "bulk:part:accept:v1:failed")
+	if err != nil {
+		return PartReceipt{}, err
+	}
+	if existing, err := m.state.LoadReceipt(ctx, plan.OrganizationID, plan.TransferID, desc.PartNumber); err == nil {
+		return m.replayPart(existing, desc)
+	}
+	if err := m.validatePart(plan, desc, src); err != nil {
+		m.emitFailure(ctx, "bulk:part:accept:v1:failed", plan.TransferID, err)
+		return PartReceipt{}, err
+	}
+	if m.events != nil {
+		if err := m.emit(ctx, "bulk:part:accept:v1:requested", partEventPayload(plan, desc)); err != nil {
+			return PartReceipt{}, err
+		}
+	}
+	receipt, err := m.storeFilePart(ctx, plan, desc, src)
+	if err != nil {
+		m.emitFailure(ctx, "bulk:part:accept:v1:failed", plan.TransferID, err)
+		return PartReceipt{}, err
+	}
+	if err := m.state.SaveReceipt(ctx, receipt); err != nil {
+		_ = m.objects.Delete(ctx, receipt.ObjectKey)
+		return PartReceipt{}, apperrors.Wrap(err, apperrors.CodeDependency, "save part receipt")
+	}
+	m.cacheReceipt(ctx, receipt)
+	if m.events != nil {
+		if err := m.emit(ctx, "bulk:part:accept:v1:success", receiptEventPayload(receipt)); err != nil {
+			return PartReceipt{}, err
+		}
+	}
+	return receipt, nil
+}
+
+// storeFilePart moves a part from a source file. The zero-copy lane is taken
+// only for identity encoding on a FileRangeObjectStore; integrity is preserved
+// by verifying the producer-declared digest in a streamed pass before the kernel
+// copy, so zero-copy changes how bytes move, not whether they are checked.
+func (m *Manager) storeFilePart(ctx context.Context, plan TransferPlan, desc PartDescriptor, src *os.File) (PartReceipt, error) {
+	frs, ok := m.objects.(FileRangeObjectStore)
+	if !ok || plan.Compression != EncodingIdentity {
+		if _, err := src.Seek(0, io.SeekStart); err != nil {
+			return PartReceipt{}, storePartError(err, "rewind transfer part")
+		}
+		return m.storePart(ctx, plan, desc, src)
+	}
+
+	hr := newHashingReader(newBoundedReader(src, desc.Size))
+	if _, err := io.Copy(io.Discard, hr); err != nil {
+		return PartReceipt{}, storePartError(err, "hash transfer part")
+	}
+	digest := hr.SumHex()
+	if err := verifyPartDigest(desc, hr.N(), digest); err != nil {
+		return PartReceipt{}, err
+	}
+	if _, err := src.Seek(0, io.SeekStart); err != nil {
+		return PartReceipt{}, storePartError(err, "rewind transfer part")
+	}
+
+	key := partObjectKey(plan, desc.PartNumber)
+	object, zeroCopy, err := frs.PutFileRange(ctx, key, src, desc.Size, partPutOptions(plan, desc, EncodingIdentity))
+	if err != nil {
+		_ = m.objects.Delete(ctx, key)
+		return PartReceipt{}, storePartError(err, "store transfer part via file range")
+	}
+	receipt := newReceipt(plan, desc, object, hr.N(), hr.N(), digest, digest, EncodingIdentity, m.clock())
+	receipt.ZeroCopy = zeroCopy
 	return receipt, nil
 }
 

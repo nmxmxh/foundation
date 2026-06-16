@@ -212,132 +212,134 @@ func allListItemsAreObjects(values []Value) bool {
 	return true
 }
 
+// MarshalJSON emits canonical JSON (object keys sorted). Use it for drift,
+// signing, and stable logs. It writes through a single growing buffer via the
+// internal append-down path so a nested document costs one backing allocation
+// (plus the sorted-key slice per object) instead of one buffer per node.
 func (v Value) MarshalJSON() ([]byte, error) {
+	return v.appendJSON(make([]byte, 0, 64))
+}
+
+func (v Value) appendJSON(dst []byte) ([]byte, error) {
 	switch v.kind {
 	case KindNull:
-		return []byte("null"), nil
+		return append(dst, "null"...), nil
 	case KindString:
-		return strconv.AppendQuote(nil, v.str), nil
+		return strconv.AppendQuote(dst, v.str), nil
 	case KindBool:
-		return strconv.AppendBool(nil, v.b), nil
+		return strconv.AppendBool(dst, v.b), nil
 	case KindInt:
-		return strconv.AppendInt(nil, v.i64, 10), nil
+		return strconv.AppendInt(dst, v.i64, 10), nil
 	case KindUint:
-		return strconv.AppendUint(nil, v.u64, 10), nil
+		return strconv.AppendUint(dst, v.u64, 10), nil
 	case KindFloat:
-		return strconv.AppendFloat(nil, v.f64, 'g', -1, 64), nil
+		return strconv.AppendFloat(dst, v.f64, 'g', -1, 64), nil
 	case KindBytes:
-		return strconv.AppendQuote(nil, base64.StdEncoding.EncodeToString(v.bytes)), nil
+		return strconv.AppendQuote(dst, base64.StdEncoding.EncodeToString(v.bytes)), nil
 	case KindList:
-		return marshalValueList(v.list)
+		return appendValueList(dst, v.list)
 	case KindObject:
-		return v.obj.MarshalJSON()
+		return v.obj.appendJSON(dst)
 	default:
 		return nil, fmt.Errorf("unknown extension value kind %d", v.kind)
 	}
 }
 
 func (o Object) MarshalJSON() ([]byte, error) {
+	return o.appendJSON(make([]byte, 0, len(o)*24+2))
+}
+
+func (o Object) appendJSON(dst []byte) ([]byte, error) {
 	if len(o) == 0 {
-		return []byte("{}"), nil
+		return append(dst, '{', '}'), nil
 	}
-	out := make([]byte, 0, len(o)*24)
-	out = append(out, '{')
+	dst = append(dst, '{')
 	keys := o.Keys()
 	for i, key := range keys {
 		if i > 0 {
-			out = append(out, ',')
+			dst = append(dst, ',')
 		}
-		out = strconv.AppendQuote(out, key)
-		out = append(out, ':')
-		value, err := o[key].MarshalJSON()
-		if err != nil {
+		dst = strconv.AppendQuote(dst, key)
+		dst = append(dst, ':')
+		var err error
+		if dst, err = o[key].appendJSON(dst); err != nil {
 			return nil, err
 		}
-		out = append(out, value...)
 	}
-	out = append(out, '}')
-	return out, nil
+	return append(dst, '}'), nil
+}
+
+func appendValueList(dst []byte, values []Value) ([]byte, error) {
+	if len(values) == 0 {
+		return append(dst, '[', ']'), nil
+	}
+	dst = append(dst, '[')
+	for i := range values {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		var err error
+		if dst, err = values[i].appendJSON(dst); err != nil {
+			return nil, err
+		}
+	}
+	return append(dst, ']'), nil
 }
 
 // MarshalJSONFast emits valid JSON without sorting object keys. Use it for
 // non-canonical compatibility responses where stable byte order is unnecessary.
+// It shares the same single-buffer append-down path as MarshalJSON.
 func (o Object) MarshalJSONFast() ([]byte, error) {
-	return marshalObjectFast(o)
+	return o.appendJSONFast(make([]byte, 0, len(o)*24+2))
 }
 
-func marshalObjectFast(o Object) ([]byte, error) {
+func (o Object) appendJSONFast(dst []byte) ([]byte, error) {
 	if len(o) == 0 {
-		return []byte("{}"), nil
+		return append(dst, '{', '}'), nil
 	}
-	out := make([]byte, 0, len(o)*24)
-	out = append(out, '{')
+	dst = append(dst, '{')
 	i := 0
 	for key, value := range o {
 		if i > 0 {
-			out = append(out, ',')
+			dst = append(dst, ',')
 		}
-		out = strconv.AppendQuote(out, key)
-		out = append(out, ':')
-		payload, err := value.marshalJSONFast()
-		if err != nil {
+		dst = strconv.AppendQuote(dst, key)
+		dst = append(dst, ':')
+		var err error
+		if dst, err = value.appendJSONFast(dst); err != nil {
 			return nil, err
 		}
-		out = append(out, payload...)
 		i++
 	}
-	out = append(out, '}')
-	return out, nil
+	return append(dst, '}'), nil
 }
 
-func (v Value) marshalJSONFast() ([]byte, error) {
-	if v.kind == KindObject {
-		return marshalObjectFast(v.obj)
+func (v Value) appendJSONFast(dst []byte) ([]byte, error) {
+	switch v.kind {
+	case KindObject:
+		return v.obj.appendJSONFast(dst)
+	case KindList:
+		return appendValueListFast(dst, v.list)
+	default:
+		return v.appendJSON(dst)
 	}
-	if v.kind == KindList {
-		return marshalValueListFast(v.list)
-	}
-	return v.MarshalJSON()
 }
 
-func marshalValueListFast(values []Value) ([]byte, error) {
+func appendValueListFast(dst []byte, values []Value) ([]byte, error) {
 	if len(values) == 0 {
-		return []byte("[]"), nil
+		return append(dst, '[', ']'), nil
 	}
-	out := make([]byte, 0, len(values)*16)
-	out = append(out, '[')
-	for i, value := range values {
+	dst = append(dst, '[')
+	for i := range values {
 		if i > 0 {
-			out = append(out, ',')
+			dst = append(dst, ',')
 		}
-		payload, err := value.marshalJSONFast()
-		if err != nil {
+		var err error
+		if dst, err = values[i].appendJSONFast(dst); err != nil {
 			return nil, err
 		}
-		out = append(out, payload...)
 	}
-	out = append(out, ']')
-	return out, nil
-}
-
-func marshalValueList(values []Value) ([]byte, error) {
-	if len(values) == 0 {
-		return []byte("[]"), nil
-	}
-	out := make([]byte, 0, len(values)*16)
-	out = append(out, '[')
-	for i, value := range values {
-		if i > 0 {
-			out = append(out, ',')
-		}
-		payload, err := value.MarshalJSON()
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, payload...)
-	}
-	out = append(out, ']')
-	return out, nil
+	return append(dst, ']'), nil
 }
 
 func (v *Value) UnmarshalJSON(data []byte) error {

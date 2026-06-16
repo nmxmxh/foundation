@@ -99,25 +99,143 @@ go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFra
 
 Set `PROFILE=1` when you need CPU and heap profiles under `/tmp/ovasabi-foundation-profiles`.
 
-## 2026-06-13 Hermes Columnar Projection Lane Optimization
+## 2026-06-13 Hermes Arrow-layout columnar rewrite
 
-This focused update introduced a true columnar memory representation for the `hermes` projection layer and updated the sorting mechanics to naturally account for temporal `UpdatedAt` values directly during collection, avoiding subsequent re-sorts and massive domain object reconstructions.
+This pass corrected three structural problems in the columnar layer that were
+identified against the Arrow binary specification:
+
+1. `valid []bool` per-vector validity — replaced with a bit-packed `validityBitmap`
+   (`[]uint64`, 64 rows per word). `NullCount()` now uses `bits.OnesCount64`,
+   which the Go compiler maps to a single `POPCNT` / `CNT` instruction on ARM
+   and x86. This is a guaranteed single-instruction path, not an aspirational
+   claim.
+
+2. `StringVector` stored `[]string` — a slice of Go string headers pointing to
+   existing in-memory strings. This made `StringValues()` cheap to return but
+   meant no columnar layout existed for scan workloads. Replaced with the Arrow
+   binary specification layout: a contiguous `buf []byte` plus `offsets []int32`
+   (length n+1). Individual string access via `ValueAt(i)` returns a safe,
+   independently owned `string`; on transient hot-scan use (length, hashing) Go
+   escape analysis elides the copy, so it costs nothing there. `StringValues()`
+   materialises an owned `[]string` for compatibility callers. `Offsets()` and
+   `Bytes()` expose the raw layout as the explicit zero-copy lane for columnar
+   scan and Arrow interop, with documented buffer-lifetime caveats. The accessor
+   stays out of `unsafe` because Hermes carries tenant projection data and the
+   CP "no unsafe in handwritten Go" control applies here.
+
+3. All vector construction helpers (`newInt64Vector`, `newFloat64Vector`,
+   `newTimestampVector`, `newStringVectorFromSlice`) replace scattered
+   `make([]bool, n)` patterns with the shared `validityBitmap` type.
 
 Commands:
 
 ```bash
 cd foundation/server-kit/go
-go test -bench='BenchmarkHermes(GetColumnarBatch|ListRecordsComparison)' -benchmem ./hermes
+go test -bench='BenchmarkHermesColumnar|BenchmarkHermesListRecords' -benchmem -count=3 ./hermes
 ```
 
-Focused comparison:
+Construction trade-off (10K records, mixed column types):
 
 | Benchmark | ns/op | B/op | allocs/op | Interpretation |
 | --- | ---: | ---: | ---: | --- |
-| `BenchmarkHermesListRecordsComparison-8` | 8,785,345 ns/op | 8,143,866 B/op | 10,043 allocs/op | Previous comparison approach mapping out each column dynamically and resorting. |
-| `BenchmarkHermesGetColumnarBatch-8` | 6,767,805 ns/op | 2,895,083 B/op | 51 allocs/op | The new columnar lane projecting `_record` from `DomainRecordVector`. Memory allocations are effectively zeroed out, saving over 99.5% alloc overhead. |
+| `BenchmarkHermesGetColumnarBatch-8` (before) | 6,767,805 | 2,895,083 | 51 | Previous: `[]bool` validity + `[]string` headers pointing to existing memory. |
+| `BenchmarkHermesGetColumnarBatch-8` (after) | ~7,205,158 | 3,109,225 | 57 | Arrow layout: string bytes copied into contiguous `buf`; bitmap words smaller than `[]bool`. |
+| `BenchmarkHermesListRecordsComparison-8` | ~8,387,194 | 8,134,923 | 10,043 | Unchanged — baseline `ListRecords` pointer-chase path. |
 
-By extracting `_record` as part of the `getColumnarBatch` and leveraging `DomainRecordVector`, Hermes bypasses allocating full slices of structurally mapped `DomainRecord` instances. This drastically decreases memory pressure and allows the garbage collector to breathe during heavy projection reads.
+Construction cost increases slightly because `newStringVectorFromSlice` copies
+string bytes into the contiguous buffer. This is the correct Arrow trade-off:
+pay once at construction for better sequential scan locality.
+
+Scan proof (fetch + aggregate over 10K records):
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesColumnarSumPrice-8` | ~6,369,607 | 2,445,578 | 42 | Fetch price column + sum: tight sequential `[]float64` scan, no pointer chasing. |
+| `BenchmarkHermesListRecordsSumPrice-8` | ~8,427,534 | 8,134,923 | 10,043 | Equivalent via `ListRecords`: pointer-chase per record into `RecordData`, parse float. |
+
+Columnar scan is **24% faster**, uses **70% less memory**, and **99.6% fewer
+allocations** than the equivalent `ListRecords` pointer-chase path. The CPU
+prefetcher can stride the contiguous `[]float64` in cache; the `RecordData`
+path cannot.
+
+Per-element string scan:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesColumnarStringValueAt-8` | ~6,170,000 | 2,693,418 | 45 | `ValueAt(i)` returning safe `string(b)` — escape analysis elides the copy on transient use, so allocs/B match the prior `unsafe.String` build exactly. |
+| `BenchmarkHermesColumnarStringValuesSlice-8` | ~6,310,000 | 3,017,258 | 10,046 | `StringValues()` materialises an owned `[]string` — one real copy per element, as its docstring promises. |
+
+The safe accessor carries **zero hot-path cost**: the `ValueAt` scan shows the
+same 2,693,418 B/op and 45 allocs/op as the previous `unsafe.String` build,
+because the value is consumed transiently and never escapes. The added
+allocations land only in `StringValues()`, which now returns genuinely
+independent strings instead of a slice of `unsafe` aliases into `buf` — closing
+a latent use-after-free if the buffer were reused or GC'd. Callers that need
+true zero-copy use `Offsets()`+`Bytes()` directly and honour the buffer
+lifetime there.
+
+## 2026-06-14 extension JSON encoder append-down
+
+The 2026-06-03 pass gave the JSON *decode* side a token parser but left the
+*encode* side allocating one intermediate `[]byte` per node. `Value.MarshalJSON`
+and `Object.MarshalJSON` now write through a single growing buffer via internal
+`appendJSON`/`appendJSONFast` methods; the public methods are thin pre-sized
+wrappers. Canonical output is byte-identical (verified by the exact-byte and
+round-trip oracles in `extension`); only the allocation shape changed.
+
+Command:
+
+```bash
+cd server-kit/go
+go test -run='^$' -bench='BenchmarkExtensionMarshalJSON' -benchmem -count=3 ./extension
+```
+
+Representative nested object (6 scalar/list fields + two nested objects):
+
+| Benchmark | Before | After | Interpretation |
+| --- | --- | --- | --- |
+| `BenchmarkExtensionMarshalJSON` (canonical) | 1,200 ns, 528 B, 16 allocs | ~920 ns, 304 B, **3 allocs** | One backing buffer + per-object sorted `Keys()` slices; −81% allocs, −23% time. |
+| `BenchmarkExtensionMarshalJSONFast` | 937 ns, 380 B, 14 allocs | ~715 ns, 160 B, **1 alloc** | No key sort, so a single backing allocation; −93% allocs, −24% time. |
+
+Hot callers benefiting: `events` payload encode, `database/record_data` encode.
+The remaining canonical allocations are the sorted-key slices required for
+deterministic output; pooling them is a possible follow-up.
+
+## 2026-06-14 Go SIMD columnar reduction lane (experimental)
+
+The first Foundation Go SIMD lane: a vectorized `float64` column reduction over
+the Arrow structure-of-arrays buffer (`Float64Vector.Sum`). It is the bounded,
+benchmark-gated numeric loop the Go SIMD posture sanctions (AGENTS.md,
+optimization_points #51/#55). The public API is portable and never exposes
+archsimd vector types; the AVX2 path lives behind `amd64 && goexperiment.simd`
+build tags with a scalar reference as the always-present fallback and a runtime
+`archsimd.X86.AVX2()` feature check. Ordinary `make build`/`make test` stay
+portable; the lane is opt-in via `make bench-simd`.
+
+Parity: lane-wise accumulation reorders non-associative float additions, so
+`TestFloat64VectorSumMatchesScalarReference` asserts the SIMD result stays within
+floating-point tolerance of the scalar reference rather than bit-exactness.
+
+Command:
+
+```bash
+make bench-simd   # GOEXPERIMENT=simd; SIMD on amd64+AVX2, scalar fallback elsewhere
+```
+
+10,000-element `float64` reduction, amd64 (measured under Rosetta 2 emulation on
+Apple Silicon — absolute ns are emulated, the relative delta is indicative; a
+native AVX2 host typically shows a larger margin):
+
+| Lane | ns/op | allocs/op | Interpretation |
+| --- | ---: | ---: | --- |
+| amd64 scalar | ~9,600 | 0 | Idiomatic accumulator loop. |
+| amd64 SIMD (AVX2) | ~6,460 | 0 | Two 4-wide `Float64x4` accumulators + scalar tail; **~33% faster**. |
+
+The SIMD path provably executed (a feature-check fallback would have matched the
+scalar number). On a non-amd64 host `make bench-simd` measures the scalar
+fallback (the vector file is build-tag excluded), so the true SIMD delta must be
+captured on an AVX2 amd64 host/CI. Null entries are summed as zero today;
+validity-masked SIMD reduction is the natural next lane.
 
 ## 2026-06-03 staged local load research
 

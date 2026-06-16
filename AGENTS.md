@@ -210,7 +210,7 @@ The Foundation modules are linked through a unified "Nervous System":
 
 ## Testing Requirements
 
-- **Unit tests**: ≥95% Line Coverage for new/changed production code; legacy modules must improve toward 95% when touched and cannot regress without an approved exception.
+- **Unit tests**: ≥95% statement coverage (`go test -cover`) for new/changed production code; legacy modules must improve toward 95% when touched and cannot regress without an approved exception. Enforced by `make check-coverage-ratchet` against per-package floors in `tooling/coverage_baseline.psv`.
 - **Integration**: Mandatory for event contracts and critical flows.
 - **E2E**: Required for auth guards and core user journeys.
 

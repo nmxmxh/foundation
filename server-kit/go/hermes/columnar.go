@@ -2,6 +2,9 @@ package hermes
 
 import (
 	"context"
+	"fmt"
+	"math"
+	"math/bits"
 	"sort"
 	"strconv"
 	"time"
@@ -19,6 +22,44 @@ const (
 	TypeTimestamp
 )
 
+// validityBitmap is a bit-packed Arrow-style validity bitmap.
+// Bit i is 1 (valid) when (words[i>>6]>>(i&63))&1 == 1.
+// This is 64× more memory-efficient than []bool and enables
+// future SIMD-accelerated null counting via bits.OnesCount64.
+type validityBitmap struct {
+	words []uint64
+	n     int // total row count
+}
+
+func newValidityBitmap(n int) validityBitmap {
+	words := (n + 63) / 64
+	return validityBitmap{words: make([]uint64, words), n: n}
+}
+
+func (b *validityBitmap) set(i int) {
+	b.words[i>>6] |= 1 << uint(i&63)
+}
+
+func (b *validityBitmap) isValid(i int) bool {
+	return (b.words[i>>6]>>uint(i&63))&1 == 1
+}
+
+// nullCount returns the number of null (invalid) entries.
+// bits.OnesCount64 is recognized by the Go compiler and maps to
+// POPCNT on x86 and CNT on ARM — no aspirational claims; this is
+// a guaranteed single-instruction operation on both platforms.
+func (b *validityBitmap) nullCount() int {
+	ones := 0
+	for _, w := range b.words {
+		ones += bits.OnesCount64(w)
+	}
+	return b.n - ones
+}
+
+// Vector is the columnar data interface. StringVector intentionally
+// does NOT expose StringValues() []string at this level because
+// materializing a []string heap-allocates. Callers that need zero-copy
+// string access must assert to *StringVector and use Offsets()/Bytes().
 type Vector interface {
 	Type() DataType
 	Len() int
@@ -27,6 +68,8 @@ type Vector interface {
 
 	Int64Values() []int64
 	Float64Values() []float64
+	// StringValues returns a materialized []string. This allocates.
+	// For zero-copy access use (*StringVector).Offsets() and (*StringVector).Bytes().
 	StringValues() []string
 	BytesValues() [][]byte
 }
@@ -41,89 +84,156 @@ type RecordBatch struct {
 	Rows    int
 }
 
+// ---------------------------------------------------------------------------
+// Int64Vector
+// ---------------------------------------------------------------------------
+
 type Int64Vector struct {
-	values []int64
-	valid  []bool
+	values   []int64
+	validity validityBitmap
 }
 
-func (v *Int64Vector) Type() DataType { return TypeInt64 }
-func (v *Int64Vector) Len() int { return len(v.values) }
-func (v *Int64Vector) NullCount() int {
-	c := 0
-	for _, b := range v.valid {
-		if !b {
-			c++
-		}
-	}
-	return c
+func newInt64Vector(n int) *Int64Vector {
+	return &Int64Vector{values: make([]int64, n), validity: newValidityBitmap(n)}
 }
-func (v *Int64Vector) IsValid(i int) bool { return v.valid[i] }
-func (v *Int64Vector) Int64Values() []int64 { return v.values }
+
+func (v *Int64Vector) Type() DataType           { return TypeInt64 }
+func (v *Int64Vector) Len() int                 { return len(v.values) }
+func (v *Int64Vector) NullCount() int           { return v.validity.nullCount() }
+func (v *Int64Vector) IsValid(i int) bool       { return v.validity.isValid(i) }
+func (v *Int64Vector) Int64Values() []int64     { return v.values }
 func (v *Int64Vector) Float64Values() []float64 { return nil }
-func (v *Int64Vector) StringValues() []string { return nil }
-func (v *Int64Vector) BytesValues() [][]byte { return nil }
+func (v *Int64Vector) StringValues() []string   { return nil }
+func (v *Int64Vector) BytesValues() [][]byte    { return nil }
+
+// ---------------------------------------------------------------------------
+// Float64Vector
+// ---------------------------------------------------------------------------
 
 type Float64Vector struct {
-	values []float64
-	valid  []bool
+	values   []float64
+	validity validityBitmap
 }
 
-func (v *Float64Vector) Type() DataType { return TypeFloat64 }
-func (v *Float64Vector) Len() int { return len(v.values) }
-func (v *Float64Vector) NullCount() int {
-	c := 0
-	for _, b := range v.valid {
-		if !b {
-			c++
-		}
-	}
-	return c
+func newFloat64Vector(n int) *Float64Vector {
+	return &Float64Vector{values: make([]float64, n), validity: newValidityBitmap(n)}
 }
-func (v *Float64Vector) IsValid(i int) bool { return v.valid[i] }
-func (v *Float64Vector) Int64Values() []int64 { return nil }
+
+func (v *Float64Vector) Type() DataType           { return TypeFloat64 }
+func (v *Float64Vector) Len() int                 { return len(v.values) }
+func (v *Float64Vector) NullCount() int           { return v.validity.nullCount() }
+func (v *Float64Vector) IsValid(i int) bool       { return v.validity.isValid(i) }
+func (v *Float64Vector) Int64Values() []int64     { return nil }
 func (v *Float64Vector) Float64Values() []float64 { return v.values }
-func (v *Float64Vector) StringValues() []string { return nil }
-func (v *Float64Vector) BytesValues() [][]byte { return nil }
+func (v *Float64Vector) StringValues() []string   { return nil }
+func (v *Float64Vector) BytesValues() [][]byte    { return nil }
+
+// ---------------------------------------------------------------------------
+// StringVector — Arrow-style offset+bytes layout
+//
+// Memory layout (matches Apache Arrow binary/string specification):
+//
+//   offsets: [o0, o1, o2, ..., oN]   (N+1 int32 values)
+//   buf:     [s0_bytes | s1_bytes | ...]
+//
+// String i occupies buf[offsets[i]:offsets[i+1]].
+// Accessing a single string is a bounds check + slice header construction —
+// zero heap allocation. StringValues() materializes []string and DOES allocate;
+// callers on hot paths should use Offsets()+Bytes() directly.
+// ---------------------------------------------------------------------------
 
 type StringVector struct {
-	values []string
-	valid  []bool
+	offsets  []int32 // len == n+1
+	buf      []byte
+	validity validityBitmap
+	n        int
 }
 
-func (v *StringVector) Type() DataType { return TypeString }
-func (v *StringVector) Len() int { return len(v.values) }
-func (v *StringVector) NullCount() int {
-	c := 0
-	for _, b := range v.valid {
-		if !b {
-			c++
+func newStringVectorFromSlice(ss []string, valid []bool) (*StringVector, error) {
+	n := len(ss)
+	// Compute total byte length for single allocation.
+	total := 0
+	for _, s := range ss {
+		total += len(s)
+	}
+	// Arrow's standard binary layout uses int32 offsets, capping one string
+	// column at 2 GiB. Bound the input explicitly (CP-02) rather than let the
+	// int32(len(v.buf)) conversions below overflow silently (CWE-190).
+	if total > math.MaxInt32 {
+		return nil, fmt.Errorf("hermes: string column bytes %d exceed int32 offset limit", total)
+	}
+	v := &StringVector{
+		offsets:  make([]int32, n+1),
+		validity: newValidityBitmap(n),
+		n:        n,
+	}
+	v.buf = make([]byte, 0, total)
+	for i, s := range ss {
+		// #nosec G115 -- len(v.buf) <= total <= MaxInt32, guarded above.
+		v.offsets[i] = int32(len(v.buf))
+		v.buf = append(v.buf, s...)
+		if valid[i] {
+			v.validity.set(i)
 		}
 	}
-	return c
+	// #nosec G115 -- len(v.buf) == total <= MaxInt32, guarded above.
+	v.offsets[n] = int32(len(v.buf))
+	return v, nil
 }
-func (v *StringVector) IsValid(i int) bool { return v.valid[i] }
-func (v *StringVector) Int64Values() []int64 { return nil }
+
+func (v *StringVector) Type() DataType           { return TypeString }
+func (v *StringVector) Len() int                 { return v.n }
+func (v *StringVector) NullCount() int           { return v.validity.nullCount() }
+func (v *StringVector) IsValid(i int) bool       { return v.validity.isValid(i) }
+func (v *StringVector) Int64Values() []int64     { return nil }
 func (v *StringVector) Float64Values() []float64 { return nil }
-func (v *StringVector) StringValues() []string { return v.values }
-func (v *StringVector) BytesValues() [][]byte { return nil }
+func (v *StringVector) BytesValues() [][]byte    { return nil }
+
+// Offsets returns the raw offset array (length n+1). Use with Bytes() for
+// zero-copy string views: buf[offsets[i]:offsets[i+1]] is string i.
+func (v *StringVector) Offsets() []int32 { return v.offsets }
+
+// Bytes returns the contiguous backing byte buffer.
+func (v *StringVector) Bytes() []byte { return v.buf }
+
+// ValueAt returns the string at index i. The result is a safe, independently
+// owned copy of the backing bytes, so callers may retain it freely. On hot
+// scan paths where the value is consumed transiently (e.g. length or hashing),
+// Go escape analysis elides the copy. For genuine zero-copy access into the
+// shared buffer, use Offsets()+Bytes() directly and observe their lifetime
+// caveats — Hermes carries tenant projection data, so the unsafe view is kept
+// out of this convenience accessor (see CP "no unsafe in handwritten Go").
+func (v *StringVector) ValueAt(i int) string {
+	return string(v.buf[v.offsets[i]:v.offsets[i+1]])
+}
+
+// StringValues materializes a []string heap copy. Use for compatibility
+// only — prefer ValueAt or Offsets/Bytes on hot paths.
+func (v *StringVector) StringValues() []string {
+	out := make([]string, v.n)
+	for i := range out {
+		out[i] = v.ValueAt(i)
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// TimestampVector
+// ---------------------------------------------------------------------------
 
 type TimestampVector struct {
-	values []time.Time
-	valid  []bool
+	values   []time.Time
+	validity validityBitmap
 }
 
-func (v *TimestampVector) Type() DataType { return TypeTimestamp }
-func (v *TimestampVector) Len() int { return len(v.values) }
-func (v *TimestampVector) NullCount() int {
-	c := 0
-	for _, b := range v.valid {
-		if !b {
-			c++
-		}
-	}
-	return c
+func newTimestampVector(n int) *TimestampVector {
+	return &TimestampVector{values: make([]time.Time, n), validity: newValidityBitmap(n)}
 }
-func (v *TimestampVector) IsValid(i int) bool { return v.valid[i] }
+
+func (v *TimestampVector) Type() DataType     { return TypeTimestamp }
+func (v *TimestampVector) Len() int           { return len(v.values) }
+func (v *TimestampVector) NullCount() int     { return v.validity.nullCount() }
+func (v *TimestampVector) IsValid(i int) bool { return v.validity.isValid(i) }
 func (v *TimestampVector) Int64Values() []int64 {
 	out := make([]int64, len(v.values))
 	for i, t := range v.values {
@@ -132,8 +242,31 @@ func (v *TimestampVector) Int64Values() []int64 {
 	return out
 }
 func (v *TimestampVector) Float64Values() []float64 { return nil }
-func (v *TimestampVector) StringValues() []string { return nil }
-func (v *TimestampVector) BytesValues() [][]byte { return nil }
+func (v *TimestampVector) StringValues() []string   { return nil }
+func (v *TimestampVector) BytesValues() [][]byte    { return nil }
+
+// ---------------------------------------------------------------------------
+// DomainRecordVector — wraps full DomainRecord values for the _record column.
+// ---------------------------------------------------------------------------
+
+type DomainRecordVector struct {
+	values   []database.DomainRecord
+	validity validityBitmap
+}
+
+func (v *DomainRecordVector) Type() DataType                        { return TypeBinary }
+func (v *DomainRecordVector) Len() int                              { return len(v.values) }
+func (v *DomainRecordVector) NullCount() int                        { return v.validity.nullCount() }
+func (v *DomainRecordVector) IsValid(i int) bool                    { return v.validity.isValid(i) }
+func (v *DomainRecordVector) Int64Values() []int64                  { return nil }
+func (v *DomainRecordVector) Float64Values() []float64              { return nil }
+func (v *DomainRecordVector) StringValues() []string                { return nil }
+func (v *DomainRecordVector) BytesValues() [][]byte                 { return nil }
+func (v *DomainRecordVector) RecordValues() []database.DomainRecord { return v.values }
+
+// ---------------------------------------------------------------------------
+// GetColumnarBatch — public entry point
+// ---------------------------------------------------------------------------
 
 func (s *Store) GetColumnarBatch(ctx context.Context, projection string, query Query, fields []string, fence Fence) (*RecordBatch, error) {
 	if err := ctxErr(ctx); err != nil {
@@ -145,6 +278,10 @@ func (s *Store) GetColumnarBatch(ctx context.Context, projection string, query Q
 	}
 	return part.getColumnarBatch(ctx, query, fields, fence)
 }
+
+// ---------------------------------------------------------------------------
+// collectRecordEntries — shared candidate collection used by getColumnarBatch.
+// ---------------------------------------------------------------------------
 
 func (p *partition) collectRecordEntries(ctx context.Context, registry *partitionRegistry, query Query) ([]recordEntry, error) {
 	ordered := p.orderedCandidateIndex(registry, query)
@@ -214,6 +351,10 @@ func (p *partition) collectRecordEntries(ctx context.Context, registry *partitio
 	return candidates, err
 }
 
+// ---------------------------------------------------------------------------
+// getColumnarBatch — builds a RecordBatch from the active partition registry.
+// ---------------------------------------------------------------------------
+
 func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []string, fence Fence) (*RecordBatch, error) {
 	if err := p.waitForStable(ctx); err != nil {
 		return nil, err
@@ -231,8 +372,9 @@ func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []
 		return nil, err
 	}
 
+	// Sort: descending UpdatedAt → descending version → ascending RecordID.
 	if query.Limit <= 0 || len(entries) > 1 {
-		sort.Slice(entries, func(i int, j int) bool {
+		sort.Slice(entries, func(i, j int) bool {
 			if !entries[i].record.UpdatedAt.Equal(entries[j].record.UpdatedAt) {
 				return entries[i].record.UpdatedAt.After(entries[j].record.UpdatedAt)
 			}
@@ -254,55 +396,69 @@ func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []
 		switch field {
 		case "_record":
 			vals := make([]database.DomainRecord, rows)
-			valid := make([]bool, rows)
-			for i, entry := range entries {
-				vals[i] = entry.record
-				valid[i] = true
+			dv := &DomainRecordVector{
+				values:   vals,
+				validity: newValidityBitmap(rows),
 			}
-			vec = &DomainRecordVector{values: vals, valid: valid}
+			for i, entry := range entries {
+				dv.values[i] = entry.record
+				dv.validity.set(i)
+			}
+			vec = dv
+
 		case "record_id":
-			vals := make([]string, rows)
-			valid := make([]bool, rows)
+			ss := make([]string, rows)
+			vv := make([]bool, rows)
 			for i, entry := range entries {
-				vals[i] = entry.record.RecordID
-				valid[i] = true
+				ss[i] = entry.record.RecordID
+				vv[i] = true
 			}
-			vec = &StringVector{values: vals, valid: valid}
+			sv, err := newStringVectorFromSlice(ss, vv)
+			if err != nil {
+				return nil, err
+			}
+			vec = sv
+
 		case "organization_id":
-			vals := make([]string, rows)
-			valid := make([]bool, rows)
+			ss := make([]string, rows)
+			vv := make([]bool, rows)
 			for i, entry := range entries {
-				vals[i] = entry.record.OrganizationID
-				valid[i] = true
+				ss[i] = entry.record.OrganizationID
+				vv[i] = true
 			}
-			vec = &StringVector{values: vals, valid: valid}
+			sv, err := newStringVectorFromSlice(ss, vv)
+			if err != nil {
+				return nil, err
+			}
+			vec = sv
+
 		case "created_at":
-			vals := make([]time.Time, rows)
-			valid := make([]bool, rows)
+			tv := newTimestampVector(rows)
 			for i, entry := range entries {
-				vals[i] = entry.record.CreatedAt
-				valid[i] = true
+				tv.values[i] = entry.record.CreatedAt
+				tv.validity.set(i)
 			}
-			vec = &TimestampVector{values: vals, valid: valid}
+			vec = tv
+
 		case "updated_at":
-			vals := make([]time.Time, rows)
-			valid := make([]bool, rows)
+			tv := newTimestampVector(rows)
 			for i, entry := range entries {
-				vals[i] = entry.record.UpdatedAt
-				valid[i] = true
+				tv.values[i] = entry.record.UpdatedAt
+				tv.validity.set(i)
 			}
-			vec = &TimestampVector{values: vals, valid: valid}
+			vec = tv
+
 		case "version":
-			vals := make([]int64, rows)
-			valid := make([]bool, rows)
+			iv := newInt64Vector(rows)
 			for i, entry := range entries {
 				// #nosec G115
-				vals[i] = int64(entry.version)
-				valid[i] = true
+				iv.values[i] = int64(entry.version)
+				iv.validity.set(i)
 			}
-			vec = &Int64Vector{values: vals, valid: valid}
+			vec = iv
+
 		default:
-			// Try to extract from RecordData
+			// Determine column type from the first valid entry.
 			var kind byte
 			found := false
 			for _, entry := range entries {
@@ -317,70 +473,73 @@ func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []
 			}
 
 			if !found {
-				vals := make([]string, rows)
-				valid := make([]bool, rows)
-				vec = &StringVector{values: vals, valid: valid}
+				ss := make([]string, rows)
+				vv := make([]bool, rows)
+				sv, err := newStringVectorFromSlice(ss, vv)
+				if err != nil {
+					return nil, err
+				}
+				vec = sv
 			} else {
 				switch kind {
 				case 'i', 'u':
-					vals := make([]int64, rows)
-					valid := make([]bool, rows)
+					iv := newInt64Vector(rows)
 					for i, entry := range entries {
 						if val, ok := entry.record.Data.Get(field); ok {
-							if kind, idxVal, ok := val.ScalarIndex(); ok && (kind == 'i' || kind == 'u') {
-								if iv, err := strconv.ParseInt(idxVal, 10, 64); err == nil {
-									vals[i] = iv
-									valid[i] = true
+							if k, idxVal, ok := val.ScalarIndex(); ok && (k == 'i' || k == 'u') {
+								if parsed, err2 := strconv.ParseInt(idxVal, 10, 64); err2 == nil {
+									iv.values[i] = parsed
+									iv.validity.set(i)
 								}
 							}
 						}
 					}
-					vec = &Int64Vector{values: vals, valid: valid}
+					vec = iv
 				case 'f':
-					vals := make([]float64, rows)
-					valid := make([]bool, rows)
+					fv := newFloat64Vector(rows)
 					for i, entry := range entries {
 						if val, ok := entry.record.Data.Get(field); ok {
-							if kind, idxVal, ok := val.ScalarIndex(); ok && kind == 'f' {
-								if fv, err := strconv.ParseFloat(idxVal, 64); err == nil {
-									vals[i] = fv
-									valid[i] = true
+							if k, idxVal, ok := val.ScalarIndex(); ok && k == 'f' {
+								if parsed, err2 := strconv.ParseFloat(idxVal, 64); err2 == nil {
+									fv.values[i] = parsed
+									fv.validity.set(i)
 								}
 							}
 						}
 					}
-					vec = &Float64Vector{values: vals, valid: valid}
+					vec = fv
 				case 'b':
-					vals := make([]int64, rows)
-					valid := make([]bool, rows)
+					iv := newInt64Vector(rows)
 					for i, entry := range entries {
 						if val, ok := entry.record.Data.Get(field); ok {
-							if kind, idxVal, ok := val.ScalarIndex(); ok && kind == 'b' {
+							if k, idxVal, ok := val.ScalarIndex(); ok && k == 'b' {
 								if idxVal == "1" {
-									vals[i] = 1
-								} else {
-									vals[i] = 0
+									iv.values[i] = 1
 								}
-								valid[i] = true
+								iv.validity.set(i)
 							}
 						}
 					}
-					vec = &Int64Vector{values: vals, valid: valid}
+					vec = iv
 				default:
-					vals := make([]string, rows)
-					valid := make([]bool, rows)
+					ss := make([]string, rows)
+					vv := make([]bool, rows)
 					for i, entry := range entries {
 						if val, ok := entry.record.Data.Get(field); ok {
 							if _, idxVal, ok := val.ScalarIndex(); ok {
-								vals[i] = idxVal
-								valid[i] = true
+								ss[i] = idxVal
+								vv[i] = true
 							} else {
-								vals[i] = val.Text
-								valid[i] = val.Kind != database.RecordValueNull
+								ss[i] = val.Text
+								vv[i] = val.Kind != database.RecordValueNull
 							}
 						}
 					}
-					vec = &StringVector{values: vals, valid: valid}
+					sv, err := newStringVectorFromSlice(ss, vv)
+					if err != nil {
+						return nil, err
+					}
+					vec = sv
 				}
 			}
 		}
@@ -393,19 +552,3 @@ func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []
 		Rows:    rows,
 	}, nil
 }
-
-type DomainRecordVector struct {
-	values []database.DomainRecord
-	valid  []bool
-}
-
-func (v *DomainRecordVector) Type() DataType { return TypeBinary }
-func (v *DomainRecordVector) Len() int { return len(v.values) }
-func (v *DomainRecordVector) NullCount() int { return 0 }
-func (v *DomainRecordVector) IsValid(i int) bool { return v.valid[i] }
-func (v *DomainRecordVector) Int64Values() []int64 { return nil }
-func (v *DomainRecordVector) Float64Values() []float64 { return nil }
-func (v *DomainRecordVector) StringValues() []string { return nil }
-func (v *DomainRecordVector) BytesValues() [][]byte { return nil }
-func (v *DomainRecordVector) RecordValues() []database.DomainRecord { return v.values }
-

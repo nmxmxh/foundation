@@ -1,9 +1,9 @@
-.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history lint verify docker-up docker-down migrate-up help \
+.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history bench-simd lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator \
 	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
 	check-doc-references \
-	check-lifecycle-manifest check-app-security-profile lifecycle-manifest
+	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet lifecycle-manifest
 
 .DEFAULT_GOAL := help
 
@@ -45,7 +45,8 @@ FOUNDATION_LINT_CHECKS := \
 	check-domain-contract-consistency \
 	check-server-kit-usage \
 	check-lifecycle-manifest \
-	check-app-security-profile
+	check-app-security-profile \
+	check-coverage-ratchet
 
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 FOUNDATION_GO_CACHE_DIR ?= /tmp/ovasabi-foundation-go-build
@@ -118,6 +119,16 @@ test-bench: test-bench-go test-bench-native-rust test-bench-frontend
 
 test-bench-history:
 	@tooling/scripts/benchmark_history.sh .
+
+# bench-simd is the explicit opt-in gate for the experimental Go SIMD lane.
+# Ordinary builds stay portable (scalar fallback); this target compiles the
+# amd64 archsimd path with GOEXPERIMENT=simd and runs its bounded benchmarks.
+# On a non-amd64 host it measures the scalar fallback (the vector file is build-
+# tag excluded), so compare against an AVX2 amd64 host for the SIMD delta.
+bench-simd:
+	@echo "Running opt-in Go SIMD columnar benchmarks (GOEXPERIMENT=simd)..."
+	@mkdir -p "$(FOUNDATION_GO_CACHE_DIR)"
+	@cd server-kit/go && GOEXPERIMENT=simd GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -run='TestFloat64VectorSumMatchesScalarReference' -bench='BenchmarkColumnarFloat64Sum' -benchmem -count=3 ./hermes
 
 test-bench-go:
 	@echo "Running bounded Foundation benchmarks..."
@@ -271,6 +282,9 @@ check-lifecycle-manifest:
 check-app-security-profile:
 	@tooling/scripts/app_security_profile_check.sh .
 
+check-coverage-ratchet:
+	@FOUNDATION_GO_CACHE_DIR="$(FOUNDATION_GO_CACHE_DIR)" tooling/scripts/coverage_ratchet_check.sh .
+
 lifecycle-manifest:
 	@proto_root=api/protos; \
 	if [ ! -d "$$proto_root" ]; then proto_root=templates/api/protos; fi; \
@@ -302,6 +316,7 @@ help:
 	@echo "  make test-load-research  Run opt-in staged 1K->1M local load research"
 	@echo "  make test-service-backed-load  Run opt-in staged service-backed load research"
 	@echo "  make test-bench-native-rust  Run native GPU/runtime Rust benchmark simulation"
+	@echo "  make bench-simd          Run opt-in Go SIMD columnar benchmarks (GOEXPERIMENT=simd)"
 	@echo "  make lint                Run foundation scaffold/practice checks"
 	@echo "  make verify              Run lint, tests, TS typechecks, and generated scaffold smoke"
 	@echo "  make docker-up/down      Start/stop core service-backed test stack"
@@ -315,4 +330,5 @@ help:
 	@echo "  make check-frontend-prototype-generator  Validate generated prototype schemas, stores, hooks, fixtures, and benchmark fixtures"
 	@echo "  make check-formal-methods  Validate formal-method templates and spec coverage"
 	@echo "  make check-operational-excellence  Validate DORA/SPACE/SLSA/OTel delivery evidence hooks"
+	@echo "  make check-coverage-ratchet  Enforce per-package coverage floors ratcheting toward 95%"
 	@echo "  make check-database-practices  Run a single foundation check"

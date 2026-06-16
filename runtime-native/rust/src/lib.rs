@@ -72,20 +72,47 @@ pub struct NativeRuntimeCapabilities {
 }
 
 impl NativeRuntimeCapabilities {
+    /// detect reports the lanes that are genuinely present in Foundation core.
+    /// FFI and GPU are application requirements, not core features: this crate is
+    /// `#![forbid(unsafe_code)]` and links no GPU backend, so both default to
+    /// absent. An application that supplies a real C-ABI bridge or a GPU backend
+    /// (wgpu/Metal/Vulkan/CUDA) declares it via `with_ffi_backend` /
+    /// `with_gpu_backend`, the same app-supplied-adapter model the bulk lane
+    /// planner uses. `native_gpu_platforms` lists the handle kinds such a backend
+    /// could interoperate with on this OS — candidates, not a presence claim.
     pub fn detect() -> Self {
         Self {
             native: true,
-            native_ffi: true,
+            native_ffi: false,
             native_shared_memory: cfg!(target_os = "linux"),
-            native_gpu: !native_gpu_platforms().is_empty(),
+            native_gpu: false,
             native_gpu_platforms: native_gpu_platforms(),
             wasm_sab: false,
             wasm_transfer: false,
             platform: std::env::consts::OS.to_string(),
         }
     }
+
+    /// with_ffi_backend marks the FFI lane available. Call it from an application
+    /// that links a real C-ABI bridge (which must live outside this unsafe-free
+    /// crate).
+    pub fn with_ffi_backend(mut self) -> Self {
+        self.native_ffi = true;
+        self
+    }
+
+    /// with_gpu_backend marks the GPU lane available and records the handle kinds
+    /// the app-supplied backend actually supports.
+    pub fn with_gpu_backend(mut self, platforms: Vec<String>) -> Self {
+        self.native_gpu = !platforms.is_empty();
+        self.native_gpu_platforms = platforms;
+        self
+    }
 }
 
+/// native_gpu_platforms lists candidate platform handle kinds a GPU backend
+/// could interoperate with on this OS. It does not imply a backend is present;
+/// `NativeRuntimeCapabilities::native_gpu` is only true once an app registers one.
 fn native_gpu_platforms() -> Vec<String> {
     let mut platforms = Vec::new();
     if cfg!(target_os = "linux") {
@@ -596,15 +623,32 @@ mod tests {
         let bridge = NativeRuntimeBridge::with_role_limits(BTreeMap::new());
         let capabilities = bridge.capabilities();
         assert!(capabilities.native);
-        assert!(capabilities.native_ffi);
+        // FFI and GPU are app requirements, absent in core by default.
+        assert!(!capabilities.native_ffi);
+        assert!(!capabilities.native_gpu);
         assert!(!capabilities.platform.trim().is_empty());
-        assert_eq!(capabilities.native_gpu, !capabilities.native_gpu_platforms.is_empty());
         for platform in &capabilities.native_gpu_platforms {
             assert!(matches!(
                 platform.as_str(),
                 "linux-dmabuf" | "apple-iosurface" | "android-hardware-buffer" | "vulkan-external"
             ));
         }
+    }
+
+    #[test]
+    fn app_declared_backends_are_reported_honestly() {
+        // An application that supplies FFI/GPU backends opts in explicitly; core
+        // never claims them on its behalf.
+        let declared = NativeRuntimeCapabilities::detect()
+            .with_ffi_backend()
+            .with_gpu_backend(vec!["apple-iosurface".to_string()]);
+        assert!(declared.native_ffi);
+        assert!(declared.native_gpu);
+        assert_eq!(declared.native_gpu_platforms, vec!["apple-iosurface".to_string()]);
+
+        // An empty backend declaration leaves the GPU lane absent.
+        let none = NativeRuntimeCapabilities::detect().with_gpu_backend(Vec::new());
+        assert!(!none.native_gpu);
     }
 
     #[test]

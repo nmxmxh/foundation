@@ -33,6 +33,44 @@ func BenchmarkObjectFromMapApplicationPayload(b *testing.B) {
 	}
 }
 
+// marshalBenchObject is a representative nested document: scalars of each kind,
+// a list, and two levels of nested objects. It guards the append-down encoder
+// against per-node allocation regressions (optimization_points #73).
+func marshalBenchObject() Object {
+	return Object{
+		"id":     String("rec_12345"),
+		"size":   Int(4096),
+		"active": Bool(true),
+		"score":  Float(0.95),
+		"tags":   List([]Value{String("a"), String("b"), String("c")}),
+		"meta": ObjectValue(Object{
+			"locale": String("en-US"),
+			"region": String("us-east-1"),
+			"nested": ObjectValue(Object{"k": Int(7)}),
+		}),
+	}
+}
+
+func BenchmarkExtensionMarshalJSON(b *testing.B) {
+	o := marshalBenchObject()
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := o.MarshalJSON(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkExtensionMarshalJSONFast(b *testing.B) {
+	o := marshalBenchObject()
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := o.MarshalJSONFast(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkObjectInterfaceMapObjectList(b *testing.B) {
 	obj := Object{
 		"items": List([]Value{

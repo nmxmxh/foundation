@@ -1,9 +1,12 @@
 package bulk
 
 import (
+	"context"
 	"os"
 	"runtime"
 	"strings"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/kernellane"
 )
 
 type PlatformCapabilities struct {
@@ -40,6 +43,36 @@ func detectPlatformCapabilities(goos string, mptcpEnabled func() bool) PlatformC
 	}
 	caps.Notes["quic"] = "requires an explicit QUIC/HTTP3 adapter"
 	return caps
+}
+
+// DetectPlatformCapabilitiesProbed augments the static OS detection with real
+// runtime probes from the kernellane package: it confirms kernel file zero-copy
+// via a copy_file_range probe and MPTCP via an actual loopback negotiation,
+// rather than inferring them from the OS name. The probes are cached, so call it
+// once at startup and pass the result into LaneRequest.Capabilities — this feeds
+// the lane planner genuine capability instead of optimistic "linux implies
+// available" guesses. Any unsupported accelerator degrades to its portable lane.
+func DetectPlatformCapabilitiesProbed(ctx context.Context) PlatformCapabilities {
+	caps := DetectPlatformCapabilities() // always returns an initialized Notes map
+	caps.ZeroCopyAvailable = kernellane.ZeroCopyFileSupported()
+	caps.MPTCPAvailable = kernellane.MultipathTCPSupported(ctx)
+	caps.Notes["zero_copy"] = zeroCopyNote(caps.ZeroCopyAvailable)
+	caps.Notes["mptcp"] = mptcpNote(caps.MPTCPAvailable)
+	return caps
+}
+
+func zeroCopyNote(available bool) string {
+	if available {
+		return "verified: copy_file_range probe succeeded"
+	}
+	return "kernel copy_file_range unavailable; portable copy fallback"
+}
+
+func mptcpNote(available bool) string {
+	if available {
+		return "verified: MPTCP negotiated on loopback probe"
+	}
+	return "MPTCP not negotiated; ordinary TCP fallback"
 }
 
 func (c PlatformCapabilities) PipelineOptions() PipelineOptions {
