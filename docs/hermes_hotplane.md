@@ -604,18 +604,23 @@ deletes, staleness, replay, rebuild, Redis loss, and memory pressure.
 ## The Reality Check: Hard Limits & Architectural Invariants
 
 ### 1. Massive State per Node (Scale Boundaries)
+
 Hermes is strictly bounded by `MaxRecords` (default 100k) and `MaxBytes` (64MB) per projection partition. It is not designed to be a replacement for large database storage. If a single tenant exceeds these caps, the system will fall back to Postgres for that tenant. It is optimized for hot working sets, not data lakes.
 
 ### 2. Eventual Consistency & Replication Lag
+
 Because it relies on CDC over Redis Streams, there is a physical replication lag (benchmarks show max lag of ~4k records under peak load). Fenced reads must be used when strict read-after-write consistency is required. Without a fence, immediate post-write reads may return stale data.
 
 ### 3. Cross-Record / Cross-Scope Transactions
+
 All `ApplyBatch` operations lock at the partition level. Atomic transactions across multiple domains, collections, or organization scopes are impossible. Hermes operates strictly on isolated single-scope boundaries.
 
 ### 4. No Complex SQL-style Joins
+
 Indexes are single-field B-tree style mappings. Complex relationships or multi-table joins are not supported. If order/user/catalog joins are required, they must be pre-joined at the CDC projection layer before ingestion into Hermes.
 
 ### 5. Architectural Mitigations (2026-06 Updates)
+
 - **Lock-Free Reads**: The global `publishing` wait-lock has been removed for reads. Reads leverage COW-style atomic swaps of index snapshots and atomic cells to guarantee sub-microsecond latency.
 - **Sharded Map Registry**: The records registry utilizes 128 independent map shards to distribute write lock contention.
 - **Watermark Deduplication**: Monotonic watermarks per producer prefix prevent duplicate replays outside the sliding window.

@@ -2587,6 +2587,7 @@ Remaining opportunity:
 ## 2026-06 Hermes Hotplane Optimizations (Lock-Free reads, Map Sharding, TTL, Watermarking)
 
 In 2026-06, we addressed critical architectural trade-offs in the Hermes Hotplane:
+
 - **Lock-Free Reads**: The global read-blocking wait loop `waitForStable` has been removed. Reads access `activeRegistry` atomically. This is 100% thread-safe under concurrency, providing flat latency profiles.
 - **Sharded Map Registry**: Replaced single-point contention maps in `partitionRegistry` with a custom `shardedMap` wrapping 128 independent `sync.Map` segments. This distributes write contention by dividing key allocations.
 - **TTL Eviction**: Records support time-based expiration (`ExpiresAt`) and are evicted inline during batch write processes to keep memory bounded without background goroutines leaking.
