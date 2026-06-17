@@ -36,8 +36,8 @@ type Config struct {
 	WSGuestRateBurst   int
 
 	// Dispatch concurrency
-	DispatchMaxConcurrent   int
-	DispatchAcquireTimeout  time.Duration
+	DispatchMaxConcurrent  int
+	DispatchAcquireTimeout time.Duration
 
 	// Database pool
 	DBMaxConnections int

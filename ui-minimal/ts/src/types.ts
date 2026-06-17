@@ -94,6 +94,8 @@ export interface MinimalMotionTheme {
 export interface MinimalZIndexTheme {
   base: number;
   sticky: number;
+  dock: number;
+  globalHeader: number;
   dropdown: number;
   overlay: number;
   modal: number;

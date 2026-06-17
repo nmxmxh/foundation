@@ -161,7 +161,8 @@ hardware can feed predictably.
 3. Use buffered channels to absorb small bursts, not to hide unbounded backlog. Buffer size is a budget and should be observable.
 4. Use `sync.WaitGroup` or `WaitGroup.Go` where available for waiting on known finite goroutine sets. Do not use sleeps as synchronization.
 5. Use `sync.Once` for expensive lazy initialization that is safe to share.
-6. Reduce lock scope before replacing locks. In read-heavy shared state, consider `sync.RWMutex`; for counters and flags, consider `sync/atomic`; for maps under high contention, consider sharding.
+6. Reduce lock scope before replacing locks. In read-heavy shared state, consider `sync.RWMutex`; for counters and flags, consider `sync/atomic`; for maps under high contention, consider sharding (e.g. 128/256 independent partitions using a fast hash).
+6a. **Lock-Free Reads**: For in-memory projection caches (e.g. Hermes), reads must be completely lock-free. Leverage Copy-On-Write (COW) index snapshot swaps and atomic cell pointers to avoid read-blocking locks, protecting read latency from write batch pressure.
 7. Share immutable snapshots freely across goroutines. Mutable shared state needs explicit ownership, synchronization, or copy-on-write semantics.
 8. Every goroutine spawned from a request, socket, worker job, or ingestion batch must receive cancellation through `context.Context` or an equivalent lifecycle boundary.
 9. In containers, validate `GOMAXPROCS` against cgroup CPU limits. Prefer an automatic setting such as `automaxprocs` where deployment does not already enforce this.

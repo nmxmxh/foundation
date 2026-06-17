@@ -575,6 +575,19 @@ const Style = {
   }>`
     ${clickableReset}
     ${focusRing}
+    position: relative;
+
+    &::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      min-width: 44px;
+      min-height: 44px;
+      width: 100%;
+      height: 100%;
+    }
     ${({ theme, $tone, $variant }) => {
       const accent = toneAccent(theme, $tone);
       if ($variant === "secondary") {
@@ -1952,13 +1965,24 @@ export const useMinimalScrollFeedback = (
 };
 
 const ShellStyle = {
-  App: styled.div`
+  App: styled.div<{ $mobile?: boolean }>`
     min-height: 100dvh;
     display: flex;
-    flex-direction: row;
+    flex-direction: ${({ $mobile }) => ($mobile ? "column" : "row")};
     isolation: isolate;
     background: ${({ theme }) => theme.color.bgApp};
     color: ${({ theme }) => theme.color.textPrimary};
+
+    ${({ $mobile }) =>
+      $mobile &&
+      css`
+        max-width: 480px;
+        width: 100%;
+        margin: 0 auto;
+        box-shadow: 0 0 40px rgba(0, 0, 0, 0.1);
+        position: relative;
+        overflow-x: hidden;
+      `}
   `,
   SkipLink: styled.a`
     position: absolute;
@@ -2045,7 +2069,7 @@ export const MinimalAppShell = ({
   mobile = false,
   ...props
 }: MinimalAppShellProps) => (
-  <ShellStyle.App data-minimal="AppShell" {...props}>
+  <ShellStyle.App data-minimal="AppShell" $mobile={mobile} {...props}>
     <MinimalSkipLink />
     {!mobile && sidebar ? (
       <ShellStyle.Sidebar aria-label="Main navigation" $width={sidebarWidth} $bannerOffset={bannerOffset}>

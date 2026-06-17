@@ -43,6 +43,7 @@ type ProjectionSpec struct {
 	MaxTombstones    int
 	MaxAppliedEvents int
 	Freshness        time.Duration
+	TTL              time.Duration
 }
 
 // Event is the durable mutation shape consumed by the Hermes hot plane.
@@ -121,10 +122,11 @@ type RecordView struct {
 }
 
 type recordEntry struct {
-	record  database.DomainRecord
-	source  string
-	version uint64
-	bytes   int64
+	record    database.DomainRecord
+	source    string
+	version   uint64
+	bytes     int64
+	expiresAt time.Time
 }
 
 type tombstoneEntry struct {

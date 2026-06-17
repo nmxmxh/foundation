@@ -309,7 +309,6 @@ func queryFilterValue(filter QueryFilter) database.RecordValue {
 	}
 }
 
-
 func ctxErr(ctx context.Context) error {
 	if ctx == nil {
 		return nil

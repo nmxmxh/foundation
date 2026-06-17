@@ -3,7 +3,6 @@ package hermes
 import (
 	"context"
 	"errors"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -29,6 +28,7 @@ type partition struct {
 	tombOrder  []string
 	applied    map[string]struct{}
 	applyOrder []string
+	watermarks map[string]uint64
 
 	bytes            atomic.Int64
 	records          atomic.Int64
@@ -37,9 +37,75 @@ type partition struct {
 }
 
 type partitionRegistry struct {
-	records sync.Map
-	scopes  sync.Map
-	fields  sync.Map
+	records shardedMap
+	scopes  shardedMap
+	fields  shardedMap
+}
+
+const numShards = 128
+
+type shardedMap struct {
+	shards [numShards]*sync.Map
+}
+
+func newShardedMap() *shardedMap {
+	sm := &shardedMap{}
+	for i := range numShards {
+		sm.shards[i] = &sync.Map{}
+	}
+	return sm
+}
+
+func hashString(s string) uint32 {
+	var h uint32 = 2166136261
+	for i := 0; i < len(s); i++ {
+		h = (h ^ uint32(s[i])) * 16777619
+	}
+	return h
+}
+
+func (sm *shardedMap) getShard(key any) *sync.Map {
+	var hash uint32
+	switch k := key.(type) {
+	case string:
+		hash = hashString(k)
+	case fieldIndex:
+		hash = hashString(k.scope.domain + ":" + k.scope.collection + ":" + k.scope.organizationID + ":" + k.field + ":" + k.value)
+	case recordScope:
+		hash = hashString(k.domain + ":" + k.collection + ":" + k.organizationID)
+	default:
+		hash = 0
+	}
+	return sm.shards[hash%numShards]
+}
+
+func (sm *shardedMap) Load(key any) (any, bool) {
+	return sm.getShard(key).Load(key)
+}
+
+func (sm *shardedMap) Store(key any, val any) {
+	sm.getShard(key).Store(key, val)
+}
+
+func (sm *shardedMap) LoadOrStore(key any, val any) (any, bool) {
+	return sm.getShard(key).LoadOrStore(key, val)
+}
+
+func (sm *shardedMap) Delete(key any) {
+	sm.getShard(key).Delete(key)
+}
+
+func (sm *shardedMap) Range(f func(key, value any) bool) {
+	for i := range numShards {
+		var keepGoing = true
+		sm.shards[i].Range(func(k, v any) bool {
+			keepGoing = f(k, v)
+			return keepGoing
+		})
+		if !keepGoing {
+			break
+		}
+	}
 }
 
 type recordCell struct {
@@ -220,13 +286,22 @@ func (s *Store) partition(name string) (*partition, error) {
 	return part, nil
 }
 
+func newPartitionRegistry() *partitionRegistry {
+	return &partitionRegistry{
+		records: *newShardedMap(),
+		scopes:  *newShardedMap(),
+		fields:  *newShardedMap(),
+	}
+}
+
 func newPartition(spec ProjectionSpec) *partition {
 	part := &partition{
 		spec:       spec,
 		tombstones: map[string]tombstoneEntry{},
 		applied:    map[string]struct{}{},
+		watermarks: map[string]uint64{},
 	}
-	part.registry.Store(&partitionRegistry{})
+	part.registry.Store(newPartitionRegistry())
 	return part
 }
 
@@ -235,7 +310,7 @@ func (p *partition) activeRegistry() *partitionRegistry {
 	if registry != nil {
 		return registry
 	}
-	registry = &partitionRegistry{}
+	registry = newPartitionRegistry()
 	p.registry.Store(registry)
 	return registry
 }
@@ -359,8 +434,8 @@ func (p *partition) forEachView(ctx context.Context, query Query, fence Fence, f
 			CreatedAt:      rec.CreatedAt,
 			UpdatedAt:      rec.UpdatedAt,
 			// #nosec G115
-			Version:        uint64(versions[i]),
-			Epoch:          epoch,
+			Version: uint64(versions[i]),
+			Epoch:   epoch,
 		}
 		if err := fn(view); err != nil {
 			return seen, err
@@ -378,15 +453,6 @@ func (p *partition) checkFence(fence Fence) error {
 	return nil
 }
 
-func (p *partition) waitForStable(ctx context.Context) error {
-	for attempts := 0; p.publishing.Load(); attempts++ {
-		if err := ctxErr(ctx); err != nil {
-			return err
-		}
-		if attempts > 1<<20 {
-			return ErrProjectionBusy
-		}
-		runtime.Gosched()
-	}
+func (p *partition) waitForStable(_ context.Context) error {
 	return nil
 }

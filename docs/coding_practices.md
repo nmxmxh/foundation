@@ -138,6 +138,8 @@ Requirements:
 4. Goroutine closures must not accidentally share mutable loop, request, tenant, or correlation state. Pass values as parameters or copy them locally when the value is part of the concurrency contract.
 5. Values passed through channels, contexts, worker args, or library objects can still point to mutable shared state. Passing a pointer through a channel is not data privatization.
 6. Channel, goroutine, timer, ticker, and context ownership must be explicit in code structure: identify who sends, receives, closes, cancels, stops, and observes terminal failure.
+7. **Lock-Free COW Pointer-Swap**: For high-concurrency read-heavy caching and projection stores (e.g. Hermes), prefer using atomic pointer swaps (`atomic.Pointer`) of immutable configurations or state snapshots (Copy-On-Write) to eliminate read locks and spin-loops entirely, ensuring zero-blocking reads.
+8. **Scope Transaction Limits**: In-memory projections and caching partitions must restrict transactional lock boundaries to a single partition scope (e.g. per-tenant/per-collection); do not attempt multi-partition atomic transactions.
 
 Enforcement:
 

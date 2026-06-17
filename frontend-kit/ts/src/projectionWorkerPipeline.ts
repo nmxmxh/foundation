@@ -97,6 +97,7 @@ export type ProjectionEventPipeline<TRecord extends Record<string, unknown>> = {
   flush(): Promise<void>;
   getSnapshot(): ProjectionEventPipelineSnapshot;
   close(): void;
+  readonly _recordType?: TRecord;
 };
 
 export type ProjectionEventPipelineSnapshot = {

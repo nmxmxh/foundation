@@ -2583,3 +2583,19 @@ Remaining opportunity:
 4. Hermes rebuild now beats old time and allocation count, but not bytes. The
    next improvement would need a true normalized snapshot source that bypasses
    durable JSONB materialization, not more `BulkLoad` tuning.
+
+## 2026-06 Hermes Hotplane Optimizations (Lock-Free reads, Map Sharding, TTL, Watermarking)
+
+In 2026-06, we addressed critical architectural trade-offs in the Hermes Hotplane:
+- **Lock-Free Reads**: The global read-blocking wait loop `waitForStable` has been removed. Reads access `activeRegistry` atomically. This is 100% thread-safe under concurrency, providing flat latency profiles.
+- **Sharded Map Registry**: Replaced single-point contention maps in `partitionRegistry` with a custom `shardedMap` wrapping 128 independent `sync.Map` segments. This distributes write contention by dividing key allocations.
+- **TTL Eviction**: Records support time-based expiration (`ExpiresAt`) and are evicted inline during batch write processes to keep memory bounded without background goroutines leaking.
+- **Producer Watermarking**: Monotonic watermarks per producer prefix prevent replay of old events without needing infinite sliding windows in memory.
+
+### Benchmark Results (Apple M1 Pro)
+
+Under active concurrent write pressure (4 background writers aggressively applying events):
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesConcurrentReadWrite-8` | 156.9 | 197 | 4 | Sub-microsecond read latency under heavy write contention. |

@@ -2,6 +2,7 @@ package hermes
 
 import (
 	"slices"
+	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
@@ -43,7 +44,6 @@ func (p *partition) removeIndexesLocked(publisher *indexPublisher, registry *par
 		publisher.remove(p.fieldCellLocked(registry, index), key)
 	})
 }
-
 
 func (p *partition) orderedCandidateIndex(registry *partitionRegistry, query Query) *indexSnapshot {
 	scope := scopeKey(p.spec.Domain, p.spec.Collection, query.OrganizationID)
@@ -111,7 +111,14 @@ func (p *partition) recordEntry(registry *partitionRegistry, key string) (record
 	if !ok {
 		return recordEntry{}, false
 	}
-	return recordEntryFromCell(value)
+	entry, ok := recordEntryFromCell(value)
+	if !ok {
+		return recordEntry{}, false
+	}
+	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
+		return recordEntry{}, false
+	}
+	return entry, true
 }
 
 func recordEntryFromCell(value any) (recordEntry, bool) {
@@ -393,7 +400,6 @@ func forEachIndexedField(rec database.DomainRecord, spec ProjectionSpec, fn func
 		}
 	}
 }
-
 
 func estimateRecordBytes(rec database.DomainRecord) int64 {
 	total := len(rec.Domain) + len(rec.Collection) + len(rec.OrganizationID) + len(rec.RecordID)

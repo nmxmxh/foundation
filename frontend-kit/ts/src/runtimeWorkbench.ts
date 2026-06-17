@@ -251,6 +251,7 @@ export type TenantSnapshotPersistence<TRecord extends Record<string, unknown>> =
   resetSession(): Promise<void>;
   start(): () => void;
   stop(): void;
+  readonly _recordType?: TRecord;
 };
 
 export type IndexedDBTenantSnapshotPersistenceOptions<TRecord extends Record<string, unknown>> =
@@ -263,10 +264,10 @@ export type HermesProjectionSource = {
   loadProjection?<TRecord extends Record<string, unknown>>(
     scope: ProjectionScope,
     request: ProjectionLoadRequest
-  ): Promise<unknown>;
+  ): Promise<unknown & { _phantom?: TRecord }>;
   subscribeProjection?<TRecord extends Record<string, unknown>>(
     scope: ProjectionScope,
-    listener: (event: unknown) => void
+    listener: (event: unknown, record?: TRecord) => void
   ): (() => void) | { unsubscribe(): void };
 };
 

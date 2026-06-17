@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
@@ -16,6 +17,7 @@ func (p *partition) applyBatch(ctx context.Context, events []Event) (ApplyResult
 	result := ApplyResult{Epoch: p.epoch.Load()}
 	registry := p.activeRegistry()
 	publisher := newIndexPublisher()
+	p.evictExpiredLocked(registry, publisher)
 	for _, event := range events {
 		if err := ctxErr(ctx); err != nil {
 			return p.finishApplyLocked(result, publisher), err
@@ -46,6 +48,7 @@ func (p *partition) applyRecords(ctx context.Context, sourcePrefix string, baseV
 	defer p.publishing.Store(false)
 	registry := p.activeRegistry()
 	publisher := newIndexPublisher()
+	p.evictExpiredLocked(registry, publisher)
 	result := ApplyResult{Epoch: p.epoch.Load()}
 	for i, rec := range records {
 		if err := ctxErr(ctx); err != nil {
@@ -63,12 +66,13 @@ func (p *partition) applyRecords(ctx context.Context, sourcePrefix string, baseV
 			p.rejectedApplies.Add(1)
 			return p.finishApplyLocked(result, publisher), err
 		}
-		if state == applyStateApplied {
+		switch state {
+		case applyStateApplied:
 			p.observeSourceWatermark(version)
 			result.Applied++
-		} else if state == applyStateDuplicate {
+		case applyStateDuplicate:
 			result.Duplicates++
-		} else {
+		default:
 			p.rejectedApplies.Add(1)
 			result.Ignored++
 		}
@@ -94,7 +98,8 @@ const (
 
 func (p *partition) applyEventLocked(registry *partitionRegistry, publisher *indexPublisher, event Event) (applyState, uint64, error) {
 	event.SourceID = strings.TrimSpace(event.SourceID)
-	if p.alreadyAppliedLocked(event.SourceID) {
+	version := p.effectiveVersion(event.Version)
+	if p.alreadyAppliedLocked(event.SourceID, version) {
 		return applyStateDuplicate, 0, nil
 	}
 	rec, err := normalizeEventRecord(event)
@@ -104,13 +109,12 @@ func (p *partition) applyEventLocked(registry *partitionRegistry, publisher *ind
 	if err := p.validateRecordScope(rec); err != nil {
 		return applyStateIgnored, 0, err
 	}
-	version := p.effectiveVersion(event.Version)
 	key := recordKey(rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID)
 	state, err := p.applyMutationLocked(registry, publisher, key, rec, event, version)
 	if err != nil {
 		return applyStateIgnored, version, err
 	}
-	p.rememberAppliedLocked(event.SourceID)
+	p.rememberAppliedLocked(event.SourceID, version)
 	return state, version, nil
 }
 
@@ -194,11 +198,16 @@ func (p *partition) upsertLocked(registry *partitionRegistry, publisher *indexPu
 		delete(p.tombstones, key)
 		p.records.Add(1)
 	}
+	var expires time.Time
+	if p.spec.TTL > 0 {
+		expires = time.Now().Add(p.spec.TTL)
+	}
 	entry := &recordEntry{
-		record:  rec,
-		source:  source,
-		version: version,
-		bytes:   recBytes,
+		record:    rec,
+		source:    source,
+		version:   version,
+		bytes:     recBytes,
+		expiresAt: expires,
 	}
 	cell.ptr.Store(entry)
 	p.bytes.Store(nextBytes)
@@ -236,11 +245,16 @@ func (p *partition) patchLocked(registry *partitionRegistry, publisher *indexPub
 		return applyStateIgnored, ErrProjectionLimit
 	}
 	p.removeIndexesLocked(publisher, registry, key, existing.record)
+	var expires time.Time
+	if p.spec.TTL > 0 {
+		expires = time.Now().Add(p.spec.TTL)
+	}
 	entry := &recordEntry{
-		record:  next,
-		source:  source,
-		version: version,
-		bytes:   recBytes,
+		record:    next,
+		source:    source,
+		version:   version,
+		bytes:     recBytes,
+		expiresAt: expires,
 	}
 	cell.ptr.Store(entry)
 	p.bytes.Store(nextBytes)
@@ -282,15 +296,24 @@ func (p *partition) blockedByNewerTombstoneLocked(key string, version uint64) bo
 	return ok && version < tomb.version
 }
 
-func (p *partition) alreadyAppliedLocked(source string) bool {
+func (p *partition) alreadyAppliedLocked(source string, version uint64) bool {
 	if source == "" {
 		return false
 	}
-	_, ok := p.applied[source]
-	return ok
+	if _, ok := p.applied[source]; ok {
+		return true
+	}
+	parts := strings.Split(source, ":")
+	if len(parts) > 1 {
+		prefix := parts[0]
+		if wm, ok := p.watermarks[prefix]; ok && version > 0 && version <= wm {
+			return true
+		}
+	}
+	return false
 }
 
-func (p *partition) rememberAppliedLocked(source string) {
+func (p *partition) rememberAppliedLocked(source string, version uint64) {
 	if source == "" {
 		return
 	}
@@ -303,6 +326,13 @@ func (p *partition) rememberAppliedLocked(source string) {
 		oldest := p.applyOrder[0]
 		p.applyOrder = p.applyOrder[1:]
 		delete(p.applied, oldest)
+	}
+	parts := strings.Split(source, ":")
+	if len(parts) > 1 {
+		prefix := parts[0]
+		if version > p.watermarks[prefix] {
+			p.watermarks[prefix] = version
+		}
 	}
 }
 
@@ -319,4 +349,26 @@ func (p *partition) rememberTombstoneLocked(key string, source string, version u
 		p.tombOrder = p.tombOrder[1:]
 		delete(p.tombstones, oldest)
 	}
+}
+
+func (p *partition) evictExpiredLocked(registry *partitionRegistry, publisher *indexPublisher) {
+	if p.spec.TTL <= 0 {
+		return
+	}
+	now := time.Now()
+	registry.records.Range(func(k, v any) bool {
+		cell, ok := v.(*recordCell)
+		if !ok || cell == nil {
+			return true
+		}
+		entry := cell.ptr.Load()
+		if entry != nil && !entry.expiresAt.IsZero() && now.After(entry.expiresAt) {
+			key := k.(string)
+			p.removeIndexesLocked(publisher, registry, key, entry.record)
+			cell.ptr.Store(nil)
+			p.records.Add(-1)
+			p.bytes.Add(-entry.bytes)
+		}
+		return true
+	})
 }

@@ -285,7 +285,51 @@ Before merging frontend work, verify:
 9. modals have explicit max-height and scroll-body behavior
 10. media/display sections declare aspect-ratio and min-height instead of depending on content accidents
 
-## 10. Reference Notes
+## 10. Fluid Sizing, Proportions, and Primitive Intelligence
+
+To handle sizing, dimensions, positioning, and accessibility fluidly and systematically across different viewport profiles:
+
+### 1. Mobile-First Phone-Frame Containment
+When targeting phone/app viewports, do not let layout blocks stretch to full-screen width. Confine the viewport to a centered layout container:
+* Wrap the application in a centered flex column:
+  ```css
+  max-width: 480px;
+  width: 100%;
+  margin: 0 auto;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.1);
+  min-height: 100vh;
+  position: relative;
+  ```
+* Do not position navigation docks with `position: fixed; bottom: 0; left: 0; right: 0;` globally if they must sit in a phone frame. Instead, use absolute or sticky positioning bound within the parent centered container, or clamp the fixed positioning via media queries.
+
+### 2. Fluid Sizing and Typography Formula
+Spacing and typography must scale dynamically with the viewport width without breaking minimum legibility. Implement fluid spacing/font sizing using the `clamp()` formula:
+* **Typography Formula**: `font-size: clamp(minSize, preferredFormula, maxSize)`
+  - *Example*: `font-size: clamp(1rem, 0.9rem + 0.5vw, 1.25rem);`
+* **Spacing Formula**: `padding: clamp(minPadding, preferredFormula, maxPadding)`
+  - *Example*: `padding: clamp(12px, 2vw + 4px, 24px);`
+
+### 3. Sizing and Spacing Proportions (Modular Scale)
+All margins, paddings, and sizing increments must adhere to a modular scale (based on the 8px grid or the Golden Ratio $1.618$):
+* **Spacing Increments**: `4px (xs)`, `8px (sm)`, `16px (md)`, `24px (lg)`, `40px (xl)`, `64px (xxl)`.
+* Avoid arbitrary numbers (e.g. `13px`, `19px`).
+
+### 4. Z-Index Layering Scale
+To prevent overlapping bugs between alerts, headers, docks, and modals, enforce a strict, semantic z-index hierarchy:
+* `z-index: 1` — Content backgrounds, overlays
+* `z-index: 10` — Sticky headers/elements inside the frame
+* `z-index: 50` — Floating actions, in-frame docks
+* `z-index: 100` — Global headers, navigation bars
+* `z-index: 200` — Dropdown panels, select overlays
+* `z-index: 300` — Modals, sheets, dialog boxes
+* `z-index: 400` — Toasts, alerts, high-priority system notices
+
+### 5. Positioning & Accessibility Invariants
+- **Focus Indicators**: Never disable focus rings (`outline: none`) without providing a visible, custom `:focus-visible` ring.
+- **Text Reflow**: Ensure container widths allow for text magnification up to 200% without overlapping text or hiding overflow actions.
+- **Click Targets**: Interactive components (buttons, links, check-boxes) must provide a minimum tap target size of `44px x 44px` for mobile accessibility.
+
+## 11. Reference Notes
 
 Use the animation reference notes in `docs/references/`:
 

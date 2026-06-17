@@ -77,6 +77,10 @@ Implementation posture:
 9. Dialog primitives must separate shell height from body scroll. Use modal max-width/max-height and scrollable body regions instead of letting content push panels off-screen.
 10. Display and landing sections should encode composition anchors, media aspect ratios, and min-height decisions in props. Page files should not recreate hero/display geometry with ad hoc inline CSS.
 11. Frontend reference imagery should be section-sliced: one horizontal frame per section, consistent palette/type/CTA logic, and enough width/height clarity that components can be rebuilt without guessing.
+12. **Mobile-First Phone-Frame Containment**: When targeting mobile/app viewports, avoid full-viewport stretch. Wrap in a centered flex column (`max-width: 480px; margin: 0 auto; min-height: 100vh; position: relative;`) and build navigation docks as in-frame absolute/sticky bottom bars rather than globally fixed elements that escape the frame bounds.
+13. **Fluid Sizing and modular Spacing**: Implement spacing and typography dynamically using the `clamp()` formula (e.g. `font-size: clamp(1rem, 0.9rem + 0.5vw, 1.25rem)` and `padding: clamp(12px, 2vw + 4px, 24px)`) matching the 8px modular scale.
+14. **Z-Index Layer Hierarchy**: Enforce a strict z-index scale: overlays/dropdowns at `200`, modals/dialogs/bottom-sheets at `300`, and system alerts/toasts at `400`.
+15. **Accessibility Invariants**: Always provide custom `:focus-visible` outline rings (do not use `outline: none` globally). Maintain a minimum touch target size of `44px x 44px` for mobile interactive primitives.
 
 Observer posture:
 

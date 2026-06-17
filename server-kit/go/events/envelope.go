@@ -26,7 +26,7 @@ const (
 )
 
 var (
-	internCache   sync.Map
+	internCache sync.Map
 )
 
 func internString(s string) string {
@@ -52,7 +52,7 @@ type Envelope struct {
 	Timestamp       time.Time        `json:"timestamp"`
 	SourceNodeID    string           `json:"-"`
 
-	lazyMetadata    *foundationpb.Metadata `json:"-"`
+	lazyMetadata *foundationpb.Metadata `json:"-"`
 }
 
 func (e *Envelope) MaterializeMetadata() error {
