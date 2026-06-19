@@ -229,5 +229,32 @@ describe('WebSocketTransport Resilience', () => {
     const transport = createWebSocketTransport({ url: 'ws://localhost:8080', reconnect: { enabled: false }, createSocket: url => new FailedSocket(url) as any });
     await expect(transport.subscribe!('*', vi.fn())).rejects.toThrow('connection failed');
     expect(transport.getConnectionState()).toBe('closed');
+  it('runs the authenticate handshake on every (re)connect', async () => {
+    const sockets: MockWebSocket[] = [];
+    const authenticate = vi.fn(async (_session: any) => {});
+    const transport = createWebSocketTransport({
+      url: 'ws://localhost:8080',
+      authenticate,
+      createSocket: (url) => {
+        const ws = new MockWebSocket(url);
+        sockets.push(ws);
+        return ws as any;
+      },
+    }) as Required<WebSocketTransport>;
+
+    // Establish the first connection.
+    await transport.subscribe('media:*', () => {});
+    expect(authenticate).toHaveBeenCalledTimes(1);
+    // Handshake receives a usable session (socket + dispatch).
+    const session = authenticate.mock.calls[0][0] as any;
+    expect(session.socket).toBeDefined();
+    expect(typeof session.dispatch).toBe('function');
+
+    // Drop the connection and let it reconnect.
+    sockets[0].onclose?.({ code: 1006, reason: 'abnormal', wasClean: false } as CloseEvent);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(sockets.length).toBe(2);
+    expect(authenticate).toHaveBeenCalledTimes(2);
   });
 });

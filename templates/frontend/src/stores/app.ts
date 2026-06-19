@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { devtools, persist } from 'zustand/middleware'
 
+import { clearSessionActivity } from '../lib/sessionActivity'
+
 interface User {
   id: string
   email: string
@@ -39,12 +41,16 @@ export const useAppStore = create<AppState>()(
             'setUser'
           ),
 
-        logout: () =>
+        logout: () => {
+          // Clear the idle-activity marker so the next login starts a fresh idle
+          // window instead of inheriting this session's (possibly expired) one.
+          clearSessionActivity()
           set(
             { user: null, isAuthenticated: false },
             false,
             'logout'
-          ),
+          )
+        },
 
         toggleSidebar: () =>
           set(

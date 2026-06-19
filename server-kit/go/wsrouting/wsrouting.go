@@ -65,6 +65,25 @@ type ConnectionInfo struct {
 	UserID       string
 	ServerID     string
 	ConnectedAt  time.Time
+
+	// Authenticated security context. These are updated atomically via
+	// UpdateAuthState whenever the connection (re)authenticates, including
+	// after a context switch that rotates the active organization. Tracking
+	// the org/role/session on the connection lets the gateway authorize
+	// subsequent frames against the *current* context rather than a stale one.
+	Authenticated  bool
+	OrganizationID string
+	Role           string
+	SessionID      string
+}
+
+// AuthState is the authenticated security context applied to a connection by
+// UpdateAuthState. A zero UserID marks the connection as unauthenticated.
+type AuthState struct {
+	UserID         string
+	OrganizationID string
+	Role           string
+	SessionID      string
 }
 
 // RouterOption configures a Router.
@@ -314,9 +333,20 @@ func (r *Router) Unregister(ctx context.Context, connectionID string) error {
 	return nil
 }
 
-// UpdateAuth updates the authentication state of a connection.
-// Call this when a WebSocket connection authenticates.
+// UpdateAuth updates the user identity of a connection. It is a thin wrapper
+// over UpdateAuthState retained for backward compatibility; prefer
+// UpdateAuthState so the organization/role/session context rotates atomically
+// with the user. Call this when a WebSocket connection authenticates.
 func (r *Router) UpdateAuth(ctx context.Context, connectionID, userID string) error {
+	return r.UpdateAuthState(ctx, connectionID, AuthState{UserID: userID})
+}
+
+// UpdateAuthState atomically applies the full authenticated security context to
+// a connection. Call this when a connection authenticates AND whenever the
+// active context changes (e.g. a context switch that rotates the organization),
+// so subsequent frames are authorized against the current context instead of a
+// stale one. A zero AuthState.UserID marks the connection unauthenticated.
+func (r *Router) UpdateAuthState(ctx context.Context, connectionID string, state AuthState) error {
 	if connectionID == "" {
 		return fmt.Errorf("connection_id is required")
 	}
@@ -324,18 +354,28 @@ func (r *Router) UpdateAuth(ctx context.Context, connectionID, userID string) er
 	r.mu.Lock()
 	info, exists := r.connections[connectionID]
 	if exists && info != nil {
-		r.removeIndexesLocked(info)
-		info.UserID = userID
-		r.addIndexesLocked(info)
+		// Only the user index needs rebuilding; org/role/session are not indexed.
+		userChanged := info.UserID != state.UserID
+		if userChanged {
+			r.removeIndexesLocked(info)
+		}
+		info.UserID = state.UserID
+		info.OrganizationID = state.OrganizationID
+		info.Role = state.Role
+		info.SessionID = state.SessionID
+		info.Authenticated = strings.TrimSpace(state.UserID) != ""
+		if userChanged {
+			r.addIndexesLocked(info)
+		}
 	}
 	r.mu.Unlock()
 
-	if !exists || r.client == nil || userID == "" {
+	if !exists || r.client == nil || state.UserID == "" {
 		return nil
 	}
 
 	// Add user → server mapping
-	userKey := fmt.Sprintf("%s:%s", KeyPrefixUser, userID)
+	userKey := fmt.Sprintf("%s:%s", KeyPrefixUser, state.UserID)
 	if _, err := r.client.Incr(ctx, userKey); err != nil {
 		return fmt.Errorf("failed to add user routing: %w", err)
 	}

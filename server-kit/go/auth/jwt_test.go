@@ -36,12 +36,31 @@ func TestJWTManagerRejectsExpired(t *testing.T) {
 		t.Fatalf("new jwt manager failed: %v", err)
 	}
 
-	token, err := manager.GenerateAccessToken(Claims{UserID: "usr_1"}, -time.Minute)
+	// Expire well beyond the clock-skew leeway so it is unambiguously rejected.
+	token, err := manager.GenerateAccessToken(Claims{UserID: "usr_1"}, -(ClockSkewLeeway + time.Minute))
 	if err != nil {
 		t.Fatalf("generate token failed: %v", err)
 	}
 	if _, err := manager.ValidateToken(token); err == nil {
 		t.Fatalf("expected expired token error")
+	}
+}
+
+func TestJWTManagerToleratesClockSkewWithinLeeway(t *testing.T) {
+	manager, err := NewJWTManager("this-is-a-very-secure-secret")
+	if err != nil {
+		t.Fatalf("new jwt manager failed: %v", err)
+	}
+
+	// A token that expired a few seconds ago (less than the leeway) simulates a
+	// validator whose clock runs slightly ahead of the issuer. It must still be
+	// accepted to avoid spurious unauthorized/logout right after token rotation.
+	token, err := manager.GenerateAccessToken(Claims{UserID: "usr_1"}, -(ClockSkewLeeway / 2))
+	if err != nil {
+		t.Fatalf("generate token failed: %v", err)
+	}
+	if _, err := manager.ValidateToken(token); err != nil {
+		t.Fatalf("token within leeway should validate, got: %v", err)
 	}
 }
 

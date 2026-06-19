@@ -80,6 +80,49 @@ func TestRegisterAndGetLocalConnection(t *testing.T) {
 	}
 }
 
+func TestUpdateAuthStateRotatesContext(t *testing.T) {
+	client := redis.NewMemoryClient("test")
+	defer func() { _ = client.Close() }()
+
+	r := NewRouter(client, "server-1")
+	ctx := context.Background()
+
+	if err := r.Register(ctx, ConnectionInfo{ConnectionID: "conn-1", DeviceID: "device-1"}); err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+
+	// Initial authentication into the personal context.
+	if err := r.UpdateAuthState(ctx, "conn-1", AuthState{UserID: "user-1", SessionID: "sess-1"}); err != nil {
+		t.Fatalf("UpdateAuthState() error = %v", err)
+	}
+	got, _ := r.GetLocalConnection("conn-1")
+	if !got.Authenticated || got.UserID != "user-1" || got.OrganizationID != "" {
+		t.Fatalf("after auth: got %+v", got)
+	}
+
+	// Context switch: same user, now scoped to an organization. The connection's
+	// authorized context must rotate atomically.
+	if err := r.UpdateAuthState(ctx, "conn-1", AuthState{UserID: "user-1", OrganizationID: "org-9", Role: "org_admin", SessionID: "sess-2"}); err != nil {
+		t.Fatalf("UpdateAuthState() switch error = %v", err)
+	}
+	got, _ = r.GetLocalConnection("conn-1")
+	if got.OrganizationID != "org-9" || got.Role != "org_admin" || got.SessionID != "sess-2" {
+		t.Fatalf("after switch: org/role/session not rotated: %+v", got)
+	}
+	if len(r.GetLocalConnectionsByUser("user-1")) != 1 {
+		t.Fatalf("user index should still resolve the connection")
+	}
+
+	// Deauthenticate.
+	if err := r.UpdateAuthState(ctx, "conn-1", AuthState{}); err != nil {
+		t.Fatalf("UpdateAuthState() clear error = %v", err)
+	}
+	got, _ = r.GetLocalConnection("conn-1")
+	if got.Authenticated || got.UserID != "" {
+		t.Fatalf("after clear: still authenticated: %+v", got)
+	}
+}
+
 func TestRegisterEmptyConnectionID(t *testing.T) {
 	client := redis.NewMemoryClient("test")
 	defer func() { _ = client.Close() }()

@@ -35,6 +35,16 @@ type WebSocketTransportOptions = {
   createSocket?: (url: string, protocols?: string | string[]) => WebSocket;
   onEnvelope?: (envelope: RuntimeEnvelope<unknown>) => void;
   readyWhenEnvelope?: (envelope: RuntimeEnvelope<unknown>) => boolean;
+  /**
+   * Re-authentication handshake run on every (re)connect, before onReady, the
+   * re-subscribe step, and before the connect promise resolves (so the first
+   * outgoing frames and any drained offline queue carry freshly established
+   * connection auth). Use this to re-assert the current session/context after a
+   * socket drop, closing the window where a fresh connection serves frames as
+   * unauthenticated. A throw is treated as a readiness failure and triggers
+   * reconnect/backoff.
+   */
+  authenticate?: (session: WebSocketReadySession) => Promise<void>;
   onReady?: (session: WebSocketReadySession) => Promise<void>;
   reconnect?: {
     enabled?: boolean;
@@ -251,13 +261,20 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
         if (ready || settled) {
           return;
         }
+        const session: WebSocketReadySession = {
+          socket: activeSocket,
+          readyEnvelope,
+          dispatch: <TPayload>(envelope: RuntimeEnvelope<TPayload>, signal?: AbortSignal) =>
+            dispatchOnSocket(activeSocket, envelope, signal ?? new AbortController().signal),
+        };
+        // Re-authentication runs first so the connection's session/context is
+        // re-established before any app readiness logic, re-subscribes, or
+        // queued frames go out over a freshly (re)opened socket.
+        if (options.authenticate) {
+          await options.authenticate(session);
+        }
         if (options.onReady) {
-          await options.onReady({
-            socket: activeSocket,
-            readyEnvelope,
-            dispatch: <TPayload>(envelope: RuntimeEnvelope<TPayload>, signal?: AbortSignal) =>
-              dispatchOnSocket(activeSocket, envelope, signal ?? new AbortController().signal),
-          });
+          await options.onReady(session);
         }
         ready = true;
         settled = true;

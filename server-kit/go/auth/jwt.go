@@ -22,6 +22,12 @@ var (
 const (
 	TokenTypeAccess  = "access"
 	TokenTypeRefresh = "refresh"
+
+	// ClockSkewLeeway tolerates clock drift between the issuer and validator
+	// (e.g. across pods in a multi-instance deployment). Without it, a freshly
+	// minted token can be rejected as expired by a validator whose clock runs
+	// slightly ahead — surfacing to clients as a spurious unauthorized/logout.
+	ClockSkewLeeway = 60 * time.Second
 )
 
 // Claims captures the security context transported by tokens.
@@ -99,7 +105,7 @@ func (m *JWTManager) ValidateToken(token string) (*Claims, error) {
 	}
 
 	nowUnix := time.Now().UTC().Unix()
-	if claims.ExpiresAt != 0 && nowUnix > claims.ExpiresAt {
+	if claims.ExpiresAt != 0 && nowUnix > claims.ExpiresAt+int64(ClockSkewLeeway.Seconds()) {
 		return nil, errTokenExpired
 	}
 	return &claims, nil
