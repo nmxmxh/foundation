@@ -11,7 +11,12 @@ github.com/nmxmxh/ovasabi_foundation/server-kit/go/chain|82.4|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/chaos|100.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/circuitbreaker|94.4|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/compress|85.1|95.0
-github.com/nmxmxh/ovasabi_foundation/server-kit/go/contracttest|72.8|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector|77.8|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector/graphqlx|0.0|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector/grpcx|0.0|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector/httpx|0.0|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector/wsx|0.0|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/contracttest|76.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/database|51.9|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/degradation|93.7|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/domainerr|94.4|95.0
@@ -30,6 +35,7 @@ github.com/nmxmxh/ovasabi_foundation/server-kit/go/kernellane|87.7|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger|81.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata|89.7|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/metrics|88.5|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/money|96.3|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/objectstore|74.6|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability|88.5|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/policy|78.2|95.0
