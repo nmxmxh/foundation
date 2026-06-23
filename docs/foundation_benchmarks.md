@@ -20,6 +20,47 @@ The benchmark suite exists to prove that ladder stays honest. The fastest lane s
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
 
+## 2026-06-22 projection read-path (projectiongw) benchmarks
+
+The Hermes projection transport gateway (`server-kit/go/projectiongw`) is the
+read-path bridge: scoped snapshots + a live delta stream over the canonical
+`RecordMutationBatch`/`events.Envelope` wire. These benchmarks gate the new lane.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test ./projectiongw -run='^$' -bench=. -benchmem
+```
+
+Snapshot read (10K-record scope), comparing the unbounded full scan against the
+gateway's actual bounded/incremental paths after the version-keyset rewrite:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkSnapshotProjection/records=10000` | ~5.5 ms | 7,281,923 | 100,001 | Full snapshot via the ordered-version index. The earlier `ForEachView` path was ~200 ms here; walking the version-descending ordered index is ~36× faster and the cost is the 100K mutation builds, not the scan. |
+| `BenchmarkSnapshotLimited` (limit 1024) | ~0.49 ms | 746,752 | 10,241 | The gateway's real full-load query. A positive limit engages early-stop, so the read is O(limit), not O(scope). |
+| `BenchmarkSnapshotIncrementalLimited` (since watermark) | ~5.4 µs | 16,672 | 101 | Reconnect/poll path: early-terminates at the watermark, so only the changed tail is built. ~90,000× cheaper than the unbounded incremental scan it replaced. |
+| `BenchmarkSnapshotPageDeep/cursor=5000` | ~0.50 ms | 746,752 | 10,241 | Keyset pagination stays bounded at any depth — skips are O(1) version compares (no map load), only the returned window builds mutations. |
+
+Delta fan-out and the apply-path observer:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkEncodeFrame` | ~3.0 µs | 3,793 | 16 | Encode one delta frame (binary envelope + `RecordMutationBatch`) once; fan-out reuses the bytes. |
+| `BenchmarkHubBroadcast/subs=1` | ~92 ns | 0 | 0 | Borrowed broadcast to one subscriber — zero allocation. |
+| `BenchmarkHubBroadcast/subs=1000` | ~0.27 ms | 8,192 | 1 | Fan-out to 1K subscribers: one target-slice allocation, non-blocking sends with slow-client drop. |
+| `BenchmarkApplyWithObserver` (bare vs observer) | 79 ns vs 79 ns | 0 | 0 | The store apply observer adds no measurable cost and **zero allocations** to the hot apply path; broadcast work happens after the partition lock releases. |
+
+Takeaways: the version-keyset read (one ordered-index traversal with early
+termination) made snapshots both bounded and incremental — the gateway never
+issues an unbounded scan, and a reconnecting client pays only for what changed.
+The fan-out and observer lanes are allocation-free at the unit boundary, matching
+the foundation rule that the hot read/route paths stay on indexed, borrowed, or
+batch-shaped lanes. Enforced static analysis (`go vet`, `staticcheck`) is clean;
+`projectiongw` is at 78% statement coverage including end-to-end HTTP-snapshot and
+gorilla-WebSocket delta tests.
+
 ## 2026-05-11 cohesive substrate synthesis
 
 The current direction is to make Foundation a small, coherent substrate rather than a broad collection of optional helpers. The sources reviewed point to the same rule from different angles:

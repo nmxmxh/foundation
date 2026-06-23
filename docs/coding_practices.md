@@ -346,6 +346,7 @@ Enforcement:
 - Reviewer gate for missing `defer`/RAII cleanup after resource acquisition.
 - Reviewer gate for explicit cleanup in loops without a hot-path rationale.
 - Automated CP checks for known dangerous timer and channel-close guard patterns.
+- `atomic_lane_purity_check.sh` (Go AST analyzer) fails the build on network/coordination calls (HTTP, gRPC, Redis, event publication) inside an `AtomicLane` transaction closure; annotate a justified exception with `// cp:allow-tx-io`.
 - Broad `go_concurrency_practices_check.sh` review output for lock/channel/select/timer/close ownership risks; use `GO_CONCURRENCY_STRICT=1` during hardening passes.
 - Reviewer gate on mixed lock/channel/wait code paths and `WaitGroup` Add/Wait ordering.
 

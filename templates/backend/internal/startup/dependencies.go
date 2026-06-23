@@ -25,6 +25,7 @@ import (
 type Dependencies struct {
 	DB            database.RuntimeStore
 	Hermes        *hermes.Store
+	Projected     *hermes.ProjectedRuntimeStore
 	Redis         rediskit.Client
 	Bus           events.Bus
 	closeBus      func() error
@@ -49,6 +50,11 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	}
 	deps.DB = db
 	deps.Hermes = hermesStore
+	// The projected runtime store is what the projection gateway resolves scopes
+	// against (it owns the partition naming). db is always the projected store.
+	if projected, ok := db.(*hermes.ProjectedRuntimeStore); ok {
+		deps.Projected = projected
+	}
 	cleanups = append(cleanups, func(context.Context) {
 		db.Close()
 	})

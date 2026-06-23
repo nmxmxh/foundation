@@ -120,8 +120,6 @@ perl -MFile::Find -MFile::Spec -MFile::Basename - "$target" <<'PERL'
   my @roots = (
     "$target/internal/service",
     "$target/backend/internal/service",
-    "$target/internal/server",
-    "$target/backend/internal/server",
   );
   for my $root (@roots) {
     next unless -d $root;

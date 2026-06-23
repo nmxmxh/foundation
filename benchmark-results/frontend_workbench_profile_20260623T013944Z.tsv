@@ -1,0 +1,6 @@
+# metric	value	unit	source
+dummy_factory_list_5000_heap_delta	8945296	bytes	frontend-kit
+tenant_projection_apply_5000_heap_delta	1988768	bytes	frontend-kit
+tenant_projection_apply_many_5000_heap_delta	1681128	bytes	frontend-kit
+projection_event_pipeline_5000_heap_delta	5660608	bytes	frontend-kit
+runtime_cache_reset_50_tenants_heap_delta	264752	bytes	frontend-kit

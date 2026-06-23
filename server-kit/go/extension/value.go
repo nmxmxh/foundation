@@ -636,6 +636,94 @@ func valueFromJSONNumber(number json.Number) (Value, error) {
 	return Float(f), nil
 }
 
+func fromJSONAnySlice(typed []any) (Value, error) {
+	out := make([]Value, 0, len(typed))
+	for _, item := range typed {
+		value, err := FromJSON(item)
+		if err != nil {
+			return Null(), err
+		}
+		out = append(out, value)
+	}
+	return listValueOwned(out), nil
+}
+
+func fromJSONStringSlice(typed []string) Value {
+	out := make([]Value, 0, len(typed))
+	for _, item := range typed {
+		out = append(out, String(item))
+	}
+	return listValueOwned(out)
+}
+
+func fromJSONIntSlice(typed []int) Value {
+	out := make([]Value, 0, len(typed))
+	for _, item := range typed {
+		out = append(out, Int(int64(item)))
+	}
+	return listValueOwned(out)
+}
+
+func fromJSONInt64Slice(typed []int64) Value {
+	out := make([]Value, 0, len(typed))
+	for _, item := range typed {
+		out = append(out, Int(item))
+	}
+	return listValueOwned(out)
+}
+
+func fromJSONUint64Slice(typed []uint64) Value {
+	out := make([]Value, 0, len(typed))
+	for _, item := range typed {
+		out = append(out, Uint(item))
+	}
+	return listValueOwned(out)
+}
+
+func fromJSONFloat64Slice(typed []float64) Value {
+	out := make([]Value, 0, len(typed))
+	for _, item := range typed {
+		out = append(out, Float(item))
+	}
+	return listValueOwned(out)
+}
+
+func fromJSONBoolSlice(typed []bool) Value {
+	out := make([]Value, 0, len(typed))
+	for _, item := range typed {
+		out = append(out, Bool(item))
+	}
+	return listValueOwned(out)
+}
+
+func fromJSONAnyMap(typed map[string]any) (Value, error) {
+	out := make(Object, len(typed))
+	for key, item := range typed {
+		value, err := FromJSON(item)
+		if err != nil {
+			return Null(), err
+		}
+		out[key] = value
+	}
+	return objectValueOwned(out), nil
+}
+
+func fromJSONStringMap(typed map[string]string) Value {
+	out := make(Object, len(typed))
+	for key, item := range typed {
+		out[key] = String(item)
+	}
+	return objectValueOwned(out)
+}
+
+func fromJSONValueMap(typed map[string]Value) Value {
+	out := make(Object, len(typed))
+	for key, item := range typed {
+		out[key] = item.Clone()
+	}
+	return ObjectValue(out)
+}
+
 func FromJSON(raw any) (Value, error) {
 	switch typed := raw.(type) {
 	case nil:
@@ -691,73 +779,25 @@ func FromJSON(raw any) (Value, error) {
 	case []Value:
 		return List(typed), nil
 	case []any:
-		out := make([]Value, 0, len(typed))
-		for _, item := range typed {
-			value, err := FromJSON(item)
-			if err != nil {
-				return Null(), err
-			}
-			out = append(out, value)
-		}
-		return listValueOwned(out), nil
+		return fromJSONAnySlice(typed)
 	case []string:
-		out := make([]Value, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, String(item))
-		}
-		return listValueOwned(out), nil
+		return fromJSONStringSlice(typed), nil
 	case []int:
-		out := make([]Value, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, Int(int64(item)))
-		}
-		return listValueOwned(out), nil
+		return fromJSONIntSlice(typed), nil
 	case []int64:
-		out := make([]Value, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, Int(item))
-		}
-		return listValueOwned(out), nil
+		return fromJSONInt64Slice(typed), nil
 	case []uint64:
-		out := make([]Value, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, Uint(item))
-		}
-		return listValueOwned(out), nil
+		return fromJSONUint64Slice(typed), nil
 	case []float64:
-		out := make([]Value, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, Float(item))
-		}
-		return listValueOwned(out), nil
+		return fromJSONFloat64Slice(typed), nil
 	case []bool:
-		out := make([]Value, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, Bool(item))
-		}
-		return listValueOwned(out), nil
+		return fromJSONBoolSlice(typed), nil
 	case map[string]any:
-		out := make(Object, len(typed))
-		for key, item := range typed {
-			value, err := FromJSON(item)
-			if err != nil {
-				return Null(), err
-			}
-			out[key] = value
-		}
-		return objectValueOwned(out), nil
+		return fromJSONAnyMap(typed)
 	case map[string]string:
-		out := make(Object, len(typed))
-		for key, item := range typed {
-			out[key] = String(item)
-		}
-		return objectValueOwned(out), nil
+		return fromJSONStringMap(typed), nil
 	case map[string]Value:
-		out := make(Object, len(typed))
-		for key, item := range typed {
-			out[key] = item.Clone()
-		}
-		return ObjectValue(out), nil
+		return fromJSONValueMap(typed), nil
 	default:
 		return valueFromReflect(reflect.ValueOf(raw))
 	}

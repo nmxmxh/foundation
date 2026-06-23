@@ -14,6 +14,72 @@ import (
 type Store struct {
 	mu          sync.RWMutex
 	projections map[string]*partition
+
+	obsMu     sync.RWMutex
+	observers map[int]AppliedBatchObserver
+	obsSeq    int
+}
+
+// AppliedBatchObserver is notified, once per apply call, with the mutations the
+// store accepted (stamped with assigned versions). It fires after the partition
+// lock is released, so observers may do bounded work (e.g. fan a delta out to
+// subscribers) without serializing applies. It is the universal delta seam: it
+// fires for every accepted write regardless of path (in-process projected store,
+// Redis envelope projector, or direct ApplyBatch/ApplyRecords).
+type AppliedBatchObserver func(projection string, mutations []AppliedMutation)
+
+// Observe registers an apply observer and returns a cancel function. Safe for
+// concurrent use; cancel is idempotent.
+func (s *Store) Observe(fn AppliedBatchObserver) func() {
+	if fn == nil {
+		return func() {}
+	}
+	s.obsMu.Lock()
+	if s.observers == nil {
+		s.observers = make(map[int]AppliedBatchObserver)
+	}
+	s.obsSeq++
+	id := s.obsSeq
+	s.observers[id] = fn
+	s.obsMu.Unlock()
+	return func() {
+		s.obsMu.Lock()
+		delete(s.observers, id)
+		s.obsMu.Unlock()
+	}
+}
+
+func (s *Store) hasObservers() bool {
+	s.obsMu.RLock()
+	defer s.obsMu.RUnlock()
+	return len(s.observers) > 0
+}
+
+// collector returns an apply observe callback that appends accepted mutations to
+// dst, or nil when there are no observers (so the apply path stays
+// allocation-free when nothing is listening).
+func (s *Store) collector(dst *[]AppliedMutation) func(AppliedMutation) {
+	if !s.hasObservers() {
+		return nil
+	}
+	return func(m AppliedMutation) { *dst = append(*dst, m) }
+}
+
+// notify fans an accepted batch out to registered observers after the partition
+// lock has been released.
+func (s *Store) notify(projection string, mutations []AppliedMutation) {
+	if len(mutations) == 0 {
+		return
+	}
+	s.obsMu.RLock()
+	observers := make([]AppliedBatchObserver, 0, len(s.observers))
+	for _, fn := range s.observers {
+		observers = append(observers, fn)
+	}
+	s.obsMu.RUnlock()
+	for _, fn := range observers {
+		fn(projection, mutations)
+	}
 }
 
 type partition struct {
@@ -194,7 +260,43 @@ func (s *Store) ApplyBatch(ctx context.Context, projection string, events []Even
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	return part.applyBatch(ctx, events)
+	var accepted []AppliedMutation
+	result, err := part.applyBatchObserving(ctx, events, s.collector(&accepted))
+	if err == nil {
+		s.notify(projection, accepted)
+	}
+	return result, err
+}
+
+// ApplyBatchObserved applies events and invokes observe for each event the
+// store accepts, stamped with the assigned version. It is the source-of-truth
+// apply path for the projection gateway: only accepted mutations reach the
+// observer, so the live delta stream never reports a rejected or deduplicated
+// write as visible state.
+func (s *Store) ApplyBatchObserved(ctx context.Context, projection string, events []Event, observe func(AppliedMutation)) (ApplyResult, error) {
+	if err := ctxErr(ctx); err != nil {
+		return ApplyResult{}, err
+	}
+	part, err := s.partition(projection)
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	var accepted []AppliedMutation
+	collect := s.collector(&accepted)
+	combined := observe
+	if collect != nil {
+		combined = func(m AppliedMutation) {
+			if observe != nil {
+				observe(m)
+			}
+			collect(m)
+		}
+	}
+	result, err := part.applyBatchObserving(ctx, events, combined)
+	if err == nil {
+		s.notify(projection, accepted)
+	}
+	return result, err
 }
 
 func (s *Store) ApplyRecords(ctx context.Context, projection string, sourcePrefix string, baseVersion uint64, records []database.DomainRecord) (ApplyResult, error) {
@@ -205,7 +307,12 @@ func (s *Store) ApplyRecords(ctx context.Context, projection string, sourcePrefi
 	if err != nil {
 		return ApplyResult{}, err
 	}
-	return part.applyRecords(ctx, sourcePrefix, baseVersion, records)
+	var accepted []AppliedMutation
+	result, err := part.applyRecords(ctx, sourcePrefix, baseVersion, records, s.collector(&accepted))
+	if err == nil {
+		s.notify(projection, accepted)
+	}
+	return result, err
 }
 
 // BulkLoad replaces a projection with a trusted, already-materialized snapshot.

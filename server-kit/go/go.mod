@@ -5,6 +5,8 @@ go 1.26.0
 require (
 	github.com/andybalholm/brotli v1.2.1
 	github.com/aws/aws-sdk-go v1.55.7
+	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/jackc/pgx/v5 v5.9.1
 	github.com/klauspost/compress v1.18.6
 	github.com/nmxmxh/ovasabi_foundation/config-contracts/go v0.0.0
@@ -31,7 +33,6 @@ require (
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect

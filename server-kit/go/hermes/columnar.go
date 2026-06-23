@@ -392,158 +392,10 @@ func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []
 	columns := make([]Column, 0, len(fields))
 
 	for _, field := range fields {
-		var vec Vector
-		switch field {
-		case "_record":
-			vals := make([]database.DomainRecord, rows)
-			dv := &DomainRecordVector{
-				values:   vals,
-				validity: newValidityBitmap(rows),
-			}
-			for i, entry := range entries {
-				dv.values[i] = entry.record
-				dv.validity.set(i)
-			}
-			vec = dv
-
-		case "record_id":
-			ss := make([]string, rows)
-			vv := make([]bool, rows)
-			for i, entry := range entries {
-				ss[i] = entry.record.RecordID
-				vv[i] = true
-			}
-			sv, err := newStringVectorFromSlice(ss, vv)
-			if err != nil {
-				return nil, err
-			}
-			vec = sv
-
-		case "organization_id":
-			ss := make([]string, rows)
-			vv := make([]bool, rows)
-			for i, entry := range entries {
-				ss[i] = entry.record.OrganizationID
-				vv[i] = true
-			}
-			sv, err := newStringVectorFromSlice(ss, vv)
-			if err != nil {
-				return nil, err
-			}
-			vec = sv
-
-		case "created_at":
-			tv := newTimestampVector(rows)
-			for i, entry := range entries {
-				tv.values[i] = entry.record.CreatedAt
-				tv.validity.set(i)
-			}
-			vec = tv
-
-		case "updated_at":
-			tv := newTimestampVector(rows)
-			for i, entry := range entries {
-				tv.values[i] = entry.record.UpdatedAt
-				tv.validity.set(i)
-			}
-			vec = tv
-
-		case "version":
-			iv := newInt64Vector(rows)
-			for i, entry := range entries {
-				// #nosec G115
-				iv.values[i] = int64(entry.version)
-				iv.validity.set(i)
-			}
-			vec = iv
-
-		default:
-			// Determine column type from the first valid entry.
-			var kind byte
-			found := false
-			for _, entry := range entries {
-				if val, ok := entry.record.Data.Get(field); ok {
-					k, _, ok := val.ScalarIndex()
-					if ok {
-						kind = k
-						found = true
-						break
-					}
-				}
-			}
-
-			if !found {
-				ss := make([]string, rows)
-				vv := make([]bool, rows)
-				sv, err := newStringVectorFromSlice(ss, vv)
-				if err != nil {
-					return nil, err
-				}
-				vec = sv
-			} else {
-				switch kind {
-				case 'i', 'u':
-					iv := newInt64Vector(rows)
-					for i, entry := range entries {
-						if val, ok := entry.record.Data.Get(field); ok {
-							if k, idxVal, ok := val.ScalarIndex(); ok && (k == 'i' || k == 'u') {
-								if parsed, err2 := strconv.ParseInt(idxVal, 10, 64); err2 == nil {
-									iv.values[i] = parsed
-									iv.validity.set(i)
-								}
-							}
-						}
-					}
-					vec = iv
-				case 'f':
-					fv := newFloat64Vector(rows)
-					for i, entry := range entries {
-						if val, ok := entry.record.Data.Get(field); ok {
-							if k, idxVal, ok := val.ScalarIndex(); ok && k == 'f' {
-								if parsed, err2 := strconv.ParseFloat(idxVal, 64); err2 == nil {
-									fv.values[i] = parsed
-									fv.validity.set(i)
-								}
-							}
-						}
-					}
-					vec = fv
-				case 'b':
-					iv := newInt64Vector(rows)
-					for i, entry := range entries {
-						if val, ok := entry.record.Data.Get(field); ok {
-							if k, idxVal, ok := val.ScalarIndex(); ok && k == 'b' {
-								if idxVal == "1" {
-									iv.values[i] = 1
-								}
-								iv.validity.set(i)
-							}
-						}
-					}
-					vec = iv
-				default:
-					ss := make([]string, rows)
-					vv := make([]bool, rows)
-					for i, entry := range entries {
-						if val, ok := entry.record.Data.Get(field); ok {
-							if _, idxVal, ok := val.ScalarIndex(); ok {
-								ss[i] = idxVal
-								vv[i] = true
-							} else {
-								ss[i] = val.Text
-								vv[i] = val.Kind != database.RecordValueNull
-							}
-						}
-					}
-					sv, err := newStringVectorFromSlice(ss, vv)
-					if err != nil {
-						return nil, err
-					}
-					vec = sv
-				}
-			}
+		vec, err := buildFieldVector(field, entries, rows)
+		if err != nil {
+			return nil, err
 		}
-
 		columns = append(columns, Column{Name: field, Data: vec})
 	}
 
@@ -551,4 +403,152 @@ func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []
 		Columns: columns,
 		Rows:    rows,
 	}, nil
+}
+
+// buildFieldVector builds the Vector for a single column. Reserved field names
+// map to fixed record attributes; any other field is resolved from the record's
+// data map, with the column type inferred from the first valid scalar value.
+// Zero-copy/borrowed-view semantics and allocation shape are preserved exactly.
+func buildFieldVector(field string, entries []recordEntry, rows int) (Vector, error) {
+	switch field {
+	case "_record":
+		vals := make([]database.DomainRecord, rows)
+		dv := &DomainRecordVector{
+			values:   vals,
+			validity: newValidityBitmap(rows),
+		}
+		for i, entry := range entries {
+			dv.values[i] = entry.record
+			dv.validity.set(i)
+		}
+		return dv, nil
+
+	case "record_id":
+		ss := make([]string, rows)
+		vv := make([]bool, rows)
+		for i, entry := range entries {
+			ss[i] = entry.record.RecordID
+			vv[i] = true
+		}
+		return newStringVectorFromSlice(ss, vv)
+
+	case "organization_id":
+		ss := make([]string, rows)
+		vv := make([]bool, rows)
+		for i, entry := range entries {
+			ss[i] = entry.record.OrganizationID
+			vv[i] = true
+		}
+		return newStringVectorFromSlice(ss, vv)
+
+	case "created_at":
+		tv := newTimestampVector(rows)
+		for i, entry := range entries {
+			tv.values[i] = entry.record.CreatedAt
+			tv.validity.set(i)
+		}
+		return tv, nil
+
+	case "updated_at":
+		tv := newTimestampVector(rows)
+		for i, entry := range entries {
+			tv.values[i] = entry.record.UpdatedAt
+			tv.validity.set(i)
+		}
+		return tv, nil
+
+	case "version":
+		iv := newInt64Vector(rows)
+		for i, entry := range entries {
+			// #nosec G115
+			iv.values[i] = int64(entry.version)
+			iv.validity.set(i)
+		}
+		return iv, nil
+
+	default:
+		return buildDataFieldVector(field, entries, rows)
+	}
+}
+
+// buildDataFieldVector resolves a non-reserved field from the record data map.
+// The column type is determined from the first valid scalar entry; an empty
+// string column is produced when no entry carries the field.
+func buildDataFieldVector(field string, entries []recordEntry, rows int) (Vector, error) {
+	// Determine column type from the first valid entry.
+	var kind byte
+	found := false
+	for _, entry := range entries {
+		if val, ok := entry.record.Data.Get(field); ok {
+			k, _, ok := val.ScalarIndex()
+			if ok {
+				kind = k
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		ss := make([]string, rows)
+		vv := make([]bool, rows)
+		return newStringVectorFromSlice(ss, vv)
+	}
+
+	switch kind {
+	case 'i', 'u':
+		iv := newInt64Vector(rows)
+		for i, entry := range entries {
+			if val, ok := entry.record.Data.Get(field); ok {
+				if k, idxVal, ok := val.ScalarIndex(); ok && (k == 'i' || k == 'u') {
+					if parsed, err2 := strconv.ParseInt(idxVal, 10, 64); err2 == nil {
+						iv.values[i] = parsed
+						iv.validity.set(i)
+					}
+				}
+			}
+		}
+		return iv, nil
+	case 'f':
+		fv := newFloat64Vector(rows)
+		for i, entry := range entries {
+			if val, ok := entry.record.Data.Get(field); ok {
+				if k, idxVal, ok := val.ScalarIndex(); ok && k == 'f' {
+					if parsed, err2 := strconv.ParseFloat(idxVal, 64); err2 == nil {
+						fv.values[i] = parsed
+						fv.validity.set(i)
+					}
+				}
+			}
+		}
+		return fv, nil
+	case 'b':
+		iv := newInt64Vector(rows)
+		for i, entry := range entries {
+			if val, ok := entry.record.Data.Get(field); ok {
+				if k, idxVal, ok := val.ScalarIndex(); ok && k == 'b' {
+					if idxVal == "1" {
+						iv.values[i] = 1
+					}
+					iv.validity.set(i)
+				}
+			}
+		}
+		return iv, nil
+	default:
+		ss := make([]string, rows)
+		vv := make([]bool, rows)
+		for i, entry := range entries {
+			if val, ok := entry.record.Data.Get(field); ok {
+				if _, idxVal, ok := val.ScalarIndex(); ok {
+					ss[i] = idxVal
+					vv[i] = true
+				} else {
+					ss[i] = val.Text
+					vv[i] = val.Kind != database.RecordValueNull
+				}
+			}
+		}
+		return newStringVectorFromSlice(ss, vv)
+	}
 }

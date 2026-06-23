@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev build build-server build-frontend build-runtime communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev run-local dev-local build build-server build-frontend build-runtime communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -210,6 +210,31 @@ dev:
 		echo "No runnable dev target found"; \
 		exit 1; \
 	fi
+
+# run-local and dev-local boot the backend with no external services: the
+# in-memory database driver (database.MemoryDB + Hermes hotplane) and the
+# in-memory event bus replace Postgres and Redis. No Docker, no migrations, no
+# containers — just `go run`. State is ephemeral (lost on restart), which is
+# exactly what you want for fast test/verify and frontend development. Override
+# the port with `make run-local PORT=9090`.
+run-local:
+	@if [ ! -f go.mod ]; then echo "No Go module; nothing to run"; exit 1; fi
+	@mkdir -p "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"
+	@echo "Starting in-memory backend on :$(or $(PORT),8080) (no Docker: memory DB + in-memory bus)"
+	@APP_ENV=development STATE_STORE_DRIVER=memory EVENT_BUS_DRIVER=memory REQUIRE_AUTH=false \
+		PORT=$(or $(PORT),8080) GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" \
+		$(GOCMD) run ./cmd/server
+
+dev-local:
+	@if [ ! -f go.mod ]; then echo "No Go module; nothing to run"; exit 1; fi
+	@mkdir -p "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"
+	@echo "Starting in-memory backend + frontend dev (no Docker)"
+	@APP_ENV=development STATE_STORE_DRIVER=memory EVENT_BUS_DRIVER=memory REQUIRE_AUTH=false \
+		PORT=$(or $(PORT),8080) GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" \
+		$(GOCMD) run ./cmd/server & \
+		server_pid=$$!; \
+		trap 'kill $$server_pid 2>/dev/null || true' EXIT INT TERM; \
+		if [ -f frontend/package.json ]; then cd frontend && npm run dev; else wait $$server_pid; fi
 
 build-server:
 	@if [ -f go.mod ]; then \
@@ -688,7 +713,7 @@ lint-frontend: frontend-prototype-runtime
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-FOUNDATION_LINT_CHECKS := check-doc-references check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+FOUNDATION_LINT_CHECKS := check-doc-references check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 
 lint-foundation:
@@ -773,6 +798,9 @@ check-dynamic-payload-practices:
 
 check-database-practices:
 	@zsh ./scripts/checks/database_practices_check.sh .
+
+check-atomic-lane-purity:
+	@zsh ./scripts/checks/atomic_lane_purity_check.sh .
 
 check-redis-practices:
 	@zsh ./scripts/checks/redis_practices_check.sh .
@@ -866,6 +894,8 @@ help:
 	@echo "Development:"
 	@echo "  setup            - Install tools and dependencies"
 	@echo "  dev              - Start the development server with your own runner"
+	@echo "  run-local        - Run backend fully in-memory (no Docker: memory DB + bus)"
+	@echo "  dev-local        - Run in-memory backend + frontend dev together (no Docker)"
 	@echo "  build            - Build backend and frontend"
 	@echo "  build-runtime    - Generate runtime bindings, build WASM artifacts, and emit runtime manifest"
 	@echo "  test             - Run unit and frontend tests"
@@ -911,6 +941,7 @@ help:
 	@echo "  check-logging-practices"
 	@echo "  check-dynamic-payload-practices"
 	@echo "  check-database-practices"
+	@echo "  check-atomic-lane-purity"
 	@echo "  check-redis-practices"
 	@echo "  check-river-practices"
 	@echo "  check-migration-structure"

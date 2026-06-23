@@ -9,7 +9,6 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -805,7 +804,7 @@ func main() {
 			"/v1/health",
 			"/v1/status",
 		},
-		Routes: httpapi.RoutesFromHandlerMap((&bootstrap.Services{}).AllHandlers()),
+		Routes: bootstrap.RouteCatalog(),
 	}
 
 	spec := Generate(cfg)

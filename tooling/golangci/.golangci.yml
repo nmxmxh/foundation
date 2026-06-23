@@ -7,6 +7,7 @@ linters:
     - errcheck
     - errorlint
     - exhaustive
+    - funlen
     - gocognit
     - gocyclo
     - gosec
@@ -25,6 +26,12 @@ linters:
     errcheck:
       check-type-assertions: true
       check-blank: true
+    funlen:
+      # CP-03: target <= 80 logical lines, hard cap <= 120. Gate at the hard cap
+      # and ignore comments so doc-heavy functions are not penalised for prose.
+      lines: 120
+      statements: 80
+      ignore-comments: true
     gocognit:
       min-complexity: 20
     gocyclo:
@@ -55,6 +62,7 @@ linters:
     rules:
       - path: '(^|/)(api/protos|migrations)/'
         linters:
+          - funlen
           - gocognit
           - gocyclo
           - gosec
@@ -62,6 +70,9 @@ linters:
           - revive
           - unparam
           - unused
+      - path: '_test\.go'
+        linters:
+          - funlen
     paths:
       - third_party$
       - builtin$

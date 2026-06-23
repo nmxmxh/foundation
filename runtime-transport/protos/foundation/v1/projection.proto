@@ -51,3 +51,59 @@ message RecordMutation {
 message RecordMutationBatch {
   repeated RecordMutation mutations = 1;
 }
+
+// ProjectionScope is the domain-agnostic key for the Hermes read path. It is
+// identical on both ends (server hermes.Store partitions and the frontend
+// HermesProjectionSource): a tenant (organization) projection partitioned by
+// domain and collection.
+message ProjectionScope {
+  string tenant_id = 1;
+  string domain = 2;
+  string collection = 3;
+}
+
+// ProjectionSnapshotRequest asks the gateway for the current materialized read
+// model at or after a resume watermark. It is the proto form of the frontend
+// ProjectionLoadRequest.
+message ProjectionSnapshotRequest {
+  ProjectionScope scope = 1;
+  // Optional resume token from a prior snapshot or delta. When set the gateway
+  // returns only records whose version advanced past the watermark; an empty
+  // value means from the beginning. Used for incremental catch-up (forward).
+  string since_watermark = 2;
+  // Optional cap on returned records. Zero means the gateway default.
+  uint32 limit = 3;
+  // Keyset pagination cursor (canonical foundation.v1 cursor convention; see
+  // PageResponse.next_cursor). When set the gateway returns only records older
+  // than this cursor, newest-first — the page after a prior response's
+  // next_cursor. Used to backfill scopes larger than the limit without an
+  // unbounded scan: each request stays O(limit). Empty means the first page.
+  string cursor = 4;
+}
+
+// ProjectionSnapshot is the materialized read model at a consistent epoch. The
+// records are carried as UPSERT RecordMutation entries so the snapshot and the
+// live delta stream share one wire shape (RecordMutationBatch). watermark/epoch
+// let the client resume the delta stream exactly where the snapshot ended.
+message ProjectionSnapshot {
+  ProjectionScope scope = 1;
+  RecordMutationBatch batch = 2;
+  // Monotonic resume token: the source watermark observed at snapshot time.
+  // Present this as since_watermark to resume the live delta stream.
+  string watermark = 3;
+  // Hermes projection epoch the snapshot was read at.
+  uint64 epoch = 4;
+  // Keyset pagination cursor (canonical foundation.v1 next_cursor/has_more
+  // convention): the cursor of the oldest record in this page. Present it as the
+  // request cursor to fetch the next (older) page. Empty when no more pages.
+  string next_cursor = 5;
+  // True when more (older) records remain beyond this page.
+  bool has_more = 6;
+}
+
+// ProjectionSubscribeRequest opens a live delta stream for a scope, optionally
+// resuming after a watermark obtained from a snapshot or earlier delta.
+message ProjectionSubscribeRequest {
+  ProjectionScope scope = 1;
+  string resume_watermark = 2;
+}

@@ -96,6 +96,35 @@ func (s *Store) ApplyEnvelopes(ctx context.Context, projection string, envelopes
 	return s.ApplyBatch(ctx, projection, out)
 }
 
+// ApplyEnvelopesObserved decodes projection envelopes and applies them, invoking
+// observe for each accepted mutation. It is the gateway's apply seam: the
+// gateway broadcasts exactly what observe reports, so a malformed, rejected, or
+// duplicate envelope never surfaces as a live delta.
+func (s *Store) ApplyEnvelopesObserved(ctx context.Context, projection string, envelopes []events.Envelope, observe func(AppliedMutation)) (ApplyResult, error) {
+	if err := ctxErr(ctx); err != nil {
+		return ApplyResult{}, err
+	}
+	out := make([]Event, 0, len(envelopes))
+	for _, envelope := range envelopes {
+		if err := ctxErr(ctx); err != nil {
+			return ApplyResult{}, err
+		}
+		decoded, err := EventsFromEnvelope(envelope)
+		if err != nil {
+			return ApplyResult{}, err
+		}
+		out = append(out, decoded...)
+	}
+	if len(out) == 0 {
+		part, err := s.partition(projection)
+		if err != nil {
+			return ApplyResult{}, err
+		}
+		return ApplyResult{Epoch: part.epoch.Load()}, nil
+	}
+	return s.ApplyBatchObserved(ctx, projection, out, observe)
+}
+
 func EventsFromEnvelope(envelope events.Envelope) ([]Event, error) {
 	envelope.Normalize()
 	if envelope.PayloadEncoding != events.PayloadEncodingProtobuf {

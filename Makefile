@@ -1,7 +1,7 @@
 .PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history bench-simd lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator \
 	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
-	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
+	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
 	check-doc-references \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet lifecycle-manifest
 
@@ -35,6 +35,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-metadata-practices \
 	check-dynamic-payload-practices \
 	check-database-practices \
+	check-atomic-lane-purity \
 	check-redis-practices \
 	check-river-practices \
 	check-migration-structure \
@@ -248,6 +249,9 @@ check-platform-boundary-debt:
 
 check-database-practices:
 	@tooling/scripts/database_practices_check.sh .
+
+check-atomic-lane-purity:
+	@tooling/scripts/atomic_lane_purity_check.sh .
 
 check-redis-practices:
 	@tooling/scripts/redis_practices_check.sh .

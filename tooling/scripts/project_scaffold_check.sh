@@ -134,7 +134,7 @@ check_any_server_contains() {
   local label="$1"
   local pattern="$2"
   local found="false"
-  for file in "$target/internal/server/server.go" "$target/cmd/server/main.go" "$target/backend/internal/server/server.go" "$target/backend/cmd/server/main.go"; do
+  for file in "$target/foundation/server-kit/go/httpserver/server.go" "$target/cmd/server/main.go" "$target/backend/foundation/server-kit/go/httpserver/server.go" "$target/backend/cmd/server/main.go"; do
     if [[ -f "$file" ]] && grep -Fq -- "$pattern" "$file"; then
       found="true"
       break
@@ -374,6 +374,12 @@ check_service_domain_contracts
 
 if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "server command" "$target/cmd/server/main.go"
+  # Standardization drift guard: the HTTP server is foundation-owned
+  # (server-kit/go/httpserver, module-synced). A project must consume it and must
+  # not carry its own divergent server. See docs/foundation_project_standardization.md.
+  check_file_contains "server command uses foundation httpserver" "$target/cmd/server/main.go" "server-kit/go/httpserver"
+  check_absent "project carries no divergent internal/server" "$target/internal/server/server.go"
+  check_absent "project carries no divergent backend/internal/server" "$target/backend/internal/server/server.go"
   check_exists "Go workspace" "$target/go.work"
   check_file_contains "Go workspace includes project module" "$target/go.work" "."
   check_file_contains "Go workspace includes foundation server-kit" "$target/go.work" "./foundation/server-kit/go"
@@ -383,39 +389,35 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "docgen command" "$target/cmd/docgen/main.go"
   check_exists "docgen helper tests" "$target/cmd/docgen/helpers_test.go"
   check_file_contains "Makefile exposes OpenAPI generation" "$target/Makefile" "docgen:"
-  check_file_contains "server serves API docs through Foundation" "$target/internal/server/server.go" "server-kit/go/apidocs"
-  check_file_contains "server stores API docs handler" "$target/internal/server/server.go" "apiDocs"
-  check_file_contains "server registers API docs endpoints" "$target/internal/server/server.go" "s.apiDocs.Register"
-  check_file_contains "server makes OpenAPI spec public" "$target/internal/server/server.go" '"/openapi.json"'
-  check_file_contains "server makes API docs UI public" "$target/internal/server/server.go" '"/docs"'
+  check_file_contains "server serves API docs through Foundation" "$target/foundation/server-kit/go/httpserver/server.go" "server-kit/go/apidocs"
+  check_file_contains "server stores API docs handler" "$target/foundation/server-kit/go/httpserver/server.go" "apiDocs"
+  check_file_contains "server registers API docs endpoints" "$target/foundation/server-kit/go/httpserver/server.go" "s.apiDocs.Register"
+  check_file_contains "server makes OpenAPI spec public" "$target/foundation/server-kit/go/httpserver/server.go" '"/openapi.json"'
+  check_file_contains "server makes API docs UI public" "$target/foundation/server-kit/go/httpserver/server.go" '"/docs"'
   if [[ -f "$target/Dockerfile" ]]; then
     check_file_contains "Docker server image generates OpenAPI spec" "$target/Dockerfile" "go run ./cmd/docgen > /tmp/openapi.json"
     check_file_contains "Docker server image embeds OpenAPI spec" "$target/Dockerfile" "COPY --from=builder /tmp/openapi.json ./openapi.json"
   fi
-  if [[ -f "$target/internal/server/routes.go" ]]; then
-    check_file_contains "server exposes HTTP route catalogue" "$target/internal/server/routes.go" "CollectHTTPRoutes"
-    check_file_not_contains "server route catalogue avoids generic thin wrappers" "$target/internal/server/routes.go" "httpapi.RoutesFromHandlerMap"
-    check_file_not_contains "server route catalogue avoids hard-coded event list" "$target/internal/server/routes.go" "EventTypes = []string"
-    check_file_not_contains "server route catalogue avoids local event inference" "$target/internal/server/routes.go" "func routeFromEvent"
-    check_file_not_contains "server route catalogue avoids local method inference" "$target/internal/server/routes.go" "func methodForAction"
-    check_file_contains "server command installs HTTP route catalogue" "$target/cmd/server/main.go" "SetHTTPRoutes"
-    check_file_contains "docgen consumes HTTP route catalogue" "$target/cmd/docgen/main.go" "CollectHTTPRoutes"
-    check_file_contains "docgen registers named route schemas" "$target/cmd/docgen/main.go" "ensureNamedSchema"
-    check_file_not_contains "docgen avoids empty route catalogue" "$target/cmd/docgen/main.go" "Routes: []registry.HTTPRoute{}"
-    check_file_not_contains "docgen avoids route TODO scaffold" "$target/cmd/docgen/main.go" "TODO: Import your domain handlers"
-  else
-    check_file_contains "server command uses Foundation route derivation" "$target/cmd/server/main.go" "httpapi.RoutesFromHandlerMap"
-    check_file_contains "docgen uses Foundation route derivation" "$target/cmd/docgen/main.go" "httpapi.RoutesFromHandlerMap"
-  fi
+  # The project's HTTP surface is declared once, in bootstrap.Services: a single
+  # HTTPRoutes() catalogue consumed by both the server (SetHTTPRoutes) and docgen
+  # (OpenAPI). The default derives routes from handlers; domains override
+  # HTTPRoutes to aggregate explicit per-service routes. See
+  # docs/foundation_project_standardization.md.
+  check_file_contains "bootstrap declares the HTTP route catalogue" "$target/internal/bootstrap/services.go" "func (s *Services) HTTPRoutes()"
+  check_file_contains "server command installs the route catalogue" "$target/cmd/server/main.go" "SetHTTPRoutes"
+  check_file_contains "server command sources routes from bootstrap catalogue" "$target/cmd/server/main.go" ".HTTPRoutes()"
+  check_file_contains "docgen consumes the route catalogue" "$target/cmd/docgen/main.go" "RouteCatalog()"
+  check_file_not_contains "docgen avoids empty route catalogue" "$target/cmd/docgen/main.go" "Routes: []registry.HTTPRoute{}"
+  check_file_not_contains "docgen avoids route TODO scaffold" "$target/cmd/docgen/main.go" "TODO: Import your domain handlers"
   check_file_not_contains "docgen avoids hand-maintained route collector" "$target/cmd/docgen/main.go" "func collectRoutes"
-  check_file_not_contains "server avoids hand-registering service routes" "$target/internal/server/server.go" ".RegisterRoutes(api)"
+  check_file_not_contains "server avoids hand-registering service routes" "$target/foundation/server-kit/go/httpserver/server.go" ".RegisterRoutes(api)"
   check_exists "worker helper tests" "$target/cmd/worker/helpers_test.go"
   check_exists "startup package" "$target/internal/startup"
   check_exists "startup smoke tests" "$target/internal/startup/startup_test.go"
   check_exists "bootstrap services container" "$target/internal/bootstrap/services.go"
   check_exists "config scaffold tests" "$target/internal/config/config_test.go"
-  check_exists "server scaffold tests" "$target/internal/server/server_test.go"
-  check_exists "server middleware scaffold tests" "$target/internal/server/middleware/middleware_test.go"
+  check_exists "server scaffold tests" "$target/foundation/server-kit/go/httpserver/server_test.go"
+  check_exists "server middleware scaffold tests" "$target/foundation/server-kit/go/httpserver/middleware/middleware_test.go"
   check_exists "river worker registry" "$target/internal/worker/registry.go"
   check_exists "river worker helper tests" "$target/internal/worker/registry_helpers_test.go"
   check_exists "river worker registry tests" "$target/internal/worker/registry_test.go"
@@ -556,9 +558,9 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "startup installs Foundation logger" "$target/internal/startup/logger.go" "server-kit/go/logger"
   check_file_contains "startup installs Foundation runtime logger" "$target/internal/startup/logger.go" "logger.Install"
   check_file_contains "startup declares Foundation runtime logger scope" "$target/internal/startup/logger.go" "logger.RuntimeConfig"
-  check_file_contains "server uses Foundation logger type" "$target/internal/server/server.go" "kitlogger.Logger"
-  check_file_contains "middleware injects log metadata" "$target/internal/server/middleware/middleware.go" "metadata.IntoContext"
-  check_file_contains "middleware propagates correlation header" "$target/internal/server/middleware/middleware.go" "X-Correlation-ID"
+  check_file_contains "server uses Foundation logger type" "$target/foundation/server-kit/go/httpserver/server.go" "kitlogger.Logger"
+  check_file_contains "middleware injects log metadata" "$target/foundation/server-kit/go/httpserver/middleware/middleware.go" "metadata.IntoContext"
+  check_file_contains "middleware propagates correlation header" "$target/foundation/server-kit/go/httpserver/middleware/middleware.go" "X-Correlation-ID"
   check_any_startup_contains "startup logs database and Hermes readiness" "\"hermes\", \"enabled\""
   check_any_startup_contains "startup logs Redis event bus readiness" "redis event bus connected"
   check_any_startup_contains "startup initializes server-kit resilience" "resilience.New"
@@ -567,7 +569,7 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_any_startup_contains "startup exposes Hermes dependency" "Hermes"
   check_any_startup_contains "startup registers Hermes health" "HermesHealth"
   check_any_server_contains "server logs listening state" "server listening"
-  check_file_contains "server logs route registration" "$target/internal/server/server.go" "registered route"
+  check_file_contains "server logs route registration" "$target/foundation/server-kit/go/httpserver/server.go" "registered route"
   check_file_contains "server-kit usage check in foundation lint" "$target/Makefile" "check-server-kit-usage"
   check_file_contains "make lifecycle contract generation target" "$target/Makefile" "lifecycle-contracts:"
   check_file_contains "make delivery metrics target" "$target/Makefile" "delivery-metrics:"
@@ -577,17 +579,17 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "worker default queue concurrency is configurable" "$target/internal/worker/registry.go" "QUEUE_WORKERS_DEFAULT"
   check_file_contains "worker processing queue concurrency is configurable" "$target/internal/worker/registry.go" "QUEUE_WORKERS_PROCESSING"
   check_file_contains "worker scheduled queue concurrency is configurable" "$target/internal/worker/registry.go" "QUEUE_WORKERS_SCHEDULED"
-  check_file_contains "server exposes correlation trace endpoint" "$target/internal/server/server.go" "/metricsz/trace"
-  check_file_contains "server wires CORS middleware" "$target/internal/server/server.go" "security.CORS("
-  check_file_contains "server uses configured CORS origins" "$target/internal/server/server.go" "allowedOrigins"
-  check_file_not_contains "server avoids wildcard CORS default" "$target/internal/server/server.go" 'security.CORS([]string{"*"})'
-  check_file_contains "server protects operational endpoints" "$target/internal/server/server.go" "operationalHandler"
-  check_file_contains "websocket reserves capacity before upgrade" "$target/internal/server/websocket.go" "reserveWSConnectionSlot"
-  check_file_contains "websocket registration uses reserved capacity slots" "$target/internal/server/websocket.go" "reserved:  true"
-  check_file_contains "websocket queue full records failed message metric" "$target/internal/server/websocket.go" "RecordMessageFailed()"
-  check_file_contains "server tests cover websocket capacity rejection" "$target/internal/server/server_test.go" "TestReserveWSConnectionSlotRejectsWhenCapacityExceeded"
-  check_file_contains "server tests cover reserved websocket registration" "$target/internal/server/server_test.go" "TestRegisterWSConnectionUsesReservedSlot"
-  check_file_contains "server tests cover websocket backpressure metric" "$target/internal/server/server_test.go" "TestEnqueueWSRecordsBackpressureFailure"
+  check_file_contains "server exposes correlation trace endpoint" "$target/foundation/server-kit/go/httpserver/server.go" "/metricsz/trace"
+  check_file_contains "server wires CORS middleware" "$target/foundation/server-kit/go/httpserver/server.go" "security.CORS("
+  check_file_contains "server uses configured CORS origins" "$target/foundation/server-kit/go/httpserver/server.go" "allowedOrigins"
+  check_file_not_contains "server avoids wildcard CORS default" "$target/foundation/server-kit/go/httpserver/server.go" 'security.CORS([]string{"*"})'
+  check_file_contains "server protects operational endpoints" "$target/foundation/server-kit/go/httpserver/server.go" "operationalHandler"
+  check_file_contains "websocket reserves capacity before upgrade" "$target/foundation/server-kit/go/httpserver/websocket.go" "reserveWSConnectionSlot"
+  check_file_contains "websocket registration uses reserved capacity slots" "$target/foundation/server-kit/go/httpserver/websocket.go" "reserved:  true"
+  check_file_contains "websocket queue full records failed message metric" "$target/foundation/server-kit/go/httpserver/websocket.go" "RecordMessageFailed()"
+  check_file_contains "server tests cover websocket capacity rejection" "$target/foundation/server-kit/go/httpserver/server_test.go" "TestReserveWSConnectionSlotRejectsWhenCapacityExceeded"
+  check_file_contains "server tests cover reserved websocket registration" "$target/foundation/server-kit/go/httpserver/server_test.go" "TestRegisterWSConnectionUsesReservedSlot"
+  check_file_contains "server tests cover websocket backpressure metric" "$target/foundation/server-kit/go/httpserver/server_test.go" "TestEnqueueWSRecordsBackpressureFailure"
   check_file_contains "load tests bound pre/post infrastructure probes" "$target/tests/load/load_test.go" "probeCtx, probeCancel := context.WithTimeout(ctx, opTimeout)"
   check_file_contains "config loads allowed origins" "$target/internal/config/config.go" "ALLOWED_ORIGINS"
   check_file_contains "config loads explicit Redis URL" "$target/internal/config/config.go" "REDIS_URL"

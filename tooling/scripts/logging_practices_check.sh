@@ -141,8 +141,8 @@ check_no_match() {
 check_project_logging_wiring() {
   local startup_logger="$target/internal/startup/logger.go"
   local startup_dir="$target/internal/startup"
-  local server_file="$target/internal/server/server.go"
-  local middleware_file="$target/internal/server/middleware/middleware.go"
+  local server_file="$target/foundation/server-kit/go/httpserver/server.go"
+  local middleware_file="$target/foundation/server-kit/go/httpserver/middleware/middleware.go"
   [[ -f "$target/.foundation" ]] || return 0
   [[ -d "$target/internal" ]] || return 0
 
@@ -165,11 +165,11 @@ check_template_logging_wiring() {
   check_file_contains_any "template startup installs process default logger" "$template_root/internal/startup/logger.go" "logger.SetDefault" "logger.Install"
   check_file_contains_any "template startup declares app runtime logger scope" "$template_root/internal/startup/logger.go" "logger.RuntimeConfig" "logger.Config{"
   check_file_contains "template dependencies expose Foundation logger" "$template_root/internal/startup/dependencies.go" "Log           kitlogger.Logger"
-  check_file_contains "template server uses Foundation logger facade" "$template_root/internal/server/server.go" "kitlogger.Logger"
-  check_file_contains "template middleware uses Foundation logger facade" "$template_root/internal/server/middleware/middleware.go" "kitlogger.Logger"
-  check_file_contains "template middleware writes correlation header" "$template_root/internal/server/middleware/middleware.go" "X-Correlation-ID"
-  check_file_contains "template middleware injects Foundation metadata" "$template_root/internal/server/middleware/middleware.go" "metadata.IntoContext"
-  check_file_contains "template middleware logs with request context" "$template_root/internal/server/middleware/middleware.go" "InfoContext(r.Context()"
+  check_file_contains "template server uses Foundation logger facade" "$target/server-kit/go/httpserver/server.go" "kitlogger.Logger"
+  check_file_contains "template middleware uses Foundation logger facade" "$target/server-kit/go/httpserver/middleware/middleware.go" "kitlogger.Logger"
+  check_file_contains "template middleware writes correlation header" "$target/server-kit/go/httpserver/middleware/middleware.go" "X-Correlation-ID"
+  check_file_contains "template middleware injects Foundation metadata" "$target/server-kit/go/httpserver/middleware/middleware.go" "metadata.IntoContext"
+  check_file_contains "template middleware logs with request context" "$target/server-kit/go/httpserver/middleware/middleware.go" "InfoContext(r.Context()"
 }
 
 check_foundation_logger_contract() {

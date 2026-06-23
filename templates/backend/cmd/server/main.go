@@ -8,12 +8,12 @@ import (
 	"syscall"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
-	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpserver"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/projectiongw"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 
 	"{{MODULE_PATH}}/internal/bootstrap"
 	"{{MODULE_PATH}}/internal/config"
-	"{{MODULE_PATH}}/internal/server"
 	"{{MODULE_PATH}}/internal/startup"
 )
 
@@ -49,9 +49,31 @@ func run(ctx context.Context) error {
 	}
 	defer cleanup()
 
-	// Create and start server
-	srv := server.New(cfg, deps.Registry, deps.Handler)
-	srv.SetHTTPRoutes(httpapi.RoutesFromHandlerMap((&bootstrap.Services{}).AllHandlers()))
+	// Create and start the foundation HTTP server (server-kit/go/httpserver). The
+	// runtime wiring — health, dispatch, websocket, projection gateway, middleware
+	// — is foundation-owned and module-synced; this project maps only its config
+	// onto the narrow httpserver.Config.
+	srv := httpserver.New(&httpserver.Config{
+		Port:                        cfg.Port,
+		AllowedOrigins:              cfg.AllowedOrigins,
+		ProtectOperationalEndpoints: cfg.ProtectOperationalEndpoints,
+	}, deps.Registry, deps.Handler)
+	srv.SetHTTPRoutes((&bootstrap.Services{}).HTTPRoutes())
+
+	// Mount the Hermes projection read path at /v1/projections/: scoped
+	// snapshots (GET) and live delta streams (WS). Access is identity-scoped by
+	// default (the tenant is the authenticated organization), and deltas flow
+	// from the store apply observer, so the live loop works with the in-memory
+	// driver too — no Redis projector required.
+	if deps.Projected != nil {
+		gateway, err := projectiongw.NewGatewayForProjectedStore(deps.Projected, 0)
+		if err != nil {
+			return fmt.Errorf("init projection gateway: %w", err)
+		}
+		defer gateway.Close()
+		srv.ConfigureProjectionGateway(gateway.Handler(projectiongw.HandlerConfig{}))
+	}
+
 	if cfg.RequireAuth || cfg.ProtectOperationalEndpoints {
 		jwtManager, err := auth.NewJWTManager(cfg.JWTSecret)
 		if err != nil {

@@ -59,6 +59,31 @@ func dispatchBytes(registry *ServiceRegistry, ctx context.Context, eventType str
 	return result.PayloadBytes, ok, nil
 }
 
+// TestDispatchInputCoercesPlainMapToPayload is a regression for a silent-drop
+// bug: an untyped handler returning a plain map[string]any (not an
+// extension.Object) was misclassified as a Stream handle, so the HTTP/WS
+// response path returned an empty 200 and dropped the result. The plain map must
+// now surface as Payload.
+func TestDispatchInputCoercesPlainMapToPayload(t *testing.T) {
+	registry := NewWithOptions(nil, nil, nil, Options{DispatchWorkers: -1})
+	if err := registry.RegisterWithOptions("demo:plain:v1:requested", func(_ context.Context, _ extension.Object) (any, error) {
+		return map[string]any{"echo": "ovs"}, nil // plain map, NOT extension.Object
+	}, bootstrap.ConcurrencyOptions{}); err != nil {
+		t.Fatalf("register err=%v", err)
+	}
+	result, ok, err := registry.DispatchInput(context.Background(), "demo:plain:v1:requested", DispatchInput{Payload: extension.Object{}})
+	if err != nil || !ok {
+		t.Fatalf("DispatchInput ok=%v err=%v", ok, err)
+	}
+	if result.Stream != nil {
+		t.Fatalf("plain map should not be a Stream, got %T", result.Stream)
+	}
+	got, _ := result.Payload.GetString("echo")
+	if got != "ovs" {
+		t.Fatalf("payload echo = %q, want ovs (result dropped?)", got)
+	}
+}
+
 func TestRegisterAndDispatchMapHandler(t *testing.T) {
 	registry := NewWithOptions(nil, nil, nil, Options{DispatchWorkers: -1})
 	if registry.dispatchWorkers != 1 {

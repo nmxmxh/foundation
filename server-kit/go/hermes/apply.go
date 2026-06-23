@@ -9,7 +9,21 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
 
-func (p *partition) applyBatch(ctx context.Context, events []Event) (ApplyResult, error) {
+// AppliedMutation describes one event that hermes accepted, stamped with the
+// version hermes assigned. It is the unit the projection gateway fans out as an
+// accepted-only delta, so the live stream reflects the source of truth rather
+// than the (possibly rejected or deduplicated) client submission.
+type AppliedMutation struct {
+	Operation Operation
+	Record    database.DomainRecord
+	Version   uint64
+}
+
+// applyBatchObserving is applyBatch with an optional per-accepted-event observer.
+// When observe is nil there is zero added cost, so the hot projector path stays
+// allocation-free; the gateway passes a non-nil observer to capture accepted
+// deltas.
+func (p *partition) applyBatchObserving(ctx context.Context, events []Event, observe func(AppliedMutation)) (ApplyResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.publishing.Store(true)
@@ -31,6 +45,13 @@ func (p *partition) applyBatch(ctx context.Context, events []Event) (ApplyResult
 		case applyStateApplied:
 			p.observeSourceWatermark(version)
 			result.Applied++
+			if observe != nil {
+				operation := event.Operation
+				if operation == "" {
+					operation = OperationUpsert
+				}
+				observe(AppliedMutation{Operation: operation, Record: event.Record, Version: version})
+			}
 		case applyStateDuplicate:
 			result.Duplicates++
 		default:
@@ -41,7 +62,7 @@ func (p *partition) applyBatch(ctx context.Context, events []Event) (ApplyResult
 	return p.finishApplyLocked(result, publisher), nil
 }
 
-func (p *partition) applyRecords(ctx context.Context, sourcePrefix string, baseVersion uint64, records []database.DomainRecord) (ApplyResult, error) {
+func (p *partition) applyRecords(ctx context.Context, sourcePrefix string, baseVersion uint64, records []database.DomainRecord, observe func(AppliedMutation)) (ApplyResult, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.publishing.Store(true)
@@ -70,6 +91,9 @@ func (p *partition) applyRecords(ctx context.Context, sourcePrefix string, baseV
 		case applyStateApplied:
 			p.observeSourceWatermark(version)
 			result.Applied++
+			if observe != nil {
+				observe(AppliedMutation{Operation: OperationUpsert, Record: event.Record, Version: version})
+			}
 		case applyStateDuplicate:
 			result.Duplicates++
 		default:

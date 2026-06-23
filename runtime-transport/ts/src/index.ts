@@ -430,6 +430,8 @@ export * from "./binaryEnvelope";
 export * from "./compression";
 export * from "./http";
 export * from "./offlineQueue";
+export * from "./projectionCodec";
+export * from "./projectionSource";
 export * from "./runtimeMetadata";
 export * from "./websocket";
 

@@ -36,11 +36,6 @@ templates/backend/cmd/worker/helpers_test.go	cmd/worker/helpers_test.go	full,bac
 templates/backend/internal/bootstrap/services.go	internal/bootstrap/services.go	full,backend	always	create
 templates/backend/internal/config/config.go	internal/config/config.go	full,backend	always	create
 templates/backend/internal/config/config_test.go	internal/config/config_test.go	full,backend	always	force
-templates/backend/internal/server/server.go	internal/server/server.go	full,backend	always	create
-templates/backend/internal/server/server_test.go	internal/server/server_test.go	full,backend	always	force
-templates/backend/internal/server/websocket.go	internal/server/websocket.go	full,backend	always	create
-templates/backend/internal/server/middleware/middleware.go	internal/server/middleware/middleware.go	full,backend	always	create
-templates/backend/internal/server/middleware/middleware_test.go	internal/server/middleware/middleware_test.go	full,backend	always	create
 templates/backend/internal/startup/dependencies.go	internal/startup/dependencies.go	full,backend	always	create
 templates/backend/internal/startup/startup_test.go	internal/startup/startup_test.go	full,backend	always	force
 templates/backend/internal/startup/logger.go	internal/startup/logger.go	full,backend	always	create

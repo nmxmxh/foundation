@@ -420,9 +420,16 @@ func (r *ServiceRegistry) DispatchInput(ctx context.Context, eventType string, i
 	result := DispatchResult{
 		PayloadEncoding: protoapi.PayloadEncodingJSON,
 	}
-	if m, ok := response.(extension.Object); ok {
-		result.Payload = m
-	} else {
+	switch typed := response.(type) {
+	case extension.Object:
+		result.Payload = typed
+	case map[string]any:
+		// A plain map is a payload, not a stream handle. Without this an untyped
+		// handler returning map[string]any was misclassified as Stream and the
+		// HTTP/WS response path silently dropped it (200 with empty body).
+		result.Payload = extension.ObjectFromMap(typed)
+	default:
+		// Stream handles (channels) and other handler-owned response objects.
 		result.Stream = response
 	}
 	return result, true, nil

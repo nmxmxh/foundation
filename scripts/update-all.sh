@@ -22,7 +22,9 @@ while IFS=$'\t' read -r slug path || [[ -n "$slug" ]]; do
     echo "========================================="
     echo "Updating project: $slug ($project_path)"
     echo "========================================="
-    "$SCRIPT_DIR/update-project.sh" "$project_path"
+    # Forward any flags (e.g. --force, --dry-run) to each project update so the
+    # whole fleet can be refreshed with one invocation.
+    "$SCRIPT_DIR/update-project.sh" "$project_path" "$@"
 done < "$TSV_FILE"
 
 echo "All projects updated successfully!"
