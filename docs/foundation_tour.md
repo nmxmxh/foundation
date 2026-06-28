@@ -1,10 +1,12 @@
 # Foundation Tour
 
-Status: current as of 2026-05-29
+Status: current as of 2026-06-28
 Owner: Platform Architecture
 
 This tour follows one product action through Foundation. The example is
 generic: a user presses a button to create or update a business record.
+
+For concept definitions, see `foundation_glossary.md`.
 
 ## The Short Version
 

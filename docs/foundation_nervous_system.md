@@ -1,14 +1,19 @@
 # Foundation Nervous System
 
-Status: baseline  
-Date: 2026-05-11  
+Status: 0.0.1  
+Date: 2026-06-28  
 Owner: Platform Architecture
 
-## Purpose
+## Purpose & The "Why"
 
-Foundation is a runtime appliance, not a pile of packages. The nervous system is the canonical path that connects contracts, metadata, dispatch, workers, Redis, WebSocket routing, frontend stores, and observability into one coherent substrate.
+The **Nervous System** is the unified lifecycle of a request as it travels across networks, databases, workers, and UI threads. Instead of developers inventing different ways to process commands, update state, and push events, every action follows a single, predictable lane.
 
-This document defines the visible lifecycle every generated app should inherit and every optimized lane must refine.
+### Why this lifecycle exists:
+- **Tracing & Debugging**: With standard correlation IDs carried through every thread and network call, we can trace a user's action from a browser click down to Go workers, database transactions, and final UI rendering.
+- **Data Safety (Tenant Isolation)**: The backend derives organization and user identities from authenticated session contexts, ensuring tenant data is never leaked across commands.
+- **Fault Tolerance**: The system decouples processing: the client initiates a request, it is parsed and validated, then handed to worker queues so slow database operations or network glitches do not block the user interface.
+
+This document defines the visible lifecycle every generated app inherits and every optimized performance lane refines.
 
 Related docs:
 
@@ -19,6 +24,9 @@ Related docs:
 - `docs/foundation_benchmarks.md`
 - `docs/redis_practices.md`
 - `docs/websocket_scaling.md`
+- `docs/transfer_lane.md`
+- `docs/frontend_command_registry.md`
+- `docs/foundation_glossary.md`
 
 ## Canonical Lifecycle
 

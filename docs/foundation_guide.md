@@ -31,7 +31,7 @@ Primary performance companions:
   * **Event Evidence**: Eventlog and contracttest preserve lifecycle evidence for tests, traces, and operator inspection.
 * **Scaffold Contract**: Generated backends must use server-kit as the runtime spine. Startup registers dependencies with `resilience`; server ingress uses `registry`, `httpapi`, `metadata`, `graceful`, `security`, `compress`, and `observability`; WebSockets use `wsrouting` and `wsmetrics`; workers use bounded queue defaults; scaffolded runtime stores are wrapped by Hermes for safe live projections.
 
-* **Extended Modules** (v1.0.0):
+* **Extended Modules**:
 
 | Module | Package | Purpose |
 | -------- | --------- | --------- |
@@ -48,6 +48,12 @@ Primary performance companions:
 | **Hermes Hotplane** | `hermes` | Bounded projection reads with freshness and rebuild contracts |
 | **Event Log** | `eventlog` | Append-only lifecycle evidence for traces and inspection |
 | **Bulk/Object Transfer** | `bulk`, `objectstore` | Bounded large-payload and object-storage helpers |
+| **Transfer Lane** | `transfer` | Progress-bearing upload/download lifecycle with bookend events |
+| **Projection Gateway** | `projectiongw` | HTTP read surface for Hermes-backed projection queries |
+| **Intelligence Signals** | `intelligence` | Registry-level intelligence signal extraction and graph hints |
+| **Financial Arithmetic** | `money` | Integer minor-unit arithmetic with checked operations |
+| **Kernel Lane** | `kernellane` | Native Rust/FFI/SHM compute dispatch and descriptor management |
+| **Worker Chains** | `chain` | Bounded multi-step job composition helpers |
 | **Service-Backed Harness** | `servicebacked` | Redis/Postgres pressure tests for Foundation substrate changes |
 
 ### B. runtime-transport (TypeScript)
@@ -455,4 +461,7 @@ make foundation-update
 
 See CHANGELOG.md in the Foundation source repository for detailed release notes.
 
-Current foundation version: **1.0.0**
+Current foundation version: **0.0.1**
+
+For concept definitions and pre-answered questions, see `foundation_glossary.md`.
+For the appkit drift-control direction, see `foundation_project_standardization.md`.

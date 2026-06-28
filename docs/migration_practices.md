@@ -1,6 +1,6 @@
 # Standalone Apps Migration Structure
 
-Status: v1.1
+Status: 0.0.1
 Date: 2026-06-08
 Owner: Platform Architecture
 

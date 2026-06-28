@@ -2,7 +2,7 @@
 
 Date: 2026-05-22
 
-This document tracks the deliberate performance and architecture carryovers folded into the scaffold after reviewing product histories and the current performance synthesis. For cross-cutting Go, networking, PostgreSQL, Rust, benchmarking, and documentation-tracking practices, see `docs/performance_practices.md`. For TLA+/`Specifying Systems` state-machine, invariant, liveness, real-time bound, composition, and refinement practices, see `docs/tla_architecture_practices.md`. For Go concurrency bug taxonomy and practices extracted from `go-study.pdf`, see `docs/go_concurrency_bug_practices.md`. For deep-dives into classic optimization techniques, see `docs/coding_magic.md`.
+This document tracks the deliberate performance and architecture carryovers folded into the scaffold after reviewing product histories and the current performance synthesis. For cross-cutting Go, networking, PostgreSQL, Rust, benchmarking, and documentation-tracking practices, see `docs/performance_practices.md`. For TLA+/`Specifying Systems` state-machine, invariant, liveness, real-time bound, composition, and refinement practices, see `docs/tla_architecture_practices.md`. For Go concurrency bug taxonomy and practices extracted from `go-study.pdf`, see `docs/go_concurrency_bug_practices.md`. For deep-dives into classic optimization techniques, see `docs/info/coding_magic.md`.
 
 ## Adopted immediately
 

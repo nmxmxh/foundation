@@ -1,7 +1,7 @@
 # Foundation Quick Start
 
-Status: baseline
-Date: 2026-06-12
+Status: 0.0.1
+Date: 2026-06-28
 Owner: Platform Architecture
 
 ## Purpose
@@ -9,6 +9,8 @@ Owner: Platform Architecture
 This is the minimum viable understanding path for a developer, reviewer, or
 agent who needs to make a Foundation change without reading the entire
 documentation set first.
+
+For concept definitions and pre-answered questions, see `foundation_glossary.md`.
 
 Use this file to choose the first lane. Then read the owning contract before
 editing.

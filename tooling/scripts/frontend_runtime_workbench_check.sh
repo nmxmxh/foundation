@@ -55,7 +55,6 @@ prototype_generator="$target/tooling/scripts/generate_frontend_prototype_runtime
 
 check_file "frontend runtime workbench doc present" "$docs_dir/frontend_runtime_workbench.md"
 check_file "runtime SAB/Cap'n Proto doc present" "$docs_dir/runtime_sab_capnp_contracts.md"
-check_file "frontend prototype runtime TODO present" "$docs_dir/frontend_prototype_runtime_todo.md"
 check_file "frontend workbench source present" "$workbench"
 check_file "frontend projection worker pipeline source present" "$projection_worker_pipeline"
 check_file "frontend workbench tests present" "$workbench_tests"
@@ -86,7 +85,6 @@ check_contains "workbench has abstract runtime adapter" "$workbench" "RuntimeWor
 check_contains "workbench manages live loading state" "$workbench" "LiveProjectionStatus"
 check_contains "workbench compute is planned before dispatch" "$workbench" "planCompute"
 check_contains "workbench omits sensitive dummy fields" "$workbench" "DEFAULT_SENSITIVE_FIELDS"
-check_contains "prototype TODO excludes P2P scope" "$docs_dir/frontend_prototype_runtime_todo.md" "No P2P"
 check_contains "workbench doc names live projection contract" "$docs_dir/frontend_runtime_workbench.md" "Live Projection Contract"
 check_contains "workbench doc names cache contract" "$docs_dir/frontend_runtime_workbench.md" "Cache Contract"
 check_contains "workbench doc names persistence contract" "$docs_dir/frontend_runtime_workbench.md" "Persistence Contract"

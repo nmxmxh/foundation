@@ -2,6 +2,9 @@
 
 This directory contains specialized resources, templates, and guides for developers and AI agents working on Ovasabi Foundation projects.
 
+For concept definitions, module cards, and pre-answered questions, see
+[`foundation_glossary.md`](../foundation_glossary.md).
+
 ## Subdirectories
 
 ### [1. UI Animation (`animation/`)](animation/)

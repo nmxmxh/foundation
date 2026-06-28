@@ -1,6 +1,6 @@
 # Ovasabi Testing Practices
 
-Status: v1.0
+Status: 0.0.1
 Date: 2026-05-22
 Owner: Platform Architecture
 

@@ -19,13 +19,15 @@ This is an **Ovasabi Foundation** project - a production-grade full-stack applic
 
 Before editing architecture-sensitive code, read these files in order:
 
-1. `docs/foundation/foundation_tour.md` or `docs/foundation_tour.md`
-2. `docs/foundation/agent_operating_contract.md` or `docs/agent_operating_contract.md`
-3. `docs/foundation/foundation_architecture_contract.md` or `docs/foundation_architecture_contract.md`
-4. `docs/foundation/practice_controls.md` or `docs/practice_controls.md`
-5. `docs/foundation/ai_threat_model.md` or `docs/ai_threat_model.md` when tool, model, retrieved, generated, package, or security-sensitive input affects the change
-6. The relevant practice file for the lane you are changing
-7. `docs/foundation/future_practices_research.md` or `docs/future_practices_research.md` when proposing a new practice, security posture, performance lane, or agent workflow
+1. `docs/foundation_glossary.md` or `docs/foundation/foundation_glossary.md` — concept lookup and agent Q&A
+2. `docs/foundation_quick_start.md` or `docs/foundation/foundation_quick_start.md`
+3. `docs/foundation_tour.md` or `docs/foundation/foundation_tour.md`
+4. `docs/foundation_architecture_contract.md` or `docs/foundation/foundation_architecture_contract.md`
+5. `docs/agent_operating_contract.md` or `docs/foundation/agent_operating_contract.md`
+6. `docs/practice_controls.md` or `docs/foundation/practice_controls.md`
+7. `docs/ai_threat_model.md` or `docs/foundation/ai_threat_model.md` when tool, model, retrieved, generated, package, or security-sensitive input affects the change
+8. The relevant practice file for the lane you are changing
+9. `docs/future_practices_research.md` or `docs/foundation/future_practices_research.md` when proposing a new practice, security posture, performance lane, or agent workflow
 
 Definition of Done for agent-authored changes:
 
@@ -152,6 +154,19 @@ make migrate-up              # Run DB migrations
 | `cache` | Cache-aside patterns with tag-based invalidation. |
 | `healthcheck` | Liveness/Readiness probes for all dependencies. |
 | `worker` | River-based background job handling. |
+| `transfer` | Progress-bearing upload/download lifecycle with bookend events. |
+| `projectiongw` | HTTP projection gateway for Hermes-backed read paths. |
+| `bulk` | Bounded large-payload and resumable multipart operations. |
+| `objectstore` | Object-storage helpers with tenant-scoped key derivation. |
+| `intelligence` | Registry-level intelligence signal extraction. |
+| `money` | Integer minor-unit financial arithmetic with checked operations. |
+| `kernellane` | Native Rust/FFI/SHM compute lane dispatch and descriptor management. |
+| `chain` | Worker chain helpers for bounded multi-step job composition. |
+| `hermes` | Bounded projection reads with freshness and rebuild contracts. |
+| `eventlog` | Append-only lifecycle evidence for traces and inspection. |
+| `degradation` | Health monitoring with automatic fallback behaviors. |
+| `versioning` | Header/path/query API versioning with deprecation support. |
+| `resilience` | Coordinated health, circuit, retry, and degradation across dependencies. |
 
 ## Go SIMD Posture
 
@@ -194,13 +209,6 @@ The Foundation modules are linked through a unified "Nervous System":
 | **Template Dev** | Updating the blueprints in `templates/` and `scaffold.manifest.tsv`. | `make lint-foundation` |
 | **Project Dev** | Building a specific app *using* a generated scaffold. | `make dev`, `make foundation-update` |
 
-## Next Steps (Core Roadmap)
-
-1. **Stability**: Finalize `policy` and `redis` modules for 1.1.0 release.
-2. **Observability**: Integrate Prometheus metrics, OTel trace exporters, DORA delivery metrics, and incident records by default.
-3. **Performance**: Optimize the 4KB WASM control plane for high-frequency signal processing.
-4. **Security**: Standardize Post-Quantum TLS helpers across all ingress points.
-
 ## Gotchas and Anti-Patterns
 
 1. **Don't ignore context deadlines**: Always pass `ctx` to DB and external calls.
@@ -240,6 +248,7 @@ For deeper context, read these files (`docs/foundation/` in generated apps, `doc
 
 | Topic | File |
 | ------- | ------ |
+| **Glossary and agent Q&A** | `docs/foundation/foundation_glossary.md` or `docs/foundation_glossary.md` |
 | Agent operating contract | `docs/foundation/agent_operating_contract.md` or `docs/agent_operating_contract.md` |
 | Practice controls matrix | `docs/foundation/practice_controls.md` or `docs/practice_controls.md` |
 | AI and agent threat model | `docs/foundation/ai_threat_model.md` or `docs/ai_threat_model.md` |
@@ -256,7 +265,8 @@ For deeper context, read these files (`docs/foundation/` in generated apps, `doc
 | Foundation guide | `docs/foundation/foundation_guide.md` or `docs/foundation_guide.md` |
 | Styling and motion | `docs/foundation/styling_design_practices.md` or `docs/styling_design_practices.md` |
 | Animation references | `docs/foundation/references/README.md` or `docs/references/README.md` |
-| Design inspiration | `docs/foundation/coding_magic.md` or `docs/coding_magic.md` |
+| Transfer lane | `docs/foundation/transfer_lane.md` or `docs/transfer_lane.md` |
+| Frontend command registry | `docs/foundation/frontend_command_registry.md` or `docs/frontend_command_registry.md` |
 
 ## Security Checklist
 
@@ -272,4 +282,4 @@ Before merging any PR, verify:
 - [ ] Agent evidence ledger is present for security, persistence, runtime, or scaffold changes
 
 ---
-Version: 1.2.0 | Last updated: 2026-06-01
+Version: 0.0.1 | Last updated: 2026-06-28

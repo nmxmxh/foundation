@@ -44,7 +44,7 @@ move it into the owning practice document and, where possible, into tooling.
 | `practice_controls.md` | Keep the machine-readable controls matrix aligned with every CP/TE rule, cross-cutting agent/security/performance control, and scaffolded enforcement path. |
 | `ai_threat_model.md` | Track OWASP LLM/agentic/MCP threat classes, tool sandbox research, provenance scoring, and contamination-resistant agent evaluations. |
 | `ai_practices.md` | Add prompt-injection, tool poisoning, memory poisoning, agent identity, generated-code provenance, model/tool eval gates, and MCP permission review. |
-| `coding_magic.md` | Add agent-era design intuition: proof-carrying patches, contract compression, representation design for agents, and evidence-led automation. |
+| `info/coding_magic.md` | Add agent-era design intuition: proof-carrying patches, contract compression, representation design for agents, and evidence-led automation. |
 | `coding_practices.md` | Split every rule into machine-enforced, review-enforced, and evidence-required. Add agent patch evidence, Go 1.25+ concurrency updates, TS package-boundary rules, and Rust 2024 unsafe posture. |
 | `testing_practices.md` | Add oracle-strength scoring, mutation score thresholds where feasible, flaky-test quarantine, property seed ledgers, model-based protocol tests, and agent-generated-test review rules. |
 | `security_practices.md` | Add AI/tool/MCP threat modeling, SLSA/SBOM/provenance, secrets-in-context policy, package install-script review, and memory-safe-roadmap tracking. |
@@ -73,9 +73,8 @@ move it into the owning practice document and, where possible, into tooling.
 | `styling_design_practices.md` | Add automated visual QA: Playwright screenshots, contrast checks, layout-overlap detection, reduced-motion tests, and motion snapshot review. |
 | `migration_practices.md` | Add production transition mode: expand/contract migrations, online backfills, lock estimation, backup verification, and restartable data movement. |
 | `scaffold_manifest.md` | Add agent conflict policy for generated updates and mode changes. |
-| `scaffolded_projects_executive_summary.md` | Add Foundation-as-control-plane framing for IP, governance, and multi-product operational value. |
+| `info/scaffolded_projects_executive_summary.md` | Add Foundation-as-control-plane framing for IP, governance, and multi-product operational value. |
 | `post_quantum_security.md` | Add crypto inventory schema, artifact-signing policy, hybrid TLS compatibility tests, and PQ latency benchmark gates. |
-| `handover_note_codex.md` | Convert to a recurring handoff template with current risks, failing checks, active hypotheses, and forbidden shortcuts. |
 | `references/*` | Add an agent checklist to each note: use when, do not use when, required verification, and accessibility/performance proof. |
 
 ## Promotion Rules
