@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
 
@@ -38,6 +40,7 @@ type ProjectedRuntimeStore struct {
 	registered    sync.Map
 	warm          sync.Map
 	degraded      sync.Map
+	rebuildSF     singleflight.Group
 }
 
 func WrapRuntimeStore(base database.RuntimeStore, opts RuntimeStoreOptions) (*ProjectedRuntimeStore, error) {
@@ -103,10 +106,14 @@ func (s *ProjectedRuntimeStore) HermesRuntimeStats() RuntimeStats {
 	}
 }
 
+// Exec executes a query directly on the underlying database.
+// Note: This operation bypasses the Hermes hot-cache projection entirely.
 func (s *ProjectedRuntimeStore) Exec(ctx context.Context, query string, args ...any) error {
 	return s.base.Exec(ctx, query, args...)
 }
 
+// ExecResult executes a query directly on the underlying database and returns the command result.
+// Note: This operation bypasses the Hermes hot-cache projection entirely.
 func (s *ProjectedRuntimeStore) ExecResult(ctx context.Context, query string, args ...any) (database.CommandResult, error) {
 	executor, ok := s.base.(database.ResultExecutor)
 	if !ok {
@@ -115,10 +122,14 @@ func (s *ProjectedRuntimeStore) ExecResult(ctx context.Context, query string, ar
 	return executor.ExecResult(ctx, query, args...)
 }
 
+// QueryRow executes a query directly on the underlying database and returns a row scanner.
+// Note: This operation bypasses the Hermes hot-cache projection entirely.
 func (s *ProjectedRuntimeStore) QueryRow(ctx context.Context, query string, args ...any) database.RowScanner {
 	return s.base.QueryRow(ctx, query, args...)
 }
 
+// Query executes a query directly on the underlying database and returns rows.
+// Note: This operation bypasses the Hermes hot-cache projection entirely.
 func (s *ProjectedRuntimeStore) Query(ctx context.Context, query string, args ...any) (database.Rows, error) {
 	queryer, ok := s.base.(database.RowQueryer)
 	if !ok {
@@ -127,6 +138,8 @@ func (s *ProjectedRuntimeStore) Query(ctx context.Context, query string, args ..
 	return queryer.Query(ctx, query, args...)
 }
 
+// BeginTx starts a transaction directly on the underlying database.
+// Note: Transactional operations bypass the Hermes hot-cache projection.
 func (s *ProjectedRuntimeStore) BeginTx(ctx context.Context) (database.Tx, error) {
 	if beginner, ok := s.base.(database.TxBeginner); ok {
 		return beginner.BeginTx(ctx)
@@ -240,22 +253,28 @@ func (s *ProjectedRuntimeStore) ensureWarm(ctx context.Context, domain, collecti
 	if _, ok := s.warm.Load(name); ok && !s.isDegraded(name) {
 		return nil
 	}
-	total, err := s.base.CountRecords(ctx, domain, collection, organizationID, database.RecordQuery{})
-	if err != nil {
-		s.markDegraded(name)
-		return err
-	}
-	if total > int64(s.opts.MaxRecordsPerScope) {
-		return ErrProjectionLimit
-	}
-	_, err = s.hot.Rebuild(ctx, name, s.base, Query{OrganizationID: organizationID})
-	if err != nil {
-		s.markDegraded(name)
-		return err
-	}
-	s.warm.Store(name, struct{}{})
-	s.markHealthy(name)
-	return nil
+	_, err, _ = s.rebuildSF.Do(name, func() (any, error) {
+		if _, ok := s.warm.Load(name); ok && !s.isDegraded(name) {
+			return nil, nil
+		}
+		total, err := s.base.CountRecords(ctx, domain, collection, organizationID, database.RecordQuery{})
+		if err != nil {
+			s.markDegraded(name)
+			return nil, err
+		}
+		if total > int64(s.opts.MaxRecordsPerScope) {
+			return nil, ErrProjectionLimit
+		}
+		_, err = s.hot.Rebuild(ctx, name, s.base, Query{OrganizationID: organizationID})
+		if err != nil {
+			s.markDegraded(name)
+			return nil, err
+		}
+		s.warm.Store(name, struct{}{})
+		s.markHealthy(name)
+		return nil, nil
+	})
+	return err
 }
 
 func (s *ProjectedRuntimeStore) getHot(ctx context.Context, domain, collection, organizationID, recordID string) (database.DomainRecord, bool, bool) {

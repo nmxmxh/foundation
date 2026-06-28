@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev run-local dev-local build build-server build-frontend build-runtime communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev run-local dev-local build build-server build-frontend build-runtime communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime frontend-commands runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -161,6 +161,27 @@ frontend-prototype-runtime:
 		echo "Frontend prototype runtime generator not found; skipping"; \
 	fi
 
+frontend-commands:
+	@echo "Generating frontend route registry..."
+	@[ -d frontend/src ] || exit 0
+	@if [ ! -f go.mod ] || [ ! -d cmd/docgen ]; then \
+		echo "No docgen command; skipping route registry generation"; exit 0; \
+	fi
+	@if ! grep -q 'route-catalog' cmd/docgen/main.go 2>/dev/null; then \
+		echo "docgen lacks route-catalog subcommand; run foundation-update to adopt it; skipping"; exit 0; \
+	fi
+	@mkdir -p docs/references/lifecycle "$(GO_CACHE_DIR)" "$(GO_MOD_CACHE_DIR)"
+	@GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" $(GOCMD) run ./cmd/docgen route-catalog > docs/references/lifecycle/route_catalog.json
+	@if [ -f scripts/checks/generate_frontend_commands.mjs ]; then \
+		node scripts/checks/generate_frontend_commands.mjs --catalog "docs/references/lifecycle/route_catalog.json" --out "frontend/src/generated/runtimeRoutes.ts"; \
+	elif [ -f foundation/tooling/scripts/generate_frontend_commands.mjs ]; then \
+		node foundation/tooling/scripts/generate_frontend_commands.mjs --catalog "docs/references/lifecycle/route_catalog.json" --out "frontend/src/generated/runtimeRoutes.ts"; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -f "$(FOUNDATION_PATH)/tooling/scripts/generate_frontend_commands.mjs" ]; then \
+		node "$(FOUNDATION_PATH)/tooling/scripts/generate_frontend_commands.mjs" --catalog "docs/references/lifecycle/route_catalog.json" --out "frontend/src/generated/runtimeRoutes.ts"; \
+	else \
+		echo "Frontend commands generator not found; skipping"; \
+	fi
+
 foundation-transport-proto:
 	@if [ -x foundation/runtime-transport/scripts/generate_bindings.sh ]; then \
 		foundation/runtime-transport/scripts/generate_bindings.sh; \
@@ -170,7 +191,7 @@ foundation-transport-proto:
 		echo "Runtime transport binding generator not found; skipping"; \
 	fi
 
-communication-contracts: proto proto-ts frontend-prototype-runtime lifecycle-contracts lifecycle-manifest foundation-transport-proto runtime-bindings
+communication-contracts: proto proto-ts frontend-prototype-runtime lifecycle-contracts lifecycle-manifest frontend-commands foundation-transport-proto runtime-bindings
 	@echo "Communication contracts generated"
 
 lifecycle-contracts:

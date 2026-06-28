@@ -113,7 +113,12 @@ type BuiltRequest = {
 };
 
 const buildRequest = async <TPayload>(options: HTTPTransportOptions, route: RuntimeRoute, envelope: RuntimeEnvelope<TPayload>): Promise<BuiltRequest> => {
-  const url = new URL(route.path, options.baseUrl);
+  // Resolve `{param}` segments from the payload before constructing the URL, so
+  // the braces are never percent-encoded into the path. Keys consumed by the
+  // path are then stripped from the body/query so a value is never sent twice
+  // (the server re-derives path params from the URL regardless).
+  const { path: resolvedPath, consumed } = resolvePathParams(route.path, envelope.payload);
+  const url = new URL(resolvedPath, options.baseUrl);
   const headers = new Headers({
     "X-Correlation-ID": envelope.metadata.correlationId,
     "X-Request-ID": envelope.metadata.requestId,
@@ -132,7 +137,7 @@ const buildRequest = async <TPayload>(options: HTTPTransportOptions, route: Runt
   headers.set("Accept-Encoding", "br, gzip, deflate");
 
   if (method === "GET" || method === "DELETE") {
-    appendQuery(url, envelope.payload);
+    appendQuery(url, envelope.payload, consumed);
     return {
       url: url.toString(),
       method,
@@ -146,7 +151,7 @@ const buildRequest = async <TPayload>(options: HTTPTransportOptions, route: Runt
     body = new Uint8Array(bytes);
     headers.set("Content-Type", CONTENT_TYPE_PROTOBUF);
   } else {
-    body = JSON.stringify(envelope.payload ?? {});
+    body = JSON.stringify(omitKeys(envelope.payload, consumed) ?? {});
     headers.set("Content-Type", CONTENT_TYPE_JSON);
   }
 
@@ -194,12 +199,16 @@ const optionsHeaders = (options: HTTPTransportOptions): Headers => {
   return headers;
 };
 
-const appendQuery = (url: URL, payload: unknown) => {
+const appendQuery = (url: URL, payload: unknown, skip?: ReadonlySet<string>) => {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return;
   }
   for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
     if (value === undefined || value === null) {
+      continue;
+    }
+    if (skip?.has(key)) {
+      // Already placed in the path; do not also send it as a query param.
       continue;
     }
     if (Array.isArray(value)) {
@@ -213,6 +222,67 @@ const appendQuery = (url: URL, payload: unknown) => {
     }
     url.searchParams.set(key, String(value));
   }
+};
+
+const PATH_PARAM_PATTERN = /\{([^{}]*)\}/g;
+
+/**
+ * resolvePathParams replaces `{name}` segments in a route path with values pulled
+ * from the payload, returning the resolved path and the set of consumed keys.
+ *
+ * - The value is taken from a top-level payload field named exactly `name`.
+ * - Each value is encodeURIComponent-escaped so it stays a single path segment.
+ * - A missing/blank value, or a non-scalar value, throws — emitting a request to
+ *   `/orders/undefined/...` or `/orders/[object Object]/...` is never correct.
+ *
+ * A path with no `{param}` segments returns unchanged with an empty consumed set,
+ * so the common case is a no-op.
+ */
+const resolvePathParams = (
+  routePath: string,
+  payload: unknown,
+): { path: string; consumed: Set<string> } => {
+  const consumed = new Set<string>();
+  if (routePath.indexOf("{") === -1) {
+    return { path: routePath, consumed };
+  }
+  const record =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : {};
+
+  const path = routePath.replace(PATH_PARAM_PATTERN, (_match, rawName: string) => {
+    const name = rawName.trim();
+    if (name === "") {
+      throw new Error(`route path "${routePath}" has an empty path parameter`);
+    }
+    const value = record[name];
+    if (value === undefined || value === null || value === "") {
+      throw new Error(`route path parameter "${name}" is required for "${routePath}"`);
+    }
+    if (typeof value === "object") {
+      throw new Error(
+        `route path parameter "${name}" must be a scalar, got ${Array.isArray(value) ? "array" : "object"}`,
+      );
+    }
+    consumed.add(name);
+    return encodeURIComponent(String(value));
+  });
+  return { path, consumed };
+};
+
+/** omitKeys returns a shallow copy of a plain-object payload without the given keys. */
+const omitKeys = (payload: unknown, keys: ReadonlySet<string>): unknown => {
+  if (keys.size === 0 || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return payload;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+    if (!keys.has(key)) {
+      out[key] = value;
+    }
+  }
+  return out;
 };
 
 const toBytes = (payload: unknown): Uint8Array => {

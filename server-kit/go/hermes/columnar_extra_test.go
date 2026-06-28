@@ -2,6 +2,8 @@ package hermes
 
 import (
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
 
 // TestGetColumnarBatchBuildsTypedColumns covers the columnar read path end to end
@@ -84,5 +86,67 @@ func assertColumnType(t *testing.T, col map[string]Vector, name string, want Dat
 	}
 	if v.Type() != want {
 		t.Fatalf("column %q type = %v, want %v", name, v.Type(), want)
+	}
+}
+
+func TestGetColumnarBatch_StrictParsingErrors(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name: "signals", Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"symbol"}, MaxRecords: 16, MaxBytes: 1 << 20,
+	})
+	ctx := t.Context()
+
+	// 1. Test malformed integer
+	rec1 := database.DomainRecord{
+		Domain:         "signals",
+		Collection:     "ticks",
+		OrganizationID: "org_1",
+		RecordID:       "tick_1",
+		Data: database.RecordData{
+			{Name: "qty", Value: database.RecordValue{Kind: database.RecordValueInt, Text: "not-an-int"}},
+		},
+	}
+	_, err := store.Apply(ctx, "signals", Event{
+		Operation: OperationUpsert,
+		SourceID:  "src_1",
+		Version:   1,
+		Record:    rec1,
+	})
+	if err != nil {
+		t.Fatalf("Apply() err = %v", err)
+	}
+
+	_, err = store.GetColumnarBatch(ctx, "signals", Query{OrganizationID: "org_1"}, []string{"qty"}, Fence{})
+	if err == nil {
+		t.Fatal("expected error parsing malformed integer, got nil")
+	}
+
+	// 2. Clear store, then test malformed float
+	store2 := newTestStore(t, ProjectionSpec{
+		Name: "signals2", Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"symbol"}, MaxRecords: 16, MaxBytes: 1 << 20,
+	})
+	rec2 := database.DomainRecord{
+		Domain:         "signals",
+		Collection:     "ticks",
+		OrganizationID: "org_1",
+		RecordID:       "tick_2",
+		Data: database.RecordData{
+			{Name: "price", Value: database.RecordValue{Kind: database.RecordValueFloat, Text: "not-a-float"}},
+		},
+	}
+	_, err = store2.Apply(ctx, "signals2", Event{
+		Operation: OperationUpsert,
+		SourceID:  "src_2",
+		Version:   1,
+		Record:    rec2,
+	})
+	if err != nil {
+		t.Fatalf("Apply() err = %v", err)
+	}
+
+	_, err = store2.GetColumnarBatch(ctx, "signals2", Query{OrganizationID: "org_1"}, []string{"price"}, Fence{})
+	if err == nil {
+		t.Fatal("expected error parsing malformed float, got nil")
 	}
 }

@@ -1,7 +1,7 @@
 # Foundation Benchmarks
 
 Status: active reference
-Date: 2026-05-31
+Date: 2026-06-25
 Owner: Platform Architecture
 
 ## Purpose
@@ -19,6 +19,121 @@ Foundation performance work is not a single transport bet. The architecture uses
 The benchmark suite exists to prove that ladder stays honest. The fastest lane should not pay network-stack or JSON costs, and the compatibility lane should remain visibly more expensive than the binary paths.
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
+
+## 2026-06-25 full baseline validation benchmarks
+
+On 2026-06-25, we performed a full, unified baseline validation run on Apple M1 Pro (ARM64) macOS to evaluate the performance impact of concurrency fixes (specifically, `ensureWarm` cache-warming singleflight synchronization), strict database parser error propagation, index delta compaction threshold adjustments, and the scoped watermark fixes for concurrent pipelines.
+
+### Local Go CPU & Alloc Baseline
+
+Command:
+```bash
+cd foundation/server-kit/go
+go test -run='^$' -bench=. -benchmem ./hermes ./transfer ./httpapi ./extension ./objectstore ./bulk ./projectiongw
+```
+
+| Package / Benchmark | ns/op | B/op | allocs/op | Notes / Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| **`hermes`** | | | | |
+| `BenchmarkHermesConcurrentReadWrite-8` | 166.4 ns | 224 B | 4 | Lock-free registry reads under concurrent writes. |
+| `BenchmarkHermesGetRecordCopied-8` | 280.9 ns | 224 B | 2 | Point lookup with data copy. |
+| `BenchmarkHermesForEachViewLimit50-8` | 12,731 ns | 20,024 B | 12 | Borrowed view iteration avoids materialization allocations. |
+| `BenchmarkHermesCountIndexed-8` | 263,021 ns | 187,584 B | 15 | Count with index scan. |
+| `BenchmarkHermesApplyEventUpsert-8` | 77,539 ns | 80,330 B | 48 | Single mutation upsert including index update. |
+| `BenchmarkHermesApplyEventPatchIndexedFields-8` | 9,443 ns | 11,857 B | 46 | Atomic partial record patching is ~8x faster than full upsert. |
+| `BenchmarkHermesApplyBatch64-8` | 352,886 ns | 277,995 B | 1,097 | Batch upsert of 64 prebuilt events. |
+| `BenchmarkHermesApplyRecords64-8` | 43,992 ns | 36,714 B | 396 | Apply prebuilt record structures directly. |
+| `BenchmarkHermesProjectedRuntimeStoreHotGet-8` | 384.4 ns | 224 B | 2 | Projection store read bypassing underlying SQL. |
+| `BenchmarkHermesGetColumnarBatch-8` | 7,693,984 ns | 3,346,825 B | 57 | Columnar vector conversion with bitmap validity. |
+| `BenchmarkHermesListRecordsComparison-8` | 8,091,987 ns | 8,372,523 B | 10,043 | Baseline pointer-chase list. |
+| `BenchmarkHermesColumnarSumPrice-8` | 7,104,192 ns | 2,683,179 B | 42 | Columnar sequential scan aggregation (~12% faster scan than `ListRecords`). |
+| `BenchmarkHermesListRecordsSumPrice-8` | 8,638,129 ns | 8,372,523 B | 10,043 | Aggregation via pointer-chase list. |
+| **`transfer`** | | | | |
+| `BenchmarkTrackerAdvance/subs=0-8` | 38.9 ns | 0 B | 0 | Progress advance without subscribers. |
+| `BenchmarkTrackerAdvance/subs=1-8` | 68.27 ns | 0 B | 0 | Single subscriber path (zero-alloc). |
+| `BenchmarkTrackerAdvance/subs=8-8` | 113.8 ns | 64 B | 1 | Multi-subscriber pay slice. |
+| **`httpapi`** | | | | |
+| `BenchmarkProgressReader-8` | 15.56 ns | 0 B | 0 | Progress reader overhead (zero-alloc). |
+| **`extension`** | | | | |
+| `BenchmarkExtensionMarshalJSON-8` | 908.4 ns | 304 B | 3 | Marshal JSON with key sorting (down from 16 allocs). |
+| `BenchmarkExtensionMarshalJSONFast-8` | 703.7 ns | 160 B | 1 | Marshal JSON without key sorting (down from 14 allocs). |
+| **`objectstore`** | | | | |
+| `BenchmarkMemoryStorePutBytes/1024KB-8` | 32,529 ns | 1,048,769 B | 6 | Memory store put overhead. |
+| **`bulk`** | | | | |
+| `BenchmarkManagerAcceptPartIdentity/1024KB-8` | 521,552 ns | 1,051,473 B | 27 | Large-part write latency. |
+| **`projectiongw`** | | | | |
+| `BenchmarkSnapshotProjection/records=10000-8` | 5.01 ms | 7,281,924 B | 100,001 | Ordered index snapshot read. |
+| `BenchmarkSnapshotIncrementalLimited-8` | 5.24 µs | 16,672 B | 101 | Watermarked incremental read (90,000x cheaper than full scans). |
+| `BenchmarkHubBroadcast/subs=1000-8` | 364,802 ns | 0 B | 0 | Fan-out to 1K subscribers (zero-alloc at unit). |
+
+### Service-Backed Saturation Baseline
+
+Command:
+```bash
+SERVICE_BACKED_LOAD_RESEARCH_STEPS=1000,10000 make test-service-backed-load
+```
+
+Measured throughput and latency distribution (Apple M1 Pro, Docker Compose with Postgres 18 and Redis 8):
+
+| Step | Lane | Throughput (units/s) | p99 Unit Latency | Notes / Interpretation |
+| --- | --- | ---: | ---: | --- |
+| **1,000** | `postgres_send_batch64` | 23.9K/s | 1,019.09 µs | Batched upsert concurrency. |
+| | `postgres_copy_from1024` | 162.5K/s | 6.14 µs | Bypasses semantic index update. |
+| | `redis_set_get_many64` | 161.3K/s | 146.72 µs | Pipeline key cache hydration. |
+| | `redis_xadd_many64` | 206.6K/s | 115.95 µs | Streams append pressure. |
+| | `redis_stream_drain64` | 74.6K/s | 22.02 µs | Stream drain + ack. |
+| | `hermes_rebuild_postgres_snapshot` | 148.9K/s | 6.71 µs | Streaming StateStore rebuild. |
+| | `hermes_redis_tailer64` | 40.0K/s | 33.44 µs | Tailer apply/ack sequence. |
+| | `hermes_hot_count` | 83.3K/s | 46.61 µs | Indexed hot projection read. |
+| | `mixed_pg_redis_hermes64` | 33.6K/s | 535.17 µs | Durable write + cache + apply. |
+| | `pipeline_pg_redis_hermes` | 31.0K/s | 32.21 µs | Fully concurrent active pipeline. |
+| | `wsroute_register_redis` | 138.0K/s | 31.04 µs | Live Redis route registration. |
+| | `wsroute_broadcast_after_register` | 134.0M/s | 0.00 µs | Local fanout planning budget. |
+| **10,000**| `postgres_send_batch64` | 32.1K/s | 4,826.91 µs | Pool saturation point. |
+| | `postgres_copy_from1024` | 397.0K/s | 28.49 µs | Large bulk COPY throughput. |
+| | `redis_set_get_many64` | 288.5K/s | 362.05 µs | Pipelining amortizes network overhead. |
+| | `redis_xadd_many64` | 368.1K/s | 268.53 µs | Streams append throughput. |
+| | `redis_stream_drain64` | 77.1K/s | 39.09 µs | Bounded stream processing. |
+| | `hermes_rebuild_postgres_snapshot` | 200.7K/s | 4.98 µs | Rebuild from PG scales linearly. |
+| | `hermes_redis_tailer64` | 36.9K/s | 44.54 µs | Steady tailer consumption. |
+| | `hermes_hot_count` | 10.7K/s | 17,926.70 µs | Read throughput on large dataset. |
+| | `mixed_pg_redis_hermes64` | 40.0K/s | 3,622.63 µs | Mixed transaction limits. |
+| | `pipeline_pg_redis_hermes` | 60.4K/s | 16.55 µs | Pipeline with watermark fixes scales to 60.4K units/sec. |
+| | `wsroute_register_redis` | 194.4K/s | 2,692.53 µs | Batched Redis coordination. |
+| | `wsroute_broadcast_after_register` | 885.5M/s | 0.00 µs | Fanout planning scales. |
+
+
+
+## 2026-06-24 transfer lane (progress + streaming route) benchmarks
+
+The `transfer` progress lane and the streaming upload route sit on the per-byte
+upload hot path, so they are held to the same allocation-shape rule as the
+fan-out lanes: the steady-state path must be allocation-free at the unit
+boundary.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test ./transfer -run='^$' -bench=. -benchmem
+go test ./httpapi -run='^$' -bench=ProgressReader -benchmem
+```
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkTrackerAdvance/subs=0` | ~38 ns | 0 | 0 | Progress advance with no subscriber — pure lock + monotonic seq bump, zero alloc. |
+| `BenchmarkTrackerAdvance/subs=1` | ~65 ns | 0 | 0 | One live subscriber (the common WS bridge): the single-subscriber fast path dispatches without building a slice — still zero alloc. |
+| `BenchmarkTrackerAdvance/subs=8` | ~113 ns | 64 | 1 | Multi-subscriber fan-out pays one target-slice allocation, matching the accepted `HubBroadcast` shape; callbacks run off-lock for safety. |
+| `BenchmarkTrackerSnapshot` | ~17 ns | 0 | 0 | Read path for HEAD/status — borrowed value copy, zero alloc. |
+| `BenchmarkManagerBeginComplete` | ~810 ns | 320 | 5 | Full bracketed lifecycle (2 bookend envelopes + registry churn). Not on the per-byte path — 2–3 events per whole transfer. |
+| `BenchmarkProgressReader` (httpapi) | ~16 ns/read | 0 | 0 | The route's per-read wrapper. The 256 KiB report threshold keeps the tracker untouched in steady state, so the streaming overhead over a raw body copy is allocation-free. |
+
+Takeaway: the design was allocation-conscious from the start — the per-byte
+progress path is zero-alloc for 0 and 1 subscribers (the dominant cases), and the
+streaming route adds no steady-state allocations. The only allocating cases are
+multi-subscriber fan-out (one slice, the documented broadcast shape) and the
+bookend lifecycle, neither of which is per-byte. No optimization was required;
+the benchmarks exist as regression guards on that shape.
 
 ## 2026-06-22 projection read-path (projectiongw) benchmarks
 

@@ -456,6 +456,43 @@ func (g *schemaGenerator) ensureNamedSchema(name, description string) string {
   fi
 }
 
+patch_docgen_route_catalog() {
+  # Evolve the create-managed docgen command so existing projects gain the
+  # `route-catalog` subcommand that emits route_catalog.json for the frontend
+  # command registry generator. Idempotent: skips once the branch is present.
+  local file="$target/cmd/docgen/main.go"
+  [[ -f "$file" ]] || return 0
+  if grep -Fq 'os.Args[1] == "route-catalog"' "$file"; then
+    return 0
+  fi
+  # The subcommand needs httpapi and bootstrap; bail out if the file does not
+  # match the known scaffold shape so we never corrupt a customized docgen.
+  grep -Fq 'server-kit/go/registry"' "$file" || return 0
+  grep -Fq '/internal/bootstrap"' "$file" || return 0
+  # Anchor after cfg is built so the branch can reuse cfg.Routes — accessor
+  # agnostic, independent of which route accessor the app's bootstrap exposes.
+  grep -Fq $'\tspec := Generate(cfg)' "$file" || return 0
+
+  local before
+  before="$(mktemp)"
+  cp "$file" "$before"
+
+  if ! grep -Fq 'server-kit/go/httpapi"' "$file"; then
+    PATCH_SEARCH=$'\t"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"' \
+    PATCH_REPLACE=$'\t"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"\n\t"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"' \
+      perl -0pi -e 's/\Q$ENV{PATCH_SEARCH}\E/$ENV{PATCH_REPLACE}/' "$file"
+  fi
+
+  PATCH_SEARCH=$'\tspec := Generate(cfg)' \
+  PATCH_REPLACE=$'\t// `docgen route-catalog` emits the client route catalog JSON (consumed by\n\t// tooling/scripts/generate_frontend_commands.mjs) instead of the OpenAPI\n\t// spec. It reuses cfg.Routes so it stays correct regardless of which route\n\t// accessor the app'"'"'s bootstrap exposes.\n\tif len(os.Args) > 1 && os.Args[1] == "route-catalog" {\n\t\tdata, err := httpapi.MarshalRouteCatalog(cfg.Routes)\n\t\tif err != nil {\n\t\t\tfmt.Fprintf(os.Stderr, "Error encoding route catalog: %v\\n", err)\n\t\t\tos.Exit(1)\n\t\t}\n\t\tif _, err := os.Stdout.Write(data); err != nil {\n\t\t\tfmt.Fprintf(os.Stderr, "Error writing route catalog: %v\\n", err)\n\t\t\tos.Exit(1)\n\t\t}\n\t\treturn\n\t}\n\n\tspec := Generate(cfg)' \
+    perl -0pi -e 's/\Q$ENV{PATCH_SEARCH}\E/$ENV{PATCH_REPLACE}/' "$file"
+
+  if ! cmp -s "$before" "$file"; then
+    log_patch "docgen route-catalog subcommand: ${file#$target/}"
+  fi
+  rm -f "$before"
+}
+
 patch_native_tauri_startup_expect() {
   local file="$target/native/src-tauri/src/lib.rs"
   [[ -f "$file" ]] || return 0
@@ -1207,6 +1244,7 @@ patch_openapi_dockerfile
 patch_apidocs_server
 patch_docgen_pointer_helper
 patch_docgen_named_schema_refs
+patch_docgen_route_catalog
 patch_native_tauri_startup_expect
 patch_go_dependency_manifests
 patch_server_binary_path

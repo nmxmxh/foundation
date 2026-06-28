@@ -580,7 +580,7 @@ func runServiceBackedLoadMixed(
 	ttl := serviceBackedLoadDurationEnv("SERVICE_BACKED_LOAD_RESEARCH_REDIS_TTL", 2*time.Minute)
 	setup := time.Since(setupStart)
 	workers := serviceBackedLoadDBWorkers(step, batchSize, maxWorkers, poolOptions)
-	stats, err := runServiceBackedLoadBatches(ctx, step, batchSize, workers, func(ctx context.Context, _ int, start, count int) error {
+	stats, err := runServiceBackedLoadBatches(ctx, step, batchSize, workers, func(ctx context.Context, workerID int, start, count int) error {
 		if err := db.SendBatch(ctx, func(batch *pgx.Batch) {
 			queueStateStoreBatch(batch, orgID, start, count)
 		}, consumeBatchExecs(count)); err != nil {
@@ -595,7 +595,8 @@ func runServiceBackedLoadMixed(
 			return fmt.Errorf("redis SetGetMany returned %d keys, want %d", len(got), len(keys))
 		}
 		records := serviceBackedLoadHermesRecords(orgID, start, count)
-		result, err := hotplane.ApplyRecords(ctx, "svc_load_mixed", "service-backed-mixed", uint64(start+1), records)
+		sourcePrefix := fmt.Sprintf("service-backed-mixed-%d", workerID)
+		result, err := hotplane.ApplyRecords(ctx, "svc_load_mixed", sourcePrefix, uint64(start+1), records)
 		if err != nil {
 			return err
 		}
@@ -1824,7 +1825,7 @@ func serviceBackedLoadHermesBatchEnvelope(orgID string, startID, count int) (eve
 		id := startID + i
 		mutations = append(mutations, &foundationpb.RecordMutation{
 			Operation:      foundationpb.ProjectionOperation_PROJECTION_OPERATION_UPSERT,
-			SourceId:       fmt.Sprintf("service-backed-load-pipeline:%09d", id),
+			SourceId:       fmt.Sprintf("service-backed-load-pipeline-%d:%09d", startID, id),
 			Version:        uint64(id + 1),
 			Domain:         "signals",
 			Collection:     "pressure",

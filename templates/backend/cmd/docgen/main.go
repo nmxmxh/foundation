@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -805,6 +806,23 @@ func main() {
 			"/v1/status",
 		},
 		Routes: bootstrap.RouteCatalog(),
+	}
+
+	// `docgen route-catalog` emits the client route catalog JSON (consumed by
+	// tooling/scripts/generate_frontend_commands.mjs) instead of the OpenAPI
+	// spec. It reuses cfg.Routes so it stays correct regardless of which route
+	// accessor the app's bootstrap exposes.
+	if len(os.Args) > 1 && os.Args[1] == "route-catalog" {
+		data, err := httpapi.MarshalRouteCatalog(cfg.Routes)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error encoding route catalog: %v\n", err)
+			os.Exit(1)
+		}
+		if _, err := os.Stdout.Write(data); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing route catalog: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	spec := Generate(cfg)

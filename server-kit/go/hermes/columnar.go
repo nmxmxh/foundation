@@ -501,10 +501,12 @@ func buildDataFieldVector(field string, entries []recordEntry, rows int) (Vector
 		for i, entry := range entries {
 			if val, ok := entry.record.Data.Get(field); ok {
 				if k, idxVal, ok := val.ScalarIndex(); ok && (k == 'i' || k == 'u') {
-					if parsed, err2 := strconv.ParseInt(idxVal, 10, 64); err2 == nil {
-						iv.values[i] = parsed
-						iv.validity.set(i)
+					parsed, err2 := strconv.ParseInt(idxVal, 10, 64)
+					if err2 != nil {
+						return nil, fmt.Errorf("hermes: failed to parse integer field %q value %q: %w", field, idxVal, err2)
 					}
+					iv.values[i] = parsed
+					iv.validity.set(i)
 				}
 			}
 		}
@@ -514,10 +516,12 @@ func buildDataFieldVector(field string, entries []recordEntry, rows int) (Vector
 		for i, entry := range entries {
 			if val, ok := entry.record.Data.Get(field); ok {
 				if k, idxVal, ok := val.ScalarIndex(); ok && k == 'f' {
-					if parsed, err2 := strconv.ParseFloat(idxVal, 64); err2 == nil {
-						fv.values[i] = parsed
-						fv.validity.set(i)
+					parsed, err2 := strconv.ParseFloat(idxVal, 64)
+					if err2 != nil {
+						return nil, fmt.Errorf("hermes: failed to parse float field %q value %q: %w", field, idxVal, err2)
 					}
+					fv.values[i] = parsed
+					fv.validity.set(i)
 				}
 			}
 		}

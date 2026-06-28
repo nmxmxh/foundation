@@ -7,7 +7,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
 
-const maxIndexDeltaDepth = 4096
+const maxIndexDeltaDepth = 512
 
 var emptyIndex = &indexSnapshot{adds: emptyRecordKeys}
 

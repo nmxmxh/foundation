@@ -1277,7 +1277,7 @@ const Style = {
       }
     }
   `,
-  FloatingPanel: styled(motion.div)<{
+  FloatingPanelContainer: styled.div<{
     $width: number;
     $maxHeight: number;
     $placement: FloatingPlacement;
@@ -1289,13 +1289,19 @@ const Style = {
     left: ${({ $left }) => `${$left}px`};
     width: ${({ $width }) => `${$width}px`};
     max-height: ${({ $maxHeight }) => `${$maxHeight}px`};
+    z-index: ${({ theme }) => theme.zIndex.dropdown};
+    transform: ${({ $placement }) => ($placement === "top" ? "translateY(-100%)" : "none")};
+    display: flex;
+    flex-direction: column;
+  `,
+  FloatingPanel: styled(motion.div)`
+    width: 100%;
+    max-height: inherit;
     background: ${({ theme }) => theme.color.bgSurface};
     border: 1px solid ${({ theme }) => theme.color.borderStrong};
     border-radius: ${({ theme }) => theme.radius.md};
     box-shadow: ${({ theme }) => theme.shadow.floating};
-    z-index: ${({ theme }) => theme.zIndex.dropdown};
     overflow: hidden;
-    transform: ${({ $placement }) => ($placement === "top" ? "translateY(-100%)" : "none")};
   `,
   DropdownTriggerButton: styled(motion.button)<{ $placeholder: boolean }>`
     ${clickableReset}
@@ -1349,7 +1355,7 @@ const Style = {
     font-size: ${({ theme }) => theme.typography.captionSize};
     line-height: ${({ theme }) => theme.typography.lineHeightBody};
   `,
-  DropdownOptionButton: styled.button<{ $selected: boolean }>`
+  DropdownOptionButton: styled.button<{ $selected: boolean; $active?: boolean }>`
     ${clickableReset}
     ${focusRing}
     width: 100%;
@@ -1359,7 +1365,7 @@ const Style = {
     padding: 10px 12px;
     border-radius: ${({ theme }) => theme.radius.sm};
     cursor: pointer;
-    background: ${({ theme, $selected }) => ($selected ? theme.color.bgSurfaceAlt : "transparent")};
+    background: ${({ theme, $selected, $active }) => ($selected || $active ? theme.color.bgSurfaceAlt : "transparent")};
     color: ${({ theme }) => theme.color.textPrimary};
     transition: background-color 160ms ${enterCurve}, color 160ms ${enterCurve};
 
@@ -1732,6 +1738,7 @@ const {
   CalendarWeekday,
   CalendarDay,
   FloatingPanel,
+  FloatingPanelContainer,
   DropdownTriggerButton,
   DropdownTriggerValue,
   DropdownList,
@@ -1857,6 +1864,84 @@ const useDismissLayer = (refs: ReadonlyArray<{ current: HTMLElement | null }>, e
       document.removeEventListener("keydown", onKey);
     };
   }, [enabled, onDismiss, refs]);
+};
+
+const useFocusTrap = (ref: RefObject<HTMLElement | null>, enabled: boolean) => {
+  useEffect(() => {
+    if (!enabled || !isBrowser() || !ref.current) {
+      return;
+    }
+
+    const previousActiveElement = document.activeElement as HTMLElement | null;
+    const element = ref.current;
+
+    const focusableSelectors = [
+      "a[href]",
+      "area[href]",
+      "input:not([disabled])",
+      "select:not([disabled])",
+      "textarea:not([disabled])",
+      "button:not([disabled])",
+      "iframe",
+      "object",
+      "embed",
+      "[contenteditable]",
+      '[tabindex]:not([tabindex^="-"])',
+    ];
+
+    const getFocusableElements = (): HTMLElement[] => {
+      if (!element) return [];
+      const list = Array.from(element.querySelectorAll<HTMLElement>(focusableSelectors.join(",")));
+      return list.filter((el) => {
+        const style = window.getComputedStyle(el);
+        return el.tabIndex >= 0 && style.display !== "none" && style.visibility !== "hidden";
+      });
+    };
+
+    const focusables = getFocusableElements();
+    if (focusables.length > 0) {
+      focusables[0].focus();
+    } else {
+      element.focus();
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const currentFocusables = getFocusableElements();
+      if (currentFocusables.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = currentFocusables[0];
+      const last = currentFocusables[currentFocusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (event.shiftKey) {
+        if (active === first || (active && !element.contains(active))) {
+          last.focus();
+          event.preventDefault();
+        }
+      } else {
+        if (active === last || (active && !element.contains(active))) {
+          first.focus();
+          event.preventDefault();
+        }
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      if (previousActiveElement && typeof previousActiveElement.focus === "function") {
+        previousActiveElement.focus();
+      }
+    };
+  }, [enabled, ref]);
 };
 
 const useFloatingPosition = (
@@ -2456,11 +2541,17 @@ export const MinimalDropdown = <T extends string>({
   const selectedOption = options.find((option) => option.value === value);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const position = useFloatingPosition(triggerRef, open, panelMaxHeight, panelMinWidth, matchTriggerWidth);
+  // Anchor the floating panel to the visible field frame, not the inner trigger
+  // button (which sits inside the frame's padding). This makes the panel span
+  // the select's full width and align to its bottom edge instead of being inset.
+  const position = useFloatingPosition(frameRef, open, panelMaxHeight, panelMinWidth, matchTriggerWidth);
   const { popVariants } = useMinimalMotion();
-  const dismissRefs = useMemo(() => [triggerRef, panelRef], []);
+  const dismissRefs = useMemo(() => [frameRef, panelRef], []);
 
   useDismissLayer(dismissRefs, open, () => setOpen(false));
 
@@ -2472,12 +2563,168 @@ export const MinimalDropdown = <T extends string>({
     return options.filter((option) => formatSearchableText(option).includes(query));
   }, [options, search, showSearch]);
 
+  const getNextFocusableIndex = (
+    currentIndex: number,
+    direction: "next" | "prev",
+    optionsList: readonly MinimalOption<T>[],
+  ) => {
+    const len = optionsList.length;
+    if (len === 0) return -1;
+    const step = direction === "next" ? 1 : -1;
+    let index = currentIndex;
+
+    for (let i = 0; i < len; i++) {
+      index = (index + step + len) % len;
+      if (!optionsList[index].disabled) {
+        return index;
+      }
+    }
+    return -1;
+  };
+
+  useEffect(() => {
+    if (open) {
+      if (search) {
+        const firstEnabled = filteredOptions.findIndex((opt) => !opt.disabled);
+        setHighlightedIndex(firstEnabled >= 0 ? firstEnabled : 0);
+      } else {
+        const idx = filteredOptions.findIndex((option) => option.value === value);
+        if (idx >= 0) {
+          setHighlightedIndex(idx);
+        } else {
+          const firstEnabled = filteredOptions.findIndex((opt) => !opt.disabled);
+          setHighlightedIndex(firstEnabled >= 0 ? firstEnabled : 0);
+        }
+      }
+    } else {
+      setHighlightedIndex(-1);
+    }
+  }, [open, search, filteredOptions, value]);
+
+  useEffect(() => {
+    if (open && showSearch) {
+      const timer = setTimeout(() => {
+        searchInputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [open, showSearch]);
+
+  const prevOpen = useRef(open);
+  useEffect(() => {
+    if (!open && prevOpen.current) {
+      triggerRef.current?.focus();
+    }
+    prevOpen.current = open;
+  }, [open]);
+
+  useEffect(() => {
+    if (highlightedIndex >= 0 && panelRef.current) {
+      const activeEl = panelRef.current.querySelector(
+        `[id="${listboxId}-option-${highlightedIndex}"]`
+      );
+      if (activeEl) {
+        activeEl.scrollIntoView({ block: "nearest" });
+      }
+    }
+  }, [highlightedIndex, listboxId]);
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return;
+
+    const key = event.key;
+    if (!open) {
+      if (key === "Enter" || key === " " || key === "ArrowDown" || key === "ArrowUp") {
+        event.preventDefault();
+        setOpen(true);
+      }
+      return;
+    }
+
+    switch (key) {
+      case "ArrowDown": {
+        event.preventDefault();
+        const nextIndex = getNextFocusableIndex(highlightedIndex, "next", filteredOptions);
+        if (nextIndex >= 0) {
+          setHighlightedIndex(nextIndex);
+        }
+        break;
+      }
+      case "ArrowUp": {
+        event.preventDefault();
+        const prevIndex = getNextFocusableIndex(highlightedIndex, "prev", filteredOptions);
+        if (prevIndex >= 0) {
+          setHighlightedIndex(prevIndex);
+        }
+        break;
+      }
+      case "Enter": {
+        event.preventDefault();
+        const option = filteredOptions[highlightedIndex];
+        if (option && !option.disabled) {
+          onChange(option.value);
+          setOpen(false);
+          setSearch("");
+        }
+        break;
+      }
+      case " ": {
+        const isSearchFocused = document.activeElement === searchInputRef.current;
+        if (!isSearchFocused) {
+          event.preventDefault();
+          const option = filteredOptions[highlightedIndex];
+          if (option && !option.disabled) {
+            onChange(option.value);
+            setOpen(false);
+            setSearch("");
+          }
+        }
+        break;
+      }
+      case "Escape": {
+        event.preventDefault();
+        setOpen(false);
+        setSearch("");
+        break;
+      }
+      case "Tab": {
+        setOpen(false);
+        setSearch("");
+        break;
+      }
+      case "Home": {
+        event.preventDefault();
+        const firstEnabled = filteredOptions.findIndex((opt) => !opt.disabled);
+        if (firstEnabled >= 0) {
+          setHighlightedIndex(firstEnabled);
+        }
+        break;
+      }
+      case "End": {
+        event.preventDefault();
+        let lastEnabled = -1;
+        for (let i = filteredOptions.length - 1; i >= 0; i--) {
+          if (!filteredOptions[i].disabled) {
+            lastEnabled = i;
+            break;
+          }
+        }
+        if (lastEnabled >= 0) {
+          setHighlightedIndex(lastEnabled);
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  };
+
   const valueContent = renderValue ? renderValue(selectedOption) : selectedOption?.label ?? placeholder;
 
   return (
-    <FieldShell data-minimal="Dropdown" {...props}>
+    <FieldShell data-minimal="Dropdown" {...props} onKeyDown={handleKeyDown}>
       {label ? <FieldLabel htmlFor={triggerId}>{label}</FieldLabel> : null}
-      <InputFrame $state={error ? "invalid" : "default"} $size="md">
+      <InputFrame ref={frameRef} $state={error ? "invalid" : "default"} $size="md">
         <DropdownTriggerButton
           type="button"
           id={triggerId}
@@ -2485,6 +2732,11 @@ export const MinimalDropdown = <T extends string>({
           onClick={() => !disabled && setOpen((current) => !current)}
           disabled={disabled}
           $placeholder={!selectedOption}
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={open ? listboxId : undefined}
+          aria-haspopup="listbox"
+          aria-activedescendant={open && highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined}
         >
           <DropdownTriggerValue>{valueContent}</DropdownTriggerValue>
           <Chevron open={open} />
@@ -2493,66 +2745,82 @@ export const MinimalDropdown = <T extends string>({
       {error ? <FieldMessage $tone="danger">{error}</FieldMessage> : hint ? <FieldMessage $tone="neutral">{hint}</FieldMessage> : null}
       {open && position && isBrowser()
         ? createPortal(
-            <FloatingPanel
-              ref={panelRef}
-              id={listboxId}
-              role="listbox"
-              aria-labelledby={label ? triggerId : undefined}
+            <FloatingPanelContainer
               $width={position.width}
               $maxHeight={position.maxHeight}
               $placement={position.placement}
               $top={position.top}
               $left={position.left}
-              variants={popVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
             >
-              {showSearch ? (
-                <DropdownSearchWrap>
-                  <DropdownSearch
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                    placeholder={searchPlaceholder}
-                    aria-label="Filter dropdown options"
-                  />
-                </DropdownSearchWrap>
-              ) : null}
-              <DropdownList>
-                {filteredOptions.length === 0 ? (
-                  <DropdownEmptyState>No matches found.</DropdownEmptyState>
-                ) : (
-                  filteredOptions.map((option) => (
-                    <DropdownOptionButton
-                      type="button"
-                      key={option.value}
-                      role="option"
-                      aria-selected={option.value === value}
-                      $selected={option.value === value}
-                      disabled={option.disabled}
-                      onClick={() => {
-                        if (option.disabled) {
-                          return;
-                        }
-                        onChange(option.value);
-                        setOpen(false);
-                        setSearch("");
-                      }}
-                    >
-                      <DropdownOptionRow>
-                        <span>{option.label}</span>
-                        {option.meta ? <span>{option.meta}</span> : null}
-                      </DropdownOptionRow>
-                      {option.description ? (
-                        <FieldMessage as="span" $tone="neutral">
-                          {option.description}
-                        </FieldMessage>
-                      ) : null}
-                    </DropdownOptionButton>
-                  ))
-                )}
-              </DropdownList>
-            </FloatingPanel>,
+              <FloatingPanel
+                ref={panelRef}
+                id={listboxId}
+                role="listbox"
+                aria-labelledby={label ? triggerId : undefined}
+                variants={popVariants}
+                initial="initial"
+                animate="animate"
+                exit="exit"
+              >
+                {showSearch ? (
+                  <DropdownSearchWrap>
+                    <DropdownSearch
+                      ref={searchInputRef}
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder={searchPlaceholder}
+                      aria-label="Filter dropdown options"
+                      role="combobox"
+                      aria-expanded={open}
+                      aria-controls={listboxId}
+                      aria-activedescendant={open && highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined}
+                    />
+                  </DropdownSearchWrap>
+                ) : null}
+                <DropdownList>
+                  {filteredOptions.length === 0 ? (
+                    <DropdownEmptyState>No matches found.</DropdownEmptyState>
+                  ) : (
+                    filteredOptions.map((option, idx) => (
+                      <DropdownOptionButton
+                        type="button"
+                        id={`${listboxId}-option-${idx}`}
+                        key={option.value}
+                        role="option"
+                        aria-selected={option.value === value}
+                        $selected={option.value === value}
+                        $active={idx === highlightedIndex}
+                        disabled={option.disabled}
+                        tabIndex={-1}
+                        onMouseEnter={() => {
+                          if (!option.disabled) {
+                            setHighlightedIndex(idx);
+                          }
+                        }}
+                        onClick={() => {
+                          if (option.disabled) {
+                            return;
+                          }
+                          onChange(option.value);
+                          setOpen(false);
+                          setSearch("");
+                        }}
+                      >
+                        <DropdownOptionRow>
+                          <span>{option.label}</span>
+                          {option.meta ? <span>{option.meta}</span> : null}
+                        </DropdownOptionRow>
+                        {option.description ? (
+                          <FieldMessage as="span" $tone="neutral">
+                            {option.description}
+                          </FieldMessage>
+                        ) : null}
+                      </DropdownOptionButton>
+                    ))
+                  )}
+                </DropdownList>
+              </FloatingPanel>
+            </FloatingPanelContainer>,
             document.body
           )
         : null}
@@ -2902,6 +3170,86 @@ export const MinimalCalendar = ({
     return weekdayFormatter.format(base);
   });
 
+  const [focusedDate, setFocusedDate] = useState<Date>(
+    () => selectedDate ?? new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1)
+  );
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (selectedDate) {
+      setFocusedDate(selectedDate);
+    }
+  }, [selectedDate]);
+
+  const adjustMonthForFocusedDate = (newFocusedDate: Date) => {
+    setFocusedDate(newFocusedDate);
+    if (
+      newFocusedDate.getMonth() !== visibleMonth.getMonth() ||
+      newFocusedDate.getFullYear() !== visibleMonth.getFullYear()
+    ) {
+      const nextMonth = new Date(newFocusedDate.getFullYear(), newFocusedDate.getMonth(), 1);
+      updateMonth(nextMonth);
+    }
+  };
+
+  useEffect(() => {
+    if (
+      focusedDate.getMonth() !== visibleMonth.getMonth() ||
+      focusedDate.getFullYear() !== visibleMonth.getFullYear()
+    ) {
+      setFocusedDate(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1));
+    }
+  }, [visibleMonth]);
+
+  useEffect(() => {
+    if (!gridRef.current) return;
+    const active = document.activeElement;
+    if (gridRef.current.contains(active)) {
+      const targetBtn = gridRef.current.querySelector<HTMLButtonElement>(
+        `[data-date="${focusedDate.toISOString()}"]`
+      );
+      targetBtn?.focus();
+    }
+  }, [focusedDate]);
+
+  const handleDayKeyDown = (day: Date, event: React.KeyboardEvent<HTMLButtonElement>) => {
+    let nextDate: Date | null = null;
+    switch (event.key) {
+      case "ArrowLeft":
+        nextDate = new Date(day.getFullYear(), day.getMonth(), day.getDate() - 1);
+        break;
+      case "ArrowRight":
+        nextDate = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+        break;
+      case "ArrowUp":
+        nextDate = new Date(day.getFullYear(), day.getMonth(), day.getDate() - 7);
+        break;
+      case "ArrowDown":
+        nextDate = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 7);
+        break;
+      case "PageUp":
+        nextDate = new Date(day.getFullYear(), day.getMonth() - 1, day.getDate());
+        break;
+      case "PageDown":
+        nextDate = new Date(day.getFullYear(), day.getMonth() + 1, day.getDate());
+        break;
+      case "Home":
+        nextDate = startOfWeek(day, weekStartsOn);
+        break;
+      case "End":
+        const start = startOfWeek(day, weekStartsOn);
+        nextDate = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+        break;
+      default:
+        return;
+    }
+
+    if (nextDate) {
+      event.preventDefault();
+      adjustMonthForFocusedDate(nextDate);
+    }
+  };
+
   const updateMonth = (next: Date) => {
     if (!externalMonth) {
       setInternalMonth(next);
@@ -2920,20 +3268,27 @@ export const MinimalCalendar = ({
           ›
         </CalendarNavButton>
       </CalendarHeader>
-      <CalendarGrid>
+      <CalendarGrid ref={gridRef}>
         {weekDays.map((day) => (
           <CalendarWeekday key={day}>{day}</CalendarWeekday>
         ))}
         {days.map((day) => {
           const selected = sameDay(selectedDate, day);
           const currentMonth = day.getMonth() === visibleMonth.getMonth();
+          const isFocused = sameDay(focusedDate, day);
           return (
             <CalendarDay
               key={day.toISOString()}
+              data-date={day.toISOString()}
               type="button"
               $selected={selected}
               $currentMonth={currentMonth}
-              onClick={() => onChange?.(day)}
+              tabIndex={isFocused ? 0 : -1}
+              onKeyDown={(event) => handleDayKeyDown(day, event)}
+              onClick={() => {
+                setFocusedDate(day);
+                onChange?.(day);
+              }}
             >
               <span>{day.getDate()}</span>
               {renderDayContent ? renderDayContent(day, selected, currentMonth) : null}
@@ -3065,6 +3420,7 @@ export const MinimalActionModal = ({
   const dismissRefs = useMemo(() => [modalRef], []);
 
   useDismissLayer(dismissRefs, open, onClose);
+  useFocusTrap(modalRef, open);
 
   useEffect(() => {
     if (!open || !isBrowser()) {
@@ -3111,6 +3467,7 @@ export const MinimalActionModal = ({
         $mobileSheet={mobileSheet}
         role="dialog"
         aria-modal="true"
+        tabIndex={-1}
         style={{
           "--minimal-modal-max-width": maxWidth,
           "--minimal-modal-max-height": maxHeight,

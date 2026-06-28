@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Transition, Variants, useReducedMotion } from "framer-motion";
 
 import { minimalBaseTheme, useMinimalTheme } from "./theme";
@@ -78,15 +79,18 @@ export const useMinimalMotion = () => {
   const theme = useMinimalTheme();
   const reducedMotion = Boolean(useReducedMotion());
 
-  return {
-    reducedMotion,
-    micro: createMicroTransition(reducedMotion, theme),
-    standard: createStandardTransition(reducedMotion, theme),
-    spring: createSpringTransition(reducedMotion, theme),
-    fadeVariants: createFadeVariants(reducedMotion, theme),
-    popVariants: createPopVariants(reducedMotion, theme),
-    slideUpVariants: createSlideUpVariants(reducedMotion, theme),
-    tooltipVariants: createTooltipVariants(reducedMotion, theme),
-    pageVariants: createPageTransitionVariants(reducedMotion, theme),
-  };
+  return useMemo(
+    () => ({
+      reducedMotion,
+      micro: createMicroTransition(reducedMotion, theme),
+      standard: createStandardTransition(reducedMotion, theme),
+      spring: createSpringTransition(reducedMotion, theme),
+      fadeVariants: createFadeVariants(reducedMotion, theme),
+      popVariants: createPopVariants(reducedMotion, theme),
+      slideUpVariants: createSlideUpVariants(reducedMotion, theme),
+      tooltipVariants: createTooltipVariants(reducedMotion, theme),
+      pageVariants: createPageTransitionVariants(reducedMotion, theme),
+    }),
+    [reducedMotion, theme]
+  );
 };

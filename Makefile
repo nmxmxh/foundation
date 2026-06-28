@@ -1,5 +1,5 @@
 .PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history bench-simd lint verify docker-up docker-down migrate-up help \
-	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator \
+	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator \
 	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
 	check-doc-references \
@@ -15,6 +15,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-migration-seed-policy \
 	check-lifecycle-contract-generator \
 	check-frontend-prototype-generator \
+	check-frontend-commands-generator \
 	check-contract-drift \
 	check-doc-references \
 	check-agent-contract \
@@ -62,6 +63,7 @@ generate-contracts:
 	@if [ -x runtime-transport/scripts/generate_bindings.sh ]; then runtime-transport/scripts/generate_bindings.sh; fi
 	@if [ -x runtime-sdk/scripts/generate_system_bindings.sh ]; then runtime-sdk/scripts/generate_system_bindings.sh; fi
 	@node tooling/scripts/generate_runtime_contract_manifest.mjs
+	@node tooling/scripts/generate_frontend_commands.mjs
 
 build: test-go test-rust frontend-build
 
@@ -186,6 +188,9 @@ check-lifecycle-contract-generator:
 
 check-frontend-prototype-generator:
 	@tests/frontend_prototype_generator_test.sh
+
+check-frontend-commands-generator:
+	@tests/frontend_commands_generator_test.sh
 
 check-contract-drift:
 	@tooling/scripts/contract_drift_check.sh .

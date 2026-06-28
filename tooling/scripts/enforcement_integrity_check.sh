@@ -41,7 +41,8 @@ default_paths() {
     tests/init_project_test.sh \
     tests/update_project_test.sh \
     tests/migration_seed_policy_test.sh \
-    tests/lifecycle_contract_generator_test.sh
+    tests/lifecycle_contract_generator_test.sh \
+    tests/frontend_commands_generator_test.sh
   find "$target/tooling/scripts" -maxdepth 1 -type f | while IFS= read -r file; do
     printf '%s\n' "${file#$target/}"
   done

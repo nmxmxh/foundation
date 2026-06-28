@@ -426,6 +426,7 @@ export const createCommandBus = (options: CommandBusOptions) => {
   };
 };
 
+export * from "./appRuntime";
 export * from "./binaryEnvelope";
 export * from "./compression";
 export * from "./http";
