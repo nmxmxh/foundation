@@ -1,0 +1,17 @@
+{
+  "name": "@ovasabi/cli",
+  "version": "0.0.1",
+  "description": "Ovasabi Foundation project initializer and updater.",
+  "bin": {
+    "ovasabi": "bin/ovasabi.js"
+  },
+  "files": [
+    "bin/",
+    "go.mod",
+    "main.go"
+  ],
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  }
+}

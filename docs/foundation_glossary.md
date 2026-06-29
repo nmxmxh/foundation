@@ -38,9 +38,11 @@ pre-answered questions without scanning multiple files.
 | **Foundation Project** | A specific application generated from Foundation templates (e.g., Trader, Civic, Global). | `AGENTS.md` |
 | **Foundation Reference** | The `/foundation` directory inside a generated project — a local copy/reference to Core modules. Read-only. | `AGENTS.md` |
 | **Foundation Template** | The skeletal structure in `templates/` used to bootstrap new projects via `init-project.sh`. | `AGENTS.md` |
+| **Ovasabi CLI** | Planned distribution CLI exposed as `@ovasabi/cli`; wraps scaffold init/update, package registry setup, license verification, agent config generation, and baseline checks. | `foundation_distribution.md` |
+| **Agent config bundle** | Generated developer-environment files (`AGENTS.md`, `.cursorrules`, `.clauderules`, `CLAUDE.md`, `.agents/*`) that make AI coding tools follow Foundation ownership, read-order, and evidence rules. | `foundation_distribution.md` |
 | **Frontend-kit** | `@ovasabi/frontend-kit` — operational frontend utilities: IndexedDB storage, metadata, runtime artifacts, transfer progress, and store helpers. | `foundation_guide.md` |
 | **Graceful signaler** | `server-kit/go/graceful` — consistently formats error and success streams into conforming envelopes, with context cancellation awareness. | `foundation_guide.md` |
-| **Hermes** | `server-kit/go/hermes` — bounded, node-local projection read cache. Not the source of truth. Falls back to Postgres when stale. | `hermes_hotplane.md` |
+| **Hermes** | `server-kit/go/hermes` — bounded, node-local projection read cache. Not the source of truth. Falls back to Postgres when stale. **CRITICAL WARNING**: Hermes is a stale-read projection and must NEVER be used for writes, transactional integrity, or financial reconciliation. | `hermes_hotplane.md` |
 | **Hotplane** | The Hermes node-local projection layer: bounded memory, freshness contracts, rebuild policies, and degradation fallback. | `hermes_hotplane.md` |
 | **httpapi** | `server-kit/go/httpapi` — HTTP route generation from event types, transfer routes, and the route catalog projection for frontend command generation. | `frontend_command_registry.md` |
 | **Idempotency key** | Token carried on mutating commands ensuring retries and duplicate deliveries do not duplicate durable side effects. | `foundation_nervous_system.md` |
@@ -70,6 +72,7 @@ pre-answered questions without scanning multiple files.
 | **Runtime-sdk** | WASM/Rust/Go runtime kernel with a 4KB control-buffer contract for high-performance JS/Rust communication. | `foundation_guide.md` |
 | **Runtime-transport** | `@ovasabi/runtime-transport` — universal client wire: command bus, envelope creation, WebSocket/HTTP fallback, route registry, and metadata stores. | `foundation_guide.md` |
 | **Scaffold manifest** | `templates/scaffold.manifest.tsv` — the contract declaring which files are managed, their destination, profile, feature gate, and ownership mode. | `scaffold_manifest.md` |
+| **Signed license file** | Offline `ovasabi.lic` JWT validated with Ovasabi's public key for air-gapped enterprise package/update authorization. | `foundation_distribution.md` |
 | **Server-kit** | Go backend platform primitives: the largest Foundation module containing 50+ packages for events, workers, database, resilience, auth, and more. | `foundation_guide.md` |
 | **Tenant isolation** | Organization scope derived from authenticated context, never from client-supplied data. Preserved through all lifecycle lanes. | `foundation_nervous_system.md` |
 | **Tracing** | `server-kit/go/tracing` — OpenTelemetry integration with correlation ID bridging and HTTP middleware for automatic span creation. | `foundation_guide.md` |
@@ -274,7 +277,7 @@ Check `templates/scaffold.manifest.tsv`. If the file has mode `overwrite` or `fo
 From authenticated context via `auth.OrgIDFromContext(ctx)`. Never from client-supplied `organization_id`. The scope must remain stable through request → worker → event → projection. See invariant #2 `TenantScopeStable`.
 
 **Q: When should I use Hermes vs direct DB?**
-Hermes is for hot operational reads where bounded staleness is acceptable (dashboards, fanout, repeated lookups). Direct DB is for durable truth, writes, and reads requiring strict consistency. Hermes falls back to DB when stale. See `hermes_hotplane.md` and `hermes_read_modes.md`.
+Hermes is for hot operational reads where bounded staleness is acceptable (dashboards, fanout, repeated lookups). Direct DB is for durable truth, writes, and reads requiring strict consistency. Hermes falls back to DB when stale. **WARNING**: Do NOT use Hermes for writes, strict transaction consistency, or financial reconciliation. Writes must go directly to the relational database. See `hermes_hotplane.md` and `hermes_read_modes.md`.
 
 **Q: What is the transfer lane for?**
 Operations with user-visible progress: uploads, downloads, exports, transcodes. Progress is ephemeral (never in the event log). Lifecycle bookends (`:requested`/`:success`/`:failed`) are durable. See `transfer_lane.md`.

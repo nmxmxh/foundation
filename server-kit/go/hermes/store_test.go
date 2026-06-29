@@ -392,6 +392,33 @@ func TestStoreRebuildUsesStreamingStateStore(t *testing.T) {
 	}
 }
 
+func TestStoreRebuildPrefersStreamingNormalizedSnapshot(t *testing.T) {
+	ctx := t.Context()
+	source := normalizedPreferenceStateStore{
+		records: []database.DomainRecord{
+			testRecord("signals", "ticks", "org_1", "tick_1", map[string]any{"bucket": 1}),
+		},
+	}
+	store := newTestStore(t, ProjectionSpec{
+		Name:          "streaming_normalized_rebuild_ticks",
+		Domain:        "signals",
+		Collection:    "ticks",
+		IndexedFields: []string{"bucket"},
+		MaxRecords:    10,
+		MaxBytes:      1 << 20,
+	})
+	result, err := store.Rebuild(ctx, "streaming_normalized_rebuild_ticks", &source, Query{OrganizationID: "org_1"})
+	if err != nil || result.Applied != 1 {
+		t.Fatalf("Rebuild() result=%+v err=%v, want 1 streamed normalized record", result, err)
+	}
+	if source.streamingCalls != 1 {
+		t.Fatalf("streaming normalized calls=%d, want 1", source.streamingCalls)
+	}
+	if source.materializedCalls != 0 {
+		t.Fatalf("materialized normalized calls=%d, want 0", source.materializedCalls)
+	}
+}
+
 func TestStoreBulkLoadReplacesSnapshotAndKeepsOldStateOnLimitError(t *testing.T) {
 	store := newTestStore(t, ProjectionSpec{
 		Name:          "bulk_ticks",
@@ -507,6 +534,27 @@ func (s streamingOnlyStateStore) EstimateCount(context.Context, string, string, 
 
 func (s streamingOnlyStateStore) DeleteRecord(context.Context, string, string, string, string) error {
 	return errors.New("not implemented")
+}
+
+type normalizedPreferenceStateStore struct {
+	streamingOnlyStateStore
+	records           []database.DomainRecord
+	streamingCalls    int
+	materializedCalls int
+}
+
+func (s *normalizedPreferenceStateStore) ForEachRecord(ctx context.Context, domain, collection, organizationID string, query database.RecordQuery, fn database.RecordVisitor) error {
+	return streamingOnlyStateStore{records: s.records}.ForEachRecord(ctx, domain, collection, organizationID, query, fn)
+}
+
+func (s *normalizedPreferenceStateStore) ForEachNormalizedRecord(ctx context.Context, domain, collection, organizationID string, query database.RecordQuery, fn database.RecordVisitor) error {
+	s.streamingCalls++
+	return streamingOnlyStateStore{records: s.records}.ForEachRecord(ctx, domain, collection, organizationID, query, fn)
+}
+
+func (s *normalizedPreferenceStateStore) ListNormalizedRecords(context.Context, string, string, string, database.RecordQuery) ([]database.DomainRecord, error) {
+	s.materializedCalls++
+	return append([]database.DomainRecord(nil), s.records...), nil
 }
 
 func TestStoreForEachViewBorrowed(t *testing.T) {

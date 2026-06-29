@@ -127,6 +127,32 @@ the repo source or check that validated the memory. If no source exists, treat
 the memory as a hypothesis and leave a review note instead of changing a
 contract silently.
 
+## Just-in-Time Context Retrieval (Context Budgets)
+
+AI agents operating in this repository must manage their context window carefully. Loading all architecture and practice documentation at once degrades attention and wastes tokens.
+
+1. **Start Small**: Always load `docs/foundation/foundation_glossary.md` (or `docs/foundation_glossary.md` in Core) first. It serves as the primary dictionary and index.
+2. **Retrieve on Demand**: Only use `view_file` to load detailed lane guides (e.g. `transfer_lane.md`, `hermes_projection.md`, `runtime_foundation.md`) when you are actively editing or verifying code in those specific packages.
+3. **Minimize File Reads**: Avoid executing massive recursive directory searches (`find` / `grep`) across the entire repository if the target file path is already indexed.
+
+## Scaffold Ownership Validation
+
+Downstream applications are initialized from the templates in `templates/` and synchronised via `scripts/update-project.sh`. To prevent local project customizations from being wiped during updates:
+
+1. **Verify Sync Mode**: Before modifying any configuration file, script, or workspace metadata, open `templates/scaffold.manifest.tsv`.
+2. **Do Not Edit Foundation Files**: If the target file is marked as `overwrite` or `force` in the manifest, it belongs to the Foundation Core. Any custom edits must be made via pull requests to the Core repository, NOT in the downstream project.
+3. **Respect Create/Always Files**: Only files marked `create` or `always` are safe for project-specific customization.
+
+## Evidence and Validation Tiers
+
+To balance production safety with rapid prototyping, agents should categorize tasks into the following **Validation Tiers**:
+
+| Tier | Scope | Required Evidence |
+| :--- | :--- | :--- |
+| **Tier 1 (Core & Critical)** | Changes touching financial math (`money/`), authorization rules (`auth/`, `policy/`), DB schema/isolation boundaries, WASM guest buffers, or crypto lanes. | Standard unit tests, static lints, and benchmark measurements (`B/op`, `ns/op`), query plans, or formal specifications (TLA+). |
+| **Tier 2 (Domain & Logic)** | Changes touching app services, background job workers, or API endpoint handlers. | Standard unit tests (aiming for >=95% coverage) and static lints (`make lint-foundation`). |
+| **Tier 3 (Presentation & Copy)** | Changes touching UI layouts, stylesheets, typography, copywriting, or translation tokens. | Conformance to static linter rules only. Benchmarks and unit tests are skipped. |
+
 ## Multi-Agent File Ownership
 
 Agents must not overwrite each other's work.

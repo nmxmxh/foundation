@@ -7,7 +7,7 @@ Owner: Platform Architecture
 
 ## Introduction: Code and Contract Verification
 
-The Ovasabi Foundation uses automated tooling, contract generation, and custom verification scripts to enforce architectural consistency across Go (backend), TypeScript (frontend), and Rust (high-performance compute/WASM). 
+The Ovasabi Foundation uses automated tooling, contract generation, and custom verification scripts to enforce architectural consistency across Go (backend), TypeScript (frontend), and Rust (high-performance compute/WASM).
 
 Rather than relying on manual code review, all architectural rules, serialization boundaries, and performance expectations are turned into repeatable checks.
 
@@ -26,22 +26,24 @@ graph TD
 To eliminate API drift across different languages, the Foundation defines all cross-boundary communication as schemas that act as compiler targets.
 
 ### 1. Protobuf (Network and Event Envelope)
-* **Format source**: `.proto` files located in [runtime-transport/protos/foundation/v1/](../runtime-transport/protos/foundation/v1/) (`envelope.proto`, `metadata.proto`, `projection.proto`, `types.proto`).
+
+* **Format source**: `.proto` files located in `runtime-transport/protos/foundation/v1/` (`envelope.proto`, `metadata.proto`, `projection.proto`, `types.proto`).
 * **Purpose**: Defines the network layout, event stream layout, tracing metadata (e.g., `CorrelationID`, `TenantID`), and progress-bearing transfer payloads.
 * **Compiler Targets**:
-  * **Go**: Compiled via `protoc-gen-go` to [runtime-transport/go/generated/](../runtime-transport/go/generated/).
-  * **TypeScript**: Compiled via `protoc` using the `ts-proto` plugin to [runtime-transport/ts/src/generated/](../runtime-transport/ts/src/generated/) with browser options optimized for minimal allocation and native interoperability.
-* **Generation command**: Running `make generate-contracts` automatically triggers [runtime-transport/scripts/generate_bindings.sh](../runtime-transport/scripts/generate_bindings.sh).
+  * **Go**: Compiled via `protoc-gen-go` to `runtime-transport/go/generated/`.
+  * **TypeScript**: Compiled via `protoc` using the `ts-proto` plugin to `runtime-transport/ts/src/generated/` with browser options optimized for minimal allocation and native interoperability.
+* **Generation command**: Running `make generate-contracts` automatically triggers `runtime-transport/scripts/generate_bindings.sh`.
 
 ### 2. Cap'n Proto (Shared-Memory WASM Buffer)
-* **Format source**: `.capnp` files located in [runtime-sdk/protocols/system/v1/](../runtime-sdk/protocols/system/v1/) (e.g., `runtime_buffer.capnp` defining the 4KB control-buffer, `runtime_shared_arena.capnp` defining WebAssembly memory layout).
+
+* **Format source**: `.capnp` files located in `runtime-sdk/protocols/system/v1/` (e.g., `runtime_buffer.capnp` defining the 4KB control-buffer, `runtime_shared_arena.capnp` defining WebAssembly memory layout).
 * **Purpose**: Defines the precise hardware-aligned byte offsets and integers for zero-copy communication between the JavaScript host and WebAssembly/Rust guests.
 * **Compiler Targets**:
-  * Because parsing dynamic schema descriptors adds runtime overhead, the Cap'n Proto schemas are compiled directly into raw static constants. 
-  * The compiler script [runtime-sdk/scripts/generate_system_bindings.sh](../runtime-sdk/scripts/generate_system_bindings.sh) uses an `awk` processor to parse the `.capnp` file constants and generate identical constant definitions in:
-    * **Rust**: [rust/crates/ovrt-core/src/generated.rs](../runtime-sdk/rust/crates/ovrt-core/src/generated.rs)
-    * **Go**: [go/runtimehost/generated/runtime_buffer_gen.go](../runtime-sdk/go/runtimehost/generated/runtime_buffer_gen.go)
-    * **TypeScript**: [ts/browser-host/src/generated/runtimeBuffer.ts](../runtime-sdk/ts/browser-host/src/generated/runtimeBuffer.ts)
+  * Because parsing dynamic schema descriptors adds runtime overhead, the Cap'n Proto schemas are compiled directly into raw static constants.
+  * The compiler script `runtime-sdk/scripts/generate_system_bindings.sh` uses an `awk` processor to parse the `.capnp` file constants and generate identical constant definitions in:
+    * **Rust**: `runtime-sdk/rust/crates/ovrt-core/src/generated.rs`
+    * **Go**: `runtime-sdk/go/runtimehost/generated/runtime_buffer_gen.go`
+    * **TypeScript**: `runtime-sdk/ts/browser-host/src/generated/runtimeBuffer.ts`
   * As a result, the JS event loop, Go WASM runner, and Rust kernel operate on the exact same physical byte slots.
 
 ---
@@ -51,8 +53,9 @@ To eliminate API drift across different languages, the Foundation defines all cr
 Beyond raw serialization compile targets, the Foundation uses automatic generators to ensure that application intent expressed in backend routes is instantly matched on the frontend.
 
 ### 1. Command & Route Registry Generator (`generate_frontend_commands.mjs`)
+
 * **Source of truth**: The Go backend registers routes via `httpapi.MarshalRouteCatalog`. This catalog contains the actual live registered paths, HTTP methods, and required permissions (view, write, admin).
-* **Process**: When `make generate-contracts` runs, the catalog is marshaled to `route_catalog.json`. The JavaScript generator [generate_frontend_commands.mjs](../tooling/scripts/generate_frontend_commands.mjs) processes this JSON.
+* **Process**: When `make generate-contracts` runs, the catalog is marshaled to `route_catalog.json`. The JavaScript generator `tooling/scripts/generate_frontend_commands.mjs` processes this JSON.
 * **Output**: Writes `frontend/src/generated/runtimeRoutes.ts` (or corresponding path). It outputs:
   * A strongly-typed `RuntimeRoute[]` catalog.
   * A helper `createAppRouteRegistry()` function.
@@ -60,14 +63,15 @@ Beyond raw serialization compile targets, the Foundation uses automatic generato
 * **Consistency Enforced**: The frontend routing and command bus (`createCommandBus`) are completely generated from the backend code. A developer cannot create an unregistered or untyped route.
 
 ### 2. Runtime Contract Manifest (`generate_runtime_contract_manifest.mjs`)
+
 * **Process**: Scans the Cap'n Proto system schemas.
-* **Output**: Generates [ts/browser-host/src/generated/runtimeContracts.ts](../runtime-sdk/ts/browser-host/src/generated/runtimeContracts.ts), mapping all schema files, IDs, and constants into a TypeScript manifest verified in the browser.
+* **Output**: Generates `runtime-sdk/ts/browser-host/src/generated/runtimeContracts.ts`, mapping all schema files, IDs, and constants into a TypeScript manifest verified in the browser.
 
 ---
 
 ## Verification Script Matrix
 
-All automated checks are run via `make lint` or specific `make check-*` targets. The source scripts live under [tooling/scripts/](../tooling/scripts/) in Core, and are copied to `scripts/checks/` in generated projects.
+All automated checks are run via `make lint` or specific `make check-*` targets. The source scripts live under `tooling/scripts/` in Core, and are copied to `scripts/checks/` in generated projects.
 
 | Check Target | Script | Type | Description |
 | --- | --- | --- | --- |
@@ -85,6 +89,7 @@ All automated checks are run via `make lint` or specific `make check-*` targets.
 | `check-contract-drift` | `contract_drift_check.sh` | Shell | Fails if compiled Go, Rust, or TS bindings are older than source `.proto` and `.capnp` schemas. |
 | `check-doc-references` | `docs_reference_check.mjs` | Node | Validates relative Markdown links in all docs and rejects non-portable absolute `file://` URLs in repo files. |
 | `check-agent-contract` | `agent_contract_check.sh` | Shell | Verifies that downstream projects retain the `agent_operating_contract.md`, evidence ledgers, and `AGENTS.md` rules. |
+| `check-ovasabi-cli` | `go test ./cmd/ovasabi`; `node cmd/ovasabi/bin/ovasabi.js --help` | Go/Node | Verifies CLI scaffold wrapping, npm entrypoint launch, and online/offline license validation primitives. |
 | `check-coverage-ratchet` | `coverage_ratchet_check.sh` | Shell | Enforces statement coverage floors per package (target >= 95% for new code) against `tooling/coverage_baseline.psv`. |
 
 ---
@@ -93,21 +98,39 @@ All automated checks are run via `make lint` or specific `make check-*` targets.
 
 When a development organization maintains multiple downstream applications (e.g., `trader_os`, `fintech_v1`), keeping them synchronized with core changes is critical to prevent code drift and framework decay.
 
+The external distribution target is the Ovasabi CLI:
+
+```bash
+npx -y @ovasabi/cli init --profile=performance --name=trader_os
+```
+
+The CLI wraps the same manifest, patch, package-boundary, license, and
+verification contracts described in [foundation_distribution.md](foundation_distribution.md).
+The shell scripts below remain the compatibility fallback and must not drift
+into a separate scaffold lifecycle.
+
 ### Fleet Synchronization (`update-all.sh`)
+
 To update the entire fleet:
+
 1. All active downstream projects are listed in `scaffolded-projects.tsv` in the parent directory of `foundation`.
-2. Running the script [scripts/update-all.sh](../scripts/update-all.sh) iterates through this file and invokes the update routine for each project:
+2. Running the script `scripts/update-all.sh` iterates through this file and invokes the update routine for each project:
+
    ```bash
    ./foundation/scripts/update-all.sh --force
    ```
 
 ### Documentation Restructuring & Cleaning
-To prevent project-level documentation drift, [scripts/update-project.sh](../scripts/update-project.sh) applies a strict synchronization policy:
-* **Directory Purge**: The script runs `rm -rf "$PROJECT_PATH/docs/foundation"` before copying the core documentation. 
+
+To prevent project-level documentation drift, `scripts/update-project.sh` applies a strict synchronization policy:
+
+* **Directory Purge**: The script runs `rm -rf "$PROJECT_PATH/docs/foundation"` before copying the core documentation.
 * **Automatic Deletion**: If a documentation file is retired in Core (such as the deletion of `handover_note_codex.md` or `inos_runtime_reuse_plan.md` in version `0.0.1`), it is automatically deleted in the target project during the next update.
 
 ### Code Patches (`scaffold_managed_patches.sh`)
-After files are copied, the foundation update runner executes [tooling/scripts/scaffold_managed_patches.sh](../tooling/scripts/scaffold_managed_patches.sh). This script applies inline code patches to target files that are project-owned or marked `create`/`force` mode:
+
+After files are copied, the foundation update runner executes `tooling/scripts/scaffold_managed_patches.sh`. This script applies inline code patches to target files that are project-owned or marked `create`/`force` mode:
+
 * Upgrading Go versions in `Dockerfile`, `.env.example`, and `docker-compose.yml` configs.
 * Correcting build targets in `docker-compose.yml` if the Dockerfile layers drift.
 * Inserting the latest AI Agent read orders and workflow requirements into the target project's `AGENTS.md` and `README.md`.

@@ -262,6 +262,42 @@ func BenchmarkHermesBulkLoad512(b *testing.B) {
 	}
 }
 
+func BenchmarkHermesRebuildNormalizedSnapshot(b *testing.B) {
+	ctx := context.Background()
+	records := benchmarkRecords(10000)
+	query := Query{OrganizationID: "org_1"}
+	b.Run("materialized", func(b *testing.B) {
+		source := materializedNormalizedSnapshotSource{records: records}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			store := newBenchStore(b)
+			result, err := store.Rebuild(ctx, "bench_ticks", source, query)
+			if err != nil {
+				b.Fatalf("Rebuild() error = %v", err)
+			}
+			if result.Applied != len(records) {
+				b.Fatalf("Rebuild() applied=%d want=%d", result.Applied, len(records))
+			}
+		}
+	})
+	b.Run("streaming", func(b *testing.B) {
+		source := streamingNormalizedSnapshotSource{materializedNormalizedSnapshotSource{records: records}}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			store := newBenchStore(b)
+			result, err := store.Rebuild(ctx, "bench_ticks", source, query)
+			if err != nil {
+				b.Fatalf("Rebuild() error = %v", err)
+			}
+			if result.Applied != len(records) {
+				b.Fatalf("Rebuild() applied=%d want=%d", result.Applied, len(records))
+			}
+		}
+	})
+}
+
 func BenchmarkHermesApplyRecordPayloads64(b *testing.B) {
 	store := newBenchStore(b)
 	ctx := context.Background()
@@ -372,25 +408,34 @@ func BenchmarkHermesDriftCheckMerkle(b *testing.B) {
 func benchmarkStore(b *testing.B, records int) *Store {
 	b.Helper()
 	store := newBenchStore(b)
-	events := make([]Event, records)
-	for i := range events {
+	seed := benchmarkRecords(records)
+	events := make([]Event, len(seed))
+	for i := range seed {
 		events[i] = Event{
 			Operation: OperationUpsert,
 			SourceID:  fmt.Sprintf("seed_%d", i),
 			Version:   uint64(i + 1),
-			Record: database.DomainRecord{
-				Domain:         "signals",
-				Collection:     "ticks",
-				OrganizationID: "org_1",
-				RecordID:       fmt.Sprintf("tick_%06d", i),
-				Data:           testRecordData(map[string]any{"bucket": i % 16, "symbol": "OVS"}),
-			},
+			Record:    seed[i],
 		}
 	}
 	if _, err := store.ApplyBatch(context.Background(), "bench_ticks", events); err != nil {
 		b.Fatalf("seed ApplyBatch() error = %v", err)
 	}
 	return store
+}
+
+func benchmarkRecords(records int) []database.DomainRecord {
+	seed := make([]database.DomainRecord, records)
+	for i := range seed {
+		seed[i] = database.DomainRecord{
+			Domain:         "signals",
+			Collection:     "ticks",
+			OrganizationID: "org_1",
+			RecordID:       fmt.Sprintf("tick_%06d", i),
+			Data:           testRecordData(map[string]any{"bucket": i % 16, "symbol": "OVS"}),
+		}
+	}
+	return seed
 }
 
 func benchmarkProjectedRuntimeStore(b *testing.B, records int) *ProjectedRuntimeStore {
@@ -421,6 +466,90 @@ func benchmarkProjectedRuntimeStore(b *testing.B, records int) *ProjectedRuntime
 		b.Fatalf("warm GetRecord() error = %v", err)
 	}
 	return store
+}
+
+type materializedNormalizedSnapshotSource struct {
+	records []database.DomainRecord
+}
+
+func (s materializedNormalizedSnapshotSource) UpsertRecord(context.Context, database.DomainRecord) (database.DomainRecord, error) {
+	return database.DomainRecord{}, fmt.Errorf("not implemented")
+}
+
+func (s materializedNormalizedSnapshotSource) GetRecord(context.Context, string, string, string, string) (database.DomainRecord, bool, error) {
+	return database.DomainRecord{}, false, fmt.Errorf("not implemented")
+}
+
+func (s materializedNormalizedSnapshotSource) ForEachRecord(context.Context, string, string, string, database.RecordQuery, database.RecordVisitor) error {
+	return fmt.Errorf("ForEachRecord must not be used for normalized rebuild benchmark")
+}
+
+func (s materializedNormalizedSnapshotSource) ListRecords(context.Context, string, string, string, database.RecordQuery) ([]database.DomainRecord, error) {
+	return nil, fmt.Errorf("ListRecords must not be used for normalized rebuild benchmark")
+}
+
+func (s materializedNormalizedSnapshotSource) CountRecords(context.Context, string, string, string, database.RecordQuery) (int64, error) {
+	return int64(len(s.records)), nil
+}
+
+func (s materializedNormalizedSnapshotSource) EstimateCount(context.Context, string, string, string) (int64, error) {
+	return int64(len(s.records)), nil
+}
+
+func (s materializedNormalizedSnapshotSource) DeleteRecord(context.Context, string, string, string, string) error {
+	return fmt.Errorf("not implemented")
+}
+
+func (s materializedNormalizedSnapshotSource) ListNormalizedRecords(ctx context.Context, domain, collection, organizationID string, query database.RecordQuery) ([]database.DomainRecord, error) {
+	out := make([]database.DomainRecord, 0, len(s.records))
+	limit := query.Limit
+	for i := range s.records {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		rec := s.records[i]
+		if !recordMatchesSnapshotQuery(rec, domain, collection, organizationID, query) {
+			continue
+		}
+		out = append(out, rec)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+type streamingNormalizedSnapshotSource struct {
+	materializedNormalizedSnapshotSource
+}
+
+func (s streamingNormalizedSnapshotSource) ForEachNormalizedRecord(ctx context.Context, domain, collection, organizationID string, query database.RecordQuery, visit database.RecordVisitor) error {
+	seen := 0
+	limit := query.Limit
+	for i := range s.records {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		rec := s.records[i]
+		if !recordMatchesSnapshotQuery(rec, domain, collection, organizationID, query) {
+			continue
+		}
+		if err := visit(rec); err != nil {
+			return err
+		}
+		seen++
+		if limit > 0 && seen >= limit {
+			return nil
+		}
+	}
+	return nil
+}
+
+func recordMatchesSnapshotQuery(rec database.DomainRecord, domain, collection, organizationID string, query database.RecordQuery) bool {
+	if rec.Domain != domain || rec.Collection != collection || rec.OrganizationID != organizationID {
+		return false
+	}
+	return rec.Data.Matches(query.Filters)
 }
 
 func benchPayloadDecoder(_ context.Context, payload RecordPayload) (database.DomainRecord, error) {

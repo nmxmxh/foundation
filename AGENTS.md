@@ -121,6 +121,22 @@ Use the foundation error taxonomy (`foundation/server-kit/go/errors`). Never pan
 
 All loops, retries, and external calls MUST have explicit bounds (timeouts, max attempts).
 
+### 7. Just-in-Time Context Retrieval (Context Budgets)
+
+To avoid context window overload, do NOT read all documentation files in bulk. Always start by reading `docs/foundation/foundation_glossary.md` to get the high-level concept index. Only load specific documentation files (like `transfer_lane.md` or `hermes_projection.md`) on-demand when modifying files that touch those specific domains.
+
+### 8. Scaffold Ownership Verification
+
+Before editing any file in the workspace, you MUST cross-reference `templates/scaffold.manifest.tsv` to check its sync mode. If a file is marked `overwrite` or `force`, it is owned by the Foundation core and must not be edited in project space, as local edits will be wiped on the next fleet update.
+
+### 9. Evidence & Validation Tiers
+
+Apply the appropriate severity validation tier to prevent over-engineering:
+
+- **Tier 1 (Core & Critical)**: Touches money/currency math (`money/`), authentication, authorization (`auth/`, `policy/`), database schema/isolation, or WASM memory buffers. Requires full benchmarks, specs, regression tests, or formal proofs.
+- **Tier 2 (Domain & Logic)**: Touches domain services, workers, or API handlers. Requires standard unit tests and static lints.
+- **Tier 3 (Presentation & Copy)**: Touches CSS layout styles, copywriting, translation tokens, or non-functional UI code. Requires local lint verification only.
+
 ## Commands
 
 ```bash

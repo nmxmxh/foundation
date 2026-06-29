@@ -181,19 +181,24 @@ Operational watch points:
    pure-upsert projector ingestion should use `ApplyRecords`; trusted full
    snapshot replacement should use `BulkLoad`, which validates scope and bounds
    but skips per-event idempotency/tombstone bookkeeping.
-3. Full-scan listing without an indexed filter pays `O(records * limit)` top-N
+3. Rebuild sources that can emit already-normalized records should implement
+   `database.StreamingNormalizedSnapshotStore`. Hermes prefers this streaming
+   normalized lane over the older `NormalizedSnapshotStore` slice-returning
+   lane, so rebuild can move one bounded record at a time into the replacement
+   partition instead of materializing the full normalized snapshot first.
+4. Full-scan listing without an indexed filter pays `O(records * limit)` top-N
    insertion work. Production list paths should declare and use an indexed
    filter field for large scopes.
-4. Index snapshots are layered and compact when delta depth crosses the bounded
+5. Index snapshots are layered and compact when delta depth crosses the bounded
    threshold. Churn-heavy projections should watch benchmark allocation and
    snapshot-depth behavior before promotion.
-5. `Stats.ApproxBytes` is a guardrail, not an exact heap meter. Configure
+6. `Stats.ApproxBytes` is a guardrail, not an exact heap meter. Configure
    `MaxBytes` below the process memory ceiling because Go map overhead,
    alignment, and GC metadata are not included in the estimate.
-6. Redis Stream tailers use non-blocking `XREADGROUP` reads. Real Redis treats
+7. Redis Stream tailers use non-blocking `XREADGROUP` reads. Real Redis treats
    `BLOCK 0` as wait forever, so service-backed tests must cover empty reads
    and pending-window behavior instead of relying only on the memory client.
-7. Tailers apply before ack. If ack fails, pending entries are retried for the
+8. Tailers apply before ack. If ack fails, pending entries are retried for the
    same consumer before new `>` messages are consumed. Cross-consumer recovery
    still requires a claim/lease policy before promotion to multi-consumer
    projector groups.

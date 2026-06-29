@@ -33,6 +33,12 @@ These are shared modules that should be versioned, tested, and rarely edited ins
 
 If logic is needed by multiple apps, move it into a platform module instead of adding root `pkg/` code to an app.
 
+Platform modules are distributed through registry package boundaries. The CLI
+contract in `foundation_distribution.md` defines the external package names,
+private registry posture, and commercial license gate; generated application
+code must still consume the same public boundaries whether the dependency comes
+from a local development reference, public registry, or private registry.
+
 ## 2. Managed Scaffold
 
 Managed scaffold is generated and synchronized from `templates/scaffold.manifest.tsv`:
@@ -44,6 +50,9 @@ Managed scaffold is generated and synchronized from `templates/scaffold.manifest
 - production-safe ingress defaults: exact CORS origins, auth-on production posture, protected operational endpoints, and CI delivery-metrics capture.
 - frontend communication package boundaries: `@ovasabi/runtime-transport`, `@ovasabi/frontend-kit`, and `@ovasabi/ui-minimal` are consumed as local packages with symlink-preserving Vite, Vitest, and TypeScript config.
 - backend runtime bindings: generated projects wire `server-kit` registry, HTTP API bridge, metadata normalization, graceful responses, security, compression, observability, WebSocket routing/metrics, bounded worker queues, Hermes runtime-store wrapping, eventlog hooks, and resilience dependency registration through startup/server code.
+- agent-native developer-environment bundle: `AGENTS.md`, `.cursorrules`,
+  `.clauderules`, `CLAUDE.md`, and `.agents/*` seed AI coding tools with the
+  local Foundation read order, scaffold ownership checks, and evidence rules.
 
 Each manifest row declares profile, feature gate, and ownership mode:
 

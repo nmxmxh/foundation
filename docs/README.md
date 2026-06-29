@@ -54,6 +54,7 @@ scaffold:
 | `hermes_hotplane.md` | Hermes node-local projection contract, scaffold wrapper, consistency modes, and operational watch points. |
 | `hermes_read_modes.md` | Stable v1 Hermes read-mode contract: `fenced`, `live`, `stale_while_revalidate`, and `postgres_required`. |
 | `foundation_architecture_contract.md` | Platform/scaffold/project ownership split and extension rules. |
+| `foundation_distribution.md` | CLI bootstrap, registry package boundaries, agent config bundle, and license verification contract. |
 | `foundation_project_standardization.md` | Project drift measurement and the `appkit` extraction plan. |
 | `tla_architecture_practices.md` | State-machine and invariant practice for high-risk changes. |
 | `specs/tla/` | Starter TLA modules for worker retry queues, projection freshness, and WebSocket backpressure. |
@@ -117,7 +118,7 @@ Non-practice reference documents live in `docs/info/`:
 
 ## Tooling And Enforcement
 
-Read [foundation_tooling.md](foundation_tooling.md) for a comprehensive guide on protocol compiler targets, automatic route generators, fleet updates, and the verification script matrix.
+Read [foundation_tooling.md](foundation_tooling.md) for a comprehensive guide on protocol compiler targets, automatic route generators, fleet updates, and the verification script matrix. Read [foundation_distribution.md](foundation_distribution.md) for the CLI, registry, agent bundle, and licensing contract that wraps those tools for external developers.
 
 Use `tooling/docs/enforcement.md` for lint strictness, communication lane
 enforcement, ownership checks, and operational gates. The source scripts live in

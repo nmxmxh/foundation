@@ -2,11 +2,18 @@
 
 Foundation project generated from {{MODULE_PATH}}.
 
+You are operating in an Ovasabi Foundation workspace.
+
 Read `AGENTS.md`, `.agents/DOMAIN_GUIDE.md`,
 `docs/foundation/agent_operating_contract.md`,
 `docs/foundation/practice_controls.md`, and
 `docs/foundation/coding_practices.md` before editing architecture-sensitive
 code.
+
+Before editing scaffolded files, inspect `templates/scaffold.manifest.tsv` and
+respect `create`, `force`, and `overwrite` ownership modes. Start context
+retrieval with `docs/foundation/foundation_glossary.md`, then load only the
+lane document needed for the files you are changing.
 
 Agent Definition of Done:
 

@@ -64,3 +64,7 @@ generated applications.
 4. Run `tooling/scripts/manifest_tool.sh validate` after edits.
 5. Treat mode changes as architectural changes. Moving a file from `create` to
    `overwrite` or `force` can overwrite app-owned behavior during updates.
+6. Agent config bundle files (`AGENTS.md`, `.cursorrules`, `.clauderules`,
+   `CLAUDE.md`, and `.agents/*`) should remain `create` unless Platform
+   Architecture explicitly accepts the risk of overwriting project-local agent
+   guidance.

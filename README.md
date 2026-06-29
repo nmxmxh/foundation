@@ -9,12 +9,14 @@ Ovasabi Foundation is a co-designed, event-driven, tenant-isolated application s
 ## Bridging the Software Deficit: The 1ns Metric
 
 In modern computing, hardware performance is bounded by physics:
+
 * **1 Nanosecond (1ns)** is one-billionth of a second ($10^{-9}$ seconds).
 * In **1ns**, light travels approximately 30 centimeters (11.8 inches)—the width of a standard motherboard.
 * A modern 3.0 GHz CPU core completes a single clock cycle in **0.33ns**. A simple CPU instruction takes less than **1ns**.
 * Accessing L1 cache takes **~0.5–1ns**; L2 cache takes **~3–4ns**; main memory (DRAM) takes **~50–100ns**.
 
 ### The Software Deficit
+
 While hardware executes billions of operations per core each second, typical software stacks suffer from a massive **software deficit**. Due to bloated framework layers, excessive heap allocations, and heavy serialization formats, a simple JSON payload parse or router dispatch often spends **50,000ns to 1,000,000ns (50µs to 1ms)**. This wastefully consumes millions of potential CPU cycles.
 
 Ovasabi Foundation is engineered to bridge this software deficit. It provides a co-designed runtime ladder, zero-allocation hotpaths, and hardware-aligned memory interfaces to keep operations in the nanosecond/microsecond domain.
@@ -23,11 +25,50 @@ Ovasabi Foundation is engineered to bridge this software deficit. It provides a 
 
 ## Core Scaffolding & Fleet Management
 
+### Ovasabi CLI
+
+Foundation now includes a baseline CLI under `cmd/ovasabi` that wraps the
+manifest-driven scaffold scripts and adds the distribution/licensing boundary
+for package-registry installs.
+
+Local development usage:
+
+```bash
+# From this repository
+cd cmd/ovasabi
+go run . init --profile=performance --name=trader_os --skip-license
+go run . update --project-dir=../../trader_os_v1 --skip-license
+go run . license verify --offline-license --license-file=ovasabi.lic --license-public-key="$(cat ovasabi.pub)"
+```
+
+NPM package skeleton usage:
+
+```bash
+# From the repository root
+node cmd/ovasabi/bin/ovasabi.js init --profile=performance --name=trader_os --foundation-dir . --skip-license
+```
+
+The intended public install command after publishing is:
+
+```bash
+npx -y @ovasabi/cli init --profile=performance --name=trader_os
+```
+
+Current status:
+
+* implemented: `init`, `update`, `license verify`, npm `bin` shim, online
+  license verification, offline Ed25519 JWT license verification;
+* pending distribution work: publish `@ovasabi/cli`, add prebuilt binaries,
+  wire signed remote template downloads, and automate registry-token setup.
+
 ### What is a Project Scaffold?
+
 A project scaffold is a blueprint template (defined in `templates/` and mapped by `templates/scaffold.manifest.tsv`) used to initialize new projects. Instead of starting from scratch, a bootstrapped project immediately receives a fully configured, production-grade folder structure, container configs, database migrations, and CI workflows.
 
 ### Managing Multiple Projects (Fleet Synchronization)
+
 In an enterprise environment, application drift and dependency decay occur rapidly across separate codebases. The Foundation core acts as the single source of truth for the platform:
+
 * **Generation**: Running `scripts/init-project.sh <path> <profile>` creates a new conforming repository.
 * **Updates**: Running `scripts/update-project.sh <path>` synchronizes an existing project. It purges retired foundation files (e.g. wiping `docs/foundation/` before copying the fresh docs) to enforce clean synchronization.
 * **Fleet Synchronization**: The script [scripts/update-all.sh](scripts/update-all.sh) reads `scaffolded-projects.tsv` in the parent directory and updates the entire fleet of projects in one invocation, applying patches and updating toolchains.
@@ -37,19 +78,24 @@ In an enterprise environment, application drift and dependency decay occur rapid
 ## Architectural Agnosticism & Zero-Copy Communication
 
 ### Decoupled Runtime Agnosticism
+
 Ovasabi Foundation is agnostic of specific CPU architectures, memory allocation models, and processing layers. Its performance rules and patterns run identically on:
+
 * **Go Backends**: Running multi-tenant database pools and concurrent worker loops.
 * **Rust Computes**: Dispatched via FFI or WebAssembly guest environments.
 * **Browser Engines**: Running asynchronous JS event loops and background worker normalizers.
 * **Native Operating Systems**: Interfacing directly with hardware APIs.
 
 ### Zero-Copy Communication
+
 To avoid CPU-bound serialization bottlenecks, the Foundation uses zero-copy and shared-memory communication:
+
 * **Cap'n Proto Buffers**: Define physical byte layouts and offsets inside the 4KB `runtime-sdk` buffer. JavaScript hosts and WASM/Rust guests read and write to the same physical memory space without serialization boundaries.
 * **SharedArrayBuffer (SAB)**: Shares raw buffers directly between browser threads and worker normalizers.
 * **Direct Frame Clients**: Go services communicate viaDirect Frame binary envelopes (`grcsvc.DirectFrame`), bypassing local socket/network round-trips.
 
 ### Runtime Native (Work in Progress)
+
 The native desktop wrapper (`runtime-native`) uses a Rust-based Tauri shell to provide local secure storage, hardware-accelerated WebGPU/Nsight compute lanes, and native window dispatch.
 
 ---
@@ -70,6 +116,7 @@ Every project generated from the Foundation scaffold receives the following capa
 ## Universal Performance Primitives
 
 The Foundation's performance primitives are not limited to simple database APIs. The exact same guidelines—such as avoiding heap allocations in hotpaths, pre-sorting indexes, utilizing Structure-of-Arrays (SoA) layout prefetching, and performing bounded SIMD loops—apply universally to:
+
 * **Financial Arithmetic**: Bounded, checked integer minor-unit money calculations (`server-kit/go/money`).
 * **Game Runtimes**: Frame-budgeted animation loops, event queue fanouts, and state-machine transitions.
 * **GPU Computing**: WebGPU/WGSL compute pass setups and CPU-to-GPU memory buffer transfers.
@@ -153,14 +200,19 @@ make test-service-backed
 From the parent directory of `foundation`:
 
 ```bash
-# Initialize a new project named my-app under the 'full' profile
+# Initialize with the CLI wrapper
+node foundation/cmd/ovasabi/bin/ovasabi.js init --profile=performance --name=my-app --foundation-dir foundation --skip-license
+
+# Compatibility fallback: initialize with shell scripts
 ./foundation/scripts/init-project.sh my-app full
 
-# Update an existing project to sync with foundation changes
+# Update an existing project to sync with Foundation changes
+node foundation/cmd/ovasabi/bin/ovasabi.js update --project-dir=/path/to/project --foundation-dir foundation --skip-license
+
+# Compatibility fallback: update with shell scripts
 ./foundation/scripts/update-project.sh /path/to/project
 ```
 
 Generated projects consume Foundation through package and module boundaries. They should not import raw source files from `foundation/*/ts/src` or copy internal Go packages into app code.
 
 Generated projects also receive Rust issue checks in `scripts/checks/`. `make check-rust` discovers app Rust, native Tauri Rust, and vendored `foundation/runtime-*` manifests, then runs fmt, Clippy safety lints, runtime-practice checks, and tests where Rust lanes are enabled.
-

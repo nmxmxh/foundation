@@ -102,6 +102,14 @@ type NormalizedSnapshotStore interface {
 	ListNormalizedRecords(context.Context, string, string, string, RecordQuery) ([]DomainRecord, error)
 }
 
+// StreamingNormalizedSnapshotStore is an optional rebuild/read-model fast lane
+// for stores that can emit already-normalized DomainRecord snapshots without
+// materializing the whole scope as a slice. Prefer this interface for large
+// Hermes rebuilds and other projection warmup paths.
+type StreamingNormalizedSnapshotStore interface {
+	ForEachNormalizedRecord(context.Context, string, string, string, RecordQuery, RecordVisitor) error
+}
+
 // RawStateStore is an optional extension for byte-preserving JSON state paths.
 type RawStateStore interface {
 	UpsertRecordJSON(context.Context, RawDomainRecord) (RawDomainRecord, error)

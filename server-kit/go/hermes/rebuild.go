@@ -35,6 +35,9 @@ func streamRebuildRecords(ctx context.Context, source database.StateStore, spec 
 	}
 	recordQuery := query.RecordQuery()
 	recordQuery.Limit = limit
+	if snapshot, ok := source.(database.StreamingNormalizedSnapshotStore); ok {
+		return snapshot.ForEachNormalizedRecord(ctx, spec.Domain, spec.Collection, orgID, recordQuery, visit)
+	}
 	if snapshot, ok := source.(database.NormalizedSnapshotStore); ok {
 		records, err := snapshot.ListNormalizedRecords(ctx, spec.Domain, spec.Collection, orgID, recordQuery)
 		if err != nil {

@@ -24,9 +24,40 @@ The benchmark suite does not replace architecture invariants. TLA-style rules li
 
 On 2026-06-25, we performed a full, unified baseline validation run on Apple M1 Pro (ARM64) macOS to evaluate the performance impact of concurrency fixes (specifically, `ensureWarm` cache-warming singleflight synchronization), strict database parser error propagation, index delta compaction threshold adjustments, and the scoped watermark fixes for concurrent pipelines.
 
+### 2026-06-29 Hermes Streaming Normalized Rebuild
+
+The MegaTrain paper pass was applied to Hermes as a memory-orchestration
+pattern: keep the canonical source authoritative, stream the active rebuild
+working set through a bounded staging path, and avoid materializing broad hot
+state before the replacement partition can consume it. The implementation adds
+`database.StreamingNormalizedSnapshotStore`, which Hermes prefers over the older
+slice-returning `database.NormalizedSnapshotStore` when rebuilding from
+already-normalized records.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test ./hermes -run='^$' -bench='BenchmarkHermesRebuildNormalizedSnapshot' -benchmem -count=5
+```
+
+Apple M1 Pro (ARM64), 10K normalized records:
+
+| Benchmark | ns/op range | B/op range | allocs/op range | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesRebuildNormalizedSnapshot/materialized-8` | 17.59-17.68 ms | 18,479,014-18,480,120 | 75,128-75,135 | Compatibility lane: source returns a full normalized `[]DomainRecord` before Hermes applies. |
+| `BenchmarkHermesRebuildNormalizedSnapshot/streaming-8` | 17.32-18.80 ms | 16,873,297-16,874,765 | 75,127-75,136 | Streaming lane: source emits normalized records one at a time; saves ~1.6 MB heap per 10K-record rebuild while runtime remains dominated by replacement partition/index construction and run-to-run scheduler variance. |
+
+Contract result: no public Hermes read semantics changed. The optimization
+preserves `HermesFallbackRefinement`, `HermesBoundedMemory`, and
+`HermesReplayable`; sources that do not implement the streaming normalized
+interface continue to use the existing materialized normalized or canonical
+`ForEachRecord` fallback paths.
+
 ### Local Go CPU & Alloc Baseline
 
 Command:
+
 ```bash
 cd foundation/server-kit/go
 go test -run='^$' -bench=. -benchmem ./hermes ./transfer ./httpapi ./extension ./objectstore ./bulk ./projectiongw
@@ -69,6 +100,7 @@ go test -run='^$' -bench=. -benchmem ./hermes ./transfer ./httpapi ./extension .
 ### Service-Backed Saturation Baseline
 
 Command:
+
 ```bash
 SERVICE_BACKED_LOAD_RESEARCH_STEPS=1000,10000 make test-service-backed-load
 ```
@@ -101,8 +133,6 @@ Measured throughput and latency distribution (Apple M1 Pro, Docker Compose with 
 | | `pipeline_pg_redis_hermes` | 60.4K/s | 16.55 µs | Pipeline with watermark fixes scales to 60.4K units/sec. |
 | | `wsroute_register_redis` | 194.4K/s | 2,692.53 µs | Batched Redis coordination. |
 | | `wsroute_broadcast_after_register` | 885.5M/s | 0.00 µs | Fanout planning scales. |
-
-
 
 ## 2026-06-24 transfer lane (progress + streaming route) benchmarks
 

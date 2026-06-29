@@ -2,7 +2,7 @@
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator \
 	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
-	check-doc-references \
+	check-doc-references check-ovasabi-cli \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet lifecycle-manifest
 
 .DEFAULT_GOAL := help
@@ -16,6 +16,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-lifecycle-contract-generator \
 	check-frontend-prototype-generator \
 	check-frontend-commands-generator \
+	check-ovasabi-cli \
 	check-contract-drift \
 	check-doc-references \
 	check-agent-contract \
@@ -191,6 +192,11 @@ check-frontend-prototype-generator:
 
 check-frontend-commands-generator:
 	@tests/frontend_commands_generator_test.sh
+
+check-ovasabi-cli:
+	@mkdir -p "$(FOUNDATION_GO_CACHE_DIR)"
+	@cd cmd/ovasabi && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test ./...
+	@GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" node cmd/ovasabi/bin/ovasabi.js --help >/dev/null
 
 check-contract-drift:
 	@tooling/scripts/contract_drift_check.sh .
