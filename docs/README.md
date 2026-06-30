@@ -1,178 +1,229 @@
 # Foundation Documentation Map
 
-Status: current as of 2026-06-28
+**Status**: current as of 2026-06-30
 
-This directory is the source documentation set for Foundation Core and the
-`docs/foundation/` reference copied into generated projects. Keep these files
-short enough for humans to scan and precise enough for coding agents to enforce.
+This directory contains the source documentation for Foundation Core and the reference copy distributed to generated projects. Keep files short enough for humans to scan and precise enough for coding agents to enforce.
 
-## First Reads
+---
 
-Read `foundation_glossary.md` first when you need a concept definition, module
-reference, or pre-answered question. It serves as the lookup companion to every
-other doc.
+## Getting Started (Pick Your Path)
 
-Read `foundation_quick_start.md` first when onboarding or making a narrow
-change. It gives the minimum viable path through the larger documentation set.
+### I'm New Here—Show Me the Essentials (15 minutes)
 
-Read these in order when reviewing architecture or changing a generated
-scaffold:
+Read in order:
 
-1. `foundation_glossary.md`: concept glossary, module cards, invariant
-   reference, practice summaries, and pre-answered agent questions.
-2. `foundation_quick_start.md`: 15-minute path, critical first questions, and
-   common high-impact mistakes.
-3. `foundation_architecture_contract.md`: ownership boundaries between platform
-   modules, managed scaffold, and project-owned code.
-4. `foundation_nervous_system.md`: canonical command, event, worker, projection,
-   and realtime lifecycle.
-5. `foundation_guide.md`: broad agent/developer guide and module overview.
-6. `foundation_tour.md`: one request through Foundation end to end.
-7. `agent_operating_contract.md`: required workflow for one architect and
-   multiple AI agents working from the same Foundation contracts.
-8. `practice_controls.md`: machine-readable mapping from rules to scripts,
-   evidence, and merge-gate posture.
-9. `ai_threat_model.md`: AI/tool/agent threat classes and required validation
-   evidence.
-10. `coding_practices.md`: enforceable CP rules used by review and tooling.
-11. `testing_practices.md`: test adequacy rules, generated lifecycle tests, and
-    CI expectations.
-12. `security_practices.md`: trust boundaries, auth posture, secrets, audit, and
-    ingress controls.
+1. [`foundation_glossary.md`](foundation_glossary.md) — concept lookup; start here for definitions
+2. [`foundation_quick_start.md`](foundation_quick_start.md) — minimum viable path, critical first questions, common mistakes
+3. [`foundation_tour.md`](foundation_tour.md) — one product action through Foundation end-to-end
+4. [`PHILOSOPHY.md`](PHILOSOPHY.md) — why Foundation exists, what gap it fills
 
-## Architecture And Runtime
+### I'm a Developer—What Do I Need to Know?
 
-| File | Use |
+Read in order:
+
+1. [`foundation_quick_start.md`](foundation_quick_start.md) — 15-minute baseline
+2. [`foundation_tour.md`](foundation_tour.md) — one complete flow
+3. [`foundation_architecture_contract.md`](foundation_architecture_contract.md) — platform/project ownership
+4. [`foundation_nervous_system.md`](foundation_nervous_system.md) — canonical lifecycle and invariants
+
+Then read only the lane-specific docs for code you're changing:
+
+- Backend/domain logic: `coding_practices.md`, `database_practices.md`, `security_practices.md`, `testing_practices.md`
+- Real-time/WebSocket: `websocket_scaling.md`, `hermes_read_modes.md`
+- Workers/async: `go_concurrency_bug_practices.md`, `coding_practices.md` (bounded work rules)
+- Frontend: `frontend_scaffold_sync.md`, `styling_design_practices.md`
+
+### I'm an Architect—Show Me the Full Picture
+
+Read in order:
+
+1. [`PHILOSOPHY.md`](PHILOSOPHY.md) — the thesis and motivation
+2. [`foundation_architecture_contract.md`](foundation_architecture_contract.md) — platform, scaffold, project ownership
+3. [`foundation_nervous_system.md`](foundation_nervous_system.md) — canonical lifecycle
+4. [`foundation_guide.md`](foundation_guide.md) — comprehensive module reference
+5. [`practice_controls.md`](practice_controls.md) — which rule is enforced by which check
+
+Then read deeply into domains that matter for your product:
+
+- **Data**: `database_practices.md`, `redis_practices.md`, `hermes_hotplane.md`, `projection_freshness_contract.md`
+- **Observability**: `delivery_metrics_practices.md`, `performance_practices.md`
+- **Security**: `security_practices.md`, `ai_threat_model.md`, `post_quantum_security.md`
+- **Performance**: `performance_lab.md`, `foundation_benchmarks.md`, `optimization_points.md`
+
+### I'm Working With AI Agents or Partners
+
+Read in order:
+
+1. [`../AGENTS.md`](../AGENTS.md) — agent workflows and role definitions
+2. [`foundation_glossary.md`](foundation_glossary.md) — concept lookup
+3. [`foundation_quick_start.md`](foundation_quick_start.md) — minimum viable path
+4. [`foundation_architecture_contract.md`](foundation_architecture_contract.md) — ownership boundaries
+5. [`agent_operating_contract.md`](agent_operating_contract.md) — definition of done, evidence requirements
+6. [`practice_controls.md`](practice_controls.md) — control matrix, enforcement gates
+7. [`ai_threat_model.md`](ai_threat_model.md) — threat classes, validation requirements
+8. [`../agent_memory/CONDUCTOR.md`](../agent_memory/CONDUCTOR.md) — autonomous build loop, memory patterns
+
+---
+
+## Core Architecture & Design
+
+| Document | Audience | Purpose |
+| --- | --- | --- |
+| [`PHILOSOPHY.md`](PHILOSOPHY.md) | Everyone | Why Foundation exists, what gap it fills, the software deficit, Hermes principle, metadata carrier |
+| [`foundation_glossary.md`](foundation_glossary.md) | Lookup reference | Concept definitions, module cards, invariant summaries, agent Q&A |
+| [`foundation_quick_start.md`](foundation_quick_start.md) | First-time readers | 15-minute path, critical questions, common mistakes, minimum evidence |
+| [`foundation_tour.md`](foundation_tour.md) | Learners | Walk-through one product action from ingress to workers to observability |
+| [`foundation_guide.md`](foundation_guide.md) | Architects, deep-dive | Comprehensive agent & developer guide, module reference, extended services |
+| [`foundation_architecture_contract.md`](foundation_architecture_contract.md) | Architects, reviewers | Platform/scaffold/project ownership boundaries, extension rules |
+| [`foundation_nervous_system.md`](foundation_nervous_system.md) | Architects, developers | Canonical lifecycle, envelope contract, invariants, correlation flow |
+
+---
+
+## Backend & Data Layer
+
+| Document | Purpose |
 | --- | --- |
-| `runtime_foundation.md` | Runtime ladder, WASM/native lanes, binary transport, and control-buffer discipline. |
-| `runtime_native.md` | Tauri/native shell device access, native byte lanes, secure storage, and GPU handle policy. |
-| `rust_runtime_practices.md` | Rust/WASM/native runtime coding, async, performance, error-handling, and check automation rules. |
-| `foundation_tour.md` | One product action through Foundation from ingress to durable state, workers, Hermes, and observability. |
-| `foundation_quick_start.md` | Minimum viable understanding path, critical first questions, common mistakes, and evidence minimums. |
-| `foundation_nervous_system.md` | Canonical lifecycle and invariants for envelopes, events, workers, stores, and projections. |
-| `foundation_glossary.md` | Concept glossary, module reference cards, invariant quick-reference, and agent Q&A. |
-| `hermes_hotplane.md` | Hermes node-local projection contract, scaffold wrapper, consistency modes, and operational watch points. |
-| `hermes_read_modes.md` | Stable v1 Hermes read-mode contract: `fenced`, `live`, `stale_while_revalidate`, and `postgres_required`. |
-| `foundation_architecture_contract.md` | Platform/scaffold/project ownership split and extension rules. |
-| `foundation_distribution.md` | CLI bootstrap, registry package boundaries, agent config bundle, and license verification contract. |
-| `foundation_project_standardization.md` | Project drift measurement and the `appkit` extraction plan. |
-| `tla_architecture_practices.md` | State-machine and invariant practice for high-risk changes. |
-| `specs/tla/` | Starter TLA modules for worker retry queues, projection freshness, and WebSocket backpressure. |
-| `scaffold_manifest.md` | Scaffold manifest columns, update modes, and safe maintenance workflow. |
-| `agent_operating_contract.md` | Architect/agent role split, definition of done, evidence ledger, handoff format, and AI-specific safety rules. |
-| `practice_controls.md` | Control matrix maintenance rules for CP, TE, and cross-cutting agent/security/performance controls. |
-| `projection_freshness_contract.md` | Freshness modes and evidence requirements for Hermes, read models, search, materialized views, and Redis caches. |
-| `transfer_lane.md` | Progress-bearing transfer operations: upload/download lifecycle, bookend events, and resumable surface. |
-| `frontend_command_registry.md` | Generated frontend route registry, `createAppRuntime`, and dispatch path from client to backend. |
-| `future_practices_research.md` | Research gap ledger mapped back to each Foundation document. |
-| `foundation_tooling.md` | Protocol compiler targets, route generators, verification script matrix, fleet updates, and benchmarks role. |
+| `database_practices.md` | PostgreSQL schema, query, pool, migration, and operational rules |
+| `migration_practices.md` | Migration structure, reversibility, safety checks |
+| `redis_practices.md` | Redis coordination, cache, stream, rate-limit rules |
+| `hermes_hotplane.md` | Hermes node-local projection contract, scaffold wrapper, consistency modes |
+| `hermes_read_modes.md` | Stable v1 read modes: `fenced`, `live`, `stale_while_revalidate`, `postgres_required` |
+| `projection_freshness_contract.md` | Freshness modes and evidence for Hermes, read models, search, views, caches |
+| `transfer_lane.md` | Progress-bearing transfer operations: upload/download lifecycle, resumability |
+| `websocket_scaling.md` | Socket routing, metrics, fanout, scaling budgets |
 
-## Backend And Data
+---
 
-| File | Use |
+## Coding Practices & Quality
+
+| Document | Purpose |
 | --- | --- |
-| `database_practices.md` | PostgreSQL schema, query, pool, migration, and operational rules. |
-| `migration_practices.md` | Migration structure, reversibility, and generated-project checks. |
-| `redis_practices.md` | Redis coordination, cache, stream, and rate-limit rules. |
-| `websocket_scaling.md` | Socket routing, metrics, fanout, and scaling budgets. |
-| `go_concurrency_bug_practices.md` | Bounded concurrency and known Go failure patterns. |
-| `ai_practices.md` | AI runtime execution as a product capability within the Foundation lifecycle. |
-| `delivery_metrics_practices.md` | DORA, SPACE/DevEx, OpenTelemetry linkage, SLSA/SBOM/provenance, and incident-linked delivery metrics. |
-| `ai_threat_model.md` | Prompt/tool/memory poisoning, generated-code provenance, and AI/tool security review vocabulary. |
-| `security_practices.md` | Shared Foundation security floor; generated apps own `docs/security/profile.md`. |
-| `post_quantum_security.md` | Post-quantum TLS, crypto agility, artifact signing, and performance rules. |
+| `coding_practices.md` | Core reliability, performance, and security rules (CP-* rules) |
+| `testing_practices.md` | Test adequacy, generated lifecycle tests, TE-* rules, CI expectations |
+| `security_practices.md` | Trust boundaries, auth posture, secrets, audit, ingress controls |
+| `go_concurrency_bug_practices.md` | Bounded concurrency patterns, known Go failure modes |
+| `practice_controls.md` | Machine-readable mapping from rules to scripts, evidence, merge-gate posture |
+| `ai_threat_model.md` | Prompt/tool/memory poisoning, generated-code provenance, validation vocabulary |
 
-## Performance And Compute
+---
 
-| File | Use |
+## Performance & Runtime
+
+| Document | Purpose |
 | --- | --- |
-| `performance_practices.md` | Cross-cutting performance posture and measurement workflow. |
-| `performance_lab.md` | Low-level performance evidence contract for CPU, allocator, syscall, I/O, WASM, FFI, native, and GPU lanes. |
-| `rust_runtime_practices.md` | Rust runtime measurement, clone/borrow, bounds, unsafe, async, and parity rules. |
-| `foundation_benchmarks.md` | Benchmark commands, reference runs, and interpretation notes. |
-| `optimization_points.md` | Adopted optimization decisions and future targets. |
-| `gpu_practices.md` | WebGPU/native GPU batching, memory, and verification rules. |
-| `game_runtime_practices.md` | Frame-budgeted runtime practices for visual and interactive loops. |
-| `mathematical_practices.md` | Numerical analysis, floating-point, probability, statistics, and CRDT convergence rules. |
+| `performance_practices.md` | Cross-cutting Go, networking, PostgreSQL, Rust benchmarking rules |
+| `performance_lab.md` | Low-level evidence contract for CPU, allocator, syscall, I/O, WASM, FFI, GPU lanes |
+| `foundation_benchmarks.md` | Benchmark commands, reference runs, interpretation, performance ladder |
+| `rust_runtime_practices.md` | Rust/WASM/native runtime coding, async, performance, error-handling |
+| `runtime_foundation.md` | Runtime ladder, WASM/native lanes, binary transport, control-buffer discipline |
+| `runtime_native.md` | Tauri/native shell device access, native byte lanes, secure storage, GPU policy |
+| `gpu_practices.md` | WebGPU/native GPU batching, memory, verification |
+| `game_runtime_practices.md` | Frame-budgeted runtime practices for visual and interactive loops |
+| `mathematical_practices.md` | Numerical analysis, floating-point, probability, statistics, CRDT convergence |
+| `tla_architecture_practices.md` | State-machine, invariant, liveness, real-time bound practices from Specifying Systems |
 
-## Frontend And Product UI
+---
 
-| File | Use |
+## Frontend & Product
+
+| Document | Purpose |
 | --- | --- |
-| `frontend_scaffold_sync.md` | Frontend package boundaries, generated types, and scaffold sync contract. |
-| `frontend_runtime_workbench.md` | Frontend workbench: dummy data, tenant stores, live projections, and runtime adapters. |
-| `frontend_command_registry.md` | Generated route registry and `createAppRuntime` dispatch. |
-| `runtime_sab_capnp_contracts.md` | SharedArrayBuffer and Cap'n Proto runtime contracts. |
-| `styling_design_practices.md` | UI primitive, theme, animation, and visual design practice. |
-| `references/README.md` | References index (UI Animation, Lifecycle Manifests, Security Profiles). |
+| `frontend_scaffold_sync.md` | Frontend package boundaries, generated types, scaffold sync contract |
+| `frontend_command_registry.md` | Generated route registry, `createAppRuntime`, dispatch path |
+| `frontend_runtime_workbench.md` | Frontend workbench: dummy data, tenant stores, live projections |
+| `styling_design_practices.md` | UI primitive, theme, animation, visual design practice |
+| `runtime_sab_capnp_contracts.md` | SharedArrayBuffer and Cap'n Proto runtime contracts |
+| `references/README.md` | References index (UI Animation, Lifecycle Manifests, Security Profiles) |
 
-## Informational Documents
+---
 
-Non-practice reference documents live in `docs/info/`:
+## Operations & Distribution
 
-| File | Use |
+| Document | Purpose |
 | --- | --- |
-| `info/scaffolded_projects_executive_summary.md` | Non-technical overview of the product family built on Foundation. |
-| `info/columnar_projection_lane.md` | Design spec for Arrow-compatible columnar Hermes projections. |
-| `info/coding_magic.md` | Product-quality interaction and presentation inspiration. |
+| `foundation_distribution.md` | CLI bootstrap, registry boundaries, agent bundle, license verification |
+| `scaffold_manifest.md` | Scaffold manifest columns, update modes, safe maintenance workflow |
+| `foundation_project_standardization.md` | Project drift measurement, `appkit` extraction plan |
+| `foundation_tooling.md` | Protocol compiler targets, route generators, verification matrix, fleet updates |
+| `delivery_metrics_practices.md` | DORA, SPACE/DevEx, OpenTelemetry linkage, SBOM, provenance |
+| `enforcement.md` (in `tooling/docs/`) | Lint strictness, communication lane enforcement, ownership checks, operational gates |
 
-## Tooling And Enforcement
+---
 
-Read [foundation_tooling.md](foundation_tooling.md) for a comprehensive guide on protocol compiler targets, automatic route generators, fleet updates, and the verification script matrix. Read [foundation_distribution.md](foundation_distribution.md) for the CLI, registry, agent bundle, and licensing contract that wraps those tools for external developers.
+## AI & Agentic Development
 
-Use `tooling/docs/enforcement.md` for lint strictness, communication lane
-enforcement, ownership checks, and operational gates. The source scripts live in
-`tooling/scripts/`; generated projects receive them under `scripts/checks/`.
-`docs_reference_check.mjs` verifies that local Markdown links resolve after docs
-are moved and that documentation does not depend on machine-local `file://`
-links.
-`agent_contract_check.sh` verifies that generated projects keep the agent
-operating contract, research ledger, and agent-facing templates wired into the
-scaffold.
-`check_lifecycle_manifest.sh` verifies that
-`docs/references/lifecycle/lifecycle_contract.json` and its guide match the
-current proto lifecycle source.
-`app_security_profile_check.sh` verifies that generated applications own
-`docs/security/profile.md`; Foundation core validates only the generic scaffold
-template and rejects concrete product posture files.
-`practice_controls_check.sh` verifies that `tooling/practice_controls.psv`
-contains every `CP-*` and `TE-*` rule plus cross-cutting controls, and that
-referenced docs/scripts exist in both Foundation and generated-project layouts.
-`runtime_performance_contract_check.sh`, `formal_methods_check.sh`, and
-`operational_excellence_check.sh` verify that low-level runtime evidence,
-formal-method templates, and DORA/SPACE/SLSA/OpenTelemetry delivery hooks remain
-wired into Foundation and generated projects.
+| Document | Purpose |
+| --- | --- |
+| [`../AGENTS.md`](../AGENTS.md) | Agent terminology, operating baseline, tech stack, architecture overview |
+| `agent_operating_contract.md` | Role split, definition of done, evidence ledger, handoff format |
+| `ai_practices.md` | AI runtime as product capability, trust boundary, bounded work, verification |
+| `ai_threat_model.md` | AI-specific threats: tool poisoning, memory poisoning, provenance, secrets |
+| [`../agent_memory/CONDUCTOR.md`](../agent_memory/CONDUCTOR.md) | Closed-loop autonomous build loop, verification gates, memory patterns |
+| [`../agent_memory/README.md`](../agent_memory/README.md) | Persistent memory in CWF format, sessions, index, validation rules |
 
-Core repository commands:
+---
 
-```bash
-make lint
-make test
-make verify
-make check-doc-references
-make check-lifecycle-manifest
-make check-app-security-profile
-make check-practice-controls
-make check-runtime-performance-contracts
-make check-formal-methods
-make check-operational-excellence
-```
+## Informational & Research
 
-Generated project commands:
+Non-practice reference documents:
 
-```bash
-make communication-contracts
-make lint-foundation
-make test-all
-```
+| File | Purpose |
+| --- | --- |
+| `info/scaffolded_projects_executive_summary.md` | Non-technical overview of products built on Foundation |
+| `info/columnar_projection_lane.md` | Design spec for Arrow-compatible columnar Hermes projections |
+| `info/coding_magic.md` | Product-quality interaction and presentation inspiration |
+| `future_practices_research.md` | Research gap ledger mapped to each Foundation document |
+
+---
+
+## How to Navigate
+
+1. **If you need a concept definition**: Jump to `foundation_glossary.md`
+2. **If you're new to Foundation**: Start with `foundation_quick_start.md` (15 min), then `foundation_tour.md`
+3. **If you're reviewing architecture**: Read `foundation_architecture_contract.md` and `practice_controls.md`
+4. **If you're changing code**: Read the lane-specific practice doc (see "Coding Practices" above)
+5. **If performance matters**: Read `foundation_benchmarks.md` and the relevant performance practice doc
+6. **If you're working with agents**: Read `AGENTS.md`, then `agent_operating_contract.md`, then lane-specific docs
+7. **If you want to understand why**: Read `PHILOSOPHY.md`
+
+---
 
 ## Maintenance Rules
 
 1. Do not duplicate canonical contracts. Link to the owning document instead.
 2. Update this map when adding or retiring a document.
-3. When code changes an invariant, benchmark expectation, generated scaffold
-   shape, or enforcement rule, update the owning doc in the same change.
-4. Keep generated-project paths distinct from Foundation Core paths:
-   `tooling/scripts` is the source, `scripts/checks` is the generated copy.
-5. Non-practice informational documents belong in `docs/info/`, not alongside
-   contracts and practice docs.
+3. When code changes an invariant, benchmark expectation, or enforcement rule, update the owning doc in the same change.
+4. Keep generated-project paths distinct from Foundation Core paths: `tooling/scripts` is source, `scripts/checks` is the generated copy.
+5. Non-practice informational documents belong in `docs/info/`, not alongside contracts and practice docs.
+
+---
+
+## Core Repository Commands
+
+For Foundation Core:
+
+```bash
+make generate-contracts             # Full code gen
+make lint                           # All linters
+make test                           # All tests
+make check-rust                     # Rust verification
+make verify                         # Full CI suite
+make check-practice-controls        # Practice matrix
+make check-doc-references           # Link validation
+make lifecycle-manifest             # Regenerate lifecycle
+```
+
+For service-backed verification (requires local infra):
+
+```bash
+make docker-up
+make test-service-backed
+```
+
+For generated projects:
+
+```bash
+make communication-contracts        # Verify contract parity
+make lint-foundation               # Foundation-specific lints
+make test-all                      # All project tests
+```

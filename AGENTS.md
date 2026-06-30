@@ -2,6 +2,8 @@
 
 > Universal instruction file for AI coding assistants (Claude, Codex, Cursor, Copilot, Windsurf, etc.)
 
+**New here?** Start with [`README.md`](README.md) → [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) → [`docs/foundation_quick_start.md`](docs/foundation_quick_start.md), then come back to this file for the agent operating contract.
+
 ## Terminology
 
 | Term | Definition |

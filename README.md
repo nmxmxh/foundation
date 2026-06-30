@@ -1,126 +1,81 @@
-# Ovasabi Foundation (Work in Progress - Version 0.0.1)
+# Ovasabi Foundation (Work in Progress — Version 0.0.1)
 
-> **Note**: Ovasabi Foundation is currently under active development. The entire repository and its template scaffolds represent a Work in Progress (WIP) baseline.
+**A full-stack application substrate for high-performance, event-driven systems.**
 
-Ovasabi Foundation is a co-designed, event-driven, tenant-isolated application substrate. It provides the core platform modules, generated templates, enforcement checks, and source documentation used to bootstrap and maintain high-performance downstream projects.
+Ovasabi Foundation is an integrated toolkit for teams that want to evolve code. It provides the platform modules, scaffolds, enforcement checks, and documentation to bootstrap and maintain production systems with:
 
----
+- **Tenant-isolated, event-driven architecture** — every operation carries metadata: who asked, what organization, correlation ID
+- **Performance ladder** — seven planes from nanosecond direct dispatch to microsecond JSON compatibility
+- **Hermes hotplane** — bounded, node-local projections for sub-microsecond operational reads
+- **Worker orchestration** — bounded background processing with retry policies and progress tracking
+- **Built-in observability** — logs, metrics, and traces automatically linked by correlation ID
 
-## Bridging the Software Deficit: The 1ns Metric
-
-In modern computing, hardware performance is bounded by physics:
-
-* **1 Nanosecond (1ns)** is one-billionth of a second ($10^{-9}$ seconds).
-* In **1ns**, light travels approximately 30 centimeters (11.8 inches)—the width of a standard motherboard.
-* A modern 3.0 GHz CPU core completes a single clock cycle in **0.33ns**. A simple CPU instruction takes less than **1ns**.
-* Accessing L1 cache takes **~0.5–1ns**; L2 cache takes **~3–4ns**; main memory (DRAM) takes **~50–100ns**.
-
-### The Software Deficit
-
-While hardware executes billions of operations per core each second, typical software stacks suffer from a massive **software deficit**. Due to bloated framework layers, excessive heap allocations, and heavy serialization formats, a simple JSON payload parse or router dispatch often spends **50,000ns to 1,000,000ns (50µs to 1ms)**. This wastefully consumes millions of potential CPU cycles.
-
-Ovasabi Foundation is engineered to bridge this software deficit. It provides a co-designed runtime ladder, zero-allocation hotpaths, and hardware-aligned memory interfaces to keep operations in the nanosecond/microsecond domain.
+Not a no-code platform. Not zero-DevOps. Not for teams that want to move fast by cutting corners. Foundation is for teams that embrace managed infrastructure, understand performance, and expect their codebase to evolve.
 
 ---
 
-## Core Scaffolding & Fleet Management
+## Components at a Glance
 
-### Ovasabi CLI
+| Component | Tech Stack | Purpose |
+| --- | --- | --- |
+| **server-kit** | Go | Backend: event bus, workers, Hermes, database, resilience, observability |
+| **runtime-transport** | TypeScript | Client wire: command bus, envelope creation, metadata stores, WebSocket/HTTP fallback |
+| **runtime-sdk** | Rust/WASM | High-performance kernel: 4KB control buffer, zero-copy communication |
+| **ui-minimal** | TypeScript/React | Shared UI primitives, semantic theme tokens, motion helpers |
+| **frontend-kit** | TypeScript | IndexedDB storage, metadata helpers, runtime adapters, transfer progress |
+| **runtime-native** | Tauri/Rust | Native shell bridge: secure storage, GPU handles, device access |
+| **config-contracts** | Go/TypeScript | Cross-language configuration schemas |
 
-Foundation now includes a baseline CLI under `cmd/ovasabi` that wraps the
-manifest-driven scaffold scripts and adds the distribution/licensing boundary
-for package-registry installs.
-
-Local development usage:
-
-```bash
-# From this repository
-cd cmd/ovasabi
-go run . init --profile=performance --name=trader_os --skip-license
-go run . update --project-dir=../../trader_os_v1 --skip-license
-go run . license verify --offline-license --license-file=ovasabi.lic --license-public-key="$(cat ovasabi.pub)"
-```
-
-NPM package skeleton usage:
-
-```bash
-# From the repository root
-node cmd/ovasabi/bin/ovasabi.js init --profile=performance --name=trader_os --foundation-dir . --skip-license
-```
-
-The intended public install command after publishing is:
-
-```bash
-npx -y @ovasabi/cli init --profile=performance --name=trader_os
-```
-
-Current status:
-
-* implemented: `init`, `update`, `license verify`, npm `bin` shim, online
-  license verification, offline Ed25519 JWT license verification;
-* pending distribution work: publish `@ovasabi/cli`, add prebuilt binaries,
-  wire signed remote template downloads, and automate registry-token setup.
-
-### What is a Project Scaffold?
-
-A project scaffold is a blueprint template (defined in `templates/` and mapped by `templates/scaffold.manifest.tsv`) used to initialize new projects. Instead of starting from scratch, a bootstrapped project immediately receives a fully configured, production-grade folder structure, container configs, database migrations, and CI workflows.
-
-### Managing Multiple Projects (Fleet Synchronization)
-
-In an enterprise environment, application drift and dependency decay occur rapidly across separate codebases. The Foundation core acts as the single source of truth for the platform:
-
-* **Generation**: Running `scripts/init-project.sh <path> <profile>` creates a new conforming repository.
-* **Updates**: Running `scripts/update-project.sh <path>` synchronizes an existing project. It purges retired foundation files (e.g. wiping `docs/foundation/` before copying the fresh docs) to enforce clean synchronization.
-* **Fleet Synchronization**: The script [scripts/update-all.sh](scripts/update-all.sh) reads `scaffolded-projects.tsv` in the parent directory and updates the entire fleet of projects in one invocation, applying patches and updating toolchains.
+**Data Layer**: PostgreSQL (durable truth), Redis (coordination), Protocol Buffers (contracts), Cap'n Proto (zero-copy boundaries)
 
 ---
 
-## Architectural Agnosticism & Zero-Copy Communication
+## The Performance Ladder
 
-### Decoupled Runtime Agnosticism
+Foundation uses seven performance planes. Each plane has its cost measured and enforced:
 
-Ovasabi Foundation is agnostic of specific CPU architectures, memory allocation models, and processing layers. Its performance rules and patterns run identically on:
+```text
+1. Direct dispatch        10–30 ns/op     (same-process, zero-alloc)
+2. Binary frames          20–80 ns/op     (borrowed views)
+3. Generated protobuf     ~370 ns/op      (typed cross-process)
+4. gRPC                   20–30 µs/op     (network machinery)
+5. JSON                   ~30 µs/op       (compatibility)
+6. Native FFI/SHM         (varies)        (trusted compute)
+7. Browser + WASM + SAB   (platform)      (where supported)
+```
 
-* **Go Backends**: Running multi-tenant database pools and concurrent worker loops.
-* **Rust Computes**: Dispatched via FFI or WebAssembly guest environments.
-* **Browser Engines**: Running asynchronous JS event loops and background worker normalizers.
-* **Native Operating Systems**: Interfacing directly with hardware APIs.
+**Key rule**: The fastest lane must not pay the cost of the compatibility lane. This is measured automatically; regressions are caught before they land.
 
-### Zero-Copy Communication
-
-To avoid CPU-bound serialization bottlenecks, the Foundation uses zero-copy and shared-memory communication:
-
-* **Cap'n Proto Buffers**: Define physical byte layouts and offsets inside the 4KB `runtime-sdk` buffer. JavaScript hosts and WASM/Rust guests read and write to the same physical memory space without serialization boundaries.
-* **SharedArrayBuffer (SAB)**: Shares raw buffers directly between browser threads and worker normalizers.
-* **Direct Frame Clients**: Go services communicate viaDirect Frame binary envelopes (`grcsvc.DirectFrame`), bypassing local socket/network round-trips.
-
-### Runtime Native (Work in Progress)
-
-The native desktop wrapper (`runtime-native`) uses a Rust-based Tauri shell to provide local secure storage, hardware-accelerated WebGPU/Nsight compute lanes, and native window dispatch.
+Read more: [`docs/foundation_benchmarks.md`](docs/foundation_benchmarks.md)
 
 ---
 
 ## Day-One Capabilities
 
-Every project generated from the Foundation scaffold receives the following capabilities out-of-the-box from day one:
+Every project generated from Foundation receives:
 
-1. **Multi-Tenant Isolation**: Automatic tenant derivation from authenticated context via `auth.OrgIDFromContext(ctx)`, preventing cross-tenant data leaks at the database query level.
-2. **Event-Driven Nervous System**: A standardized lifecycle (`requested` -> `success` / `failed`) with correlation metadata (`CorrelationID`) propagated through all logs and workers.
-3. **Hermes Hotplane Projections**: Node-local, memory-bounded, indexed read models that automatically project database mutations, performing dashboard reads in sub-microseconds with stale-while-revalidate fallbacks.
-4. **Resumable Progress Transfers**: A progress-bearing, chunk-based file upload/download lifecycle (`server-kit/go/transfer`) with progression events.
-5. **Bounded Background Processing**: Bounded queues, exponential backoff retries, and worker chain orchestration powered by River.
-6. **Unified Observability & Resilience**: Built-in OpenTelemetry tracing, circuit breakers, and a structured, categorized error taxonomy.
+1. **Multi-Tenant Isolation** — organization scope derived from authenticated context, never from client data
+2. **Event-Driven Nervous System** — canonical `requested → success / failed` lifecycle with correlation metadata
+3. **Hermes Hotplane** — node-local, memory-bounded, indexed read models that project database mutations in real-time
+4. **Resumable File Transfers** — progress-bearing, chunk-based upload/download with resumability
+5. **Bounded Worker Processing** — background jobs with exponential backoff, retry policies, and bounded queues
+6. **Unified Observability** — OpenTelemetry tracing, structured logs, circuit breakers, error taxonomy
 
 ---
 
-## Universal Performance Primitives
+## Quick Paths
 
-The Foundation's performance primitives are not limited to simple database APIs. The exact same guidelines—such as avoiding heap allocations in hotpaths, pre-sorting indexes, utilizing Structure-of-Arrays (SoA) layout prefetching, and performing bounded SIMD loops—apply universally to:
+### For Developers
 
-* **Financial Arithmetic**: Bounded, checked integer minor-unit money calculations (`server-kit/go/money`).
-* **Game Runtimes**: Frame-budgeted animation loops, event queue fanouts, and state-machine transitions.
-* **GPU Computing**: WebGPU/WGSL compute pass setups and CPU-to-GPU memory buffer transfers.
-* **Data Processing**: Vectorized sequential aggregations (columnar scans) that outpace standard pointer-chase loops.
+Start here → [`docs/foundation_quick_start.md`](docs/foundation_quick_start.md) (15 min) → [`docs/foundation_tour.md`](docs/foundation_tour.md) (walk-through) → [`docs/foundation_architecture_contract.md`](docs/foundation_architecture_contract.md) (platform/project split)
+
+### For Architects & Reviewers
+
+Start here → [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) (why Foundation exists) → [`docs/foundation_architecture_contract.md`](docs/foundation_architecture_contract.md) → [`docs/foundation_nervous_system.md`](docs/foundation_nervous_system.md) → [`docs/practice_controls.md`](docs/practice_controls.md)
+
+### For AI Agents & Partners
+
+Start here → [`AGENTS.md`](AGENTS.md) → [`docs/foundation_glossary.md`](docs/foundation_glossary.md) → [`docs/agent_operating_contract.md`](docs/agent_operating_contract.md) → [`docs/ai_threat_model.md`](docs/ai_threat_model.md)
 
 ---
 
@@ -128,69 +83,32 @@ The Foundation's performance primitives are not limited to simple database APIs.
 
 | Path | Purpose |
 | --- | --- |
-| `server-kit/` | Go backend platform primitives: registry, metadata, events, workers, resilience, observability, Hermes, eventlog, Redis, database, transfer, projection gateway, object storage, bulk operations, intelligence signals, and service-backed harnesses. |
-| `runtime-transport/` | Foundation transport contracts, protobuf envelopes, command bus, route registry, binary codecs, and Hermes projection schemas. |
-| `runtime-sdk/` | WASM/Rust/Go runtime kernel, 4KB control-buffer contract, shared arena, and runtime lane helpers. |
-| `runtime-native/` | Native shell bridge for Tauri/device lanes, secure storage, binary native frames, and runtime dispatch. |
-| `frontend-kit/` | Frontend operational utilities for metadata, storage, runtime artifacts, transfer progress, and external stores. |
-| `ui-minimal/` | Shared structural UI primitives, theme tokens, and motion helpers. |
-| `config-contracts/` | Cross-language configuration schemas and generated consumers. |
-| `templates/` | Managed scaffold copied into generated Foundation projects. |
-| `tooling/` | Source enforcement scripts, manifests, lint configs, and documentation. |
-| `docs/` | Architecture, coding, testing, security, runtime, and performance guidance. Start with `docs/README.md`. |
-
----
-
-## Agent-Native Workflow
-
-Foundation is intended for one architect coordinating multiple AI coding agents. Before agents change architecture-sensitive code, read:
-
-1. `docs/foundation_glossary.md` — concept lookup and agent Q&A
-2. `docs/foundation_quick_start.md` — minimum viable understanding path
-3. `docs/README.md` — full documentation map
-4. `docs/foundation_architecture_contract.md` — ownership boundaries
-5. `docs/foundation_nervous_system.md` — canonical lifecycle
-6. `docs/agent_operating_contract.md` — agent workflow and evidence
-7. `docs/practice_controls.md` — rule-to-check mapping
-8. `docs/ai_threat_model.md` when tool, model, retrieved, generated, package, or security-sensitive input affects the change
-9. The lane-specific practice doc for the change
-
-Agent-authored changes should carry evidence: contract changed, invariant preserved, tests or benchmarks added, fallback path, scope boundary, regression guard, and owning docs updated.
-The machine-readable control plane lives at `tooling/practice_controls.psv` and is checked by `make check-practice-controls`.
-
----
-
-## Code Quality Lanes
-
-Runtime, distributed-system, and operations-sensitive changes should use these checks before ordinary test expansion:
-
-1. `make check-runtime-performance-contracts`: verifies low-level performance evidence hooks for pprof/trace, CPU counters, Rust Miri/Loom opt-ins, WebGPU/WGSL, CUDA/Nsight, and benchmark metadata.
-2. `make check-formal-methods`: verifies TLA/PlusCal/Alloy/P guidance and the inherited queue, projection, and WebSocket spec templates.
-3. `make check-operational-excellence`: verifies DORA, SPACE/DevEx, OpenTelemetry linkage, SBOM, and provenance fields.
-
-For measured runtime work, `tooling/scripts/performance_check.sh` writes `machine.json` and supports `PROFILE=1`, `TRACE=1`, `PROFILE_DIR=...`, and `PERF_COUNTERS=1` opt-in evidence capture.
+| `server-kit/` | Go backend: registry, metadata, events, workers, resilience, observability, Hermes, eventlog, Redis, database, transfer, projection gateway, object storage, bulk operations, intelligence signals |
+| `runtime-transport/` | Protocol contracts, command bus, route registry, binary codecs, Hermes projection schemas |
+| `runtime-sdk/` | WASM/Rust/Go kernel, 4KB control-buffer, shared arena, runtime lane helpers |
+| `runtime-native/` | Tauri shell, secure storage, native frames, device dispatch |
+| `frontend-kit/` | IndexedDB storage, metadata, runtime artifacts, transfer progress |
+| `ui-minimal/` | Shared UI primitives, theme tokens, motion helpers |
+| `config-contracts/` | Generated configuration schemas |
+| `templates/` | Scaffold templates copied into generated projects |
+| `docs/` | Architecture, practices, guides, security, performance, testing |
+| `tooling/` | Enforcement scripts, manifests, lint configs |
 
 ---
 
 ## Core Commands
 
 ```bash
-make generate-contracts      # Full code gen (Protos -> Go/TS)
+make generate-contracts      # Code gen (Protos → Go/TS)
 make lint                    # All linters
-make test                    # All tests (Go, TS, Rust)
+make test                    # All tests
 make check-rust              # Rust fmt, clippy, tests
-make verify                  # Full CI verification suite
-make check-practice-controls # Practice matrix integrity
-make check-doc-references    # Markdown link validation
-make lifecycle-manifest      # Regenerate lifecycle contract
-make lifecycle-contracts     # Regenerate lifecycle tests
-```
+make verify                  # Full CI suite
+make check-practice-controls # Practice matrix
+make check-doc-references    # Link validation
 
-Service-backed checks require local infrastructure and use explicit targets:
-
-```bash
-make docker-up
-make test-service-backed
+make docker-up               # Start local infra
+make test-service-backed     # Tests with live DB/Redis
 ```
 
 ---
@@ -200,19 +118,66 @@ make test-service-backed
 From the parent directory of `foundation`:
 
 ```bash
-# Initialize with the CLI wrapper
+# New project
 node foundation/cmd/ovasabi/bin/ovasabi.js init --profile=performance --name=my-app --foundation-dir foundation --skip-license
 
-# Compatibility fallback: initialize with shell scripts
+# Or via shell script (legacy)
 ./foundation/scripts/init-project.sh my-app full
 
-# Update an existing project to sync with Foundation changes
+# Update existing project
 node foundation/cmd/ovasabi/bin/ovasabi.js update --project-dir=/path/to/project --foundation-dir foundation --skip-license
-
-# Compatibility fallback: update with shell scripts
-./foundation/scripts/update-project.sh /path/to/project
 ```
 
-Generated projects consume Foundation through package and module boundaries. They should not import raw source files from `foundation/*/ts/src` or copy internal Go packages into app code.
+Generated projects consume Foundation through package boundaries. Do not import raw `foundation/*/ts/src` or `foundation/*/go` directly.
 
-Generated projects also receive Rust issue checks in `scripts/checks/`. `make check-rust` discovers app Rust, native Tauri Rust, and vendored `foundation/runtime-*` manifests, then runs fmt, Clippy safety lints, runtime-practice checks, and tests where Rust lanes are enabled.
+---
+
+## Philosophy & Motivation
+
+Foundation bridges the **software deficit**: the gap between hardware performance (nanoseconds) and typical software stacks (milliseconds). It provides proven patterns for:
+
+- **Responding instantly** — sub-microsecond operational reads via Hermes
+- **Scaling safely** — bounded work, tenant isolation, circuit breakers
+- **Observing clearly** — correlation IDs flowing through all layers
+- **Evolving confidently** — enforced practices, contract verification, performance measurement
+
+Foundation is not for everyone. It's demanding. It requires discipline: thinking about performance trade-offs, writing adequate tests, understanding failure modes, reviewing gate verdicts. It's for teams that expect to build something ambitious.
+
+Read [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) for the full story.
+
+---
+
+## Documentation
+
+**Start here**: [`docs/README.md`](docs/README.md) is the documentation map.
+
+**Key reads** (in order):
+
+1. [`docs/foundation_glossary.md`](docs/foundation_glossary.md) — concept lookup
+2. [`docs/foundation_quick_start.md`](docs/foundation_quick_start.md) — 15-minute path
+3. [`docs/foundation_tour.md`](docs/foundation_tour.md) — walk-through one action
+4. [`docs/foundation_architecture_contract.md`](docs/foundation_architecture_contract.md) — ownership split
+5. [`docs/foundation_nervous_system.md`](docs/foundation_nervous_system.md) — lifecycle contract
+
+**If you're using AI tools**: [`AGENTS.md`](AGENTS.md) — agent workflows and evidence requirements
+
+**To understand why**: [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) — the motivation and design principles
+
+---
+
+## Work in Progress
+
+Foundation is actively evolving. The entire repository represents a work-in-progress baseline for production applications. Expect:
+
+- Continued refinement of contracts and practices
+- New performance planes (GPU compute, distributed tracing refinement)
+- Agentic coding patterns still being proven
+- Documentation expanding as usage patterns emerge
+
+Contributions via research, agents, and human reviewers are how Foundation improves. Read [`docs/agent_operating_contract.md`](docs/agent_operating_contract.md) for evidence and handoff expectations.
+
+---
+
+## License
+
+See [`LICENSE`](LICENSE).
