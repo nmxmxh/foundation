@@ -1,7 +1,7 @@
 # Foundation Benchmarks
 
 Status: active reference
-Date: 2026-06-25
+Date: 2026-07-01
 Owner: Platform Architecture
 
 ## Purpose
@@ -19,6 +19,102 @@ Foundation performance work is not a single transport bet. The architecture uses
 The benchmark suite exists to prove that ladder stays honest. The fastest lane should not pay network-stack or JSON costs, and the compatibility lane should remain visibly more expensive than the binary paths.
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
+
+## 2026-07-01 Durable snapshot tier: warm-from-snapshot vs Postgres rebuild
+
+A new Hermes capability (`server-kit/go/hermes/snapshot_tier.go`) lets a cold
+partition warm from a durable, versioned snapshot artifact plus a bounded tail
+replay, instead of re-scanning the source database on every warm. A snapshot is
+serialized as a canonical `RecordMutationBatch` (the same wire the projection
+gateway uses), carries a source-watermark cursor and a sha256 checksum, and is
+loaded through the existing atomic `bulkLoadFrom` swap. It is **not** a source of
+truth: a missing/corrupt/scope-mismatched artifact falls back to the existing
+`Rebuild` path, so warm is a refinement of today's behavior, never worse.
+
+### Local unit benchmark
+
+```bash
+cd foundation/server-kit/go
+go test ./hermes -run='^$' -bench='BenchmarkHermesWarmFromSnapshot' -benchmem -count=3
+```
+
+Apple M1 Pro (ARM64), 10K-record artifact:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesWarmFromSnapshot-8` | ~40.7 ms | ~30.4 MB | ~345K | Cold `NewStore` + `WarmFromSnapshot` (proto decode + `recordFromMutation` + atomic bulk load). Streaming each mutation into `bulkLoadFrom` (rather than materializing a `[]DomainRecord` first) saves ~1.6 MB/op, matching the streaming-rebuild delta. |
+
+**Caveat on the local number.** Against the in-memory
+`BenchmarkHermesRebuildNormalizedSnapshot` (~22 ms), local warm looks *slower* —
+but that is not the comparison the tier is for. That rebuild bench replays an
+in-memory normalized source with no decode; warm pays proto-decode cost the
+rebuild bench never incurs, and neither touches Postgres. The tier's value only
+shows against a **real source** (service-backed) and across **multiple warming
+nodes**. The local bench exists as an allocation-shape regression guard on the
+warm path, not as the win.
+
+### Service-backed comparison (the real oracle)
+
+A `hermes_warm_from_snapshot` lane was added alongside
+`hermes_rebuild_postgres_snapshot` in the service-backed load harness. Both seed
+the same Postgres scope; the rebuild lane then scans it into a hotplane, while
+the warm lane builds one durable artifact and measures warming a **cold**
+partition from that artifact (which issues zero Postgres queries).
+
+```bash
+SERVICE_BACKED_LOAD_RESEARCH_STEPS=1000,100000 \
+SERVICE_BACKED_LOAD_RESEARCH_LANES=hermes_rebuild_postgres_snapshot,hermes_warm_from_snapshot \
+make test-service-backed-load
+```
+
+Apple M1 Pro, Docker Compose (Postgres 18 / Redis 8),
+`benchmark-results/service_backed_load_research_20260701T141638Z.tsv`:
+
+| Step | Lane | Measured warm | Throughput | PG acquires during measured warm | Artifact bytes |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1,000 | `hermes_rebuild_postgres_snapshot` | 8.20 ms | 121.9K/s | scans full scope from pool | — |
+| 1,000 | `hermes_warm_from_snapshot` | 5.83 ms | 171.6K/s | **0** | ~281 KB |
+| 100,000 | `hermes_rebuild_postgres_snapshot` | 658.1 ms | 152.0K/s | scans full scope from pool | — |
+| 100,000 | `hermes_warm_from_snapshot` | 617.6 ms | 161.9K/s | **0** | ~27.6 MB |
+
+### Insight (and where the next optimization is)
+
+1. **The win is source-load isolation, not raw latency.** During the measured
+   warm the snapshot lane issues **0 Postgres pool acquires** (delta captured in
+   the row note), while rebuild scans the entire scope from the connection pool.
+   The artifact is built **once** and any number of nodes — or a branch, or a
+   PITR replica — warm from it. The economic shape is `1 source scan + N cheap
+   artifact reads`, not `N full scans`, exactly the "read replica ≠ physical
+   clone" move.
+
+2. **Wall-clock advantage shrinks as scope grows** (≈29% faster at 1K → ≈6% at
+   100K). At small scope the Postgres round-trip dominates rebuild, so warm wins
+   clearly. At 100K the CPU-bound partition/index construction dominates *both*
+   paths and they converge — warm is still ahead, but marginally.
+
+3. **Warm is decode-bound, and that points at the next lane.** The artifact is a
+   proto `RecordMutationBatch` (~27.6 MB / 100K records), and warm's ~345K
+   allocs/op at 10K is dominated by `proto.Unmarshal` + `recordFromMutation`.
+   Serializing the artifact in the existing Hermes **columnar** layout
+   (`columnar.go`) instead of row-wise protos should cut both artifact bytes
+   (columnar compresses >10× on wide scans) and decode allocations, and it makes
+   the artifact directly scannable for the analytical read path. That is the
+   highest-value follow-up, ahead of the objectstore backend.
+
+4. **Built alongside the tier** (same change, unit-tested, not yet separately
+   benchmarked): the background snapshot writer
+   (`server-kit/go/hermes/snapshot_writer.go`), which makes
+   `snapshotDeltaThreshold`/interval concrete — it bounds the tail a later warm
+   must replay by re-snapshotting once the source watermark has advanced far
+   enough or enough time has passed — and the objectstore-backed
+   `SnapshotStore` (`server-kit/go/hermessnapshot`), which keeps the AWS SDK
+   dependency out of core `hermes` and makes `Latest` a two-object read
+   (LATEST pointer + artifact) with checksum verification at the storage
+   boundary.
+
+5. **Not yet built:** the columnar artifact lane from insight 3, and the
+   shadow-mode wire into `ProjectedRuntimeStore.ensureWarm` (dual-load + diff
+   before preferring the snapshot over `Rebuild`).
 
 ## 2026-06-25 full baseline validation benchmarks
 
@@ -121,7 +217,7 @@ Measured throughput and latency distribution (Apple M1 Pro, Docker Compose with 
 | | `pipeline_pg_redis_hermes` | 31.0K/s | 32.21 µs | Fully concurrent active pipeline. |
 | | `wsroute_register_redis` | 138.0K/s | 31.04 µs | Live Redis route registration. |
 | | `wsroute_broadcast_after_register` | 134.0M/s | 0.00 µs | Local fanout planning budget. |
-| **10,000**| `postgres_send_batch64` | 32.1K/s | 4,826.91 µs | Pool saturation point. |
+| **10,000** | `postgres_send_batch64` | 32.1K/s | 4,826.91 µs | Pool saturation point. |
 | | `postgres_copy_from1024` | 397.0K/s | 28.49 µs | Large bulk COPY throughput. |
 | | `redis_set_get_many64` | 288.5K/s | 362.05 µs | Pipelining amortizes network overhead. |
 | | `redis_xadd_many64` | 368.1K/s | 268.53 µs | Streams append throughput. |

@@ -29,7 +29,7 @@ import (
 
 const (
 	defaultServiceBackedLoadResearchSteps = "1000,10000,50000,100000,250000,500000,1000000"
-	defaultServiceBackedLoadResearchLanes = "postgres_send_batch64,postgres_copy_from1024,redis_set_get_many64,redis_xadd_many64,redis_stream_drain64,hermes_rebuild_postgres_snapshot,hermes_redis_tailer64,hermes_hot_count,mixed_pg_redis_hermes64,pipeline_pg_redis_hermes,wsroute_register_redis,wsroute_broadcast_after_register"
+	defaultServiceBackedLoadResearchLanes = "postgres_send_batch64,postgres_copy_from1024,redis_set_get_many64,redis_xadd_many64,redis_stream_drain64,hermes_rebuild_postgres_snapshot,hermes_warm_from_snapshot,hermes_redis_tailer64,hermes_hot_count,mixed_pg_redis_hermes64,pipeline_pg_redis_hermes,wsroute_register_redis,wsroute_broadcast_after_register"
 )
 
 func TestServiceBackedLoadResearchRamps(t *testing.T) {
@@ -102,6 +102,9 @@ func runServiceBackedLoadStep(
 	runIfServiceBackedLoadLane(t, lanes, "hermes_rebuild_postgres_snapshot", func() {
 		runServiceBackedLoadHermesRebuild(t, ctx, env, recorder, step, maxWorkers)
 	})
+	runIfServiceBackedLoadLane(t, lanes, "hermes_warm_from_snapshot", func() {
+		runServiceBackedLoadHermesWarmFromSnapshot(t, ctx, env, recorder, step, maxWorkers)
+	})
 	runIfServiceBackedLoadLane(t, lanes, "hermes_redis_tailer64", func() {
 		runServiceBackedLoadHermesRedisTailer(t, ctx, env, recorder, step)
 	})
@@ -133,6 +136,7 @@ func prepareServiceBackedLoadSchemas(
 	needsState := serviceBackedLoadLaneEnabled(lanes,
 		"postgres_send_batch64",
 		"hermes_rebuild_postgres_snapshot",
+		"hermes_warm_from_snapshot",
 		"hermes_hot_count",
 		"mixed_pg_redis_hermes64",
 		"pipeline_pg_redis_hermes",
@@ -427,6 +431,87 @@ func runServiceBackedLoadHermesRebuild(
 		DBStats:     store.Stats(),
 		HermesStats: hermesStats,
 		Notes:       "Hermes trusted rebuild from live Postgres snapshot; control-plane repair/warmup lane",
+	})
+	cleanupOrganization(t, ctx, store, orgID)
+}
+
+// runServiceBackedLoadHermesWarmFromSnapshot is the durable-snapshot-tier
+// counterpart to runServiceBackedLoadHermesRebuild. The setup phase seeds
+// Postgres, rebuilds a source hotplane once, and exports a durable snapshot
+// artifact to a SnapshotStore. The MEASURED phase then warms a cold partition
+// from that artifact — which touches the SnapshotStore only and issues zero
+// Postgres queries — so the row's DBStats acquire count captured before vs after
+// the measured warm shows the source-load the tier avoids per warming node.
+func runServiceBackedLoadHermesWarmFromSnapshot(
+	t *testing.T,
+	ctx context.Context,
+	env serviceEnv,
+	recorder *serviceBackedLoadRecorder,
+	step int,
+	maxWorkers int,
+) {
+	t.Helper()
+	const lane = "hermes_warm_from_snapshot"
+	const seedBatchSize = 256
+	before := serviceBackedLoadRuntimeSnapshot()
+	setupStart := time.Now()
+	poolOptions := serviceBackedLoadHermesRebuildPoolOptions(t, maxWorkers)
+	store := openPostgres(t, env, poolOptions)
+	defer store.Close()
+	db := requirePostgresDB(t, store)
+	orgID := uniqueName(env.prefix, "load-hermes-warm")
+	cleanupOrganization(t, ctx, store, orgID)
+	workers := serviceBackedLoadDBWorkers(step, seedBatchSize, maxWorkers, poolOptions)
+	if _, err := runServiceBackedLoadBatches(ctx, step, seedBatchSize, workers, func(ctx context.Context, _ int, start, count int) error {
+		return db.SendBatch(ctx, func(batch *pgx.Batch) {
+			queueHermesStateBatch(batch, orgID, start, count)
+		}, consumeBatchExecs(count))
+	}); err != nil {
+		t.Fatalf("%s setup seed failed: %v", lane, err)
+	}
+	// Build the source hotplane once and export a durable snapshot artifact.
+	source := newServiceBackedLoadHermesStore(t, "svc_load_warm_src", step)
+	if _, err := source.Rebuild(ctx, "svc_load_warm_src", store, hermes.Query{OrganizationID: orgID, Limit: step}); err != nil {
+		t.Fatalf("%s setup rebuild failed: %v", lane, err)
+	}
+	snaps := hermes.NewMemorySnapshotStore()
+	desc, err := source.SaveSnapshot(ctx, "svc_load_warm_src", hermes.Query{OrganizationID: orgID}, snaps)
+	if err != nil {
+		t.Fatalf("%s SaveSnapshot failed: %v", lane, err)
+	}
+	// The measured warm targets a store with the same projection name the
+	// artifact declares.
+	cold := newServiceBackedLoadHermesStore(t, "svc_load_warm_src", step)
+	setup := time.Since(setupStart)
+	dbBefore := store.Stats()
+
+	start := time.Now()
+	warmDesc, ok, err := cold.WarmFromSnapshot(ctx, "svc_load_warm_src", snaps)
+	elapsed := time.Since(start)
+	if err != nil || !ok {
+		t.Fatalf("%s WarmFromSnapshot ok=%v err=%v", lane, ok, err)
+	}
+	if warmDesc.Records != int64(step) {
+		t.Fatalf("%s warmed %d records, want %d", lane, warmDesc.Records, step)
+	}
+
+	dbAfter := store.Stats()
+	hermesStats, _ := cold.Stats("svc_load_warm_src")
+	recordServiceBackedLoadLane(t, recorder, serviceBackedLoadRow{
+		Step:        step,
+		Lane:        lane,
+		BatchSize:   step,
+		Workers:     1,
+		Setup:       setup,
+		Stats:       serviceBackedLoadStatsFromSingle(step, elapsed),
+		Before:      before,
+		After:       serviceBackedLoadRuntimeSnapshot(),
+		DBStats:     dbAfter,
+		HermesStats: hermesStats,
+		Notes: fmt.Sprintf(
+			"Warm cold partition from durable snapshot artifact (%d bytes, checksum %s...); Postgres pool acquires during measured warm: %d (vs rebuild which scans the whole scope)",
+			desc.Bytes, desc.Checksum[:8], dbAfter.AcquireCount-dbBefore.AcquireCount,
+		),
 	})
 	cleanupOrganization(t, ctx, store, orgID)
 }
