@@ -26,12 +26,16 @@ Read in order:
 3. [`foundation_architecture_contract.md`](foundation_architecture_contract.md) — platform/project ownership
 4. [`foundation_nervous_system.md`](foundation_nervous_system.md) — canonical lifecycle and invariants
 
+For how state flows across the whole stack (commands, events, projections,
+stores), read [`state_event_model.md`](state_event_model.md) — it is the map
+that connects backend and frontend.
+
 Then read only the lane-specific docs for code you're changing:
 
 - Backend/domain logic: `coding_practices.md`, `database_practices.md`, `security_practices.md`, `testing_practices.md`
 - Real-time/WebSocket: `websocket_scaling.md`, `hermes_read_modes.md`
 - Workers/async: `go_concurrency_bug_practices.md`, `coding_practices.md` (bounded work rules)
-- Frontend: `frontend_scaffold_sync.md`, `styling_design_practices.md`
+- Frontend: `state_event_model.md`, `frontend_scaffold_sync.md`, `frontend_command_registry.md`, `styling_design_practices.md`
 
 ### I'm an Architect—Show Me the Full Picture
 
@@ -76,6 +80,7 @@ Read in order:
 | [`foundation_guide.md`](foundation_guide.md) | Architects, deep-dive | Comprehensive agent & developer guide, module reference, extended services |
 | [`foundation_architecture_contract.md`](foundation_architecture_contract.md) | Architects, reviewers | Platform/scaffold/project ownership boundaries, extension rules |
 | [`foundation_nervous_system.md`](foundation_nervous_system.md) | Architects, developers | Canonical lifecycle, envelope contract, invariants, correlation flow |
+| [`state_event_model.md`](state_event_model.md) | Full-stack developers | "Everything is a state event": commands, events, projections, and frontend stores as one model |
 
 ---
 
@@ -128,6 +133,7 @@ Read in order:
 
 | Document | Purpose |
 | --- | --- |
+| [`state_event_model.md`](state_event_model.md) | End-to-end command → event → projection → store model (start here for state flow) |
 | `frontend_scaffold_sync.md` | Frontend package boundaries, generated types, scaffold sync contract |
 | `frontend_command_registry.md` | Generated route registry, `createAppRuntime`, dispatch path |
 | `frontend_runtime_workbench.md` | Frontend workbench: dummy data, tenant stores, live projections |

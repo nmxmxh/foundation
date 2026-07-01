@@ -3,6 +3,10 @@ EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANTS Jobs, MaxQueue, MaxAttempts
 
+\* Set of jobs currently in the queue sequence. (Previously used but undefined,
+\* which made the module fail to parse under SANY.)
+SeqToSet(s) == {s[i] : i \in 1..Len(s)}
+
 VARIABLES queue, leased, attempts, terminal
 
 vars == <<queue, leased, attempts, terminal>>

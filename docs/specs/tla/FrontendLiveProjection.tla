@@ -5,7 +5,10 @@ EXTENDS Naturals, Sequences
 \* projection streams. It documents the correctness shape; production tests map
 \* these invariants to frontend-kit live projection binding tests.
 
-CONSTANTS Tenant, OtherTenant, Domain, Collection, Record, MaxQueued
+\* NULL is the empty-record sentinel; MaxVersion bounds the version axis so the
+\* Mutation set is finite (it was `version : Nat`, an infinite set TLC cannot
+\* enumerate). NULL was previously used in Init but never declared.
+CONSTANTS Tenant, OtherTenant, Domain, Collection, Record, MaxQueued, NULL, MaxVersion
 
 VARIABLES store, status, buffered, liveQueue, lastVersion, applied, rejected, dropped
 
@@ -16,7 +19,7 @@ Mutation ==
     domain : {Domain},
     collection : {Collection},
     recordId : {"record-1"},
-    version : Nat,
+    version : 1..MaxVersion,
     op : {"upsert", "patch", "delete"},
     record : {Record} ]
 
@@ -128,8 +131,9 @@ TypeOK ==
 TenantScopeStable ==
   \A m \in Mutation : m.tenant # Tenant => ~Accept(m)
 
-VersionMonotonic ==
-  lastVersion >= 0
+\* The applied version stays within the deliverable range. (State invariant.)
+VersionWithinBound ==
+  lastVersion <= MaxVersion
 
 ClosedDoesNotBuffer ==
   status = "closed" => Len(buffered) = 0 /\ Len(liveQueue) = 0
@@ -137,12 +141,23 @@ ClosedDoesNotBuffer ==
 LiveQueueBounded ==
   Len(liveQueue) <= MaxQueued
 
-Spec == Init /\ [][Next]_<<store, status, buffered, liveQueue, lastVersion, applied, rejected, dropped>>
+vars == <<store, status, buffered, liveQueue, lastVersion, applied, rejected, dropped>>
+
+Spec == Init /\ [][Next]_vars
+
+\* Real monotonicity as a STEP property (the old `lastVersion >= 0` was
+\* vacuous): every step either keeps/advances the applied version or resets it
+\* to 0 on teardown. ApplyAccepted only fires when m.version >= lastVersion, so
+\* it never regresses; only Reset zeroes it. This is the read-your-write /
+\* no-stale-overwrite guarantee the frontend store depends on.
+VersionMonotone ==
+  [][ lastVersion' >= lastVersion \/ lastVersion' = 0 ]_vars
 
 THEOREM Spec => []TypeOK
 THEOREM Spec => []TenantScopeStable
-THEOREM Spec => []VersionMonotonic
+THEOREM Spec => []VersionWithinBound
 THEOREM Spec => []ClosedDoesNotBuffer
 THEOREM Spec => []LiveQueueBounded
+THEOREM Spec => VersionMonotone
 
 ================================================================================

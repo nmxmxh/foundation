@@ -5,3 +5,13 @@ edition = "2021"
 
 [lib]
 path = "src/lib.rs"
+
+[features]
+# loom enables the exhaustive interleaving model tests for the lock-free
+# log-ring publication protocol. It is opt-in: `cargo test --features loom`
+# (also driven by `make test-rust-loom` and RUST_RUNTIME_LOOM=1). Ordinary
+# builds never pull in loom.
+loom = ["dep:loom"]
+
+[dependencies]
+loom = { version = "0.7", optional = true }

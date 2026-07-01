@@ -1,0 +1,35 @@
+# Spec -> code conformance manifest.
+#
+# Every TLA invariant must be tied to real code that confirms it. This maps each
+# (spec, invariant) to the concrete anchors that check it: the TLC model, and
+# one or more code anchors (a test that runs the real implementation, or the
+# source symbol that enforces the invariant). spec_conformance_check.sh verifies
+# every anchor below actually exists, so a rename or deletion breaks the build --
+# the spec<->code link stops being a comment and becomes an enforced reference.
+#
+# kind: tlc | go-test | go-property | go-trace | go-race | servicebacked | loom | go-symbol | ts-test
+# columns: spec <TAB> invariant <TAB> kind <TAB> anchor <TAB> path
+#
+HermesProjectionPublish	TearFreeRead	tlc	TearFreeRead	docs/specs/tla/HermesProjectionPublish.tla
+HermesProjectionPublish	TearFreeRead	go-test	TestStoreConcurrentPatchReadsNeverObserveTornArchiveState	server-kit/go/hermes/store_test.go
+HermesProjectionPublish	TearFreeRead	go-race	test-go-race	Makefile
+HermesProjectionPublish	TearFreeRead	loom	loom_verification	runtime-sdk/rust/crates/ovrt-core/src/log_ring.rs
+HermesProjectionPublish	VersionWatermarkConsistent	go-symbol	observeSourceWatermark	server-kit/go/hermes/apply.go
+HermesProjectionPublish	VersionWatermarkConsistent	servicebacked	TestConformanceServiceBackedHermesProjectionMonotonic	server-kit/go/servicebacked/conformance_test.go
+MetadataMerge	StrongEventualConsistency	tlc	StrongEventualConsistency	docs/specs/tla/MetadataMerge.tla
+MetadataMerge	StrongEventualConsistency	go-property	TestMergeMapsACILaws	server-kit/go/metadata/aci_merge_test.go
+MetadataMerge	StrongEventualConsistency	go-symbol	AssertACILaws	server-kit/go/contracttest/aci.go
+WorkerRetryQueue	RetryBudgetBounded	tlc	RetryBudgetBounded	docs/specs/tla/WorkerRetryQueue.tla
+WorkerRetryQueue	RetryBudgetBounded	go-symbol	exceeds max_attempts	server-kit/go/worker/job.go
+WorkerRetryQueue	RetryBudgetBounded	go-test	TestConformanceWorkerRetryBudgetBounded	server-kit/go/worker/conformance_test.go
+WorkerRetryQueue	RetryBudgetBounded	go-trace	TestConformanceTraceWorkerRetryQueue	server-kit/go/worker/conformance_trace_test.go
+CacheProjectionFreshness	ProjectionVersionMonotonic	tlc	ProjectionVersionMonotonic	docs/specs/tla/CacheProjectionFreshness.tla
+CacheProjectionFreshness	ProjectionVersionMonotonic	go-symbol	observeSourceWatermark	server-kit/go/hermes/apply.go
+CacheProjectionFreshness	ProjectionVersionMonotonic	servicebacked	TestConformanceServiceBackedHermesProjectionMonotonic	server-kit/go/servicebacked/conformance_test.go
+WebSocketBackpressure	WriteQueueBounded	tlc	WriteQueueBounded	docs/specs/tla/WebSocketBackpressure.tla
+WebSocketBackpressure	WriteQueueBounded	go-symbol	wsWriteQueueDepth	server-kit/go/httpserver/websocket.go
+WebSocketBackpressure	WriteQueueBounded	go-test	TestEnqueueWSBackpressure	server-kit/go/httpserver/websocket_lifecycle_test.go
+WebSocketBackpressure	DisconnectCleansState	go-test	TestWSClientDisconnectCleansUpConnection	server-kit/go/httpserver/websocket_lifecycle_test.go
+FrontendLiveProjection	TenantScopeStable	tlc	TenantScopeStable	docs/specs/tla/FrontendLiveProjection.tla
+FrontendLiveProjection	TenantScopeStable	ts-test	rejects cross-tenant live mutations	frontend-kit/ts/src/runtimeWorkbench.test.ts
+FrontendLiveProjection	LiveQueueBounded	ts-test	keeps old snapshots immutable	frontend-kit/ts/src/runtimeWorkbench.test.ts

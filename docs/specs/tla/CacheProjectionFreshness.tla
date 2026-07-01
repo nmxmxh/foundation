@@ -7,12 +7,14 @@ VARIABLES truth, cache, watermarks, now
 
 vars == <<truth, cache, watermarks, now>>
 
+\* A fresh node: the cache is seeded from truth at version 0, watermarks at 0,
+\* clock at 0. (Previously cache/watermarks ranged over all of Nat in Init,
+\* giving an infinite set of initial states that TLC cannot enumerate.)
 Init ==
   /\ truth \in [Keys -> Values]
-  /\ cache \in [Keys -> [value: Values, version: Nat, refreshedAt: Nat]]
-  /\ watermarks \in [Keys -> Nat]
+  /\ cache = [k \in Keys |-> [value |-> truth[k], version |-> 0, refreshedAt |-> 0]]
+  /\ watermarks = [k \in Keys |-> 0]
   /\ now = 0
-  /\ \A k \in Keys : cache[k].version <= watermarks[k]
 
 TypeOK ==
   /\ truth \in [Keys -> Values]

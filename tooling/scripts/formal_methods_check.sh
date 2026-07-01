@@ -69,15 +69,44 @@ else
   check_exists "TLA spec template directory" "$spec_dir"
   check_exists "TLA spec template index" "$spec_dir/README.md"
 
-  for spec in WorkerRetryQueue CacheProjectionFreshness WebSocketBackpressure FrontendLiveProjection; do
+  for spec in WorkerRetryQueue CacheProjectionFreshness WebSocketBackpressure FrontendLiveProjection HermesProjectionPublish MetadataMerge; do
     file="$spec_dir/${spec}.tla"
-    check_exists "TLA template $spec" "$file"
+    check_exists "TLA spec $spec" "$file"
     check_contains "$spec defines Init" "$file" "Init =="
     check_contains "$spec defines Next" "$file" "Next =="
     check_contains "$spec defines TypeOK" "$file" "TypeOK =="
     check_contains "$spec defines Spec" "$file" "Spec =="
     check_contains "$spec declares theorem/invariant" "$file" "THEOREM"
   done
+
+  # Every spec must be model-checkable (ship a runnable TLC config) AND carry a
+  # negative control: a *Broken model that injects a bad transition so a named
+  # invariant is violated, proving the invariant has teeth. The config may be a
+  # bare <Name>.cfg (monolithic spec) or an MC<Name>.cfg (base + finite model
+  # instance); either satisfies the check.
+  for spec in WorkerRetryQueue CacheProjectionFreshness WebSocketBackpressure FrontendLiveProjection HermesProjectionPublish MetadataMerge; do
+    if [[ -f "$spec_dir/${spec}.cfg" || -f "$spec_dir/MC${spec}.cfg" ]]; then
+      ok "$spec has a runnable TLC config"
+    else
+      fail "$spec has a runnable TLC config" "expected ${spec}.cfg or MC${spec}.cfg"
+    fi
+    if [[ -f "$spec_dir/${spec}Broken.cfg" || -f "$spec_dir/MC${spec}Broken.cfg" ]]; then
+      ok "$spec has a negative control"
+    else
+      fail "$spec has a negative control" "expected ${spec}Broken.cfg or MC${spec}Broken.cfg"
+    fi
+  done
+
+  # HermesProjectionPublish is the implementation-mapped spec: it must assert the
+  # tear-free read invariant that mirrors the Go concurrency test, and name the
+  # atomic.Pointer it models.
+  hermes_spec="$spec_dir/HermesProjectionPublish.tla"
+  check_contains "Hermes spec asserts tear-free read invariant" "$hermes_spec" "TearFreeRead"
+  check_contains "Hermes spec maps to atomic.Pointer publish" "$hermes_spec" "atomic.Pointer"
+
+  # MetadataMerge is the CRDT convergence spec: it must assert Strong Eventual
+  # Consistency, the join-semilattice result from mathematical_practices.md.
+  check_contains "MetadataMerge asserts Strong Eventual Consistency" "$spec_dir/MetadataMerge.tla" "StrongEventualConsistency"
 fi
 
 if [[ "${FORMAL_RUN_TLC:-0}" == "1" ]]; then
@@ -86,14 +115,38 @@ if [[ "${FORMAL_RUN_TLC:-0}" == "1" ]]; then
   elif ! command -v java >/dev/null 2>&1; then
     fail "FORMAL_RUN_TLC requested but java is unavailable"
   else
+    tlc_jar="$(cd "$(dirname "$TLA_TOOLS_JAR")" && pwd)/$(basename "$TLA_TOOLS_JAR")"
+    # Run TLC from inside the spec directory so an INSTANCE resolves its sibling
+    # base module, and send scratch output to a throwaway metadir so TLC's
+    # states/ directory never lands in docs/ (which propagates to apps).
+    scratch="$(mktemp -d "${TMPDIR:-/tmp}/tla-scratch.XXXXXX")"
+    trap 'rm -rf "$scratch"' EXIT
     for cfg in "$spec_dir"/*.cfg; do
       [[ -f "$cfg" ]] || continue
-      module="${cfg%.cfg}.tla"
-      if java -cp "$TLA_TOOLS_JAR" tlc2.TLC -config "$cfg" "$module"; then
-        ok "TLC model check ${module#$target/}"
-      else
-        fail "TLC model check ${module#$target/}"
-      fi
+      cfg_base="$(basename "$cfg")"
+      module_base="$(basename "${cfg%.cfg}.tla")"
+      label="${cfg%.cfg}.tla"; label="${label#$target/}"
+      case "$cfg_base" in
+        *Broken*)
+          # Negative control: TLC MUST report an invariant violation. -deadlock
+          # disables deadlock checking (terminal states are expected in these
+          # safety models and are not errors).
+          out="$( (cd "$spec_dir" && java -cp "$tlc_jar" tlc2.TLC -deadlock -metadir "$scratch" -config "$cfg_base" "$module_base") 2>&1 || true )"
+          if printf '%s\n' "$out" | grep -q "is violated"; then
+            violated="$(printf '%s\n' "$out" | grep -m1 "is violated")"
+            ok "TLC negative control caught: $label ($violated)"
+          else
+            fail "TLC negative control did NOT fail (invariant has no teeth): $label"
+          fi
+          ;;
+        *)
+          if (cd "$spec_dir" && java -cp "$tlc_jar" tlc2.TLC -deadlock -metadir "$scratch" -config "$cfg_base" "$module_base") >/dev/null 2>&1; then
+            ok "TLC model check $label"
+          else
+            fail "TLC model check $label"
+          fi
+          ;;
+      esac
     done
   fi
 else

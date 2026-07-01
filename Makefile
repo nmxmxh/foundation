@@ -1,6 +1,6 @@
-.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-ts test-rust test-rust-sdk test-native-rust check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history bench-simd lint verify docker-up docker-down migrate-up help \
+.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-go-race test-ts test-rust test-rust-sdk test-native-rust test-rust-loom check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history bench-simd lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator \
-	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
+	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
 	check-doc-references check-ovasabi-cli \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet lifecycle-manifest
@@ -24,6 +24,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-runtime-performance-contracts \
 	check-frontend-runtime-workbench \
 	check-formal-methods \
+	check-spec-conformance \
 	check-operational-excellence \
 	check-go-fix \
 	check-go-static-analysis \
@@ -53,6 +54,7 @@ FOUNDATION_LINT_CHECKS := \
 
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 FOUNDATION_GO_CACHE_DIR ?= /tmp/ovasabi-foundation-go-build
+FOUNDATION_GO_RACE_FLAGS ?=
 FOUNDATION_VITEST_WORKERS ?= 0
 FOUNDATION_CARGO_TEST_JOBS ?= 1
 FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY ?= never
@@ -90,6 +92,20 @@ test-go:
 	@cd runtime-sdk/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test ./...
 	@cd config-contracts/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test ./...
 
+# test-go-race runs the Go suite under the data-race detector. The lock-free
+# projection lanes (hermes atomic.Pointer publish, event bus, worker queues,
+# registry, websocket fanout) depend on correct atomic discipline; -race is the
+# strongest dynamic check that no reader observes a torn or unsynchronized
+# write. It is slower than plain test-go, so it is a separate enforced gate
+# (wired into verify) rather than part of the inner-loop test-go target.
+test-go-race:
+	@echo "Running Go tests under -race..."
+	@mkdir -p "$(FOUNDATION_GO_CACHE_DIR)"
+	@cd server-kit/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -race $(FOUNDATION_GO_RACE_FLAGS) ./...
+	@cd runtime-transport/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -race $(FOUNDATION_GO_RACE_FLAGS) ./...
+	@cd runtime-sdk/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -race $(FOUNDATION_GO_RACE_FLAGS) ./...
+	@cd config-contracts/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -race $(FOUNDATION_GO_RACE_FLAGS) ./...
+
 test-ts:
 	@echo "Running TypeScript tests..."
 	@if [ -d runtime-transport/ts/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-transport/ts run; else echo "Skipping runtime-transport/ts tests; run npm install first"; fi
@@ -115,6 +131,15 @@ test-rust-sdk:
 test-native-rust:
 	@echo "Running runtime-native Rust tests..."
 	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo test --manifest-path runtime-native/rust/Cargo.toml --lib -j "$(FOUNDATION_CARGO_TEST_JOBS)"
+
+# test-rust-loom runs the loom exhaustive-interleaving model tests for the
+# lock-free log-ring publication protocol (ovrt-core). Loom enumerates thread
+# interleavings and memory orderings to prove the Acquire/Release contract has
+# no torn-read interleaving. It is the Rust analogue of the Go -race gate and is
+# the same invocation enforced by RUST_RUNTIME_LOOM=1 in the runtime checks.
+test-rust-loom:
+	@echo "Running runtime-sdk loom interleaving model tests..."
+	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo test --manifest-path runtime-sdk/rust/Cargo.toml -p ovrt-core --features loom loom_verification -j "$(FOUNDATION_CARGO_TEST_JOBS)"
 
 check-rust:
 	@scripts/check-rust.sh .
@@ -219,6 +244,9 @@ check-frontend-runtime-workbench:
 check-formal-methods:
 	@tooling/scripts/formal_methods_check.sh .
 
+check-spec-conformance:
+	@tooling/scripts/spec_conformance_check.sh .
+
 check-operational-excellence:
 	@tooling/scripts/operational_excellence_check.sh .
 
@@ -306,7 +334,7 @@ lifecycle-manifest:
 	node tooling/scripts/generate_lifecycle_manifest.mjs --proto-root "$$proto_root"
 
 
-verify: lint test frontend-build check-scaffold-smoke
+verify: lint test test-go-race frontend-build check-scaffold-smoke
 
 docker-up:
 	@docker compose -f tests/docker-compose.service-backed.yml up -d

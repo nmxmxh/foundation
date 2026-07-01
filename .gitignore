@@ -56,3 +56,8 @@
 
 # Agent memory + conductor (in-house / experimental for now — not shipped or scaffolded yet)
 agent_memory/
+
+# TLC model-checker scratch output (must never land in docs/ — docs/ propagates to apps)
+**/states/
+**/*_TTrace_*.tla
+.tla-scratch/

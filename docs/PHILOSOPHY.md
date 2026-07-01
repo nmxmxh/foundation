@@ -23,6 +23,64 @@ This is not premature optimization. When you can keep a dashboard read in sub-mi
 
 ---
 
+## One Programming Model: Everything Is a State Event
+
+The deeper reason most software is slow *and* buggy is not bad code — it's **fragmentation**. In a normal stack, the same piece of state is represented differently at every layer, and the developer pays a tax to translate it across each boundary:
+
+```
+Database (SQL rows)
+   │  ORM mapping
+Backend (Go/Java objects)
+   │  JSON serialization
+Network (HTTP payloads)
+   │  API hydration
+Frontend (React/Zustand state)
+   │  storage mapping
+Browser (IndexedDB/LocalStorage)
+```
+
+Each arrow is hand-written translation code: ORMs, JSON encoders, REST controllers, DTOs, state synchronizers. A large fraction of a team's time goes into those arrows — and they are where most bugs, security leaks, and wasted CPU live. The business logic is a thin sliver; the translation tower is the bulk.
+
+**Foundation collapses the tower.** The unit of the system is not a row, an object, or a payload — it is a single, immutable **state event**. A mutation is defined *once* as a schema (Protocol Buffers / Cap'n Proto), and the system behaves as a state machine:
+
+```
+State(n+1) = Transition(State(n), Event)
+```
+
+The same event flows through every layer without being re-encoded:
+
+- The **event log** (Postgres, Redis Streams) is the *history* of events.
+- The **network** (`runtime-transport` over WebSocket/HTTP) is the *carriage* of events.
+- The **hotplane** (Hermes) is the *node-local projection* of events.
+- The **frontend store** (Zustand via `runtime-transport`) is the *visual projection* of events.
+
+The `RuntimeEnvelope` that represents a mutation in Go is the same envelope transmitted over the wire, tailer-applied from Redis, and read by JavaScript and WASM in the browser. The contract is the program. This is the practical realization of a **replicated state machine** — the same idea that underpins consensus systems like Raft, applied as the everyday programming model.
+
+### Why contracts and protos are the foundation, not boilerplate
+
+In most stacks, the schema is an afterthought — a serialization detail bolted on at the network edge. Here it is inverted: **the proto/Cap'n Proto contract is the single source of truth, and every layer is generated from or validated against it.** That one decision is what makes the rest possible:
+
+- **No translation drift.** Backend route, network shape, generated TypeScript types, and frontend command registry all derive from the same contract (`server-kit/go/httpapi/catalog.go` → `route_catalog.json` → generated `runtimeRoutes.ts`). When the contract changes, every consumer changes with it or fails a check. There is no place for a hand-maintained DTO to silently disagree with the database.
+- **Zero-copy where it counts.** Because the byte layout is fixed by the contract, the hot lanes pass *references*, not re-serialized copies. A binary frame arriving in the browser is read directly from its offsets through the SharedArrayBuffer control plane — no JSON parse, no allocation, no GC pressure (`runtime-sdk`'s `layout.rs`).
+- **Determinism and replay.** State is a pure function of the event stream, so the event log *is* the reproduction. A production bug for one tenant can be downloaded as its event stream and replayed locally with full fidelity — which is also why agents debug well here: they replay the stream and watch exactly where an invariant breaks, instead of guessing.
+- **Temporal coordination for free.** Events are ordered by epochs and watermarks, so every layer knows *when* it is. The frontend can tell its view is stale by comparing its local watermark to the backend epoch — the classic out-of-order / staleness problem is handled by the contract, not by ad-hoc cache-busting.
+
+### The mindset shift
+
+In a conventional stack you **manipulate variables and call APIs**. In Foundation you **define transitions**:
+
+1. Define the **schema** (the event).
+2. Write the **transition** (how the event updates durable state).
+3. Write the **projection** (how the UI displays the state).
+
+Routing, transport, serialization, caching, multi-tenancy, and persistence are handled by the substrate. That is the real abstraction: the developer (or agent) writes at the level of the **"what"** — declarative domain logic — while the substrate compiles it down to the **"how"** — zero-alloc frames, columnar scans, GPU dispatches, SharedArrayBuffer atomics. Developer expressiveness is decoupled from execution efficiency: simple code on top, hardware-limit physics underneath.
+
+A fair caveat: this is the model Foundation is built *toward*, and large parts of it are real and measured today (the shared envelope, the generated registry, Hermes projections, the zero-copy runtime lanes). Some lanes still pass through compatibility adapters (JSON ingress, not-yet-binary paths). The contract makes those adapters *visible and bounded* rather than load-bearing — and the direction of travel is always toward fewer translations, not more.
+
+For the concrete end-to-end mechanics of this model — command to event to projection to store — see [`state_event_model.md`](state_event_model.md).
+
+---
+
 ## Three Enablers: Hermes, Metadata, and Performance Planes
 
 ### Hermes: The Hotplane

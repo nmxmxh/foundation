@@ -132,6 +132,19 @@ else
   check_contains "Rust runtime script exposes Loom opt-in" "$rust_runtime_script" "RUST_RUNTIME_LOOM"
 fi
 
+# Concurrency evidence gates: the lock-free projection lanes must be exercised
+# under the Go data-race detector and the Rust Loom interleaving checker. These
+# checks keep the gates wired so they cannot silently regress out of CI.
+makefile="$(first_existing "$target/Makefile" "$target/foundation/Makefile" || true)"
+if [[ -z "${makefile:-}" ]]; then
+  fail "Makefile exists for concurrency gates" "expected Makefile"
+else
+  check_contains "Makefile defines -race test gate" "$makefile" "test-go-race:"
+  check_contains "race gate runs the detector" "$makefile" "go test -race"
+  check_contains "verify enforces the -race gate" "$makefile" "test test-go-race"
+  check_contains "Makefile defines Loom interleaving gate" "$makefile" "test-rust-loom:"
+fi
+
 if [[ "$failed" -ne 0 ]]; then
   echo "runtime performance contract check failed"
   exit 1
