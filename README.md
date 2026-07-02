@@ -73,7 +73,7 @@ Start here → [`docs/foundation_quick_start.md`](docs/foundation_quick_start.md
 
 Start here → [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) (why Foundation exists) → [`docs/foundation_architecture_contract.md`](docs/foundation_architecture_contract.md) → [`docs/foundation_nervous_system.md`](docs/foundation_nervous_system.md) → [`docs/practice_controls.md`](docs/practice_controls.md)
 
-### For AI Agents & Partners
+### For AI Agents & Partners (Agent-Native Workflow)
 
 Start here → [`AGENTS.md`](AGENTS.md) → [`docs/foundation_glossary.md`](docs/foundation_glossary.md) → [`docs/agent_operating_contract.md`](docs/agent_operating_contract.md) → [`docs/ai_threat_model.md`](docs/ai_threat_model.md)
 

@@ -2,12 +2,14 @@
 CTRL-01|docs/practice_controls.md|tooling|critical|strong|script:tooling/scripts/practice_controls_check.sh|matrix-check|yes
 CTRL-02|docs/README.md|docs|medium|strong|script:tooling/scripts/docs_reference_check.mjs|doc-link-check|yes
 CTRL-03|docs/foundation_nervous_system.md|contracts|high|strong|script:tooling/scripts/check_lifecycle_manifest.sh|lifecycle-manifest-check|yes
+CTRL-04|docs/foundation_tooling.md|tooling|high|strong|script:tooling/scripts/server_kit_module_parity_check.sh|module-parity|yes
 AOC-01|docs/agent_operating_contract.md|agent|high|partial|script:tooling/scripts/agent_contract_check.sh;review|definition-of-done|yes
 EVID-01|docs/agent_operating_contract.md|agent|high|human|review|evidence-ledger|yes
 FPR-01|docs/future_practices_research.md|research|medium|human|review|research-ledger|contextual
 AISEC-01|docs/ai_threat_model.md|security|critical|human|review|threat-model|yes
 AISEC-02|docs/security_practices.md|security|critical|partial|script:tooling/scripts/app_security_profile_check.sh;review|app-threat-profile|yes
 PERFLAB-01|docs/performance_lab.md|performance|high|contextual|script:tooling/scripts/performance_check.sh;review|benchmark-artifact|contextual
+PERFLAB-02|docs/foundation_benchmarks.md|performance|medium|strong|script:tooling/scripts/benchmark_evidence_check.sh|benchmark-evidence|yes
 RUNTIME-01|docs/performance_lab.md|performance|high|partial|script:tooling/scripts/runtime_performance_contract_check.sh;script:tooling/scripts/performance_check.sh;review|profile-trace-benchmark|yes
 FORMAL-01|docs/tla_architecture_practices.md|formal|high|partial|script:tooling/scripts/formal_methods_check.sh;review|spec-template|yes
 OPS-01|docs/delivery_metrics_practices.md|operations|high|partial|script:tooling/scripts/operational_excellence_check.sh;review|delivery-event|yes

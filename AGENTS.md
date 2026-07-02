@@ -181,6 +181,7 @@ make migrate-up              # Run DB migrations
 | `kernellane` | Native Rust/FFI/SHM compute lane dispatch and descriptor management. |
 | `chain` | Worker chain helpers for bounded multi-step job composition. |
 | `hermes` | Bounded projection reads with freshness and rebuild contracts. |
+| `hermessnapshot` | Objectstore-backed durable projection snapshots for warm-from-snapshot. |
 | `eventlog` | Append-only lifecycle evidence for traces and inspection. |
 | `degradation` | Health monitoring with automatic fallback behaviors. |
 | `versioning` | Header/path/query API versioning with deprecation support. |

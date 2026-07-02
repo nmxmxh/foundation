@@ -891,8 +891,8 @@ Artifacts:
 | --- | --- |
 | `benchmark-results/foundation_bench_20260531T223701Z.tsv` | Broad Go/Rust/TypeScript benchmark summary: 221 rows, with `benchmark`, `ns_per_op`, `bytes_per_op`, `allocs_per_op`, and `source`. |
 | `benchmark-results/foundation_bench_20260531T223701Z.log` | Raw broad benchmark output, including Vitest `hz`, `mean`, p75/p99/p995/p999, RME, and sample counts. |
-| `benchmark-results/test_bench_20260531T224419.log` | Targeted objectstore, bulk manager, and native flow simulation output from `make test-bench`. |
-| `benchmark-results/native_bench_20260531T224409.log` | Runtime-native Rust report-only benches, native flow simulation, and runtime-native TypeScript frame benches. |
+| `test_bench_20260531T224419.log` (artifact pruned) | Targeted objectstore, bulk manager, and native flow simulation output from `make test-bench`. The raw log was pruned from `benchmark-results/`; the readings survive in the tables below. |
+| `native_bench_20260531T224409.log` (artifact pruned) | Runtime-native Rust report-only benches, native flow simulation, and runtime-native TypeScript frame benches. The raw log was pruned from `benchmark-results/`; the readings survive in the tables below. |
 | `benchmark-results/service_backed_20260531T235252Z.tsv` | Live eventlog/Postgres/Redis service-backed summary after eventlog claim leases: 15 rows, with `unit_per_op` for batch rows. |
 | `benchmark-results/service_backed_20260531T235252Z.log` | Raw service-backed benchmark output after Docker-backed race tests, including concurrent multi-drainer eventlog publication coverage. |
 

@@ -212,6 +212,36 @@ check_typed_proto_plane() {
   fi
 }
 
+# Architecture-wide vendored-surface verification: the server-kit module list
+# is data-driven from tooling/server_kit_module_manifest.tsv rather than
+# hand-enumerated here, so new foundation modules get fleet verification by
+# adding one manifest row.
+check_server_kit_module_parity() {
+  [[ -d "$target/foundation/server-kit/go" ]] || return 0
+  local script=""
+  local candidate
+  for candidate in "$target/scripts/checks/server_kit_module_parity_check.sh" "$target/foundation/tooling/scripts/server_kit_module_parity_check.sh"; do
+    if [[ -f "$candidate" ]]; then
+      script="$candidate"
+      break
+    fi
+  done
+  if [[ -z "$script" ]]; then
+    echo "[FAIL] server-kit module parity check available"
+    echo "  missing scripts/checks/server_kit_module_parity_check.sh; re-run foundation update"
+    failed=1
+    return
+  fi
+  local output
+  if output="$(bash "$script" "$target" 2>&1)"; then
+    echo "[OK] server-kit module surface matches foundation manifest"
+  else
+    echo "[FAIL] server-kit module surface matches foundation manifest"
+    printf '%s\n' "$output" | grep -v '^\[OK\]' | sed 's/^/  /' | head -20
+    failed=1
+  fi
+}
+
 check_repository_boundaries() {
   local service_root=""
   if [[ -d "$target/internal/service" ]]; then
@@ -371,6 +401,7 @@ check_absent "stale root config-contracts module" "$target/config-contracts"
 check_typed_proto_plane
 check_repository_boundaries
 check_service_domain_contracts
+check_server_kit_module_parity
 
 if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "server command" "$target/cmd/server/main.go"
@@ -506,6 +537,9 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_exists "project Rust runtime practices script" "$target/scripts/checks/rust_runtime_practices_check.sh"
   check_exists "foundation Vitest Node runtime runner" "$target/foundation/tooling/scripts/run_vitest.sh"
   check_exists "foundation lifecycle contract generator" "$target/foundation/tooling/scripts/generate_lifecycle_contract_tests.mjs"
+  check_exists "foundation hermes snapshot tier" "$target/foundation/server-kit/go/hermes/snapshot_tier.go"
+  check_exists "foundation hermes snapshot writer" "$target/foundation/server-kit/go/hermes/snapshot_writer.go"
+  check_exists "foundation objectstore snapshot store" "$target/foundation/server-kit/go/hermessnapshot/store.go"
   check_exists "foundation parallel chain module" "$target/foundation/server-kit/go/chain/chain.go"
   check_exists "foundation chaos module" "$target/foundation/server-kit/go/chaos/chaos.go"
   check_exists "foundation contract testing module" "$target/foundation/server-kit/go/contracttest/event_contract.go"

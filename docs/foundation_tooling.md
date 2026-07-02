@@ -91,6 +91,8 @@ All automated checks are run via `make lint` or specific `make check-*` targets.
 | `check-agent-contract` | `agent_contract_check.sh` | Shell | Verifies that downstream projects retain the `agent_operating_contract.md`, evidence ledgers, and `AGENTS.md` rules. |
 | `check-ovasabi-cli` | `go test ./cmd/ovasabi`; `node cmd/ovasabi/bin/ovasabi.js --help` | Go/Node | Verifies CLI scaffold wrapping, npm entrypoint launch, and online/offline license validation primitives. |
 | `check-coverage-ratchet` | `coverage_ratchet_check.sh` | Shell | Enforces statement coverage floors per package (target >= 95% for new code) against `tooling/coverage_baseline.psv`. |
+| `check-benchmark-evidence` | `benchmark_evidence_check.sh` | Shell | Fails when `docs/foundation_benchmarks.md` references a benchmark function, source path, or `benchmark-results/` artifact that no longer exists, keeping the evidence ledger honest across all lanes. |
+| `check-server-kit-module-parity` | `server_kit_module_parity_check.sh` | Shell | In Core, verifies `tooling/server_kit_module_manifest.tsv` matches the real `server-kit/go` module surface both ways. In projects, verifies every vendored module arrived and every foundation-only module (e.g. `servicebacked`) was pruned. New modules get fleet verification by adding one manifest row. |
 
 ---
 

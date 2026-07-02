@@ -2,7 +2,7 @@
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator \
 	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
-	check-doc-references check-ovasabi-cli \
+	check-doc-references check-ovasabi-cli check-benchmark-evidence check-server-kit-module-parity \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet lifecycle-manifest
 
 .DEFAULT_GOAL := help
@@ -46,8 +46,10 @@ FOUNDATION_LINT_CHECKS := \
 	check-enforcement-integrity \
 	check-foundation-assets \
 	check-server-kit-module-contract \
+	check-server-kit-module-parity \
 	check-domain-contract-consistency \
 	check-server-kit-usage \
+	check-benchmark-evidence \
 	check-lifecycle-manifest \
 	check-app-security-profile \
 	check-coverage-ratchet
@@ -318,6 +320,12 @@ check-domain-contract-consistency:
 
 check-server-kit-usage:
 	@tooling/scripts/server_kit_usage_check.sh .
+
+check-server-kit-module-parity:
+	@bash tooling/scripts/server_kit_module_parity_check.sh .
+
+check-benchmark-evidence:
+	@bash tooling/scripts/benchmark_evidence_check.sh .
 
 check-lifecycle-manifest:
 	@tooling/scripts/check_lifecycle_manifest.sh .

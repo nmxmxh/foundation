@@ -1,4 +1,4 @@
-# OVASABI Foundation Community License Agreement v1.0
+# OVASABI Foundation Community License Agreement v1.1
 
 Copyright (c) 2024–2026 OVASABI STUDIOS LTD. All rights reserved.
 
@@ -6,45 +6,158 @@ Copyright (c) 2024–2026 OVASABI STUDIOS LTD. All rights reserved.
 
 ## 1. Purpose and Scope
 
-This License Agreement governs your use of the software known as "Foundation" and all accompanying source code, documentation, schema configurations, and scaffolding scripts (the "Software") owned by OVASABI STUDIOS LTD ("Licensor").
+This License Agreement (the "Agreement") governs your use of the software known
+as "Foundation" and all accompanying source code, documentation, schema
+configurations, benchmark records, practice controls, and scaffolding scripts
+(collectively, the "Software") owned by OVASABI STUDIOS LTD ("Licensor").
 
-## 2. Permitted Uses (The "Community" & Open Source License)
+By using, copying, modifying, or distributing the Software, you accept the
+terms of this Agreement.
 
-Subject to the restrictions in Section 3, Licensor grants you a worldwide, royalty-free, non-exclusive, non-sublicensable license to:
+## 2. Definitions
 
-* Use, copy, modify, and distribute the Software for **non-commercial** purposes.
-* Use, copy, modify, and distribute the Software for **open-source development**, provided that any derivative work or application utilizing the Software is also published under a license approved by the Open Source Initiative (OSI).
+- **"Commercial Purpose"** means use of the Software to run, support, or enable
+  a product, service, or internal system of a for-profit business, or any use
+  intended for commercial advantage or monetary compensation.
+- **"Organization"** means you together with all entities that control you, are
+  controlled by you, or are under common control with you, with revenue and
+  funding measured on a consolidated group basis.
+- **"Revenue Threshold"** means (a) more than US $1,000,000 in gross revenue in
+  the most recent twelve (12) month period, or (b) more than US $1,000,000 in
+  total financing raised (equity, debt, grants, or token sales combined).
+- **"AI System"** means any machine learning model, neural network, or
+  artificial intelligence system, including code-generation and
+  software-synthesis models.
+- **"Training Use"** means any use of the Software, in whole or in part, where
+  the purpose or effect is to create, train, fine-tune, align, evaluate for
+  development purposes, distill, or otherwise improve an AI System — including
+  use as training data, fine-tuning data, reinforcement-learning data
+  (RLHF/RLAIF or similar), distillation source material, embedding corpora
+  assembled for model training, or seed material for synthetic training data.
+- **"Inference Use"** means providing the Software as contextual input to an
+  AI System at inference time for the purpose of developing, maintaining,
+  reviewing, testing, documenting, or operating software — including use of AI
+  coding assistants and autonomous coding agents operating on the Software.
 
-For the scope of these permitted uses, the terms and permissions of the **Apache License 2.0** apply to and are incorporated into this Agreement.
+## 3. License Grant (Community Use)
 
-## 3. License Restrictions & Exclusions
+Subject to the restrictions in Section 4, Licensor grants you a worldwide,
+royalty-free, non-exclusive, non-sublicensable, non-transferable license to
+use, copy, modify, and distribute the Software for:
 
-You may not do any of the following without obtaining a separate, written, commercial license agreement from OVASABI STUDIOS LTD:
+1. **Non-commercial purposes**, including personal projects, research, and
+   education;
+2. **Open-source development**, provided that any derivative work or
+   application utilizing the Software is published under a license approved by
+   the Open Source Initiative (OSI); and
+3. **Commercial Purposes, only while your Organization does not exceed the
+   Revenue Threshold.**
 
-### 3.1. Commercial Use
+For the scope of these permitted uses, the terms and permissions of the
+**Apache License 2.0** are incorporated into this Agreement by reference. Where
+this Agreement and the Apache License 2.0 conflict, this Agreement controls.
 
-You may not use the Software, or any derivative works of the Software, for any commercial purpose if:
+## 4. Restrictions
 
-* You use the Software to run, support, or enable a commercial product, service, or business.
-* Your organization (including affiliates and subsidiaries) exceeds **$1,000,000 USD** in annual revenue or has raised more than **$1,000,000 USD** in total venture funding.
+### 4.1. Commercial Use Above the Revenue Threshold
 
-### 3.2. Machine Learning and AI Training Data Exclusion
+If your Organization exceeds the Revenue Threshold, you may not use the
+Software or any derivative work of the Software for any Commercial Purpose
+without a separate written commercial license agreement from OVASABI STUDIOS
+LTD. Community use under Sections 3.1 and 3.2 remains permitted.
 
-You are strictly prohibited from using the Software, including its source code, comments, documentation, test suites, architecture schemas, and benchmark records:
+If your Organization crosses the Revenue Threshold while using the Software
+commercially, you must obtain a commercial license within ninety (90) days of
+crossing it.
 
-* As training data, fine-tuning data, reinforcement learning (RLHF/RLAIF) data, or input datasets for any machine learning models, neural networks, or artificial intelligence systems.
-* To generate, train, or optimize code-generation or software-synthesis models.
+### 4.2. AI Training Exclusion
 
-This restriction applies regardless of whether your use of the AI system or the resulting model is commercial or non-commercial.
+**Training Use of the Software is prohibited.** This restriction applies
+regardless of whether your use of the AI System or the resulting model is
+commercial or non-commercial, and regardless of your Organization's size.
 
-## 4. Obtaining a Commercial License
+**Inference Use is expressly permitted** and does not constitute Training Use,
+provided that you do not knowingly grant the AI System's provider rights to
+retain or use the Software for Training Use (for example, by submitting the
+Software through service tiers whose terms permit training on user content
+where an opt-out or non-training tier is reasonably available).
 
-To obtain a commercial license, permission for enterprise deployment, or a license to utilize the Software as machine learning training data, please contact:
+For the avoidance of doubt: building retrieval indexes or embeddings over the
+Software solely to assist Inference Use is permitted; contributing the Software
+or such derivatives to any corpus used to create or improve an AI System is
+not.
 
-* **Email:** <licensing@ovasabi.studio>
-* **Company:** OVASABI STUDIOS LTD
-* **Company Registration No:** 7357449 (Federal Republic of Nigeria)
+## 5. Obtaining a Commercial License
 
-## 5. Limitation of Liability & Warranty
+Commercial licenses are offered in tiers aligned to deployment posture:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+- **Commercial** — for Organizations above the Revenue Threshold using the
+  Software for Commercial Purposes.
+- **Enterprise / Sovereign** — fully self-hosted or air-gapped deployment with
+  offline license verification (signed license file), private registry access,
+  and contractual data-sovereignty and IP warranties for regulated
+  environments.
+- **Training Rights** — any Training Use under Section 4.2, licensed
+  separately and only by express written agreement.
+
+To obtain a commercial license, contact:
+
+- **Email:** <licensing@ovasabi.studio>
+- **Company:** OVASABI STUDIOS LTD
+- **Company Registration No:** 7357449 (Federal Republic of Nigeria)
+
+## 5A. Data Sovereignty Covenant
+
+Licensor commits, for all use under this Agreement, that:
+
+1. The Software as distributed by Licensor contains no telemetry and performs
+   no network transmission of your source code, schemas, prompts, tenant data,
+   or derivative works to Licensor or any third party.
+2. License verification is available fully offline; no license check requires
+   sending Licensor anything beyond license credentials, and air-gapped
+   operation is a supported mode, not an exception.
+3. Licensor claims no ownership over applications, domain schemas, or other
+   works you build using the Software. Your business logic is yours.
+
+## 6. Patents
+
+Licensor grants you a patent license to the extent provided by the Apache
+License 2.0 for the uses permitted in Section 3. If you or your Organization
+initiate patent litigation alleging that the Software infringes a patent, all
+licenses granted to you under this Agreement terminate immediately.
+
+## 7. Trademarks
+
+This Agreement grants no rights to use the names, logos, or trademarks of
+OVASABI STUDIOS LTD, including "OVASABI" and "Ovasabi Foundation", except for
+reasonable and customary use in describing the origin of the Software.
+
+## 8. Termination
+
+This Agreement terminates automatically upon your material breach of its
+terms. If the breach is curable and you cure it within thirty (30) days of
+becoming aware of it, the license is reinstated. Sections 4.2, 6, 7, 9, and 10
+survive termination.
+
+## 9. Limitation of Liability & Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+## 10. Governing Law and Miscellaneous
+
+This Agreement is governed by the laws of the Federal Republic of Nigeria,
+without regard to conflict-of-laws principles, and the courts of Nigeria have
+exclusive jurisdiction over disputes arising under it.
+
+If any provision of this Agreement is held unenforceable, the remaining
+provisions remain in effect. This Agreement is the entire agreement between
+you and Licensor concerning the Software and supersedes prior versions for
+copies obtained under this version. Licensor may publish revised versions of
+this Agreement; each copy of the Software is governed by the license version
+it was distributed with.
