@@ -27,14 +27,38 @@ The 4KB buffer is the hot control plane, not the whole runtime. Large payloads u
 ## Getting Started: Developing a "Unit"
 
 A "Unit" is a single piece of logic (e.g., `image:resize`, `tax:calculate_nigeria`).
+The full walkthrough — crate layout, all execution lanes (stdio, FFI, shm,
+browser WASM), Go integration, and the evidence checklist — lives in
+[`docs/rust_unit_guide.md`](../docs/rust_unit_guide.md), with
+`global_value_exchange_net_v1/rust/crates/gve-financial` as the worked example.
 
 ### Rust Implementation
 
+A unit is a `Send + Sync` type implementing `ovrt_unit::RuntimeUnit`: a
+validated descriptor plus a `run` body. A crate without a descriptor is a
+library, not a unit — the descriptor is what makes it selectable by the lane
+planner and registrable in `UnitRegistry`/`NativeRuntimeHost`.
+
 ```rust
 impl RuntimeUnit for MyUnit {
+    fn descriptor(&self) -> RuntimeUnitDescriptor {
+        RuntimeUnitDescriptor {
+            unit_id: "myapp.scoring.v1".to_string(),
+            role: RuntimeRole::Compute, // pulse | compute | gpu | io
+            input_schema: "myapp/scoring/v1/features.capnp".to_string(),
+            output_schema: "myapp/scoring/v1/scores.capnp".to_string(),
+            supports_wasm: true,
+            supports_native: true,
+            requires_shared_memory: false,
+            supports_gpu: false,
+            max_concurrency: 2,
+        }
+    }
+
     fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-        // Input is pre-validated and pulled from the 4KB buffer region
-        Ok(vec![...])
+        // Input is pre-validated and pulled from the 4KB buffer region.
+        // Return controlled errors; never panic.
+        Ok(vec![])
     }
 }
 ```

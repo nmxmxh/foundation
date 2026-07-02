@@ -34,6 +34,24 @@ move it into the owning practice document and, where possible, into tooling.
 6. Operational excellence: OpenTelemetry semantic conventions, DORA, SPACE,
    DevEx, SLSA/SBOM/provenance, incident-linked delivery records, and flaky-test
    budgets.
+7. Near-data and movement-avoidance compute (added 2026-07-02, source: the
+   Processing-using-Memory literature — RowClone, Ambit, HBM-PIM, CXL memory):
+   the governing question is "why is this component involved in this byte's
+   journey at all?" Software-level deltas to track and promote:
+   - kernel zero-copy primitives as measured lanes for artifact/snapshot
+     movement: `copy_file_range`, reflink clones, `sendfile`/`splice`,
+     `io_uring`, mmap page-cache reads (candidate: hermessnapshot artifact
+     serving and snapshot-tier warm paths);
+   - bitmap-predicate merges in Hermes columnar reads: evaluate multi-filter
+     queries as bulk AND/OR over packed validity/index bitmaps (POPCNT lane)
+     before touching record memory — the software form of Ambit's in-place
+     bulk bitwise operations;
+   - an explicit bytes-moved-per-op budget next to B/op in benchmark rows, so
+     movement (not just allocation) is a gated regression class;
+   - lane-planner readiness for near-memory hardware (PIM DIMMs, CXL pooled
+     memory, GPU near-data kernels): compute location is already a planned,
+     benchmarked decision in Foundation, so a near-data device is a new lane,
+     not a rearchitecture.
 
 ## Per-Document Gap Map
 

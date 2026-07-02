@@ -28,7 +28,8 @@ Before acting, verify your target against the structural boundaries of the Found
 
 Agents MUST navigate to these specific files for granular rules when operating within their respective domains:
 
-* **Coding Practices**: [`docs/coding_practices.md`](../docs/coding_practices.md) - Contains CP-01 through CP-17 strict coding assertions.
+* **Coding Practices**: [`docs/coding_practices.md`](../docs/coding_practices.md) - Contains CP-01 through CP-36 strict coding assertions.
+* **Rust Unit Guide**: [`docs/rust_unit_guide.md`](../docs/rust_unit_guide.md) - End-to-end walkthrough for adding an app-owned Rust performance unit (stdio/FFI/shm/WASM lanes).
 * **Database Practices**: [`docs/database_practices.md`](../docs/database_practices.md) - Fixed 3-group migration structure and connection budgets.
 * **Redis Practices**: [`docs/redis_practices.md`](../docs/redis_practices.md) - Ephemeral data structures, key-naming conventions, and TTL configurations.
 * **Runtime Architecture**: [`docs/runtime_foundation.md`](../docs/runtime_foundation.md) - Top-level isolation posture between control-plane (Go) and hot-path (WASM/Rust).

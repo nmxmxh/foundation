@@ -120,6 +120,7 @@ Read in order:
 | `performance_lab.md` | Low-level evidence contract for CPU, allocator, syscall, I/O, WASM, FFI, GPU lanes |
 | `foundation_benchmarks.md` | Benchmark commands, reference runs, interpretation, performance ladder |
 | `rust_runtime_practices.md` | Rust/WASM/native runtime coding, async, performance, error-handling |
+| `rust_unit_guide.md` | End-to-end walkthrough for adding an app-owned Rust performance unit across stdio/FFI/shm/WASM lanes |
 | `runtime_foundation.md` | Runtime ladder, WASM/native lanes, binary transport, control-buffer discipline |
 | `runtime_native.md` | Tauri/native shell device access, native byte lanes, secure storage, GPU policy |
 | `gpu_practices.md` | WebGPU/native GPU batching, memory, verification |

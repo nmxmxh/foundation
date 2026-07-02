@@ -288,7 +288,10 @@ Operations with user-visible progress: uploads, downloads, exports, transcodes. 
 Create `internal/service/<domain>/` with handler, repository, and tests. Register routes through the server bootstrap. Add protobuf schemas in `api/protos/`. Run `make generate-contracts`. Add lifecycle and integration tests. See `foundation_guide.md` §3.
 
 **Q: How do I add a new server-kit module?**
-Create `server-kit/go/<package>/` with implementation and tests. Add to `go.mod`. Update `foundation_guide.md` extended modules table and `AGENTS.md` modules table. Add practice control entries if the module introduces new rules. Run `make test`.
+Create `server-kit/go/<package>/` with implementation and tests. Add to `go.mod`. Update `foundation_guide.md` extended modules table, `AGENTS.md` modules table, and `tooling/server_kit_module_manifest.tsv` (checked by `make check-server-kit-module-parity`). Add practice control entries if the module introduces new rules. Run `make test`.
+
+**Q: How do I add a Rust performance unit?**
+Create a crate under the project's `rust/crates/` implementing `ovrt_unit::RuntimeUnit` (a validated `RuntimeUnitDescriptor` plus `run`). Expose the lanes: a stdio bin via `ovrt_native::serve_stdio`, FFI via `ovrt_ffi::export_runtime_ffi!`, WASM via `make build-rust-wasm` + `wasm-manifest`. Integrate from Go through `runtimehost.NewProcessPool`/`NewFFIPool` and add a runtimehost integration test for at least one native lane. Full walkthrough: `rust_unit_guide.md`.
 
 **Q: How do I add a new transfer/upload route?**
 Use `httpapi.MakeTransferRoute` for simple streaming uploads or `httpapi.MakeResumableTransferRoutes` for resumable multipart. Both require a `transfer.Manager` and `objectstore.Store`. See `transfer_lane.md`.
@@ -343,7 +346,7 @@ The recommended facade that wires the generated route registry, HTTP/WS transpor
 | WebSocket routing | `websocket_scaling.md`, `coding_practices.md` (CP-17) |
 | Frontend component | `styling_design_practices.md`, `frontend_scaffold_sync.md`, `references/README.md` |
 | Frontend transport | `frontend_command_registry.md`, `frontend_scaffold_sync.md` |
-| Runtime / WASM / Rust | `runtime_foundation.md`, `rust_runtime_practices.md`, `performance_lab.md` |
+| Runtime / WASM / Rust | `runtime_foundation.md`, `rust_runtime_practices.md`, `rust_unit_guide.md`, `performance_lab.md` |
 | Native / Tauri | `runtime_native.md`, `rust_runtime_practices.md` |
 | GPU / WebGPU | `gpu_practices.md`, `game_runtime_practices.md` |
 | Security / auth | `security_practices.md`, `coding_practices.md` (CP-18, CP-20, CP-29), `ai_threat_model.md` |
