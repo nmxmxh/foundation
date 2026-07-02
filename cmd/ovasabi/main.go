@@ -32,6 +32,8 @@ type commandRunner interface {
 type osRunner struct{}
 
 func (osRunner) Run(ctx context.Context, name string, args []string, dir string, env []string, stdout io.Writer, stderr io.Writer) error {
+	// #nosec G204 -- the CLI's purpose is launching the Foundation scaffold
+	// scripts; name/args come from internal call sites, not user input.
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
@@ -429,7 +431,7 @@ func readConfigLicenseKey() string {
 	if err != nil {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".ovasabi", "config.json"))
+	data, err := os.ReadFile(filepath.Join(home, ".ovasabi", "config.json")) // #nosec G304 -- fixed path under the user's home directory.
 	if err != nil {
 		return ""
 	}

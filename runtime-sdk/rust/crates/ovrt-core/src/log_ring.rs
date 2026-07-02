@@ -112,15 +112,15 @@ mod loom_verification {
     #[test]
     fn acquire_release_publishes_complete_slab() {
         loom::model(|| {
-            let ring = Arc::new(ModelRing {
-                write_offset: AtomicU32::new(0),
-                slab: UnsafeCell::new(0),
-            });
+            let ring =
+                Arc::new(ModelRing { write_offset: AtomicU32::new(0), slab: UnsafeCell::new(0) });
 
             let producer = {
                 let ring = ring.clone();
                 loom::thread::spawn(move || {
                     // Write the slab payload, then publish via Release store.
+                    // SAFETY: loom's UnsafeCell::with_mut hands out exclusive
+                    // access; the model checks every interleaving for races.
                     ring.slab.with_mut(|p| unsafe { *p = SENTINEL });
                     ring.write_offset.store(4, Ordering::Release);
                 })
@@ -128,14 +128,13 @@ mod loom_verification {
 
             // Consumer: only read the slab once the published offset is visible.
             if ring.write_offset.load(Ordering::Acquire) != 0 {
+                // SAFETY: read is gated behind the Acquire load of the
+                // published offset; loom verifies the happens-before edge.
                 let observed = ring.slab.with(|p| unsafe { *p });
-                assert_eq!(
-                    observed, SENTINEL,
-                    "consumer observed a torn or unpublished slab",
-                );
+                assert_eq!(observed, SENTINEL, "consumer observed a torn or unpublished slab",);
             }
 
-            producer.join().unwrap();
+            assert!(producer.join().is_ok(), "producer thread must complete");
         });
     }
 
@@ -146,14 +145,14 @@ mod loom_verification {
     #[test]
     fn sequential_publications_stay_monotonic() {
         loom::model(|| {
-            let ring = Arc::new(ModelRing {
-                write_offset: AtomicU32::new(0),
-                slab: UnsafeCell::new(0),
-            });
+            let ring =
+                Arc::new(ModelRing { write_offset: AtomicU32::new(0), slab: UnsafeCell::new(0) });
 
             let producer = {
                 let ring = ring.clone();
                 loom::thread::spawn(move || {
+                    // SAFETY: loom's UnsafeCell::with_mut hands out exclusive
+                    // access; the model checks every interleaving for races.
                     ring.slab.with_mut(|p| unsafe { *p = SENTINEL });
                     ring.write_offset.store(8, Ordering::Release);
                 })
@@ -162,11 +161,13 @@ mod loom_verification {
             let offset = ring.write_offset.load(Ordering::Acquire);
             assert!(offset == 0 || offset == 8, "offset must be monotonic");
             if offset == 8 {
+                // SAFETY: read is gated behind the Acquire load of the
+                // published offset; loom verifies the happens-before edge.
                 let observed = ring.slab.with(|p| unsafe { *p });
                 assert_eq!(observed, SENTINEL, "published offset without slab data");
             }
 
-            producer.join().unwrap();
+            assert!(producer.join().is_ok(), "producer thread must complete");
         });
     }
 }

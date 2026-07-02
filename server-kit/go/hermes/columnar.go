@@ -371,8 +371,42 @@ func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []
 	if err != nil {
 		return nil, err
 	}
+	entries = sortAndLimitEntries(entries, query)
+	return buildRecordBatch(fields, entries)
+}
 
-	// Sort: descending UpdatedAt → descending version → ascending RecordID.
+// getColumnarBatchWhere is the predicate-pushdown twin of getColumnarBatch:
+// candidates are collected without the query limit, filtered before sorting,
+// then sorted, limited, and materialized — so unselected rows never pay sort
+// comparisons or vector construction, and the limit applies to filtered rows.
+func (p *partition) getColumnarBatchWhere(ctx context.Context, query Query, fields []string, predicates []ColumnPredicate, fence Fence) (*RecordBatch, error) {
+	if err := p.waitForStable(ctx); err != nil {
+		return nil, err
+	}
+	if err := p.checkFence(fence); err != nil {
+		return nil, err
+	}
+	query = normalizeQuery(query)
+	if query.OrganizationID == "" {
+		return nil, ErrInvalidEvent
+	}
+
+	// Collect with the limit lifted: an early-stopped candidate walk would
+	// truncate before filtering and break WHERE-then-LIMIT semantics.
+	collectQuery := query
+	collectQuery.Limit = 0
+	entries, err := p.collectRecordEntries(ctx, p.activeRegistry(), collectQuery)
+	if err != nil {
+		return nil, err
+	}
+	entries = filterEntriesInPlace(entries, predicates)
+	entries = sortAndLimitEntries(entries, query)
+	return buildRecordBatch(fields, entries)
+}
+
+// sortAndLimitEntries applies the canonical batch order (descending UpdatedAt
+// → descending version → ascending RecordID), then the query limit.
+func sortAndLimitEntries(entries []recordEntry, query Query) []recordEntry {
 	if query.Limit <= 0 || len(entries) > 1 {
 		sort.Slice(entries, func(i, j int) bool {
 			if !entries[i].record.UpdatedAt.Equal(entries[j].record.UpdatedAt) {
@@ -387,10 +421,13 @@ func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []
 	if query.Limit > 0 && len(entries) > query.Limit {
 		entries = entries[:query.Limit]
 	}
+	return entries
+}
 
+// buildRecordBatch materializes the requested field vectors for the entries.
+func buildRecordBatch(fields []string, entries []recordEntry) (*RecordBatch, error) {
 	rows := len(entries)
 	columns := make([]Column, 0, len(fields))
-
 	for _, field := range fields {
 		vec, err := buildFieldVector(field, entries, rows)
 		if err != nil {
@@ -398,7 +435,6 @@ func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []
 		}
 		columns = append(columns, Column{Name: field, Data: vec})
 	}
-
 	return &RecordBatch{
 		Columns: columns,
 		Rows:    rows,

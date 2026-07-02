@@ -39,9 +39,11 @@ move it into the owning practice document and, where possible, into tooling.
    the governing question is "why is this component involved in this byte's
    journey at all?" Software-level deltas to track and promote:
    - kernel zero-copy primitives as measured lanes for artifact/snapshot
-     movement: `copy_file_range`, reflink clones, `sendfile`/`splice`,
-     `io_uring`, mmap page-cache reads (candidate: hermessnapshot artifact
-     serving and snapshot-tier warm paths);
+     movement — promoted 2026-07-02: `hermessnapshot.FileStore` ships
+     reflink → `copy_file_range` → userspace clone lanes (`PromoteLatest`)
+     and sendfile-path serving (`OpenArtifact`), correctness-proven on Linux
+     via `make bench-zerocopy-linux`; still open: ledger-grade numbers on a
+     real ext4/XFS host, `io_uring`, and mmap page-cache read lanes;
    - bitmap-predicate merges in Hermes columnar reads: evaluate multi-filter
      queries as bulk AND/OR over packed validity/index bitmaps (POPCNT lane)
      before touching record memory — the software form of Ambit's in-place

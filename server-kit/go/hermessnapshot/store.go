@@ -1,7 +1,11 @@
-// Package hermessnapshot provides an object-storage-backed implementation of
-// hermes.SnapshotStore. It lives outside the core hermes package so that hermes
-// consumers do not inherit the object-storage (AWS SDK) dependency unless they
-// opt into durable, shared snapshots.
+// Package hermessnapshot provides durable hermes.SnapshotStore backends. It
+// lives outside the core hermes package so that hermes consumers do not
+// inherit backend dependencies unless they opt into durable, shared snapshots.
+//
+// Two backends ship: Store (object storage, this file) for shared cross-node
+// snapshots, and FileStore (filestore.go) for same-host durable snapshots with
+// kernel zero-copy promotion lanes (reflink/copy_file_range) and
+// sendfile-path artifact serving.
 //
 // Layout: artifacts are written to tenant-scoped keys derived from the
 // colon-delimited, org-embedding projection name, and a small LATEST pointer

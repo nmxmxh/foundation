@@ -1,7 +1,7 @@
 # Foundation Benchmarks
 
 Status: active reference
-Date: 2026-07-01
+Date: 2026-07-02
 Owner: Platform Architecture
 
 ## Purpose
@@ -19,6 +19,138 @@ Foundation performance work is not a single transport bet. The architecture uses
 The benchmark suite exists to prove that ladder stays honest. The fastest lane should not pay network-stack or JSON costs, and the compatibility lane should remain visibly more expensive than the binary paths.
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
+
+## 2026-07-02 Bitmap-predicate merges in Hermes columnar reads
+
+Promoted from `future_practices_research.md` lane 7 (the processing-using-memory
+lineage: evaluate multi-filter queries as bulk bitwise operations over packed
+bitmaps first; touch record memory only for surviving rows). The implementation
+adds `SelectionBitmap` (`server-kit/go/hermes/columnar_select.go`): typed
+predicate constructors (`SelectInt64`, `SelectFloat64`, `SelectString` with
+`CompareOp`), validity-aware null semantics (a null cell never matches),
+word-at-a-time `And`/`Or`/`AndNot`/`Not` merges with tail-word hygiene,
+POPCNT-lowered `Count`, bit-scan `ForEachSelected` iteration, and a masked
+`SumFloat64Selected` reduction.
+
+```bash
+cd foundation/server-kit/go
+go test ./hermes -run='^$' \
+  -bench='BenchmarkHermesColumnarBitmapFilter|BenchmarkHermesListRecordsFilterSum|BenchmarkHermesSelectionBitmapMerge10K' \
+  -benchmem -count=3
+```
+
+Apple M1 Pro (ARM64), 10K-row fixture (float price with real nulls, int bucket,
+string symbol), predicates `price > 7500 AND bucket <= 7` (medians of 3):
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesColumnarBitmapFilterCachedBatch-8` | ~34,302 | 2,560 | 2 | **The new lane isolated**: two predicate scans + AND merge + masked sum over a resident batch. This is the repeated-filter (dashboard/analytics) pattern. |
+| `BenchmarkHermesListRecordsFilterSum-8` | ~7,865,649 | 8,244,525 | 10,043 | Record-path equivalent: list copied records, chase `RecordData` per row, parse, filter. ~229× slower and 5,000× more allocations than the cached-batch bitmap lane. |
+| `BenchmarkHermesColumnarBitmapFilterSum-8` | ~6,961,410 | 2,769,035 | 47 | Cold path including `GetColumnarBatch` per iteration: batch construction dominates; the filter machinery adds ~5 allocs and ~0.2 ms over `BenchmarkHermesColumnarSumPrice` (~7.2 ms / 42 allocs). Still 12% faster and 66% less memory than the record path while doing strictly more work (two predicates vs none). |
+| `BenchmarkHermesSelectionBitmapMerge10K-8` | ~408 | 1,280 | 1 | One 10K-row AND + POPCNT count; the single alloc is the defensive clone. The merge itself is 157 words of uint64 arithmetic — per-row boolean logic replaced by memory-bandwidth word ops. |
+
+The bitmap benchmarks also report a deterministic `bytes_touched/op` metric
+(two column scans + bitmap words + selected reads ≈ 180 KB at 10K rows). The
+record-path baseline has no computable equivalent — its per-record pointer
+graph is exactly the untracked movement the columnar layout removes. This is
+the first step of the bytes-moved budget from research lane 7; extending the
+metric to other lanes remains open.
+
+Evidence: `TestSelectionBitmap*` cover all six compare ops, null exclusion
+under `Ne`/`Le` (zero-valued null cells must not leak through), tail-word
+hygiene at n ∈ {1, 63, 64, 65} including double-`Not`, shape-mismatch and
+type-mismatch errors, and early-stop iteration. Hermes package coverage rose
+from the 81.9% floor to 82.4% with the change. Race detector clean.
+
+### Predicate pushdown into batch construction (same day, follow-up)
+
+`GetColumnarBatchWhere` (`server-kit/go/hermes/columnar_pushdown.go`) moves the
+same predicates upstream: `ColumnPredicate` values (int64/float64/string
+constructors, AND semantics, SelectionBitmap-identical null rules) are
+evaluated per candidate entry after collection but **before sorting, before
+the query limit, and before any vector is built** — so unselected rows never
+pay sort comparisons or column materialization, and the limit applies to
+filtered rows (WHERE-then-LIMIT; the correct "top N matching" API, which a
+post-hoc bitmap over a limited batch cannot provide). Parity with the bitmap
+oracle is locked by `TestGetColumnarBatchWherePushdownParity`.
+
+Local cold-path comparison (same 10K fixture and predicates, medians of 3):
+
+| Benchmark | ns/op | allocs/op | Interpretation |
+| --- | ---: | ---: | --- |
+| `BenchmarkHermesColumnarPushdownFilterSum-8` | ~5,054,770 | 42 | Predicates during construction: only ~44% of rows sorted and materialized. |
+| `BenchmarkHermesColumnarBitmapFilterSum-8` | ~7,002,509 | 47 | Post-hoc: full batch built, then bitmap filter. Pushdown is **28% faster**. |
+| `BenchmarkHermesListRecordsFilterSum-8` | ~7,865,649 | 10,043 | Record path. Pushdown is **36% faster** with 239× fewer allocations. |
+
+### Service-backed confirmation (live Postgres-rebuilt hotplane)
+
+New load-research lanes `hermes_columnar_pushdown_filter` and
+`hermes_columnar_record_filter` seed Postgres, rebuild the hotplane from the
+live scope, sanity-fence both paths to the identical selected row set, then
+measure repeated filtered reads (`bucket <= "07" AND ordinal >= step/2`,
+~25% selectivity, 32 ops, single worker).
+`benchmark-results/service_backed_load_research_20260702T160004Z.tsv`:
+
+| Step | Lane | p50/read | p95/read | Throughput | Rows selected |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1,000 | pushdown filter | 383 µs | 972 µs | 2,156 reads/s | 252 |
+| 1,000 | record filter | 680 µs | 1,014 µs | 1,383 reads/s | 252 |
+| 100,000 | pushdown filter | 136.9 ms | 166.3 ms | 7.11 reads/s | 25,000 |
+| 100,000 | record filter | 161.5 ms | 192.0 ms | 6.12 reads/s | 25,000 |
+
+Pushdown wins **44% at 1K** and **15% at 100K** on p50 against the record
+path, with identical result sets (the lane fails loudly on any divergence).
+The 100K per-read cost on both lanes is dominated by unindexed candidate
+collection over the full scope — consistent with hermes_hotplane.md watch
+point 4: production list paths at large scope should declare an indexed
+filter field, which composes with pushdown rather than replacing it. One
+integration note discovered by the lane's selectivity fence: jsonb integer
+literals normalize to `RecordValueInt` (kind `'i'`), so pushdown predicates
+against seeded JSON numbers must use `PredicateInt64`, not `PredicateFloat64`.
+
+### Kernel zero-copy artifact lanes (same day, follow-up) — correctness-proven, performance-pending real disk
+
+`hermessnapshot.FileStore` (`server-kit/go/hermessnapshot/filestore.go`) is a
+local-filesystem `hermes.SnapshotStore`: atomic temp+rename artifact/pointer
+publication, checksum verification at the storage boundary, newest-wins saves —
+plus the lane-7 kernel primitives:
+
+1. **`PromoteLatest`** clones the newest artifact between stores through a
+   fastest-first lane chain (`clone_linux.go`, build-tagged):
+   reflink (`FICLONE`, O(1) copy-on-write) → `copy_file_range` (kernel moves
+   bytes without a userspace round trip) → portable userspace `io.Copy`
+   (`clone_fallback.go`, the only lane on non-Linux). The lane actually used is
+   returned for diagnostics; every lane is checksum-equivalent
+   (`FallbackRefinement`).
+2. **`OpenArtifact`** exposes the artifact as an `*os.File` so `io.Copy` to a
+   `*net.TCPConn` engages the stdlib sendfile/splice fast path when serving.
+
+Correctness evidence (all in `filestore_test.go`): round-trip, newest-wins,
+tamper detection (`ErrSnapshotCorrupt`), pointer-traversal rejection, promote
+skip on equal snapshots, and the full integration —
+`hermes.Store.SaveSnapshot → FileStore → PromoteLatest → cold
+hermes.Store.WarmFromSnapshot` with re-verified checksum. Run on macOS
+(userspace lane) and in a Linux container on container-native overlayfs via
+`make bench-zerocopy-linux`, where the suite passed with lane
+`copy_file_range` — and overlayfs refusing `FICLONE` exercised the fallback
+chain as a real code path, not a mock.
+
+Measured shape (8 MB artifact promotion, medians of 3):
+
+| Environment | Lane | ns/op | Throughput | B/op | Interpretation |
+| --- | --- | ---: | ---: | ---: | --- |
+| macOS APFS (native) | `userspace` | ~7,397,107 | ~1,134 MB/s | 40,135 | Portable baseline; the 32 KB copy buffer and file handling dominate allocations. |
+| Linux container, overlayfs (Docker VM) | `copy_file_range` | ~6,674,549 | ~1,257 MB/s | **6,103** | Artifact bytes never enter userspace — the **6.6× allocation drop is the kernel lane's signature** and is valid evidence regardless of storage virtualization. |
+
+**The asterisk, stated plainly:** wall-clock and MB/s from a Docker Desktop VM
+describe virtualized storage, not production disks, so they are *not*
+ledger-grade performance claims (CP-07b: page-cache and mount effects must be
+stated). What this run proves is correctness of all three lanes, the fallback
+chain firing on a real unsupported filesystem, and the allocation shape. The
+pending half is one command on any Linux host with ext4/XFS —
+`make bench-zerocopy-linux` — which runs natively there and should be recorded
+here (reflink is expected to go O(1) on XFS/Btrfs, where this table's
+copy_file_range row becomes the *slow* kernel lane).
 
 ## 2026-07-01 Durable snapshot tier: warm-from-snapshot vs Postgres rebuild
 

@@ -165,7 +165,10 @@ func TestObjectStoreCorruptArtifact(t *testing.T) {
 	if _, err := obj.PutBytes(ctx, artifactKey, []byte("tampered"), objectstore.PutOptions{}); err != nil {
 		t.Fatalf("PutBytes(artifact) error = %v", err)
 	}
-	pointer, _ := json.Marshal(latestPointer{Descriptor: desc, ArtifactKey: artifactKey})
+	pointer, err := json.Marshal(latestPointer{Descriptor: desc, ArtifactKey: artifactKey})
+	if err != nil {
+		t.Fatalf("json.Marshal(pointer) error = %v", err)
+	}
 	if _, err := obj.PutBytes(ctx, adapter.latestKey("p"), pointer, objectstore.PutOptions{}); err != nil {
 		t.Fatalf("PutBytes(pointer) error = %v", err)
 	}

@@ -29,7 +29,7 @@ import (
 
 const (
 	defaultServiceBackedLoadResearchSteps = "1000,10000,50000,100000,250000,500000,1000000"
-	defaultServiceBackedLoadResearchLanes = "postgres_send_batch64,postgres_copy_from1024,redis_set_get_many64,redis_xadd_many64,redis_stream_drain64,hermes_rebuild_postgres_snapshot,hermes_warm_from_snapshot,hermes_redis_tailer64,hermes_hot_count,mixed_pg_redis_hermes64,pipeline_pg_redis_hermes,wsroute_register_redis,wsroute_broadcast_after_register"
+	defaultServiceBackedLoadResearchLanes = "postgres_send_batch64,postgres_copy_from1024,redis_set_get_many64,redis_xadd_many64,redis_stream_drain64,hermes_rebuild_postgres_snapshot,hermes_warm_from_snapshot,hermes_redis_tailer64,hermes_hot_count,hermes_columnar_pushdown_filter,hermes_columnar_record_filter,mixed_pg_redis_hermes64,pipeline_pg_redis_hermes,wsroute_register_redis,wsroute_broadcast_after_register"
 )
 
 func TestServiceBackedLoadResearchRamps(t *testing.T) {
@@ -111,6 +111,12 @@ func runServiceBackedLoadStep(
 	runIfServiceBackedLoadLane(t, lanes, "hermes_hot_count", func() {
 		runServiceBackedLoadHermesHotCount(t, ctx, env, recorder, step, maxWorkers)
 	})
+	runIfServiceBackedLoadLane(t, lanes, "hermes_columnar_pushdown_filter", func() {
+		runServiceBackedLoadHermesColumnarFilter(t, ctx, env, recorder, step, maxWorkers, true)
+	})
+	runIfServiceBackedLoadLane(t, lanes, "hermes_columnar_record_filter", func() {
+		runServiceBackedLoadHermesColumnarFilter(t, ctx, env, recorder, step, maxWorkers, false)
+	})
 	runIfServiceBackedLoadLane(t, lanes, "mixed_pg_redis_hermes64", func() {
 		runServiceBackedLoadMixed(t, ctx, env, recorder, step, maxWorkers)
 	})
@@ -138,6 +144,8 @@ func prepareServiceBackedLoadSchemas(
 		"hermes_rebuild_postgres_snapshot",
 		"hermes_warm_from_snapshot",
 		"hermes_hot_count",
+		"hermes_columnar_pushdown_filter",
+		"hermes_columnar_record_filter",
 		"mixed_pg_redis_hermes64",
 		"pipeline_pg_redis_hermes",
 	)
@@ -511,6 +519,140 @@ func runServiceBackedLoadHermesWarmFromSnapshot(
 		Notes: fmt.Sprintf(
 			"Warm cold partition from durable snapshot artifact (%d bytes, checksum %s...); Postgres pool acquires during measured warm: %d (vs rebuild which scans the whole scope)",
 			desc.Bytes, desc.Checksum[:8], dbAfter.AcquireCount-dbBefore.AcquireCount,
+		),
+	})
+	cleanupOrganization(t, ctx, store, orgID)
+}
+
+// runServiceBackedLoadHermesColumnarFilter compares the two columnar filter
+// lanes over a hotplane rebuilt from live Postgres: pushdown=true measures
+// GetColumnarBatchWhere (predicates applied before sort/limit/vector build);
+// pushdown=false measures the record path (ListRecords + per-record
+// RecordData chase + parse + filter). Both apply the same two predicates —
+// bucket <= "07" AND ordinal >= step/2 (~25% selectivity) — and sum the
+// surviving ordinals, so the lanes answer the identical question.
+func runServiceBackedLoadHermesColumnarFilter(
+	t *testing.T,
+	ctx context.Context,
+	env serviceEnv,
+	recorder *serviceBackedLoadRecorder,
+	step int,
+	maxWorkers int,
+	pushdown bool,
+) {
+	t.Helper()
+	lane := "hermes_columnar_record_filter"
+	if pushdown {
+		lane = "hermes_columnar_pushdown_filter"
+	}
+	const seedBatchSize = 256
+	before := serviceBackedLoadRuntimeSnapshot()
+	setupStart := time.Now()
+	poolOptions := serviceBackedLoadHermesRebuildPoolOptions(t, maxWorkers)
+	store := openPostgres(t, env, poolOptions)
+	defer store.Close()
+	db := requirePostgresDB(t, store)
+	orgID := uniqueName(env.prefix, "load-hermes-colfilter")
+	cleanupOrganization(t, ctx, store, orgID)
+	seedWorkers := serviceBackedLoadDBWorkers(step, seedBatchSize, maxWorkers, poolOptions)
+	if _, err := runServiceBackedLoadBatches(ctx, step, seedBatchSize, seedWorkers, func(ctx context.Context, _ int, start, count int) error {
+		return db.SendBatch(ctx, func(batch *pgx.Batch) {
+			queueHermesStateBatch(batch, orgID, start, count)
+		}, consumeBatchExecs(count))
+	}); err != nil {
+		t.Fatalf("%s setup seed failed: %v", lane, err)
+	}
+	hotplane := newServiceBackedLoadHermesStore(t, "svc_load_colfilter", step)
+	if result, err := hotplane.Rebuild(ctx, "svc_load_colfilter", store, hermes.Query{OrganizationID: orgID, Limit: step}); err != nil || result.Applied != step {
+		t.Fatalf("%s setup rebuild result=%+v err=%v, want %d applied", lane, result, err, step)
+	}
+	query := hermes.Query{OrganizationID: orgID}
+	ordinalFloor := int64(step / 2)
+	predicates := []hermes.ColumnPredicate{
+		hermes.PredicateString("bucket", hermes.CompareLe, "07"),
+		hermes.PredicateInt64("ordinal", hermes.CompareGe, ordinalFloor),
+	}
+	ops := serviceBackedLoadPositiveIntEnv(t, "SERVICE_BACKED_LOAD_RESEARCH_COLUMNAR_OPS", 32)
+	setup := time.Since(setupStart)
+
+	filterOnce := func(ctx context.Context) (int, error) {
+		if pushdown {
+			batch, err := hotplane.GetColumnarBatchWhere(ctx, "svc_load_colfilter", query, []string{"ordinal"}, predicates, hermes.Fence{})
+			if err != nil {
+				return 0, err
+			}
+			return batch.Rows, nil
+		}
+		list, err := hotplane.ListRecords(ctx, "svc_load_colfilter", query, hermes.Fence{})
+		if err != nil {
+			return 0, err
+		}
+		matched := 0
+		for _, record := range list {
+			bucketVal, ok := record.Data.Get("bucket")
+			if !ok {
+				continue
+			}
+			_, bucketIdx, ok := bucketVal.ScalarIndex()
+			if !ok || bucketIdx > "07" {
+				continue
+			}
+			ordinalVal, ok := record.Data.Get("ordinal")
+			if !ok {
+				continue
+			}
+			_, ordinalIdx, ok := ordinalVal.ScalarIndex()
+			if !ok {
+				continue
+			}
+			ordinal, err2 := strconv.ParseInt(ordinalIdx, 10, 64)
+			if err2 != nil || ordinal < ordinalFloor {
+				continue
+			}
+			matched++
+		}
+		return matched, nil
+	}
+
+	// Sanity-fence the lane before measuring: both paths must select the same
+	// non-trivial row set, or the comparison is meaningless.
+	expected, err := filterOnce(ctx)
+	if err != nil {
+		t.Fatalf("%s warmup failed: %v", lane, err)
+	}
+	if expected <= 0 || expected >= step {
+		t.Fatalf("%s selectivity fence: matched %d of %d rows", lane, expected, step)
+	}
+
+	stats, err := runServiceBackedLoadBatches(ctx, ops, 1, 1, func(ctx context.Context, _ int, _ int, _ int) error {
+		matched, err := filterOnce(ctx)
+		if err != nil {
+			return err
+		}
+		if matched != expected {
+			return fmt.Errorf("filter matched %d rows, expected %d", matched, expected)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("%s failed: %v", lane, err)
+	}
+	hermesStats, _ := hotplane.Stats("svc_load_colfilter")
+	recordServiceBackedLoadLane(t, recorder, serviceBackedLoadRow{
+		Step:        step,
+		Lane:        lane,
+		TotalUnits:  ops,
+		BatchSize:   1,
+		Workers:     1,
+		Setup:       setup,
+		Stats:       stats,
+		Before:      before,
+		After:       serviceBackedLoadRuntimeSnapshot(),
+		DBStats:     store.Stats(),
+		HermesStats: hermesStats,
+		Notes: fmt.Sprintf(
+			"Columnar filter lane (pushdown=%v): bucket<=07 AND ordinal>=%d over %d live-Postgres-rebuilt records, %d rows selected per op; unit = one filtered read",
+			pushdown, ordinalFloor, step, expected,
 		),
 	})
 	cleanupOrganization(t, ctx, store, orgID)

@@ -2,7 +2,7 @@
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator \
 	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
-	check-doc-references check-ovasabi-cli check-benchmark-evidence check-server-kit-module-parity \
+	check-doc-references check-ovasabi-cli check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet lifecycle-manifest
 
 .DEFAULT_GOAL := help
@@ -326,6 +326,23 @@ check-server-kit-module-parity:
 
 check-benchmark-evidence:
 	@bash tooling/scripts/benchmark_evidence_check.sh .
+
+# bench-zerocopy-linux exercises the hermessnapshot kernel zero-copy clone
+# lanes (reflink -> copy_file_range -> userspace) on a real Linux kernel.
+# Inside Docker Desktop the numbers carry a storage-virtualization asterisk
+# (overlayfs in a VM); run this target directly on a Linux host with ext4/XFS
+# for ledger-grade performance evidence. Correctness is proven either way.
+bench-zerocopy-linux:
+	@if [ "$$(uname -s)" = "Linux" ]; then \
+		cd server-kit/go && \
+		go test ./hermessnapshot -v -run 'TestFileStore' && \
+		go test ./hermessnapshot -run '^$$' -bench BenchmarkFileStorePromoteLatest -benchmem -count=3; \
+	else \
+		docker run --rm -v "$$(pwd):/work" -w /work/server-kit/go \
+			-e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomod -e TMPDIR=/tmp \
+			golang:1.26 sh -c \
+			"go test ./hermessnapshot -v -run 'TestFileStore' && go test ./hermessnapshot -run '^$$' -bench BenchmarkFileStorePromoteLatest -benchmem -count=3"; \
+	fi
 
 check-lifecycle-manifest:
 	@tooling/scripts/check_lifecycle_manifest.sh .

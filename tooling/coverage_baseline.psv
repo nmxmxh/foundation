@@ -29,6 +29,7 @@ github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful|81.4|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc|88.7|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/healthcheck|88.8|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes|81.9|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermessnapshot|91.6|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi|87.8|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpserver|89.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpserver/middleware|95.0|95.0
