@@ -18,6 +18,8 @@ templates/github/workflows/security.yml	.github/workflows/security.yml	all	alway
 templates/agents/POST_INIT.md	.agents/POST_INIT.md	all	always	create
 templates/agents/DOMAIN_GUIDE.md	.agents/DOMAIN_GUIDE.md	all	always	create
 templates/docker/Dockerfile	Dockerfile	full,backend	docker	create
+templates/docker/Dockerfile.postgres	Dockerfile.postgres	full,backend	docker	create
+templates/docker/Dockerfile.redis	Dockerfile.redis	full,backend	docker	create
 templates/docker/Dockerfile.migrate	Dockerfile.migrate	full,backend	docker	create
 templates/docker/docker-compose.yml	docker-compose.yml	full,backend	docker	create
 templates/docker/docker-compose.dev.yml	docker-compose.dev.yml	full,backend	docker	create
@@ -26,6 +28,7 @@ templates/docker/start.sh	start.sh	full,backend	docker	create
 templates/config/default.conf.template	config/default.conf.template	full,backend	docker	create
 templates/config/nginx.conf	config/nginx.conf	full,backend	docker	create
 templates/config/postgresql.conf	config/postgresql.conf	full,backend	docker	create
+templates/config/pg_hba.conf	config/pg_hba.conf	full,backend	docker	create
 templates/config/redis.conf	config/redis.conf	full,backend	docker	create
 templates/backend/.gitignore	.gitignore	full,backend	always	create
 templates/backend/go.mod.template	go.mod	full,backend	always	create

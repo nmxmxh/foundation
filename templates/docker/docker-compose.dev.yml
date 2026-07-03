@@ -14,9 +14,7 @@
 services:
   # PostgreSQL Database (local development only)
   postgres:
-    image: postgres:${POSTGRES_VERSION:-18}
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-postgres
-    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
     networks:
       - app-network
     ports:
@@ -25,7 +23,6 @@ services:
       # PostgreSQL 18+ stores data in major-version-specific subdirectories.
       # Mount the parent directory so pg_upgrade can work across versions.
       - postgres_data:/var/lib/postgresql
-      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     environment:
       POSTGRES_USER: "${DB_USER:-postgres}"
       POSTGRES_PASSWORD: "${DB_PASSWORD:-postgres}"

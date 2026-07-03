@@ -71,16 +71,15 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	deps.Bus = bus
 	deps.closeBus = closeBus
 	if closeBus != nil {
+		// closeBus wraps RedisBus.Close(), which cancels the listener ctx and
+		// closes the shared redis client. Registering a separate redisClient.Close()
+		// cleanup would double-close: cleanups run LIFO, so the client would close
+		// first, then the listener goroutine's in-flight Subscribe would log
+		// "redis: client is closed", followed by RedisBus.Close() failing on the
+		// same already-closed client. One cleanup, one owner.
 		cleanups = append(cleanups, func(cleanupCtx context.Context) {
 			if err := closeBus(); err != nil {
 				kitLog.ErrorContext(cleanupCtx, "failed to close event bus", "error", err)
-			}
-		})
-	}
-	if redisClient != nil {
-		cleanups = append(cleanups, func(cleanupCtx context.Context) {
-			if err := redisClient.Close(); err != nil {
-				kitLog.ErrorContext(cleanupCtx, "failed to close redis", "error", err)
 			}
 		})
 	}

@@ -677,7 +677,7 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
   else
     echo "[OK] Dockerfiles avoid removed nginx-brotli image"
   fi
-  check_file_contains "compose Redis 8 baseline" "$target/docker-compose.yml" "redis:8-alpine"
+  check_file_contains "Redis config image baseline is Redis 8" "$target/Dockerfile.redis" "ARG REDIS_VERSION=8-alpine"
   check_file_contains "compose Postgres service" "$target/docker-compose.yml" "  postgres:"
   check_file_contains "compose Postgres 18 mounts parent data directory" "$target/docker-compose.yml" "/var/lib/postgresql"
   check_file_not_contains "compose Postgres 18 avoids legacy data mount" "$target/docker-compose.yml" "/var/lib/postgresql/data"
@@ -725,6 +725,18 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     check_file_contains "shared Docker Go module cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gomod'
     check_file_contains "shared Docker Go build cache" "$target/Dockerfile" 'id=${CACHE_NAMESPACE}-gobuild'
     check_file_contains "Docker dependency stage" "$target/Dockerfile" "AS go-deps"
+    check_exists "Postgres config image Dockerfile" "$target/Dockerfile.postgres"
+    check_exists "Redis config image Dockerfile" "$target/Dockerfile.redis"
+    check_file_contains "Postgres Dockerfile bakes config" "$target/Dockerfile.postgres" "COPY config/postgresql.conf"
+    check_file_contains "Postgres Dockerfile bakes hba" "$target/Dockerfile.postgres" "COPY config/pg_hba.conf"
+    check_file_contains "Redis Dockerfile bakes config" "$target/Dockerfile.redis" "COPY config/redis.conf"
+    check_file_contains "Compose builds Postgres config image" "$target/docker-compose.yml" "Dockerfile.postgres"
+    check_file_contains "Compose builds Redis config image" "$target/docker-compose.yml" "Dockerfile.redis"
+    check_file_contains "Compose uses baked Postgres hba" "$target/docker-compose.yml" "hba_file=/etc/postgresql/pg_hba.conf"
+    check_file_contains "Compose migration fails fast on DB auth errors" "$target/docker-compose.yml" "database authentication is not retryable"
+    check_file_not_contains "Compose avoids Postgres config bind" "$target/docker-compose.yml" "./config/postgresql.conf"
+    check_file_not_contains "Compose avoids Redis config bind" "$target/docker-compose.yml" "./config/redis.conf"
+    check_file_not_contains "Compose avoids default CA bind" "$target/docker-compose.yml" "config/certs/ca.crt"
     if grep -Fq '=> ./foundation/runtime-sdk/go' "$target/go.mod"; then
       check_file_contains "Docker deps copy runtime-sdk go.mod" "$target/Dockerfile" "COPY foundation/runtime-sdk/go/go.mod"
     fi
@@ -742,6 +754,7 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
       fi
     fi
     check_exists "postgresql config" "$target/config/postgresql.conf"
+    check_exists "Postgres hba config" "$target/config/pg_hba.conf"
     check_exists "redis config" "$target/config/redis.conf"
     check_file_contains "postgres timeout guardrail" "$target/config/postgresql.conf" "statement_timeout"
     check_file_contains "postgres WAL headroom baseline" "$target/config/postgresql.conf" "max_wal_size = 4GB"
@@ -751,6 +764,8 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     check_file_contains "postgres autovacuum work memory baseline" "$target/config/postgresql.conf" "autovacuum_work_mem = 128MB"
     check_file_contains "postgres async I/O baseline" "$target/config/postgresql.conf" "io_method"
     check_file_contains "postgres I/O observability baseline" "$target/config/postgresql.conf" "track_io_timing"
+    check_file_contains "Postgres hba supports local operator recovery" "$target/config/pg_hba.conf" "local   all             all                                     trust"
+    check_file_contains "Postgres hba permits Compose network SCRAM clients" "$target/config/pg_hba.conf" "0.0.0.0/0"
     check_file_contains "redis LFU eviction guardrail" "$target/config/redis.conf" "maxmemory-policy allkeys-lfu"
     check_file_contains "redis io thread baseline" "$target/config/redis.conf" "io-threads"
     check_file_contains "redis ephemeral persistence baseline" "$target/config/redis.conf" "appendonly no"

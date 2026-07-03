@@ -35,6 +35,7 @@ make communication-contracts
 ```
 
 **Identify your 3-5 core domains.** Examples:
+
 - Fintech: `user`, `business`, `billing`, `tax`, `compliance`
 - Media: `workspace`, `media`, `publish`, `identity`
 - Civic: `incident`, `report`, `evidence`, `verification`, `geo`
@@ -45,7 +46,7 @@ See `.agents/DOMAIN_GUIDE.md` for patterns and naming conventions.
 
 Once protos exist, create service handlers:
 
-```
+```text
 internal/service/<domain>/
 ├── service.go        # Business logic
 ├── registration.go   # Event handler registration
@@ -141,6 +142,7 @@ CI or a release branch.
 ## Detailed Checklist
 
 For a comprehensive checklist, see:
+
 - `.agents/POST_INIT.md` - Step-by-step initialization guide
 - `.agents/DOMAIN_GUIDE.md` - Domain definition patterns
 - `docs/operations/README.md` - Production readiness, DORA delivery metrics, and incident records
@@ -150,14 +152,14 @@ For a comprehensive checklist, see:
 Before production, keep the scaffold defaults aligned with the Foundation security and delivery model:
 
 - Set `APP_ENV=production`, keep `REQUIRE_AUTH=true`, and keep `PROTECT_OPERATIONAL_ENDPOINTS=true`.
-- Set `ALLOWED_ORIGINS` to exact production origins only. Do not use wildcard CORS for authenticated routes.
+- Set `ALLOWED_ORIGINS` to exact production origins only. Do not use wildcard CORS for authenticated routes. On Coolify, map the deployed frontend FQDN to `ALLOWED_ORIGINS` explicitly.
 - Keep `/metricsz`, `/metricsz/trace`, and operational event views behind authenticated operator/admin access.
 - Preserve the CI `delivery-metrics` artifact and forward it to your observability or warehouse layer once deployment is wired.
 - Record production incidents, failed deployments, rollbacks, and hotfixes with `docs/operations/incident_record_template.md`.
 
 ## Architecture Overview
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                     Your Application                         │
 ├─────────────────────────────────────────────────────────────┤
@@ -186,7 +188,7 @@ The transport layer chooses the available lane (`sab`, `wasm`, `transferable`, `
 ## Key Files
 
 | File | Purpose |
-|------|---------|
+| ------ | --------- |
 | `AGENTS.md` | AI assistant instructions (31 coding practices) |
 | `CLAUDE.md` | Claude-specific project context |
 | `.agents/POST_INIT.md` | Detailed initialization checklist |

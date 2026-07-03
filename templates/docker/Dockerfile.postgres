@@ -1,0 +1,7 @@
+ARG POSTGRES_VERSION=18
+FROM postgres:${POSTGRES_VERSION}
+
+COPY config/postgresql.conf /etc/postgresql/postgresql.conf
+COPY config/pg_hba.conf /etc/postgresql/pg_hba.conf
+
+RUN chmod 0644 /etc/postgresql/postgresql.conf /etc/postgresql/pg_hba.conf

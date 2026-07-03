@@ -3,7 +3,6 @@ package graceful
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -15,12 +14,36 @@ import (
 	"github.com/riverqueue/river"
 )
 
-var ErrRiverClientRequired = errors.New("graceful: river client is required")
+var (
+	ErrRiverClientRequired = errors.New("graceful: river client is required")
+	// ErrEmitTxUnsupported is returned when a caller passes a non-nil pgx.Tx to
+	// an emitter that cannot honor transactional publish semantics (i.e. the
+	// direct Redis fallback). Surfacing this loudly prevents silent dual-writes
+	// where a producer commits its business row and then loses the event on a
+	// mid-flight crash. Wire a River-backed emitter for producers that need the
+	// transactional outbox.
+	ErrEmitTxUnsupported = errors.New("graceful: emitter does not support transactional publish; use the river-backed emitter")
+)
 
 // EventEmitter emits lifecycle events for command outcomes.
+//
+// Contract: callers that hold an open pgx.Tx MUST call EmitEventTx with that
+// tx so the enqueue and business write commit atomically. EmitEvent is only
+// valid for genuinely tx-less call sites. Passing a non-nil tx to an emitter
+// that cannot honor it returns ErrEmitTxUnsupported rather than silently
+// falling back to a dual write.
+//
+// Payload must be an extension.Object. Callers build it explicitly at the
+// emit site; there is no reflection-based struct fallback. This makes payload
+// shape reviewable and avoids silent JSON-marshal degradation.
+//
+// Ownership: the emitter takes ownership of payload on entry — no clone at
+// the boundary. Callers MUST NOT mutate or reuse the object after calling.
+// Build a fresh extension.Object per emit (SuccessContext.ToObject and
+// ErrorContext.ToObject already do this).
 type EventEmitter interface {
-	EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error
-	EmitEventTx(ctx context.Context, tx pgx.Tx, eventType string, payload any, metadata extension.Object) error
+	EmitEvent(ctx context.Context, eventType string, payload extension.Object, metadata extension.Object) error
+	EmitEventTx(ctx context.Context, tx pgx.Tx, eventType string, payload extension.Object, metadata extension.Object) error
 }
 
 // Scheduler abstracts async job scheduling and transactional variants.
@@ -42,11 +65,28 @@ type CacheInfo struct {
 }
 
 // SuccessContext is the canonical success payload shape.
+//
+// Result is an extension.Object so the outgoing envelope Payload is a typed
+// object end-to-end. Scalar results should be wrapped, e.g.
+// extension.Object{"value": extension.String("ok")}.
 type SuccessContext struct {
-	Code      string    `json:"code"`
-	Message   string    `json:"message"`
-	Result    any       `json:"result"`
-	Timestamp time.Time `json:"timestamp"`
+	Code      string           `json:"code"`
+	Message   string           `json:"message"`
+	Result    extension.Object `json:"result"`
+	Timestamp time.Time        `json:"timestamp"`
+}
+
+// ToObject renders the success context as an extension.Object payload.
+func (s *SuccessContext) ToObject() extension.Object {
+	if s == nil {
+		return extension.Object{}
+	}
+	return extension.Object{
+		"code":      extension.String(s.Code),
+		"message":   extension.String(s.Message),
+		"result":    extension.ObjectValue(s.Result),
+		"timestamp": extension.String(s.Timestamp.UTC().Format(time.RFC3339Nano)),
+	}
 }
 
 // ErrorContext is the canonical error payload shape.
@@ -56,6 +96,20 @@ type ErrorContext struct {
 	Cause     string    `json:"cause"`
 	Timestamp time.Time `json:"timestamp"`
 	Service   string    `json:"service"`
+}
+
+// ToObject renders the error context as an extension.Object payload.
+func (e *ErrorContext) ToObject() extension.Object {
+	if e == nil {
+		return extension.Object{}
+	}
+	return extension.Object{
+		"code":      extension.String(e.Code),
+		"message":   extension.String(e.Message),
+		"cause":     extension.String(e.Cause),
+		"timestamp": extension.String(e.Timestamp.UTC().Format(time.RFC3339Nano)),
+		"service":   extension.String(e.Service),
+	}
 }
 
 // Handler centralizes success/error signaling, event publication, and scheduling.
@@ -128,7 +182,7 @@ func NewHandler(opts ...Option) *Handler {
 }
 
 // Success records a successful operation and emits <action>:success when configured.
-func (h *Handler) Success(ctx context.Context, action string, msg string, result any, metadata extension.Object, entityID string, cacheInfo *CacheInfo) *SuccessContext {
+func (h *Handler) Success(ctx context.Context, action string, msg string, result extension.Object, metadata extension.Object, entityID string, cacheInfo *CacheInfo) *SuccessContext {
 	success := &SuccessContext{
 		Code:      "ok",
 		Message:   msg,
@@ -161,7 +215,7 @@ func (h *Handler) Success(ctx context.Context, action string, msg string, result
 	if h.EventEnabled && h.EventEmitter != nil && ctx.Err() == nil {
 		eventType := ensureTerminalState(action, "success")
 		meta := withCorrelationIDFromContext(ctx, metadata)
-		if err := h.EventEmitter.EmitEvent(ctx, eventType, success, meta); err != nil && h.Log != nil {
+		if err := h.EventEmitter.EmitEvent(ctx, eventType, success.ToObject(), meta); err != nil && h.Log != nil {
 			h.Log.WarnContext(ctx, "success event emit failed",
 				"event_type", eventType,
 				"error", err,
@@ -196,7 +250,7 @@ func (h *Handler) Error(ctx context.Context, action string, msg string, cause er
 	if h.EventEnabled && h.EventEmitter != nil && ctx.Err() == nil {
 		eventType := ensureTerminalState(action, "failed")
 		meta := withCorrelationIDFromContext(ctx, metadata)
-		if err := h.EventEmitter.EmitEvent(ctx, eventType, errContext, meta); err != nil && h.Log != nil {
+		if err := h.EventEmitter.EmitEvent(ctx, eventType, errContext.ToObject(), meta); err != nil && h.Log != nil {
 			h.Log.WarnContext(ctx, "failure event emit failed",
 				"event_type", eventType,
 				"error", err,
@@ -223,7 +277,7 @@ func withCorrelationIDFromContext(ctx context.Context, metadata extension.Object
 // PublishEventArgs captures event publication job arguments for River.
 type PublishEventArgs struct {
 	EventType      string           `json:"event_type"`
-	Payload        any              `json:"payload"`
+	Payload        extension.Object `json:"payload"`
 	Metadata       extension.Object `json:"metadata"`
 	SchemaVersion  string           `json:"schema_version,omitempty"`
 	IdempotencyKey string           `json:"idempotency_key,omitempty"`
@@ -238,17 +292,6 @@ type InsertOptions struct {
 	ScheduledAt time.Time
 }
 
-// OwnedObject marks an extension object as uniquely owned by the caller.
-// Emitters may use it without cloning. Use only when no other goroutine or
-// caller will mutate the object after the emit call begins.
-type OwnedObject struct {
-	Object extension.Object
-}
-
-func OwnObject(object extension.Object) OwnedObject {
-	return OwnedObject{Object: object}
-}
-
 // InMemoryEventEmitter emits directly to an in-memory bus (Local/Dev).
 type InMemoryEventEmitter struct {
 	Bus eventcontract.Bus
@@ -258,7 +301,7 @@ func NewInMemoryEventEmitter(bus eventcontract.Bus) *InMemoryEventEmitter {
 	return &InMemoryEventEmitter{Bus: bus}
 }
 
-func (e *InMemoryEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error {
+func (e *InMemoryEventEmitter) EmitEvent(ctx context.Context, eventType string, payload extension.Object, metadata extension.Object) error {
 	if e == nil || e.Bus == nil {
 		return nil
 	}
@@ -275,7 +318,7 @@ func (e *InMemoryEventEmitter) EmitEvent(ctx context.Context, eventType string, 
 	corr, _ := meta.GetString("correlation_id")
 	envelope := eventcontract.Envelope{
 		EventType:     eventType,
-		Payload:       objectFromPayload(payload),
+		Payload:       payload,
 		Metadata:      meta,
 		CorrelationID: corr,
 		SchemaVersion: eventcontract.EnvelopeSchemaVersion,
@@ -285,7 +328,7 @@ func (e *InMemoryEventEmitter) EmitEvent(ctx context.Context, eventType string, 
 	return e.Bus.Publish(ctx, envelope)
 }
 
-func (e *InMemoryEventEmitter) EmitEventTx(ctx context.Context, _ pgx.Tx, eventType string, payload any, metadata extension.Object) error {
+func (e *InMemoryEventEmitter) EmitEventTx(ctx context.Context, _ pgx.Tx, eventType string, payload extension.Object, metadata extension.Object) error {
 	return e.EmitEvent(ctx, eventType, payload, metadata)
 }
 
@@ -350,7 +393,7 @@ func NewRedisEventEmitter(bus eventcontract.Bus) *RedisEventEmitter {
 	return &RedisEventEmitter{Bus: bus}
 }
 
-func (e *RedisEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error {
+func (e *RedisEventEmitter) EmitEvent(ctx context.Context, eventType string, payload extension.Object, metadata extension.Object) error {
 	if e == nil || e.Bus == nil {
 		return nil
 	}
@@ -365,7 +408,7 @@ func (e *RedisEventEmitter) EmitEvent(ctx context.Context, eventType string, pay
 	corr, _ := meta.GetString("correlation_id")
 	envelope := eventcontract.Envelope{
 		EventType:     eventType,
-		Payload:       objectFromPayload(payload),
+		Payload:       payload,
 		Metadata:      meta,
 		CorrelationID: corr,
 		SchemaVersion: eventcontract.EnvelopeSchemaVersion,
@@ -375,7 +418,10 @@ func (e *RedisEventEmitter) EmitEvent(ctx context.Context, eventType string, pay
 	return e.Bus.Publish(ctx, envelope)
 }
 
-func (e *RedisEventEmitter) EmitEventTx(ctx context.Context, _ pgx.Tx, eventType string, payload any, metadata extension.Object) error {
+func (e *RedisEventEmitter) EmitEventTx(ctx context.Context, tx pgx.Tx, eventType string, payload extension.Object, metadata extension.Object) error {
+	if tx != nil {
+		return ErrEmitTxUnsupported
+	}
 	return e.EmitEvent(ctx, eventType, payload, metadata)
 }
 
@@ -388,7 +434,7 @@ func NewRiverEventEmitter(client *river.Client[pgx.Tx]) *RiverEventEmitter {
 	return &RiverEventEmitter{riverClient: client}
 }
 
-func (e *RiverEventEmitter) EmitEvent(ctx context.Context, eventType string, payload any, metadata extension.Object) error {
+func (e *RiverEventEmitter) EmitEvent(ctx context.Context, eventType string, payload extension.Object, metadata extension.Object) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -409,7 +455,7 @@ func (e *RiverEventEmitter) EmitEvent(ctx context.Context, eventType string, pay
 	return err
 }
 
-func (e *RiverEventEmitter) EmitEventTx(ctx context.Context, tx pgx.Tx, eventType string, payload any, metadata extension.Object) error {
+func (e *RiverEventEmitter) EmitEventTx(ctx context.Context, tx pgx.Tx, eventType string, payload extension.Object, metadata extension.Object) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -475,32 +521,6 @@ func (s *RiverScheduler) ScheduleTxWithOpts(ctx context.Context, tx pgx.Tx, job 
 	}
 	_, err := s.riverClient.InsertTx(ctx, tx, job, opts)
 	return err
-}
-
-func objectFromPayload(payload any) extension.Object {
-	if payload == nil {
-		return extension.Object{}
-	}
-	switch value := payload.(type) {
-	case extension.Object:
-		return value.Clone()
-	case OwnedObject:
-		if value.Object == nil {
-			return extension.Object{}
-		}
-		// Caller explicitly promises exclusive ownership, so we avoid cloning
-		return value.Object
-	default:
-		// Convert the payload struct or value directly using reflection via extension.FromJSON
-		typed, err := extension.FromJSON(value)
-		if err != nil {
-			return extension.Object{"result": extension.String(fmt.Sprint(value))}
-		}
-		if obj, ok := typed.ObjectValue(); ok {
-			return obj
-		}
-		return extension.Object{"result": typed}
-	}
 }
 
 func pickCorrelation(metadata extension.Object) string {

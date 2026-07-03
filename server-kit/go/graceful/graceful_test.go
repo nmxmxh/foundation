@@ -70,8 +70,9 @@ func TestHandlerOptionsCacheAndDisabledEvents(t *testing.T) {
 	if handler.Service != "server_kit" || handler.Version != "v2" || handler.Scheduler == nil {
 		t.Fatalf("handler options not applied: %+v", handler)
 	}
-	success := handler.Success(context.Background(), "orders:create:v1:requested", "ok", "result", nil, "order_1", &CacheInfo{Key: "orders:1"})
-	if success.Code != "ok" || success.Result != "result" {
+	result := extension.Object{"value": extension.String("result")}
+	success := handler.Success(context.Background(), "orders:create:v1:requested", "ok", result, nil, "order_1", &CacheInfo{Key: "orders:1"})
+	if v, _ := success.Result.GetString("value"); success.Code != "ok" || v != "result" {
 		t.Fatalf("unexpected success context: %+v", success)
 	}
 	if cache.key != "orders:1" || cache.ttl != 5*time.Minute {
@@ -79,7 +80,7 @@ func TestHandlerOptionsCacheAndDisabledEvents(t *testing.T) {
 	}
 
 	cache.err = errors.New("cache down")
-	success = handler.Success(context.Background(), "orders:create:v1:requested", "ok", "result", nil, "order_1", &CacheInfo{Key: "orders:2", TTL: time.Second})
+	success = handler.Success(context.Background(), "orders:create:v1:requested", "ok", result, nil, "order_1", &CacheInfo{Key: "orders:2", TTL: time.Second})
 	if success.Code != "ok" || cache.key != "orders:2" || cache.ttl != time.Second {
 		t.Fatalf("cache error path mismatch: success=%+v cache=%+v", success, cache)
 	}
@@ -154,7 +155,7 @@ func TestEventEmittersNilInvalidAndRedisPaths(t *testing.T) {
 		t.Fatalf("expected invalid event error")
 	}
 	ctx := metautil.IntoContext(context.Background(), metautil.FromMap(map[string]any{"correlation_id": "corr_redis"}))
-	if err := redisEmitter.EmitEventTx(ctx, nil, "orders:create:v1:success", "ok", nil); err != nil {
+	if err := redisEmitter.EmitEventTx(ctx, nil, "orders:create:v1:success", extension.Object{"result": extension.String("ok")}, nil); err != nil {
 		t.Fatalf("EmitEventTx() error = %v", err)
 	}
 	recent := bus.Recent(1)
@@ -213,22 +214,6 @@ func TestInMemorySchedulerStoresJobs(t *testing.T) {
 func TestPublishEventArgsAndHelpers(t *testing.T) {
 	if got := (PublishEventArgs{}).Kind(); got != "publish_event" {
 		t.Fatalf("Kind() = %q", got)
-	}
-	if got := objectFromPayload(nil); len(got) != 0 {
-		t.Fatalf("objectFromPayload(nil) = %+v", got)
-	}
-	payload := extension.Object{"ok": extension.Bool(true)}
-	if got := objectFromPayload(payload); got["ok"].Interface() != true {
-		t.Fatalf("objectFromPayload(object) = %+v", got)
-	}
-	owned := extension.Object{"owned": extension.String("yes")}
-	gotOwned := objectFromPayload(OwnObject(owned))
-	owned["owned"] = extension.String("mutated")
-	if gotOwned["owned"].Interface() != "mutated" {
-		t.Fatalf("owned payload should avoid clone: %+v", gotOwned)
-	}
-	if got := objectFromPayload("value"); got["result"].Interface() != "value" {
-		t.Fatalf("objectFromPayload(value) = %+v", got)
 	}
 	if got := pickCorrelation(extension.Object{"correlation_id": extension.String("corr")}); got != "corr" {
 		t.Fatalf("pickCorrelation = %q", got)
@@ -308,7 +293,7 @@ func TestHandlerSuccessRespectsCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	handler.Success(ctx, "orders:create:v1:requested", "done", "result", nil, "o1", nil)
+	handler.Success(ctx, "orders:create:v1:requested", "done", extension.Object{"value": extension.String("result")}, nil, "o1", nil)
 
 	if len(bus.Recent(10)) != 0 {
 		t.Fatalf("expected no events on cancelled context")
@@ -333,52 +318,23 @@ func TestHandlerErrorRespectsCancelledContext(t *testing.T) {
 	}
 }
 
-func TestObjectFromPayloadStruct(t *testing.T) {
-	type SimpleStruct struct {
-		ID    int    `json:"id"`
-		Name  string `json:"name"`
-		Count int64  `json:"count"`
+func TestSuccessContextToObject(t *testing.T) {
+	sc := &SuccessContext{
+		Code:      "ok",
+		Message:   "done",
+		Result:    extension.Object{"id": extension.Int(42)},
+		Timestamp: time.Unix(0, 0).UTC(),
 	}
-
-	val := SimpleStruct{ID: 42, Name: "testing", Count: 100}
-	obj := objectFromPayload(val)
-
-	idVal, ok := obj["id"]
+	obj := sc.ToObject()
+	if code, _ := obj.GetString("code"); code != "ok" {
+		t.Fatalf("code = %q", code)
+	}
+	nested, ok := obj["result"].ObjectValue()
 	if !ok {
-		t.Fatalf("expected id key directly in obj: %+v", obj)
+		t.Fatalf("result should be object: %+v", obj)
 	}
-	idInt, ok := idVal.IntValue()
-	if !ok || idInt != 42 {
-		t.Fatalf("expected id = 42, got %v", idVal)
-	}
-
-	countVal, ok := obj["count"]
-	if !ok {
-		t.Fatalf("expected count key directly in obj: %+v", obj)
-	}
-	countInt, ok := countVal.IntValue()
-	if !ok || countInt != 100 {
-		t.Fatalf("expected count = 100, got %v", countVal)
-	}
-}
-
-func BenchmarkObjectFromPayload(b *testing.B) {
-	type ComplexStruct struct {
-		ID        int      `json:"id"`
-		Tags      []string `json:"tags"`
-		IsActive  bool     `json:"is_active"`
-		NestedVal float64  `json:"nested_val"`
-	}
-
-	val := ComplexStruct{
-		ID:        99,
-		Tags:      []string{"a", "b", "c"},
-		IsActive:  true,
-		NestedVal: 3.14,
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = objectFromPayload(val)
+	id, _ := nested["id"].IntValue()
+	if id != 42 {
+		t.Fatalf("nested id = %d", id)
 	}
 }

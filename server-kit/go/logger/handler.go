@@ -30,7 +30,7 @@ func (h *foundationHandler) Enabled(ctx context.Context, level slog.Level) bool 
 }
 
 func (h *foundationHandler) Handle(ctx context.Context, r slog.Record) error {
-	if !h.shouldLog(r.Level, r.Message) {
+	if !h.shouldLog(r.Level, r.Message, r) {
 		return nil
 	}
 	r = r.Clone()
@@ -46,11 +46,11 @@ func (h *foundationHandler) WithGroup(name string) slog.Handler {
 	return &foundationHandler{next: h.next.WithGroup(name), config: h.config, filters: h.filters}
 }
 
-func (h *foundationHandler) shouldLog(level slog.Level, msg string) bool {
+func (h *foundationHandler) shouldLog(level slog.Level, msg string, r slog.Record) bool {
 	if level >= slog.LevelError || !h.config.enableFiltering || h.config.environment != "production" {
 		return true
 	}
-	key := filterKey(level, msg)
+	key := filterKey(level, msg, r)
 	now := time.Now()
 	h.filters.mu.Lock()
 	defer h.filters.mu.Unlock()
@@ -85,12 +85,57 @@ func (h *foundationHandler) addContext(ctx context.Context, r *slog.Record) {
 	}
 }
 
-func filterKey(level slog.Level, msg string) string {
+// filterKey builds a dedup key that includes a discriminator drawn from the
+// record's attrs so distinct fanout events (e.g. "registered handler" for many
+// event_types, "registered route" for many paths) don't collide under a single
+// per-message counter. Without this, a MaxSimilarLogs=1 production config
+// silently drops all but the first hit per unique message per interval, which
+// hides startup enumeration logs.
+func filterKey(level slog.Level, msg string, r slog.Record) string {
+	disc := discriminator(r)
 	key := level.String() + ":" + msg
-	if len(key) > 96 {
-		return key[:96]
+	if disc != "" {
+		key += "|" + disc
+	}
+	if len(key) > 160 {
+		return key[:160]
 	}
 	return key
+}
+
+// discriminatorKeys are attr keys that identify distinct instances of an
+// otherwise-identical log message. Values are concatenated into the filter key.
+var discriminatorKeys = []string{"event_type", "path", "route", "name", "handler", "id"}
+
+func discriminator(r slog.Record) string {
+	if r.NumAttrs() == 0 {
+		return ""
+	}
+	found := make(map[string]string, len(discriminatorKeys))
+	r.Attrs(func(attr slog.Attr) bool {
+		for _, k := range discriminatorKeys {
+			if attr.Key == k {
+				found[k] = attr.Value.Resolve().String()
+				break
+			}
+		}
+		return true
+	})
+	if len(found) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, k := range discriminatorKeys {
+		if v, ok := found[k]; ok {
+			if b.Len() > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(k)
+			b.WriteByte('=')
+			b.WriteString(v)
+		}
+	}
+	return b.String()
 }
 
 func recordKeys(r slog.Record) map[string]struct{} {

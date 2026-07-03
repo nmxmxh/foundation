@@ -8,20 +8,24 @@
 services:
   # PostgreSQL Database
   postgres:
-    image: postgres:${POSTGRES_VERSION:-18}
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+      args:
+        POSTGRES_VERSION: "${POSTGRES_VERSION:-18}"
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-postgres
-    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
     expose:
       - "5432"
     volumes:
       # PostgreSQL 18+ stores data in major-version-specific subdirectories.
       # Mount the parent directory so pg_upgrade can work across versions.
       - postgres_data:/var/lib/postgresql
-      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     environment:
       POSTGRES_USER: "${DB_USER:-postgres}"
       POSTGRES_PASSWORD: "${DB_PASSWORD:-postgres}"
       POSTGRES_DB: "${DB_NAME:-{{PROJECT_NAME}}}"
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=trust"
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "${DB_USER:-postgres}", "-d", "${DB_NAME:-{{PROJECT_NAME}}}"]
       interval: 5s
@@ -34,13 +38,16 @@ services:
 
   # Redis Cache
   app-redis:
-    image: ${REDIS_IMAGE:-redis:8-alpine}
+    build:
+      context: .
+      dockerfile: Dockerfile.redis
+      args:
+        REDIS_VERSION: "${REDIS_VERSION:-8-alpine}"
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-redis
     expose:
       - "6379"
     volumes:
       - redis_data:/data
-      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
     command: redis-server /usr/local/etc/redis/redis.conf --requirepass "${REDIS_PASSWORD:-redis}"
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis}", "ping"]
@@ -73,8 +80,6 @@ services:
     restart: on-failure:3
     volumes:
       - uploads_data:/srv/uploads
-      # SSL CA certificate (for managed databases)
-      - ${SSL_CA_CERT_PATH:-./config/certs/ca.crt}:/etc/ssl/certs/ca.crt:ro
     environment:
       APP_ENV: "${APP_ENV:-production}"
       DATABASE_URL: "${DATABASE_URL:-}"
@@ -99,8 +104,8 @@ services:
       REDIS_READ_TIMEOUT: "${REDIS_READ_TIMEOUT:-500ms}"
       REDIS_WRITE_TIMEOUT: "${REDIS_WRITE_TIMEOUT:-500ms}"
       REDIS_PREFIX: "${REDIS_PREFIX:-{{PROJECT_NAME}}}"
-      JWT_SECRET: "${JWT_SECRET:-dev-change-me}"
-      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-change-me}"
+      JWT_SECRET: "${JWT_SECRET:-Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       # Tracing (optional)
@@ -146,10 +151,9 @@ services:
       - DB_NAME=${DB_NAME:-{{PROJECT_NAME}}}
       - DB_SSLMODE=${DB_SSLMODE:-disable}
       - MIGRATE_MAX_RETRIES=${MIGRATE_MAX_RETRIES:-120}
+      - MIGRATE_AUTH_GRACE_SECONDS=${MIGRATE_AUTH_GRACE_SECONDS:-30}
       - MIGRATE_PATH=/migrations
       - MIGRATE_DATABASE_OPTIONS=${MIGRATE_DATABASE_OPTIONS:-}
-    volumes:
-      - ${SSL_CA_CERT_PATH:-./config/certs/ca.crt}:/etc/ssl/certs/ca.crt:ro
     command:
       - |
         db_url="$${DATABASE_URL:-}"
@@ -173,6 +177,8 @@ services:
         fi
         attempt=1
         max_attempts=$${MIGRATE_MAX_RETRIES:-120}
+        auth_grace=$${MIGRATE_AUTH_GRACE_SECONDS:-30}
+        start_ts=$$(date +%s)
         while [ $$attempt -le $$max_attempts ]; do
           output=$$(migrate -path="$${MIGRATE_PATH:-/migrations}" -database="$$db_url" up 2>&1)
           status=$$?
@@ -184,6 +190,20 @@ services:
           if printf '%s' "$$output" | grep -qi 'Dirty database version'; then
             echo "Database is dirty - manual intervention required"
             exit $$status
+          fi
+          if printf '%s' "$$output" | grep -Eqi 'password authentication failed|failed SASL auth|no pg_hba\.conf entry'; then
+            # pg_isready flips healthy the moment Postgres accepts connections, but the
+            # POSTGRES_USER/POSTGRES_PASSWORD role from initdb may not exist yet on a
+            # cold volume. Retry auth failures during the grace window; only escalate
+            # to a hard failure once the window has elapsed and it looks like a real
+            # credential misconfiguration.
+            elapsed=$$(( $$(date +%s) - start_ts ))
+            if [ $$elapsed -ge $$auth_grace ]; then
+              echo "Migration failed: database authentication still failing after $${auth_grace}s grace."
+              echo "Check DB_USER, DB_PASSWORD, DB_NAME, DATABASE_URL, and the existing Postgres volume credentials."
+              exit $$status
+            fi
+            echo "Auth not ready yet ($${elapsed}s/$${auth_grace}s grace) - retrying..."
           fi
           if printf '%s' "$$output" | grep -Eqi 'no such host|name or service not known|temporary failure in name resolution'; then
             echo "Migration failed: database host '$${DB_HOST}' is not resolvable from this Compose network."

@@ -154,7 +154,7 @@ func extractEntityID(payload extension.Object) string {
 	return ""
 }
 
-func emitSuccess(handler *graceful.Handler, ctx context.Context, action, message string, result any, entityID string) {
+func emitSuccess(handler *graceful.Handler, ctx context.Context, action, message string, result extension.Object, entityID string) {
 	if handler == nil {
 		return
 	}

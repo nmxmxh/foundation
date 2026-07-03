@@ -98,20 +98,24 @@ patch_compose_database_contract() {
     postgres_block="$(cat <<EOF
   # PostgreSQL Database
   postgres:
-    image: postgres:\${POSTGRES_VERSION:-18}
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+      args:
+        POSTGRES_VERSION: "\${POSTGRES_VERSION:-18}"
     container_name: \${SERVICE_NAME:-$project_name}-postgres
-    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
     expose:
       - "5432"
     volumes:
       # PostgreSQL 18+ stores data in major-version-specific subdirectories.
       # Mount the parent directory so pg_upgrade can work across versions.
       - postgres_data:/var/lib/postgresql
-      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     environment:
       POSTGRES_USER: "\${DB_USER:-postgres}"
       POSTGRES_PASSWORD: "\${DB_PASSWORD:-postgres}"
       POSTGRES_DB: "\${DB_NAME:-$project_name}"
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=trust"
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "\${DB_USER:-postgres}", "-d", "\${DB_NAME:-$project_name}"]
       interval: 5s
@@ -193,6 +197,139 @@ EOF
       log_patch "Docker Compose Postgres volume: ${compose#$target/}"
     fi
     rm -f "$before"
+  fi
+}
+
+patch_coolify_deploy_contract() {
+  local compose="$target/docker-compose.yml"
+  local dev_compose="$target/docker-compose.dev.yml"
+  local project_name
+  project_name="$(project_name_from_metadata)"
+  local pg_hba="$target/config/pg_hba.conf"
+
+  if [[ -f "$pg_hba" ]]; then
+    replace_in_file "$pg_hba" 'local   all             all                                     scram-sha-256' 'local   all             all                                     trust' "Postgres hba keeps local operator recovery auth"
+    replace_in_file "$pg_hba" '# Require SCRAM for local, IPv4, and IPv6 clients so migration/app containers
+# can connect without relying on PGDATA-generated localhost-only defaults.' '# Container-local socket access is trusted for operator recovery through
+# `docker exec`. TCP clients, including migrations and app containers on the
+# Compose network, must authenticate with SCRAM.' "Postgres hba documents local operator recovery auth"
+  fi
+
+  if [[ -f "$compose" ]]; then
+    replace_in_file "$compose" '    image: postgres:${POSTGRES_VERSION:-18}' '    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+      args:
+        POSTGRES_VERSION: "${POSTGRES_VERSION:-18}"' "Docker Compose bakes Postgres config"
+
+    replace_in_file "$compose" '    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]' '    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]' "Docker Compose uses baked Postgres hba"
+
+    replace_in_file "$compose" '      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+' '' "Docker Compose removes Postgres config bind"
+
+    replace_in_file "$compose" '      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"' '      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=trust"' "Docker Compose keeps local Postgres recovery auth"
+
+    if ! grep -Fq 'POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=trust"' "$compose"; then
+      replace_in_file "$compose" '      POSTGRES_DB: "${DB_NAME:-'"$project_name"'}"' '      POSTGRES_DB: "${DB_NAME:-'"$project_name"'}"
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=trust"' "Docker Compose sets Postgres SCRAM init auth"
+      replace_in_file "$compose" '      POSTGRES_DB: "${DB_NAME:-{{PROJECT_NAME}}}"' '      POSTGRES_DB: "${DB_NAME:-{{PROJECT_NAME}}}"
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=trust"' "Docker Compose sets Postgres SCRAM init auth"
+    fi
+
+    replace_in_file "$compose" '    image: ${REDIS_IMAGE:-redis:8-alpine}' '    build:
+      context: .
+      dockerfile: Dockerfile.redis
+      args:
+        REDIS_VERSION: "${REDIS_VERSION:-8-alpine}"' "Docker Compose bakes Redis config"
+
+    replace_in_file "$compose" '      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+' '' "Docker Compose removes Redis config bind"
+
+    replace_in_file "$compose" '      # SSL CA certificate (for managed databases)
+      - ${SSL_CA_CERT_PATH:-./config/certs/ca.crt}:/etc/ssl/certs/ca.crt:ro
+' '' "Docker Compose removes default CA bind"
+
+    replace_in_file "$compose" '    volumes:
+      - ${SSL_CA_CERT_PATH:-./config/certs/ca.crt}:/etc/ssl/certs/ca.crt:ro
+' '' "Docker Compose removes migrate CA bind"
+
+    # Insert auth-fail handling if it's missing entirely. Emit the grace-window
+    # form so cold-volume boots (pg_isready flips healthy before the initdb role
+    # exists) don't hard-exit on the first "password authentication failed".
+    if ! grep -Fq 'password authentication failed' "$compose"; then
+      local auth_fail_block
+      auth_fail_block='          if printf '\''%s'\'' "$$output" | grep -qi '\''Dirty database version'\''; then
+            echo "Database is dirty - manual intervention required"
+            exit $$status
+          fi
+          if printf '\''%s'\'' "$$output" | grep -Eqi '\''password authentication failed|failed SASL auth|no pg_hba\.conf entry'\''; then
+            elapsed=$$(( $$(date +%s) - start_ts ))
+            if [ $$elapsed -ge $$auth_grace ]; then
+              echo "Migration failed: database authentication still failing after $${auth_grace}s grace."
+              echo "Check DB_USER, DB_PASSWORD, DB_NAME, DATABASE_URL, and the existing Postgres volume credentials."
+              exit $$status
+            fi
+            echo "Auth not ready yet ($${elapsed}s/$${auth_grace}s grace) - retrying..."
+          fi'
+      replace_in_file "$compose" '          if printf '\''%s'\'' "$$output" | grep -qi '\''Dirty database version'\''; then
+            echo "Database is dirty - manual intervention required"
+            exit $$status
+          fi' "$auth_fail_block" "Docker Compose migration retries auth during Postgres cold-boot grace window"
+    fi
+
+    # Migrate the older hard-exit auth block to the grace-window form.
+    if grep -Fq 'database authentication is not retryable' "$compose"; then
+      local old_auth_block new_auth_block
+      old_auth_block='          if printf '\''%s'\'' "$$output" | grep -Eqi '\''password authentication failed|failed SASL auth|no pg_hba\.conf entry'\''; then
+            echo "Migration failed: database authentication is not retryable."
+            echo "Check DB_USER, DB_PASSWORD, DB_NAME, DATABASE_URL, and the existing Postgres volume credentials."
+            exit $$status
+          fi'
+      new_auth_block='          if printf '\''%s'\'' "$$output" | grep -Eqi '\''password authentication failed|failed SASL auth|no pg_hba\.conf entry'\''; then
+            elapsed=$$(( $$(date +%s) - start_ts ))
+            if [ $$elapsed -ge $$auth_grace ]; then
+              echo "Migration failed: database authentication still failing after $${auth_grace}s grace."
+              echo "Check DB_USER, DB_PASSWORD, DB_NAME, DATABASE_URL, and the existing Postgres volume credentials."
+              exit $$status
+            fi
+            echo "Auth not ready yet ($${elapsed}s/$${auth_grace}s grace) - retrying..."
+          fi'
+      replace_in_file "$compose" "$old_auth_block" "$new_auth_block" "Docker Compose migration retries auth during Postgres cold-boot grace window"
+    fi
+
+    # Introduce start_ts / auth_grace bookkeeping alongside attempt/max_attempts.
+    if ! grep -Fq 'auth_grace=$${MIGRATE_AUTH_GRACE_SECONDS' "$compose"; then
+      replace_in_file "$compose" '        attempt=1
+        max_attempts=$${MIGRATE_MAX_RETRIES:-120}
+        while' '        attempt=1
+        max_attempts=$${MIGRATE_MAX_RETRIES:-120}
+        auth_grace=$${MIGRATE_AUTH_GRACE_SECONDS:-30}
+        start_ts=$$(date +%s)
+        while' "Docker Compose migration tracks auth-grace elapsed time"
+    fi
+
+    # Publish MIGRATE_AUTH_GRACE_SECONDS in the migrate env list.
+    if ! grep -Fq 'MIGRATE_AUTH_GRACE_SECONDS' "$compose"; then
+      replace_in_file "$compose" '      - MIGRATE_MAX_RETRIES=${MIGRATE_MAX_RETRIES:-120}
+      - MIGRATE_PATH=/migrations' '      - MIGRATE_MAX_RETRIES=${MIGRATE_MAX_RETRIES:-120}
+      - MIGRATE_AUTH_GRACE_SECONDS=${MIGRATE_AUTH_GRACE_SECONDS:-30}
+      - MIGRATE_PATH=/migrations' "Docker Compose exposes MIGRATE_AUTH_GRACE_SECONDS"
+    fi
+
+    # Replace the 12-char `dev-change-me` JWT fallback with a strong random-looking
+    # literal so the compose default alone isn't trivially weak. Real deployments
+    # still override via env; this only hardens the fallback path.
+    replace_in_file "$compose" '      JWT_SECRET: "${JWT_SECRET:-dev-change-me}"' '      JWT_SECRET: "${JWT_SECRET:-Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn}"' "Docker Compose strengthens JWT_SECRET fallback"
+    replace_in_file "$compose" '      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-change-me}"' '      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn}"' "Docker Compose strengthens JWT_SECRET_KEY fallback"
+  fi
+
+  if [[ -f "$dev_compose" ]]; then
+    replace_in_file "$dev_compose" '    image: postgres:${POSTGRES_VERSION:-18}
+' '' "dev Compose inherits baked Postgres image"
+    replace_in_file "$dev_compose" '    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+' '' "dev Compose inherits baked Postgres command"
+    replace_in_file "$dev_compose" '      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+' '' "dev Compose removes Postgres config bind"
   fi
 }
 
@@ -1235,6 +1372,32 @@ sync_go_work() {
   rm -f "$tmp"
 }
 
+patch_startup_dependencies_double_close_redis() {
+  local file="$target/internal/startup/dependencies.go"
+  [[ -f "$file" ]] || return 0
+
+  # closeBus already closes the shared redis client. A separate
+  # redisClient.Close() cleanup runs LIFO after closeBus, double-closing the
+  # client and producing the "redis: client is closed" / "failed to close event
+  # bus" pair on any startup that fails after event bus init.
+  #
+  # Match the whole `if redisClient != nil { cleanups = append(...) { redisClient.Close() ... } }`
+  # block with a regex so we tolerate downstream drift (e.g. `closeErr` vs `err`
+  # as the inner variable name). Only touch files that still have the double-close.
+  if ! grep -Fq 'redisClient.Close()' "$file"; then
+    return 0
+  fi
+  local before after
+  before="$(mktemp)"
+  after="$(mktemp)"
+  cp "$file" "$before"
+  perl -0pi -e 's/\n\tif redisClient != nil \{\n\t\tcleanups = append\(cleanups, func\(cleanupCtx context\.Context\) \{\n\t\t\tif \w+ := redisClient\.Close\(\); \w+ != nil \{\n\t\t\t\tkitLog\.ErrorContext\(cleanupCtx, "failed to close redis", "error", \w+\)\n\t\t\t\}\n\t\t\}\)\n\t\}\n//' "$file"
+  if ! cmp -s "$before" "$file"; then
+    log_patch "startup dependencies drops double-close of redis client: ${file#$target/}"
+  fi
+  rm -f "$before" "$after"
+}
+
 export PATCH_SEARCH PATCH_REPLACE
 
 patch_agent_native_guides
@@ -1250,6 +1413,7 @@ patch_compose_targets "$target/docker-compose.yml"
 patch_compose_targets "$target/docker-compose.dev.yml"
 patch_compose_targets "$target/docker-compose.test.yml"
 patch_compose_database_contract
+patch_coolify_deploy_contract
 patch_reframe_frontend_dockerfile
 patch_runtime_native_dockerfile
 patch_openapi_dockerfile
@@ -1267,6 +1431,7 @@ patch_foundation_event_log_publish_claim_schema
 patch_test_postgres_platform
 patch_test_compose_ephemeral_ports
 patch_postgres_config_baseline
+patch_startup_dependencies_double_close_redis
 sync_go_work
 
 if [[ "$patched" -eq 0 ]]; then

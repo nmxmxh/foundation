@@ -184,13 +184,9 @@ func recordFromMutation(mutation *foundationpb.RecordMutation) (database.DomainR
 			return database.DomainRecord{}, fmt.Errorf("%w: duplicate hermes projection field %q", ErrInvalidEvent, name)
 		}
 		seen[name] = struct{}{}
-		value, err := scalarFromProto(field.GetValue())
+		recordValue, err := scalarFromProto(field.GetValue())
 		if err != nil {
 			return database.DomainRecord{}, err
-		}
-		recordValue, ok := database.RecordValueFromAny(value)
-		if !ok {
-			return database.DomainRecord{}, fmt.Errorf("%w: unsupported hermes projection field %q", ErrInvalidEvent, name)
 		}
 		data = append(data, database.RecordField{Name: name, Value: recordValue})
 	}
@@ -206,25 +202,25 @@ func recordFromMutation(mutation *foundationpb.RecordMutation) (database.DomainR
 	}, nil
 }
 
-func scalarFromProto(value *foundationpb.ScalarValue) (any, error) {
+func scalarFromProto(value *foundationpb.ScalarValue) (database.RecordValue, error) {
 	if value == nil {
-		return nil, fmt.Errorf("%w: hermes projection field value is required", ErrInvalidEvent)
+		return database.RecordValue{}, fmt.Errorf("%w: hermes projection field value is required", ErrInvalidEvent)
 	}
 	switch typed := value.GetKind().(type) {
 	case *foundationpb.ScalarValue_StringValue:
-		return typed.StringValue, nil
+		return database.StringValue(typed.StringValue), nil
 	case *foundationpb.ScalarValue_Int64Value:
-		return typed.Int64Value, nil
+		return database.IntValue(typed.Int64Value), nil
 	case *foundationpb.ScalarValue_Uint64Value:
-		return typed.Uint64Value, nil
+		return database.UintValue(typed.Uint64Value), nil
 	case *foundationpb.ScalarValue_DoubleValue:
-		return typed.DoubleValue, nil
+		return database.FloatValue(typed.DoubleValue), nil
 	case *foundationpb.ScalarValue_BoolValue:
-		return typed.BoolValue, nil
+		return database.BoolValue(typed.BoolValue), nil
 	case *foundationpb.ScalarValue_BytesValue:
-		return append([]byte(nil), typed.BytesValue...), nil
+		return database.RawValue(append([]byte(nil), typed.BytesValue...)), nil
 	default:
-		return nil, fmt.Errorf("%w: unsupported hermes projection field value", ErrInvalidEvent)
+		return database.RecordValue{}, fmt.Errorf("%w: unsupported hermes projection field value", ErrInvalidEvent)
 	}
 }
 

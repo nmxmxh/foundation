@@ -117,7 +117,7 @@ func (t *Tailer) decodeMessages(ctx context.Context, messages []SourceMessage) (
 			return nil, nil, err
 		}
 		for i := range decoded {
-			fillEventSource(&decoded[i], message.ID, i, len(decoded))
+			fillEventSource(&decoded[i], message, i, len(decoded))
 			events = append(events, decoded[i])
 		}
 		if strings.TrimSpace(message.ID) != "" {
@@ -127,15 +127,49 @@ func (t *Tailer) decodeMessages(ctx context.Context, messages []SourceMessage) (
 	return events, ids, nil
 }
 
-func fillEventSource(event *Event, messageID string, index int, total int) {
-	if event.SourceID != "" || messageID == "" {
+// fillEventSource assigns Event.SourceID when the decoder did not provide one.
+//
+// Producer-side dedup (e.g. River's IdempotencyKey) and consumer-side dedup
+// (hermes' applied-events / tombstone map) must share a key, or a producer
+// retry that republishes the same envelope will land on a fresh Redis stream
+// ID and be applied twice. To keep those namespaces joined by construction,
+// we prefer idempotency_key from the message payload, then correlation_id,
+// and only fall back to the stream ID when neither is present.
+func fillEventSource(event *Event, message SourceMessage, index int, total int) {
+	if event.SourceID != "" {
+		return
+	}
+	if key := firstStringField(message.Values, "idempotency_key", "correlation_id"); key != "" {
+		if total <= 1 {
+			event.SourceID = key
+		} else {
+			event.SourceID = fmt.Sprintf("%s#%d", key, index)
+		}
+		return
+	}
+	if message.ID == "" {
 		return
 	}
 	if total <= 1 {
-		event.SourceID = messageID
+		event.SourceID = message.ID
 		return
 	}
-	event.SourceID = fmt.Sprintf("%s#%d", messageID, index)
+	event.SourceID = fmt.Sprintf("%s#%d", message.ID, index)
+}
+
+func firstStringField(values redispkg.Values, fields ...string) string {
+	for _, field := range fields {
+		raw, ok := values.Get(field)
+		if !ok {
+			continue
+		}
+		if s, ok := raw.(string); ok {
+			if s = strings.TrimSpace(s); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
 func waitForTailerIdle(ctx context.Context, wait time.Duration) error {
