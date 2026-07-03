@@ -333,6 +333,29 @@ patch_coolify_deploy_contract() {
   fi
 }
 
+patch_coolify_routing_labels() {
+  local compose="$target/docker-compose.yml"
+  [[ -f "$compose" ]] || return 0
+
+  # Coolify generates Traefik routers from the service FQDN configuration. The
+  # scaffold-level labels used shell-style defaults inside Docker label keys,
+  # which Docker Compose leaves literal and Traefik treats as invalid/noisy
+  # router names. Keep routing ownership with Coolify for generated apps.
+  if ! grep -Fq 'traefik.http.routers.${SERVICE_NAME:-' "$compose"; then
+    return 0
+  fi
+
+  local before
+  before="$(mktemp)"
+  cp "$compose" "$before"
+  perl -0pi -e 's/\n    labels:\n      # Traefik routing \(customize paths as needed\)\n      - "traefik\.enable=true"\n      - "traefik\.http\.routers\.\$\{SERVICE_NAME:-[^"]+-api\.rule=[^"]+"\n      - "traefik\.http\.routers\.\$\{SERVICE_NAME:-[^"]+-api\.priority=10"\n      - "traefik\.http\.services\.\$\{SERVICE_NAME:-[^"]+-api\.loadbalancer\.server\.port=8080"\n      - "traefik\.http\.services\.\$\{SERVICE_NAME:-[^"]+-api\.loadbalancer\.server\.scheme=http"\n/\n/g' "$compose"
+  perl -0pi -e 's/\n    labels:\n      - "traefik\.enable=true"\n      - "traefik\.http\.routers\.\$\{SERVICE_NAME:-[^"]+-web\.rule=PathPrefix\(`\/`\)"\n      - "traefik\.http\.routers\.\$\{SERVICE_NAME:-[^"]+-web\.priority=1"\n      - "traefik\.http\.services\.\$\{SERVICE_NAME:-[^"]+-web\.loadbalancer\.server\.port=80"\n/\n/g' "$compose"
+  if ! cmp -s "$before" "$compose"; then
+    log_patch "Docker Compose removes scaffold Traefik labels for Coolify-owned routing: ${compose#$target/}"
+  fi
+  rm -f "$before"
+}
+
 patch_reframe_frontend_dockerfile() {
   local file="$target/frontend/Dockerfile"
   [[ -f "$file" ]] || return 0
@@ -1414,6 +1437,7 @@ patch_compose_targets "$target/docker-compose.dev.yml"
 patch_compose_targets "$target/docker-compose.test.yml"
 patch_compose_database_contract
 patch_coolify_deploy_contract
+patch_coolify_routing_labels
 patch_reframe_frontend_dockerfile
 patch_runtime_native_dockerfile
 patch_openapi_dockerfile

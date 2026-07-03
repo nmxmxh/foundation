@@ -113,13 +113,6 @@ services:
       TRACING_ENDPOINT: "${TRACING_ENDPOINT:-}"
     networks:
       - app-network
-    labels:
-      # Traefik routing (customize paths as needed)
-      - "traefik.enable=true"
-      - "traefik.http.routers.${SERVICE_NAME:-{{PROJECT_NAME}}}-api.rule=PathPrefix(`/api`) || PathPrefix(`/v1`) || PathPrefix(`/ws`) || PathPrefix(`/healthz`)"
-      - "traefik.http.routers.${SERVICE_NAME:-{{PROJECT_NAME}}}-api.priority=10"
-      - "traefik.http.services.${SERVICE_NAME:-{{PROJECT_NAME}}}-api.loadbalancer.server.port=8080"
-      - "traefik.http.services.${SERVICE_NAME:-{{PROJECT_NAME}}}-api.loadbalancer.server.scheme=http"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/healthz || exit 1"]
       interval: 10s
@@ -238,11 +231,6 @@ services:
     environment:
       UPSTREAM_HOST: server
       UPSTREAM_PORT: 8080
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.${SERVICE_NAME:-{{PROJECT_NAME}}}-web.rule=PathPrefix(`/`)"
-      - "traefik.http.routers.${SERVICE_NAME:-{{PROJECT_NAME}}}-web.priority=1"
-      - "traefik.http.services.${SERVICE_NAME:-{{PROJECT_NAME}}}-web.loadbalancer.server.port=80"
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://localhost:80/healthz || exit 1"]
       interval: 10s
