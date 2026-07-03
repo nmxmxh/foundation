@@ -98,6 +98,17 @@ check_file_contains() {
   fi
 }
 
+check_file_not_contains() {
+  local label="$1"
+  local file="$2"
+  local pattern="$3"
+  if [[ -f "$file" ]] && grep -Fq -- "$pattern" "$file"; then
+    fail "$label" "unexpected pattern: $pattern" "file: ${file#$target/}"
+  else
+    ok "$label"
+  fi
+}
+
 check_no_paths "foundation tree avoids checked-in local build residue" \
   "$target/templates/.DS_Store" \
   "$target/server-kit/go/appbench.test" \
@@ -105,6 +116,7 @@ check_no_paths "foundation tree avoids checked-in local build residue" \
   "$target/server-kit/go/grpcsvc.test"
 
 check_no_tracked_path_pattern "foundation git index avoids cache/build directories" '(^|/)(\.gocache|node_modules|dist|build|target)(/|$)'
+check_file_not_contains "foundation gitignore does not blanket-ignore generated contracts" "$target/.gitignore" "**/generated/"
 
 for module in server-kit/go runtime-transport/go runtime-sdk/go config-contracts/go; do
   check_exists "$module module manifest" "$target/$module/go.mod"

@@ -51,9 +51,6 @@
 .env
 .env.*
 
-# Generated files
-**/generated/
-
 # Agent memory + conductor (in-house / experimental for now — not shipped or scaffolded yet)
 agent_memory/
 

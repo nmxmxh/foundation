@@ -44,6 +44,16 @@ replace_go_version_defaults() {
   PATCH_SEARCH='GO_VERSION=1.25' PATCH_REPLACE='GO_VERSION=1.26' replace_in_file "$file" 'GO_VERSION=1.25' 'GO_VERSION=1.26' "Go 1.26 scaffold default"
 }
 
+patch_generated_ignore_contract() {
+  local file="$1"
+  [[ -f "$file" ]] || return 0
+
+  local broad_generated_ignore='# Generated files
+**/generated/
+'
+  replace_in_file "$file" "$broad_generated_ignore" "" "remove blanket generated ignore"
+}
+
 patch_compose_targets() {
   local compose="$1"
   local dockerfile="$target/Dockerfile"
@@ -1233,6 +1243,8 @@ replace_go_version_defaults "$target/Dockerfile"
 replace_go_version_defaults "$target/docker-compose.yml"
 replace_go_version_defaults "$target/docker-compose.dev.yml"
 replace_go_version_defaults "$target/docker-compose.test.yml"
+patch_generated_ignore_contract "$target/.gitignore"
+patch_generated_ignore_contract "$target/foundation/.gitignore"
 
 patch_compose_targets "$target/docker-compose.yml"
 patch_compose_targets "$target/docker-compose.dev.yml"
