@@ -30,6 +30,33 @@ The source file is `templates/scaffold.manifest.tsv`.
 Use `create` when a generated project is expected to customize the file. Use
 `overwrite` or `force` only when Foundation owns the file’s contract.
 
+## Seed Ledger and Drift Warnings
+
+Create-mode files are recorded in a project-root seed ledger,
+`.foundation-seeds.tsv` (`destination`, `template_sha256`, `seeded_sha256`).
+Rows are written when a file is seeded; projects scaffolded before the ledger
+existed are backfilled on their next update, treating current state as the
+baseline.
+
+During `update-project.sh` (and `ovasabi refresh`), every create-mode file is
+compared against its ledger row:
+
+- **Template unchanged** → silence. User edits to project-owned files are
+  never flagged; customization is the point of `create` mode.
+- **Template evolved, local copy unmodified since seeding** → warning with a
+  reseed hint (delete the file and re-run update to reseed it).
+- **Template evolved, local copy customized** → warning with a review hint
+  (diff the local file against the current template).
+
+Warnings repeat on every update until resolved: either reseed the file, or
+run `update --acknowledge-seed-drift` / `refresh --acknowledge-seed-drift`
+after review to re-baseline the ledger to the current templates. Drift
+detection never rewrites a create-mode file.
+
+The ledger is project state and should be committed. The seed-drift contract
+is enforced by `make check-scaffold-seed-drift`
+(`tests/scaffold_seed_drift_test.sh`).
+
 ## Tooling
 
 List files by profile:

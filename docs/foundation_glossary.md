@@ -72,6 +72,7 @@ pre-answered questions without scanning multiple files.
 | **Runtime-sdk** | WASM/Rust/Go runtime kernel with a 4KB control-buffer contract for high-performance JS/Rust communication. | `foundation_guide.md` |
 | **Runtime-transport** | `@ovasabi/runtime-transport` — universal client wire: command bus, envelope creation, WebSocket/HTTP fallback, route registry, and metadata stores. | `foundation_guide.md` |
 | **Scaffold manifest** | `templates/scaffold.manifest.tsv` — the contract declaring which files are managed, their destination, profile, feature gate, and ownership mode. | `scaffold_manifest.md` |
+| **Seed ledger** | `.foundation-seeds.tsv` in a generated project — per create-mode file, the template hash and rendered hash at seed time. Update/refresh warn when the Foundation template evolves after seeding; user edits are never flagged and project-owned files are never rewritten. | `scaffold_manifest.md` |
 | **Signed license file** | Offline `ovasabi.lic` JWT validated with Ovasabi's public key for air-gapped enterprise package/update authorization. | `foundation_distribution.md` |
 | **Server-kit** | Go backend platform primitives: the largest Foundation module containing 50+ packages for events, workers, database, resilience, auth, and more. | `foundation_guide.md` |
 | **Tenant isolation** | Organization scope derived from authenticated context, never from client-supplied data. Preserved through all lifecycle lanes. | `foundation_nervous_system.md` |

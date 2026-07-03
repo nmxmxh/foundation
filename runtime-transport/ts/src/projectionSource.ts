@@ -260,6 +260,14 @@ export type WebSocketProjectionSourceConfig = {
   query?: () => Record<string, string> | Promise<Record<string, string>>;
   minBackoffMs?: number;
   maxBackoffMs?: number;
+  // Reconnect budget: consecutive connections that close without ever opening
+  // before the source gives up and emits "closed". The browser WebSocket API
+  // hides the HTTP status of a failed upgrade, so a rejection the server will
+  // always repeat (e.g. an unauthenticated 401) is indistinguishable from an
+  // outage — without a budget it becomes an infinite request loop. A
+  // successful open resets the budget; a new subscribeProjection() starts a
+  // fresh one. Defaults to 8.
+  maxConsecutiveFailures?: number;
   onStatus?: (status: ProjectionTransportStatus) => void;
   createSocket?: (url: string) => WebSocket;
 };
@@ -273,6 +281,7 @@ type ProjectionControlFrame = {
 
 const DEFAULT_MIN_BACKOFF = 500;
 const DEFAULT_MAX_BACKOFF = 15_000;
+const DEFAULT_MAX_CONSECUTIVE_FAILURES = 8;
 
 export const createWebSocketProjectionSource = (
   config: WebSocketProjectionSourceConfig,
@@ -286,6 +295,10 @@ export const createWebSocketProjectionSource = (
       const createSocket = config.createSocket ?? ((url: string) => new WebSocket(url));
       const minBackoff = Math.max(0, config.minBackoffMs ?? DEFAULT_MIN_BACKOFF);
       const maxBackoff = Math.max(minBackoff, config.maxBackoffMs ?? DEFAULT_MAX_BACKOFF);
+      const maxFailures = Math.max(
+        1,
+        config.maxConsecutiveFailures ?? DEFAULT_MAX_CONSECUTIVE_FAILURES,
+      );
 
       let closed = false;
       let socket: WebSocket | undefined;
@@ -340,6 +353,13 @@ export const createWebSocketProjectionSource = (
 
       const scheduleReconnect = () => {
         if (closed) return;
+        // attempt counts reconnects already scheduled, so this close is
+        // consecutive failure number attempt + 1.
+        if (attempt + 1 >= maxFailures) {
+          closed = true;
+          emitStatus({ phase: "closed", reason: "retry-limit" });
+          return;
+        }
         const delay = backoffDelay();
         attempt += 1;
         reconnectTimer = setTimeout(() => {

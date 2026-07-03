@@ -51,6 +51,107 @@ scaffold_should_overwrite() {
     esac
 }
 
+# Seed ledger: records, for every create-mode file, the hash of the template
+# it was seeded from and the hash of the rendered file as written. Update uses
+# it to warn when the Foundation template evolves after seeding — without ever
+# rewriting project-owned files, and without flagging ordinary user edits.
+scaffold_seed_ledger_path() {
+    echo "$PROJECT_PATH/.foundation-seeds.tsv"
+}
+
+scaffold_seed_ledger_row() {
+    local dest_rel="$1"
+    local ledger
+    ledger="$(scaffold_seed_ledger_path)"
+    [[ -f "$ledger" ]] || return 0
+    awk -F'\t' -v d="$dest_rel" '$1 == d { print; exit }' "$ledger"
+}
+
+scaffold_record_seed() {
+    local dest_rel="$1"
+    local template_hash="$2"
+    local seeded_hash="$3"
+    [[ "${DRY_RUN:-false}" == "true" ]] && return 0
+
+    local ledger tmp
+    ledger="$(scaffold_seed_ledger_path)"
+    tmp="${ledger}.tmp"
+    {
+        echo "# destination	template_sha256	seeded_sha256"
+        {
+            if [[ -f "$ledger" ]]; then
+                awk -F'\t' -v d="$dest_rel" '/^#/ { next } $1 != d { print }' "$ledger"
+            fi
+            printf '%s\t%s\t%s\n' "$dest_rel" "$template_hash" "$seeded_hash"
+        } | sort
+    } >"$tmp"
+    mv "$tmp" "$ledger"
+}
+
+scaffold_warn_seed_drift() {
+    local dest_rel="$1"
+    local source_abs="$2"
+    local dest_abs="$3"
+    local seeded_hash="$4"
+
+    local file_now
+    file_now="$(foundation_hash_file "$dest_abs")"
+    if [[ "$file_now" == "$seeded_hash" ]]; then
+        foundation_log_warn "Seed drift: $dest_rel — Foundation template evolved; local copy is unmodified since seeding. Delete the file and re-run update to reseed it."
+    else
+        foundation_log_warn "Seed drift: $dest_rel — Foundation template evolved and the local copy is customized. Review: diff \"$dest_abs\" \"$source_abs\""
+    fi
+}
+
+scaffold_report_seed_drift() {
+    local manifest="$FOUNDATION_DIR/templates/scaffold.manifest.tsv"
+    [[ -f "$manifest" ]] || return 0
+
+    local drift_count=0
+    local backfill_count=0
+    while IFS=$'\t' read -r source dest profiles feature mode; do
+        [[ -z "${source:-}" || "${source:0:1}" == "#" ]] && continue
+        [[ "$mode" == "create" ]] || continue
+        profile_matches "$profiles" || continue
+        feature_matches "$feature" || continue
+
+        local dest_rel source_abs dest_abs
+        dest_rel="$(scaffold_expand_path "$dest")"
+        source_abs="$FOUNDATION_DIR/$source"
+        dest_abs="$PROJECT_PATH/$dest_rel"
+        [[ -f "$source_abs" && -f "$dest_abs" ]] || continue
+
+        local template_now row template_rec seeded_rec
+        template_now="$(foundation_hash_file "$source_abs")"
+        row="$(scaffold_seed_ledger_row "$dest_rel")"
+        if [[ -z "$row" ]]; then
+            scaffold_record_seed "$dest_rel" "$template_now" "$(foundation_hash_file "$dest_abs")"
+            backfill_count=$((backfill_count + 1))
+            continue
+        fi
+        template_rec="$(echo "$row" | cut -f2)"
+        [[ "$template_now" == "$template_rec" ]] && continue
+
+        if [[ "${ACKNOWLEDGE_SEED_DRIFT:-false}" == "true" ]]; then
+            seeded_rec="$(echo "$row" | cut -f3)"
+            scaffold_record_seed "$dest_rel" "$template_now" "$seeded_rec"
+            foundation_log_info "Seed drift acknowledged: $dest_rel re-baselined to the current template"
+            continue
+        fi
+
+        seeded_rec="$(echo "$row" | cut -f3)"
+        scaffold_warn_seed_drift "$dest_rel" "$source_abs" "$dest_abs" "$seeded_rec"
+        drift_count=$((drift_count + 1))
+    done < "$manifest"
+
+    if [[ "$backfill_count" -gt 0 ]]; then
+        foundation_log_info "Seed ledger: recorded baseline for $backfill_count project-owned file(s)"
+    fi
+    if [[ "$drift_count" -gt 0 ]]; then
+        foundation_log_warn "$drift_count project-owned file(s) drifted from evolved templates; review them, then re-run with --acknowledge-seed-drift to re-baseline"
+    fi
+}
+
 scaffold_copy_file() {
     local source="$1"
     local dest="$2"
@@ -83,6 +184,12 @@ scaffold_copy_file() {
     cp "$source" "$dest"
     foundation_render_file "$dest"
     [[ "$(basename "$dest")" == "start.sh" ]] && chmod +x "$dest" 2>/dev/null || true
+
+    if [[ "$mode" == "create" ]]; then
+        scaffold_record_seed "${dest#$PROJECT_PATH/}" \
+            "$(foundation_hash_file "$source")" \
+            "$(foundation_hash_file "$dest")"
+    fi
 }
 
 scaffold_copy_tree() {

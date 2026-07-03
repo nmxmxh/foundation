@@ -211,4 +211,37 @@ describe("createWebSocketProjectionSource", () => {
     unsubscribe();
     expect(statuses).toContain("closed");
   });
+
+  it("stops reconnecting once the consecutive-failure budget is exhausted", async () => {
+    vi.useFakeTimers();
+    try {
+      const sockets: FakeSocket[] = [];
+      const statuses: { phase: string; reason?: string }[] = [];
+      const source = createWebSocketProjectionSource({
+        url: "wss://host/v1/projections",
+        codec,
+        maxConsecutiveFailures: 3,
+        createSocket: () => {
+          const instance = new FakeSocket();
+          sockets.push(instance);
+          return instance as unknown as WebSocket;
+        },
+        onStatus: (status) => statuses.push({ phase: status.phase, reason: status.reason }),
+      });
+      source.subscribeProjection(scope, () => {});
+
+      // Every connection closes without ever opening — the shape of an upgrade
+      // the server rejects every time (e.g. unauthenticated). The source must
+      // stop after the budget, not request forever.
+      for (let i = 0; i < 6; i += 1) {
+        await vi.advanceTimersByTimeAsync(20_000);
+        sockets.at(-1)?.onclose?.();
+      }
+
+      expect(sockets).toHaveLength(3);
+      expect(statuses.at(-1)).toMatchObject({ phase: "closed", reason: "retry-limit" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

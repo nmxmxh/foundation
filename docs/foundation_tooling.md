@@ -80,6 +80,8 @@ All automated checks are run via `make lint` or specific `make check-*` targets.
 | `check-init-project` | `tests/init_project_test.sh` | Shell | Simulates a fresh project initialization and checks files against the manifest. |
 | `check-update-project` | `tests/update_project_test.sh` | Shell | Verifies that updating a project successfully replaces foundation code and deletes retired directories. |
 | `check-scaffold-smoke` | `tests/scaffold_smoke_test.sh` | Shell | Performs a full build, lint, and test cycle on a newly generated scaffold. |
+| `check-scaffold-idempotency` | `tests/scaffold_idempotency_test.sh` | Shell | Asserts a fresh `init.sh` followed by a default `update-project.sh` produces zero tracked drift beyond the `.foundation` `LAST_UPDATED` stamp. |
+| `check-scaffold-seed-drift` | `tests/scaffold_seed_drift_test.sh` | Shell | Proves the seed-ledger contract: silence while templates are unchanged, warnings when templates evolve, `--acknowledge-seed-drift` re-baselining, and reseed-on-delete. |
 | **Enforcement & Policy** | | | |
 | `check-coding-practices` | `coding_practices_check.sh` | Shell | Scans code against CP rules (e.g., CP-01 no uncontrolled recursion, CP-02 bounded loops, CP-03 function size limits). |
 | `check-testing-practices` | `testing_practices_check.sh` | Shell | Enforces test adequacy rules and checks for generated event contract test files. |

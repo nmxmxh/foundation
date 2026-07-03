@@ -173,7 +173,7 @@ check_file_contains "template Redis config is baked" "$target/templates/docker/D
 check_file_contains "template Postgres uses baked hba" "$target/templates/docker/docker-compose.yml" "hba_file=/etc/postgresql/pg_hba.conf"
 check_file_contains "template Postgres Compose auth allows SCRAM clients" "$target/templates/config/pg_hba.conf" "0.0.0.0/0"
 check_file_contains "template Postgres local socket supports operator recovery" "$target/templates/config/pg_hba.conf" "local   all             all                                     trust"
-check_file_contains "template migration fails fast on DB auth errors" "$target/templates/docker/docker-compose.yml" "database authentication is not retryable"
+check_file_contains "template migration fails auth after grace window" "$target/templates/docker/docker-compose.yml" "database authentication still failing after"
 check_file_contains "template server receives DB host" "$target/templates/docker/docker-compose.yml" 'DB_HOST: "${DB_HOST:-postgres}"'
 check_file_contains "template migrate defaults to Compose Postgres host" "$target/templates/docker/docker-compose.yml" 'DB_HOST=${DB_HOST:-postgres}'
 

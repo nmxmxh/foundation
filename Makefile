@@ -1,5 +1,5 @@
 .PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-go-race test-ts test-rust test-rust-sdk test-native-rust test-rust-loom check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history bench-simd lint verify docker-up docker-down migrate-up help \
-	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator \
+	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-scaffold-idempotency check-scaffold-seed-drift check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator \
 	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
 	check-doc-references check-ovasabi-cli check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux \
@@ -12,6 +12,8 @@ FOUNDATION_LINT_CHECKS := \
 	check-init-project \
 	check-update-project \
 	check-scaffold-smoke \
+	check-scaffold-idempotency \
+	check-scaffold-seed-drift \
 	check-migration-seed-policy \
 	check-lifecycle-contract-generator \
 	check-frontend-prototype-generator \
@@ -207,6 +209,12 @@ check-update-project:
 
 check-scaffold-smoke:
 	@tests/scaffold_smoke_test.sh
+
+check-scaffold-idempotency:
+	@tests/scaffold_idempotency_test.sh
+
+check-scaffold-seed-drift:
+	@tests/scaffold_seed_drift_test.sh
 
 check-migration-seed-policy:
 	@tests/migration_seed_policy_test.sh

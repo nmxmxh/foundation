@@ -72,6 +72,18 @@ foundation_render_tree() {
     )
 }
 
+foundation_hash_file() {
+    local file="$1"
+    if command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | awk '{print $1}'
+    elif command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | awk '{print $1}'
+    else
+        echo "missing sha256 tool" >&2
+        return 2
+    fi
+}
+
 foundation_log_info() { echo -e "\033[0;34m[INFO]\033[0m $1"; }
 foundation_log_success() { echo -e "\033[0;32m[SUCCESS]\033[0m $1"; }
 foundation_log_warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }

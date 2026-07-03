@@ -64,7 +64,11 @@ Current local usage:
 cd cmd/ovasabi
 go run . init --profile=performance --name=trader_os --skip-license
 go run . update --project-dir=../trader_os_v1 --skip-license
+go run . refresh --project-dir=../trader_os_v1 --skip-license   # reconcile from declared .foundation state; no overrides
+go run . refresh --project-dir=../trader_os_v1 --skip-license --acknowledge-seed-drift
 go run . license verify --offline-license --license-file=ovasabi.lic --license-public-key="$(cat ovasabi.pub)"
+go run . doctor            # preflight: verifies git/go/node/npm (required) and docker/cargo (lane-optional)
+go run . doctor --json     # machine-readable output for agents and CI
 npm exec -- ovasabi --help
 ```
 

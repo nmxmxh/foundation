@@ -30,6 +30,7 @@ Options:
   --no-wasm           Disable WASM scaffold and runtime-sdk metadata
   --with-native       Enable native/Tauri scaffold and runtime-native metadata
   --no-native         Disable native/Tauri scaffold and runtime-native metadata
+  --acknowledge-seed-drift  Re-baseline the seed ledger to current templates
   --help, -h          Show this help message
 EOF
 }
@@ -64,6 +65,7 @@ GO_MODULE_OVERRIDE=""
 WITH_DOCKER_OVERRIDE=""
 WITH_WASM_OVERRIDE=""
 WITH_NATIVE_OVERRIDE=""
+ACKNOWLEDGE_SEED_DRIFT="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -120,6 +122,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --with-native)
             WITH_NATIVE_OVERRIDE="true"
+            shift
+            ;;
+        --acknowledge-seed-drift)
+            ACKNOWLEDGE_SEED_DRIFT="true"
             shift
             ;;
         --no-native)
@@ -225,6 +231,7 @@ else
     foundation_log_info "Syncing managed scaffold..."
     scaffold_apply_manifest
     foundation_log_success "Managed scaffold synchronized"
+    scaffold_report_seed_drift
     if [[ -x "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" ]]; then
         foundation_log_info "Applying managed scaffold patches..."
         "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" "$PROJECT_PATH"

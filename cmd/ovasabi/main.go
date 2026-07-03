@@ -43,10 +43,11 @@ func (osRunner) Run(ctx context.Context, name string, args []string, dir string,
 }
 
 type app struct {
-	stdout io.Writer
-	stderr io.Writer
-	runner commandRunner
-	client *http.Client
+	stdout   io.Writer
+	stderr   io.Writer
+	runner   commandRunner
+	client   *http.Client
+	lookPath func(string) (string, error) // nil means exec.LookPath
 }
 
 func main() {
@@ -72,8 +73,12 @@ func (a app) run(ctx context.Context, args []string) error {
 		return a.runInit(ctx, args[1:])
 	case "update":
 		return a.runUpdate(ctx, args[1:])
+	case "refresh":
+		return a.runRefresh(ctx, args[1:])
 	case "license":
 		return a.runLicense(ctx, args[1:])
+	case "doctor":
+		return a.runDoctor(ctx, args[1:])
 	case "help", "--help", "-h":
 		a.usage()
 		return nil
@@ -89,7 +94,12 @@ func (a app) usage() {
 Usage:
   ovasabi init --profile=performance --name=trader_os [options]
   ovasabi update --project-dir=../trader_os_v1 [options]
+  ovasabi refresh --project-dir=../trader_os_v1 [--dry-run] [--acknowledge-seed-drift]
   ovasabi license verify [options]
+  ovasabi doctor [--json]
+
+refresh reconciles a project against its declared .foundation state with no
+overrides; update is the flag-driven variant for changing profile or features.
 
 The CLI wraps the existing Foundation scaffold scripts while adding the
 distribution and licensing boundary used by package-registry installs.`)
@@ -182,6 +192,7 @@ func (a app) runUpdate(ctx context.Context, args []string) error {
 	docsOnly := fs.Bool("docs-only", false, "update docs only")
 	toolingOnly := fs.Bool("tooling-only", false, "update tooling only")
 	foundationOnly := fs.Bool("foundation-only", false, "update vendored foundation modules only")
+	acknowledgeSeedDrift := fs.Bool("acknowledge-seed-drift", false, "re-baseline the seed ledger to current templates")
 	profile := fs.String("profile", "", "override profile")
 	lic := bindLicenseFlags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -193,24 +204,8 @@ func (a app) runUpdate(ctx context.Context, args []string) error {
 	if *projectDir == "" {
 		return errors.New("--project-dir or project path is required")
 	}
-	if *foundationDir == "" {
-		dir, err := discoverFoundationDir()
-		if err != nil {
-			return err
-		}
-		*foundationDir = dir
-	}
-	absFoundationDir, err := resolveCallerPath(*foundationDir)
-	if err != nil {
+	if err := resolveDirs(foundationDir, projectDir); err != nil {
 		return err
-	}
-	*foundationDir = absFoundationDir
-	if *projectDir != "" {
-		absProjectDir, err := resolveCallerPath(*projectDir)
-		if err != nil {
-			return err
-		}
-		*projectDir = absProjectDir
 	}
 	lic.profile = *profile
 	if err := a.verifyLicense(ctx, lic); err != nil {
@@ -233,6 +228,9 @@ func (a app) runUpdate(ctx context.Context, args []string) error {
 	if *foundationOnly {
 		scriptArgs = append(scriptArgs, "--foundation-only")
 	}
+	if *acknowledgeSeedDrift {
+		scriptArgs = append(scriptArgs, "--acknowledge-seed-drift")
+	}
 	if *profile != "" {
 		mapped, err := scriptProfile(*profile)
 		if err != nil {
@@ -241,6 +239,65 @@ func (a app) runUpdate(ctx context.Context, args []string) error {
 		scriptArgs = append(scriptArgs, "--profile", mapped)
 	}
 	return a.runner.Run(ctx, script, scriptArgs, *foundationDir, nil, a.stdout, a.stderr)
+}
+
+// runRefresh reconciles a project purely from its declared .foundation state:
+// no profile, force, or feature overrides are accepted.
+func (a app) runRefresh(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("refresh", flag.ContinueOnError)
+	fs.SetOutput(a.stderr)
+	projectDir := fs.String("project-dir", "", "project directory")
+	foundationDir := fs.String("foundation-dir", "", "Foundation core checkout")
+	dryRun := fs.Bool("dry-run", false, "preview without writing files")
+	acknowledgeSeedDrift := fs.Bool("acknowledge-seed-drift", false, "re-baseline the seed ledger to current templates")
+	lic := bindLicenseFlags(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *projectDir == "" && fs.NArg() > 0 {
+		*projectDir = fs.Arg(0)
+	}
+	if *projectDir == "" {
+		return errors.New("--project-dir or project path is required")
+	}
+	if err := resolveDirs(foundationDir, projectDir); err != nil {
+		return err
+	}
+	if err := a.verifyLicense(ctx, lic); err != nil {
+		return err
+	}
+	script := filepath.Join(*foundationDir, "scripts", "update-project.sh")
+	scriptArgs := []string{*projectDir}
+	if *dryRun {
+		scriptArgs = append(scriptArgs, "--dry-run")
+	}
+	if *acknowledgeSeedDrift {
+		scriptArgs = append(scriptArgs, "--acknowledge-seed-drift")
+	}
+	return a.runner.Run(ctx, script, scriptArgs, *foundationDir, nil, a.stdout, a.stderr)
+}
+
+func resolveDirs(foundationDir, projectDir *string) error {
+	if *foundationDir == "" {
+		dir, err := discoverFoundationDir()
+		if err != nil {
+			return err
+		}
+		*foundationDir = dir
+	}
+	absFoundationDir, err := resolveCallerPath(*foundationDir)
+	if err != nil {
+		return err
+	}
+	*foundationDir = absFoundationDir
+	if *projectDir != "" {
+		absProjectDir, err := resolveCallerPath(*projectDir)
+		if err != nil {
+			return err
+		}
+		*projectDir = absProjectDir
+	}
+	return nil
 }
 
 func (a app) runLicense(ctx context.Context, args []string) error {

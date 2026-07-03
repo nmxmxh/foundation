@@ -733,7 +733,7 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     check_file_contains "Compose builds Postgres config image" "$target/docker-compose.yml" "Dockerfile.postgres"
     check_file_contains "Compose builds Redis config image" "$target/docker-compose.yml" "Dockerfile.redis"
     check_file_contains "Compose uses baked Postgres hba" "$target/docker-compose.yml" "hba_file=/etc/postgresql/pg_hba.conf"
-    check_file_contains "Compose migration fails fast on DB auth errors" "$target/docker-compose.yml" "database authentication is not retryable"
+    check_file_contains "Compose migration fails auth after grace window" "$target/docker-compose.yml" "database authentication still failing after"
     check_file_not_contains "Compose avoids Postgres config bind" "$target/docker-compose.yml" "./config/postgresql.conf"
     check_file_not_contains "Compose avoids Redis config bind" "$target/docker-compose.yml" "./config/redis.conf"
     check_file_not_contains "Compose avoids default CA bind" "$target/docker-compose.yml" "config/certs/ca.crt"

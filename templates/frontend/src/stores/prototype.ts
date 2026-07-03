@@ -42,7 +42,12 @@ export type PrototypeRuntimeContextOptions = {
   // for the WebSocket connection (e.g. a bearer token).
   projectionHeaders?: () => Record<string, string> | Promise<Record<string, string>>
   projectionQuery?: () => Record<string, string> | Promise<Record<string, string>>
-  // Set false to force offline 'dummy' mode even when a gateway origin resolves.
+  // Tri-state liveness. Unset (default): go live only when a credential
+  // provider (projectionHeaders or projectionQuery) is supplied — the
+  // projection gateway scopes every read by the authenticated organization, so
+  // a context without credentials can only ever collect 401s. true: force live
+  // without credentials (e.g. a custom unauthenticated gateway). false: always
+  // offline.
   live?: boolean
   // Override the derived gateway base (e.g. a dedicated projection host). When
   // unset the endpoints derive from VITE_API_URL / the page origin.
@@ -70,20 +75,25 @@ export function createPrototypeRuntimeContext(
 
   // Prefer an explicitly supplied source; otherwise derive the gateway endpoints
   // from VITE_API_URL / the page origin plus the standard /v1/projections path.
-  // When no origin resolves (or live is disabled) the prototype stays offline.
+  // Liveness is gated on auth availability, not origin resolvability: in a
+  // browser an origin always resolves, so keying on the origin alone would
+  // send every domain's snapshot + subscribe unauthenticated at startup (N
+  // domains x every load x every retry — a self-inflicted request storm).
   // createDefaultProjectionSource returns a HermesProjectionSource-shaped object,
   // so this assigns with no cast at the seam.
+  const wantsLive =
+    options.live ?? Boolean(options.projectionHeaders ?? options.projectionQuery)
   const hermesSource: HermesProjectionSource | undefined =
     options.hermesSource ??
-    (options.live === false
-      ? undefined
-      : createDefaultProjectionSource({
+    (wantsLive
+      ? createDefaultProjectionSource({
           baseUrl: options.projectionBaseUrl,
           originUrl: import.meta.env.VITE_API_URL,
           headers: options.projectionHeaders,
           query: options.projectionQuery,
           onStatus: handleStatus,
-        }))
+        })
+      : undefined)
 
   const adapter: RuntimeWorkbenchAdapter | undefined = hermesSource
     ? createHermesProjectionAdapter(hermesSource, {
@@ -151,4 +161,8 @@ export function createPrototypeRuntimeContext(
   }
 }
 
-export const offlinePrototypeRuntime = createPrototypeRuntimeContext()
+// Offline by construction, not by circumstance: live is pinned false so this
+// module-level singleton can never open network connections at import time.
+// Apps go live by building their own context after auth is available:
+//   createPrototypeRuntimeContext({ projectionHeaders: () => authHeaders() })
+export const offlinePrototypeRuntime = createPrototypeRuntimeContext({ live: false })
