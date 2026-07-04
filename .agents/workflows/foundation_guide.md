@@ -1,5 +1,5 @@
 ---
-description: Ovasabi Foundation: Exhaustive Agent Operations Workflow & Architecture Guide
+description: "Ovasabi Foundation: Exhaustive Agent Operations Workflow & Architecture Guide"
 ---
 
 # Ovasabi Foundation: Detailed Agent Workflow & Architecture Guide

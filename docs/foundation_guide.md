@@ -1,5 +1,5 @@
 ---
-description: Ovasabi Foundation: Comprehensive Agent & Developer Guide
+description: "Ovasabi Foundation: Comprehensive Agent & Developer Guide"
 ---
 
 # Ovasabi Foundation: Comprehensive Agent & Developer Guide
