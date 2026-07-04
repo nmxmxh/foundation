@@ -1,0 +1,20 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/servicebacked
+cpu: Apple M1 Pro
+BenchmarkServiceBackedHermesRebuild512-8            	     450	   2914560 ns/op	       512.0 records/op	 1879425 B/op	   21278 allocs/op
+BenchmarkServiceBackedHermesApplyBatch512-8         	    1270	    962877 ns/op	       512.0 records/op	 1002751 B/op	    6375 allocs/op
+BenchmarkServiceBackedRedisSetGet-8                 	    2383	    443338 ns/op	     888 B/op	      26 allocs/op
+BenchmarkServiceBackedRedisSet-8                    	    5446	    222143 ns/op	     464 B/op	      13 allocs/op
+BenchmarkServiceBackedRedisGet-8                    	    5512	    216671 ns/op	     408 B/op	      12 allocs/op
+BenchmarkServiceBackedRedisSetGetParallel-8         	    9782	    113453 ns/op	    1017 B/op	      29 allocs/op
+BenchmarkServiceBackedRedisSetManyGetMany64-8       	    1642	    796525 ns/op	        64.00 keys/op	   51522 B/op	    1053 allocs/op
+BenchmarkServiceBackedRedisSetGetMany64-8           	    2204	    693280 ns/op	        64.00 keys/op	   49482 B/op	     793 allocs/op
+BenchmarkServiceBackedRedisRawPipelineSetGet64-8    	    1947	    702681 ns/op	        64.00 keys/op	   31768 B/op	     657 allocs/op
+BenchmarkServiceBackedPostgresUpsert-8              	    3350	    342599 ns/op	    3054 B/op	      49 allocs/op
+BenchmarkServiceBackedPostgresUpsertRawJSON-8       	    3136	    409281 ns/op	    2204 B/op	      40 allocs/op
+BenchmarkServiceBackedPostgresUpsertParallel-8      	   13876	     77136 ns/op	    3091 B/op	      49 allocs/op
+BenchmarkServiceBackedPostgresSendBatchUpsert64-8   	     530	   2811726 ns/op	        64.00 rows/op	   73373 B/op	     937 allocs/op
+BenchmarkServiceBackedPostgresCopyFrom64-8          	    1832	    601597 ns/op	        64.00 rows/op	   37899 B/op	     378 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/servicebacked	20.408s

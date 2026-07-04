@@ -65,7 +65,7 @@ Read in order:
 5. [`agent_operating_contract.md`](agent_operating_contract.md) — definition of done, evidence requirements
 6. [`practice_controls.md`](practice_controls.md) — control matrix, enforcement gates
 7. [`ai_threat_model.md`](ai_threat_model.md) — threat classes, validation requirements
-8. [`../agent_memory/CONDUCTOR.md`](../agent_memory/CONDUCTOR.md) — autonomous build loop, memory patterns
+8. `../agent_memory/CONDUCTOR.md` — autonomous build loop, memory patterns (in-house; not yet shipped)
 
 ---
 
@@ -165,8 +165,8 @@ Read in order:
 | `agent_operating_contract.md` | Role split, definition of done, evidence ledger, handoff format |
 | `ai_practices.md` | AI runtime as product capability, trust boundary, bounded work, verification |
 | `ai_threat_model.md` | AI-specific threats: tool poisoning, memory poisoning, provenance, secrets |
-| [`../agent_memory/CONDUCTOR.md`](../agent_memory/CONDUCTOR.md) | Closed-loop autonomous build loop, verification gates, memory patterns |
-| [`../agent_memory/README.md`](../agent_memory/README.md) | Persistent memory in CWF format, sessions, index, validation rules |
+| `../agent_memory/CONDUCTOR.md` | Closed-loop autonomous build loop, verification gates, memory patterns (in-house; not yet shipped) |
+| `../agent_memory/README.md` | Persistent memory in CWF format, sessions, index, validation rules (in-house; not yet shipped) |
 
 ---
 

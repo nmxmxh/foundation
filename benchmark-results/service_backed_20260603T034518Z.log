@@ -1,0 +1,21 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/servicebacked
+cpu: Apple M1 Pro
+BenchmarkServiceBackedEventLogPublishPending64-8    	     244	   4709855 ns/op	        64.00 events/op	  164662 B/op	    2038 allocs/op
+BenchmarkServiceBackedHermesRebuild512-8            	     402	   2851649 ns/op	       512.0 records/op	 2342535 B/op	   17153 allocs/op
+BenchmarkServiceBackedHermesApplyBatch512-8         	    1344	    853578 ns/op	       512.0 records/op	  981485 B/op	    4324 allocs/op
+BenchmarkServiceBackedRedisSetGet-8                 	    2058	    502290 ns/op	     888 B/op	      26 allocs/op
+BenchmarkServiceBackedRedisSet-8                    	    5215	    259545 ns/op	     464 B/op	      13 allocs/op
+BenchmarkServiceBackedRedisGet-8                    	    4861	    249718 ns/op	     408 B/op	      12 allocs/op
+BenchmarkServiceBackedRedisSetGetParallel-8         	    9283	    125887 ns/op	    1019 B/op	      29 allocs/op
+BenchmarkServiceBackedRedisSetManyGetMany64-8       	    1528	    799608 ns/op	        64.00 keys/op	   51520 B/op	    1053 allocs/op
+BenchmarkServiceBackedRedisSetGetMany64-8           	    2078	    579867 ns/op	        64.00 keys/op	   49482 B/op	     793 allocs/op
+BenchmarkServiceBackedRedisRawPipelineSetGet64-8    	    2140	    600321 ns/op	        64.00 keys/op	   31768 B/op	     657 allocs/op
+BenchmarkServiceBackedPostgresUpsert-8              	    3224	    384018 ns/op	    3319 B/op	      56 allocs/op
+BenchmarkServiceBackedPostgresUpsertRawJSON-8       	    3207	    389153 ns/op	    2190 B/op	      40 allocs/op
+BenchmarkServiceBackedPostgresUpsertParallel-8      	   11240	    102392 ns/op	    3381 B/op	      56 allocs/op
+BenchmarkServiceBackedPostgresSendBatchUpsert64-8   	     418	   2875443 ns/op	        64.00 rows/op	   73372 B/op	     937 allocs/op
+BenchmarkServiceBackedPostgresCopyFrom64-8          	    1993	    616363 ns/op	        64.00 rows/op	   38387 B/op	     378 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/servicebacked	23.962s

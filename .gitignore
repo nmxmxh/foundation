@@ -42,6 +42,8 @@
 # Logs
 *.log
 **/logs/
+# benchmark evidence artifacts referenced by the ledger (check-benchmark-evidence)
+!benchmark-results/*.log
 
 # Temporary files
 **/tmp/
@@ -50,6 +52,8 @@
 # Environment (should not be in foundation but just in case)
 .env
 .env.*
+# scaffold source shipped to projects (see templates/scaffold.manifest.tsv) — placeholders only
+!templates/.env.example
 
 # Agent memory + conductor (in-house / experimental for now — not shipped or scaffolded yet)
 agent_memory/

@@ -1,0 +1,489 @@
+== foundation Go performance guards ==
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc	(cached)
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/chain	(cached)
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc
+cpu: Apple M1 Pro
+BenchmarkDispatchOverBufconn-8                    	   35132	     30175 ns/op	   12624 B/op	     213 allocs/op
+BenchmarkDispatchFrameOverBufconn-8               	   49485	     25372 ns/op	   10916 B/op	     178 allocs/op
+BenchmarkClientDispatchFrameOverBufconn-8         	   52576	     20585 ns/op	   10991 B/op	     181 allocs/op
+BenchmarkRouterDispatchFrameDirect-8              	100000000	        10.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDirectFrameClientDispatch-8              	65200843	        18.40 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBoundFrameClientDispatch-8               	99542725	        11.98 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBoundFrameClientDispatchTrusted-8        	100000000	        10.67 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameCodecRoundTrip-8              	14289960	        81.71 ns/op	     144 B/op	       2 allocs/op
+BenchmarkBinaryFrameAppendRoundTrip-8             	28912356	        41.00 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	61150911	        19.75 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	 3166232	       371.5 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoUnmarshalReset-8           	 5379633	       226.6 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoUnmarshalMergeReuse-8      	 7032483	       161.0 ns/op	      56 B/op	       5 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc	18.903s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/chain
+cpu: Apple M1 Pro
+BenchmarkRunParallel-8       	 1189609	       981.0 ns/op	     592 B/op	       6 allocs/op
+BenchmarkRunParallelInto-8   	 1261578	       949.4 ns/op	     464 B/op	       5 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/chain	4.419s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi
+cpu: Apple M1 Pro
+BenchmarkDecodeRequestBytesIntoCompleteReuse-8   	 4681927	       242.4 ns/op	      72 B/op	       8 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi	1.622s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap
+cpu: Apple M1 Pro
+BenchmarkTypedFrameAdapterDispatch-8             	  166504	      6293 ns/op	    3829 B/op	      80 allocs/op
+BenchmarkTypedFrameAdapterDispatchNoMetadata-8   	 1947328	       559.8 ns/op	     536 B/op	      10 allocs/op
+BenchmarkTypedFrameAdapterDispatchReuse-8        	 2353309	       525.2 ns/op	     424 B/op	       9 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap	4.838s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_DirectFrame_DomainCall-8                   	38100324	        32.02 ns/op	      32 B/op	       1 allocs/op
+BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest-8        	  191413	      5399 ns/op	    9219 B/op	      71 allocs/op
+BenchmarkAppLane_Auth_ValidateToken-8                       	  365056	      3288 ns/op	    2104 B/op	      27 allocs/op
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8          	  163195	      7203 ns/op	   11284 B/op	      81 allocs/op
+BenchmarkAppLane_Cache_GetHit_JSONValue-8                   	22890133	        54.03 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAppLane_Retry_NoRetrySuccess-8                     	377078251	         3.697 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAppLane_CircuitBreaker_ClosedSuccess-8             	15900339	        68.35 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAppLane_Worker_EnqueueWithBackpressureAndDrain-8   	  221478	      5500 ns/op	    1167 B/op	      26 allocs/op
+BenchmarkAppLane_Worker_RejectFullQueue-8                   	  932101	      1523 ns/op	     738 B/op	      17 allocs/op
+BenchmarkAppLane_Worker_DropNoProcessor-8                   	 1000000	      1291 ns/op	     706 B/op	      14 allocs/op
+BenchmarkAppLane_Retry_CanceledWait-8                       	11509364	        95.83 ns/op	      96 B/op	       2 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench	15.490s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkScale_MemoryDBTenantCount100K-8                        	     100	      5173 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale_MemoryDBTenantListFiltered100K-8                 	     100	     21586 ns/op	   33400 B/op	     105 allocs/op
+BenchmarkScale1M_MemoryDBTenantCount-8                          	     100	      5079 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale1M_MemoryDBTenantListFiltered-8                   	     100	     21598 ns/op	   33400 B/op	     105 allocs/op
+BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit-8         	     100	     16836 ns/op	   33400 B/op	     105 allocs/op
+BenchmarkScale_WebSocketBroadcastResolveInto100K-8              	     100	     34464 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale_WebSocketBroadcastResolveInto1K-8                	     100	       553.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale_WebSocketBroadcastBatch1K-8                      	     100	        32.50 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale_WebSocketBroadcastBatch100K-8                    	     100	       337.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale_WebSocketUserResolve100K-8                       	     100	       263.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale1M_WebSocketBroadcastResolveInto-8                	     100	    489633 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale1M_WebSocketBroadcastForEach-8                    	     100	   2400135 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale1M_WebSocketBroadcastBatch-8                      	     100	       747.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale1M_WebSocketUserResolve-8                         	     100	       285.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale_EventExactDispatch100KSubscriptions-8            	     100	       405.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale1M_EventExactDispatchSubscriptions-8              	     100	       423.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkScale_EventWildcardDispatch1KSubscriptions-8           	     100	       544.2 ns/op	      64 B/op	       1 allocs/op
+BenchmarkScale_EventPrefixWildcardDispatch100KSubscriptions-8   	     100	       530.8 ns/op	      64 B/op	       1 allocs/op
+BenchmarkScale_ConfigConvergence10K-8                           	     100	       173.8 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench	30.591s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkScale_LocalOperationMixLatency-8   	  187456	      6309 ns/op	    132458 max-ns/op	      6042 p50-ns/op	      8500 p95-ns/op	      9792 p99-ns/op	     560 B/op	      10 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench	1.687s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache
+cpu: Apple M1 Pro
+BenchmarkMemoryBackend_Set-8               	 2941623	       452.5 ns/op	     229 B/op	       2 allocs/op
+BenchmarkMemoryBackend_Get-8               	22817610	        52.39 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryBackend_SetGet_Parallel-8   	 3961275	       297.2 ns/op	      14 B/op	       1 allocs/op
+BenchmarkGetOrSet-8                        	 5869183	       205.1 ns/op	     176 B/op	       3 allocs/op
+BenchmarkGetOrSet_ParallelHotHit-8         	 7544214	       161.0 ns/op	     168 B/op	       3 allocs/op
+BenchmarkCacheKey-8                        	 5681444	       223.9 ns/op	     104 B/op	       6 allocs/op
+BenchmarkMemoryBackend_DeletePattern-8     	  335942	      3687 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache	30.096s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/circuitbreaker
+cpu: Apple M1 Pro
+BenchmarkCircuitBreaker_Execute_Closed-8     	19204881	        60.63 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Execute_Open-8       	24231103	        48.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_Execute_Parallel-8   	 4192047	       287.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCircuitBreaker_StateRead-8          	1000000000	         0.5294 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/circuitbreaker	6.046s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/compress
+cpu: Apple M1 Pro
+BenchmarkCompressLargeBatch/Brotli-Q4-8         	     427	   2786526 ns/op	15589281 B/op	      26 allocs/op
+BenchmarkCompressLargeBatch/Zstd-Fastest-8      	    1966	    565183 ns/op	 1048576 B/op	       1 allocs/op
+BenchmarkDecompressLargeBatch/Brotli-8          	     518	   2290871 ns/op	 3346752 B/op	      38 allocs/op
+BenchmarkDecompressLargeBatch/Zstd-8            	    3033	    397159 ns/op	 1056787 B/op	       1 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/compress	6.890s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/events
+cpu: Apple M1 Pro
+BenchmarkInMemoryBus_Publish_NoSubscribers-8   	 3879841	       299.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkInMemoryBus_Publish_1Subscriber-8     	 3916483	       305.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkInMemoryBus_Publish_10Subscribers-8   	 3428280	       357.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkInMemoryBus_Publish_Parallel-8        	 2461374	       480.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMatches-8                             	150236590	         7.964 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMatches_Exact-8                       	458797586	         2.570 ns/op	       0 B/op	       0 allocs/op
+BenchmarkTerminalState-8                       	30976300	        39.05 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEnvelope_ToJSON-8                     	  359396	      3330 ns/op	    2681 B/op	      49 allocs/op
+BenchmarkEnvelope_ToBinary-8                   	  493857	      2390 ns/op	    2224 B/op	      20 allocs/op
+BenchmarkEnvelope_FromJSON-8                   	  317222	      3777 ns/op	    2072 B/op	      40 allocs/op
+BenchmarkEnvelope_FromBinary-8                 	  562726	      2258 ns/op	    2984 B/op	      35 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/events	17.157s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/metrics
+cpu: Apple M1 Pro
+BenchmarkRegistryCounterNoTags-8            	 8735089	       120.3 ns/op	      32 B/op	       1 allocs/op
+BenchmarkRegistryCounterTagged-8            	 3466107	       351.9 ns/op	     272 B/op	       4 allocs/op
+BenchmarkRegistryCounterPrecomputedKey-8    	58008822	        20.61 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRegistrySnapshotPrometheus1024-8   	    7183	    162653 ns/op	  230080 B/op	      19 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/metrics	6.325s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis
+cpu: Apple M1 Pro
+BenchmarkMemoryClientGetHit-8                 	 6298000	       178.1 ns/op	      56 B/op	       4 allocs/op
+BenchmarkMemoryClientSetManyGetMany64-8       	   60141	     20175 ns/op	   12637 B/op	     516 allocs/op
+BenchmarkMemoryClientSetGetMany64-8           	   95226	     11911 ns/op	    9563 B/op	     324 allocs/op
+BenchmarkMemoryClientPublish1KSubscribers-8   	   22428	     53420 ns/op	   47701 B/op	     991 allocs/op
+BenchmarkMemoryClientPSubscribePrefix1K-8     	   42682	     28176 ns/op	     111 B/op	       4 allocs/op
+BenchmarkMemoryClientStreamXAddReadAck-8      	 1000000	      1058 ns/op	    1015 B/op	      17 allocs/op
+BenchmarkMemoryClientLockUnlock-8             	 2634404	       465.7 ns/op	     120 B/op	       8 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis	10.271s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/retry
+cpu: Apple M1 Pro
+BenchmarkPolicy_Do_Success-8       	336101305	         3.546 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPolicy_Do_Retry-8         	 4146822	       299.1 ns/op	     264 B/op	       4 allocs/op
+BenchmarkPolicy_CalculateDelay-8   	79107608	        15.32 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/retry	5.457s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker
+cpu: Apple M1 Pro
+BenchmarkEngine_Enqueue_InMemory-8        	  640974	      2969 ns/op	     920 B/op	      20 allocs/op
+BenchmarkEngine_Enqueue_RawPayload-8      	  606358	      2182 ns/op	     906 B/op	      20 allocs/op
+BenchmarkEngine_Processing_Throughput-8   	  281985	      4207 ns/op	    1184 B/op	      25 allocs/op
+BenchmarkJob_Normalize-8                  	248844470	         4.998 ns/op	       0 B/op	       0 allocs/op
+BenchmarkJob_HealthKey-8                  	222432434	         5.373 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker	9.236s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/database
+cpu: Apple M1 Pro
+BenchmarkMemoryDBCountRecordsTenantScoped-8          	   97432	     12303 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryDBListRecordsTenantScopedFiltered-8   	   93536	     12520 ns/op	   25304 B/op	      69 allocs/op
+BenchmarkMemoryDBUpsertTenantScopedParallel-8        	  534505	      3130 ns/op	    1979 B/op	      12 allocs/op
+BenchmarkQueryAllFakeRows100-8                       	  390139	      3416 ns/op	    4512 B/op	     210 allocs/op
+BenchmarkExecCommandMemoryDB-8                       	38974905	        33.00 ns/op	      24 B/op	       1 allocs/op
+BenchmarkExecRowsAffectedFake-8                      	38734197	        31.56 ns/op	      24 B/op	       1 allocs/op
+BenchmarkQueryEachFakeRows100-8                      	  432124	      2585 ns/op	    2472 B/op	     202 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/database	10.842s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/wsrouting
+cpu: Apple M1 Pro
+BenchmarkRouterRegisterLocalOnly-8               	 1000000	      1082 ns/op	     725 B/op	       4 allocs/op
+BenchmarkRouterResolveTargetsUserLocal-8         	   53503	     22048 ns/op	   18432 B/op	       1 allocs/op
+BenchmarkRouterResolveTargetsUserSparseLocal-8   	 2874801	       435.8 ns/op	     256 B/op	       1 allocs/op
+BenchmarkRouterResolveTargetsDeviceLocal-8       	21045216	        56.17 ns/op	      16 B/op	       1 allocs/op
+BenchmarkRouterForEachLocal1024-8                	   27938	     39039 ns/op	   98304 B/op	    1024 allocs/op
+BenchmarkRouterForEachLocalValue1024-8           	   67080	     17851 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/wsrouting	8.648s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/security
+cpu: Apple M1 Pro
+BenchmarkTLSHandshake_ClassicalX25519-8        	    2977	    422080 ns/op	   72597 B/op	     817 allocs/op
+BenchmarkTLSHandshake_HybridX25519MLKEM768-8   	    1753	    585660 ns/op	  116450 B/op	     838 allocs/op
+BenchmarkApplyPostQuantumTLSAuto-8             	 5565850	       216.4 ns/op	     964 B/op	       3 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/security	4.847s
+skip service-backed Redis/Postgres benchmarks: SERVICE_BACKED_DATABASE_URL and SERVICE_BACKED_REDIS_URL are not set
+== foundation runtime-sdk Go benchmarks ==
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkBufferSetInputBytes1KB-8        	42153752	        28.54 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetInputBytesFast1KB-8    	76216689	        16.02 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferInputBytesOwned1KB-8      	 8663240	       143.4 ns/op	    1024 B/op	       1 allocs/op
+BenchmarkBufferInputBytesView1KB-8       	395908233	         3.109 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetOutputBytes2KB-8       	19978675	        59.84 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetOutputBytesFast2KB-8   	41371429	        29.04 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferOutputBytesOwned2KB-8     	 4530327	       276.2 ns/op	    2048 B/op	       1 allocs/op
+BenchmarkBufferOutputBytesView2KB-8      	376665420	         3.214 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferEpochAdd-8                	167660169	         6.932 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferDiagnosticsText-8         	 4027557	       266.5 ns/op	      48 B/op	       1 allocs/op
+BenchmarkBufferReadFrameAllocCopy4KB-8   	 1805646	       693.6 ns/op	    4100 B/op	       2 allocs/op
+BenchmarkBufferReadFrameInto4KB-8        	16331346	        73.68 ns/op	       4 B/op	       1 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	20.323s
+== foundation runtime-transport Go benchmarks ==
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/transport
+cpu: Apple M1 Pro
+BenchmarkCreateEnvelopeJSON-8                 	 3859143	       296.8 ns/op	      96 B/op	       2 allocs/op
+BenchmarkResolveRouteLinear16-8               	36971756	        33.38 ns/op	       0 B/op	       0 allocs/op
+BenchmarkResolveRouteLinear1024-8             	 2652840	       443.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkRouteIndexResolve1024-8              	147867867	         8.371 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCanDispatchExactCapability-8         	250442382	         4.786 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCanDispatchWriteViaAdminFallback-8   	16179211	        63.17 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSchemaRegistryNegotiate-8            	38422437	        31.41 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/transport	10.646s
+== foundation runtime-sdk browser-host benchmarks ==
+Benchmarking is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v4.1.5 /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host
+
+
+ ✓ src/webgpuHost.bench.ts > RuntimeWebGpuHost CPU-side helpers 31651ms
+     name                                                  hz     min      max    mean     p75     p99    p995    p999     rme  samples
+   · gpu layout strict u32 4KB x1                8,838,049.19  0.0000   2.7915  0.0001  0.0001  0.0002  0.0002  0.0010  ±1.27%  4419025
+   · gpu layout strict u32 into 4KB x1          11,149,359.87  0.0000   6.3034  0.0001  0.0001  0.0001  0.0002  0.0003  ±3.22%  5574680
+   · gpu pack arena descriptors 4KB x1             910,961.56  0.0004  18.2966  0.0011  0.0008  0.0041  0.0054  0.0430  ±8.36%   455481
+   · gpu pack arena descriptors into 4KB x1      2,931,047.15  0.0002   3.1059  0.0003  0.0003  0.0004  0.0005  0.0134  ±1.56%  1465524
+   · gpu writeback arena descriptors 4KB x1      3,063,279.29  0.0002   2.6838  0.0003  0.0003  0.0004  0.0004  0.0006  ±1.07%  1531640
+   · gpu layout strict u32 64KB x1               8,589,574.99  0.0000   0.3936  0.0001  0.0001  0.0002  0.0003  0.0006  ±0.57%  4294788
+   · gpu layout strict u32 into 64KB x1         11,827,200.30  0.0000   0.0648  0.0001  0.0001  0.0001  0.0001  0.0002  ±0.14%  5913601
+   · gpu pack arena descriptors 64KB x1            154,181.55  0.0037   1.6429  0.0065  0.0048  0.0310  0.0609  0.1501  ±3.65%    77105
+   · gpu pack arena descriptors into 64KB x1       321,338.55  0.0026  16.8558  0.0031  0.0028  0.0065  0.0153  0.0434  ±6.76%   160670
+   · gpu writeback arena descriptors 64KB x1       347,048.84  0.0026   0.2155  0.0029  0.0028  0.0032  0.0067  0.0257  ±0.30%   173525
+   · gpu layout strict u32 1024KB x1             8,880,606.56  0.0000   1.3278  0.0001  0.0001  0.0001  0.0002  0.0006  ±0.75%  4440304
+   · gpu layout strict u32 into 1024KB x1       11,711,063.93  0.0000   0.0611  0.0001  0.0001  0.0001  0.0001  0.0002  ±0.15%  5855532
+   · gpu pack arena descriptors 1024KB x1           13,788.83  0.0526   1.6504  0.0725  0.0638  0.6079  0.6813  1.4229  ±2.81%     6895
+   · gpu pack arena descriptors into 1024KB x1      23,287.10  0.0408   0.2050  0.0429  0.0426  0.0630  0.0720  0.1025  ±0.21%    11644
+   · gpu writeback arena descriptors 1024KB x1      23,357.22  0.0408   0.1440  0.0428  0.0423  0.0632  0.0719  0.1217  ±0.22%    11679
+   · gpu layout strict u32 1KB x8                5,934,901.81  0.0001   0.0597  0.0002  0.0002  0.0002  0.0002  0.0003  ±0.14%  2967451
+   · gpu layout strict u32 into 1KB x8           6,970,534.19  0.0000   0.0995  0.0001  0.0002  0.0002  0.0002  0.0003  ±0.19%  3485268
+   · gpu pack arena descriptors 1KB x8             517,772.95  0.0011   7.4437  0.0019  0.0014  0.0047  0.0162  0.0750  ±4.58%   258887
+   · gpu pack arena descriptors into 1KB x8        999,341.10  0.0008   3.3839  0.0010  0.0010  0.0011  0.0015  0.0102  ±1.37%   499673
+   · gpu writeback arena descriptors 1KB x8        728,310.94  0.0012   0.2365  0.0014  0.0013  0.0015  0.0019  0.0123  ±0.28%   364156
+   · gpu layout strict u32 1KB x32               2,436,501.62  0.0003   1.3921  0.0004  0.0004  0.0007  0.0009  0.0035  ±0.75%  1218251
+   · gpu layout strict u32 into 1KB x32          2,896,265.53  0.0002   0.0747  0.0003  0.0003  0.0004  0.0005  0.0007  ±0.16%  1448133
+   · gpu pack arena descriptors 1KB x32            159,265.48  0.0041   4.7131  0.0063  0.0047  0.0399  0.0661  0.2061  ±3.72%    79634
+   · gpu pack arena descriptors into 1KB x32       227,229.41  0.0035   5.3375  0.0044  0.0037  0.0098  0.0165  0.0870  ±3.88%   113615
+   · gpu writeback arena descriptors 1KB x32       157,506.47  0.0050   3.0029  0.0063  0.0055  0.0208  0.0407  0.1823  ±2.45%    78754
+   · gpu layout strict u32 1KB x128                639,283.53  0.0011  20.7341  0.0016  0.0013  0.0024  0.0047  0.0307  ±8.89%   319642
+   · gpu layout strict u32 into 1KB x128           864,682.76  0.0010   0.3026  0.0012  0.0011  0.0013  0.0014  0.0160  ±0.35%   432342
+   · gpu pack arena descriptors 1KB x128            47,171.44  0.0163   1.6262  0.0212  0.0188  0.0812  0.1032  0.6960  ±2.50%    23586
+   · gpu pack arena descriptors into 1KB x128       66,685.24  0.0143   0.2671  0.0150  0.0148  0.0189  0.0248  0.0551  ±0.25%    33343
+   · gpu writeback arena descriptors 1KB x128       47,779.77  0.0200   0.3116  0.0209  0.0207  0.0272  0.0321  0.0639  ±0.24%    23890
+
+ ✓ src/webgpuHost.bench.ts > RuntimeWebGpuHost resident dispatch policies 2054ms
+     name                                                      hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · webgpu fake dispatch gpu-resident 4KB x1          550,690.10  0.0015  0.3558  0.0018  0.0017  0.0026  0.0048  0.0143  ±0.63%   275346
+   · webgpu fake dispatch materialize-readback 4KB x1  275,403.65  0.0027  5.3732  0.0036  0.0035  0.0108  0.0151  0.0268  ±2.16%   137702
+   · webgpu fake dispatch resident-to-resident 4KB x1  872,026.66  0.0010  0.3235  0.0011  0.0011  0.0016  0.0027  0.0057  ±0.59%   436014
+
+ ✓ src/arena.bench.ts > RuntimeSharedArena payload movement 25738ms
+     name                                                            hz     min      max    mean     p75     p99    p995     p999     rme  samples
+   · 4KB slab write/read                                     787,154.71  0.0008   7.6947  0.0013  0.0012  0.0040  0.0050   0.0116  ±4.82%   393578
+   · 4KB slab write/read view                              2,065,406.70  0.0004   0.9005  0.0005  0.0005  0.0006  0.0006   0.0016  ±0.40%  1032704
+   · 4KB slab fast write/read view                         2,407,561.51  0.0003   0.0880  0.0004  0.0004  0.0005  0.0005   0.0007  ±0.12%  1203781
+   · 64KB slab write/read                                    102,803.51  0.0068   1.9096  0.0097  0.0097  0.0444  0.0696   0.1616  ±2.90%    51402
+   · 64KB slab write/read view                               323,041.89  0.0028   6.7906  0.0031  0.0029  0.0071  0.0071   0.0155  ±3.05%   161521
+   · 64KB slab fast write/read view                          348,205.81  0.0027   0.0688  0.0029  0.0029  0.0030  0.0031   0.0097  ±0.10%   174103
+   · 1024KB slab write/read                                    8,734.62  0.0945   2.7595  0.1145  0.1050  0.6940  0.8427   0.9466  ±2.42%     4368
+   · 1024KB slab write/read view                              23,618.28  0.0409   0.6767  0.0423  0.0419  0.0541  0.0609   0.1100  ±0.30%    11810
+   · 1024KB slab fast write/read view                         22,540.65  0.0409   0.2210  0.0444  0.0428  0.0853  0.1029   0.1608  ±0.39%    11271
+   · sustained descriptor-ready ring traffic                     965.87  0.9739   1.6148  1.0353  1.0467  1.3411  1.4910   1.6148  ±0.61%      483
+   · descriptor-ready batch traffic x1                           913.07  1.0375   1.7073  1.0952  1.1069  1.3089  1.3345   1.7073  ±0.49%      457
+   · descriptor-ready fast batch traffic x1                      892.36  1.0662   1.6329  1.1206  1.1335  1.3552  1.4090   1.6329  ±0.48%      447
+   · descriptor-ready id batch traffic x1                        901.21  1.0589   1.5119  1.1096  1.1205  1.3562  1.4060   1.5119  ±0.44%      451
+   · descriptor-ready batch traffic x8                           955.41  1.0115   1.2903  1.0467  1.0474  1.2259  1.2799   1.2903  ±0.30%      478
+   · descriptor-ready fast batch traffic x8                    1,708.73  0.5074  15.6180  0.5852  0.5346  1.7176  2.5568  15.6180  ±6.78%      855
+   · descriptor-ready id batch traffic x8                      1,967.08  0.4933   1.0239  0.5084  0.5063  0.5860  0.6198   1.0239  ±0.27%      984
+   · descriptor-ready batch traffic x32                          930.17  0.9958   3.7987  1.0751  1.0764  1.3684  2.3162   3.7987  ±1.70%      466
+   · descriptor-ready fast batch traffic x32                   2,092.11  0.4590   0.8031  0.4780  0.4762  0.5882  0.6384   0.7476  ±0.33%     1047
+   · descriptor-ready id batch traffic x32                     2,266.55  0.4252   0.6584  0.4412  0.4390  0.5371  0.5588   0.5872  ±0.27%     1134
+   · descriptor-ready batch traffic x128                         967.07  0.9872   1.2604  1.0341  1.0369  1.2360  1.2557   1.2604  ±0.40%      484
+   · descriptor-ready fast batch traffic x128                  2,165.40  0.4400   0.7660  0.4618  0.4639  0.5765  0.6202   0.7550  ±0.37%     1083
+   · descriptor-ready id batch traffic x128                    2,295.33  0.4060   1.7212  0.4357  0.4324  0.7676  0.9181   1.1895  ±0.94%     1148
+   · preallocated write/enqueue/dequeue batch x1           1,831,952.03  0.0004   4.2668  0.0005  0.0005  0.0012  0.0013   0.0125  ±2.53%   915977
+   · preallocated write/enqueue/dequeue batch x8             282,321.15  0.0033   1.5818  0.0035  0.0035  0.0042  0.0064   0.0202  ±0.69%   141161
+   · preallocated write/enqueue/dequeue batch x32             71,462.86  0.0132   0.2887  0.0140  0.0137  0.0261  0.0342   0.0562  ±0.30%    35732
+   · preallocated write/enqueue/dequeue batch x128            18,052.04  0.0526   0.3318  0.0554  0.0544  0.0830  0.1035   0.1570  ±0.33%     9027
+   · descriptor release/reallocate free-list x1            3,291,636.97  0.0002   0.5492  0.0003  0.0003  0.0003  0.0004   0.0009  ±0.33%  1645819
+   · descriptor release/reallocate free-list x8              451,558.99  0.0020   0.2716  0.0022  0.0022  0.0025  0.0031   0.0190  ±0.25%   225780
+   · descriptor release/reallocate free-list x32             113,959.32  0.0082   0.4497  0.0088  0.0085  0.0175  0.0249   0.0472  ±0.34%    56980
+   · descriptor release/reallocate free-list x128             28,886.10  0.0329   0.5327  0.0346  0.0339  0.0535  0.0631   0.1218  ±0.34%    14444
+   · packet-ring enqueue/dequeue/complete/release x1       2,223,569.71  0.0003  10.9362  0.0004  0.0004  0.0005  0.0007   0.0014  ±5.79%  1115151
+   · packet-ring id enqueue/dequeue/complete/release x1    2,325,222.15  0.0003   4.1051  0.0004  0.0004  0.0005  0.0006   0.0043  ±1.63%  1162612
+   · packet-ring enqueue/dequeue/complete/release x8         356,528.88  0.0026   0.3065  0.0028  0.0027  0.0032  0.0037   0.0170  ±0.26%   178265
+   · packet-ring id enqueue/dequeue/complete/release x8      359,057.49  0.0026   0.2970  0.0028  0.0027  0.0032  0.0034   0.0150  ±0.26%   179529
+   · packet-ring enqueue/dequeue/complete/release x32         92,010.67  0.0103   0.4567  0.0109  0.0107  0.0137  0.0228   0.0370  ±0.34%    46006
+   · packet-ring id enqueue/dequeue/complete/release x32      91,117.74  0.0103   0.3465  0.0110  0.0107  0.0207  0.0285   0.0470  ±0.34%    45559
+   · packet-ring enqueue/dequeue/complete/release x128        22,784.09  0.0420   0.4307  0.0439  0.0433  0.0602  0.0704   0.1363  ±0.31%    11393
+   · packet-ring id enqueue/dequeue/complete/release x128     23,108.53  0.0411   0.3587  0.0433  0.0426  0.0652  0.0738   0.1280  ±0.32%    11555
+
+ ✓ src/nativeGpu.bench.ts > runtime native GPU descriptor contract 1800ms
+     name                                      hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · validate native GPU descriptor  2,035,072.77  0.0004  1.0517  0.0005  0.0005  0.0006  0.0007  0.0036  ±0.58%  1017537
+   · plan native GPU lane            1,492,946.50  0.0005  0.3222  0.0007  0.0006  0.0008  0.0012  0.0110  ±0.41%   746474
+
+ BENCH  Summary
+
+  descriptor release/reallocate free-list x1 - src/arena.bench.ts > RuntimeSharedArena payload movement
+    1.37x faster than 4KB slab fast write/read view
+    1.42x faster than packet-ring id enqueue/dequeue/complete/release x1
+    1.48x faster than packet-ring enqueue/dequeue/complete/release x1
+    1.59x faster than 4KB slab write/read view
+    1.80x faster than preallocated write/enqueue/dequeue batch x1
+    4.18x faster than 4KB slab write/read
+    7.29x faster than descriptor release/reallocate free-list x8
+    9.17x faster than packet-ring id enqueue/dequeue/complete/release x8
+    9.23x faster than packet-ring enqueue/dequeue/complete/release x8
+    9.45x faster than 64KB slab fast write/read view
+    10.19x faster than 64KB slab write/read view
+    11.66x faster than preallocated write/enqueue/dequeue batch x8
+    28.88x faster than descriptor release/reallocate free-list x32
+    32.02x faster than 64KB slab write/read
+    35.77x faster than packet-ring enqueue/dequeue/complete/release x32
+    36.13x faster than packet-ring id enqueue/dequeue/complete/release x32
+    46.06x faster than preallocated write/enqueue/dequeue batch x32
+    113.95x faster than descriptor release/reallocate free-list x128
+    139.37x faster than 1024KB slab write/read view
+    142.44x faster than packet-ring id enqueue/dequeue/complete/release x128
+    144.47x faster than packet-ring enqueue/dequeue/complete/release x128
+    146.03x faster than 1024KB slab fast write/read view
+    182.34x faster than preallocated write/enqueue/dequeue batch x128
+    376.85x faster than 1024KB slab write/read
+    1434.06x faster than descriptor-ready id batch traffic x128
+    1452.27x faster than descriptor-ready id batch traffic x32
+    1520.11x faster than descriptor-ready fast batch traffic x128
+    1573.35x faster than descriptor-ready fast batch traffic x32
+    1673.36x faster than descriptor-ready id batch traffic x8
+    1926.36x faster than descriptor-ready fast batch traffic x8
+    3403.72x faster than descriptor-ready batch traffic x128
+    3407.95x faster than sustained descriptor-ready ring traffic
+    3445.27x faster than descriptor-ready batch traffic x8
+    3538.75x faster than descriptor-ready batch traffic x32
+    3605.02x faster than descriptor-ready batch traffic x1
+    3652.48x faster than descriptor-ready id batch traffic x1
+    3688.70x faster than descriptor-ready fast batch traffic x1
+
+  validate native GPU descriptor - src/nativeGpu.bench.ts > runtime native GPU descriptor contract
+    1.36x faster than plan native GPU lane
+
+  gpu layout strict u32 into 64KB x1 - src/webgpuHost.bench.ts > RuntimeWebGpuHost CPU-side helpers
+    1.01x faster than gpu layout strict u32 into 1024KB x1
+    1.06x faster than gpu layout strict u32 into 4KB x1
+    1.33x faster than gpu layout strict u32 1024KB x1
+    1.34x faster than gpu layout strict u32 4KB x1
+    1.38x faster than gpu layout strict u32 64KB x1
+    1.70x faster than gpu layout strict u32 into 1KB x8
+    1.99x faster than gpu layout strict u32 1KB x8
+    3.86x faster than gpu writeback arena descriptors 4KB x1
+    4.04x faster than gpu pack arena descriptors into 4KB x1
+    4.08x faster than gpu layout strict u32 into 1KB x32
+    4.85x faster than gpu layout strict u32 1KB x32
+    11.83x faster than gpu pack arena descriptors into 1KB x8
+    12.98x faster than gpu pack arena descriptors 4KB x1
+    13.68x faster than gpu layout strict u32 into 1KB x128
+    16.24x faster than gpu writeback arena descriptors 1KB x8
+    18.50x faster than gpu layout strict u32 1KB x128
+    22.84x faster than gpu pack arena descriptors 1KB x8
+    34.08x faster than gpu writeback arena descriptors 64KB x1
+    36.81x faster than gpu pack arena descriptors into 64KB x1
+    52.05x faster than gpu pack arena descriptors into 1KB x32
+    74.26x faster than gpu pack arena descriptors 1KB x32
+    75.09x faster than gpu writeback arena descriptors 1KB x32
+    76.71x faster than gpu pack arena descriptors 64KB x1
+    177.36x faster than gpu pack arena descriptors into 1KB x128
+    247.54x faster than gpu writeback arena descriptors 1KB x128
+    250.73x faster than gpu pack arena descriptors 1KB x128
+    506.36x faster than gpu writeback arena descriptors 1024KB x1
+    507.89x faster than gpu pack arena descriptors into 1024KB x1
+    857.74x faster than gpu pack arena descriptors 1024KB x1
+
+  webgpu fake dispatch resident-to-resident 4KB x1 - src/webgpuHost.bench.ts > RuntimeWebGpuHost resident dispatch policies
+    1.58x faster than webgpu fake dispatch gpu-resident 4KB x1
+    3.17x faster than webgpu fake dispatch materialize-readback 4KB x1
+
+== foundation runtime-sdk Rust native buffer benchmarks ==
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-native)
+    Finished `release` profile [optimized] target(s) in 1.33s
+     Running `target/release/buffer_bench`
+native read_output_bytes owned Vec              63.34 ns/op
+native read_output_bytes_into reused Vec        20.06 ns/op
+native output_bytes_view borrowed                3.93 ns/op
+native write_output_bytes clear+copy            39.69 ns/op
+native write_output_bytes_fast copy only        16.66 ns/op
+native process_runtime_buffer_in_place         135.92 ns/op
+== foundation runtime-transport TS tests ==
+
+ RUN  v4.1.0 /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-transport/ts
+
+
+ Test Files  6 passed (6)
+      Tests  20 passed (20)
+   Start at  23:41:58
+   Duration  629ms (transform 359ms, setup 0ms, import 565ms, tests 453ms, environment 0ms)
+
+Benchmarking is an experimental feature.
+Breaking changes might not follow SemVer, please pin Vitest's version when using it.
+
+ RUN  v4.1.0 /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-transport/ts
+
+
+ ✓ src/routing.bench.ts > runtime transport routing hot paths 12682ms
+     name                                              hz     min     max    mean     p75     p99    p995    p999     rme   samples
+   · parse event type                        5,556,465.33  0.0001  0.0897  0.0002  0.0002  0.0002  0.0003  0.0010  ±0.15%   2778233
+   · create json envelope                    1,551,560.33  0.0005  0.2861  0.0006  0.0007  0.0007  0.0008  0.0008  ±0.15%    775781
+   · resolve route by event type            20,372,154.37  0.0000  0.2299  0.0000  0.0000  0.0001  0.0001  0.0002  ±0.28%  10186078
+   · resolve route by path                   5,702,221.19  0.0001  0.0618  0.0002  0.0002  0.0002  0.0002  0.0003  ±0.09%   2851111
+   · can dispatch exact capability          24,393,632.05  0.0000  0.0508  0.0000  0.0000  0.0000  0.0000  0.0001  ±0.10%  12196817
+   · can dispatch write via admin fallback   6,753,817.66  0.0000  0.3123  0.0001  0.0002  0.0002  0.0002  0.0007  ±0.42%   3376909
+
+ ✓ src/binaryEnvelope.bench.ts > runtime transport binary envelope 4635ms
+     name                                                hz     min     max    mean     p75     p99    p995    p999     rme  samples
+   · encode json envelope to protobuf bytes      152,623.65  0.0057  0.1954  0.0066  0.0063  0.0115  0.0170  0.0643  ±0.36%    76312
+   · decode json envelope from protobuf bytes    356,366.38  0.0025  0.1363  0.0028  0.0027  0.0032  0.0054  0.0201  ±0.30%   178184
+   · encode protobuf envelope bytes              263,981.68  0.0030  5.0782  0.0038  0.0036  0.0094  0.0178  0.0258  ±2.05%   131991
+   · decode protobuf envelope bytes              609,406.86  0.0015  0.1906  0.0016  0.0016  0.0020  0.0024  0.0120  ±0.34%   304704
+   · encode json compatibility envelope          744,899.50  0.0012  1.5303  0.0013  0.0013  0.0017  0.0020  0.0070  ±0.67%   372450
+   · decode identity binary frame              4,988,681.08  0.0001  4.9562  0.0002  0.0002  0.0003  0.0005  0.0009  ±2.00%  2495209
+
+ BENCH  Summary
+
+  decode identity binary frame - src/binaryEnvelope.bench.ts > runtime transport binary envelope
+    6.70x faster than encode json compatibility envelope
+    8.19x faster than decode protobuf envelope bytes
+    14.00x faster than decode json envelope from protobuf bytes
+    18.90x faster than encode protobuf envelope bytes
+    32.69x faster than encode json envelope to protobuf bytes
+
+  can dispatch exact capability - src/routing.bench.ts > runtime transport routing hot paths
+    1.20x faster than resolve route by event type
+    3.61x faster than can dispatch write via admin fallback
+    4.28x faster than resolve route by path
+    4.39x faster than parse event type
+    15.72x faster than create json envelope
+

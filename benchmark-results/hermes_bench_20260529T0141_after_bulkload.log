@@ -1,0 +1,19 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesGetRecordCopied-8                  	 3780577	       300.3 ns/op	     368 B/op	       3 allocs/op
+BenchmarkHermesForEachViewLimit50-8               	  166256	      7384 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHermesCountIndexed-8                     	 8923408	       134.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkHermesListRecordsCopiedLimit50-8         	   60979	     19827 ns/op	   33400 B/op	     105 allocs/op
+BenchmarkHermesApplyEventUpsert-8                 	  279895	     18416 ns/op	   15864 B/op	      41 allocs/op
+BenchmarkHermesApplyBatch64-8                     	    8473	    222475 ns/op	  153467 B/op	     993 allocs/op
+BenchmarkHermesApplyRecords64-8                   	   38412	     28482 ns/op	   29646 B/op	     351 allocs/op
+BenchmarkHermesBulkLoad512-8                      	    1425	    857575 ns/op	  850629 B/op	    4805 allocs/op
+BenchmarkHermesApplyRecordPayloads64-8            	    9285	    348380 ns/op	  252517 B/op	    1094 allocs/op
+BenchmarkHermesApplyRecordPayloadEvents64-8       	    8628	    344500 ns/op	  260311 B/op	    1095 allocs/op
+BenchmarkHermesProjectedRuntimeStoreHotGet-8      	 2805172	       431.5 ns/op	     368 B/op	       3 allocs/op
+BenchmarkHermesProjectedRuntimeStoreWarmCount-8   	 4404316	       271.8 ns/op	      48 B/op	       1 allocs/op
+BenchmarkHermesDriftCheckMerkle-8                 	      68	  17312275 ns/op	12619678 B/op	   24939 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	29.041s
