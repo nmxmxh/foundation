@@ -186,6 +186,7 @@ make migrate-up              # Run DB migrations
 | `degradation` | Health monitoring with automatic fallback behaviors. |
 | `versioning` | Header/path/query API versioning with deprecation support. |
 | `resilience` | Coordinated health, circuit, retry, and degradation across dependencies. |
+| `connector` | HTTP and WebSocket connectors with health probing and streaming. |
 
 ## Go SIMD Posture
 
@@ -302,4 +303,4 @@ Before merging any PR, verify:
 - [ ] Agent evidence ledger is present for security, persistence, runtime, or scaffold changes
 
 ---
-Version: 0.0.1 | Last updated: 2026-06-28
+Version: 0.0.1 | Last updated: 2026-07-04

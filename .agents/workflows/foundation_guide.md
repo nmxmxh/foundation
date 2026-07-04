@@ -114,3 +114,4 @@ Before completing a task or marking code as "Done," run an internal check agains
 1. When asked to fix an issue in the foundation: **READ THIS ENTIRE FILE.**
 2. When extending a service: Look at the generated schemas/manifests in `api/schemas` or route registry.
 3. When refactoring: If the files live inside `foundation/`, verify that your edits retain generic (`<TMetadata>`) portability so other apps pulling the same foundation folder do not break. DO NOT ADD APP-SPECIFIC DOMAIN IMPORTS in `foundation`.
+4. Before editing any scaffolded file: check its sync mode in `templates/scaffold.manifest.tsv`. `overwrite`/`force` files are Foundation-owned and will be wiped on the next `ovasabi update`; `create`-mode files are tracked in the seed ledger, and drift is surfaced by `ovasabi refresh` (acknowledge intentional drift with `--acknowledge-seed-drift`).

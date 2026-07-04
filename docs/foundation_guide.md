@@ -55,6 +55,12 @@ Primary performance companions:
 | **Kernel Lane** | `kernellane` | Native Rust/FFI/SHM compute dispatch and descriptor management |
 | **Worker Chains** | `chain` | Bounded multi-step job composition helpers |
 | **Service-Backed Harness** | `servicebacked` | Redis/Postgres pressure tests for Foundation substrate changes |
+| **Resilience Runtime** | `resilience` | Coordinated health, circuit, retry, and degradation across registered dependencies |
+| **Hermes Snapshots** | `hermessnapshot` | Objectstore-backed durable projection snapshots for warm-from-snapshot rebuilds |
+| **Background Workers** | `worker` | River-based background job handling with bounded queues |
+| **Connectors** | `connector` | HTTP and WebSocket connectors with health probing and streaming |
+| **Auth / RBAC** | `auth` | RBAC and JWT context helpers |
+| **Metadata Context** | `metadata` | Context-aware correlation, tenant, and request metadata |
 
 ### B. runtime-transport (TypeScript)
 
@@ -109,6 +115,7 @@ Primary performance companions:
 * For high-risk concurrent or performance-sensitive work, also define visible state, hidden/internal state, invariants, liveness/fairness, real-time bounds, and refinement/parity expectations. Use `tla_architecture_practices.md` as the granular guide.
 * Establish a baseline with a benchmark, profile, load test, query plan, or production telemetry. Performance work without measurement belongs in docs as a hypothesis, not in code as a default.
 * Update `performance_practices.md`, `tla_architecture_practices.md`, `foundation_benchmarks.md`, `database_practices.md`, `runtime_foundation.md`, `websocket_scaling.md`, or `optimization_points.md` when an optimization changes a default, budget, invariant, benchmark expectation, or operational runbook.
+* Go 1.26 SIMD (`GOEXPERIMENT=simd`, `archsimd`) is a measured, architecture-specific lane: use it only for benchmark-proven bounded loops over contiguous numeric or byte data, never expose `archsimd` types in public APIs, keep scalar Go and Rust/WASM fallbacks for every SIMD path, and keep ordinary builds portable.
 
 ### 4. Hostile-Environment Security Rule
 
@@ -121,6 +128,7 @@ Primary performance companions:
 
 * Treat complexity plus low coverage as change risk. If a touched method is a hotspot candidate, add tests or simplify it before layering more behavior onto it.
 * New and changed production code should aim for line coverage >= 95%, branch coverage >= 90%, and CRAP-style hotspot scores below the high-risk threshold where the stack can calculate them.
+* Coverage floors are enforced per package by `make check-coverage-ratchet` against `tooling/coverage_baseline.psv`. Legacy packages ratchet toward 95% when touched and cannot regress without an approved exception.
 
 ### 6. DOM Observation Rule
 
@@ -175,6 +183,16 @@ Primary performance companions:
 * Runtime health and delivery health are separate signals. Keep DORA-style delivery events for change lead time, deployment frequency, failed deployment recovery time, change fail rate, and deployment rework rate.
 * Generated projects inherit `make delivery-metrics` and CI artifact capture. Treat those records as collection events; app deployment platforms own aggregation, dashboards, and alert policies.
 * Production incidents, failed deployments, rollbacks, and hotfixes should have incident records that tie CI run, deployment run, commit SHA, correlation IDs, and remediation follow-up together.
+
+### 11. Scaffold Ownership Rule
+
+* Before editing a file in a generated project, check its sync mode in `templates/scaffold.manifest.tsv`. Files marked `overwrite` or `force` are Foundation-owned; local edits are wiped on the next fleet update.
+* `create`-mode files are seeded once and tracked in the project's seed ledger. `ovasabi refresh` (or `update-project.sh`) detects seed drift; re-baseline intentional drift with `--acknowledge-seed-drift` rather than hand-editing the ledger.
+* See `scaffold_manifest.md` for ownership modes and `foundation_distribution.md` for the distribution contract.
+
+### 12. Context Budget Rule
+
+* Do not bulk-read documentation. Start from `foundation_glossary.md` for the concept index, then load the specific practice file for the lane you are changing on demand.
 
 ---
 
@@ -436,7 +454,28 @@ http.Handle("/api/versions", v.VersionsHandler())
 
 ## 5. Project Bootstrapping
 
-### Create New Projects
+### Create New Projects (Ovasabi CLI)
+
+The Ovasabi CLI (`cmd/ovasabi`, published as `@ovasabi/cli`) is the primary bootstrap path. It wraps the scaffold scripts and adds the distribution and licensing boundary.
+
+```bash
+npx -y @ovasabi/cli init --profile=performance --name=trader_os
+
+# Profiles: lite, core, performance, regulated
+```
+
+### Update Existing Projects
+
+```bash
+ovasabi update --project-dir=../trader_os    # Flag-driven: change profile or features
+ovasabi refresh --project-dir=../trader_os   # Reconcile against declared .foundation state, no overrides
+ovasabi doctor [--json]                      # Diagnose workspace and scaffold state
+ovasabi license verify                       # Online or air-gapped license check
+```
+
+`refresh` compares `create`-mode files against the seed ledger of template hashes and reports drift; acknowledge intentional drift with `--acknowledge-seed-drift`.
+
+### Compatibility Scripts
 
 ```bash
 # From OVASABI STUDIOS root
@@ -444,16 +483,14 @@ http.Handle("/api/versions", v.VersionsHandler())
 ./foundation/scripts/init-project.sh api-service backend  # Backend only
 ./foundation/scripts/init-project.sh web-client frontend  # Frontend only
 ./foundation/scripts/init-project.sh utility minimal      # Tooling only
-```
 
-### Update Existing Projects
-
-```bash
-./foundation/scripts/update-project.sh /path/to/project
+./foundation/scripts/update-project.sh /path/to/project [--acknowledge-seed-drift]
 
 # Or from within a project
 make foundation-update
 ```
+
+Fallback scripts call the same manifest, patch, and check scripts as the CLI; they may not create a second scaffold contract. See `foundation_distribution.md` for the full distribution, agent bundle, and licensing contract.
 
 ---
 
@@ -465,3 +502,4 @@ Current foundation version: **0.0.1**
 
 For concept definitions and pre-answered questions, see `foundation_glossary.md`.
 For the appkit drift-control direction, see `foundation_project_standardization.md`.
+For CLI distribution, agent bundle, and licensing, see `foundation_distribution.md`.
