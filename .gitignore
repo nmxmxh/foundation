@@ -42,8 +42,8 @@
 # Logs
 *.log
 **/logs/
-# benchmark evidence artifacts referenced by the ledger (check-benchmark-evidence)
-!benchmark-results/*.log
+# benchmark evidence logs referenced by the ledger stay tracked despite *.log;
+# `git add -f` new artifacts when the ledger gains rows (check-benchmark-evidence)
 
 # Temporary files
 **/tmp/
