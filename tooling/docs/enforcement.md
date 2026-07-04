@@ -44,9 +44,12 @@ Foundation uses a strict-core lint model:
    references
 7. `docs_reference_check.mjs` verifies that local Markdown references resolve
    after documentation moves and rejects machine-local `file://` links
-8. `check_lifecycle_manifest.sh` verifies the proto-derived lifecycle manifest
+8. `markdown_frontmatter_check.mjs` verifies that Markdown files opening with a
+   `---` frontmatter block close the block and carry parseable YAML (no
+   unquoted colons in values, unterminated quotes, or tab indentation)
+9. `check_lifecycle_manifest.sh` verifies the proto-derived lifecycle manifest
    and guide used by agents to generate event names and review vectors
-9. `app_security_profile_check.sh` verifies that generated applications own
+10. `app_security_profile_check.sh` verifies that generated applications own
    `docs/security/profile.md`, keep required sections, and review it within 90
    days. In Foundation core it validates only the generic scaffold template and
    rejects concrete product posture docs.

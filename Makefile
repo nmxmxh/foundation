@@ -2,7 +2,7 @@
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-scaffold-idempotency check-scaffold-seed-drift check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator \
 	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
-	check-doc-references check-ovasabi-cli check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux \
+	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet lifecycle-manifest
 
 .DEFAULT_GOAL := help
@@ -21,6 +21,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-ovasabi-cli \
 	check-contract-drift \
 	check-doc-references \
+	check-markdown-frontmatter \
 	check-agent-contract \
 	check-practice-controls \
 	check-runtime-performance-contracts \
@@ -239,6 +240,9 @@ check-contract-drift:
 check-doc-references:
 	@node tooling/scripts/docs_reference_check.mjs .
 
+check-markdown-frontmatter:
+	@node tooling/scripts/markdown_frontmatter_check.mjs .
+
 check-agent-contract:
 	@tooling/scripts/agent_contract_check.sh .
 
@@ -398,6 +402,7 @@ help:
 	@echo "  make docker-up/down      Start/stop core service-backed test stack"
 	@echo "  make check-agent-contract  Run the agent workflow/documentation contract check"
 	@echo "  make check-doc-references  Validate local Markdown links and portable docs paths"
+	@echo "  make check-markdown-frontmatter  Validate YAML frontmatter blocks in Markdown files"
 	@echo "  make check-lifecycle-manifest  Validate proto-derived lifecycle manifest and guide"
 	@echo "  make check-app-security-profile  Validate the app-owned security profile contract"
 	@echo "  make check-practice-controls  Validate the machine-readable practice controls matrix"
