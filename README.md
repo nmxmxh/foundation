@@ -1,16 +1,17 @@
-# Ovasabi Foundation (Work in Progress — Version 0.0.1)
+# Foundation (Work in Progress — Version 0.0.1)
 
-**A full-stack application substrate for high-performance, event-driven systems.**
+**I built Foundation to bridge the massive deficit between raw hardware speed and typical software stacks, collapse the translation layers between the database and the browser, and create an agent-native workspace where AI and humans can build production systems without regression.**
 
-Ovasabi Foundation is an integrated toolkit for teams that want to evolve code. It provides the platform modules, scaffolds, enforcement checks, and documentation to bootstrap and maintain production systems with:
+Every modern system wastes millions of CPU cycles translating the same piece of state: SQL rows get parsed into Go structs, serialized to JSON, decoded over HTTP, mapped to TypeScript interfaces, and synchronized with React state. That's a massive "software deficit"—spending microseconds or milliseconds on work that raw hardware could complete in nanoseconds. It is also where most bugs, memory leaks, and architectural drift live.
 
-- **Tenant-isolated, event-driven architecture** — every operation carries metadata: who asked, what organization, correlation ID
-- **Performance ladder** — seven planes from nanosecond direct dispatch to microsecond JSON compatibility
-- **Hermes hotplane** — bounded, node-local projections for sub-microsecond operational reads
-- **Worker orchestration** — bounded background processing with retry policies and progress tracking
-- **Built-in observability** — logs, metrics, and traces automatically linked by correlation ID
+And when you bring AI agents into a loose, unstructured codebase, the friction multiplies. Without strict boundary contracts and deterministic checks, agents write sloppy loops, hallucinate APIs, and compromise performance under load.
 
-Not a no-code platform. Not zero-DevOps. Not for teams that want to move fast by cutting corners. Foundation is for teams that embrace managed infrastructure, understand performance, and expect their codebase to evolve.
+So I built **Foundation**.
+
+It is a full-stack substrate that compounds the strengths of Go, Rust/WASM, and TypeScript into a single, cohesive "nervous system":
+- **Single-Contract Architecture**: Define mutations once (Protobuf/Cap'n Proto), and the schema generates the Go routes, TypeScript types, and zero-copy binary layouts across all boundaries.
+- **Extreme Performance**: Serves node-local read models via **Hermes** in microseconds. Predicate filter benchmarks show Hermes columnar bitmap merges executing in ~34 µs with 2 allocations, compared to ~7.8 ms and 10,000+ allocations on standard record-chasing paths (a 229× speedup).
+- **Agent & Human Synergy**: The codebase is designed as an agent-executable environment. With 40+ automated **Practice Controls** checking function complexity, loop bounds, and concurrency safety on every commit, both humans and agents can refactor and add features with complete confidence.
 
 ---
 
@@ -113,37 +114,43 @@ make test-service-backed     # Tests with live DB/Redis
 
 ---
 
-## Project Bootstrap
+## Scaffolding & Development Velocity
+
+Bootstrapping a new project should not require reinventing the wheel. Foundation's scaffolding tool creates a fully configured, production-ready workspace in seconds, designed specifically to be simple for human developers to navigate and deterministic for AI agents to write code in.
+
+### Why the Scaffold Facilitates Modern Development:
+- **Instant Production Stack**: Humans get a ready-to-run environment with PostgreSQL, Redis, DORA telemetry, and a Go-React-Rust runtime pre-wired.
+- **Deterministic AI Context**: Agents get strict `.cursorrules` / `.clauderules`, a clear `AGENTS.md` operating contract, and automated checks in `tooling/` that act as compilation gates. They don't have to guess or hallucinate APIs.
+- **Clean Sync Boundaries**: Upstream updates to core foundation modules (like `server-kit` or `runtime-transport`) can be merged into existing projects cleanly using `make foundation-update` without overwriting custom application code.
+
+### Bootstrapping a New Project
 
 From the parent directory of `foundation`:
 
 ```bash
-# New project
+# Initialize a new project with a performance-oriented stack
 node foundation/cmd/ovasabi/bin/ovasabi.js init --profile=performance --name=my-app --foundation-dir foundation --skip-license
 
-# Or via shell script (legacy)
-./foundation/scripts/init-project.sh my-app full
-
-# Update existing project
+# Update an existing project to sync with core updates
 node foundation/cmd/ovasabi/bin/ovasabi.js update --project-dir=/path/to/project --foundation-dir foundation --skip-license
 ```
 
-Generated projects consume Foundation through package boundaries. Do not import raw `foundation/*/ts/src` or `foundation/*/go` directly.
+*Note: Generated projects consume Foundation through package boundaries. Do not import raw `foundation/*/ts/src` or `foundation/*/go` directly.*
 
 ---
 
 ## Philosophy & Motivation
 
-Foundation bridges the **software deficit**: the gap between hardware performance (nanoseconds) and typical software stacks (milliseconds). It provides proven patterns for:
+Modern hardware is insanely fast, yet modern software stacks feel heavy and slow. A 3.0 GHz CPU core completes a clock cycle every 0.33 nanoseconds, but typical web apps spend milliseconds on router dispatch, JSON serialization, and garbage collection.
 
-- **Responding instantly** — sub-microsecond operational reads via Hermes
-- **Scaling safely** — bounded work, tenant isolation, circuit breakers
-- **Observing clearly** — correlation IDs flowing through all layers
-- **Evolving confidently** — enforced practices, contract verification, performance measurement
+I built Foundation to bridge this software deficit. By collapsing the translation tower and defining every operation as a single, immutable **state event** from day one, we achieve:
+- **Zero-Allocation Hotpaths**: The fastest lanes pass memory references (binary frames, SharedArrayBuffers), avoiding the latency cliffs of GC pressure.
+- **Hermes Hotplane**: Local memory-bounded read models project Postgres mutations in real-time, handling query loads in microsecond domains.
+- **Continuous Architectural Governance**: We shift code quality from manual reviews to automated compilation gates. Practice controls check loop boundaries, tenant isolation, and complexity thresholds on every commit.
 
-Foundation is not for everyone. It's demanding. It requires discipline: thinking about performance trade-offs, writing adequate tests, understanding failure modes, reviewing gate verdicts. It's for teams that expect to build something ambitious.
+This structural discipline is what makes high-performance full-stack applications buildable and maintainable at scale.
 
-Read [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) for the full story.
+Read [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) to understand the design.
 
 ---
 
@@ -174,7 +181,9 @@ Foundation is actively evolving. The entire repository represents a work-in-prog
 - Agentic coding patterns still being proven
 - Documentation expanding as usage patterns emerge
 
-Contributions via research, agents, and human reviewers are how Foundation improves. Read [`docs/agent_operating_contract.md`](docs/agent_operating_contract.md) for evidence and handoff expectations.
+This repository is designed for agent-assisted development. While I review and sign off on all modifications, many of the underlying modules, tests, and reference documents are co-authored by AI agents verifying their work via strict, machine-decidable evidence gates.
+
+Read [`docs/agent_operating_contract.md`](docs/agent_operating_contract.md) for evidence and handoff expectations.
 
 ---
 

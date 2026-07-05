@@ -1,4 +1,4 @@
-# Ovasabi Foundation Intelligence
+# Foundation Intelligence
 
 > Universal instruction file for AI coding assistants (Claude, Codex, Cursor, Copilot, Windsurf, etc.)
 
@@ -15,7 +15,7 @@
 
 ## Project Context
 
-This is an **Ovasabi Foundation** project - a production-grade full-stack application using Go backend, TypeScript/React frontend, and Rust/WASM for high-performance compute. The foundation provides shared infrastructure for event-driven, tenant-isolated, realtime applications.
+This is a **Foundation** project - a production-grade full-stack application using Go backend, TypeScript/React frontend, and Rust/WASM for high-performance compute. The foundation provides shared infrastructure for event-driven, tenant-isolated, realtime applications.
 
 ## Agent Operating Baseline
 

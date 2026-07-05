@@ -107,7 +107,7 @@ Copilot, Windsurf, and VS Code agents start with the same contract:
 
 Every agent-facing file must tell the assistant:
 
-1. it is operating in an Ovasabi Foundation workspace;
+1. it is operating in a Foundation workspace;
 2. it must inspect `templates/scaffold.manifest.tsv` before editing scaffolded
    files;
 3. it is bound by the CP and TE practices, verified through Foundation checks;

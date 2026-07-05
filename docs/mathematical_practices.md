@@ -1,12 +1,12 @@
-# Mathematical Practices for Ovasabi
-
+# Mathematical Practices
+ 
 Status: baseline
 Date: 2026-06-16
 Owner: Platform Architecture
-
+ 
 ## Purpose
-
-This document is the "mathematician in the room" for Ovasabi Foundation. It
+ 
+This document is the "mathematician in the room" for Foundation. It
 translates the relevant numerical-analysis, probability, statistics, and
 abstract-algebra results into engineering constraints that bind real code. It
 is not a math survey: every rule below maps to an implementation we ship

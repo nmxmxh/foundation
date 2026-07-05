@@ -1,6 +1,6 @@
 # {{PROJECT_NAME}} (Work in Progress)
 
-This application is scaffolded using the **Ovasabi Foundation {{FOUNDATION_VERSION}}**, currently a **Work in Progress (WIP)** baseline. It is structured to separate shared platform infrastructure from your custom domain and application logic.
+This application is scaffolded using **Foundation {{FOUNDATION_VERSION}}**, currently a **Work in Progress (WIP)** baseline. It is structured to separate shared platform infrastructure from your custom domain and application logic.
 
 ---
 
@@ -26,7 +26,7 @@ make dev
 A Foundation project separates the shared platform layer from your own application logic to prevent architectural drift and framework decay:
 
 * **Platform Modules (`foundation/`)**: These contain core primitives (e.g. `server-kit`, `runtime-transport`, `ui-minimal`). They are **read-only references** and should not be modified directly.
-* **Scaffold Updates (`make foundation-update`)**: If the upstream Ovasabi Foundation core is updated, you can synchronize your project by running `make foundation-update`. This purges old foundation references, copies updated modules, and applies non-breaking scaffold patches.
+* **Scaffold Updates (`make foundation-update`)**: If the upstream Foundation core is updated, you can synchronize your project by running `make foundation-update`. This purges old foundation references, copies updated modules, and applies non-breaking scaffold patches.
 * **Project-Owned Space**: Your custom application logic belongs in the following places:
   * Domain services under `internal/service/`
   * Background event job handlers under `internal/worker/`

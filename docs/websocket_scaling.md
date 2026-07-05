@@ -1,6 +1,6 @@
 # WebSocket Scaling Guide
 
-This document covers the WebSocket scaling capabilities in the Ovasabi Foundation, including CPU-aware auto-tuning, connection routing, and metrics collection.
+This document covers the WebSocket scaling capabilities in Foundation, including CPU-aware auto-tuning, connection routing, and metrics collection.
 
 ## Overview
 

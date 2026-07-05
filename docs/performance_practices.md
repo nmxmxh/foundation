@@ -1,4 +1,4 @@
-# Ovasabi Performance Practices
+# Performance Practices
 
 Status: baseline
 Date: 2026-05-22
@@ -6,7 +6,7 @@ Owner: Platform Architecture
 
 ## Purpose
 
-This document synthesizes the useful performance guidance from Go production patterns, Go networking practices, PostgreSQL tuning notes, Rust optimization notes, and the local `Specifying Systems` book context into practices that apply to Ovasabi Foundation projects. The TLA+ architecture details live in `foundation/docs/tla_architecture_practices.md`.
+This document synthesizes the useful performance guidance from Go production patterns, Go networking practices, PostgreSQL tuning notes, Rust optimization notes, and the local `Specifying Systems` book context into practices that apply to Foundation projects. The TLA+ architecture details live in `foundation/docs/tla_architecture_practices.md`.
 
 The rule is simple: specify the behavior and bounds first, measure the system, then optimize the proven bottleneck without weakening contracts, tenancy, security, or diagnostics.
 

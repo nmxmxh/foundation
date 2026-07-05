@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the Ovasabi Foundation will be documented in this file.
+All notable changes to Foundation will be documented in this file.
 
 ## [0.0.1] - 2026-06-28
 

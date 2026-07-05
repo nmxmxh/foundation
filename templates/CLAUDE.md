@@ -2,7 +2,7 @@
 
 Foundation project generated from {{MODULE_PATH}}.
 
-You are operating in an Ovasabi Foundation workspace.
+You are operating in a Foundation workspace.
 
 Read `AGENTS.md`, `.agents/DOMAIN_GUIDE.md`,
 `docs/foundation/agent_operating_contract.md`,

@@ -7,7 +7,7 @@ Owner: Platform Architecture
 
 ## Introduction: Code and Contract Verification
 
-The Ovasabi Foundation uses automated tooling, contract generation, and custom verification scripts to enforce architectural consistency across Go (backend), TypeScript (frontend), and Rust (high-performance compute/WASM).
+The Foundation uses automated tooling, contract generation, and custom verification scripts to enforce architectural consistency across Go (backend), TypeScript (frontend), and Rust (high-performance compute/WASM).
 
 Rather than relying on manual code review, all architectural rules, serialization boundaries, and performance expectations are turned into repeatable checks.
 
@@ -144,7 +144,7 @@ After files are copied, the foundation update runner executes `tooling/scripts/s
 
 ## The Relevance of Benchmarks
 
-The Ovasabi Foundation requires all structural and runtime modifications to prove their optimization claims. These measurements are compiled in [docs/foundation_benchmarks.md](foundation_benchmarks.md).
+The Foundation requires all structural and runtime modifications to prove their optimization claims. These measurements are compiled in [docs/foundation_benchmarks.md](foundation_benchmarks.md).
 
 Benchmarks are relevant to the application lifecycle in three ways:
 

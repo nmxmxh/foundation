@@ -1,5 +1,5 @@
-# Ovasabi Foundation: Philosophy & Design
-
+# Foundation: Philosophy & Design
+ 
 **Status**: 0.0.1 | **Date**: 2026-06-30 | **Audience**: Architects, full-stack teams, AI coding partners
 
 This document explains *why* Foundation exists, what gap it fills, and who it's designed for.

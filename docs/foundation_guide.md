@@ -1,10 +1,10 @@
 ---
-description: "Ovasabi Foundation: Comprehensive Agent & Developer Guide"
+description: "Foundation: Comprehensive Agent & Developer Guide"
 ---
 
-# Ovasabi Foundation: Comprehensive Agent & Developer Guide
+# Foundation: Comprehensive Agent & Developer Guide
 
-The **Ovasabi Foundation** is the master template and infrastructure baseline for building independent, standalone applications in the ecosystem. It abstracts **communication mechanics**, **high-compute performance**, and **durable orchestration** so feature teams can iterate safely without creating shared production databases.
+The **Foundation** is the master template and infrastructure baseline for building independent, standalone applications in the ecosystem. It abstracts **communication mechanics**, **high-compute performance**, and **durable orchestration** so feature teams can iterate safely without creating shared production databases.
 
 This guide is **self-contained** and designed to be copied into any application using the foundation.
 
