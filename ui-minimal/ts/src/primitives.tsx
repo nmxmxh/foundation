@@ -804,7 +804,8 @@ const Style = {
 
     &:focus-within {
       border-color: ${({ theme, $state }) => ($state === "invalid" ? theme.color.danger : theme.color.borderFocus)};
-      box-shadow: 0 0 0 3px ${({ theme, $state }) => ($state === "invalid" ? theme.color.dangerSoft : theme.color.brandSoft)};
+      box-shadow: 0 0 0 ${({ theme }) => theme.focus.ringWidth}
+        ${({ theme, $state }) => ($state === "invalid" ? theme.color.dangerSoft : theme.color.brandSoft)};
     }
   `,
   InputAdornment: styled.span`
@@ -1357,7 +1358,7 @@ const Style = {
 
     &:focus {
       border-color: ${({ theme }) => theme.color.borderFocus};
-      box-shadow: 0 0 0 3px ${({ theme }) => theme.color.brandSoft};
+      box-shadow: 0 0 0 ${({ theme }) => theme.focus.ringWidth} ${({ theme }) => theme.color.brandSoft};
     }
   `,
   DropdownEmptyState: styled.div`
@@ -1503,7 +1504,9 @@ const Style = {
     border-radius: ${({ theme }) => theme.radius.md};
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
     background:
-      ${({ $overlay }) => $overlay ?? "linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.92))"},
+      ${({ theme, $overlay }) =>
+        $overlay ??
+        `linear-gradient(180deg, color-mix(in srgb, ${theme.color.bgSurface} 72%, transparent), color-mix(in srgb, ${theme.color.bgSurface} 92%, transparent))`},
       ${({ $backgroundImage }) => ($backgroundImage ? `url(${$backgroundImage}) center / cover` : "transparent")};
     box-shadow: ${({ theme, $intensity }) => ($intensity === "statement" ? theme.shadow.medium : theme.shadow.subtle)};
     padding: ${({ theme, $intensity }) =>
@@ -2075,7 +2078,7 @@ const ShellStyle = {
         max-width: 480px;
         width: 100%;
         margin: 0 auto;
-        box-shadow: 0 0 40px rgba(0, 0, 0, 0.1);
+        box-shadow: ${({ theme }) => theme.shadow.floating};
         position: relative;
         overflow-x: hidden;
       `}

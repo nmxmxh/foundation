@@ -60,6 +60,11 @@ export interface MinimalShadowTheme {
   floating: string;
 }
 
+export interface MinimalFocusTheme {
+  /** Spread of the focus ring (the `box-shadow` inflation on focus states). */
+  ringWidth: string;
+}
+
 export interface MinimalTypographyTheme {
   displayFamily: string;
   bodyFamily: string;
@@ -108,6 +113,7 @@ export interface MinimalTheme {
   spacing: MinimalSpacingTheme;
   radius: MinimalRadiusTheme;
   shadow: MinimalShadowTheme;
+  focus: MinimalFocusTheme;
   typography: MinimalTypographyTheme;
   motion: MinimalMotionTheme;
   zIndex: MinimalZIndexTheme;
