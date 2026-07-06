@@ -165,6 +165,12 @@ export interface MinimalSegmentedControlProps<T extends string> extends Omit<HTM
   ariaLabel: string;
   size?: MinimalSize;
   disabled?: boolean;
+  /**
+   * Indicator styling. `neutral` (default) is the raised white pill; `brand`
+   * fills the indicator with the theme brand colour and inverts the selected
+   * label — for prominent, on-brand switches (e.g. an auth role toggle).
+   */
+  variant?: "neutral" | "brand";
 }
 
 export interface MinimalExplainerProps extends Omit<HTMLAttributes<HTMLDivElement>, "title"> {
@@ -978,21 +984,26 @@ const Style = {
     padding: 4px;
     min-height: ${({ $size }) => ($size === "sm" ? "34px" : $size === "lg" ? "44px" : "38px")};
   `,
-  SegmentedIndicator: styled(motion.div)<{ $count: number; $index: number }>`
+  SegmentedIndicator: styled(motion.div)<{ $count: number; $index: number; $variant: "neutral" | "brand" }>`
     position: absolute;
     top: 4px;
     bottom: 4px;
     left: ${({ $count, $index }) => `calc(${$index} * (100% / ${$count}) + 4px)`};
     width: ${({ $count }) => `calc((100% / ${$count}) - 8px)`};
-    background: ${({ theme }) => theme.color.bgSurface};
-    border: 1px solid ${({ theme }) => theme.color.borderStrong};
+    background: ${({ theme, $variant }) => ($variant === "brand" ? theme.color.brand : theme.color.bgSurface)};
+    border: 1px solid ${({ theme, $variant }) => ($variant === "brand" ? "transparent" : theme.color.borderStrong)};
     border-radius: ${({ theme }) => theme.radius.sm};
-    box-shadow: ${({ theme }) => theme.shadow.subtle};
+    box-shadow: ${({ theme, $variant }) => ($variant === "brand" ? "none" : theme.shadow.subtle)};
   `,
-  SegmentedButton: styled.button<{ $selected: boolean; $size: MinimalSize; $count: number }>`
+  SegmentedButton: styled.button<{ $selected: boolean; $size: MinimalSize; $count: number; $variant: "neutral" | "brand" }>`
     ${clickableReset}
     ${focusRing}
-    color: ${({ theme, $selected }) => ($selected ? theme.color.textPrimary : theme.color.textSecondary)};
+    color: ${({ theme, $selected, $variant }) =>
+      $selected
+        ? $variant === "brand"
+          ? theme.color.textInverse
+          : theme.color.textPrimary
+        : theme.color.textSecondary};
     cursor: pointer;
     position: relative;
     z-index: 1;
@@ -2921,6 +2932,7 @@ export const MinimalSegmentedControl = <T extends string>({
   ariaLabel,
   size = "md",
   disabled = false,
+  variant = "neutral",
   ...props
 }: MinimalSegmentedControlProps<T>) => {
   const { spring } = useMinimalMotion();
@@ -2934,6 +2946,7 @@ export const MinimalSegmentedControl = <T extends string>({
           transition={spring}
           $index={currentIndex}
           $count={options.length}
+          $variant={variant}
         />
       ) : null}
       {options.map((option) => {
@@ -2945,6 +2958,7 @@ export const MinimalSegmentedControl = <T extends string>({
             $selected={selected}
             $size={size}
             $count={options.length}
+            $variant={variant}
             aria-pressed={selected}
             disabled={disabled || option.disabled}
             onClick={() => onChange(option.value)}
