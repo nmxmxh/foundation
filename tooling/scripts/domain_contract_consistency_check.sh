@@ -14,6 +14,11 @@ failed=0
 checked=0
 warnings=0
 
+# Domains that legitimately own no relational table (object-storage or event-only
+# persistence). Their proto fields live on other domains' tables (e.g. *_url columns),
+# so a proto<->migration overlap check would always be a false positive. Space-separated.
+table_less_domains="media"
+
 normalize_tokens() {
   tr '[:upper:]' '[:lower:]' |
     sed -E 's/([a-z0-9])([A-Z])/\1_\2/g; s/[^a-z0-9_]+/\n/g' |
@@ -23,6 +28,7 @@ normalize_tokens() {
 field_tokens_for_proto_dir() {
   local proto_dir="$1"
   rg -o '^[[:space:]]*(repeated[[:space:]]+)?([A-Za-z0-9_.<>]+)[[:space:]]+([a-z][A-Za-z0-9_]*)[[:space:]]*=' "$proto_dir" --glob '*.proto' 2>/dev/null |
+    rg -v '(^|:|[[:space:]])option[[:space:]]' |
     sed -E 's/.*[[:space:]]([a-z][A-Za-z0-9_]*)[[:space:]]*=.*/\1/' |
     normalize_tokens |
     sort -u |
@@ -36,12 +42,34 @@ go_tokens_for_service_dir() {
     sort -u || true
 }
 
-migration_tokens_for_domain() {
+# Table-block aware column extraction. A line-scoped grep for the domain word misses
+# almost every column (SQL rarely repeats the table name per line), so it only ever saw
+# CHECK-enum values and constraint names -> spurious "no overlap" drift warnings. Instead
+# we locate CREATE TABLE blocks whose name belongs to the domain and emit each column's
+# leading identifier. Empty output => the domain owns no relational table.
+migration_column_tokens_for_domain() {
   local domain="$1"
   [[ -d "$target/migrations" ]] || return 0
-  rg -n "($domain|${domain}s)" "$target/migrations" --glob '*.up.sql' 2>/dev/null |
-    normalize_tokens |
-    sort -u || true
+  setopt local_options null_glob
+  local files=("$target"/migrations/*.up.sql)
+  (( ${#files} )) || return 0
+  awk -v d="$domain" '
+    FNR==1 { capture=0 }
+    /CREATE[ \t]+TABLE/ {
+      t=$0
+      sub(/.*CREATE[ \t]+TABLE([ \t]+IF[ \t]+NOT[ \t]+EXISTS)?[ \t]+/, "", t)
+      sub(/[ \t("].*/, "", t)
+      gsub(/[`"]/, "", t)
+      sub(/^[a-z0-9_]+\./, "", t)   # strip schema qualifier
+      capture = (tolower(t) ~ ("(^|_)" d "s?($|_)"))
+      next
+    }
+    capture && /^[ \t]*[a-z][a-z0-9_]*[ \t]/ {
+      c = tolower($1)
+      if (c !~ /^(constraint|primary|unique|foreign|check|index|like)$/) print c
+    }
+    capture && /\);/ { capture=0 }
+  ' "${files[@]}" 2>/dev/null | sort -u || true
 }
 
 timestamp_proto_violations() {
@@ -68,14 +96,23 @@ while IFS= read -r service_dir; do
 
   proto_tokens="$(field_tokens_for_proto_dir "$proto_dir")"
   go_tokens="$(go_tokens_for_service_dir "$service_dir")"
-  migration_tokens="$(migration_tokens_for_domain "$domain")"
+  migration_tokens="$(migration_column_tokens_for_domain "$domain")"
 
-  if [[ -n "$proto_tokens" && -n "$migration_tokens" ]]; then
-    overlap="$(comm -12 <(print -r -- "$proto_tokens") <(print -r -- "$migration_tokens") | head -5)"
-    if [[ -z "$overlap" ]]; then
-      echo "[WARN] $domain proto fields do not overlap domain migration vocabulary"
-      echo "  check api/protos/$domain against migrations for table/column naming drift"
-      warnings=$((warnings + 1))
+  if [[ -n "$proto_tokens" ]]; then
+    if [[ -z "$migration_tokens" ]]; then
+      # No CREATE TABLE block belongs to this domain -> no relational persistence to drift
+      # against. Announce the known object-store/event-only domains; stay silent for the
+      # rest rather than inventing drift we cannot actually measure.
+      if [[ " $table_less_domains " == *" $domain "* ]]; then
+        echo "[INFO] $domain has no owned table (object-store/event-only); migration overlap skipped"
+      fi
+    else
+      overlap="$(comm -12 <(print -r -- "$proto_tokens") <(print -r -- "$migration_tokens") | head -5)"
+      if [[ -z "$overlap" ]]; then
+        echo "[WARN] $domain proto fields do not overlap owned-table columns"
+        echo "  check api/protos/$domain against migrations for table/column naming drift"
+        warnings=$((warnings + 1))
+      fi
     fi
   fi
 
