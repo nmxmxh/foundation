@@ -249,6 +249,10 @@ func (s *Server) Handler() http.Handler {
 
 	if s.apiDocs != nil {
 		s.apiDocs.Register(mux)
+		// Serve the docs at the server root so the bare API URL shows the API
+		// documentation (content-negotiated) instead of an authorization error.
+		// ServeIndex only handles an exact "/"; other unmatched paths 404.
+		mux.HandleFunc("/", s.apiDocs.ServeIndex)
 		if s.apiDocs.Loaded() {
 			s.log.Info("api docs registered", "spec_path", s.apiDocs.SpecPath())
 		} else if err := s.apiDocs.LoadError(); err != nil {

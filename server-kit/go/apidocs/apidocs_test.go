@@ -49,6 +49,44 @@ func TestHandlerServesSpecAndDocs(t *testing.T) {
 	}
 }
 
+func TestServeIndexNegotiatesRoot(t *testing.T) {
+	dir := t.TempDir()
+	specPath := filepath.Join(dir, "openapi.json")
+	spec := `{"openapi":"3.0.0","info":{"title":"Example API","description":"Example docs"},"paths":{}}`
+	if err := os.WriteFile(specPath, []byte(spec), 0o600); err != nil {
+		t.Fatalf("write spec: %v", err)
+	}
+	handler := New(Options{SpecPaths: []string{specPath}})
+
+	// Browser (Accept: text/html) gets the Swagger UI shell.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Accept", "text/html")
+	rec := httptest.NewRecorder()
+	handler.ServeIndex(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("root html status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "Example API") {
+		t.Fatalf("root html missing docs shell: %s", rec.Body.String())
+	}
+
+	// Non-HTML clients get the raw spec.
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeIndex(rec, req)
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "application/json") {
+		t.Fatalf("root default content type = %q", got)
+	}
+
+	// The root catch-all must not swallow unmatched sub-paths.
+	req = httptest.NewRequest(http.MethodGet, "/not-a-route", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeIndex(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("non-root status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
 func TestHandlerMethodValidationAndMissingSpec(t *testing.T) {
 	handler := New(Options{SpecPaths: []string{filepath.Join(t.TempDir(), "missing.json")}})
 

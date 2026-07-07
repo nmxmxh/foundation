@@ -86,6 +86,19 @@ server {
         access_log off;
     }
 
+    # Kubernetes/Coolify-style split probes. server-kit's httpserver serves
+    # /health/live (liveness) and /health/ready (readiness) alongside /healthz;
+    # without these blocks the SPA try_files fallback would swallow them.
+    location /health/live {
+        proxy_pass $upstream_backend/health/live;
+        access_log off;
+    }
+
+    location /health/ready {
+        proxy_pass $upstream_backend/health/ready;
+        access_log off;
+    }
+
     location / {
         try_files $uri $uri/ /index.html;
         expires -1;

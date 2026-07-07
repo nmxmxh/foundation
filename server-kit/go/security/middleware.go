@@ -185,6 +185,14 @@ func isPublicPath(path string, publicPaths []string) bool {
 		return false
 	}
 
+	// The server root serves API docs (see apidocs.ServeIndex); expose it
+	// publicly by exact match. "/" must never be added to a prefix-matched
+	// public list — every path starts with "/", which would make the whole
+	// surface public.
+	if path == "/" {
+		return true
+	}
+
 	// Hardcoded system public paths
 	systemPublic := []string{
 		"/healthz",

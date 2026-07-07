@@ -200,6 +200,31 @@ func (h *Handler) RedirectToDocs(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, h.docsPath, http.StatusTemporaryRedirect)
 }
 
+// ServeIndex serves the API documentation at the server root. HTML clients
+// (browsers) get the Swagger UI shell; everything else gets the raw OpenAPI
+// spec — the same content negotiation an API server landing page is expected
+// to do. Only an exact "/" is handled; any other unmatched path 404s so this
+// root catch-all never masks a real route. Registered so the API server root
+// shows docs instead of an authorization error.
+func (h *Handler) ServeIndex(w http.ResponseWriter, r *http.Request) {
+	if h == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if !allowGetHead(w, r) {
+		return
+	}
+	if strings.Contains(r.Header.Get("Accept"), "text/html") {
+		h.ServeDocs(w, r)
+		return
+	}
+	h.ServeSpec(w, r)
+}
+
 func allowGetHead(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return true

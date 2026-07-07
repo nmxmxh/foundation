@@ -333,6 +333,14 @@ func TestPublicPathAndOriginHelpers(t *testing.T) {
 	if isPublicPath("", []string{"/"}) || isPublicPath("/private", []string{"/custom"}) {
 		t.Fatalf("expected private path")
 	}
+	// The server root is public by exact match (it serves API docs), but that
+	// must not leak to sub-paths — "/" is never a prefix-public entry.
+	if !isPublicPath("/", nil) {
+		t.Fatalf("expected root to be public")
+	}
+	if isPublicPath("/private", nil) {
+		t.Fatalf("root being public must not make sub-paths public")
+	}
 	if !isOriginAllowed("https://app.example.com", []string{"*"}) {
 		t.Fatalf("expected wildcard origin allow")
 	}
