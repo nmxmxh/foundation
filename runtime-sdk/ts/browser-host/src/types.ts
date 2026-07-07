@@ -67,13 +67,24 @@ export type PulseDiagnostics = {
   issues: RuntimeCapabilityIssue[];
 };
 
-export type RuntimeDiagnosticsSnapshot = {
-  pulseMode: PulseMode;
+// Canonical runtime mode. Superset of PulseMode: native hosts add "native".
+export type RuntimeMode = "worker" | "main-thread" | "native" | "stopped";
+
+// Canonical control-plane descriptor. Mirrors runtime_diagnostics.capnp
+// field-for-field; the field-drift check enforces parity against the schema.
+export type RuntimeDiagnostics = {
+  mode: RuntimeMode;
   degraded: boolean;
   activeUnits: number;
   inFlight: number;
   lastRuntimeSource: string;
   lastError: string | null;
   lastEpoch: number;
+};
+
+// Host superset: the canonical wire contract plus a browser-only delta.
+// Composed by intersection rather than re-spelled, so the canonical fields are
+// the canonical type by construction and cannot drift.
+export type RuntimeDiagnosticsSnapshot = RuntimeDiagnostics & {
   issues: RuntimeCapabilityIssue[];
 };

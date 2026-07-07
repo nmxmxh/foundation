@@ -29,16 +29,18 @@ const NATIVE_GPU_FALLBACK_CPU_MATERIALIZE :UInt32 = 3;
 const NATIVE_GPU_DESCRIPTOR_TEXT_MAX_BYTES :UInt32 = 256;
 const NATIVE_GPU_DESCRIPTOR_ID_MAX_BYTES :UInt32 = 128;
 
+# Version travels as the NATIVE_GPU_DESCRIPTOR_SCHEMA_VERSION const above, not as
+# a per-descriptor field: descriptors are constructed in-process and never
+# persisted, so a per-instance version byte would be dead weight on a hot path.
 struct RuntimeNativeGpuDescriptor {
-  schemaVersion @0 :UInt32;
-  id @1 :Text;
-  kind @2 :UInt32;
-  platform @3 :UInt32;
-  byteLength @4 :UInt64;
-  width @5 :UInt32;
-  height @6 :UInt32;
-  format @7 :Text;
-  schemaName @8 :Text;
-  producer @9 :Text;
-  fallback @10 :UInt32;
+  id @0 :Text;
+  kind @1 :UInt32;
+  platform @2 :UInt32;
+  byteLength @3 :UInt64;
+  width @4 :UInt32;
+  height @5 :UInt32;
+  format @6 :Text;
+  schemaName @7 :Text;
+  producer @8 :Text;
+  fallback @9 :UInt32;
 }

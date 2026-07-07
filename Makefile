@@ -1,6 +1,6 @@
 .PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-go-race test-ts test-rust test-rust-sdk test-native-rust test-rust-loom check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history bench-simd lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-scaffold-idempotency check-scaffold-seed-drift check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator \
-	check-contract-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
+	check-contract-drift check-runtime-contract-field-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
 	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet lifecycle-manifest
@@ -20,6 +20,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-frontend-commands-generator \
 	check-ovasabi-cli \
 	check-contract-drift \
+	check-runtime-contract-field-drift \
 	check-doc-references \
 	check-markdown-frontmatter \
 	check-agent-contract \
@@ -236,6 +237,9 @@ check-ovasabi-cli:
 
 check-contract-drift:
 	@tooling/scripts/contract_drift_check.sh .
+
+check-runtime-contract-field-drift:
+	@node tooling/scripts/runtime_contract_field_drift_check.mjs
 
 check-doc-references:
 	@node tooling/scripts/docs_reference_check.mjs .

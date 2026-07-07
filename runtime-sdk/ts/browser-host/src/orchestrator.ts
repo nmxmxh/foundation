@@ -47,7 +47,7 @@ export const createRuntimeOrchestrator = (options: RuntimeOrchestratorOptions) =
     });
 
   let diagnostics: RuntimeDiagnosticsSnapshot = {
-    pulseMode: pulseManager.getMode(),
+    mode: pulseManager.getMode(),
     degraded: false,
     activeUnits: 0,
     inFlight: 0,
@@ -61,7 +61,7 @@ export const createRuntimeOrchestrator = (options: RuntimeOrchestratorOptions) =
     const pulseDiagnostics = pulseManager.getDiagnostics();
     diagnostics = {
       ...diagnostics,
-      pulseMode: pulseManager.getMode(),
+      mode: pulseManager.getMode(),
       activeUnits: units.size,
       inFlight: inFlight.size,
       degraded: diagnostics.degraded || pulseDiagnostics.degraded,
@@ -217,7 +217,7 @@ export const createRuntimeOrchestrator = (options: RuntimeOrchestratorOptions) =
       pulseManager.shutdown();
       diagnostics = {
         ...diagnostics,
-        pulseMode: "stopped",
+        mode: "stopped",
         inFlight: 0,
       };
       emitDiagnostics();

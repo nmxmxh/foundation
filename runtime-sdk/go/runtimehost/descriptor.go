@@ -24,7 +24,7 @@ type RuntimeUnitDescriptor struct {
 	SupportsNative       bool        `json:"supports_native"`
 	RequiresSharedMemory bool        `json:"requires_shared_memory"`
 	SupportsGPU          bool        `json:"supports_gpu"`
-	MaxConcurrency       int         `json:"max_concurrency"`
+	MaxConcurrency       uint32      `json:"max_concurrency"`
 }
 
 type RuntimeNativeGPUKind string
@@ -90,7 +90,7 @@ func (d RuntimeUnitDescriptor) Validate() error {
 	if d.OutputSchema == "" {
 		return ErrInvalidDescriptor("output_schema is required")
 	}
-	if d.MaxConcurrency <= 0 {
+	if d.MaxConcurrency == 0 {
 		return ErrInvalidDescriptor("max_concurrency must be positive")
 	}
 	return nil
