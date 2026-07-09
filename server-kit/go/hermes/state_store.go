@@ -245,6 +245,20 @@ func (s *ProjectedRuntimeStore) DeleteRecord(ctx context.Context, domain, collec
 	return nil
 }
 
+// WarmScope eagerly rebuilds the hermes hot partition for a scope from the
+// underlying database, so the projection gateway (which reads the hot partition
+// directly and does not trigger the lazy read-through warm) returns SQL-seeded
+// rows instead of "projection not found". Call it at startup for each scope that
+// was populated out-of-band (e.g. raw SQL seeds) rather than through the
+// projected write path. It is idempotent: an already-warm, non-degraded scope
+// is a no-op. Returns ErrProjectionLimit if the scope exceeds MaxRecordsPerScope.
+func (s *ProjectedRuntimeStore) WarmScope(ctx context.Context, domain, collection, organizationID string) error {
+	if s == nil || s.hot == nil {
+		return errors.New("hermes projected runtime store is not initialized")
+	}
+	return s.ensureWarm(ctx, domain, collection, organizationID)
+}
+
 func (s *ProjectedRuntimeStore) ensureWarm(ctx context.Context, domain, collection, organizationID string) error {
 	name, err := s.ensureProjection(domain, collection, organizationID)
 	if err != nil {

@@ -2,6 +2,7 @@ package hermes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -32,14 +33,25 @@ func (p *partition) applyBatchObserving(ctx context.Context, events []Event, obs
 	registry := p.activeRegistry()
 	publisher := newIndexPublisher()
 	p.evictExpiredLocked(registry, publisher)
+	var eventErrs error
 	for _, event := range events {
 		if err := ctxErr(ctx); err != nil {
-			return p.finishApplyLocked(result, publisher), err
+			return p.finishApplyLocked(result, publisher), errors.Join(eventErrs, err)
 		}
 		state, version, err := p.applyEventLocked(registry, publisher, event)
 		if err != nil {
 			p.rejectedApplies.Add(1)
-			return p.finishApplyLocked(result, publisher), err
+			// Event-level rejections (invalid scope, capacity) poison only the
+			// offending event, not the batch: count it, remember the error, and
+			// keep applying. One bad event must not halt a projector loop or
+			// discard the rest of a batch. Anything else is a system error and
+			// aborts as before.
+			if errors.Is(err, ErrInvalidEvent) || errors.Is(err, ErrProjectionLimit) {
+				result.Ignored++
+				eventErrs = errors.Join(eventErrs, err)
+				continue
+			}
+			return p.finishApplyLocked(result, publisher), errors.Join(eventErrs, err)
 		}
 		switch state {
 		case applyStateApplied:
@@ -59,7 +71,7 @@ func (p *partition) applyBatchObserving(ctx context.Context, events []Event, obs
 			result.Ignored++
 		}
 	}
-	return p.finishApplyLocked(result, publisher), nil
+	return p.finishApplyLocked(result, publisher), eventErrs
 }
 
 func (p *partition) applyRecords(ctx context.Context, sourcePrefix string, baseVersion uint64, records []database.DomainRecord, observe func(AppliedMutation)) (ApplyResult, error) {

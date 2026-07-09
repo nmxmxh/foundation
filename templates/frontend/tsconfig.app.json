@@ -24,10 +24,9 @@
     "noUncheckedSideEffectImports": true,
 
     /* Paths */
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
-      "@generated/*": ["src/types/protos/*"]
+      "@/*": ["./src/*"],
+      "@generated/*": ["./src/types/protos/*"]
     }
   },
   "include": ["src"]

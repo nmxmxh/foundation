@@ -262,7 +262,9 @@ func (s *Store) ApplyBatch(ctx context.Context, projection string, events []Even
 	}
 	var accepted []AppliedMutation
 	result, err := part.applyBatchObserving(ctx, events, s.collector(&accepted))
-	if err == nil {
+	// Accepted events are visible state even when the batch also carried
+	// event-level rejections, so fan them out regardless of err.
+	if len(accepted) > 0 {
 		s.notify(projection, accepted)
 	}
 	return result, err
@@ -293,7 +295,7 @@ func (s *Store) ApplyBatchObserved(ctx context.Context, projection string, event
 		}
 	}
 	result, err := part.applyBatchObserving(ctx, events, combined)
-	if err == nil {
+	if len(accepted) > 0 {
 		s.notify(projection, accepted)
 	}
 	return result, err

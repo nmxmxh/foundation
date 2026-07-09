@@ -109,6 +109,36 @@ func TestRouteRBACAllowsGrantedAndBypassesPublic(t *testing.T) {
 	}
 }
 
+// TestIsPublicRouteBypassesAuth proves that a route flagged IsPublic bypasses
+// the JWTAuth middleware under requireAuthForDispatch without an explicit
+// AddPublicPath call: registerPublicRoutePaths propagates the route flag into
+// s.publicPaths, and both "<path>" and "/api<path>" are exposed. This is the
+// regression guard for public media/object serving 401ing under REQUIRE_AUTH,
+// which <img> tags (unable to send bearer tokens) cannot recover from.
+func TestIsPublicRouteBypassesAuth(t *testing.T) {
+	s := serverWithDispatch(t, func(context.Context, extension.Object) (any, error) { return nil, nil })
+	s.ConfigureAuth(nil, security.NewAuthorizer(nil), true)
+
+	reached := 0
+	s.SetHTTPRoutes([]registry.HTTPRoute{{
+		Method:   http.MethodGet,
+		Path:     "/v1/media/objects/",
+		Handler:  func(w http.ResponseWriter, _ *http.Request) { reached++; w.WriteHeader(http.StatusOK) },
+		IsPublic: true,
+	}})
+
+	for _, path := range []string{"/v1/media/objects/seed.png", "/api/v1/media/objects/seed.png"} {
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("unauthenticated GET %s: status = %d, want 200 (public route must bypass auth)", path, rec.Code)
+		}
+	}
+	if reached != 2 {
+		t.Fatalf("public media handler reached %d times, want 2", reached)
+	}
+}
+
 // TestTerminalEventType pins the lifecycle-suffix rewriter used to derive a
 // terminal event type from a request/ack event: a recognized lifecycle suffix is
 // replaced, and an event with no lifecycle suffix gets the terminal appended.

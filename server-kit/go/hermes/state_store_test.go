@@ -48,6 +48,59 @@ func TestProjectedRuntimeStoreUsesHermesForWarmStateScope(t *testing.T) {
 	}
 }
 
+// TestWarmScopePopulatesHotPartition proves WarmScope eagerly materializes the
+// hermes hot partition from rows seeded directly into the base store (simulating
+// a raw SQL seed that bypassed the projected write path). This is the regression
+// guard for the projection gateway returning "projection not found" for
+// out-of-band seed rows: after WarmScope, the same partition the gateway reads
+// (store.Store() under ProjectionName) serves the seeded records without the
+// base store.
+func TestWarmScopePopulatesHotPartition(t *testing.T) {
+	base := database.NewMemoryDB()
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{MaxRecordsPerScope: 8, MaxBytesPerScope: 1 << 20})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	ctx := t.Context()
+
+	// Seed rows directly into the base store only (bypassing the projected write
+	// path), so the hot partition starts empty.
+	for i := range 2 {
+		if _, err = base.UpsertRecord(ctx, database.DomainRecord{
+			Domain:         "menu",
+			Collection:     "dishes",
+			OrganizationID: "org_1",
+			RecordID:       fmt.Sprintf("dish_%d", i),
+			Data:           testRecordData(map[string]any{"state": "published"}),
+		}); err != nil {
+			t.Fatalf("base UpsertRecord() error = %v", err)
+		}
+	}
+
+	projection := store.ProjectionName("menu", "dishes", "org_1")
+	if _, ok := store.warm.Load(projection); ok {
+		t.Fatalf("projection %q should not be warm before WarmScope", projection)
+	}
+
+	if err = store.WarmScope(ctx, "menu", "dishes", "org_1"); err != nil {
+		t.Fatalf("WarmScope() error = %v", err)
+	}
+	if _, ok := store.warm.Load(projection); !ok {
+		t.Fatalf("projection %q was not marked warm after WarmScope", projection)
+	}
+
+	// With the base store closed, the seeded rows are only served if WarmScope
+	// materialized them into the hot partition the gateway reads.
+	base.Close()
+	count, err := store.hot.Count(ctx, projection, Query{OrganizationID: "org_1"}, Fence{})
+	if err != nil {
+		t.Fatalf("hot Count() error = %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("hot partition count = %d, want 2 (WarmScope should have materialized seed rows)", count)
+	}
+}
+
 func TestProjectedRuntimeStoreExactReadThroughAndDelete(t *testing.T) {
 	base := database.NewMemoryDB()
 	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{MaxRecordsPerScope: 8, MaxBytesPerScope: 1 << 20})

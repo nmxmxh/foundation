@@ -207,6 +207,35 @@ func (s *Server) AddPublicPath(path string) {
 	s.publicPaths = append(s.publicPaths, path)
 }
 
+// registerPublicRoutePaths propagates the IsPublic flag on domain routes into
+// s.publicPaths so the JWTAuth middleware and RBAC wrapper bypass them. Routes
+// are served at both "<path>" and "/api<path>", so both prefixes are exposed.
+// Idempotent: safe to call on every Handler() build.
+func (s *Server) registerPublicRoutePaths() {
+	existing := make(map[string]struct{}, len(s.publicPaths))
+	for _, p := range s.publicPaths {
+		existing[p] = struct{}{}
+	}
+	add := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" || path == "/" {
+			return
+		}
+		if _, ok := existing[path]; ok {
+			return
+		}
+		existing[path] = struct{}{}
+		s.publicPaths = append(s.publicPaths, path)
+	}
+	for _, route := range s.routes {
+		if !route.IsPublic {
+			continue
+		}
+		add(route.Path)
+		add("/api" + route.Path)
+	}
+}
+
 // AddUnauthenticatedWSEvent allows an event type for unauthenticated WebSocket connections
 func (s *Server) AddUnauthenticatedWSEvent(eventType string) {
 	if s.wsUnauthenticatedAllowset == nil {
@@ -284,6 +313,7 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	// Register domain routes
+	s.registerPublicRoutePaths()
 	s.registerDomainRoutes(mux)
 
 	// Build middleware stack

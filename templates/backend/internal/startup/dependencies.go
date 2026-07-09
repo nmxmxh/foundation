@@ -4,6 +4,7 @@ package startup
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	// against (it owns the partition naming). db is always the projected store.
 	if projected, ok := db.(*hermes.ProjectedRuntimeStore); ok {
 		deps.Projected = projected
+		warmProjectionScopes(ctx, projected, cfg.HermesWarmScopes, kitLog)
 	}
 	cleanups = append(cleanups, func(context.Context) {
 		db.Close()
@@ -82,6 +84,14 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 				kitLog.ErrorContext(cleanupCtx, "failed to close event bus", "error", err)
 			}
 		})
+	}
+
+	// Fallback projection population: tail canonical projection envelopes from
+	// Redis Streams for each warm scope. The canonical path is a
+	// hermes.RecordWorkerProcessor on the River queue (durable, tx-coupled);
+	// this tailer covers producers that cannot share the Postgres job queue.
+	if cfg.HermesEnvelopeFallback && deps.Projected != nil && deps.Redis != nil {
+		startProjectionEnvelopeFallback(ctx, deps.Projected, deps.Redis, cfg.HermesWarmScopes, kitLog)
 	}
 
 	deps.HealthChecker = initHealthChecker(deps.DB, deps.Redis)
@@ -116,6 +126,90 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	}
 
 	return deps, cleanup, nil
+}
+
+// warmProjectionScopes eagerly rebuilds the hermes hot partitions for the
+// configured scopes so the projection gateway serves out-of-band (e.g.
+// SQL-seeded) rows instead of "projection not found". Each scope is
+// "domain:collection:organization". Warming failures are logged, not fatal:
+// the projected store falls back to the database on read, and a warm scope is
+// re-attempted lazily on the first read-through.
+func warmProjectionScopes(ctx context.Context, projected *hermes.ProjectedRuntimeStore, scopes []string, log kitlogger.Logger) {
+	for _, scope := range scopes {
+		parts := strings.Split(scope, ":")
+		if len(parts) != 3 {
+			log.WarnContext(ctx, "skipping malformed hermes warm scope; want domain:collection:organization", "scope", scope)
+			continue
+		}
+		domain, collection, organization := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+		if domain == "" || collection == "" || organization == "" {
+			log.WarnContext(ctx, "skipping hermes warm scope with empty component", "scope", scope)
+			continue
+		}
+		if err := projected.WarmScope(ctx, domain, collection, organization); err != nil {
+			log.WarnContext(ctx, "failed to warm hermes projection scope; will warm lazily on first read",
+				"domain", domain, "collection", collection, "organization", organization, "error", err)
+			continue
+		}
+		log.InfoContext(ctx, "warmed hermes projection scope",
+			"domain", domain, "collection", collection, "organization", organization)
+	}
+}
+
+// startProjectionEnvelopeFallback runs one hardened hermes.EnvelopeTailer per
+// warm scope, consuming canonical projection envelopes
+// (foundation.v1.RecordMutationBatch) from the Redis stream
+// hermes:projection:<domain>:<collection>:<organization>. Poison envelopes are
+// quarantined by the tailer, so only system errors (e.g. Redis down) surface
+// here; each tailer restarts with a fixed backoff until ctx ends. WarmScope
+// runs first so the partition is registered and seeded before deltas apply.
+func startProjectionEnvelopeFallback(ctx context.Context, projected *hermes.ProjectedRuntimeStore, client rediskit.Client, scopes []string, log kitlogger.Logger) {
+	consumer, err := os.Hostname()
+	if err != nil || strings.TrimSpace(consumer) == "" {
+		consumer = "envelope_fallback"
+	}
+	for _, scope := range scopes {
+		parts := strings.Split(scope, ":")
+		if len(parts) != 3 {
+			continue // warmProjectionScopes already logged the malformed scope
+		}
+		domain, collection, organization := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+		if domain == "" || collection == "" || organization == "" {
+			continue
+		}
+		if err := projected.WarmScope(ctx, domain, collection, organization); err != nil {
+			log.WarnContext(ctx, "envelope fallback: warm before tail failed; skipping scope",
+				"domain", domain, "collection", collection, "organization", organization, "error", err)
+			continue
+		}
+		stream := "hermes:projection:" + domain + ":" + collection + ":" + organization
+		source, err := hermes.NewRedisStreamEnvelopeSource(client, stream, "hermes_projection", consumer, "")
+		if err != nil {
+			log.WarnContext(ctx, "envelope fallback: source init failed", "stream", stream, "error", err)
+			continue
+		}
+		projection := projected.ProjectionName(domain, collection, organization)
+		tailer, err := hermes.NewEnvelopeTailer(projected.Store(), projection, source, hermes.TailerOptions{})
+		if err != nil {
+			log.WarnContext(ctx, "envelope fallback: tailer init failed", "projection", projection, "error", err)
+			continue
+		}
+		log.InfoContext(ctx, "envelope fallback: tailing projection envelopes", "stream", stream, "projection", projection)
+		go func() {
+			for {
+				err := tailer.Run(ctx)
+				if ctx.Err() != nil {
+					return
+				}
+				log.WarnContext(ctx, "envelope fallback: tailer stopped; restarting", "stream", stream, "error", err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+				}
+			}
+		}()
+	}
 }
 
 func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger) (database.RuntimeStore, *hermes.Store, error) {

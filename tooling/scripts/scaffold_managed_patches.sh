@@ -1421,6 +1421,260 @@ patch_startup_dependencies_double_close_redis() {
   rm -f "$before" "$after"
 }
 
+patch_frontend_tsconfig_baseurl() {
+  local file="$target/frontend/tsconfig.app.json"
+  [[ -f "$file" ]] || return 0
+
+  # TypeScript 7 removed the baseUrl compiler option (TS5102) and rejects
+  # non-relative path targets that relied on it (TS5090), breaking `tsc` for
+  # every scaffolded frontend. Drop baseUrl and make the scaffold's path aliases
+  # relative so the app keeps typechecking under tsc 7. Guarded on baseUrl so it
+  # is a no-op once applied.
+  grep -Fq '"baseUrl"' "$file" || return 0
+  local before
+  before="$(mktemp)"
+  cp "$file" "$before"
+  perl -0pi -e 's/[ \t]*"baseUrl":\s*"\.",\r?\n//' "$file"
+  perl -0pi -e 's{"\@/\*":\s*\["src/\*"\]}{"\@/*": ["./src/*"]}' "$file"
+  perl -0pi -e 's{"\@generated/\*":\s*\["src/types/protos/\*"\]}{"\@generated/*": ["./src/types/protos/*"]}' "$file"
+  if ! cmp -s "$before" "$file"; then
+    log_patch "frontend tsconfig drops removed baseUrl for TS7: ${file#$target/}"
+  fi
+  rm -f "$before"
+}
+
+patch_env_example_hermes_warm_scopes() {
+  local file="$target/.env.example"
+  [[ -f "$file" ]] || return 0
+
+  # HERMES_WARM_SCOPES lets the projected store warm scopes from Postgres at
+  # startup so the projection gateway serves out-of-band (e.g. SQL-seeded) rows
+  # instead of "projection not found". Keep the example in sync with the new
+  # server-kit capability. Idempotent: skip if the key already exists.
+  grep -q '^HERMES_WARM_SCOPES=' "$file" && return 0
+  grep -q '^HERMES_INDEXED_FIELDS=' "$file" || return 0
+  printf '# Projection scopes to warm from Postgres at startup so the projection gateway\n# serves out-of-band (e.g. SQL-seeded) rows. Comma-separated\n# "domain:collection:organization" triples.\nHERMES_WARM_SCOPES=\n' >> "$file"
+  log_patch "env example adds HERMES_WARM_SCOPES: ${file#$target/}"
+}
+
+patch_startup_projection_warming() {
+  local deps="$target/internal/startup/dependencies.go"
+  local cfg="$target/internal/config/config.go"
+  [[ -f "$deps" && -f "$cfg" ]] || return 0
+
+  # Wire the projected store's WarmScope (shipped in server-kit) into startup so
+  # the projection gateway serves out-of-band (e.g. SQL-seeded) rows instead of
+  # "projection not found". This is an *additive* injection into project-owned
+  # (create-mode) files, so it is heavily guarded: bail unless the file still has
+  # the exact canonical scaffold shape and identifiers we depend on. A diverged
+  # app is left untouched and can adopt the wiring by hand.
+  grep -Fq 'deps.Projected = projected' "$deps" || return 0
+  grep -Fq $'\nfunc initDatabase(' "$deps" || return 0
+  grep -Fq 'cfg *config.Config' "$deps" || return 0
+  grep -Fq 'kitLog :=' "$deps" || return 0
+  grep -Fq 'server-kit/go/hermes' "$deps" || return 0
+  grep -Fq 'HermesIndexedFields []string' "$cfg" || return 0
+  grep -Fq 'HERMES_INDEXED_FIELDS' "$cfg" || return 0
+
+  local touched=0
+
+  # --- config.go: struct field + env load line ---
+  if ! grep -Fq 'HermesWarmScopes' "$cfg"; then
+    local before; before="$(mktemp)"; cp "$cfg" "$before"
+    perl -0pi -e 's/(\tHermesIndexedFields \[\]string\n)/$1\t\/\/ HermesWarmScopes lists projection scopes to eagerly warm from the database\n\t\/\/ at startup so the projection gateway serves out-of-band (e.g. SQL-seeded)\n\t\/\/ rows instead of "projection not found". Each entry is\n\t\/\/ "domain:collection:organization"; empty organization is invalid.\n\tHermesWarmScopes []string\n/' "$cfg"
+    perl -0pi -e 's/(HermesIndexedFields:\s*splitCSV\(getEnv\("HERMES_INDEXED_FIELDS"[^\n]*\n)/$1\t\tHermesWarmScopes: splitCSV(getEnv("HERMES_WARM_SCOPES", "")),\n/' "$cfg"
+    if ! cmp -s "$before" "$cfg"; then
+      touched=1
+      log_patch "config adds HermesWarmScopes: ${cfg#$target/}"
+    fi
+    rm -f "$before"
+  fi
+
+  # --- dependencies.go: call site + helper function ---
+  if ! grep -Fq 'warmProjectionScopes' "$deps"; then
+    local before; before="$(mktemp)"; cp "$deps" "$before"
+
+    # The helper uses strings.Split/TrimSpace; not every scaffold-era file
+    # imports strings.
+    if ! grep -Eq $'^\t"strings"$' "$deps"; then
+      perl -0pi -e 's/(\n\t"fmt"\n)/$1\t"strings"\n/' "$deps"
+    fi
+
+    # Call site: warm right after the projected store is captured.
+    perl -0pi -e 's/(\n\t\tdeps\.Projected = projected\n)/$1\t\twarmProjectionScopes(ctx, projected, cfg.HermesWarmScopes, kitLog)\n/' "$deps"
+
+    # Helper function: insert immediately before initDatabase.
+    local helper; helper="$(mktemp)"
+    cat > "$helper" <<'GOEOF'
+// warmProjectionScopes eagerly rebuilds the hermes hot partitions for the
+// configured scopes so the projection gateway serves out-of-band (e.g.
+// SQL-seeded) rows instead of "projection not found". Each scope is
+// "domain:collection:organization". Warming failures are logged, not fatal:
+// the projected store falls back to the database on read, and a warm scope is
+// re-attempted lazily on the first read-through.
+func warmProjectionScopes(ctx context.Context, projected *hermes.ProjectedRuntimeStore, scopes []string, log kitlogger.Logger) {
+	for _, scope := range scopes {
+		parts := strings.Split(scope, ":")
+		if len(parts) != 3 {
+			log.WarnContext(ctx, "skipping malformed hermes warm scope; want domain:collection:organization", "scope", scope)
+			continue
+		}
+		domain, collection, organization := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+		if domain == "" || collection == "" || organization == "" {
+			log.WarnContext(ctx, "skipping hermes warm scope with empty component", "scope", scope)
+			continue
+		}
+		if err := projected.WarmScope(ctx, domain, collection, organization); err != nil {
+			log.WarnContext(ctx, "failed to warm hermes projection scope; will warm lazily on first read",
+				"domain", domain, "collection", collection, "organization", organization, "error", err)
+			continue
+		}
+		log.InfoContext(ctx, "warmed hermes projection scope",
+			"domain", domain, "collection", collection, "organization", organization)
+	}
+}
+
+GOEOF
+    HELPER="$helper" perl -0pi -e 'BEGIN{local $/; open(F,"<",$ENV{HELPER}) or die; $h=<F>; close F} s/\nfunc initDatabase\(/\n$h\nfunc initDatabase(/' "$deps"
+    rm -f "$helper"
+
+    if ! cmp -s "$before" "$deps"; then
+      touched=1
+      log_patch "startup wires projection warming: ${deps#$target/}"
+    fi
+    rm -f "$before"
+  fi
+
+  # gofmt the injected Go so the changes stay lint-clean (alignment/tabs).
+  if [[ "$touched" -eq 1 ]] && command -v gofmt >/dev/null 2>&1; then
+    gofmt -w "$cfg" "$deps"
+  fi
+}
+
+patch_startup_envelope_fallback() {
+  local deps="$target/internal/startup/dependencies.go"
+  local cfg="$target/internal/config/config.go"
+  local env="$target/.env.example"
+  [[ -f "$deps" && -f "$cfg" ]] || return 0
+
+  # Wire the hardened EnvelopeTailer fallback (server-kit hermes) behind
+  # HERMES_ENVELOPE_FALLBACK. Runs after patch_startup_projection_warming and
+  # anchors on its output plus the canonical scaffold shape; a diverged app is
+  # left untouched. All injections are symbol-guarded and idempotent.
+  grep -Fq 'warmProjectionScopes' "$deps" || return 0
+  grep -Fq 'HermesWarmScopes' "$cfg" || return 0
+  grep -Fq 'deps.HealthChecker = initHealthChecker(deps.DB, deps.Redis)' "$deps" || return 0
+  grep -Fq $'\nfunc initDatabase(' "$deps" || return 0
+  grep -Fq 'rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"' "$deps" || return 0
+  # The injected helper passes deps.Redis as rediskit.Client; an app whose
+  # Dependencies struct types Redis as a raw driver client would not compile.
+  grep -Eq 'Redis[[:space:]]+rediskit\.Client' "$deps" || return 0
+  grep -Fq 'getEnvBool' "$cfg" || return 0
+
+  local touched=0
+
+  # --- config.go: struct field + env load line ---
+  if ! grep -Fq 'HermesEnvelopeFallback' "$cfg"; then
+    local before; before="$(mktemp)"; cp "$cfg" "$before"
+    perl -0pi -e 's/(\tHermesWarmScopes \[\]string\n)/$1\t\/\/ HermesEnvelopeFallback runs a hardened EnvelopeTailer per warm scope,\n\t\/\/ consuming canonical projection envelopes from Redis Streams\n\t\/\/ (hermes:projection:<domain>:<collection>:<organization>). It is the\n\t\/\/ fallback population path for producers that cannot share the Postgres\n\t\/\/ job queue the canonical RecordWorkerProcessor uses.\n\tHermesEnvelopeFallback bool\n/' "$cfg"
+    perl -0pi -e 's/(\t*HermesWarmScopes:\s*splitCSV\(getEnv\("HERMES_WARM_SCOPES", ""\)\),\n)/$1\t\tHermesEnvelopeFallback: getEnvBool("HERMES_ENVELOPE_FALLBACK", false),\n/' "$cfg"
+    if ! cmp -s "$before" "$cfg"; then
+      touched=1
+      log_patch "config adds HermesEnvelopeFallback: ${cfg#$target/}"
+    fi
+    rm -f "$before"
+  fi
+
+  # --- dependencies.go: os import + call site + helper ---
+  if ! grep -Fq 'startProjectionEnvelopeFallback' "$deps"; then
+    local before; before="$(mktemp)"; cp "$deps" "$before"
+
+    if ! grep -Eq $'^\t"os"$' "$deps"; then
+      perl -0pi -e 's/(\n\t"fmt"\n)/$1\t"os"\n/' "$deps"
+    fi
+
+    perl -0pi -e 's/(\n\tdeps\.HealthChecker = initHealthChecker\(deps\.DB, deps\.Redis\)\n)/\n\t\/\/ Fallback projection population: tail canonical projection envelopes from\n\t\/\/ Redis Streams for each warm scope. The canonical path is a\n\t\/\/ hermes.RecordWorkerProcessor on the River queue (durable, tx-coupled);\n\t\/\/ this tailer covers producers that cannot share the Postgres job queue.\n\tif cfg.HermesEnvelopeFallback && deps.Projected != nil \&\& deps.Redis != nil {\n\t\tstartProjectionEnvelopeFallback(ctx, deps.Projected, deps.Redis, cfg.HermesWarmScopes, kitLog)\n\t}\n$1/' "$deps"
+
+    local helper; helper="$(mktemp)"
+    cat > "$helper" <<'GOEOF'
+// startProjectionEnvelopeFallback runs one hardened hermes.EnvelopeTailer per
+// warm scope, consuming canonical projection envelopes
+// (foundation.v1.RecordMutationBatch) from the Redis stream
+// hermes:projection:<domain>:<collection>:<organization>. Poison envelopes are
+// quarantined by the tailer, so only system errors (e.g. Redis down) surface
+// here; each tailer restarts with a fixed backoff until ctx ends. WarmScope
+// runs first so the partition is registered and seeded before deltas apply.
+func startProjectionEnvelopeFallback(ctx context.Context, projected *hermes.ProjectedRuntimeStore, client rediskit.Client, scopes []string, log kitlogger.Logger) {
+	consumer, err := os.Hostname()
+	if err != nil || strings.TrimSpace(consumer) == "" {
+		consumer = "envelope_fallback"
+	}
+	for _, scope := range scopes {
+		parts := strings.Split(scope, ":")
+		if len(parts) != 3 {
+			continue // warmProjectionScopes already logged the malformed scope
+		}
+		domain, collection, organization := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+		if domain == "" || collection == "" || organization == "" {
+			continue
+		}
+		if err := projected.WarmScope(ctx, domain, collection, organization); err != nil {
+			log.WarnContext(ctx, "envelope fallback: warm before tail failed; skipping scope",
+				"domain", domain, "collection", collection, "organization", organization, "error", err)
+			continue
+		}
+		stream := "hermes:projection:" + domain + ":" + collection + ":" + organization
+		source, err := hermes.NewRedisStreamEnvelopeSource(client, stream, "hermes_projection", consumer, "")
+		if err != nil {
+			log.WarnContext(ctx, "envelope fallback: source init failed", "stream", stream, "error", err)
+			continue
+		}
+		projection := projected.ProjectionName(domain, collection, organization)
+		tailer, err := hermes.NewEnvelopeTailer(projected.Store(), projection, source, hermes.TailerOptions{})
+		if err != nil {
+			log.WarnContext(ctx, "envelope fallback: tailer init failed", "projection", projection, "error", err)
+			continue
+		}
+		log.InfoContext(ctx, "envelope fallback: tailing projection envelopes", "stream", stream, "projection", projection)
+		go func() {
+			for {
+				err := tailer.Run(ctx)
+				if ctx.Err() != nil {
+					return
+				}
+				log.WarnContext(ctx, "envelope fallback: tailer stopped; restarting", "stream", stream, "error", err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Second):
+				}
+			}
+		}()
+	}
+}
+
+GOEOF
+    HELPER="$helper" perl -0pi -e 'BEGIN{local $/; open(F,"<",$ENV{HELPER}) or die; $h=<F>; close F} s/\nfunc initDatabase\(/\n$h\nfunc initDatabase(/' "$deps"
+    rm -f "$helper"
+
+    if ! cmp -s "$before" "$deps"; then
+      touched=1
+      log_patch "startup wires envelope fallback tailers: ${deps#$target/}"
+    fi
+    rm -f "$before"
+  fi
+
+  # --- .env.example: document the flag ---
+  if [[ -f "$env" ]] && ! grep -q '^HERMES_ENVELOPE_FALLBACK=' "$env" && grep -q '^HERMES_WARM_SCOPES=' "$env"; then
+    perl -0pi -e 's/(^HERMES_WARM_SCOPES=[^\n]*\n)/$1# Fallback projection population: tail canonical projection envelopes from\n# Redis Streams (hermes:projection:<domain>:<collection>:<organization>) for\n# each warm scope. Canonical path is the RecordWorkerProcessor on the River\n# queue; enable this for producers that cannot share the Postgres job queue.\nHERMES_ENVELOPE_FALLBACK=false\n/m' "$env"
+    log_patch "env example adds HERMES_ENVELOPE_FALLBACK: ${env#$target/}"
+  fi
+
+  if [[ "$touched" -eq 1 ]] && command -v gofmt >/dev/null 2>&1; then
+    gofmt -w "$cfg" "$deps"
+  fi
+}
+
 export PATCH_SEARCH PATCH_REPLACE
 
 patch_agent_native_guides
@@ -1456,6 +1710,10 @@ patch_test_postgres_platform
 patch_test_compose_ephemeral_ports
 patch_postgres_config_baseline
 patch_startup_dependencies_double_close_redis
+patch_frontend_tsconfig_baseurl
+patch_env_example_hermes_warm_scopes
+patch_startup_projection_warming
+patch_startup_envelope_fallback
 sync_go_work
 
 if [[ "$patched" -eq 0 ]]; then

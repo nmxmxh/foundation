@@ -45,7 +45,11 @@ type TailResult struct {
 	Read    int
 	Decoded int
 	Acked   int
-	Apply   ApplyResult
+	// Quarantined counts messages whose decode failed. They are acked and
+	// dropped so a poison message cannot halt the tail loop or redeliver
+	// forever; the count is the operator's signal to inspect the producer.
+	Quarantined int
+	Apply       ApplyResult
 }
 
 func NewTailer(store *Store, projection string, source MessageSource, decode MessageDecoder, opts TailerOptions) (*Tailer, error) {
@@ -70,15 +74,19 @@ func (t *Tailer) PollOnce(ctx context.Context) (TailResult, error) {
 	if err != nil || len(messages) == 0 {
 		return TailResult{Read: len(messages)}, err
 	}
-	events, ids, err := t.decodeMessages(ctx, messages)
-	if err != nil {
-		return TailResult{Read: len(messages)}, err
-	}
-	result := TailResult{Read: len(messages), Decoded: len(events)}
+	events, ids, quarantined := t.decodeMessages(ctx, messages)
+	result := TailResult{Read: len(messages), Decoded: len(events), Quarantined: quarantined}
 	if len(events) > 0 {
 		result.Apply, err = t.store.ApplyBatch(ctx, t.projection, events)
 		if err != nil {
-			return result, err
+			// Event-level rejections (invalid scope, capacity) already skipped
+			// only the offending events and are counted in Apply.Ignored; the
+			// batch's accepted events applied and fanned out. Acking here keeps
+			// the loop moving instead of redelivering poison forever. System
+			// errors abort without acking so nothing is lost.
+			if !errors.Is(err, ErrInvalidEvent) && !errors.Is(err, ErrProjectionLimit) {
+				return result, err
+			}
 		}
 	}
 	if len(ids) > 0 {
@@ -108,23 +116,29 @@ func (t *Tailer) Run(ctx context.Context) error {
 	}
 }
 
-func (t *Tailer) decodeMessages(ctx context.Context, messages []SourceMessage) ([]Event, []string, error) {
+// decodeMessages decodes each message independently. A message whose decode
+// fails is quarantined — still acked, its events dropped — so one poison
+// message cannot block the healthy messages read alongside it or halt the
+// tail loop by redelivering forever.
+func (t *Tailer) decodeMessages(ctx context.Context, messages []SourceMessage) ([]Event, []string, int) {
 	events := make([]Event, 0, len(messages))
 	ids := make([]string, 0, len(messages))
+	quarantined := 0
 	for _, message := range messages {
 		decoded, err := t.decode(ctx, message)
 		if err != nil {
-			return nil, nil, err
-		}
-		for i := range decoded {
-			fillEventSource(&decoded[i], message, i, len(decoded))
-			events = append(events, decoded[i])
+			quarantined++
+		} else {
+			for i := range decoded {
+				fillEventSource(&decoded[i], message, i, len(decoded))
+				events = append(events, decoded[i])
+			}
 		}
 		if strings.TrimSpace(message.ID) != "" {
 			ids = append(ids, message.ID)
 		}
 	}
-	return events, ids, nil
+	return events, ids, quarantined
 }
 
 // fillEventSource assigns Event.SourceID when the decoder did not provide one.

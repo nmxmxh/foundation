@@ -285,18 +285,34 @@ func (t *EnvelopeTailer) PollOnce(ctx context.Context) (TailResult, error) {
 	if err != nil || len(messages) == 0 {
 		return TailResult{Read: len(messages)}, err
 	}
-	envelopes := make([]events.Envelope, len(messages))
+	// Decode each envelope independently and quarantine failures (acked,
+	// dropped, counted) so one poison envelope cannot halt the tail loop or
+	// block the healthy envelopes read alongside it — same contract as
+	// Tailer.decodeMessages.
+	batch := make([]Event, 0, len(messages))
 	ids := make([]string, 0, len(messages))
-	for i, message := range messages {
-		envelopes[i] = message.Envelope
+	result := TailResult{Read: len(messages)}
+	for _, message := range messages {
 		if strings.TrimSpace(message.AckID) != "" {
 			ids = append(ids, message.AckID)
 		}
+		decoded, err := EventsFromEnvelope(message.Envelope)
+		if err != nil {
+			result.Quarantined++
+			continue
+		}
+		result.Decoded++
+		batch = append(batch, decoded...)
 	}
-	result := TailResult{Read: len(messages), Decoded: len(envelopes)}
-	result.Apply, err = t.store.ApplyEnvelopes(ctx, t.projection, envelopes)
-	if err != nil {
-		return result, err
+	if len(batch) > 0 {
+		result.Apply, err = t.store.ApplyBatch(ctx, t.projection, batch)
+		if err != nil {
+			// Event-level rejections already skipped only the offending events;
+			// ack and keep tailing. System errors abort without acking.
+			if !errors.Is(err, ErrInvalidEvent) && !errors.Is(err, ErrProjectionLimit) {
+				return result, err
+			}
+		}
 	}
 	if len(ids) > 0 {
 		if err := t.source.Ack(ctx, ids...); err != nil {
@@ -360,13 +376,19 @@ func (s *RedisStreamEnvelopeSource) ReadEnvelopes(ctx context.Context, count int
 	}
 	out := make([]EnvelopeMessage, 0, len(messages))
 	for _, message := range messages {
+		// A message with a missing or undecodable envelope is returned with a
+		// zero Envelope instead of failing the read: the tailer quarantines it
+		// (acked, dropped, counted) so one poison message cannot block the
+		// healthy messages read alongside it or redeliver forever.
 		raw, ok := payloadBytes(message.Values, s.field)
 		if !ok {
-			return nil, fmt.Errorf("%w: redis stream envelope field %q is required", ErrInvalidEvent, s.field)
+			out = append(out, EnvelopeMessage{AckID: message.ID})
+			continue
 		}
 		envelope, err := events.FromBinary(raw)
 		if err != nil {
-			return nil, err
+			out = append(out, EnvelopeMessage{AckID: message.ID})
+			continue
 		}
 		out = append(out, EnvelopeMessage{AckID: message.ID, Envelope: envelope})
 	}

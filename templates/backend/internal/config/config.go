@@ -43,6 +43,17 @@ type Config struct {
 	HermesMaxRecords    int
 	HermesMaxBytes      int64
 	HermesIndexedFields []string
+	// HermesWarmScopes lists projection scopes to eagerly warm from the database
+	// at startup so the projection gateway serves out-of-band (e.g. SQL-seeded)
+	// rows instead of "projection not found". Each entry is
+	// "domain:collection:organization"; empty organization is invalid.
+	HermesWarmScopes []string
+	// HermesEnvelopeFallback runs a hardened EnvelopeTailer per warm scope,
+	// consuming canonical projection envelopes from Redis Streams
+	// (hermes:projection:<domain>:<collection>:<organization>). It is the
+	// fallback population path for producers that cannot share the Postgres
+	// job queue the canonical RecordWorkerProcessor uses.
+	HermesEnvelopeFallback bool
 
 	// Redis
 	RedisURL          string
@@ -106,6 +117,8 @@ func Load() (*Config, error) {
 		HermesMaxRecords:                    getEnvInt("HERMES_MAX_RECORDS_PER_SCOPE", 10000),
 		HermesMaxBytes:                      int64(getEnvInt("HERMES_MAX_BYTES_PER_SCOPE", 16*1024*1024)),
 		HermesIndexedFields:                 splitCSV(getEnv("HERMES_INDEXED_FIELDS", "state,status,type,kind,bucket")),
+		HermesWarmScopes:                    splitCSV(getEnv("HERMES_WARM_SCOPES", "")),
+		HermesEnvelopeFallback:              getEnvBool("HERMES_ENVELOPE_FALLBACK", false),
 		RedisURL:                            getEnv("REDIS_URL", ""),
 		RedisShardURLs:                      getEnv("REDIS_SHARD_URLS", ""),
 		RedisPrefix:                         getEnv("REDIS_PREFIX", "{{PROJECT_NAME}}"),
