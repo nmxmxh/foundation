@@ -20,6 +20,134 @@ The benchmark suite exists to prove that ladder stays honest. The fastest lane s
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
 
+## 2026-07-09 Canonical record-projection bridge (normalized tables → Hermes)
+
+The projection subsystem consolidation landed a single canonical path from
+normalized-SQL truth to the Hermes hotplane: write repos enqueue a
+`hermes.NewRecordProjectionJob(domain, collection, org, record_id, mutationTag)`
+via `Engine.EnqueueTx` in the same transaction as the domain write; one generic
+`hermes.RecordProjectionProcessor` (registered once, keyed by job args)
+resolves the committed row — inline `RawPayload` JSON or read-back through the
+app's `RecordFetcher` — and writes it through `ProjectedRuntimeStore`, buying
+the durable `governance_state_records` mirror, hot-partition apply, live
+gateway fan-out, and cold-start rebuildability (`WarmScope`) in one call. The
+mutation tag lives in the idempotency key so the engine's dedup
+(kind + IdempotencyKey) can never swallow a successive update to the same
+record.
+
+```bash
+cd foundation/server-kit/go
+SERVICE_BACKED_DATABASE_URL=... SERVICE_BACKED_REDIS_URL=... \
+go test -tags servicebacked ./servicebacked \
+  -run TestServiceBackedRecordProjectionCanonicalPath -v
+SERVICE_BACKED_DATABASE_URL=... SERVICE_BACKED_REDIS_URL=... \
+go test -tags servicebacked ./servicebacked -run='^$' \
+  -bench BenchmarkServiceBackedRecordProjectionHandle -benchmem -count=3
+```
+
+Apple M1 Pro (ARM64), live Postgres 16 in Docker on localhost (medians of 3):
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkServiceBackedRecordProjectionHandle-8` | ~932,488 | 12,871 | 147 | One projection job end-to-end: read-back `SELECT` from the normalized table + `UpsertRecord` (durable mirror write + hot apply + fan-out). ~0.93 ms is the full per-mutation projection cost a write repo adds by enqueueing one job — two Postgres round-trips dominate; the hermes apply itself is microseconds (see the 2026-07-02 columnar tables). Inline `RawPayload` producers skip the read-back round-trip. |
+
+### Batch projection writes: round-trip amortization (same day, follow-up)
+
+The single-record path pays the durable boundary (two Postgres round trips)
+per mutation. The batch shape pays it per batch: new
+`PostgresDB.UpsertRecordsBatch` (pipelined `pgx.Batch` over the identical
+upsert SQL — same validation, DISTINCT-FROM change detection, and returned
+timestamps; each row individually atomic and idempotent, so mid-batch failure
+replays safely) plus `ProjectedRuntimeStore.UpsertRecords` (one base round
+trip, then one hot `ApplyRecords` per scope group, versions reserved from the
+same counter so LWW and the "state" watermark stay coherent with single-record
+upserts). `RecordWorkerProcessor.Handle` now routes decoded records through
+the batch path, so a job carrying N records amortizes automatically.
+
+| Benchmark | ns/op | per-record | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkServiceBackedRecordProjectionHandle-8` (1 record, read-back) | ~954,371 | ~954 µs | 139 | The per-record shape: two round trips per mutation. |
+| `BenchmarkServiceBackedRecordProjectionBatch64-8` (64 records, inline, pipelined `pgx.Batch`) | ~4,971,414 | ~78 µs | 3,563 (~56/rec) | First batch rung: one pipelined round trip carrying 64 statements. Superseded same-day by the unnest lane below. |
+| `BenchmarkServiceBackedRecordProjectionBatch64-8` (64 records, inline, single-statement `unnest`) | ~3,822,648 | **~60 µs** | 2,502 (~39/rec) | `UpsertRecordsBatch` rewritten as ONE set-based statement (`unnest` arrays → upsert CTE → ordinal-joined timestamps): one parse/plan, one commit. **~16× cheaper per mutation than the single-record path**; the residual is per-row heap/index/WAL work and the commit flush on the server, no longer the wire or statement count. |
+
+The unnest lane carries an explicit refinement contract (per
+`tla_architecture_practices.md`): one statement must refine "sequential
+`UpsertRecord` per record" — same final rows, same `IS DISTINCT FROM` change
+detection (an unchanged replay never bumps `updated_at`; a change bumps it
+without touching `created_at`), and last-write-wins for duplicate identities
+inside one batch (deduplicated client-side keeping the last occurrence, since
+`ON CONFLICT DO UPDATE` cannot touch one row twice in a statement — exactly
+the sequential outcome). `TestServiceBackedUpsertRecordsBatchParity` proves
+each clause against live Postgres. CopyFrom was evaluated and rejected for
+this lane: COPY cannot express `ON CONFLICT` change detection without a
+temp-table dance that breaks the one-statement atomicity contract; it remains
+the right tool for pure append ingest.
+
+Evidence: `TestUpsertRecordsBatchGroupsScopesAndStaysCoherent` pins the batch
+contract (multi-scope grouping, base + hot landing, observer fan-out, and a
+later single-record upsert winning LWW over the batch via the shared version
+counter, including the per-record fallback lane for base stores without batch
+support). The same pass repaired
+`TestConformanceServiceBackedHermesProjectionMonotonic`, which had been
+reusing one SourceID across six versions — SourceID is per-event idempotency
+identity, so every apply after the first was an exact-tier duplicate and the
+watermark invariant could never hold; per-event IDs restore the intended
+TLA-refinement check and it now passes against live Postgres.
+
+### Allocation cuts on the shared DB/hermes hot path (same day, follow-up)
+
+Profiling the projection benchmark attributed the per-op allocations and drove
+three cuts in shared infrastructure (paid by every DB operation and every
+hermes apply fleet-wide, not just the projection path):
+
+1. **`database.acquireConn` closure → by-value `connLease`** — the returned
+   `cancel` capture closure (and the `conn.Release` method value stored in
+   `budgetedRow`/`budgetedRows`) heap-allocated on every operation. A lease
+   struct returned and stored by value carries the same release semantics with
+   zero allocation.
+2. **`observability` op/state counters → struct keys** — `RecordDatabaseOperation`
+   and `RecordRedisOperation` allocated an `"operation|state"` string per call.
+   Internal maps now key on a two-string struct (zero-alloc increment, gated by
+   `TestRecordOpStateDoesNotAllocate`); the exported snapshot builds the string
+   keys only at read time, so the `/metricsz` contract is unchanged.
+3. **`hermes.indexPublisher.publish` ownership transfer** — the per-cell order
+   re-slice and remove-set clone copied maps/slices the per-batch publisher was
+   about to discard; the COW snapshot now takes ownership (in-place filter, no
+   clones).
+
+Measured effect (medians of 3): the live projection Handle drops 147 → 139
+allocs/op (12,871 → 12,701 B/op, latency neutral — the op stays
+round-trip-bound); local `BenchmarkHermesApplyEventUpsert` drops 47 → 45
+allocs/op and `BenchmarkHermesApplyBatch64` ~1,096 → ~1,080 allocs
+(−12 KB/op). Full hermes/database/observability/projectiongw suites plus a
+hermes race run stay green.
+
+Method note for future passes: `pprof -sample_index=alloc_objects` extrapolates
+object counts from sampled bytes, so tiny allocations (closures, small strings)
+show inflated *shares* — the closure read as ~21% of objects but was physically
+2 allocs/op. Attribute with the profile, but size the win with `-benchmem`
+physical counts before and after. The remaining ~139 allocs/op are dominated by
+pgx query encode/scan, JSONB materialization, and per-query budget contexts —
+the next meaningful lever is not allocation trimming but round-trip removal
+(inline `RawPayload` producers already skip the read-back SELECT).
+
+Evidence: `TestServiceBackedRecordProjectionCanonicalPath`
+(`servicebacked/record_projection_test.go`) drives the full seam against live
+Postgres in four legs — (1) transactional write (`BeginTx` → normalized
+`INSERT` → job built in tx scope → commit) then `Handle` lands the record in
+the durable mirror **and** the identity-scoped projection gateway HTTP
+snapshot; (2) an update flows through the same seam and the mirror reflects
+the new value; (3) cold restart: a fresh `ProjectedRuntimeStore` over the same
+Postgres warms the projection back via `WarmScope` (the restart-survival
+property the memory-only projector paths lack); (4) delete-converge: the
+normalized row is deleted, a stale upsert job replays, and the processor
+converges by removing the record from mirror and snapshot. Unit-level
+contracts (job validation, idempotency-key mutation tags, inline payload,
+poison-drop, retryable fetcher errors) are pinned in
+`hermes/projection_job_test.go`; batch tolerance, tailer quarantine, and the
+canonical `RecordWorkerProcessor` durability split are pinned in
+`hermes/consolidation_test.go`.
+
 ## 2026-07-02 Bitmap-predicate merges in Hermes columnar reads
 
 Promoted from `future_practices_research.md` lane 7 (the processing-using-memory

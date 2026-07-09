@@ -177,6 +177,23 @@ This document tracks the deliberate performance and architecture carryovers fold
     on amd64 (Rosetta-emulated; native AVX2 host expected larger). Validity-masked
     reduction and additional numeric kernels (filter, min/max) are the next steps.
 
+80. Hot-path resource handles should be returned and stored as by-value structs
+    with release methods, not capture closures or method values. The
+    `database.acquireConn` cancel closure and `conn.Release` method values were
+    the largest per-op allocators on the DB hot path (2026-07-09); `connLease`
+    carries the same semantics allocation-free.
+81. Per-operation metric keys with bounded vocabularies must use composite
+    struct map keys internally and build display strings only at snapshot time.
+    String concatenation per recorded operation is an avoidable hot-path
+    allocation (see `observability.opStateKey`, gated by a zero-alloc test).
+82. Per-batch builders that hand results to immutable COW snapshots should
+    transfer ownership of their maps/slices instead of cloning, when the
+    builder is provably discarded after publish (`hermes.indexPublisher`).
+83. `pprof alloc_objects` shares are extrapolated from sampled bytes and
+    overstate tiny allocations. Use the profile to *locate* allocators, but
+    size and verify each cut with `-benchmem` physical allocs/op before and
+    after; a "20% of objects" closure can be 2 physical allocs/op.
+
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 
 - **Singleflight Cache**: `GetOrSet` prevents cache stampedes via concurrent request coalescing and double-check locking.

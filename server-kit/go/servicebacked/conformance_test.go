@@ -20,6 +20,7 @@ package servicebacked
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -74,9 +75,15 @@ func TestConformanceServiceBackedHermesProjectionMonotonic(t *testing.T) {
 		if _, err := state.UpsertRecord(ctx, record); err != nil {
 			t.Fatalf("postgres upsert v%d failed: %v", version, err)
 		}
+		// SourceID is per-event idempotency identity (a producer retry reuses
+		// it; a new mutation mints a new one), so each version carries its own.
+		// The shared "service-backed" prefix drives the watermark dedup tier
+		// the VersionWatermarkConsistent invariant observes. Reusing one
+		// SourceID across versions made every apply after the first an exact
+		// duplicate, so the watermark could never track the applied version.
 		if _, err := store.Apply(ctx, projection, hermes.Event{
 			Operation:     hermes.OperationUpsert,
-			SourceID:      "service-backed:conformance",
+			SourceID:      fmt.Sprintf("service-backed:conformance:%d", version),
 			Version:       version,
 			CorrelationID: "corr-conformance-monotonic",
 			Record:        record,

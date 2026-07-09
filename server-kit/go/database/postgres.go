@@ -122,25 +122,25 @@ func (r postgresCommandResult) RowsAffected() int64 {
 }
 
 type budgetedRow struct {
-	row     RowScanner
-	ctx     context.Context
-	cancel  context.CancelFunc
-	release func()
-	start   time.Time
+	row   RowScanner
+	ctx   context.Context
+	lease connLease
+	conn  *pgxpool.Conn
+	start time.Time
 }
 
 type budgetedRows struct {
-	rows    pgx.Rows
-	ctx     context.Context
-	cancel  context.CancelFunc
-	release func()
-	start   time.Time
+	rows  pgx.Rows
+	ctx   context.Context
+	lease connLease
+	conn  *pgxpool.Conn
+	start time.Time
 }
 
 func (r budgetedRow) Scan(dest ...any) error {
-	defer r.cancel()
-	if r.release != nil {
-		defer r.release()
+	defer r.lease.release()
+	if r.conn != nil {
+		defer r.conn.Release()
 	}
 	err := r.row.Scan(dest...)
 	err = normalizePostgresOperationError(contextErr(r.ctx), err)
@@ -150,10 +150,10 @@ func (r budgetedRow) Scan(dest ...any) error {
 
 func (r budgetedRows) Close() {
 	r.rows.Close()
-	if r.release != nil {
-		r.release()
+	if r.conn != nil {
+		r.conn.Release()
 	}
-	r.cancel()
+	r.lease.release()
 	recordDatabaseOperation("query", r.start, normalizePostgresOperationError(contextErr(r.ctx), r.rows.Err()))
 }
 
@@ -272,13 +272,13 @@ func (db *PostgresDB) Exec(ctx context.Context, query string, args ...any) error
 	if db == nil || db.pool == nil {
 		return errors.New("postgres pool is nil")
 	}
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "exec")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "exec")
 	if err != nil {
 		return err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	_, err = conn.Exec(queryCtx, query, args...)
 	err = normalizePostgresOperationError(contextErr(queryCtx), err)
@@ -290,13 +290,13 @@ func (db *PostgresDB) ExecResult(ctx context.Context, query string, args ...any)
 	if db == nil || db.pool == nil {
 		return nil, errors.New("postgres pool is nil")
 	}
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "exec_result")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "exec_result")
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	tag, err := conn.Exec(queryCtx, query, args...)
 	err = normalizePostgresOperationError(contextErr(queryCtx), err)
@@ -311,18 +311,18 @@ func (db *PostgresDB) QueryRow(ctx context.Context, query string, args ...any) R
 	if db == nil || db.pool == nil {
 		return memoryRow{err: errors.New("postgres pool is nil")}
 	}
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "query_row")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "query_row")
 	if err != nil {
 		return memoryRow{err: err}
 	}
-	return budgetedRow{row: conn.QueryRow(queryCtx, query, args...), ctx: queryCtx, cancel: cancel, release: conn.Release, start: start}
+	return budgetedRow{row: conn.QueryRow(queryCtx, query, args...), ctx: queryCtx, lease: lease, conn: conn, start: start}
 }
 
 func (db *PostgresDB) Query(ctx context.Context, query string, args ...any) (Rows, error) {
 	if db == nil || db.pool == nil {
 		return nil, errors.New("postgres pool is nil")
 	}
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "query")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "query")
 	if err != nil {
 		return nil, err
 	}
@@ -330,11 +330,11 @@ func (db *PostgresDB) Query(ctx context.Context, query string, args ...any) (Row
 	if err != nil {
 		err = normalizePostgresOperationError(contextErr(queryCtx), err)
 		conn.Release()
-		cancel()
+		lease.release()
 		recordDatabaseOperation("query", start, err)
 		return nil, err
 	}
-	return budgetedRows{rows: rows, ctx: queryCtx, cancel: cancel, release: conn.Release, start: start}, nil
+	return budgetedRows{rows: rows, ctx: queryCtx, lease: lease, conn: conn, start: start}, nil
 }
 
 func (db *PostgresDB) Stats() StoreStats {
@@ -361,7 +361,25 @@ func (db *PostgresDB) recordPoolPressure() {
 	recordDatabasePoolPressure(db.pool)
 }
 
-func (db *PostgresDB) acquireConn(ctx context.Context, operation string) (*pgxpool.Conn, context.Context, func(), time.Time, error) {
+// connLease releases an acquired connection's query budget and records pool
+// pressure. It is returned and stored by value so the database hot path does
+// not heap-allocate a capture closure per operation - that closure was the
+// single largest per-op allocator in the 2026-07-09 projection profile.
+type connLease struct {
+	db          *PostgresDB
+	queryCancel context.CancelFunc
+}
+
+func (l connLease) release() {
+	if l.queryCancel != nil {
+		l.queryCancel()
+	}
+	if l.db != nil {
+		l.db.recordPoolPressure()
+	}
+}
+
+func (db *PostgresDB) acquireConn(ctx context.Context, operation string) (*pgxpool.Conn, context.Context, connLease, time.Time, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -374,14 +392,10 @@ func (db *PostgresDB) acquireConn(ctx context.Context, operation string) (*pgxpo
 		err = normalizeAcquireError(acquireErr, err)
 		recordDatabaseOperation(operation+"_acquire", start, err)
 		db.recordPoolPressure()
-		return nil, nil, nil, start, err
+		return nil, nil, connLease{}, start, err
 	}
 	queryCtx, queryCancel := QueryBudgetContext(ctx, db.opts)
-	cancel := func() {
-		queryCancel()
-		db.recordPoolPressure()
-	}
-	return conn, queryCtx, cancel, start, nil
+	return conn, queryCtx, connLease{db: db, queryCancel: queryCancel}, start, nil
 }
 
 func normalizeAcquireError(ctxErr error, err error) error {
@@ -510,13 +524,13 @@ func (db *PostgresDB) UpsertRecord(ctx context.Context, rec DomainRecord) (Domai
 		createdAt time.Time
 		updatedAt time.Time
 	)
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "upsert_record")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "upsert_record")
 	if err != nil {
 		return DomainRecord{}, err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	err = conn.QueryRow(queryCtx, upsertRecordSQL, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload).Scan(&createdAt, &updatedAt)
 	err = normalizePostgresOperationError(contextErr(queryCtx), err)
@@ -543,13 +557,13 @@ func (db *PostgresDB) UpsertRecordJSON(ctx context.Context, rec RawDomainRecord)
 		createdAt time.Time
 		updatedAt time.Time
 	)
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "upsert_record_json")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "upsert_record_json")
 	if err != nil {
 		return RawDomainRecord{}, err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	err = conn.QueryRow(queryCtx, upsertRecordJSONSQL, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID, payload, rec.OrganizationID).Scan(&createdAt, &updatedAt)
 	err = normalizePostgresOperationError(contextErr(queryCtx), err)
@@ -597,13 +611,13 @@ func (db *PostgresDB) GetRecordJSON(ctx context.Context, domain, collection, org
 		createdAt time.Time
 		updatedAt time.Time
 	)
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "get_record_json")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "get_record_json")
 	if err != nil {
 		return RawDomainRecord{}, false, err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	domain = strings.TrimSpace(domain)
 	collection = strings.TrimSpace(collection)
@@ -703,7 +717,7 @@ func (db *PostgresDB) ForEachRecordWithOptions(ctx context.Context, domain, coll
 		args = append(args, queryLimit)
 	}
 
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "list_records")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "list_records")
 	if err != nil {
 		return err
 	}
@@ -711,7 +725,7 @@ func (db *PostgresDB) ForEachRecordWithOptions(ctx context.Context, domain, coll
 	if err != nil {
 		err = normalizePostgresOperationError(contextErr(queryCtx), err)
 		conn.Release()
-		cancel()
+		lease.release()
 		recordDatabaseOperation("list_records", start, err)
 		return err
 	}
@@ -719,7 +733,7 @@ func (db *PostgresDB) ForEachRecordWithOptions(ctx context.Context, domain, coll
 	defer func() {
 		rows.Close()
 		conn.Release()
-		cancel()
+		lease.release()
 		recordDatabaseOperation("list_records", start, opErr)
 	}()
 
@@ -801,13 +815,13 @@ func (db *PostgresDB) CountRecordsWithOptions(ctx context.Context, domain, colle
 	}
 
 	var count int64
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "count_records")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "count_records")
 	if err != nil {
 		return 0, err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	sql := `SELECT COUNT(*) FROM governance_state_records WHERE ` + where
 	err = conn.QueryRow(queryCtx, sql, args...).Scan(&count)
@@ -828,13 +842,13 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 	// If no filters, use the fastest catalog-based estimate
 	if domain == "" && collection == "" && organizationID == "" {
 		var estimate int64
-		conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "estimate_count")
+		conn, queryCtx, lease, start, err := db.acquireConn(ctx, "estimate_count")
 		if err != nil {
 			return 0, err
 		}
 		defer func() {
 			conn.Release()
-			cancel()
+			lease.release()
 		}()
 		err = conn.QueryRow(queryCtx, `
 			SELECT reltuples::bigint 
@@ -868,13 +882,13 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 
 	query := `EXPLAIN (FORMAT JSON) SELECT 1 FROM governance_state_records WHERE ` + strings.Join(clauses, " AND ")
 	var planJSON []byte
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "estimate_count")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "estimate_count")
 	if err != nil {
 		return 0, err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	err = conn.QueryRow(queryCtx, query, args...).Scan(&planJSON)
 	err = normalizePostgresOperationError(contextErr(queryCtx), err)
@@ -909,13 +923,13 @@ func (db *PostgresDB) DeleteRecord(ctx context.Context, domain, collection, orga
 	if db == nil || db.pool == nil {
 		return errors.New("postgres pool is nil")
 	}
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "delete_record")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "delete_record")
 	if err != nil {
 		return err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	_, err = conn.Exec(queryCtx, `
 		DELETE FROM governance_state_records
@@ -934,13 +948,13 @@ func (db *PostgresDB) DeleteRecordsByOrganization(ctx context.Context, organizat
 	if db == nil || db.pool == nil {
 		return 0, errors.New("postgres pool is nil")
 	}
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "delete_records_by_organization")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "delete_records_by_organization")
 	if err != nil {
 		return 0, err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	commandTag, err := conn.Exec(queryCtx, `
 		DELETE FROM governance_state_records

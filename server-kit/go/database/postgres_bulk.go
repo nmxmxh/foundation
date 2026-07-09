@@ -2,7 +2,10 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -26,13 +29,13 @@ func (db *PostgresDB) CopyFromSource(ctx context.Context, tablePath []string, co
 	if source == nil {
 		return 0, errors.New("copy source is required")
 	}
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "copy_from")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "copy_from")
 	if err != nil {
 		return 0, err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	copied, err := conn.Conn().CopyFrom(queryCtx, pgx.Identifier(tablePath), columns, source)
 	err = normalizePostgresOperationError(contextErr(queryCtx), err)
@@ -62,13 +65,13 @@ func (db *PostgresDB) SendBatch(ctx context.Context, build func(*pgx.Batch), con
 	}
 	var batch pgx.Batch
 	build(&batch)
-	conn, queryCtx, cancel, start, err := db.acquireConn(ctx, "send_batch")
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "send_batch")
 	if err != nil {
 		return err
 	}
 	defer func() {
 		conn.Release()
-		cancel()
+		lease.release()
 	}()
 	results := conn.Conn().SendBatch(queryCtx, &batch)
 	defer results.Close()
@@ -76,4 +79,133 @@ func (db *PostgresDB) SendBatch(ctx context.Context, build func(*pgx.Batch), con
 	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("send_batch", start, err)
 	return err
+}
+
+// upsertRecordsUnnestSQL is the set-based batch form of upsertRecordSQL: one
+// statement, one parse/plan, all rows via unnest arrays. The upsert CTE keeps
+// the exact single-row semantics (ON CONFLICT identity, IS DISTINCT FROM
+// change detection, updated_at bump only on change); the outer join maps each
+// input ordinal to its timestamps — inserted/changed rows come from the CTE's
+// RETURNING, unchanged rows read their existing row (unmodified by this
+// statement, so the pre-statement snapshot is the correct value).
+const upsertRecordsUnnestSQL = `
+	WITH input AS (
+		SELECT t.domain, t.collection_name, t.organization_id, t.record_id, t.data, t.ord
+		FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::jsonb[])
+			WITH ORDINALITY AS t(domain, collection_name, organization_id, record_id, data, ord)
+	), upsert AS (
+		INSERT INTO governance_state_records (domain, collection_name, organization_id, record_id, data)
+		SELECT domain, collection_name, organization_id, record_id, data FROM input
+		ON CONFLICT (domain, collection_name, organization_id, record_id)
+		DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+		WHERE governance_state_records.data IS DISTINCT FROM EXCLUDED.data
+		RETURNING domain, collection_name, organization_id, record_id, created_at, updated_at
+	)
+	SELECT COALESCE(u.created_at, g.created_at), COALESCE(u.updated_at, g.updated_at)
+	FROM input i
+	LEFT JOIN upsert u ON u.domain = i.domain AND u.collection_name = i.collection_name
+		AND u.organization_id = i.organization_id AND u.record_id = i.record_id
+	LEFT JOIN governance_state_records g ON g.domain = i.domain AND g.collection_name = i.collection_name
+		AND g.organization_id = i.organization_id AND g.record_id = i.record_id
+	ORDER BY i.ord`
+
+// UpsertRecordsBatch upserts many domain records in ONE SQL statement (unnest
+// arrays), so high-rate projection mirrors pay one round trip and one
+// parse/plan per batch instead of per record.
+//
+// Refinement contract (vs sequential UpsertRecord per record, proven by the
+// service-backed parity test): same final rows, same change detection
+// (unchanged data never bumps updated_at), and last-write-wins for duplicate
+// identities within one batch. Duplicates are deduplicated client-side keeping
+// the last occurrence — ON CONFLICT DO UPDATE cannot touch the same row twice
+// in one statement — which is exactly the sequential outcome; every input
+// position still receives the final row's timestamps. The statement is
+// individually atomic and idempotent, so a failed batch replays safely.
+func (db *PostgresDB) UpsertRecordsBatch(ctx context.Context, records []DomainRecord) ([]DomainRecord, error) {
+	if db == nil || db.pool == nil {
+		return nil, errors.New("postgres pool is nil")
+	}
+	if len(records) == 0 {
+		return nil, nil
+	}
+
+	out := make([]DomainRecord, len(records))
+	type identity struct{ domain, collection, organization, record string }
+	// keep-last dedupe: slot holds the position of each identity in the arrays.
+	slot := make(map[identity]int, len(records))
+	domains := make([]string, 0, len(records))
+	collections := make([]string, 0, len(records))
+	organizations := make([]string, 0, len(records))
+	recordIDs := make([]string, 0, len(records))
+	payloads := make([]string, 0, len(records))
+	// rowFor maps each input index to its identity's array slot so duplicate
+	// positions receive the final row's timestamps.
+	rowFor := make([]int, len(records))
+
+	for i := range records {
+		rec := records[i]
+		if err := validateDomainRecord(&rec); err != nil {
+			return nil, err
+		}
+		payload, err := json.Marshal(rec.Data)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = rec
+		id := identity{rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID}
+		if at, seen := slot[id]; seen {
+			payloads[at] = string(payload)
+			rowFor[i] = at
+			continue
+		}
+		slot[id] = len(domains)
+		rowFor[i] = len(domains)
+		domains = append(domains, rec.Domain)
+		collections = append(collections, rec.Collection)
+		organizations = append(organizations, rec.OrganizationID)
+		recordIDs = append(recordIDs, rec.RecordID)
+		payloads = append(payloads, string(payload))
+	}
+
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "upsert_records_batch")
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		conn.Release()
+		lease.release()
+	}()
+
+	rows, err := conn.Query(queryCtx, upsertRecordsUnnestSQL, domains, collections, organizations, recordIDs, payloads)
+	if err != nil {
+		err = normalizePostgresOperationError(contextErr(queryCtx), err)
+		recordDatabaseOperation("upsert_records_batch", start, err)
+		return nil, err
+	}
+	createdAt := make([]time.Time, 0, len(domains))
+	updatedAt := make([]time.Time, 0, len(domains))
+	for rows.Next() {
+		var created, updated time.Time
+		if err := rows.Scan(&created, &updated); err != nil {
+			rows.Close()
+			recordDatabaseOperation("upsert_records_batch", start, err)
+			return nil, err
+		}
+		createdAt = append(createdAt, created.UTC())
+		updatedAt = append(updatedAt, updated.UTC())
+	}
+	rows.Close()
+	err = normalizePostgresOperationError(contextErr(queryCtx), rows.Err())
+	recordDatabaseOperation("upsert_records_batch", start, err)
+	if err != nil {
+		return nil, err
+	}
+	if len(createdAt) != len(domains) {
+		return nil, fmt.Errorf("upsert_records_batch returned %d rows, want %d", len(createdAt), len(domains))
+	}
+	for i := range out {
+		out[i].CreatedAt = createdAt[rowFor[i]]
+		out[i].UpdatedAt = updatedAt[rowFor[i]]
+	}
+	return out, nil
 }

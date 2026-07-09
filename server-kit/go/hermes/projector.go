@@ -148,10 +148,9 @@ func (p *RecordWorkerProcessor) Handle(ctx context.Context, job worker.Job) erro
 	if err != nil {
 		return err
 	}
-	for _, rec := range records {
-		if _, err := p.projected.UpsertRecord(ctx, rec); err != nil {
-			return err
-		}
-	}
-	return nil
+	// Batch write: one pipelined base round trip + grouped hot applies, so a
+	// job carrying N records amortizes the durable boundary instead of paying
+	// it once per record.
+	_, err = p.projected.UpsertRecords(ctx, records)
+	return err
 }

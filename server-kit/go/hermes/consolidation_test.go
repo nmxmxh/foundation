@@ -121,6 +121,68 @@ func TestTailerQuarantinesPoisonMessage(t *testing.T) {
 	}
 }
 
+// TestUpsertRecordsBatchGroupsScopesAndStaysCoherent pins the batch write
+// path: UpsertRecords lands every record in the base store and the hot
+// partitions (grouped per scope), fans accepted mutations out to observers,
+// and allocates versions from the same counter as single-record upserts so a
+// later UpsertRecord still wins LWW over the batch. MemoryDB has no batch
+// capability, so this also covers the per-record fallback lane.
+func TestUpsertRecordsBatchGroupsScopesAndStaysCoherent(t *testing.T) {
+	base := database.NewMemoryDB()
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	ctx := t.Context()
+
+	var accepted []AppliedMutation
+	cancel := store.Store().Observe(func(_ string, mutations []AppliedMutation) {
+		accepted = append(accepted, mutations...)
+	})
+	defer cancel()
+
+	saved, err := store.UpsertRecords(ctx, []database.DomainRecord{
+		{Domain: "menu", Collection: "dishes", OrganizationID: "org_1", RecordID: "dish_1",
+			Data: testRecordData(map[string]any{"state": "published"})},
+		{Domain: "menu", Collection: "dishes", OrganizationID: "org_1", RecordID: "dish_2",
+			Data: testRecordData(map[string]any{"state": "published"})},
+		{Domain: "billing", Collection: "subscriptions", OrganizationID: "org_1", RecordID: "sub_1",
+			Data: testRecordData(map[string]any{"status": "active"})},
+	})
+	if err != nil || len(saved) != 3 {
+		t.Fatalf("UpsertRecords() len=%d err=%v", len(saved), err)
+	}
+	if len(accepted) != 3 {
+		t.Fatalf("observer saw %d mutations, want 3 (batch applies must fan out)", len(accepted))
+	}
+	for _, check := range []struct {
+		domain, collection string
+		want               int64
+	}{{"menu", "dishes", 2}, {"billing", "subscriptions", 1}} {
+		name := store.ProjectionName(check.domain, check.collection, "org_1")
+		count, err := store.Store().Count(ctx, name, Query{OrganizationID: "org_1"}, Fence{})
+		if err != nil || count != check.want {
+			t.Fatalf("hot count %s/%s = %d err=%v, want %d", check.domain, check.collection, count, err, check.want)
+		}
+	}
+	if _, found, err := base.GetRecord(ctx, "billing", "subscriptions", "org_1", "sub_1"); err != nil || !found {
+		t.Fatalf("base record missing after batch: found=%v err=%v", found, err)
+	}
+
+	// A later single-record upsert must win LWW over the batch (shared counter).
+	if _, err := store.UpsertRecord(ctx, database.DomainRecord{
+		Domain: "menu", Collection: "dishes", OrganizationID: "org_1", RecordID: "dish_1",
+		Data: testRecordData(map[string]any{"state": "sold_out"}),
+	}); err != nil {
+		t.Fatalf("follow-up UpsertRecord() error = %v", err)
+	}
+	name := store.ProjectionName("menu", "dishes", "org_1")
+	rec, found, err := store.Store().GetRecord(ctx, name, Query{OrganizationID: "org_1"}, "dish_1", Fence{})
+	if err != nil || !found || !recordDataStringEquals(rec.Data, "state", "sold_out") {
+		t.Fatalf("post-batch LWW record = %+v found=%v err=%v, want state=sold_out", rec, found, err)
+	}
+}
+
 // TestEnvelopeTailerQuarantinesPoisonEnvelope proves the envelope fallback
 // path survives poison: a message with a missing envelope field and one with
 // undecodable envelope bytes are quarantined (acked, dropped, counted) while

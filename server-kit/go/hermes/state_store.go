@@ -164,6 +164,76 @@ func (s *ProjectedRuntimeStore) UpsertRecord(ctx context.Context, rec database.D
 	return saved, nil
 }
 
+// batchRecordUpserter is the optional base-store capability UpsertRecords uses
+// to write a whole batch in one pipelined round trip (PostgresDB implements it
+// via UpsertRecordsBatch).
+type batchRecordUpserter interface {
+	UpsertRecordsBatch(ctx context.Context, records []database.DomainRecord) ([]database.DomainRecord, error)
+}
+
+// UpsertRecords writes a batch of records through the projected store: one
+// pipelined round trip to the base store when it supports batching (falling
+// back to per-record upserts), then one hot-partition ApplyRecords per scope
+// group. This is the round-trip-amortized shape of UpsertRecord — the
+// per-record projection cost drops toward the per-batch boundary cost, which
+// is what makes high mutation rates cheap. Semantics per record are identical
+// to UpsertRecord (idempotent, LWW-versioned from the same counter, live
+// fan-out through the store observer).
+func (s *ProjectedRuntimeStore) UpsertRecords(ctx context.Context, records []database.DomainRecord) ([]database.DomainRecord, error) {
+	switch len(records) {
+	case 0:
+		return nil, nil
+	case 1:
+		saved, err := s.UpsertRecord(ctx, records[0])
+		if err != nil {
+			return nil, err
+		}
+		return []database.DomainRecord{saved}, nil
+	}
+
+	var saved []database.DomainRecord
+	if batcher, ok := s.base.(batchRecordUpserter); ok {
+		batched, err := batcher.UpsertRecordsBatch(ctx, records)
+		if err != nil {
+			return nil, err
+		}
+		saved = batched
+	} else {
+		saved = make([]database.DomainRecord, 0, len(records))
+		for _, rec := range records {
+			one, err := s.base.UpsertRecord(ctx, rec)
+			if err != nil {
+				return nil, err
+			}
+			saved = append(saved, one)
+		}
+	}
+
+	s.projectUpsertBatch(ctx, saved)
+	return saved, nil
+}
+
+// projectUpsertBatch applies saved records to the hot plane grouped by scope,
+// one ApplyRecords call per projection partition. Versions are reserved from
+// the same counter as single-record projectUpsert, so LWW and the "state"
+// watermark dedup stay coherent across both paths.
+func (s *ProjectedRuntimeStore) projectUpsertBatch(ctx context.Context, records []database.DomainRecord) {
+	groups := make(map[string][]database.DomainRecord)
+	for _, rec := range records {
+		name, err := s.ensureProjection(rec.Domain, rec.Collection, rec.OrganizationID)
+		if err != nil {
+			continue
+		}
+		groups[name] = append(groups[name], rec)
+	}
+	for name, group := range groups {
+		count := uint64(len(group))
+		baseVersion := s.version.Add(count) - count + 1
+		_, err := s.hot.ApplyRecords(ctx, name, "state", baseVersion, group)
+		s.rememberProjectionResult(name, err)
+	}
+}
+
 func (s *ProjectedRuntimeStore) UpsertRecordJSON(ctx context.Context, rec database.RawDomainRecord) (database.RawDomainRecord, error) {
 	raw, err := s.rawStore().UpsertRecordJSON(ctx, rec)
 	if err != nil {

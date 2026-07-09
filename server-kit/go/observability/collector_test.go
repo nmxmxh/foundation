@@ -172,3 +172,35 @@ func TestSnapshotAndTraceHandlers(t *testing.T) {
 		t.Fatalf("missing correlation status = %d", rec.Code)
 	}
 }
+
+// TestRecordOpStateDoesNotAllocate is the regression gate for the struct-keyed
+// operation/state counters: recording a database or redis operation on a
+// warmed key must not allocate (the former "operation|state" concatenation
+// allocated one string per recorded call on the DB hot path — 2026-07-09
+// projection profile). The exported snapshot keeps the "op|state" string keys;
+// they are built only at snapshot time.
+func TestRecordOpStateDoesNotAllocate(t *testing.T) {
+	c := NewCollector()
+	// Warm the map buckets so steady-state behavior is measured.
+	c.RecordDatabaseOperation("upsert_record", "ok", time.Millisecond)
+	c.RecordRedisOperation("xadd", "ok", time.Millisecond)
+
+	if allocs := testing.AllocsPerRun(1000, func() {
+		c.RecordDatabaseOperation("upsert_record", "ok", time.Millisecond)
+	}); allocs != 0 {
+		t.Fatalf("RecordDatabaseOperation allocs/op = %v, want 0", allocs)
+	}
+	if allocs := testing.AllocsPerRun(1000, func() {
+		c.RecordRedisOperation("xadd", "ok", time.Millisecond)
+	}); allocs != 0 {
+		t.Fatalf("RecordRedisOperation allocs/op = %v, want 0", allocs)
+	}
+
+	snapshot := c.Snapshot()
+	if snapshot.Database.Count["upsert_record|ok"] == 0 {
+		t.Fatal("snapshot lost the op|state string key contract")
+	}
+	if snapshot.Redis.Count["xadd|ok"] == 0 {
+		t.Fatal("redis snapshot lost the op|state string key contract")
+	}
+}

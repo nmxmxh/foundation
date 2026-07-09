@@ -224,16 +224,26 @@ func (p *indexPublisher) publish() int {
 	for cell, change := range p.changes {
 		old := snapshotFromCell(cell)
 		adds := make(map[string]struct{}, len(change.adds))
-		order := make([]recordOrderEntry, 0, len(change.order))
 		for key := range change.adds {
 			adds[key] = struct{}{}
 		}
+		// The publisher is per-apply-batch and discarded after publish, so the
+		// snapshot takes ownership of change.order (filtered in place) and
+		// change.removes instead of allocating copies — the order re-slice and
+		// the remove-set clone were hot allocations in the 2026-07-09
+		// projection profile.
+		kept := 0
 		for _, entry := range change.order {
 			if _, ok := change.adds[entry.key]; ok {
-				order = append(order, entry)
+				change.order[kept] = entry
+				kept++
 			}
 		}
-		removes := cloneRemoveSet(change.removes)
+		order := change.order[:kept]
+		var removes map[string]struct{}
+		if len(change.removes) > 0 {
+			removes = change.removes
+		}
 		size := max(old.len()+change.delta, 0)
 		next := &indexSnapshot{
 			base:    old,
@@ -262,17 +272,6 @@ func (p *indexPublisher) change(cell *indexCell) *indexChange {
 	}
 	p.changes[cell] = change
 	return change
-}
-
-func cloneRemoveSet(in map[string]struct{}) map[string]struct{} {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]struct{}, len(in))
-	for key := range in {
-		out[key] = struct{}{}
-	}
-	return out
 }
 
 func (s *indexSnapshot) len() int {

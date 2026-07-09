@@ -13,10 +13,10 @@ type Collector struct {
 	httpRequests          map[string]int64
 	dispatchCount         map[string]int64
 	dispatchDurationMicro map[string]int64
-	redisCount            map[string]int64
-	redisDurationMicro    map[string]int64
-	databaseCount         map[string]int64
-	databaseDurationMicro map[string]int64
+	redisCount            map[opStateKey]int64
+	redisDurationMicro    map[opStateKey]int64
+	databaseCount         map[opStateKey]int64
+	databaseDurationMicro map[opStateKey]int64
 	databasePool          map[string]DatabasePoolPressure
 	workerCount           map[string]int64
 	workerQueueDepth      map[string]int64
@@ -28,6 +28,18 @@ type Collector struct {
 	traceOrder            []string
 	maxTraceCorrelations  int
 	maxTraceEvents        int
+}
+
+// opStateKey keys per-operation counters without allocating an
+// "operation|state" string on every recorded call. Both components are
+// bounded vocabularies; the string form is built only in Snapshot (cold path).
+type opStateKey struct {
+	operation string
+	state     string
+}
+
+func (k opStateKey) String() string {
+	return k.operation + "|" + k.state
 }
 
 type traceBuffer struct {
@@ -102,10 +114,10 @@ func NewCollector() *Collector {
 		httpRequests:          map[string]int64{},
 		dispatchCount:         map[string]int64{},
 		dispatchDurationMicro: map[string]int64{},
-		redisCount:            map[string]int64{},
-		redisDurationMicro:    map[string]int64{},
-		databaseCount:         map[string]int64{},
-		databaseDurationMicro: map[string]int64{},
+		redisCount:            map[opStateKey]int64{},
+		redisDurationMicro:    map[opStateKey]int64{},
+		databaseCount:         map[opStateKey]int64{},
+		databaseDurationMicro: map[opStateKey]int64{},
 		databasePool:          map[string]DatabasePoolPressure{},
 		workerCount:           map[string]int64{},
 		workerQueueDepth:      map[string]int64{},
@@ -163,7 +175,7 @@ func (c *Collector) RecordRedisOperation(operation, state string, duration time.
 	if state == "" {
 		state = "unknown"
 	}
-	key := operation + "|" + state
+	key := opStateKey{operation: operation, state: state}
 	c.mu.Lock()
 	c.redisCount[key]++
 	c.redisDurationMicro[key] += duration.Microseconds()
@@ -180,7 +192,7 @@ func (c *Collector) RecordDatabaseOperation(operation, state string, duration ti
 	if state == "" {
 		state = "unknown"
 	}
-	key := operation + "|" + state
+	key := opStateKey{operation: operation, state: state}
 	c.mu.Lock()
 	c.databaseCount[key]++
 	c.databaseDurationMicro[key] += duration.Microseconds()
@@ -380,10 +392,10 @@ func (c *Collector) Snapshot() Snapshot {
 		}
 		dispatchAvgMicro[key] = c.dispatchDurationMicro[key] / count
 	}
-	redis := cloneMap(c.redisCount)
-	redisAvgMicro := averageMap(c.redisCount, c.redisDurationMicro)
-	database := cloneMap(c.databaseCount)
-	databaseAvgMicro := averageMap(c.databaseCount, c.databaseDurationMicro)
+	redis := stringifyOpStateMap(c.redisCount)
+	redisAvgMicro := averageOpStateMap(c.redisCount, c.redisDurationMicro)
+	database := stringifyOpStateMap(c.databaseCount)
+	databaseAvgMicro := averageOpStateMap(c.databaseCount, c.databaseDurationMicro)
 	databasePool := cloneDatabasePoolMap(c.databasePool)
 	worker := cloneMap(c.workerCount)
 	queueDepth := cloneMap(c.workerQueueDepth)
@@ -441,10 +453,10 @@ func (c *Collector) Reset() {
 	c.httpRequests = map[string]int64{}
 	c.dispatchCount = map[string]int64{}
 	c.dispatchDurationMicro = map[string]int64{}
-	c.redisCount = map[string]int64{}
-	c.redisDurationMicro = map[string]int64{}
-	c.databaseCount = map[string]int64{}
-	c.databaseDurationMicro = map[string]int64{}
+	c.redisCount = map[opStateKey]int64{}
+	c.redisDurationMicro = map[opStateKey]int64{}
+	c.databaseCount = map[opStateKey]int64{}
+	c.databaseDurationMicro = map[opStateKey]int64{}
 	c.databasePool = map[string]DatabasePoolPressure{}
 	c.workerCount = map[string]int64{}
 	c.workerQueueDepth = map[string]int64{}
@@ -500,6 +512,27 @@ func averageMap(counts, durations map[string]int64) map[string]int64 {
 			continue
 		}
 		out[key] = durations[key] / count
+	}
+	return out
+}
+
+// stringifyOpStateMap materializes the exported "operation|state" string keys
+// at snapshot time so the hot record path never pays the concatenation.
+func stringifyOpStateMap(in map[opStateKey]int64) map[string]int64 {
+	out := make(map[string]int64, len(in))
+	for key, value := range in {
+		out[key.String()] = value
+	}
+	return out
+}
+
+func averageOpStateMap(counts, durations map[opStateKey]int64) map[string]int64 {
+	out := map[string]int64{}
+	for key, count := range counts {
+		if count <= 0 {
+			continue
+		}
+		out[key.String()] = durations[key] / count
 	}
 	return out
 }

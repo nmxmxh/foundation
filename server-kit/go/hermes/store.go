@@ -311,7 +311,7 @@ func (s *Store) ApplyRecords(ctx context.Context, projection string, sourcePrefi
 	}
 	var accepted []AppliedMutation
 	result, err := part.applyRecords(ctx, sourcePrefix, baseVersion, records, s.collector(&accepted))
-	if err == nil {
+	if len(accepted) > 0 {
 		s.notify(projection, accepted)
 	}
 	return result, err
