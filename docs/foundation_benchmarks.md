@@ -51,6 +51,69 @@ Apple M1 Pro (ARM64), live Postgres 16 in Docker on localhost (medians of 3):
 | --- | ---: | ---: | ---: | --- |
 | `BenchmarkServiceBackedRecordProjectionHandle-8` | ~932,488 | 12,871 | 147 | One projection job end-to-end: read-back `SELECT` from the normalized table + `UpsertRecord` (durable mirror write + hot apply + fan-out). ~0.93 ms is the full per-mutation projection cost a write repo adds by enqueueing one job — two Postgres round-trips dominate; the hermes apply itself is microseconds (see the 2026-07-02 columnar tables). Inline `RawPayload` producers skip the read-back round-trip. |
 
+### Columnar snapshot artifacts — HCS1 (same day, follow-up)
+
+The 2026-07-01 entry named this "the highest-value follow-up": warm was
+decode-bound (proto decode builds N×F `RecordMutation` messages, then
+`recordFromMutation` converts every field). The HCS1 columnar artifact
+(`server-kit/go/hermes/snapshot_columnar.go`) stores each column once — field
+names appear once, all text lives in one blob decoded as a single shared
+string whose substrings back every value, identity columns are
+dictionary-encoded, and the bounds-checked cursor turns any corruption into
+`ErrSnapshotCorrupt`. `SaveSnapshot` now writes HCS1; both readers
+(`WarmFromSnapshot`, `ShadowCompareSnapshot`) sniff the magic through one
+shared `streamSnapshotRecords` seam, so row-proto artifacts already in stores
+keep loading unchanged (FallbackRefinement — format is hidden state).
+
+```bash
+cd foundation/server-kit/go
+go test ./hermes -run='^$' \
+  -bench='BenchmarkHermesWarmFromSnapshotFormats' -benchmem -count=3
+```
+
+Apple M1 Pro (ARM64), same 10K-record partition, cold warm per iteration
+(medians of 3):
+
+| Format | ns/op | artifact bytes | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `proto_rows` (legacy) | ~31.6 ms | 1,279,873 | 29.3 MB | 325,133 | Decode dominates: ~250K of the allocations are proto messages and per-field conversions. |
+| `columnar` (HCS1) | **~18.1 ms** | **677,637** | **18.5 MB** | **75,142** | **43% faster, 47% smaller, 77% fewer allocations** — and 75.1K allocs is exactly the partition/index-construction floor the streaming-rebuild benchmark reports (75,127–75,136), i.e. decode allocation is eliminated; warm is now pure partition construction. |
+
+Honesty note: the ledger's earlier ">10× compression" speculation assumed wide
+analytical scans; this 3-field fixture yields 1.9×. The structural win — the
+predicted decode-allocation collapse — landed exactly as forecast.
+
+Evidence: `TestColumnarSnapshotRoundTripParity` locks the refinement — both
+formats stream byte-identical record sets (canonical-JSON bodies, timestamps,
+vectors) from the same partition, a cold store warmed from HCS1 serves the
+same reads, the shadow comparator matches across formats, and a truncated
+HCS1 payload fails with `ErrSnapshotCorrupt` instead of panicking.
+
+### Shadow-mode snapshot warm wire (same day, follow-up)
+
+The 2026-07-01 snapshot-tier entry left one item explicitly "not yet built":
+the shadow-mode wire into `ProjectedRuntimeStore.ensureWarm` (dual-load + diff
+before ever preferring the snapshot over `Rebuild`). It now exists:
+`RuntimeStoreOptions.SnapshotStore` arms a strictly best-effort lane that runs
+after every successful source rebuild — `Store.ShadowCompareSnapshot` diffs the
+newest durable artifact against the freshly rebuilt partition (the rebuild is
+the oracle: counts, per-record canonical-JSON bodies, missing/extra/mismatch
+classification), the outcome lands in
+`HermesRuntimeStats.SnapshotShadow{Matches,Mismatches,Errors}`, and the
+artifact is refreshed (`SnapshotSaves`) so the next cold process compares
+against current evidence. The served warm path is byte-for-byte unchanged
+(`FallbackRefinement`): snapshots are compared and produced, never yet
+preferred — flipping preference is a later, evidence-gated change once fleets
+show sustained clean matches. Scaffolded apps arm it with one env var
+(`HERMES_SNAPSHOT_DIR` → `hermessnapshot.FileStore`).
+
+Evidence: `TestSnapshotShadowEvidenceCycle` drives four simulated process
+generations over one base + one snapshot store — first warm produces the
+artifact, second records a clean match, an out-of-band base mutation makes the
+third record a mismatch, and the refreshed artifact matches again on the
+fourth. `TestApplyRecordsSkipsEventLevelRejections` extends the batch-tolerance
+contract to the trusted-records lane the batch upserts use. Race run clean.
+
 ### Batch projection writes: round-trip amortization (same day, follow-up)
 
 The single-record path pays the durable boundary (two Postgres round trips)

@@ -48,6 +48,12 @@ type Config struct {
 	// rows instead of "projection not found". Each entry is
 	// "domain:collection:organization"; empty organization is invalid.
 	HermesWarmScopes []string
+	// HermesSnapshotDir enables the shadow-mode snapshot rollout: after every
+	// source rebuild the projected store diffs and refreshes a durable snapshot
+	// artifact under this directory (evidence counters in hermes runtime
+	// stats). Empty disables the shadow lane. The served warm path never
+	// changes: snapshots are compared and produced, not yet preferred.
+	HermesSnapshotDir string
 	// HermesEnvelopeFallback runs a hardened EnvelopeTailer per warm scope,
 	// consuming canonical projection envelopes from Redis Streams
 	// (hermes:projection:<domain>:<collection>:<organization>). It is the
@@ -118,6 +124,7 @@ func Load() (*Config, error) {
 		HermesMaxBytes:                      int64(getEnvInt("HERMES_MAX_BYTES_PER_SCOPE", 16*1024*1024)),
 		HermesIndexedFields:                 splitCSV(getEnv("HERMES_INDEXED_FIELDS", "state,status,type,kind,bucket")),
 		HermesWarmScopes:                    splitCSV(getEnv("HERMES_WARM_SCOPES", "")),
+		HermesSnapshotDir:                   getEnv("HERMES_SNAPSHOT_DIR", ""),
 		HermesEnvelopeFallback:              getEnvBool("HERMES_ENVELOPE_FALLBACK", false),
 		RedisURL:                            getEnv("REDIS_URL", ""),
 		RedisShardURLs:                      getEnv("REDIS_SHARD_URLS", ""),

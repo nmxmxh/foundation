@@ -164,7 +164,9 @@ check_file_contains "eventlog detects lost publish claims" "$kit/eventlog/eventl
 check_file_contains "graceful guards missing River client" "$kit/graceful/graceful.go" "ErrRiverClientRequired"
 check_file_contains "graceful respects context cancellation before emit" "$kit/graceful/graceful.go" "ctx.Err()"
 check_file_contains "graceful publish args carry idempotency" "$kit/graceful/graceful.go" "IdempotencyKey"
-check_file_contains "graceful exposes owned extension payload fast path" "$kit/graceful/graceful.go" "type OwnedObject struct"
+# 2a69cdf removed the OwnedObject wrapper: the emitter contract is now a typed
+# extension.Object payload at the boundary (no generic-any conversion lane).
+check_file_contains "graceful emits typed extension payloads" "$kit/graceful/graceful.go" "payload extension.Object, metadata extension.Object"
 check_file_contains "registry validates HTTP route manifests" "$kit/registry/http_route.go" "func (r HTTPRoute) Validate() error"
 check_file_contains "registry exposes dispatch metrics snapshot" "$kit/registry/registry.go" "func (r *ServiceRegistry) MetricsSnapshot() MetricsSnapshot"
 check_file_contains "registry tracks unknown event types" "$kit/registry/registry.go" "unknownEvents"

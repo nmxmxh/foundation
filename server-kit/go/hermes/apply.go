@@ -83,9 +83,10 @@ func (p *partition) applyRecords(ctx context.Context, sourcePrefix string, baseV
 	publisher := newIndexPublisher()
 	p.evictExpiredLocked(registry, publisher)
 	result := ApplyResult{Epoch: p.epoch.Load()}
+	var eventErrs error
 	for i, rec := range records {
 		if err := ctxErr(ctx); err != nil {
-			return p.finishApplyLocked(result, publisher), err
+			return p.finishApplyLocked(result, publisher), errors.Join(eventErrs, err)
 		}
 		event := Event{Operation: OperationUpsert, Record: rec}
 		if baseVersion > 0 {
@@ -97,7 +98,16 @@ func (p *partition) applyRecords(ctx context.Context, sourcePrefix string, baseV
 		state, version, err := p.applyEventLocked(registry, publisher, event)
 		if err != nil {
 			p.rejectedApplies.Add(1)
-			return p.finishApplyLocked(result, publisher), err
+			// Same batch-tolerance contract as applyBatchObserving: an
+			// event-level rejection (invalid scope, capacity) poisons only the
+			// offending record; the rest of the trusted batch still applies and
+			// the error surfaces joined at the end.
+			if errors.Is(err, ErrInvalidEvent) || errors.Is(err, ErrProjectionLimit) {
+				result.Ignored++
+				eventErrs = errors.Join(eventErrs, err)
+				continue
+			}
+			return p.finishApplyLocked(result, publisher), errors.Join(eventErrs, err)
 		}
 		switch state {
 		case applyStateApplied:
@@ -113,7 +123,7 @@ func (p *partition) applyRecords(ctx context.Context, sourcePrefix string, baseV
 			result.Ignored++
 		}
 	}
-	return p.finishApplyLocked(result, publisher), nil
+	return p.finishApplyLocked(result, publisher), eventErrs
 }
 
 func (p *partition) finishApplyLocked(result ApplyResult, publisher *indexPublisher) ApplyResult {

@@ -14,6 +14,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/healthcheck"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermessnapshot"
 	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
@@ -224,11 +225,23 @@ func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger)
 	if err != nil {
 		return nil, nil, err
 	}
-	projected, err := hermes.WrapRuntimeStore(db, hermes.RuntimeStoreOptions{
+	storeOpts := hermes.RuntimeStoreOptions{
 		IndexedFields:      cfg.HermesIndexedFields,
 		MaxRecordsPerScope: cfg.HermesMaxRecords,
 		MaxBytesPerScope:   cfg.HermesMaxBytes,
-	})
+	}
+	// Shadow-mode snapshot rollout: with a snapshot directory configured, every
+	// source rebuild diffs and refreshes a durable artifact (evidence counters
+	// in hermes runtime stats). The served warm path is unchanged.
+	if dir := strings.TrimSpace(cfg.HermesSnapshotDir); dir != "" {
+		snaps, err := hermessnapshot.NewFileStore(dir)
+		if err != nil {
+			db.Close()
+			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", err)
+		}
+		storeOpts.SnapshotStore = snaps
+	}
+	projected, err := hermes.WrapRuntimeStore(db, storeOpts)
 	if err != nil {
 		db.Close()
 		return nil, nil, err

@@ -1675,6 +1675,57 @@ GOEOF
   fi
 }
 
+patch_startup_snapshot_shadow() {
+  local deps="$target/internal/startup/dependencies.go"
+  local cfg="$target/internal/config/config.go"
+  local env="$target/.env.example"
+  [[ -f "$deps" && -f "$cfg" ]] || return 0
+
+  # Wire the shadow-mode snapshot rollout (HERMES_SNAPSHOT_DIR ->
+  # hermessnapshot.FileStore -> RuntimeStoreOptions.SnapshotStore). Anchored on
+  # the exact canonical WrapRuntimeStore block; a diverged app is left
+  # untouched. Symbol-guarded and idempotent.
+  grep -Fq 'HermesWarmScopes []string' "$cfg" || return 0
+  grep -Fq 'HERMES_WARM_SCOPES' "$cfg" || return 0
+  grep -Fq '"github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes"' "$deps" || return 0
+
+  local touched=0
+
+  if ! grep -Fq 'HermesSnapshotDir' "$cfg"; then
+    local before; before="$(mktemp)"; cp "$cfg" "$before"
+    perl -0pi -e 's/(\tHermesWarmScopes \[\]string\n)/$1\t\/\/ HermesSnapshotDir enables the shadow-mode snapshot rollout: after every\n\t\/\/ source rebuild the projected store diffs and refreshes a durable snapshot\n\t\/\/ artifact under this directory (evidence counters in hermes runtime\n\t\/\/ stats). Empty disables the shadow lane. The served warm path never\n\t\/\/ changes: snapshots are compared and produced, not yet preferred.\n\tHermesSnapshotDir string\n/' "$cfg"
+    perl -0pi -e 's/(\t*HermesWarmScopes:\s*splitCSV\(getEnv\("HERMES_WARM_SCOPES", ""\)\),\n)/$1\t\tHermesSnapshotDir: getEnv("HERMES_SNAPSHOT_DIR", ""),\n/' "$cfg"
+    if ! cmp -s "$before" "$cfg"; then
+      touched=1
+      log_patch "config adds HermesSnapshotDir: ${cfg#$target/}"
+    fi
+    rm -f "$before"
+  fi
+
+  if ! grep -Fq 'hermessnapshot' "$deps"; then
+    local before; before="$(mktemp)"; cp "$deps" "$before"
+    perl -0pi -e 's/(\t"github.com\/nmxmxh\/ovasabi_foundation\/server-kit\/go\/hermes"\n)/$1\t"github.com\/nmxmxh\/ovasabi_foundation\/server-kit\/go\/hermessnapshot"\n/' "$deps"
+    perl -0pi -e 's/\tprojected, err := hermes\.WrapRuntimeStore\(db, hermes\.RuntimeStoreOptions\{\n\t\tIndexedFields:      cfg\.HermesIndexedFields,\n\t\tMaxRecordsPerScope: cfg\.HermesMaxRecords,\n\t\tMaxBytesPerScope:   cfg\.HermesMaxBytes,\n\t\}\)\n/\tstoreOpts := hermes.RuntimeStoreOptions{\n\t\tIndexedFields:      cfg.HermesIndexedFields,\n\t\tMaxRecordsPerScope: cfg.HermesMaxRecords,\n\t\tMaxBytesPerScope:   cfg.HermesMaxBytes,\n\t}\n\t\/\/ Shadow-mode snapshot rollout: with a snapshot directory configured, every\n\t\/\/ source rebuild diffs and refreshes a durable artifact (evidence counters\n\t\/\/ in hermes runtime stats). The served warm path is unchanged.\n\tif dir := strings.TrimSpace(cfg.HermesSnapshotDir); dir != "" {\n\t\tsnaps, err := hermessnapshot.NewFileStore(dir)\n\t\tif err != nil {\n\t\t\tdb.Close()\n\t\t\treturn nil, nil, fmt.Errorf("init hermes snapshot store: %w", err)\n\t\t}\n\t\tstoreOpts.SnapshotStore = snaps\n\t}\n\tprojected, err := hermes.WrapRuntimeStore(db, storeOpts)\n/' "$deps"
+    if grep -Fq 'storeOpts.SnapshotStore' "$deps" && ! cmp -s "$before" "$deps"; then
+      touched=1
+      log_patch "startup wires shadow-mode snapshot store: ${deps#$target/}"
+    else
+      # WrapRuntimeStore block diverged: revert the import-only change.
+      cp "$before" "$deps"
+    fi
+    rm -f "$before"
+  fi
+
+  if [[ -f "$env" ]] && ! grep -q '^HERMES_SNAPSHOT_DIR=' "$env" && grep -q '^HERMES_ENVELOPE_FALLBACK=' "$env"; then
+    perl -0pi -e 's/(^HERMES_ENVELOPE_FALLBACK=[^\n]*\n)/$1# Shadow-mode snapshot rollout: with a directory set, every source rebuild\n# diffs and refreshes a durable snapshot artifact (evidence counters in hermes\n# runtime stats). Served warm path unchanged; empty disables.\nHERMES_SNAPSHOT_DIR=\n/m' "$env"
+    log_patch "env example adds HERMES_SNAPSHOT_DIR: ${env#$target/}"
+  fi
+
+  if [[ "$touched" -eq 1 ]] && command -v gofmt >/dev/null 2>&1; then
+    gofmt -w "$cfg" "$deps"
+  fi
+}
+
 export PATCH_SEARCH PATCH_REPLACE
 
 patch_agent_native_guides
@@ -1714,6 +1765,7 @@ patch_frontend_tsconfig_baseurl
 patch_env_example_hermes_warm_scopes
 patch_startup_projection_warming
 patch_startup_envelope_fallback
+patch_startup_snapshot_shadow
 sync_go_work
 
 if [[ "$patched" -eq 0 ]]; then

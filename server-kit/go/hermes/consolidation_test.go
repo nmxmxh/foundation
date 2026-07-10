@@ -183,6 +183,105 @@ func TestUpsertRecordsBatchGroupsScopesAndStaysCoherent(t *testing.T) {
 	}
 }
 
+// TestApplyRecordsSkipsEventLevelRejections extends the batch-tolerance
+// contract to the trusted-records lane (the batch-upsert hot path): a capacity
+// rejection mid-batch poisons only the overflowing record — the records before
+// it stay applied and the error surfaces joined at the end.
+func TestApplyRecordsSkipsEventLevelRejections(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name:       "tolerant_records",
+		Domain:     "signals",
+		Collection: "ticks",
+		MaxRecords: 1,
+		MaxBytes:   1 << 20,
+	})
+	ctx := t.Context()
+	result, err := store.ApplyRecords(ctx, "tolerant_records", "state", 1, []database.DomainRecord{
+		testRecord("signals", "ticks", "org_1", "tick_1", nil),
+		testRecord("signals", "ticks", "org_1", "tick_2", nil), // over capacity
+	})
+	if !errors.Is(err, ErrProjectionLimit) {
+		t.Fatalf("err = %v, want joined ErrProjectionLimit", err)
+	}
+	if result.Applied != 1 || result.Ignored != 1 {
+		t.Fatalf("result = %+v, want Applied=1 Ignored=1 (overflow must not poison the batch)", result)
+	}
+	count, err := store.Count(ctx, "tolerant_records", Query{OrganizationID: "org_1"}, Fence{})
+	if err != nil || count != 1 {
+		t.Fatalf("Count() = %d err=%v, want 1", count, err)
+	}
+}
+
+// TestSnapshotShadowEvidenceCycle drives the shadow-mode snapshot rollout
+// across three simulated process generations sharing one durable base and one
+// snapshot store:
+//
+//	gen 1: cold warm, no artifact yet → rebuild serves, artifact saved.
+//	gen 2: cold warm, artifact matches the rebuild → clean-match evidence.
+//	gen 3: base mutated out-of-band since the artifact → mismatch evidence,
+//	       artifact refreshed to the new truth.
+//
+// Throughout, the served warm path is the source rebuild — the shadow lane
+// only accumulates the evidence counters that gate ever preferring snapshots.
+func TestSnapshotShadowEvidenceCycle(t *testing.T) {
+	base := database.NewMemoryDB()
+	snaps := NewMemorySnapshotStore()
+	ctx := t.Context()
+	opts := RuntimeStoreOptions{MaxRecordsPerScope: 8, MaxBytesPerScope: 1 << 20, SnapshotStore: snaps}
+
+	seed := func(id string) {
+		t.Helper()
+		if _, err := base.UpsertRecord(ctx, database.DomainRecord{
+			Domain: "menu", Collection: "dishes", OrganizationID: "org_1", RecordID: id,
+			Data: testRecordData(map[string]any{"state": "published"}),
+		}); err != nil {
+			t.Fatalf("seed %s error = %v", id, err)
+		}
+	}
+	warmGen := func(label string) RuntimeStats {
+		t.Helper()
+		gen, err := WrapRuntimeStore(base, opts)
+		if err != nil {
+			t.Fatalf("%s WrapRuntimeStore() error = %v", label, err)
+		}
+		if err := gen.WarmScope(ctx, "menu", "dishes", "org_1"); err != nil {
+			t.Fatalf("%s WarmScope() error = %v", label, err)
+		}
+		return gen.HermesRuntimeStats()
+	}
+
+	seed("dish_1")
+	seed("dish_2")
+
+	// Gen 1: no artifact yet — neither match nor mismatch, one save.
+	stats := warmGen("gen1")
+	if stats.SnapshotShadowMatches != 0 || stats.SnapshotShadowMismatches != 0 || stats.SnapshotShadowErrors != 0 {
+		t.Fatalf("gen1 stats = %+v, want no shadow outcomes before an artifact exists", stats)
+	}
+	if stats.SnapshotSaves != 1 {
+		t.Fatalf("gen1 saves = %d, want 1 (rebuild must produce the first artifact)", stats.SnapshotSaves)
+	}
+
+	// Gen 2: artifact reproduces the rebuild exactly — clean match.
+	stats = warmGen("gen2")
+	if stats.SnapshotShadowMatches != 1 || stats.SnapshotShadowMismatches != 0 {
+		t.Fatalf("gen2 stats = %+v, want one clean shadow match", stats)
+	}
+
+	// Base mutates after the artifact: gen 3 must record the divergence.
+	seed("dish_3")
+	stats = warmGen("gen3")
+	if stats.SnapshotShadowMismatches != 1 || stats.SnapshotShadowErrors != 0 {
+		t.Fatalf("gen3 stats = %+v, want one shadow mismatch (artifact stale-behind)", stats)
+	}
+
+	// Gen 4: gen 3 refreshed the artifact to current truth — clean again.
+	stats = warmGen("gen4")
+	if stats.SnapshotShadowMatches != 1 || stats.SnapshotShadowMismatches != 0 {
+		t.Fatalf("gen4 stats = %+v, want the refreshed artifact to match", stats)
+	}
+}
+
 // TestEnvelopeTailerQuarantinesPoisonEnvelope proves the envelope fallback
 // path survives poison: a message with a missing envelope field and one with
 // undecodable envelope bytes are quarantined (acked, dropped, counted) while

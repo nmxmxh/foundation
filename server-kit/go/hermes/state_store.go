@@ -27,6 +27,12 @@ type RuntimeStoreOptions struct {
 	IndexedFields      []string
 	MaxRecordsPerScope int
 	MaxBytesPerScope   int64
+	// SnapshotStore enables the shadow-mode snapshot rollout: every successful
+	// source rebuild diffs the newest durable artifact against the freshly
+	// rebuilt partition (evidence counters in HermesRuntimeStats) and then
+	// refreshes the artifact to the rebuilt state. The served warm path is
+	// unchanged — snapshots are compared and produced, never yet preferred.
+	SnapshotStore SnapshotStore
 }
 
 type ProjectedRuntimeStore struct {
@@ -41,6 +47,12 @@ type ProjectedRuntimeStore struct {
 	warm          sync.Map
 	degraded      sync.Map
 	rebuildSF     singleflight.Group
+
+	// Shadow-mode snapshot evidence (see RuntimeStoreOptions.SnapshotStore).
+	shadowMatches    atomic.Int64
+	shadowMismatches atomic.Int64
+	shadowErrors     atomic.Int64
+	shadowSaves      atomic.Int64
 }
 
 func WrapRuntimeStore(base database.RuntimeStore, opts RuntimeStoreOptions) (*ProjectedRuntimeStore, error) {
@@ -100,9 +112,13 @@ func (s *ProjectedRuntimeStore) HermesRuntimeStats() RuntimeStats {
 		return RuntimeStats{}
 	}
 	return RuntimeStats{
-		Projections:    s.hot.AllStats(),
-		Fallbacks:      s.fallbackCount.Load(),
-		DegradedScopes: s.degradedCount.Load(),
+		Projections:              s.hot.AllStats(),
+		Fallbacks:                s.fallbackCount.Load(),
+		DegradedScopes:           s.degradedCount.Load(),
+		SnapshotShadowMatches:    s.shadowMatches.Load(),
+		SnapshotShadowMismatches: s.shadowMismatches.Load(),
+		SnapshotShadowErrors:     s.shadowErrors.Load(),
+		SnapshotSaves:            s.shadowSaves.Load(),
 	}
 }
 
@@ -356,9 +372,37 @@ func (s *ProjectedRuntimeStore) ensureWarm(ctx context.Context, domain, collecti
 		}
 		s.warm.Store(name, struct{}{})
 		s.markHealthy(name)
+		s.shadowSnapshot(ctx, name, organizationID)
 		return nil, nil
 	})
 	return err
+}
+
+// shadowSnapshot runs the shadow-mode half of the snapshot rollout after a
+// successful source rebuild: diff the newest durable artifact against the
+// freshly rebuilt partition (the rebuild is the oracle), record the outcome,
+// and refresh the artifact so the next cold process compares against current
+// evidence. Strictly best-effort — no error here can degrade the warm that
+// already succeeded (FallbackRefinement).
+func (s *ProjectedRuntimeStore) shadowSnapshot(ctx context.Context, name, organizationID string) {
+	if s.opts.SnapshotStore == nil {
+		return
+	}
+	query := Query{OrganizationID: organizationID}
+	report, ok, err := s.hot.ShadowCompareSnapshot(ctx, name, query, s.opts.SnapshotStore)
+	switch {
+	case err != nil:
+		s.shadowErrors.Add(1)
+	case ok && report.Match():
+		s.shadowMatches.Add(1)
+	case ok:
+		s.shadowMismatches.Add(1)
+	}
+	if _, err := s.hot.SaveSnapshot(ctx, name, query, s.opts.SnapshotStore); err == nil {
+		s.shadowSaves.Add(1)
+	} else {
+		s.shadowErrors.Add(1)
+	}
 }
 
 func (s *ProjectedRuntimeStore) getHot(ctx context.Context, domain, collection, organizationID, recordID string) (database.DomainRecord, bool, bool) {

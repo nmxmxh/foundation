@@ -103,13 +103,55 @@ func (s *Store) ExportSnapshot(ctx context.Context, projection string, query Que
 	return desc, payload, nil
 }
 
-// SaveSnapshot exports the projection and writes the artifact to store. It is the
-// off-hot-path materialization step; run it from a bounded background worker.
+// ExportSnapshotColumnar serializes a projection into the HCS1 columnar
+// artifact: same descriptor semantics as ExportSnapshot, set-based payload.
+// This is the write half of the columnar artifact lane — decode cost scales
+// with columns instead of records×fields, and repeated identity strings and
+// field names are stored once.
+func (s *Store) ExportSnapshotColumnar(ctx context.Context, projection string, query Query) (SnapshotDescriptor, []byte, error) {
+	if err := ctxErr(ctx); err != nil {
+		return SnapshotDescriptor{}, nil, err
+	}
+	part, err := s.partition(projection)
+	if err != nil {
+		return SnapshotDescriptor{}, nil, err
+	}
+	epoch := part.epoch.Load()
+	watermark := part.watermark.Load()
+	var records []database.DomainRecord
+	if _, err := part.forEachView(ctx, query, Fence{}, func(view RecordView) error {
+		records = append(records, recordFromView(view))
+		return nil
+	}); err != nil {
+		return SnapshotDescriptor{}, nil, err
+	}
+	payload, err := encodeColumnarSnapshot(records)
+	if err != nil {
+		return SnapshotDescriptor{}, nil, err
+	}
+	sum := sha256.Sum256(payload)
+	return SnapshotDescriptor{
+		Projection:     projection,
+		Domain:         part.spec.Domain,
+		Collection:     part.spec.Collection,
+		OrganizationID: strings.TrimSpace(query.OrganizationID),
+		Epoch:          epoch,
+		Watermark:      watermark,
+		Records:        int64(len(records)),
+		Bytes:          int64(len(payload)),
+		Checksum:       hex.EncodeToString(sum[:]),
+	}, payload, nil
+}
+
+// SaveSnapshot exports the projection and writes the artifact to store. It is
+// the off-hot-path materialization step; run it from a bounded background
+// worker. Artifacts are written in the columnar HCS1 format; readers sniff the
+// magic, so row-proto artifacts already in stores keep loading unchanged.
 func (s *Store) SaveSnapshot(ctx context.Context, projection string, query Query, store SnapshotStore) (SnapshotDescriptor, error) {
 	if store == nil {
 		return SnapshotDescriptor{}, errors.New("hermes snapshot store is required")
 	}
-	desc, payload, err := s.ExportSnapshot(ctx, projection, query)
+	desc, payload, err := s.ExportSnapshotColumnar(ctx, projection, query)
 	if err != nil {
 		return SnapshotDescriptor{}, err
 	}
@@ -117,6 +159,101 @@ func (s *Store) SaveSnapshot(ctx context.Context, projection string, query Query
 		return SnapshotDescriptor{}, err
 	}
 	return desc, nil
+}
+
+// SnapshotShadowReport is the evidence one shadow comparison produces: how the
+// newest durable artifact diverges from the live (source-rebuilt) partition.
+// It is the dual-load-and-diff phase that must accumulate clean matches before
+// any warm path prefers the snapshot over a source Rebuild.
+type SnapshotShadowReport struct {
+	Descriptor      SnapshotDescriptor
+	LiveRecords     int
+	SnapshotRecords int
+	// MissingInSnapshot counts live records the artifact lacks (artifact is
+	// stale-behind); ExtraInSnapshot counts artifact records the live partition
+	// lacks (deleted since the artifact); DataMismatches counts records present
+	// in both with differing data.
+	MissingInSnapshot int
+	ExtraInSnapshot   int
+	DataMismatches    int
+}
+
+// Match reports whether the artifact reproduces the live partition exactly.
+func (r SnapshotShadowReport) Match() bool {
+	return r.MissingInSnapshot == 0 && r.ExtraInSnapshot == 0 && r.DataMismatches == 0
+}
+
+// ShadowCompareSnapshot diffs the newest durable snapshot against the live
+// partition WITHOUT mutating either — the read-only shadow half of the
+// snapshot-warm rollout. ok=false with nil error means no artifact exists yet.
+// A corrupt or scope-mismatched artifact returns an error; the caller records
+// it as shadow evidence, never as a serving failure (FallbackRefinement: the
+// shadow lane cannot affect the served result).
+func (s *Store) ShadowCompareSnapshot(ctx context.Context, projection string, query Query, store SnapshotStore) (SnapshotShadowReport, bool, error) {
+	report := SnapshotShadowReport{}
+	if store == nil {
+		return report, false, errors.New("hermes snapshot store is required")
+	}
+	if err := ctxErr(ctx); err != nil {
+		return report, false, err
+	}
+	part, err := s.partition(projection)
+	if err != nil {
+		return report, false, err
+	}
+	desc, payload, ok, err := store.Latest(ctx, projection)
+	if err != nil || !ok {
+		return report, false, err
+	}
+	report.Descriptor = desc
+	sum := sha256.Sum256(payload)
+	if hex.EncodeToString(sum[:]) != desc.Checksum {
+		return report, false, ErrSnapshotCorrupt
+	}
+	if desc.Domain != part.spec.Domain || desc.Collection != part.spec.Collection {
+		return report, false, ErrSnapshotScope
+	}
+	// Canonical-JSON record bodies keyed by identity: deterministic equality
+	// without per-field walking. The shadow lane runs on cold warms only, so
+	// the marshal cost is acceptable evidence-gathering overhead. Format is
+	// sniffed by magic, so legacy row-proto artifacts compare unchanged.
+	artifact := make(map[string]string)
+	if err := streamSnapshotRecords(payload, func(rec database.DomainRecord) error {
+		body, err := rec.Data.MarshalJSON()
+		if err != nil {
+			return err
+		}
+		artifact[recordKey(rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID)] = string(body)
+		return nil
+	}); err != nil {
+		return report, false, err
+	}
+	report.SnapshotRecords = len(artifact)
+
+	_, err = s.ForEachView(ctx, projection, query, Fence{}, func(view RecordView) error {
+		report.LiveRecords++
+		rec := recordFromView(view)
+		key := recordKey(rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID)
+		body, ok := artifact[key]
+		if !ok {
+			report.MissingInSnapshot++
+			return nil
+		}
+		delete(artifact, key)
+		live, err := rec.Data.MarshalJSON()
+		if err != nil {
+			return err
+		}
+		if string(live) != body {
+			report.DataMismatches++
+		}
+		return nil
+	})
+	if err != nil {
+		return report, false, err
+	}
+	report.ExtraInSnapshot = len(artifact)
+	return report, true, nil
 }
 
 // WarmFromSnapshot loads the newest durable snapshot for a projection and
@@ -149,23 +286,12 @@ func (s *Store) WarmFromSnapshot(ctx context.Context, projection string, store S
 	if desc.Domain != part.spec.Domain || desc.Collection != part.spec.Collection {
 		return desc, false, ErrSnapshotScope
 	}
-	var batch foundationpb.RecordMutationBatch
-	if err := proto.Unmarshal(payload, &batch); err != nil {
-		return desc, false, err
-	}
-	// Stream each mutation into the atomic bulk load rather than materializing a
+	// Stream records into the atomic bulk load rather than materializing a
 	// full []DomainRecord first, matching streamRebuildRecords in rebuild.go.
+	// Format is sniffed by magic: columnar (HCS1) artifacts decode per column;
+	// legacy row-proto artifacts keep loading unchanged.
 	if _, err := part.bulkLoadFrom(ctx, func(visit database.RecordVisitor) error {
-		for _, mutation := range batch.Mutations {
-			rec, err := recordFromMutation(mutation)
-			if err != nil {
-				return err
-			}
-			if err := visit(rec); err != nil {
-				return err
-			}
-		}
-		return nil
+		return streamSnapshotRecords(payload, visit)
 	}); err != nil {
 		return desc, false, err
 	}

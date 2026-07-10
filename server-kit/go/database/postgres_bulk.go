@@ -109,6 +109,63 @@ const upsertRecordsUnnestSQL = `
 		AND g.organization_id = i.organization_id AND g.record_id = i.record_id
 	ORDER BY i.ord`
 
+// batchUpsertInput is the validated, deduplicated array form of a record batch
+// ready for upsertRecordsUnnestSQL.
+type batchUpsertInput struct {
+	out           []DomainRecord
+	domains       []string
+	collections   []string
+	organizations []string
+	recordIDs     []string
+	payloads      []string
+	// rowFor maps each input index to its identity's array slot so duplicate
+	// positions receive the final row's timestamps.
+	rowFor []int
+}
+
+// buildBatchUpsertInput validates every record, marshals payloads, and
+// deduplicates identities keep-last — ON CONFLICT DO UPDATE cannot touch one
+// row twice per statement, and keep-last is exactly the sequential
+// UpsertRecord outcome.
+func buildBatchUpsertInput(records []DomainRecord) (batchUpsertInput, error) {
+	input := batchUpsertInput{
+		out:           make([]DomainRecord, len(records)),
+		domains:       make([]string, 0, len(records)),
+		collections:   make([]string, 0, len(records)),
+		organizations: make([]string, 0, len(records)),
+		recordIDs:     make([]string, 0, len(records)),
+		payloads:      make([]string, 0, len(records)),
+		rowFor:        make([]int, len(records)),
+	}
+	type identity struct{ domain, collection, organization, record string }
+	slot := make(map[identity]int, len(records))
+	for i := range records {
+		rec := records[i]
+		if err := validateDomainRecord(&rec); err != nil {
+			return batchUpsertInput{}, err
+		}
+		payload, err := json.Marshal(rec.Data)
+		if err != nil {
+			return batchUpsertInput{}, err
+		}
+		input.out[i] = rec
+		id := identity{rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID}
+		if at, seen := slot[id]; seen {
+			input.payloads[at] = string(payload)
+			input.rowFor[i] = at
+			continue
+		}
+		slot[id] = len(input.domains)
+		input.rowFor[i] = len(input.domains)
+		input.domains = append(input.domains, rec.Domain)
+		input.collections = append(input.collections, rec.Collection)
+		input.organizations = append(input.organizations, rec.OrganizationID)
+		input.recordIDs = append(input.recordIDs, rec.RecordID)
+		input.payloads = append(input.payloads, string(payload))
+	}
+	return input, nil
+}
+
 // UpsertRecordsBatch upserts many domain records in ONE SQL statement (unnest
 // arrays), so high-rate projection mirrors pay one round trip and one
 // parse/plan per batch instead of per record.
@@ -129,43 +186,13 @@ func (db *PostgresDB) UpsertRecordsBatch(ctx context.Context, records []DomainRe
 		return nil, nil
 	}
 
-	out := make([]DomainRecord, len(records))
-	type identity struct{ domain, collection, organization, record string }
-	// keep-last dedupe: slot holds the position of each identity in the arrays.
-	slot := make(map[identity]int, len(records))
-	domains := make([]string, 0, len(records))
-	collections := make([]string, 0, len(records))
-	organizations := make([]string, 0, len(records))
-	recordIDs := make([]string, 0, len(records))
-	payloads := make([]string, 0, len(records))
-	// rowFor maps each input index to its identity's array slot so duplicate
-	// positions receive the final row's timestamps.
-	rowFor := make([]int, len(records))
-
-	for i := range records {
-		rec := records[i]
-		if err := validateDomainRecord(&rec); err != nil {
-			return nil, err
-		}
-		payload, err := json.Marshal(rec.Data)
-		if err != nil {
-			return nil, err
-		}
-		out[i] = rec
-		id := identity{rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID}
-		if at, seen := slot[id]; seen {
-			payloads[at] = string(payload)
-			rowFor[i] = at
-			continue
-		}
-		slot[id] = len(domains)
-		rowFor[i] = len(domains)
-		domains = append(domains, rec.Domain)
-		collections = append(collections, rec.Collection)
-		organizations = append(organizations, rec.OrganizationID)
-		recordIDs = append(recordIDs, rec.RecordID)
-		payloads = append(payloads, string(payload))
+	input, err := buildBatchUpsertInput(records)
+	if err != nil {
+		return nil, err
 	}
+	out := input.out
+	rowFor := input.rowFor
+	domains := input.domains
 
 	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "upsert_records_batch")
 	if err != nil {
@@ -176,7 +203,7 @@ func (db *PostgresDB) UpsertRecordsBatch(ctx context.Context, records []DomainRe
 		lease.release()
 	}()
 
-	rows, err := conn.Query(queryCtx, upsertRecordsUnnestSQL, domains, collections, organizations, recordIDs, payloads)
+	rows, err := conn.Query(queryCtx, upsertRecordsUnnestSQL, input.domains, input.collections, input.organizations, input.recordIDs, input.payloads)
 	if err != nil {
 		err = normalizePostgresOperationError(contextErr(queryCtx), err)
 		recordDatabaseOperation("upsert_records_batch", start, err)

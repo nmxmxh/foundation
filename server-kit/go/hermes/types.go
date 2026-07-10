@@ -105,6 +105,14 @@ type RuntimeStats struct {
 	Projections    []Stats
 	Fallbacks      int64
 	DegradedScopes int64
+	// Shadow-mode snapshot rollout evidence: clean matches vs divergences
+	// between durable artifacts and source rebuilds, plus artifact refreshes
+	// and shadow-lane errors. The warm path may prefer snapshots only after
+	// these counters show sustained clean matches.
+	SnapshotShadowMatches    int64
+	SnapshotShadowMismatches int64
+	SnapshotShadowErrors     int64
+	SnapshotSaves            int64
 }
 
 // RecordView is a borrowed, zero-copy read view valid only during callbacks.
