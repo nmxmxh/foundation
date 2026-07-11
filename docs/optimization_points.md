@@ -193,6 +193,27 @@ This document tracks the deliberate performance and architecture carryovers fold
     overstate tiny allocations. Use the profile to *locate* allocators, but
     size and verify each cut with `-benchmem` physical allocs/op before and
     after; a "20% of objects" closure can be 2 physical allocs/op.
+84. Cumulative allocation and retained footprint are separate evidence lanes.
+    Capture `alloc_space`/`alloc_objects` for churn and
+    `inuse_space`/`inuse_objects` for retention under the same active workload;
+    a small live heap can coexist with gigabytes of short-lived construction.
+85. Hermes compact index traversal must not allocate a full-size reconciliation
+    map. Count-only reads traverse live indexed candidates directly instead of
+    materializing a columnar batch; equality-index counts are guarded at zero
+    timed allocations and scale with selected candidates.
+86. Predicate pushdown without indexed candidate selection is late
+    materialization, not an indexed query. Large range-filter scopes require a
+    declared ordered/range or bitmap index with candidates-inspected counters,
+    memory/write-amplification budgets, and full-scan parity evidence.
+87. Hermes ordered numeric candidate indexes are now an explicit read/write
+    trade through `RangeIndexedFields`. Binary-searched intervals preserve the
+    full-scan fallback and delivered ~9.1× faster 100K range reads on the
+    reference fixture, while one 10K index added ~38% build time and ~27%
+    allocated bytes. Promote only measured range-heavy fields.
+88. Ordered indexes publish immutable addition/removal deltas and compact at a
+    hard depth of 32. This replaced rejected eager rebuilding (~4.9 ms/2.84 MB
+    for one 10K update) with amortized updates (~211 µs/133 KB) while preserving
+    full-scan and post-compaction parity.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 
@@ -248,3 +269,6 @@ This document tracks the deliberate performance and architecture carryovers fold
 9. Build a direct streaming JSON decoder for `extension.Object`/`extension.Value`, then route HTTP JSON dispatch, `events.FromJSON`, and JSON payload handling through it without `any` staging.
 10. Add benchmark guards for `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest`, `BenchmarkEnvelope_FromJSON`, `BenchmarkEnvelope_FromBinary`, and service-backed Hermes rebuild/apply allocation budgets so typed-contract work cannot silently move cost into compatibility lanes.
 11. Add a Hermes trusted-batch builder that can populate `RecordData` from validated projector rows with fewer per-field owned conversions, then compare it against the current `ApplyRecords` and `ApplyBatch` lanes.
+12. Add bounded Hermes ordered/range or bit-sliced bitmap candidate indexes for
+    declared high-value numeric fields; benchmark 1K/10K/100K/1M scopes and
+    preserve the current full-scan predicate path as the correctness fallback.

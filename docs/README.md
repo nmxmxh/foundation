@@ -4,6 +4,12 @@
 
 This directory contains the source documentation for Foundation Core and the reference copy distributed to generated projects. Keep files short enough for humans to scan and precise enough for coding agents to enforce.
 
+Foundation documentation uses progressive disclosure. The shared external model
+is domain intent → contract → durable transition → projection/result → verified
+guarantees. Specialist documents expose the deeper database, distributed,
+WASM, native, SIMD, kernel, and GPU mechanics only when the reader's task needs
+them. See [`PHILOSOPHY.md`](PHILOSOPHY.md#complexity-becomes-infrastructure).
+
 ---
 
 ## Getting Started (Pick Your Path)
@@ -16,6 +22,10 @@ Read in order:
 2. [`foundation_quick_start.md`](foundation_quick_start.md) — minimum viable path, critical first questions, common mistakes
 3. [`foundation_tour.md`](foundation_tour.md) — one product action through Foundation end-to-end
 4. [`PHILOSOPHY.md`](PHILOSOPHY.md) — why Foundation exists, what gap it fills
+
+You do not need to understand every execution plane before describing or
+building a feature. Begin with behavior and guarantees; Foundation agents should
+translate those into contracts and surface only consequential choices.
 
 ### I'm a Developer—What Do I Need to Know?
 

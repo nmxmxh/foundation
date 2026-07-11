@@ -1,11 +1,38 @@
 package hermes
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
+
+// TestCountIndexedDoesNotAllocate guards the count-only read shape: compact
+// index traversal must not rebuild a candidate set or materialize a columnar
+// batch merely to return its cardinality.
+func TestCountIndexedDoesNotAllocate(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name: "count_alloc", Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"bucket"}, MaxRecords: 1024, MaxBytes: 8 << 20,
+	})
+	records := make([]database.DomainRecord, 256)
+	for i := range records {
+		records[i] = testRecord("signals", "ticks", "org_1", fmt.Sprintf("tick_%03d", i), map[string]any{"bucket": i % 8})
+	}
+	if _, err := store.BulkLoad(t.Context(), "count_alloc", records); err != nil {
+		t.Fatalf("BulkLoad: %v", err)
+	}
+	query := QueryWithFilters("org_1", 0, mustFilter(t, "bucket", 7))
+	if got := testing.AllocsPerRun(100, func() {
+		count, countErr := store.Count(context.Background(), "count_alloc", query, Fence{})
+		if countErr != nil || count != 32 {
+			t.Fatalf("Count = %d, %v; want 32, nil", count, countErr)
+		}
+	}); got != 0 {
+		t.Fatalf("Count allocations = %g, want 0", got)
+	}
+}
 
 // TestIndexCompactionPreservesQueryCorrectness drives the indexed delta chain past
 // its compaction threshold (maxIndexDeltaDepth) with a mix of upserts and deletes,

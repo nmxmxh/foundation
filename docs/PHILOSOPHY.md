@@ -19,7 +19,7 @@ Foundation is engineered to bridge this deficit. It provides:
 - **Hardware-aligned memory interfaces** that keep operations in the nanosecond-to-microsecond domain
 - **Bounded work guarantees** on every queue, cache, retry, and worker to prevent surprise latency cliffs
 
-This is not premature optimization. When you can keep a dashboard read in sub-microseconds instead of milliseconds, you enable product experiences that feel instant. When you eliminate allocation pressure from critical paths, you gain predictability under load. When you measure this carefully and enforce it, you build systems that stay fast as they grow.
+This is not premature optimization. When you can keep a dashboard read in microseconds instead of tens of milliseconds, you enable product experiences that feel instant. When you eliminate allocation pressure from critical paths, you gain predictability under load. When you measure this carefully and enforce it, you build systems that stay fast as they grow.
 
 ---
 
@@ -77,6 +77,75 @@ Routing, transport, serialization, caching, multi-tenancy, and persistence are h
 
 A fair caveat: this is the model Foundation is built *toward*, and large parts of it are real and measured today (the shared envelope, the generated registry, Hermes projections, the zero-copy runtime lanes). Some lanes still pass through compatibility adapters (JSON ingress, not-yet-binary paths). The contract makes those adapters *visible and bounded* rather than load-bearing — and the direction of travel is always toward fewer translations, not more.
 
+## Complexity Becomes Infrastructure
+
+Foundation is not trying to make distributed systems, native runtimes, or
+accelerated computing internally simple. They are not simple. Its purpose is to
+make sophisticated, high-performance, reliable software **externally
+programmable through a small, teachable model**.
+
+The public model is deliberately compact:
+
+1. Describe the domain intent and guarantees.
+2. Define the contract.
+3. Define the durable transition.
+4. Define the projection or result.
+5. Let the substrate select, execute, observe, and verify the appropriate lane.
+
+Below that model, Foundation may use direct Go dispatch, bounded workers,
+Postgres, Redis, Hermes row or columnar projections, bitmap operations, Go
+SIMD, Rust/WASM, SharedArrayBuffer, transferable buffers, FFI, shared memory,
+framed processes, kernel-assisted artifact movement, Tauri device plugins,
+WebGPU, or native GPU resources. Those mechanisms are hidden implementation
+state, not different product semantics. Each faster or more specialized lane
+must refine the same visible contract and retain an explicit fallback.
+
+This is broader than a web framework and broader than an event system. The
+target is an **agent-native application and execution substrate**: human intent
+at the top; generated contracts, capability planning, hardware-aware execution,
+durability, security, observability, and evidence underneath.
+
+### Expertise encoded as infrastructure
+
+Deep architectural knowledge is a Foundation asset, but requiring every user
+to acquire that knowledge before becoming productive would waste it. Expertise
+should be encoded into:
+
+- contracts and generators
+- agent instructions and diagnostic explanations
+- capability and policy gates
+- reference implementations
+- benchmarks and conformance tests
+- bounded resource budgets
+- safe fallback behavior
+
+An agent should be able to translate a product request into the technical
+contract, identify the invariants and meaningful choices, implement across the
+required planes, and return evidence in language appropriate to the person
+making the decision. The agent does not conceal consequential trade-offs; it
+translates them.
+
+### Progressive disclosure
+
+Foundation presents the same system at four useful levels:
+
+| Audience | Required view |
+| --- | --- |
+| **Layperson or product owner** | What the feature does, what is guaranteed, what may fail or be briefly stale, and what decision requires approval. |
+| **Product developer** | Contract, transition, projection, domain rules, and the commands that prove them. |
+| **Application architect** | Consistency, freshness, security, failure, capability, cost, and scaling choices. |
+| **Foundation engineer** | Memory layouts, projection machinery, query plans, schedulers, native handles, kernel/GPU lanes, benchmarks, and refinement evidence. |
+
+This is progressive disclosure, not concealment. Complexity remains available
+to the humans or agents who need it, while ordinary feature work stays at the
+level of product meaning.
+
+The success criterion is therefore not whether every developer understands
+every plane. It is whether routine domain intent can cross those planes
+automatically and correctly while tenant isolation, correlation, replay,
+boundedness, freshness, observability, capability fallback, and regression
+evidence remain intact.
+
 For the concrete end-to-end mechanics of this model — command to event to projection to store — see [`state_event_model.md`](state_event_model.md).
 
 ---
@@ -85,7 +154,7 @@ For the concrete end-to-end mechanics of this model — command to event to proj
 
 ### Hermes: The Hotplane
 
-Hermes is the bounded, node-local projection layer that answers operational reads in sub-microseconds—without hitting the database for every query.
+Hermes is the bounded, node-local projection layer that answers point reads in a few hundred nanoseconds and indexed, filtered views in tens of microseconds—without hitting the database for every query.
 
 **The principle**: Postgres decides (it's the source of truth). Redis coordinates (across nodes). Hermes remembers what this node needs right now.
 
@@ -98,7 +167,7 @@ Hermes is not a cache you query. It's an automatically-updated read model that:
 
 A dashboard that reads 100 million customer records can use Hermes to serve scoped, filtered views in microseconds instead of hammering Postgres with millions of queries per second. And when Hermes is stale, it tells you—it doesn't silently serve wrong data.
 
-**Why it matters**: Responsiveness at scale. The difference between a dashboard that loads instantly and one that lags is often just sub-microsecond reads. Hermes makes that the default, not the exception.
+**Why it matters**: Responsiveness at scale. The difference between a dashboard that loads instantly and one that lags is often just microsecond-domain reads served next to the process instead of milliseconds of database round trips. Hermes makes that the default, not the exception.
 
 ### Metadata: The Context Carrier
 
@@ -151,7 +220,7 @@ Each component can be adopted partially. You can use server-kit without Hermes, 
 ### Performance
 
 - Multi-plane architecture from nanosecond direct dispatch to microsecond JSON compatibility
-- Hermes hotplane enables sub-microsecond operational reads at any scale
+- Hermes hotplane serves sub-microsecond point reads and microsecond filtered views on warm, indexed scopes
 - Zero-allocation critical paths prevent latency cliffs under load
 - Benchmarks measure and enforce performance contracts automatically
 - Throughput and tail latency matter equally (p99 drives decisions, not p50)
@@ -218,10 +287,10 @@ When everything works together, here's what you get:
 4. Event is emitted: `domain:action:requested → :success`
 5. Workers process follow-up work without blocking the user
 6. Hermes projects the change into a local index
-7. WebSocket notifies the frontend in sub-microseconds
+7. WebSocket fan-out targets the subscribed clients — route planning costs nanoseconds per connection, then delivery rides the socket
 8. Observability sees the full path: logs linked by correlation ID, metrics by tenant, traces from entry to completion
 
-This entire flow costs microseconds on the hot path, not milliseconds. Tenant isolation is automatic. Observability is wired in. Workers are bounded. Failure modes are graceful.
+The durable leg of this flow — the domain write plus its Hermes projection — costs about a millisecond, dominated by two Postgres round trips (measured: ~0.93 ms per projected mutation; see `foundation_benchmarks.md`). That is two to three orders of magnitude fresher than a typical CDC-pipeline read model, and every read that follows is served from the hotplane in nanoseconds to microseconds. Tenant isolation is automatic. Observability is wired in. Workers are bounded. Failure modes are graceful.
 
 That's Foundation.
 

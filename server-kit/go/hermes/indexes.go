@@ -12,7 +12,8 @@ const maxIndexDeltaDepth = 512
 var emptyIndex = &indexSnapshot{adds: emptyRecordKeys}
 
 type indexPublisher struct {
-	changes map[*indexCell]*indexChange
+	changes      map[*indexCell]*indexChange
+	rangeChanges map[*rangeIndexCell]*rangeIndexChange
 }
 
 type indexChange struct {
@@ -23,7 +24,10 @@ type indexChange struct {
 }
 
 func newIndexPublisher() *indexPublisher {
-	return &indexPublisher{changes: map[*indexCell]*indexChange{}}
+	return &indexPublisher{
+		changes:      map[*indexCell]*indexChange{},
+		rangeChanges: map[*rangeIndexCell]*rangeIndexChange{},
+	}
 }
 
 func (p *partition) addIndexesLocked(publisher *indexPublisher, registry *partitionRegistry, key string, rec database.DomainRecord, version uint64) {
@@ -34,6 +38,11 @@ func (p *partition) addIndexesLocked(publisher *indexPublisher, registry *partit
 		index := fieldIndex{scope: scope, field: field, kind: kind, value: value}
 		publisher.add(p.fieldCellLocked(registry, index), entry)
 	})
+	p.forEachRangeIndexedValue(rec, func(index rangeIndex, rangeEntry rangeIndexEntry) {
+		rangeEntry.key = key
+		rangeEntry.version = version
+		publisher.rangeAdd(p.rangeCellLocked(registry, index), rangeEntry)
+	})
 }
 
 func (p *partition) removeIndexesLocked(publisher *indexPublisher, registry *partitionRegistry, key string, rec database.DomainRecord) {
@@ -42,6 +51,9 @@ func (p *partition) removeIndexesLocked(publisher *indexPublisher, registry *par
 	forEachIndexedField(rec, p.spec, func(field string, kind byte, value string) {
 		index := fieldIndex{scope: scope, field: field, kind: kind, value: value}
 		publisher.remove(p.fieldCellLocked(registry, index), key)
+	})
+	p.forEachRangeIndexedValue(rec, func(index rangeIndex, _ rangeIndexEntry) {
+		publisher.rangeRemove(p.rangeCellLocked(registry, index), key)
 	})
 }
 
@@ -258,6 +270,7 @@ func (p *indexPublisher) publish() int {
 		}
 		cell.ptr.Store(compactIndexSnapshot(next))
 	}
+	p.publishRanges()
 	return compactions
 }
 
@@ -281,20 +294,21 @@ func (s *indexSnapshot) len() int {
 	return s.size
 }
 
-func (s *indexSnapshot) contains(key string) bool {
-	for current := s; current != nil; current = current.base {
-		if _, removed := current.removes[key]; removed {
-			return false
-		}
-		if _, added := current.adds[key]; added {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *indexSnapshot) forEachKey(fn func(string) bool) {
 	if s == nil || s.len() == 0 {
+		return
+	}
+	// A compact snapshot owns the complete live key set. Iterate it directly:
+	// allocating a seen map proportional to the index made read-only counts and
+	// candidate scans pay O(N) extra bytes even though there was no delta chain
+	// to reconcile. emptyIndex may remain as a zero-sized base after a bulk load,
+	// so treat that shape as compact too.
+	if len(s.removes) == 0 && (s.base == nil || s.base.len() == 0) {
+		for key := range s.adds {
+			if !fn(key) {
+				return
+			}
+		}
 		return
 	}
 	seen := make(map[string]struct{}, s.len())
@@ -307,7 +321,7 @@ func (s *indexSnapshot) forEachKey(fn func(string) bool) {
 				continue
 			}
 			seen[key] = struct{}{}
-			if s.contains(key) && !fn(key) {
+			if !fn(key) {
 				return
 			}
 		}

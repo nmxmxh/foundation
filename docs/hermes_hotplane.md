@@ -218,6 +218,8 @@ Foundation hotplane:
 | `approx_bytes` | Approximate bounded memory used by record payloads. |
 | `tombstones` | Current delete tombstone count. |
 | `index_compactions` | Number of index snapshot compactions performed. |
+| `range_index_entries` | Live entries across declared tenant-scoped ordered numeric indexes. |
+| `range_index_bytes` | Approximate key plus fixed-slot bytes owned by ordered numeric index snapshots. |
 
 These numbers are operationally more useful together than alone. A rising
 fallback count with stable canonical latency means Hermes is protecting
@@ -238,16 +240,47 @@ ProjectionSpec:
 - source stream or outbox family
 - rebuild query
 - indexed fields
+- range-indexed numeric fields (explicit, optional)
 - order fields
 - max records
 - max bytes
 - max indexes
+- max range indexes
 - max tombstones
 - ttl
 - freshness budget
 - read modes allowed
 - auth/fence policy
 - fallback policy
+
+### Ordered range indexes
+
+`RangeIndexedFields` is the opt-in candidate-selection lane for numeric
+`CompareEq`, `CompareLt`, `CompareLe`, `CompareGt`, and `CompareGe` predicates.
+Each declared field owns immutable, tenant-scoped, value-sorted snapshots.
+Accepted apply batches publish small sorted addition/removal deltas; readers
+reconcile newest-first, and a hard depth cap periodically compacts the chain.
+Reads binary-search the narrowest eligible interval, validate current record
+version/TTL and query scope, then run all residual predicates before
+sorting/materialization.
+
+This is deliberately not automatic:
+
+- memory is bounded by projection records × declared range fields and observed
+  through `RangeIndexEntries`/`RangeIndexBytes`
+- `MaxRangeIndexes` bounds the declared field count
+- writes pay snapshot maintenance and sorting once per accepted batch
+- delta depth is capped at 32, bounding lookup reconciliation and amortizing
+  full-index compaction
+- missing fields, kind mismatches, `CompareNe`, strings, and undeclared fields
+  retain the full-scan correctness fallback
+- raw platform indexes and candidates never cross tenant scope
+
+Promote a field only with read/write evidence. The 2026-07-11 reference fixture
+improved a 100K two-predicate read by about 9× while one 10K ordered index added
+about 38% to projection-build time and 27% to allocated bytes. Equality indexes
+remain the cheaper choice for exact filters; ordered indexes are for measured
+range-heavy product paths.
 ```
 
 Projection specs should be generated or registered during startup with the same

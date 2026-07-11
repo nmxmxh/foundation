@@ -447,3 +447,49 @@ func TestBridgeWorkInjectsCorrelationIntoProcessorContext(t *testing.T) {
 		t.Fatal("processor did not receive bridge job")
 	}
 }
+
+// TestAddToWorkersRegistersDynamicKinds pins the Engine→River glue: every
+// engine-registered processor lands in the river.Workers bundle under its
+// dynamic kind (AddWorkerArgs; plain AddWorker would panic on the zero Job's
+// empty kind), and RiverQueueConfig merges processor queues into the app's
+// static queue map without overriding it.
+func TestAddToWorkersRegistersDynamicKinds(t *testing.T) {
+	engine := NewEngine(map[string]int{"static": 4}, nil)
+	if err := engine.Register(&fakeProcessor{kind: "proj_a", queue: "hermes_projection", maxAttempts: 3}); err != nil {
+		t.Fatalf("Register(a) error = %v", err)
+	}
+	if err := engine.Register(&fakeProcessor{kind: "proj_b", queue: "hermes_projection", maxAttempts: 3}); err != nil {
+		t.Fatalf("Register(b) error = %v", err)
+	}
+
+	workers := river.NewWorkers()
+	if err := engine.AddToWorkers(workers); err != nil {
+		t.Fatalf("AddToWorkers() error = %v", err)
+	}
+	if err := engine.AddToWorkers(nil); err == nil {
+		t.Fatal("AddToWorkers(nil) error = nil")
+	}
+	// Proof the dynamic kinds actually landed in the bundle: registering the
+	// same kinds again must panic on duplicates (river rejects double
+	// registration), which can only happen if the first pass registered them.
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("duplicate AddToWorkers did not panic; kinds were never registered")
+			}
+		}()
+		_ = engine.AddToWorkers(workers)
+	}()
+
+	queues := engine.RiverQueueConfig(map[string]river.QueueConfig{
+		"static":            {MaxWorkers: 4},
+		"hermes_projection": {MaxWorkers: 9},
+	})
+	if queues["hermes_projection"].MaxWorkers != 9 {
+		t.Fatalf("existing queue overridden: %+v", queues["hermes_projection"])
+	}
+	engineOnly := engine.RiverQueueConfig(map[string]river.QueueConfig{"static": {MaxWorkers: 4}})
+	if engineOnly["hermes_projection"].MaxWorkers < 1 {
+		t.Fatalf("processor queue missing from merged config: %+v", engineOnly)
+	}
+}

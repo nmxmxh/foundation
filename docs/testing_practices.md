@@ -337,6 +337,14 @@ Requirements:
 2. Statistical targets such as p95/p99 latency, RPS, heap, CPU, and allocation counts belong in benchmarks/load tests.
 3. Benchmarks must include representative fixtures and must not silently skip the hot path they claim to measure.
 4. Load tests must define request mix, duration, concurrency, think time, error budget, and pass/fail threshold.
+5. Memory claims must distinguish cumulative allocation
+   (`alloc_space`/`alloc_objects`) from retained memory
+   (`inuse_space`/`inuse_objects`). RSS or live heap alone does not prove low
+   churn.
+6. Data-structure, scan, index, codec, and batch tests must exercise a size
+   series capable of exposing accidental repeated-linear or quadratic work.
+   Record the expected complexity and at least one operation-specific work
+   counter where practical.
 
 Enforcement:
 
@@ -698,6 +706,17 @@ Requirements:
    inspect fixture allocation, timer placement, GC pressure, scheduler
    pressure, lock contention, and hidden network or filesystem work before
    calling it noise.
+8. Allocation evidence must name its sample view. `B/op` and `allocs/op` are
+   per-operation churn; `alloc_space` and `alloc_objects` are cumulative churn;
+   `inuse_space` and `inuse_objects` are retained footprint. Do not describe
+   one as another.
+9. Hot collection and scan benchmarks must report enough cardinalities to
+   expose the growth curve. When the operation filters or projects data, report
+   candidates inspected and results produced, or document why those counters
+   cannot yet be observed.
+10. A source-line profile may identify the allocator, but the before/after
+    benchmark sizes the physical win. Sampled profile shares must not be
+    reported as exact allocation counts.
 
 Enforcement:
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
@@ -393,5 +394,221 @@ func TestRecordWorkerProcessorUpsertsThroughProjectedStore(t *testing.T) {
 	}
 	if count, _ = projected.Store().Count(ctx, projection, Query{OrganizationID: "org_1"}, Fence{}); count != 1 {
 		t.Fatalf("count after replay = %d, want 1", count)
+	}
+}
+
+// TestScopeBackfillMakesWarmSelfSufficient proves the self-backfilling warm:
+// with an empty record mirror and a configured ScopeBackfill enumerator, a
+// WarmScope pulls the scope's rows from the authoritative source through the
+// batch lane, so eagerly configured warm scopes work on first boot with no
+// separate backfill step. A non-empty mirror never re-triggers the backfill.
+func TestScopeBackfillMakesWarmSelfSufficient(t *testing.T) {
+	base := database.NewMemoryDB()
+	ctx := t.Context()
+	backfills := 0
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{
+		MaxRecordsPerScope: 16,
+		MaxBytesPerScope:   1 << 20,
+		ScopeBackfill: func(_ context.Context, domain, collection, organizationID string, visit database.RecordVisitor) error {
+			backfills++
+			// Simulates the app-side enumerator reading its normalized tables.
+			for i := range 3 {
+				if err := visit(database.DomainRecord{
+					Domain: domain, Collection: collection, OrganizationID: organizationID,
+					RecordID: fmt.Sprintf("dish_%d", i),
+					Data:     testRecordData(map[string]any{"state": "published"}),
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+
+	// Mirror empty + backfiller configured: warm self-backfills.
+	if err := store.WarmScope(ctx, "menu", "dishes", "org_1"); err != nil {
+		t.Fatalf("WarmScope() error = %v", err)
+	}
+	if backfills != 1 {
+		t.Fatalf("backfills = %d, want 1", backfills)
+	}
+	// Rows landed durably in the mirror AND in the hot partition.
+	if _, found, err := base.GetRecord(ctx, "menu", "dishes", "org_1", "dish_0"); err != nil || !found {
+		t.Fatalf("mirror after backfill: found=%v err=%v", found, err)
+	}
+	name := store.ProjectionName("menu", "dishes", "org_1")
+	if count, _ := store.Store().Count(ctx, name, Query{OrganizationID: "org_1"}, Fence{}); count != 3 {
+		t.Fatalf("hot count = %d, want 3", count)
+	}
+
+	// A fresh process generation over the now-populated mirror must NOT
+	// re-trigger the backfill: the mirror is the rebuild source from here on.
+	gen2, err := WrapRuntimeStore(base, RuntimeStoreOptions{
+		MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20,
+		ScopeBackfill: func(context.Context, string, string, string, database.RecordVisitor) error {
+			backfills++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("gen2 WrapRuntimeStore() error = %v", err)
+	}
+	if err := gen2.WarmScope(ctx, "menu", "dishes", "org_1"); err != nil {
+		t.Fatalf("gen2 WarmScope() error = %v", err)
+	}
+	if backfills != 1 {
+		t.Fatalf("backfills after gen2 = %d, want 1 (non-empty mirror must not re-backfill)", backfills)
+	}
+	name2 := gen2.ProjectionName("menu", "dishes", "org_1")
+	if count, _ := gen2.Store().Count(ctx, name2, Query{OrganizationID: "org_1"}, Fence{}); count != 3 {
+		t.Fatalf("gen2 hot count = %d, want 3", count)
+	}
+}
+
+// TestMirrorSweeperPushesChangedRows pins the one-place projection seam: a
+// sweep pulls rows changed after the cursor from each source, pushes them
+// through the projected store (durable mirror + hot partition + fan-out), and
+// advances the cursor so unchanged rows are never re-read. A failing source is
+// counted and retried without advancing; other sources keep sweeping.
+func TestMirrorSweeperPushesChangedRows(t *testing.T) {
+	base := database.NewMemoryDB()
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	ctx := t.Context()
+
+	// A fake source table: rows with updated_at, served incrementally.
+	type row struct {
+		id string
+		at time.Time
+	}
+	t0 := time.Date(2026, 7, 11, 10, 0, 0, 0, time.UTC)
+	rows := []row{{"dish_1", t0}, {"dish_2", t0.Add(time.Second)}}
+	polls := 0
+	source := func(_ context.Context, cursor time.Time, visit func(database.DomainRecord, time.Time) error) error {
+		polls++
+		for _, r := range rows {
+			if !r.at.After(cursor) {
+				continue
+			}
+			if err := visit(database.DomainRecord{
+				Domain: "menu", Collection: "dishes", OrganizationID: "org_1", RecordID: r.id,
+				Data: testRecordData(map[string]any{"state": "published"}),
+			}, r.at); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	failing := func(context.Context, time.Time, func(database.DomainRecord, time.Time) error) error {
+		return errors.New("source down")
+	}
+
+	sweeper, err := NewMirrorSweeper(store, MirrorSweepOptions{BatchSize: 1})
+	if err != nil {
+		t.Fatalf("NewMirrorSweeper() error = %v", err)
+	}
+	if err := sweeper.AddSource("menu_dishes", source); err != nil {
+		t.Fatalf("AddSource() error = %v", err)
+	}
+	if err := sweeper.AddSource("broken", failing); err != nil {
+		t.Fatalf("AddSource(broken) error = %v", err)
+	}
+
+	// First sweep from zero cursor = full sync.
+	n, err := sweeper.SweepOnce(ctx)
+	if err != nil || n != 2 {
+		t.Fatalf("SweepOnce() = %d err=%v, want 2", n, err)
+	}
+	if _, found, err := base.GetRecord(ctx, "menu", "dishes", "org_1", "dish_2"); err != nil || !found {
+		t.Fatalf("mirror after sweep: found=%v err=%v", found, err)
+	}
+	name := store.ProjectionName("menu", "dishes", "org_1")
+	if count, _ := store.Store().Count(ctx, name, Query{OrganizationID: "org_1"}, Fence{}); count != 2 {
+		t.Fatalf("hot count = %d, want 2", count)
+	}
+
+	// Second sweep: cursor advanced, nothing re-read.
+	if n, _ := sweeper.SweepOnce(ctx); n != 0 {
+		t.Fatalf("idle sweep swept %d, want 0", n)
+	}
+
+	// A change after the cursor is picked up.
+	rows = append(rows, row{"dish_3", t0.Add(2 * time.Second)})
+	if n, _ := sweeper.SweepOnce(ctx); n != 1 {
+		t.Fatalf("incremental sweep swept %d, want 1", n)
+	}
+
+	stats := sweeper.Stats()
+	if stats.Swept != 3 || stats.Errors != 3 {
+		t.Fatalf("stats = %+v, want Swept=3 Errors=3 (one failing source per pass)", stats)
+	}
+}
+
+// TestMirrorSweeperConvergesHardDeletes pins the delete lane: identities
+// announced by a tombstone source are removed from the mirror and the hot
+// partition (with live fan-out via the store observer), the cursor advances,
+// and replays are safe because DeleteRecord is idempotent.
+func TestMirrorSweeperConvergesHardDeletes(t *testing.T) {
+	base := database.NewMemoryDB()
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	ctx := t.Context()
+	for _, id := range []string{"dish_1", "dish_2"} {
+		if _, err := store.UpsertRecord(ctx, database.DomainRecord{
+			Domain: "menu", Collection: "dishes", OrganizationID: "org_1", RecordID: id,
+			Data: testRecordData(map[string]any{"state": "published"}),
+		}); err != nil {
+			t.Fatalf("seed %s error = %v", id, err)
+		}
+	}
+
+	t0 := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	type tomb struct {
+		id string
+		at time.Time
+	}
+	tombs := []tomb{}
+	source := func(_ context.Context, cursor time.Time, visit func(string, string, string, string, time.Time) error) error {
+		for _, tb := range tombs {
+			if !tb.at.After(cursor) {
+				continue
+			}
+			if err := visit("menu", "dishes", "org_1", tb.id, tb.at); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	sweeper, err := NewMirrorSweeper(store, MirrorSweepOptions{})
+	if err != nil {
+		t.Fatalf("NewMirrorSweeper() error = %v", err)
+	}
+	if err := sweeper.AddDeleteSource("tombstones", source); err != nil {
+		t.Fatalf("AddDeleteSource() error = %v", err)
+	}
+
+	// Hard delete announced by tombstone: swept away from mirror + hot.
+	tombs = append(tombs, tomb{"dish_1", t0})
+	if n, err := sweeper.SweepOnce(ctx); err != nil || n != 1 {
+		t.Fatalf("SweepOnce() = %d err=%v, want 1", n, err)
+	}
+	if _, found, _ := base.GetRecord(ctx, "menu", "dishes", "org_1", "dish_1"); found {
+		t.Fatal("mirror row survived delete sweep")
+	}
+	name := store.ProjectionName("menu", "dishes", "org_1")
+	if count, _ := store.Store().Count(ctx, name, Query{OrganizationID: "org_1"}, Fence{}); count != 1 {
+		t.Fatalf("hot count = %d, want 1 (dish_2 only)", count)
+	}
+
+	// Cursor advanced: the same tombstone is not re-swept.
+	if n, _ := sweeper.SweepOnce(ctx); n != 0 {
+		t.Fatalf("idle delete sweep swept %d, want 0", n)
 	}
 }

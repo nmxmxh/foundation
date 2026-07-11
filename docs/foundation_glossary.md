@@ -18,6 +18,7 @@ pre-answered questions without scanning multiple files.
 | **Bounded work** | The invariant that all loops, retries, queue depths, Redis waits, request handling, and worker execution have finite caps or deadlines (CP-02). | `coding_practices.md` |
 | **Bulk** | `server-kit/go/bulk` — bounded large-payload and resumable multipart upload helpers with idempotent part replay. | `transfer_lane.md` |
 | **Cap'n Proto** | Zero-copy serialization format used for runtime contracts: SAB layouts, syscalls, compute capsules, and chunk descriptors. | `runtime_sab_capnp_contracts.md` |
+| **Capability planner** | Runtime decision layer that selects an eligible execution lane from workload shape, trust, locality, platform capability, deadline, budgets, and fallback requirements while preserving the visible contract. | `runtime_foundation.md` |
 | **Chain** | `server-kit/go/chain` — worker chain helpers for bounded multi-step job composition. | `coding_practices.md` |
 | **Circuit breaker** | `server-kit/go/circuitbreaker` — fault tolerance pattern that stops calling a failing dependency after a threshold, auto-recovering after a timeout. | `foundation_guide.md` |
 | **Command bus** | `createCommandBus` in `@ovasabi/runtime-transport` — resolves an event type to a route and dispatches it over HTTP or WebSocket. | `frontend_command_registry.md` |
@@ -61,6 +62,8 @@ pre-answered questions without scanning multiple files.
 | **Practice controls** | Machine-readable matrix at `tooling/practice_controls.psv` mapping every CP/TE rule to enforcement, evidence, and merge-gate posture. | `practice_controls.md` |
 | **Projection freshness** | Contract governing staleness modes for Hermes, read models, search, materialized views, and Redis caches. | `projection_freshness_contract.md` |
 | **Projection gateway** | `server-kit/go/projectiongw` — HTTP read surface for Hermes-backed projection queries. | `foundation_project_standardization.md` |
+| **Range index** | Optional Hermes tenant-scoped ordered numeric candidate index declared through `RangeIndexedFields`; accelerates bounded range predicates while retaining full-scan fallback and explicit write/memory cost. | `hermes_hotplane.md` |
+| **Progressive disclosure** | Documentation and agent interface principle: expose behavior and guarantees first, contracts and domain mechanics next, architectural trade-offs next, and low-level runtime internals only when the task or decision requires them. | `PHILOSOPHY.md` |
 | **Protocol Buffers** | Primary contract format for app/domain/backend business services, Hermes events, durable API messages, and generated TypeScript types. | `foundation_architecture_contract.md` |
 | **Registry** | `server-kit/go/registry` — central route registration, dispatch, metrics, and queue management for HTTP and WebSocket handlers. | `foundation_guide.md` |
 | **Resilience** | `server-kit/go/resilience` — coordinated dependency model: health, circuit breakers, retry, degradation, and failure-drill behavior. | `foundation_guide.md` |

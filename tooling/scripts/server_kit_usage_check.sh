@@ -140,6 +140,10 @@ if [[ -f "$target/.foundation" && -d "$target/internal" ]]; then
   check_file_contains "websocket uses routing metrics" "$target/foundation/server-kit/go/httpserver/websocket.go" "server-kit/go/wsrouting"
   check_file_contains "websocket uses websocket metrics" "$target/foundation/server-kit/go/httpserver/websocket.go" "server-kit/go/wsmetrics"
   check_file_contains "worker queues are bounded by config" "$target/internal/worker/registry.go" "DefaultQueueConfig"
+  # Engine-canonical worker story: processors bridge onto river via the engine
+  # (AddToWorkers) and the worker binary binds the foundation engine.
+  check_file_contains "worker main bridges engine processors onto river" "$target/cmd/worker/main.go" "AddToWorkers"
+  check_file_contains "worker registry exposes processor seam" "$target/internal/worker/registry.go" "RegisterProcessors"
   check_no_project_match "internal code avoids JSON gRPC compatibility dispatch" "grpcsvc\\.Dispatch\\s*\\(|\\.Dispatch\\s*\\([^\\n]*grpcsvc\\.Envelope|grpcsvc\\.Envelope\\b" "$target/internal" "$target/cmd"
   check_no_project_match "services use Foundation domain errors" "type .*Error struct|type .*Error interface|func New.*Error\\(" "$target/internal/service"
   check_no_project_match "services use Foundation event bus" "type .*Bus struct|type .*EventBus" "$target/internal/service"

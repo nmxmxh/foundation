@@ -13,13 +13,22 @@ import (
 // i%5 == 4 omit price entirely, so the price column carries real nulls),
 // bucket = i%16, symbol alternates OVS/ALT.
 func buildSelectFixtureStore(tb testing.TB, n int) *Store {
+	return buildSelectFixtureStoreWithRange(tb, n, true)
+}
+
+func buildSelectFixtureStoreWithRange(tb testing.TB, n int, withRange bool) *Store {
 	tb.Helper()
+	var rangeFields []string
+	if withRange {
+		rangeFields = []string{"bucket", "price"}
+	}
 	store, err := NewStore(ProjectionSpec{
-		Name:          "ticks",
-		Domain:        "signals",
-		Collection:    "ticks",
-		IndexedFields: []string{"symbol", "bucket", "price"},
-		MaxRecords:    100000,
+		Name:               "ticks",
+		Domain:             "signals",
+		Collection:         "ticks",
+		IndexedFields:      []string{"symbol", "bucket", "price"},
+		RangeIndexedFields: rangeFields,
+		MaxRecords:         max(n, 100000),
 	})
 	if err != nil {
 		tb.Fatalf("failed to create store: %v", err)

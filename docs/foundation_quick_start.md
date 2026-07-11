@@ -15,6 +15,27 @@ For concept definitions and pre-answered questions, see `foundation_glossary.md`
 Use this file to choose the first lane. Then read the owning contract before
 editing.
 
+## The Small External Model
+
+For ordinary product work, start with five questions:
+
+1. What should happen in domain language?
+2. What contract represents the request and result?
+3. What durable transition makes it true?
+4. What projection or output makes it useful?
+5. What guarantee, failure, freshness, or fallback choice needs human approval?
+
+Foundation and its agents own the cross-plane mechanics unless the change is
+specifically about those mechanics. Do not require a product owner to choose
+between WASM, FFI, shared memory, Hermes columnar execution, WebGPU, or a native
+GPU lane. Derive the workload and guarantees first; then use the runtime
+capability planner, owning practice document, benchmarks, and parity tests to
+select the lane.
+
+Explain at the reader's level: product behavior and guarantees first, then
+contract and domain mechanics, then architectural trade-offs, and only then
+memory/runtime internals when they affect the decision.
+
 ## Fifteen-Minute Path
 
 Read these in order:

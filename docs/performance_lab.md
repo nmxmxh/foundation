@@ -19,10 +19,11 @@ runtime lane.
 | --- | --- |
 | CPU hot path | `go test -bench`, Criterion, or Vitest bench with allocation counts and repeated runs. |
 | Scheduler/concurrency | `runtime/trace`, pprof block/mutex profile, goroutine leak evidence, or bounded load test. |
-| Allocator/memory | bytes/op, allocs/op, heap profile, RSS/PSS where relevant, and object lifetime explanation. |
+| Allocator/memory | bytes/op, allocs/op, `alloc_space`/`alloc_objects`, `inuse_space`/`inuse_objects`, RSS/PSS where relevant, and object lifetime explanation. |
 | Cache/TLB/branch | CPU-counter capture where available, or explicit fallback when counters are unavailable. |
 | Syscall/I/O | syscall count, copy path, sendfile/splice/io_uring decision, and fallback path. |
 | Database/Redis | query plan, WAL/rows/bytes, pool acquire timing, Redis command mix, and p95/p99 under load. |
+| Algorithmic work | Size-series benchmark plus candidates/rows/bytes/comparisons/copies/round trips appropriate to the operation and an expected complexity class. |
 | WASM/FFI/native | host/guest boundary cost, ABI version, pointer/length validation, and scalar fallback parity. |
 | GPU/WebGPU | device matrix, dispatch timing, device-loss behavior, layout conformance, and CPU fallback. |
 
@@ -51,6 +52,33 @@ Go pprof/trace:
   or blocking behavior is part of the claim.
 - Foundation's benchmark runner supports `PROFILE=1`, `TRACE=1`,
   `PROFILE_DIR=...`, and `PERF_COUNTERS=1` for local evidence capture.
+- Capture profiles while the measured workload is active. For allocation work,
+  retain both cumulative (`alloc_space`, `alloc_objects`) and live
+  (`inuse_space`, `inuse_objects`) views and use source-line attribution before
+  changing a data structure.
+- Treat profiles as complementary evidence: CPU samples can be dominated by
+  scheduler/syscall waiting while allocation profiles reveal the application
+  work, and a small live heap can coexist with extreme cumulative churn.
+
+## Cumulative-Work Record
+
+Every core profile should record the smallest set of counters that explains
+where work scales:
+
+| Operation shape | Required work counters |
+| --- | --- |
+| Filter/list/projection | candidates inspected, rows selected, rows materialized, sort comparisons where practical |
+| Codec/frame/snapshot | input bytes, output bytes, bytes copied/touched, encode/decode allocations |
+| Database/Redis | logical operations, statements/commands, round trips, returned rows, WAL/bytes when relevant |
+| Worker/queue | jobs accepted, queue hops, batches, retries, rejected work, time queued |
+| File/kernel lane | logical bytes, userspace bytes, syscalls, page-cache posture, checksum bytes |
+| GPU/native | host/device bytes, dispatches, synchronizations, materializations, fallback count |
+
+Run scale points that can falsify the claimed complexity. A collection change
+should normally include at least four increasing sizes and report normalized
+work such as candidates per result or bytes copied per input byte. Benchmark
+fixtures must not allocate or rebuild inside the timed region unless construction
+is explicitly the subject.
 
 Rust Miri/Loom:
 
@@ -275,3 +303,5 @@ Do not add a faster lane unless all are true:
 3. the fallback is documented and tested
 4. the new lane has a rollback plan
 5. the owning practice doc and controls matrix still match the evidence
+6. a cheaper algorithm, data structure, index, batch, or round-trip removal was
+   considered before allocation shaving, pooling, SIMD, FFI, or GPU promotion

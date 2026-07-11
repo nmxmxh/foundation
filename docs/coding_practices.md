@@ -214,6 +214,17 @@ Requirements:
 35. Batch-size changes in runtime, database, websocket, worker, or analytical paths must state the intended working-set budget: payload bytes, descriptor count, cache-line footprint, and downstream backpressure limit.
 36. GPU/WebGPU kernels must state workload shape, buffer layout, transfer/readback budget, synchronization scope, capability gate, async error-drain points, numeric tolerance, fallback lane, and benchmarked tuning parameters before promotion. Keep shader/kernel code out of auth, tenant, idempotency, orchestration, and request-handler control paths.
 37. Interactive rendering, media, canvas, map, visual dashboard, and native preview code must state frame budget, hitch budget, pass boundaries, resource lifetimes, culling/LOD/filter strategy, first-use warmup, quality profile, and capture evidence when it touches user-visible deadlines.
+38. Hot collection operations must avoid accidental repeated whole-slice or
+    whole-buffer copying. Prepend/insert/concatenate paths that grow with stored
+    state require a deque/ring/chunked representation, reserved capacity, or
+    other benchmark-proven amortized strategy.
+39. Scan and filtered-list paths must expose or benchmark candidate work before
+    materialization. At large scope, prefer selective equality/range/bitmap/
+    composite indexes and report candidates inspected per returned row.
+40. Memory optimization evidence must distinguish allocation churn from retained
+    footprint. Use cumulative and live profile views under load; do not justify
+    pooling, unsafe reuse, or complex ownership solely from RSS or a sampled
+    profile percentage.
 
 Enforcement:
 

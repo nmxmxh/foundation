@@ -1726,6 +1726,166 @@ patch_startup_snapshot_shadow() {
   fi
 }
 
+patch_worker_engine_canonical() {
+  local main="$target/cmd/worker/main.go"
+  local reg="$target/internal/worker/registry.go"
+  [[ -f "$main" && -f "$reg" ]] || return 0
+
+  # Resolve the worker drift: the foundation worker.Engine becomes the
+  # canonical seam. Worker main gains the engine (bridged onto the existing
+  # river bundle via AddToWorkers); the registry gains the RegisterProcessors
+  # seam, projection dependencies, and the projection queue. All transforms are
+  # anchored on the canonical scaffold shape and symbol-guarded; app-custom
+  # river.Worker registrations and Dependencies fields are preserved verbatim.
+  local touched=0
+
+  # --- internal/worker/registry.go (additive) ---
+  local skip_reg=0
+  grep -Eq 'Config[[:space:]]+\*config\.Config' "$reg" || skip_reg=1
+  grep -Fq '"scheduled_maintenance"' "$reg" || skip_reg=1
+  grep -Fq '"github.com/jackc/pgx/v5/pgxpool"' "$reg" || skip_reg=1
+  if [[ "$skip_reg" -eq 0 ]] && ! grep -Fq 'RegisterProcessors' "$reg"; then
+    local before; before="$(mktemp)"; cp "$reg" "$before"
+
+    perl -0pi -e 's/(\t"github.com\/jackc\/pgx\/v5\/pgxpool"\n)/$1\t"github.com\/nmxmxh\/ovasabi_foundation\/server-kit\/go\/hermes"\n\tworkerkit "github.com\/nmxmxh\/ovasabi_foundation\/server-kit\/go\/worker"\n/' "$reg"
+    perl -0pi -e 's/(\tConfig[ \t]+\*config\.Config\n)/$1\t\/\/ Projected + ProjectionFetch arm the canonical hermes record-projection\n\t\/\/ processor: repos enqueue hermes.NewRecordProjectionJob in their command\n\t\/\/ transactions, and the processor resolves committed rows through\n\t\/\/ ProjectionFetch (read-back from your normalized tables) into the\n\t\/\/ projected store. Leave nil until the app wires its fetcher.\n\tProjected       *hermes.ProjectedRuntimeStore\n\tProjectionFetch hermes.RecordFetcher\n/' "$reg"
+    perl -0pi -e 's/(\n\/\/ DefaultQueueConfig returns queue configuration for River\.)/\n\/\/ RegisterProcessors registers foundation worker.Processor implementations on\n\/\/ the engine; they bridge onto the river bundle via engine.AddToWorkers. This\n\/\/ is the canonical seam for foundation-shaped jobs - raw river.Worker\n\/\/ registrations in RegisterAll coexist on the same client.\nfunc RegisterProcessors(engine *workerkit.Engine, deps *Dependencies) {\n\tif engine == nil || deps == nil {\n\t\treturn\n\t}\n\tif deps.Projected != nil \&\& deps.ProjectionFetch != nil {\n\t\tif processor, err := hermes.NewRecordProjectionProcessor(deps.Projected, deps.ProjectionFetch); err == nil {\n\t\t\t_ = engine.Register(processor)\n\t\t}\n\t}\n}\n$1/' "$reg"
+    perl -0pi -e 's/(\t\t"scheduled_maintenance":\s*\{MaxWorkers: envInt\("QUEUE_WORKERS_SCHEDULED", 2\)\},\n)/$1\t\thermes.RecordProjectionQueue: {MaxWorkers: envInt("QUEUE_WORKERS_PROJECTION", 4)},\n/' "$reg"
+
+    if grep -Fq 'func RegisterProcessors' "$reg" && grep -Fq 'hermes.RecordProjectionQueue' "$reg"; then
+      touched=1
+      log_patch "worker registry gains processor seam: ${reg#$target/}"
+    else
+      cp "$before" "$reg"
+    fi
+    rm -f "$before"
+  fi
+
+  # --- cmd/worker/main.go ---
+  local skip_main=0
+  grep -Fq 'workers := river.NewWorkers()' "$main" || skip_main=1
+  grep -Fq 'worker.RegisterAll(workers, &worker.Dependencies{' "$main" || skip_main=1
+  grep -Eq 'Queues:[[:space:]]+worker\.DefaultQueueConfig\(cfg\),' "$main" || skip_main=1
+  # Main references worker.RegisterProcessors: only transform once the registry
+  # carries the seam (patched below on the first pass, so main lands on the
+  # second guard evaluation in the same run via the reordering that follows).
+  grep -Fq 'RegisterProcessors' "$reg" || skip_main=1
+  # Apps rename the logger variable (log vs logger); detect it from the
+  # canonical river-client error line so injected code compiles either way.
+  local logvar
+  logvar="$(perl -ne 'if (/(\w+)\.Error\("failed to initialize River client"/) { print $1; exit }' "$main")"
+  [[ -n "$logvar" ]] || skip_main=1
+  if [[ "$skip_main" -eq 0 ]] && ! grep -Fq 'AddToWorkers' "$main"; then
+    local before; before="$(mktemp)"; cp "$main" "$before"
+
+    export LOGVAR="$logvar"
+    perl -0pi -e 's/(\t"github.com\/nmxmxh\/ovasabi_foundation\/server-kit\/go\/database"\n)/$1\tworkerkit "github.com\/nmxmxh\/ovasabi_foundation\/server-kit\/go\/worker"\n/' "$main"
+    # Lift the Dependencies literal into a variable (app-custom fields kept
+    # verbatim in the captured middle) and append the engine block.
+    perl -0pi -e 's/\tworkers := river\.NewWorkers\(\)\n\tworker\.RegisterAll\(workers, &worker\.Dependencies\{\n(.*?)\n\t\}\)\n/\tworkers := river.NewWorkers()\n\tdeps := &worker.Dependencies{\n$1\n\t}\n\tworker.RegisterAll(workers, deps)\n\n\t\/\/ Foundation worker engine: the canonical seam for Processor-based jobs\n\t\/\/ (e.g. the hermes record-projection processor). Engine processors bridge\n\t\/\/ onto the same river bundle as the raw river.Worker registrations above,\n\t\/\/ and the engine is the EnqueueTx\/Enqueue surface for foundation jobs.\n\tengine := workerkit.NewEngine(nil, $ENV{LOGVAR})\n\tworker.RegisterProcessors(engine, deps)\n\tif err := engine.AddToWorkers(workers); err != nil {\n\t\t$ENV{LOGVAR}.Error("failed to bridge engine processors onto river", "error", err)\n\t\tos.Exit(1)\n\t}\n/s' "$main"
+    perl -0pi -e 's/(\t\tQueues:[ \t]+)worker\.DefaultQueueConfig\(cfg\),/$1engine.RiverQueueConfig(worker.DefaultQueueConfig(cfg)),/' "$main"
+    perl -0pi -e 's/(\triverClient, err := river\.NewClient\(riverpgxv5\.New\(dbPool\), &river\.Config\{\n.*?\n\t\}\)\n\tif err != nil \{\n\t\t$ENV{LOGVAR}\.Error\("failed to initialize River client", "error", err\)\n\t\tos\.Exit\(1\)\n\t\}\n)/$1\tengine.SetRiverClient(riverClient, dbPool)\n/s' "$main"
+
+    if grep -Fq 'engine.SetRiverClient(riverClient, dbPool)' "$main" && grep -Fq 'worker.RegisterProcessors(engine, deps)' "$main"; then
+      touched=1
+      log_patch "worker main binds foundation engine: ${main#$target/}"
+    else
+      cp "$before" "$main"
+    fi
+    rm -f "$before"
+  fi
+
+  # --- internal/startup/dependencies.go (additive, canonical apps only) ---
+  local deps_file="$target/internal/startup/dependencies.go"
+  if [[ -f "$deps_file" ]] && ! grep -Fq 'initWorkerEngine' "$deps_file" \
+    && grep -Fq 'warmProjectionScopes' "$deps_file" \
+    && grep -Fq 'deps.HealthChecker = initHealthChecker(deps.DB, deps.Redis)' "$deps_file" \
+    && grep -Eq 'FrameRouter[[:space:]]+\*grpcsvc\.Router' "$deps_file" \
+    && grep -Fq '"github.com/nmxmxh/ovasabi_foundation/server-kit/go/resilience"' "$deps_file" \
+    && grep -Eq '^\t"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"$' "$deps_file"; then
+    local before; before="$(mktemp)"; cp "$deps_file" "$before"
+
+    perl -0pi -e 's/(\t"github.com\/nmxmxh\/ovasabi_foundation\/server-kit\/go\/resilience"\n)/$1\tworkerkit "github.com\/nmxmxh\/ovasabi_foundation\/server-kit\/go\/worker"\n\t"github.com\/riverqueue\/river"\n\t"github.com\/riverqueue\/river\/riverdriver\/riverpgxv5"\n/' "$deps_file"
+    perl -0pi -e 's/(\n\/\/ Dependencies holds all initialized dependencies\n)/\n\/\/ ProjectionFetcher is the app'"'"'s read-back seam for the canonical hermes\n\/\/ record-projection processor: given a record identity, return its committed\n\/\/ data from the app'"'"'s normalized tables (Data keys = the column names your\n\/\/ projection consumers read). Assign it from an app-owned file in this package\n\/\/ (e.g. projection_fetcher.go) before InitDependencies runs; while nil the\n\/\/ projection processor is not registered and the worker engine is insert-only.\nvar ProjectionFetcher hermes.RecordFetcher\n$1/' "$deps_file"
+    perl -0pi -e 's/(\tFrameRouter[ \t]+\*grpcsvc\.Router\n)/$1\t\/\/ WorkerEngine is the canonical job seam: repos EnqueueTx foundation jobs\n\t\/\/ (e.g. hermes projection jobs) in their command transactions, and - when\n\t\/\/ ProjectionFetcher is assigned - this process works the projection queue\n\t\/\/ so hot applies (and their WS deltas) happen in the serving process.\n\tWorkerEngine *workerkit.Engine\n/' "$deps_file"
+    perl -0pi -e 's/(\n\tdeps\.HealthChecker = initHealthChecker\(deps\.DB, deps\.Redis\)\n)/\n\t\/\/ Canonical worker engine: EnqueueTx surface for foundation jobs and - when\n\t\/\/ the app assigns ProjectionFetcher - the in-process worker for the hermes\n\t\/\/ projection queue, so hot applies fan WS deltas out of the serving process.\n\tif deps.Projected != nil {\n\t\tengine, stopWorkers, err := initWorkerEngine(ctx, deps.Projected, kitLog)\n\t\tif err != nil {\n\t\t\tkitLog.WarnContext(ctx, "worker engine unavailable; foundation job enqueue disabled", "error", err)\n\t\t} else {\n\t\t\tdeps.WorkerEngine = engine\n\t\t\tif stopWorkers != nil {\n\t\t\t\tcleanups = append(cleanups, stopWorkers)\n\t\t\t}\n\t\t}\n\t}\n$1/' "$deps_file"
+
+    local helper; helper="$(mktemp)"
+    cat > "$helper" <<'GOEOF'
+// initWorkerEngine builds the canonical foundation worker engine over the
+// projected store's Postgres pool. With ProjectionFetcher assigned, the hermes
+// record-projection processor registers and this process works the projection
+// queue (river client started; stopped via the returned cleanup). Without it,
+// the engine is insert-only: EnqueueTx works, and a separate worker binary —
+// which bridges the same processors via engine.AddToWorkers — executes jobs.
+func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeStore, log kitlogger.Logger) (*workerkit.Engine, func(context.Context), error) {
+	pg, ok := projected.Base().(*database.PostgresDB)
+	if !ok || pg.Pool() == nil {
+		return nil, nil, fmt.Errorf("worker engine requires the postgres driver")
+	}
+	pool := pg.Pool()
+
+	engine := workerkit.NewEngine(nil, log)
+	registered := false
+	if ProjectionFetcher != nil {
+		processor, err := hermes.NewRecordProjectionProcessor(projected, ProjectionFetcher)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init projection processor: %w", err)
+		}
+		if err := engine.Register(processor); err != nil {
+			return nil, nil, fmt.Errorf("register projection processor: %w", err)
+		}
+		registered = true
+	}
+
+	riverCfg := &river.Config{}
+	if registered {
+		workers := river.NewWorkers()
+		if err := engine.AddToWorkers(workers); err != nil {
+			return nil, nil, err
+		}
+		riverCfg.Workers = workers
+		riverCfg.Queues = engine.RiverQueueConfig(nil)
+	}
+	client, err := river.NewClient(riverpgxv5.New(pool), riverCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("init river client: %w", err)
+	}
+	engine.SetRiverClient(client, pool)
+
+	if !registered {
+		return engine, nil, nil // insert-only: nothing to start or stop
+	}
+	if err := client.Start(ctx); err != nil {
+		return nil, nil, fmt.Errorf("start river client: %w", err)
+	}
+	stop := func(cleanupCtx context.Context) {
+		if err := client.Stop(cleanupCtx); err != nil {
+			log.ErrorContext(cleanupCtx, "failed to stop river client", "error", err)
+		}
+	}
+	return engine, stop, nil
+}
+
+GOEOF
+    HELPER="$helper" perl -0pi -e 'BEGIN{local $/; open(F,"<",$ENV{HELPER}) or die; $h=<F>; close F} s/\n\/\/ warmProjectionScopes eagerly/\n$h\n\/\/ warmProjectionScopes eagerly/' "$deps_file"
+    rm -f "$helper"
+
+    if grep -Fq 'func initWorkerEngine' "$deps_file" && grep -Fq 'WorkerEngine *workerkit.Engine' "$deps_file"; then
+      touched=1
+      log_patch "startup binds canonical worker engine: ${deps_file#$target/}"
+    else
+      cp "$before" "$deps_file"
+    fi
+    rm -f "$before"
+  fi
+
+  if [[ "$touched" -eq 1 ]] && command -v gofmt >/dev/null 2>&1; then
+    gofmt -w "$main" "$reg" 2>/dev/null
+    [[ -f "$deps_file" ]] && gofmt -w "$deps_file" 2>/dev/null
+  fi
+}
+
 export PATCH_SEARCH PATCH_REPLACE
 
 patch_agent_native_guides
@@ -1766,6 +1926,7 @@ patch_env_example_hermes_warm_scopes
 patch_startup_projection_warming
 patch_startup_envelope_fallback
 patch_startup_snapshot_shadow
+patch_worker_engine_canonical
 sync_go_work
 
 if [[ "$patched" -eq 0 ]]; then

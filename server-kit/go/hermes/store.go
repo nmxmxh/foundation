@@ -106,6 +106,7 @@ type partitionRegistry struct {
 	records shardedMap
 	scopes  shardedMap
 	fields  shardedMap
+	ranges  shardedMap
 }
 
 const numShards = 128
@@ -137,6 +138,8 @@ func (sm *shardedMap) getShard(key any) *sync.Map {
 		hash = hashString(k)
 	case fieldIndex:
 		hash = hashString(k.scope.domain + ":" + k.scope.collection + ":" + k.scope.organizationID + ":" + k.field + ":" + k.value)
+	case rangeIndex:
+		hash = hashString(k.scope.domain + ":" + k.scope.collection + ":" + k.scope.organizationID + ":" + k.field + ":" + string(k.kind))
 	case recordScope:
 		hash = hashString(k.domain + ":" + k.collection + ":" + k.organizationID)
 	default:
@@ -400,6 +403,7 @@ func newPartitionRegistry() *partitionRegistry {
 		records: *newShardedMap(),
 		scopes:  *newShardedMap(),
 		fields:  *newShardedMap(),
+		ranges:  *newShardedMap(),
 	}
 }
 
@@ -429,20 +433,24 @@ func (p *partition) stats() Stats {
 	tombstones := len(p.tombstones)
 	applied := len(p.applied)
 	p.mu.Unlock()
+	rangeEntries, rangeBytes := p.activeRegistry().rangeIndexStats()
 	return Stats{
-		Projection:       p.spec.Name,
-		Epoch:            p.epoch.Load(),
-		SourceWatermark:  p.watermark.Load(),
-		Records:          int(p.records.Load()),
-		ApproxBytes:      p.bytes.Load(),
-		Tombstones:       tombstones,
-		AppliedEvents:    applied,
-		RejectedApplies:  p.rejectedApplies.Load(),
-		IndexCompactions: p.indexCompactions.Load(),
-		MaxRecords:       p.spec.MaxRecords,
-		MaxBytes:         p.spec.MaxBytes,
-		MaxTombstones:    p.spec.MaxTombstones,
-		MaxAppliedEvents: p.spec.MaxAppliedEvents,
+		Projection:        p.spec.Name,
+		Epoch:             p.epoch.Load(),
+		SourceWatermark:   p.watermark.Load(),
+		Records:           int(p.records.Load()),
+		ApproxBytes:       p.bytes.Load(),
+		Tombstones:        tombstones,
+		AppliedEvents:     applied,
+		RejectedApplies:   p.rejectedApplies.Load(),
+		IndexCompactions:  p.indexCompactions.Load(),
+		RangeIndexEntries: rangeEntries,
+		RangeIndexBytes:   rangeBytes,
+		MaxRecords:        p.spec.MaxRecords,
+		MaxBytes:          p.spec.MaxBytes,
+		MaxTombstones:     p.spec.MaxTombstones,
+		MaxAppliedEvents:  p.spec.MaxAppliedEvents,
+		MaxRangeIndexes:   len(p.spec.RangeIndexedFields),
 	}
 }
 
@@ -494,11 +502,33 @@ func (p *partition) listRecords(ctx context.Context, query Query, fence Fence) (
 }
 
 func (p *partition) count(ctx context.Context, query Query, fence Fence) (int64, error) {
-	batch, err := p.getColumnarBatch(ctx, query, []string{"record_id"}, fence)
-	if err != nil {
+	if err := p.waitForStable(ctx); err != nil {
 		return 0, err
 	}
-	return int64(batch.Rows), nil
+	if err := p.checkFence(fence); err != nil {
+		return 0, err
+	}
+	query = normalizeQuery(query)
+	if query.OrganizationID == "" {
+		return 0, ErrInvalidEvent
+	}
+
+	registry := p.activeRegistry()
+	index := p.candidateIndex(registry, query)
+	var count int64
+	var iterErr error
+	index.forEachKey(func(key string) bool {
+		entry, ok := p.recordEntry(registry, key)
+		if !ok || !recordMatches(entry.record, p.spec, query) {
+			return true
+		}
+		if iterErr = ctxErr(ctx); iterErr != nil {
+			return false
+		}
+		count++
+		return query.Limit <= 0 || count < int64(query.Limit)
+	})
+	return count, iterErr
 }
 
 func (p *partition) forEachView(ctx context.Context, query Query, fence Fence, fn func(RecordView) error) (int, error) {

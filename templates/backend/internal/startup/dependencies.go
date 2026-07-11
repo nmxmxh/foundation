@@ -19,9 +19,20 @@ import (
 	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/resilience"
+	workerkit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
 	"{{MODULE_PATH}}/internal/config"
 )
+
+// ProjectionFetcher is the app's read-back seam for the canonical hermes
+// record-projection processor: given a record identity, return its committed
+// data from the app's normalized tables (Data keys = the column names your
+// projection consumers read). Assign it from an app-owned file in this package
+// (e.g. projection_fetcher.go) before InitDependencies runs; while nil the
+// projection processor is not registered and the worker engine is insert-only.
+var ProjectionFetcher hermes.RecordFetcher
 
 // Dependencies holds all initialized dependencies
 type Dependencies struct {
@@ -36,7 +47,12 @@ type Dependencies struct {
 	Handler       *graceful.Handler
 	Registry      *registry.ServiceRegistry
 	FrameRouter   *grpcsvc.Router
-	Log           kitlogger.Logger
+	// WorkerEngine is the canonical job seam: repos EnqueueTx foundation jobs
+	// (e.g. hermes projection jobs) in their command transactions, and — when
+	// ProjectionFetcher is assigned — this process works the projection queue
+	// so hot applies (and their WS deltas) happen in the serving process.
+	WorkerEngine *workerkit.Engine
+	Log          kitlogger.Logger
 }
 
 // InitDependencies initializes all application dependencies
@@ -95,6 +111,21 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 		startProjectionEnvelopeFallback(ctx, deps.Projected, deps.Redis, cfg.HermesWarmScopes, kitLog)
 	}
 
+	// Canonical worker engine: EnqueueTx surface for foundation jobs and — when
+	// the app assigns ProjectionFetcher — the in-process worker for the hermes
+	// projection queue, so hot applies fan WS deltas out of the serving process.
+	if deps.Projected != nil {
+		engine, stopWorkers, err := initWorkerEngine(ctx, deps.Projected, kitLog)
+		if err != nil {
+			kitLog.WarnContext(ctx, "worker engine unavailable; foundation job enqueue disabled", "error", err)
+		} else {
+			deps.WorkerEngine = engine
+			if stopWorkers != nil {
+				cleanups = append(cleanups, stopWorkers)
+			}
+		}
+	}
+
 	deps.HealthChecker = initHealthChecker(deps.DB, deps.Redis)
 
 	deps.Handler = graceful.NewHandler(
@@ -127,6 +158,61 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	}
 
 	return deps, cleanup, nil
+}
+
+// initWorkerEngine builds the canonical foundation worker engine over the
+// projected store's Postgres pool. With ProjectionFetcher assigned, the hermes
+// record-projection processor registers and this process works the projection
+// queue (river client started; stopped via the returned cleanup). Without it,
+// the engine is insert-only: EnqueueTx works, and a separate worker binary —
+// which bridges the same processors via engine.AddToWorkers — executes jobs.
+func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeStore, log kitlogger.Logger) (*workerkit.Engine, func(context.Context), error) {
+	pg, ok := projected.Base().(*database.PostgresDB)
+	if !ok || pg.Pool() == nil {
+		return nil, nil, fmt.Errorf("worker engine requires the postgres driver")
+	}
+	pool := pg.Pool()
+
+	engine := workerkit.NewEngine(nil, log)
+	registered := false
+	if ProjectionFetcher != nil {
+		processor, err := hermes.NewRecordProjectionProcessor(projected, ProjectionFetcher)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init projection processor: %w", err)
+		}
+		if err := engine.Register(processor); err != nil {
+			return nil, nil, fmt.Errorf("register projection processor: %w", err)
+		}
+		registered = true
+	}
+
+	riverCfg := &river.Config{}
+	if registered {
+		workers := river.NewWorkers()
+		if err := engine.AddToWorkers(workers); err != nil {
+			return nil, nil, err
+		}
+		riverCfg.Workers = workers
+		riverCfg.Queues = engine.RiverQueueConfig(nil)
+	}
+	client, err := river.NewClient(riverpgxv5.New(pool), riverCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("init river client: %w", err)
+	}
+	engine.SetRiverClient(client, pool)
+
+	if !registered {
+		return engine, nil, nil // insert-only: nothing to start or stop
+	}
+	if err := client.Start(ctx); err != nil {
+		return nil, nil, fmt.Errorf("start river client: %w", err)
+	}
+	stop := func(cleanupCtx context.Context) {
+		if err := client.Stop(cleanupCtx); err != nil {
+			log.ErrorContext(cleanupCtx, "failed to stop river client", "error", err)
+		}
+	}
+	return engine, stop, nil
 }
 
 // warmProjectionScopes eagerly rebuilds the hermes hot partitions for the

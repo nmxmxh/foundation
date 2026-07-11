@@ -23,6 +23,12 @@ Foundation keeps application work in clear lanes:
 7. Hermes keeps a small local hot view of recently needed operational state.
 8. Frontend, websocket, workers, and dashboards read the same contract shape.
 
+This is the product-facing model. Foundation may execute part of the action
+through a direct CPU path, a worker, Hermes, columnar/bitmap machinery,
+Rust/WASM, FFI/shared memory, a native device plugin, or a GPU lane. The product
+contract does not change with that choice: optimized lanes refine the same
+result, metadata, diagnostics, and controlled failure behavior.
+
 ## Step By Step
 
 ### 1. Request Enters
@@ -95,3 +101,10 @@ system behaviors consistent:
 
 That lets applications differ in product logic while sharing the same operational
 spine.
+
+It also lets people enter at different depths. A product owner can reason about
+behavior and guarantees; a developer can work with the contract, transition,
+and projection; an architect can choose consistency and capability posture; and
+a Foundation engineer can inspect the memory layout, planner, query, native
+handle, or benchmark evidence. Agents translate between those levels and must
+surface decisions without forcing every reader to learn every execution plane.

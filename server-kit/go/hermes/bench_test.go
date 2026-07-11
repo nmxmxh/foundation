@@ -96,6 +96,29 @@ func BenchmarkHermesCountTypedFilterIndexed(b *testing.B) {
 	}
 }
 
+func BenchmarkHermesCountIndexedScale(b *testing.B) {
+	for _, records := range []int{1_000, 4_000, 16_000, 64_000} {
+		b.Run(fmt.Sprintf("records=%d", records), func(b *testing.B) {
+			store := benchmarkStore(b, records)
+			filter, ok := NewQueryFilter("bucket", 7)
+			if !ok {
+				b.Fatal("bucket filter is not indexable")
+			}
+			query := QueryWithFilters("org_1", 0, filter)
+			expected := (records + 8) / 16
+			b.ReportMetric(float64(expected), "candidates/op")
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				count, err := store.Count(context.Background(), "bench_ticks", query, Fence{})
+				if err != nil || count != int64(expected) {
+					b.Fatalf("Count() count=%d err=%v", count, err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkHermesListRecordsCopiedLimit50(b *testing.B) {
 	store := benchmarkStore(b, 10000)
 	ctx := context.Background()

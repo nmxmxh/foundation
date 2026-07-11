@@ -33,17 +33,23 @@ const (
 
 // ProjectionSpec defines a bounded hot subset over canonical domain records.
 type ProjectionSpec struct {
-	Name             string
-	Domain           string
-	Collection       string
-	IndexedFields    []string
-	MaxRecords       int
-	MaxBytes         int64
-	MaxIndexes       int
-	MaxTombstones    int
-	MaxAppliedEvents int
-	Freshness        time.Duration
-	TTL              time.Duration
+	Name          string
+	Domain        string
+	Collection    string
+	IndexedFields []string
+	// RangeIndexedFields declares numeric fields that receive a tenant-scoped
+	// ordered index for CompareEq/Lt/Le/Gt/Ge predicate planning. These indexes
+	// trade copy-on-write batch maintenance and bounded memory for sub-scope
+	// candidate selection; unsupported kinds/operators fall back to scanning.
+	RangeIndexedFields []string
+	MaxRecords         int
+	MaxBytes           int64
+	MaxIndexes         int
+	MaxRangeIndexes    int
+	MaxTombstones      int
+	MaxAppliedEvents   int
+	Freshness          time.Duration
+	TTL                time.Duration
 }
 
 // Event is the durable mutation shape consumed by the Hermes hot plane.
@@ -86,19 +92,22 @@ type ApplyResult struct {
 }
 
 type Stats struct {
-	Projection       string
-	Epoch            uint64
-	SourceWatermark  uint64
-	Records          int
-	ApproxBytes      int64
-	Tombstones       int
-	AppliedEvents    int
-	RejectedApplies  int64
-	IndexCompactions int64
-	MaxRecords       int
-	MaxBytes         int64
-	MaxTombstones    int
-	MaxAppliedEvents int
+	Projection        string
+	Epoch             uint64
+	SourceWatermark   uint64
+	Records           int
+	ApproxBytes       int64
+	Tombstones        int
+	AppliedEvents     int
+	RejectedApplies   int64
+	IndexCompactions  int64
+	RangeIndexEntries int
+	RangeIndexBytes   int64
+	MaxRecords        int
+	MaxBytes          int64
+	MaxTombstones     int
+	MaxAppliedEvents  int
+	MaxRangeIndexes   int
 }
 
 type RuntimeStats struct {
@@ -153,6 +162,12 @@ type fieldIndex struct {
 	field string
 	kind  byte
 	value string
+}
+
+type rangeIndex struct {
+	scope recordScope
+	field string
+	kind  byte
 }
 
 type recordOrderEntry struct {

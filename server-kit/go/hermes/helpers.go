@@ -20,6 +20,7 @@ func normalizeSpec(spec ProjectionSpec) (ProjectionSpec, error) {
 		return ProjectionSpec{}, ErrInvalidProjection
 	}
 	spec.IndexedFields = normalizeIndexedFields(spec.IndexedFields, spec.MaxIndexes)
+	spec.RangeIndexedFields = normalizeIndexedFields(spec.RangeIndexedFields, spec.MaxRangeIndexes)
 	if spec.MaxRecords <= 0 {
 		spec.MaxRecords = defaultMaxRecords
 	}

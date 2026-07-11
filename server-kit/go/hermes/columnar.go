@@ -395,13 +395,48 @@ func (p *partition) getColumnarBatchWhere(ctx context.Context, query Query, fiel
 	// truncate before filtering and break WHERE-then-LIMIT semantics.
 	collectQuery := query
 	collectQuery.Limit = 0
-	entries, err := p.collectRecordEntries(ctx, p.activeRegistry(), collectQuery)
+	registry := p.activeRegistry()
+	var entries []recordEntry
+	var err error
+	if plan, ok := p.bestRangeCandidatePlan(registry, collectQuery, predicates); ok {
+		entries, _, err = p.collectRangeEntries(ctx, registry, collectQuery, plan)
+	} else {
+		entries, err = p.collectRecordEntries(ctx, registry, collectQuery)
+	}
 	if err != nil {
 		return nil, err
 	}
 	entries = filterEntriesInPlace(entries, predicates)
 	entries = sortAndLimitEntries(entries, query)
 	return buildRecordBatch(fields, entries)
+}
+
+func (p *partition) collectRangeEntries(
+	ctx context.Context,
+	registry *partitionRegistry,
+	query Query,
+	plan rangeCandidatePlan,
+) ([]recordEntry, int, error) {
+	if plan.snapshot == nil || plan.estimate == 0 {
+		return nil, 0, nil
+	}
+	entries := make([]recordEntry, 0, plan.estimate)
+	inspected := 0
+	var iterErr error
+	plan.forEach(func(candidate rangeIndexEntry) bool {
+		if err := ctxErr(ctx); err != nil {
+			iterErr = err
+			return false
+		}
+		inspected++
+		entry, ok := p.recordEntry(registry, candidate.key)
+		if !ok || entry.version != candidate.version || !recordMatches(entry.record, p.spec, query) {
+			return true
+		}
+		entries = append(entries, entry)
+		return true
+	})
+	return entries, inspected, iterErr
 }
 
 // sortAndLimitEntries applies the canonical batch order (descending UpdatedAt

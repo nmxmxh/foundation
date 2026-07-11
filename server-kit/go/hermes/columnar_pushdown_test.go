@@ -2,8 +2,92 @@ package hermes
 
 import (
 	"context"
+	"fmt"
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
+
+func TestGetColumnarBatchWhereRangeIndexTracksMutation(t *testing.T) {
+	store := buildSelectFixtureStore(t, 100)
+	stats, err := store.Stats("ticks")
+	if err != nil || stats.RangeIndexEntries == 0 || stats.RangeIndexBytes == 0 || stats.MaxRangeIndexes != 2 {
+		t.Fatalf("range stats = %+v, err=%v", stats, err)
+	}
+	predicates := []ColumnPredicate{PredicateFloat64("price", CompareGe, 135)}
+	if got := fetchPushdownBatch(t, store, []string{"record_id"}, predicates, 0).Rows; got != 8 {
+		t.Fatalf("initial range rows = %d, want 8", got)
+	}
+	_, err = store.Apply(t.Context(), "ticks", Event{
+		Operation: OperationPatch, SourceID: "range_patch", Version: 10_000,
+		Record: database.DomainRecord{
+			Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "tick_000090",
+			Data: database.RecordDataFromPairs(database.RecordField{Name: "price", Value: database.FloatValue(1)}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("range patch: %v", err)
+	}
+	if got := fetchPushdownBatch(t, store, []string{"record_id"}, predicates, 0).Rows; got != 7 {
+		t.Fatalf("post-patch range rows = %d, want 7", got)
+	}
+}
+
+func TestGetColumnarBatchWhereRangeIndexTenantIsolation(t *testing.T) {
+	store := buildSelectFixtureStore(t, 32)
+	_, err := store.Apply(t.Context(), "ticks", Event{
+		Operation: OperationUpsert, SourceID: "other_org", Version: 50_000,
+		Record: database.DomainRecord{
+			Domain: "signals", Collection: "ticks", OrganizationID: "org_2", RecordID: "other",
+			Data: database.RecordDataFromPairs(database.RecordField{Name: "price", Value: database.FloatValue(999999)}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("other-org apply: %v", err)
+	}
+	batch := fetchPushdownBatch(t, store, []string{"record_id"}, []ColumnPredicate{
+		PredicateFloat64("price", CompareGt, 100000),
+	}, 0)
+	if batch.Rows != 0 {
+		t.Fatalf("org_2 range candidate leaked into org_1: rows=%d", batch.Rows)
+	}
+}
+
+func TestGetColumnarBatchWhereRangeIndexDeltaCompactionParity(t *testing.T) {
+	indexed := buildSelectFixtureStoreWithRange(t, 128, true)
+	oracle := buildSelectFixtureStoreWithRange(t, 128, false)
+	for i := range maxRangeIndexDeltaDepth + 8 {
+		event := Event{
+			Operation: OperationPatch, SourceID: fmt.Sprintf("compact_%d", i), Version: uint64(10_000 + i),
+			Record: database.DomainRecord{
+				Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: fmt.Sprintf("tick_%06d", i),
+				Data: database.RecordDataFromPairs(database.RecordField{Name: "price", Value: database.FloatValue(float64(500 - i))}),
+			},
+		}
+		if _, err := indexed.Apply(t.Context(), "ticks", event); err != nil {
+			t.Fatalf("indexed patch %d: %v", i, err)
+		}
+		if _, err := oracle.Apply(t.Context(), "ticks", event); err != nil {
+			t.Fatalf("oracle patch %d: %v", i, err)
+		}
+	}
+	predicates := []ColumnPredicate{PredicateFloat64("price", CompareGe, 250), PredicateInt64("bucket", CompareLe, 7)}
+	indexedBatch := fetchPushdownBatch(t, indexed, []string{"record_id"}, predicates, 0)
+	oracleBatch := fetchPushdownBatch(t, oracle, []string{"record_id"}, predicates, 0)
+	indexedIDs := map[string]bool{}
+	for _, id := range indexedBatch.Columns[0].Data.(*StringVector).StringValues() {
+		indexedIDs[id] = true
+	}
+	oracleIDs := oracleBatch.Columns[0].Data.(*StringVector).StringValues()
+	if len(indexedIDs) != len(oracleIDs) {
+		t.Fatalf("post-compaction row count differs: indexed=%d oracle=%d", len(indexedIDs), len(oracleIDs))
+	}
+	for _, id := range oracleIDs {
+		if !indexedIDs[id] {
+			t.Fatalf("post-compaction range result missing %q", id)
+		}
+	}
+}
 
 func fetchPushdownBatch(tb testing.TB, store *Store, fields []string, predicates []ColumnPredicate, limit int) *RecordBatch {
 	tb.Helper()
@@ -202,4 +286,92 @@ func BenchmarkHermesColumnarPushdownFilterSum(b *testing.B) {
 		sink = sum
 	}
 	_ = sink
+}
+
+func BenchmarkHermesColumnarRangeIndexScale(b *testing.B) {
+	for _, records := range []int{1_000, 10_000, 100_000} {
+		for _, indexed := range []bool{false, true} {
+			name := "scan"
+			if indexed {
+				name = "ordered"
+			}
+			b.Run(fmt.Sprintf("%s/records=%d", name, records), func(b *testing.B) {
+				store := buildSelectFixtureStoreWithRange(b, records, indexed)
+				predicates := []ColumnPredicate{
+					PredicateFloat64("price", CompareGe, float64(records)*1.125),
+					PredicateInt64("bucket", CompareLe, 7),
+				}
+				part, err := store.partition("ticks")
+				if err != nil {
+					b.Fatal(err)
+				}
+				candidates := records
+				if plan, ok := part.bestRangeCandidatePlan(part.activeRegistry(), Query{OrganizationID: "org_1"}, predicates); ok {
+					candidates = plan.estimate
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					batch, batchErr := store.GetColumnarBatchWhere(
+						context.Background(), "ticks", Query{OrganizationID: "org_1"},
+						[]string{"price"}, predicates, Fence{},
+					)
+					if batchErr != nil || batch.Rows == 0 {
+						b.Fatalf("range batch rows=%d err=%v", batch.Rows, batchErr)
+					}
+				}
+				b.ReportMetric(float64(candidates), "candidates/op")
+			})
+		}
+	}
+}
+
+func BenchmarkHermesRangeIndexBuild10K(b *testing.B) {
+	records := benchmarkRecords(10_000)
+	for _, indexed := range []bool{false, true} {
+		name := "equality_only"
+		if indexed {
+			name = "ordered"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				var rangeFields []string
+				if indexed {
+					rangeFields = []string{"bucket"}
+				}
+				store, err := NewStore(ProjectionSpec{
+					Name: "build", Domain: "signals", Collection: "ticks",
+					IndexedFields: []string{"bucket"}, RangeIndexedFields: rangeFields,
+					MaxRecords: 10_001, MaxBytes: 512 << 20,
+				})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if _, err := store.BulkLoad(context.Background(), "build", records); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkHermesRangeIndexUpdate10K(b *testing.B) {
+	store := buildSelectFixtureStoreWithRange(b, 10_000, true)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		_, err := store.Apply(context.Background(), "ticks", Event{
+			Operation: OperationPatch,
+			SourceID:  fmt.Sprintf("range_update_%d", i),
+			Version:   uint64(20_000 + i),
+			Record: database.DomainRecord{
+				Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "tick_000001",
+				Data: database.RecordDataFromPairs(database.RecordField{Name: "price", Value: database.FloatValue(float64(i % 10_000))}),
+			},
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }

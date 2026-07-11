@@ -606,6 +606,45 @@ func (e *Engine) recordHealth(job Job, state JobHealthState, err error, startedA
 	e.jobHealth[key] = snapshot
 }
 
+// AddToWorkers registers every processor currently registered on the engine
+// with a river.Workers bundle — one Bridge per kind, using AddWorkerArgs so
+// the dynamic Job kinds register correctly (plain AddWorker derives the kind
+// from a zero Job, which is empty). This is the missing glue that makes the
+// Engine the canonical worker story: apps register Processors on the engine,
+// call AddToWorkers before building the river client, and raw river.Worker
+// registrations for app-specific args types coexist on the same bundle.
+func (e *Engine) AddToWorkers(workers *river.Workers) error {
+	if workers == nil {
+		return errors.New("river workers bundle is required")
+	}
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for kind, processor := range e.processors {
+		river.AddWorkerArgs(workers, Job{JobKind: kind}, &Bridge{Processor: processor})
+	}
+	return nil
+}
+
+// RiverQueueConfig merges the engine's registered processor queues into a
+// river queue configuration, so a processor's queue always has workers even
+// when the app's static queue map predates it. Existing entries win.
+func (e *Engine) RiverQueueConfig(base map[string]river.QueueConfig) map[string]river.QueueConfig {
+	out := map[string]river.QueueConfig{}
+	maps.Copy(out, base)
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for queue, count := range e.workers {
+		if _, ok := out[queue]; ok {
+			continue
+		}
+		if count <= 0 {
+			count = 1
+		}
+		out[queue] = river.QueueConfig{MaxWorkers: count}
+	}
+	return out
+}
+
 // Bridge creates a river.Worker that delegates to a Processor.
 type Bridge struct {
 	river.WorkerDefaults[Job]

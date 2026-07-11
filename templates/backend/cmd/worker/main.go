@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+	workerkit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 
@@ -60,22 +61,35 @@ func main() {
 
 	// Initialize River Workers
 	workers := river.NewWorkers()
-	worker.RegisterAll(workers, &worker.Dependencies{
+	deps := &worker.Dependencies{
 		DB:     dbPool,
 		Config: cfg,
 		// Add your initialized services here
-	})
+	}
+	worker.RegisterAll(workers, deps)
+
+	// Foundation worker engine: the canonical seam for Processor-based jobs
+	// (e.g. the hermes record-projection processor). Engine processors bridge
+	// onto the same river bundle as the raw river.Worker registrations above,
+	// and the engine is the EnqueueTx/Enqueue surface for foundation jobs.
+	engine := workerkit.NewEngine(nil, log)
+	worker.RegisterProcessors(engine, deps)
+	if err := engine.AddToWorkers(workers); err != nil {
+		log.Error("failed to bridge engine processors onto river", "error", err)
+		os.Exit(1)
+	}
 
 	// Initialize River Client
 	riverClient, err := river.NewClient(riverpgxv5.New(dbPool), &river.Config{
 		Workers:      workers,
-		Queues:       worker.DefaultQueueConfig(cfg),
+		Queues:       engine.RiverQueueConfig(worker.DefaultQueueConfig(cfg)),
 		PeriodicJobs: worker.PeriodicJobs(cfg),
 	})
 	if err != nil {
 		log.Error("failed to initialize River client", "error", err)
 		os.Exit(1)
 	}
+	engine.SetRiverClient(riverClient, dbPool)
 
 	// Start River Client
 	if err := riverClient.Start(ctx); err != nil {

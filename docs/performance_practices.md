@@ -98,6 +98,24 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 4. Treat `runtime.convT2I`, `runtime.assertI2T`, high allocation counts, mutex wait, and goroutine growth as signals to inspect, not automatic refactor triggers.
 5. For Go concurrency changes, capture active goroutines by component, queue depth/capacity, blocked or rejected channel sends, shutdown drain duration, work-after-cancel count, and block/mutex profile samples.
 6. A passing race run or absent runtime deadlock is not enough performance evidence. Pair `go test -race` with explicit leak/blocking tests and metrics for the specific goroutine/channel/lock boundary.
+7. Profile a representative active workload, not an idle process. An empty CPU
+   profile is still evidence: inspect waiting, syscalls, scheduler activity,
+   allocation churn, blocking, and external round trips before concluding that
+   the path has no bottleneck.
+8. Separate cumulative allocation from retained memory. Capture
+   `alloc_space`/`alloc_objects` to find garbage and construction churn, and
+   `inuse_space`/`inuse_objects` to find footprint and retention. Neither view
+   substitutes for the other.
+9. Inspect cumulative work as well as time per operation. Record the counters
+   appropriate to the lane: candidates inspected, results produced, bytes
+   copied/touched, sort comparisons, rows removed by filter, serialization
+   bytes, database/network round trips, syscalls, host/device transfers, or
+   queue hops.
+10. State the expected complexity class for data-structure and scan changes.
+    A normal live heap can hide quadratic copying or repeated linear scans;
+    source-line allocation profiles and size-series benchmarks must distinguish
+    `O(1)`, amortized `O(1)`, `O(log N + K)`, bounded `O(N)`, and accidental
+    superlinear behavior.
 
 ### Allocation discipline
 
@@ -121,6 +139,17 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 15. Return borrowed readers or views for immutable in-memory payloads when the caller consumes them synchronously. Make a defensive copy only when storing caller-provided bytes, exposing mutable data, or allowing the view to outlive the owner.
 15a. De-serialize protobuf event envelope metadata lazily. Store raw metadata pointers and parse the metadata map only when explicitly requested (e.g., via `MaterializeMetadata()`). Perform fast-path validations directly on the protobuf structure to bypass map allocations.
 15b. Convert custom structs directly to generic extension containers (like `extension.Object` maps) using reflection (`reflect.Struct` kinds) instead of performing expensive `json.Marshal`/`json.Unmarshal` round-trips in hot paths.
+16. Do not infer allocation churn from RSS or live heap alone. A path may retain
+    little memory while repeatedly allocating and discarding large backing
+    arrays. Compare cumulative and retained profiles under the same workload.
+17. Before pooling or shaving individual allocations, determine whether the
+    path is CPU/GC-bound or waiting on a database, network, disk, device, or
+    lock. Allocation cuts on a wait-bound path are capacity/p99 improvements
+    only when GC CPU, throughput, or tail-latency evidence confirms them.
+18. Review prepend, insert, concatenate, clone, grow, and exact-fit slice
+    patterns for repeated whole-buffer copying. Use a deque/ring, reserved head
+    room, chunked representation, builder, or ownership transfer when the
+    operation otherwise becomes quadratic; preserve bounds and ownership tests.
 
 ### CPU microarchitecture posture
 
@@ -263,6 +292,16 @@ not replacements for Postgres transactional truth.
 7. Late materialization is a review principle: filter/prune on compact columns
    before constructing wide row objects, JSON maps, React state, or response
    DTOs.
+8. Report `candidates_inspected`, `rows_selected`, and their ratio for filtered
+   scans. Predicate pushdown that avoids materialization but still examines an
+   entire large scope is an intermediate improvement, not an indexed query.
+9. The planner should begin with the most selective eligible equality, ordered,
+   range, bitmap, or composite index, then evaluate residual predicates over
+   the reduced candidate set. Index memory, mutation cost, and tenant/scope
+   bounds are part of the decision.
+10. Benchmark scale series, not one cardinality, for candidate collection and
+    data-structure changes. Include enough sizes to expose linear, logarithmic,
+    and superlinear growth and report work per returned row.
 
 ## GPU and WebGPU performance
 
@@ -410,6 +449,8 @@ Each tracked change should include:
 5. The doc and test/benchmark location that will stay updated.
 6. The agent or reviewer evidence note when the change was AI-authored or
    AI-assisted, using `agent_operating_contract.md`.
+7. The cumulative-work counters and expected complexity class when the change
+   affects a loop, collection, index, codec, copy, batch, or projection scan.
 
 ## Review checklist
 
@@ -419,5 +460,7 @@ Each tracked change should include:
 - [ ] Does the optimization preserve tenant scope, idempotency, authorization, replay safety, and diagnostics?
 - [ ] Does it use the correct Ovasabi performance lane for the process/network boundary?
 - [ ] Are allocation, copying, locking, and goroutine growth visible in tests or telemetry?
+- [ ] Are cumulative allocation and retained memory distinguished where memory behavior is part of the claim?
+- [ ] Are algorithmic work, scale behavior, and work-per-result visible for scans and collection operations?
 - [ ] Are database indexes and query predicates aligned?
 - [ ] Is the documentation updated in the same change set?

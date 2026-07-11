@@ -15,6 +15,30 @@ reviewable engineering work: every patch should preserve ownership boundaries,
 state invariants, security posture, benchmark meaning, and project-specific
 intent.
 
+Agents are also the progressive-disclosure interface to Foundation. They must
+make the system externally programmable through domain intent, contracts,
+transitions, projections, and guarantees while retaining access to the full
+runtime depth when evidence or risk requires it.
+
+## Progressive Disclosure Duty
+
+Match explanations and requested decisions to the reader:
+
+1. For a layperson or product owner, lead with visible behavior, guarantees,
+   failure/freshness posture, and decisions that change product meaning.
+2. For a product developer, expose contracts, transitions, projections, domain
+   rules, and verification commands.
+3. For an application architect, expose consistency, capability, security,
+   scaling, cost, and fallback choices.
+4. For a Foundation engineer, expose layouts, planner decisions, query shape,
+   allocation/copy budgets, native/GPU resources, and benchmark evidence.
+
+Do not ask a user to select a low-level lane when workload shape, platform
+capabilities, policy, and benchmark evidence can decide it. Do not hide a
+trade-off when it changes correctness, privacy, durability, cost, portability,
+or user-visible latency. Translate the decision and preserve the deeper evidence
+for inspection.
+
 Related docs:
 
 - `foundation_architecture_contract.md`

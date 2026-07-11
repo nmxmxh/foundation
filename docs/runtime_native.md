@@ -3,6 +3,13 @@
 `runtime-native` is Foundation's native device shell bridge. It makes desktop and
 mobile shells first-class without weakening the runtime ladder.
 
+Application authors describe the device capability and product guarantee, not
+the platform handle choreography. Agents and the runtime translate that intent
+into permission manifests, bounded byte lanes, private native handle ownership,
+capability checks, planner descriptors, parity evidence, and materialization
+fallbacks. The deeper Swift/Kotlin/Rust/GPU mechanics remain inspectable without
+becoming the entry-level programming model.
+
 ## Contract
 
 1. Tauri is the shell. It owns windows, mobile projects, bundling, and platform entrypoints.

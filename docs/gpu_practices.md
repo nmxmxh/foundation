@@ -12,6 +12,13 @@ work is a batch-throughput optimization lane. It is not a replacement for
 Postgres command truth, Go request orchestration, tenant checks, authorization,
 or ordinary UI control flow.
 
+GPU is an implementation capability, not a separate product model. A product
+request should state the operation, data shape, latency/quality target, and
+fallback tolerance. Agents and the lane planner determine whether CPU, SIMD,
+Rust/WASM, WebGPU, or native GPU is justified, then preserve the benchmark,
+parity, device-capability, and fallback evidence. Users need GPU internals only
+when those internals change cost, portability, quality, privacy, or correctness.
+
 The main research input is "Optimization Techniques for GPU Programming"
 (ACM Computing Surveys, 2023, DOI `10.1145/3570638`), a survey of 450 GPU
 optimization papers. Its useful lesson for Foundation is that GPU performance

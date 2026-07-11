@@ -4,6 +4,14 @@ Date: 2026-05-22
 
 This document records the runtime foundation posture for this scaffold.
 
+The runtime is the execution depth behind Foundation's small external model.
+Product code declares a stable input/output contract and required guarantees;
+the planner may select direct Go, bounded workers, SIMD, WASM/SAB, transferable
+buffers, FFI, shared memory, framed process, native shell/device, WebGPU/native
+GPU, or network fallback according to workload, trust, locality, capability,
+and deadline. Lane choice is hidden state unless it changes a consequential
+trade-off. Every lane must preserve visible semantics and diagnostics.
+
 For the end-to-end command/event/worker/realtime lifecycle, see `foundation/docs/foundation_nervous_system.md`. That document is the canonical substrate contract; this file describes the runtime lanes that must refine it. For the Hermes hotplane research posture, see `foundation/docs/hermes_hotplane.md`. For Go-specific concurrency bug taxonomy and watch points, see `foundation/docs/go_concurrency_bug_practices.md`. For Rust/WASM/native coding, async, performance, and error-handling rules, see `foundation/docs/rust_runtime_practices.md`.
 
 ## Control-plane foundations

@@ -43,9 +43,11 @@ type Config struct {
 	HermesMaxRecords    int
 	HermesMaxBytes      int64
 	HermesIndexedFields []string
-	// HermesWarmScopes lists projection scopes to eagerly warm from the database
-	// at startup so the projection gateway serves out-of-band (e.g. SQL-seeded)
-	// rows instead of "projection not found". Each entry is
+	// HermesWarmScopes OPTIONALLY pre-warms projection scopes at startup to cut
+	// first-request latency. It is NOT required for correctness: the projection
+	// gateway lazy-warms any cold scope on first read (rebuild from the record
+	// mirror, self-backfilling an empty mirror via ScopeBackfill). The list also
+	// names the scopes the envelope-fallback tailers consume. Each entry is
 	// "domain:collection:organization"; empty organization is invalid.
 	HermesWarmScopes []string
 	// HermesSnapshotDir enables the shadow-mode snapshot rollout: after every

@@ -20,6 +20,126 @@ The benchmark suite exists to prove that ladder stays honest. The fastest lane s
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
 
+## 2026-07-11 Cumulative-work profiling and Hermes count traversal
+
+Foundation now distinguishes cumulative allocation (`alloc_space`,
+`alloc_objects`) from retained memory (`inuse_space`, `inuse_objects`) and
+records algorithmic work counters for collection/scan lanes. A representative
+Core sweep covered HTTP ingress, envelopes/frames, workers, cache/Redis,
+database adapters, Hermes reads/writes/columnar scans, projection snapshots,
+bulk transfer, and object storage. CPU and memory profiles were then captured
+for the suspicious or dominant shapes.
+
+### Profiles: cumulative churn is not retained footprint
+
+Apple M1 Pro, 3-second benchmark profiles:
+
+| Lane | Timed result | Cumulative allocation | Retained profile | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| HTTP JSON ingress → dispatch request | ~6.1 µs, 16.6 KB/op, 56 allocs/op | ~9.24 GB | ~4.6 MB | Fixture/request buffering, metadata object construction, and cloning dominate churn; CPU samples are scheduler/network-poller heavy, so allocation work remains an ownership/adapter target rather than proof of equivalent latency gain. |
+| Worker processing | ~4.65 µs, 1.17 KB/op, 25 allocs/op | ~803 MB | ~3.0 MB | Health-key/health-record formatting and deadline timers dominate churn. Optimize only with worker-health contract parity and concurrent throughput/p99 evidence. |
+| Hermes indexed count (after change) | ~101 µs at 625 selected candidates | timed path: 0 B/op, 0 allocs/op | fixture/runtime only | Count no longer materializes candidate/vector batches; profile allocation is setup outside the timed region. |
+| Projection snapshot, 10K records | ~5.12 ms, 7.28 MB/op, 100,001 allocs/op | ~4.9 GB | ~2.5 MB | ~97% of churn is owned per-record protobuf mutation/field/timestamp construction. The architectural improvement is a streaming/columnar snapshot wire, not unsafe pooling of returned mutable protos. |
+
+These profiles demonstrate why live heap alone is insufficient: every measured
+lane retained only a few megabytes while some generated gigabytes of short-lived
+objects during the run.
+
+### Compact index traversal and count-only execution
+
+Two measured changes landed in Hermes:
+
+1. `indexSnapshot.forEachKey` now directly iterates an already-compact live key
+   set instead of allocating a `seen` map proportional to the index. Delta-chain
+   and removal reconciliation retain the general path.
+2. `Store.Count` validates live indexed candidates and residual predicates
+   directly instead of building a columnar `record_id` batch just to read
+   `batch.Rows`.
+
+Before/after, 10K-record fixture with `bucket = 7` (625 selected candidates):
+
+| Benchmark | Before | After | Result |
+| --- | ---: | ---: | --- |
+| `BenchmarkHermesCountTypedFilterIndexed` | ~261 µs, 187,584 B/op, 15 allocs/op | **~102 µs, 0 B/op, 0 allocs/op** | ~61% lower latency; candidate validation remains `O(K)` with no materialization. |
+| `BenchmarkHermesColumnarPushdownFilterSum` | ~5.5 ms, 2.62 MB/op, 42 allocs/op | **~4.9 ms, 2.18 MB/op, 9 allocs/op** | Compact-index traversal removes the per-query reconciliation map before predicate pushdown. |
+
+Scale evidence for equality-index count (medians of 3):
+
+| Records | Selected candidates | ns/op | B/op | allocs/op |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 63 | ~11,041 | 0 | 0 |
+| 4,000 | 250 | ~50,890 | 0 | 0 |
+| 16,000 | 1,000 | ~222,738 | 0 | 0 |
+| 64,000 | 4,000 | ~1,262,435 | 0 | 0 |
+
+The growth curve is intentionally proportional to selected candidates because
+each candidate is checked for current version, expiry, tenant/scope, and
+residual predicates. An allocation guard (`TestCountIndexedDoesNotAllocate`)
+and the existing compaction/removal correctness tests preserve both paths.
+
+### Remaining algorithmic bottleneck: range candidate selection
+
+The service-backed 100K pushdown result (~137 ms p50 in the 2026-07-02 record)
+still begins with a full-scope candidate traversal for predicates such as
+`bucket <= 7 AND ordinal >= N`. Predicate pushdown avoids sorting and
+materializing rejected rows, but equality-key indexes cannot select range
+predicates. The next legitimate lane is a bounded, declared ordered/range or
+bit-sliced bitmap index with:
+
+- candidates-inspected and rows-selected counters
+- equality/range/bitmap planner selectivity
+- index memory and mutation/write-amplification budgets
+- multi-tenant scope isolation
+- parity against the current full-scan oracle
+- 1K/10K/100K/1M scale and concurrent read/write evidence
+
+This entry originally identified the missing lane; the same-day follow-up below
+records its implementation and measured trade-offs. Undeclared fields still use
+pushdown as materialization avoidance rather than indexed range execution.
+
+### Ordered numeric candidate indexes (same-day follow-up)
+
+The declared ordered lane now exists. `ProjectionSpec.RangeIndexedFields` and
+`MaxRangeIndexes` opt numeric fields into tenant-scoped immutable sorted
+snapshots. `GetColumnarBatchWhere` chooses the smallest eligible
+`Eq/Lt/Le/Gt/Ge` interval by binary search, validates live version/TTL/scope,
+then applies every residual predicate. Unsupported field/kind/operator shapes
+retain the full-scope scan as the parity oracle. `RuntimeStoreOptions` exposes
+the same declaration; `Stats.RangeIndexEntries` and `RangeIndexBytes` make the
+footprint visible.
+
+Apple M1 Pro, medians of 3; predicates select the upper 20% by `price`, then
+apply `bucket <= 7` as a residual predicate:
+
+| Records | Full-scan candidates | Ordered candidates | Full scan | Ordered | Speedup | Read bytes/op |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 1,000 | 200 | ~306 µs | ~69.8 µs | ~4.4× | 222,522 → 50,488 |
+| 10,000 | 10,000 | 2,000 | ~4.39 ms | ~649 µs | ~6.8× | 2.17 MB → 443 KB |
+| 100,000 | 100,000 | 20,000 | ~81.8 ms | ~8.96 ms | **~9.1×** | 21.69 MB → 4.41 MB |
+
+Both paths remain at nine fixed allocations; the allocation reduction is
+candidate-slice size, not pooling. Write/build cost is explicit:
+
+| 10K projection build | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Equality index only | ~17.29 ms | ~13.15 MB | ~75,230 |
+| Equality + one ordered index | ~23.83 ms | ~16.70 MB | ~75,351 |
+
+One ordered index therefore costs about 38% more build time and 27% more
+allocated bytes on this fixture. Eager full-snapshot rebuilding was rejected:
+it made a single 10K update cost ~4.9 ms and 2.84 MB. The shipped immutable
+delta chain reduces that update to **~211 µs and ~133 KB** (~23× faster, ~95%
+fewer bytes), with a hard depth-32 compaction bound. A fresh 100K ordered read
+remains ~9.9 ms, 4.41 MB, and nine allocations versus ~81.8 ms/21.69 MB for the
+scan.
+
+This remains an opt-in read/write trade, not a new default. Evidence:
+bitmap-oracle parity, WHERE-before-LIMIT, mutation reindex, delta-compaction
+parity, tenant isolation, range-index bound/normalization, package race tests,
+and `BenchmarkHermesColumnarRangeIndexScale`,
+`BenchmarkHermesRangeIndexBuild10K`, and
+`BenchmarkHermesRangeIndexUpdate10K`.
+
 ## 2026-07-09 Canonical record-projection bridge (normalized tables → Hermes)
 
 The projection subsystem consolidation landed a single canonical path from
@@ -50,6 +170,60 @@ Apple M1 Pro (ARM64), live Postgres 16 in Docker on localhost (medians of 3):
 | Benchmark | ns/op | B/op | allocs/op | Interpretation |
 | --- | ---: | ---: | ---: | --- |
 | `BenchmarkServiceBackedRecordProjectionHandle-8` | ~932,488 | 12,871 | 147 | One projection job end-to-end: read-back `SELECT` from the normalized table + `UpsertRecord` (durable mirror write + hot apply + fan-out). ~0.93 ms is the full per-mutation projection cost a write repo adds by enqueueing one job — two Postgres round-trips dominate; the hermes apply itself is microseconds (see the 2026-07-02 columnar tables). Inline `RawPayload` producers skip the read-back round-trip. |
+
+### Gateway lazy-warm: cold scopes resolve on first read (2026-07-11)
+
+The last configuration dependency in the projection read path is gone. The
+gateway (`projectiongw`) now catches `ErrProjectionNotFound` on a snapshot,
+resolves the scope through `ProjectedRuntimeStore.WarmScope` (idempotent,
+singleflighted — a read stampede on a cold scope collapses to one rebuild, and
+an empty mirror self-backfills via `ScopeBackfill`), and retries once.
+`NewGatewayForProjectedStore` wires this automatically (`WithScopeWarmer` for
+custom stores). Consequences: SQL-seeded data serves on the FIRST request with
+zero configuration; a scope with genuinely no data serves an EMPTY snapshot
+instead of a wiring error; and `HERMES_WARM_SCOPES` is demoted from
+correctness requirement to optional first-request-latency optimization (it
+also still names the envelope-fallback tailer scopes, which is why the knob
+survives). Warm failure preserves the original not-found (FallbackRefinement);
+invalid scopes still fail fast without warming.
+
+Evidence: `TestGatewayLazyWarmsColdScopeOnRead` — three legs against the real
+gateway: base-only seed resolves on first snapshot, empty mirror + backfiller
+serves backfilled rows on first snapshot, and a truly empty scope returns an
+empty snapshot, not an error.
+
+### Mirror sweep: the one-place projection seam (2026-07-11, follow-up)
+
+Per-repository projection hooks (enqueue a job after every mutating command)
+were reviewed and rejected as an anti-pattern for this architecture: N call
+sites for one concern, and blind to writers that bypass repositories (seeds,
+admin SQL, future services). `hermes.MirrorSweeper` replaces them with one
+bounded poller per process: each registered source streams rows with
+`updated_at > cursor` (ascending, LIMIT-bounded), the sweeper pushes batches
+through `ProjectedRuntimeStore.UpsertRecords` (durable mirror + hot apply +
+live fan-out in one write), and cursors only advance on success so errors
+retry without skipping. The first pass from a zero cursor is a full sync
+(idempotent — unchanged rows are DISTINCT-FROM no-ops), so the sweeper doubles
+as startup reconciliation. Steady-state staleness is bounded by the sweep
+interval (default 2s) — comparable to River's own job poll interval, so the
+sweep is not a latency regression versus enqueue-after-commit hooks.
+
+Hard deletes get the symmetric treatment (same day, follow-up): AFTER DELETE
+triggers on every projected table write an identity tombstone
+(`projection_tombstones`), and a `DeletedSince` source sweeps them back
+through `DeleteRecord` (mirror removal + hot tombstone + live fan-out), with
+opportunistic retention pruning keeping the tombstone table bounded. Schema
+requirements, both enforced app-side by migration: every swept table needs the
+updated_at bump trigger (the scaffold's `update_updated_at_column`) AND the
+tombstone delete trigger — upserts and deletes are announced by the schema,
+never by call sites.
+
+Evidence: `TestMirrorSweeperPushesChangedRows` — full sync from zero cursor,
+cursor-advanced idle pass reads nothing, incremental change picked up, and a
+failing source is counted and retried while healthy sources keep sweeping —
+and `TestMirrorSweeperConvergesHardDeletes` — a tombstoned identity is removed
+from mirror and hot partition, the cursor advances, and consumed tombstones
+are not re-swept.
 
 ### Columnar snapshot artifacts — HCS1 (same day, follow-up)
 

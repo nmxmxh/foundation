@@ -1,12 +1,19 @@
 # Foundation (Work in Progress — Version 0.0.1)
 
-**I built Foundation to bridge the massive deficit between raw hardware speed and typical software stacks, collapse the translation layers between the database and the browser, and create an agent-native workspace where AI and humans can build production systems without regression.**
+**I built Foundation to bridge the massive deficit between raw hardware speed and typical software stacks, collapse translation layers across database, network, browser, native, and accelerated runtimes, and make sophisticated, high-performance, reliable software externally programmable through a small, teachable model.**
 
 Every modern system wastes millions of CPU cycles translating the same piece of state: SQL rows get parsed into Go structs, serialized to JSON, decoded over HTTP, mapped to TypeScript interfaces, and synchronized with React state. That's a massive "software deficit"—spending microseconds or milliseconds on work that raw hardware could complete in nanoseconds. It is also where most bugs, memory leaks, and architectural drift live.
 
 And when you bring AI agents into a loose, unstructured codebase, the friction multiplies. Without strict boundary contracts and deterministic checks, agents write sloppy loops, hallucinate APIs, and compromise performance under load.
 
 So I built **Foundation**.
+
+Foundation concentrates systems complexity into infrastructure. A person or
+agent describes domain intent, contracts, transitions, projections, and
+guarantees; the substrate supplies authenticated execution, durability,
+realtime state, capability-aware runtime selection, observability, verification,
+and safe fallback. Its deeper planes remain available through progressive
+disclosure rather than becoming prerequisites for ordinary feature work.
 
 It is a full-stack substrate that compounds the strengths of Go, Rust/WASM, and TypeScript into a single, cohesive "nervous system":
 
@@ -29,6 +36,12 @@ It is a full-stack substrate that compounds the strengths of Go, Rust/WASM, and 
 | **config-contracts** | Go/TypeScript | Cross-language configuration schemas |
 
 **Data Layer**: PostgreSQL (durable truth), Redis (coordination), Protocol Buffers (contracts), Cap'n Proto (zero-copy boundaries)
+
+The execution surface extends from ordinary HTTP and worker flows through
+Hermes columnar reads, Rust/WASM and SharedArrayBuffer, Go SIMD, native
+FFI/shared memory, Tauri device byte lanes, WebGPU/native GPU resources, and
+portable compatibility fallbacks. These are capability-selected refinements of
+one visible contract, not separate programming models.
 
 ---
 

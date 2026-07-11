@@ -1,6 +1,7 @@
 package projectiongw
 
 import (
+	"context"
 	"errors"
 	"net/http/httptest"
 	"strings"
@@ -288,5 +289,98 @@ func TestSubscribeHandlerSendsResyncOnDrop(t *testing.T) {
 	}
 	if !sawResync {
 		t.Fatal("expected a resync control frame after dropped deltas")
+	}
+}
+
+// TestGatewayLazyWarmsColdScopeOnRead is the config-free end state: a scope
+// whose data lives only in the durable base (raw SQL seed — never warmed,
+// never written through the projected store) resolves on the FIRST snapshot
+// request. The gateway catches ErrProjectionNotFound, warms through
+// ProjectedRuntimeStore.WarmScope (which self-backfills an empty mirror via
+// ScopeBackfill), and retries — so eager warm configuration is no longer
+// required for correctness, and "projection not found" stops being the
+// steady-state answer for seeded data.
+func TestGatewayLazyWarmsColdScopeOnRead(t *testing.T) {
+	ctx := t.Context()
+
+	// Leg 1: rows exist only in the base mirror (out-of-band seed).
+	base := database.NewMemoryDB()
+	if _, err := base.UpsertRecord(ctx, database.DomainRecord{
+		Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "tick_seed",
+		Data: database.RecordData{{Name: "symbol", Value: database.StringValue("OVS")}},
+	}); err != nil {
+		t.Fatalf("seed UpsertRecord() err=%v", err)
+	}
+	projected, err := hermes.WrapRuntimeStore(base, hermes.RuntimeStoreOptions{
+		MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() err=%v", err)
+	}
+	gw, err := NewGatewayForProjectedStore(projected, 0)
+	if err != nil {
+		t.Fatalf("NewGatewayForProjectedStore() err=%v", err)
+	}
+	defer gw.Close()
+
+	snap, err := gw.Snapshot(ctx, &foundationpb.ProjectionSnapshotRequest{Scope: scope()})
+	if err != nil {
+		t.Fatalf("cold-scope Snapshot() err=%v, want lazy warm to resolve it", err)
+	}
+	if muts := snap.GetBatch().GetMutations(); len(muts) != 1 || muts[0].GetRecordId() != "tick_seed" {
+		t.Fatalf("lazy-warmed snapshot = %+v, want the seeded record", muts)
+	}
+
+	// Leg 2: empty mirror + ScopeBackfill — the warm pulls rows from the app's
+	// authoritative tables on the same first read.
+	backfilled, err := hermes.WrapRuntimeStore(database.NewMemoryDB(), hermes.RuntimeStoreOptions{
+		MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20,
+		ScopeBackfill: func(_ context.Context, domain, collection, organizationID string, visit database.RecordVisitor) error {
+			return visit(database.DomainRecord{
+				Domain: domain, Collection: collection, OrganizationID: organizationID, RecordID: "tick_backfill",
+				Data: database.RecordData{{Name: "symbol", Value: database.StringValue("BKF")}},
+			})
+		},
+	})
+	if err != nil {
+		t.Fatalf("backfill WrapRuntimeStore() err=%v", err)
+	}
+	gw2, err := NewGatewayForProjectedStore(backfilled, 0)
+	if err != nil {
+		t.Fatalf("backfill gateway err=%v", err)
+	}
+	defer gw2.Close()
+	snap, err = gw2.Snapshot(ctx, &foundationpb.ProjectionSnapshotRequest{Scope: scope()})
+	if err != nil {
+		t.Fatalf("backfill Snapshot() err=%v", err)
+	}
+	if muts := snap.GetBatch().GetMutations(); len(muts) != 1 || muts[0].GetRecordId() != "tick_backfill" {
+		t.Fatalf("backfilled snapshot = %+v, want the backfilled record", muts)
+	}
+
+	// Leg 3: a scope with genuinely no data anywhere serves EMPTY, not an
+	// error — "projection not found" is no longer the steady-state answer.
+	empty, err := hermes.WrapRuntimeStore(database.NewMemoryDB(), hermes.RuntimeStoreOptions{
+		MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20,
+	})
+	if err != nil {
+		t.Fatalf("empty WrapRuntimeStore() err=%v", err)
+	}
+	gw3, err := NewGatewayForProjectedStore(empty, 0)
+	if err != nil {
+		t.Fatalf("empty gateway err=%v", err)
+	}
+	defer gw3.Close()
+	snap, err = gw3.Snapshot(ctx, &foundationpb.ProjectionSnapshotRequest{Scope: scope()})
+	if err != nil {
+		t.Fatalf("empty-scope Snapshot() err=%v, want empty snapshot", err)
+	}
+	if muts := snap.GetBatch().GetMutations(); len(muts) != 0 {
+		t.Fatalf("empty-scope snapshot = %+v, want no mutations", muts)
+	}
+
+	// Invalid scopes still fail fast — lazy warm never runs for them.
+	if _, err := gw3.Snapshot(ctx, &foundationpb.ProjectionSnapshotRequest{Scope: &foundationpb.ProjectionScope{}}); err == nil {
+		t.Fatal("invalid scope error = nil")
 	}
 }

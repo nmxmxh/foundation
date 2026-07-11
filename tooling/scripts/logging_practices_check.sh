@@ -164,7 +164,7 @@ check_template_logging_wiring() {
   check_file_contains "template startup installs Foundation logger facade" "$template_root/internal/startup/logger.go" "server-kit/go/logger"
   check_file_contains_any "template startup installs process default logger" "$template_root/internal/startup/logger.go" "logger.SetDefault" "logger.Install"
   check_file_contains_any "template startup declares app runtime logger scope" "$template_root/internal/startup/logger.go" "logger.RuntimeConfig" "logger.Config{"
-  check_file_contains "template dependencies expose Foundation logger" "$template_root/internal/startup/dependencies.go" "Log           kitlogger.Logger"
+  check_file_contains "template dependencies expose Foundation logger" "$template_root/internal/startup/dependencies.go" "Log          kitlogger.Logger"
   check_file_contains "template server uses Foundation logger facade" "$target/server-kit/go/httpserver/server.go" "kitlogger.Logger"
   check_file_contains "template middleware uses Foundation logger facade" "$target/server-kit/go/httpserver/middleware/middleware.go" "kitlogger.Logger"
   check_file_contains "template middleware writes correlation header" "$target/server-kit/go/httpserver/middleware/middleware.go" "X-Correlation-ID"

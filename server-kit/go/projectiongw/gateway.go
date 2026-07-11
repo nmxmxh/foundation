@@ -52,6 +52,10 @@ type Gateway struct {
 	resolve  Resolver
 	maxLimit int
 	cancel   func()
+	// warmScope lazily warms a cold scope on first read (see WithScopeWarmer):
+	// a snapshot that would return ErrProjectionNotFound instead resolves the
+	// scope through the projected store's warm path and retries once.
+	warmScope func(ctx context.Context, scope *foundationpb.ProjectionScope) error
 }
 
 // Option configures a Gateway.
@@ -63,6 +67,18 @@ func WithResolver(resolver Resolver) Option {
 		if resolver != nil {
 			g.resolve = resolver
 		}
+	}
+}
+
+// WithScopeWarmer makes cold scopes self-resolving on first read: when a
+// snapshot hits ErrProjectionNotFound, the gateway invokes warm (idempotent,
+// singleflighted by the projected store) and retries once. With this wired, a
+// scope never needs eager warming for correctness — seeded data resolves on
+// the first request, and a scope with no data anywhere serves an empty
+// snapshot instead of a wiring error.
+func WithScopeWarmer(warm func(ctx context.Context, scope *foundationpb.ProjectionScope) error) Option {
+	return func(g *Gateway) {
+		g.warmScope = warm
 	}
 }
 
@@ -91,7 +107,13 @@ func NewGatewayForProjectedStore(projected *hermes.ProjectedRuntimeStore, queueS
 		name := projected.ProjectionName(scope.GetDomain(), scope.GetCollection(), scope.GetTenantId())
 		return name, hermes.QueryWithFilters(scope.GetTenantId(), DefaultSnapshotLimit), nil
 	}
-	return NewGateway(projected.Store(), queueSize, append([]Option{WithResolver(resolver)}, opts...)...)
+	// Cold scopes lazy-warm on first read: WarmScope rebuilds from the record
+	// mirror (and self-backfills via ScopeBackfill when the mirror is empty),
+	// so no scope ever needs eager warming for correctness.
+	warmer := func(ctx context.Context, scope *foundationpb.ProjectionScope) error {
+		return projected.WarmScope(ctx, scope.GetDomain(), scope.GetCollection(), scope.GetTenantId())
+	}
+	return NewGateway(projected.Store(), queueSize, append([]Option{WithResolver(resolver), WithScopeWarmer(warmer)}, opts...)...)
 }
 
 // NewGateway constructs a Gateway over the given store. queueSize bounds the
@@ -175,6 +197,15 @@ func (g *Gateway) Snapshot(ctx context.Context, req *foundationpb.ProjectionSnap
 	sinceVersion := hermes.ParseWatermark(req.GetSinceWatermark())
 	beforeVersion := hermes.ParseWatermark(req.GetCursor())
 	snapshot, err := g.store.SnapshotPage(ctx, projection, query, hermes.Fence{}, sinceVersion, beforeVersion)
+	if errors.Is(err, hermes.ErrProjectionNotFound) && g.warmScope != nil {
+		// Lazy warm: resolve the cold scope through the projected store (which
+		// registers the partition, rebuilds from the mirror, and self-backfills
+		// an empty mirror), then retry once. Warm failure preserves the
+		// original not-found so the HTTP mapping stays stable.
+		if warmErr := g.warmScope(ctx, scope); warmErr == nil {
+			snapshot, err = g.store.SnapshotPage(ctx, projection, query, hermes.Fence{}, sinceVersion, beforeVersion)
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

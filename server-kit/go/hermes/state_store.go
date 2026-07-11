@@ -25,6 +25,7 @@ var DefaultStateIndexedFields = []string{"state", "status", "type", "kind", "buc
 type RuntimeStoreOptions struct {
 	ProjectionPrefix   string
 	IndexedFields      []string
+	RangeIndexedFields []string
 	MaxRecordsPerScope int
 	MaxBytesPerScope   int64
 	// SnapshotStore enables the shadow-mode snapshot rollout: every successful
@@ -33,6 +34,16 @@ type RuntimeStoreOptions struct {
 	// refreshes the artifact to the rebuilt state. The served warm path is
 	// unchanged — snapshots are compared and produced, never yet preferred.
 	SnapshotStore SnapshotStore
+	// ScopeBackfill makes warms self-backfilling: when a warm finds the record
+	// mirror EMPTY for a scope, the store pulls the scope's rows from the app's
+	// authoritative tables through this enumerator (batched via UpsertRecords)
+	// before rebuilding — so eagerly configured warm scopes work on first boot
+	// with no separate backfill step or ordering ritual. Called at most once
+	// per cold-empty scope per process (inside the warm singleflight); a
+	// non-empty mirror never triggers it, and ongoing EnqueueTx projection
+	// writes keep the mirror current afterward. Errors degrade to the normal
+	// lazy-warm fallback, never fail the store.
+	ScopeBackfill func(ctx context.Context, domain, collection, organizationID string, visit database.RecordVisitor) error
 }
 
 type ProjectedRuntimeStore struct {
@@ -88,6 +99,17 @@ func (s *ProjectedRuntimeStore) Store() *Store {
 		return nil
 	}
 	return s.hot
+}
+
+// Base exposes the wrapped runtime store so composition seams (e.g. a worker
+// engine needing the underlying *database.PostgresDB pool for its river
+// client) can reach driver capabilities without new constructor signatures.
+// Writes must still go through the projected store, never the base directly.
+func (s *ProjectedRuntimeStore) Base() database.RuntimeStore {
+	if s == nil {
+		return nil
+	}
+	return s.base
 }
 
 func (s *ProjectedRuntimeStore) ProjectionName(domain, collection, organizationID string) string {
@@ -362,6 +384,19 @@ func (s *ProjectedRuntimeStore) ensureWarm(ctx context.Context, domain, collecti
 			s.markDegraded(name)
 			return nil, err
 		}
+		// Self-backfilling warm: an empty mirror with a configured backfiller
+		// means the scope's truth lives only in the app's authoritative tables
+		// (raw seeds, pre-projection writes). Pull it through the batch lane
+		// once, then warm normally — so eager warm scopes work on first boot
+		// without a separate backfill step.
+		if total == 0 && s.opts.ScopeBackfill != nil {
+			if backfilled, err := s.backfillScope(ctx, domain, collection, organizationID); err != nil {
+				s.markDegraded(name)
+				return nil, err
+			} else {
+				total = backfilled
+			}
+		}
 		if total > int64(s.opts.MaxRecordsPerScope) {
 			return nil, ErrProjectionLimit
 		}
@@ -403,6 +438,37 @@ func (s *ProjectedRuntimeStore) shadowSnapshot(ctx context.Context, name, organi
 	} else {
 		s.shadowErrors.Add(1)
 	}
+}
+
+// backfillScope streams the scope's rows from the app's authoritative tables
+// into the projected store in bounded batches (one pipelined round trip +
+// grouped hot apply per batch). Returns how many records landed.
+func (s *ProjectedRuntimeStore) backfillScope(ctx context.Context, domain, collection, organizationID string) (int64, error) {
+	const batchSize = 256
+	var total int64
+	batch := make([]database.DomainRecord, 0, batchSize)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		if _, err := s.UpsertRecords(ctx, batch); err != nil {
+			return err
+		}
+		total += int64(len(batch))
+		batch = batch[:0]
+		return nil
+	}
+	err := s.opts.ScopeBackfill(ctx, domain, collection, organizationID, func(rec database.DomainRecord) error {
+		batch = append(batch, rec)
+		if len(batch) >= batchSize {
+			return flush()
+		}
+		return nil
+	})
+	if err != nil {
+		return total, err
+	}
+	return total, flush()
 }
 
 func (s *ProjectedRuntimeStore) getHot(ctx context.Context, domain, collection, organizationID, recordID string) (database.DomainRecord, bool, bool) {
@@ -478,15 +544,17 @@ func (s *ProjectedRuntimeStore) ensureProjection(domain, collection, organizatio
 	}
 	name := projectionName(s.opts.ProjectionPrefix, scope.domain, scope.collection, scope.organizationID)
 	err = s.hot.Register(ProjectionSpec{
-		Name:             name,
-		Domain:           scope.domain,
-		Collection:       scope.collection,
-		IndexedFields:    s.opts.IndexedFields,
-		MaxRecords:       s.opts.MaxRecordsPerScope,
-		MaxBytes:         s.opts.MaxBytesPerScope,
-		MaxIndexes:       len(s.opts.IndexedFields),
-		MaxTombstones:    min(s.opts.MaxRecordsPerScope, defaultMaxTombstones),
-		MaxAppliedEvents: min(s.opts.MaxRecordsPerScope*2, defaultMaxAppliedEvents),
+		Name:               name,
+		Domain:             scope.domain,
+		Collection:         scope.collection,
+		IndexedFields:      s.opts.IndexedFields,
+		RangeIndexedFields: s.opts.RangeIndexedFields,
+		MaxRecords:         s.opts.MaxRecordsPerScope,
+		MaxBytes:           s.opts.MaxBytesPerScope,
+		MaxIndexes:         len(s.opts.IndexedFields),
+		MaxRangeIndexes:    len(s.opts.RangeIndexedFields),
+		MaxTombstones:      min(s.opts.MaxRecordsPerScope, defaultMaxTombstones),
+		MaxAppliedEvents:   min(s.opts.MaxRecordsPerScope*2, defaultMaxAppliedEvents),
 	})
 	if err != nil {
 		return "", err
