@@ -13,10 +13,19 @@ becoming the entry-level programming model.
 ## Contract
 
 1. Tauri is the shell. It owns windows, mobile projects, bundling, and platform entrypoints.
-2. `foundation/runtime-native` is the bridge. It owns binary native frames, command allowlists, secure storage surfaces, capability discovery, and dispatch into `runtime-sdk`.
+2. `foundation/runtime-native` is the bridge. It owns binary native frames, command allowlists, bounded ephemeral storage adapters, capability discovery, and dispatch into `runtime-sdk`. Durable secrets require an app-installed Stronghold or OS-keychain backend.
 3. `foundation/runtime-sdk` remains the performance anchor. Hot work uses WASM/SAB, Rust FFI, shared memory, framed stdio, WebSocket, or HTTP fallback.
 4. Tauri IPC is measured as a control boundary. It is not assumed zero-copy and must not replace direct FFI, shared memory, or WASM/SAB for hot compute.
 5. Native dispatch frames are binary. JSON IPC is allowed for low-volume control responses such as capability discovery and secure-store results only.
+6. Tauri commands are deny-by-omission. The build manifest enumerates application commands, the main-window capability grants only the runtime commands it needs, and remote URLs receive no IPC capability.
+
+## Tauri Security Boundary
+
+The default scaffold exposes only binary runtime dispatch and capability discovery to the local `main` window. It does not grant `core:default`, expose remote IPC, install shell/filesystem/network plugins, or register storage commands. Production CSP permits bundled local assets only; the development overlay adds only the loopback Vite origin and websocket required for hot reload.
+
+`NativeSecureStore` is a bounded, process-memory adapter for short-lived material. It is not encrypted persistence and must not hold passwords, refresh tokens, signing keys, tenant secrets, or biometric material. Applications needing durable secrets must deliberately install Tauri Stronghold or an audited platform keychain adapter, add narrowly scoped permissions, document password/key derivation and recovery, and add persistence, tamper, and permission-negative tests. Foundation does not install Stronghold by default because secure key derivation and recovery are application security decisions.
+
+The scaffold follows Tauri 2's current security model: explicit app-command manifests, window-scoped capabilities, restrictive CSP, no remote IPC, and least-privilege plugin permissions. Release applications must also use platform code signing; updater adoption requires signed update artifacts and protected offline private keys.
 
 ## Device Access Lanes
 

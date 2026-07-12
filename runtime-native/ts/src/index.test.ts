@@ -7,6 +7,7 @@ import {
 
 import {
   MAX_NATIVE_FRAME_BYTES,
+  MAX_EPHEMERAL_STORE_VALUE_BYTES,
   NATIVE_CAPABILITIES_COMMAND,
   NATIVE_DISPATCH_COMMAND,
   SECURE_STORE_DELETE_COMMAND,
@@ -163,6 +164,22 @@ describe("runtime native transport", () => {
     const store = createNativeSecureStore(async () => ({ value: null }));
 
     await expect(store.get("session:token")).resolves.toBeNull();
+  });
+
+  it("rejects invalid, oversized, and pre-aborted secure-store requests before IPC", async () => {
+    let calls = 0;
+    const store = createNativeSecureStore(async () => {
+      calls += 1;
+      return { value: null };
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(store.get("session token")).rejects.toThrow("unsupported characters");
+    await expect(store.put("session:token", new Uint8Array(MAX_EPHEMERAL_STORE_VALUE_BYTES + 1)))
+      .rejects.toThrow("byte limit");
+    await expect(store.delete("session:token", controller.signal)).rejects.toThrow("aborted");
+    expect(calls).toBe(0);
   });
 
   it("rejects non-byte native responses", () => {

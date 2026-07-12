@@ -56,9 +56,10 @@ barcode scanning, notifications, filesystem, and shell access are configuration
 work once the product needs them. Keep their capability snippets inactive until
 the dependency and product permission copy exist.
 
-The scaffold secure-store commands are wired as native-only commands and avoid
-frontend storage. Replace the in-memory baseline with the platform keychain /
-keystore implementation before storing durable production session material.
+The default shell does not register storage commands. The `runtime-native`
+in-memory store is bounded but ephemeral; it is not a credential vault. Install
+and narrowly scope Tauri Stronghold or an audited OS keychain/keystore adapter
+before persisting passwords, refresh tokens, signing keys, or tenant secrets.
 
 The active capability list is explicit in `src-tauri/tauri.conf.json` and both
 environment overlays. Keep example capabilities inactive until the app actually

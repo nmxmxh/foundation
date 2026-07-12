@@ -21,6 +21,7 @@ export const NATIVE_FRAME_VERSION = 1;
 export const NATIVE_ENCODING_CAPNP = 1;
 export const NATIVE_ENCODING_PROTOBUF = 2;
 export const MAX_NATIVE_FRAME_BYTES = 2 * 1024 * 1024;
+export const MAX_EPHEMERAL_STORE_VALUE_BYTES = 64 * 1024;
 
 export type NativeRuntimeCapabilities = {
   native: boolean;
@@ -119,7 +120,10 @@ export const readNativeRuntimeCapabilities = async (
 
 export const createNativeSecureStore = (invoke: NativeBinaryInvoke): NativeSecureStore => ({
   async get(key: string, signal?: AbortSignal): Promise<Uint8Array | null> {
+    throwIfAborted(signal);
+    validateStoreKey(key);
     const result = await invoke(SECURE_STORE_GET_COMMAND, { key }, signal);
+    throwIfAborted(signal);
     if (isNativeValueResult(result) && result.value === null) {
       return null;
     }
@@ -127,14 +131,33 @@ export const createNativeSecureStore = (invoke: NativeBinaryInvoke): NativeSecur
     return bytes.byteLength === 0 ? null : bytes;
   },
   async put(key: string, value: Uint8Array, signal?: AbortSignal): Promise<void> {
+    throwIfAborted(signal);
+    validateStoreKey(key);
+    if (value.byteLength > MAX_EPHEMERAL_STORE_VALUE_BYTES) {
+      throw new Error(`native ephemeral store value exceeds ${MAX_EPHEMERAL_STORE_VALUE_BYTES} byte limit`);
+    }
     await invoke(SECURE_STORE_PUT_COMMAND, { key, value: Array.from(value) }, signal);
+    throwIfAborted(signal);
   },
   async delete(key: string, signal?: AbortSignal): Promise<boolean> {
+    throwIfAborted(signal);
+    validateStoreKey(key);
     const result = await invoke(SECURE_STORE_DELETE_COMMAND, { key }, signal);
+    throwIfAborted(signal);
     const value = isNativeValueResult(result) ? result.value : result;
     return value === true;
   },
 });
+
+const validateStoreKey = (key: string): void => {
+  const trimmed = key.trim();
+  if (trimmed.length === 0 || new TextEncoder().encode(trimmed).byteLength > 128) {
+    throw new Error("native ephemeral store key must be 1-128 bytes");
+  }
+  if (!/^[A-Za-z0-9.:_-]+$/.test(trimmed)) {
+    throw new Error("native ephemeral store key contains unsupported characters");
+  }
+};
 
 export type NativeDispatchFrameInput = {
   unitId: string;

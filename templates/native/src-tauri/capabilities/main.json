@@ -4,6 +4,7 @@
   "description": "Foundation native shell commands for the main app window.",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "allow-foundation-runtime-dispatch",
+    "allow-foundation-runtime-capabilities"
   ]
 }

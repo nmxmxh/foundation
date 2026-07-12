@@ -23,6 +23,8 @@ const RESPONSE_MAGIC: &[u8; 4] = b"OVRR";
 const NATIVE_FRAME_VERSION: u8 = 1;
 const SUPPORTED_SCHEMA_VERSION: &str = "1.0";
 pub const MAX_NATIVE_FRAME_BYTES: usize = 2 * 1024 * 1024;
+pub const MAX_EPHEMERAL_STORE_ENTRIES: usize = 256;
+pub const MAX_EPHEMERAL_STORE_VALUE_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NativePayloadEncoding {
@@ -231,10 +233,27 @@ pub struct NativeSecureStore {
 impl NativeSecureStore {
     pub fn put(&self, key: &str, value: &[u8]) -> Result<(), NativeRuntimeError> {
         validate_store_key(key)?;
+        if value.len() > MAX_EPHEMERAL_STORE_VALUE_BYTES {
+            return Err(NativeRuntimeError::new(
+                NativeErrorCode::OversizedFrame,
+                format!(
+                    "ephemeral store value has {} bytes; max is {MAX_EPHEMERAL_STORE_VALUE_BYTES}",
+                    value.len()
+                ),
+            ));
+        }
         let mut guard = self.values.write().map_err(|_| {
             NativeRuntimeError::new(NativeErrorCode::StoreUnavailable, "secure store lock poisoned")
         })?;
-        guard.insert(key.to_string(), value.to_vec());
+        if !guard.contains_key(key) && guard.len() >= MAX_EPHEMERAL_STORE_ENTRIES {
+            return Err(NativeRuntimeError::new(
+                NativeErrorCode::StoreUnavailable,
+                format!("ephemeral store is limited to {MAX_EPHEMERAL_STORE_ENTRIES} entries"),
+            ));
+        }
+        if let Some(mut replaced) = guard.insert(key.to_string(), value.to_vec()) {
+            replaced.fill(0);
+        }
         Ok(())
     }
 
@@ -251,7 +270,21 @@ impl NativeSecureStore {
         let mut guard = self.values.write().map_err(|_| {
             NativeRuntimeError::new(NativeErrorCode::StoreUnavailable, "secure store lock poisoned")
         })?;
-        Ok(guard.remove(key).is_some())
+        let Some(mut removed) = guard.remove(key) else {
+            return Ok(false);
+        };
+        removed.fill(0);
+        Ok(true)
+    }
+}
+
+impl Drop for NativeSecureStore {
+    fn drop(&mut self) {
+        if let Ok(values) = self.values.get_mut() {
+            for value in values.values_mut() {
+                value.fill(0);
+            }
+        }
     }
 }
 
@@ -665,5 +698,20 @@ mod tests {
         let store = NativeSecureStore::default();
         let err = store.put("../session", b"secret").expect_err("invalid key must fail");
         assert_eq!(err.code, NativeErrorCode::MalformedFrame);
+    }
+
+    #[test]
+    fn secure_store_rejects_oversized_values_and_entry_exhaustion() {
+        let store = NativeSecureStore::default();
+        let oversized = vec![1; MAX_EPHEMERAL_STORE_VALUE_BYTES + 1];
+        let err = store.put("oversized", &oversized).expect_err("oversized value must fail");
+        assert_eq!(err.code, NativeErrorCode::OversizedFrame);
+
+        for index in 0..MAX_EPHEMERAL_STORE_ENTRIES {
+            store.put(&format!("key-{index}"), b"value").expect("bounded insert");
+        }
+        let err = store.put("one-too-many", b"value").expect_err("entry bound must fail");
+        assert_eq!(err.code, NativeErrorCode::StoreUnavailable);
+        store.put("key-0", b"replacement").expect("replacement remains allowed");
     }
 }

@@ -890,7 +890,10 @@ if [[ "${WITH_NATIVE:-false}" == "true" ]]; then
   check_file_not_contains "native prod CSP forbids inline styles" "$target/native/src-tauri/tauri.prod.conf.json" "'unsafe-inline'"
   check_file_contains "native README documents frontend layout" "$target/native/README.md" "../../frontend"
   check_file_contains "native command dispatch" "$target/native/src-tauri/src/lib.rs" "foundation_runtime_dispatch"
-  check_file_contains "native secure store get" "$target/native/src-tauri/src/lib.rs" "foundation_secure_store_get"
+  check_file_contains "native command ACL manifest" "$target/native/src-tauri/build.rs" "AppManifest::new().commands"
+  check_file_contains "native capability allows runtime dispatch explicitly" "$target/native/src-tauri/capabilities/main.json" "allow-foundation-runtime-dispatch"
+  check_file_not_contains "native capability avoids broad core defaults" "$target/native/src-tauri/capabilities/main.json" "core:default"
+  check_file_not_contains "native scaffold does not expose ephemeral storage as a vault" "$target/native/src-tauri/src/lib.rs" "foundation_secure_store_get"
   check_file_not_contains "native scaffold avoids startup expect" "$target/native/src-tauri/src/lib.rs" ".expect("
   check_file_contains "native uses runtime-native crate" "$target/native/src-tauri/Cargo.toml" "ovasabi-runtime-native"
   check_file_contains "native scaffold pins Tauri" "$target/native/src-tauri/Cargo.toml" '=2.11.1'
