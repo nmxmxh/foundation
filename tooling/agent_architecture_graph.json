@@ -1,0 +1,53 @@
+{
+  "schemaVersion": "1.0",
+  "capabilities": [
+    {
+      "capability": "command_lifecycle",
+      "owner": "server-kit/events",
+      "entrypoints": ["contracttest.VerifyCommandLifecycle", "generate_lifecycle_manifest.mjs"],
+      "invariants": ["RequestedBeforeTerminal", "ExactlyOneTerminalVisible", "MetadataPreserved"],
+      "consumers": ["domain-services", "workers", "generated-projects"],
+      "requiredEvidence": ["unit", "contract", "coverage"]
+    },
+    {
+      "capability": "live_projection",
+      "owner": "runtime-transport",
+      "entrypoints": ["createProjectionSource", "createTenantProjectionStore"],
+      "invariants": ["TenantScopeStable", "BoundedReconnect", "FallbackRefinement"],
+      "consumers": ["frontend-kit", "generated-projects"],
+      "requiredEvidence": ["unit", "contract", "coverage", "benchmark"]
+    },
+    {
+      "capability": "offline_frontend",
+      "owner": "frontend-kit",
+      "entrypoints": ["createPrototypeRuntimeContext", "createTenantSnapshotPersistence"],
+      "invariants": ["TenantScopeStable", "BoundedMemory", "FallbackRefinement"],
+      "consumers": ["generated-projects"],
+      "requiredEvidence": ["unit", "coverage", "profile"]
+    },
+    {
+      "capability": "background_work",
+      "owner": "server-kit/worker",
+      "entrypoints": ["worker.Register", "worker.Enqueue"],
+      "invariants": ["BoundedWork", "IdempotentRetry", "MetadataPreserved"],
+      "consumers": ["domain-services", "generated-projects"],
+      "requiredEvidence": ["unit", "integration", "contract"]
+    },
+    {
+      "capability": "runtime_compute",
+      "owner": "runtime-sdk",
+      "entrypoints": ["createRuntimeWorkbench", "ProcessPool.ExecuteInto"],
+      "invariants": ["FrameSizeBound", "FallbackRefinement", "BoundedWork"],
+      "consumers": ["frontend-kit", "server-kit/kernellane", "runtime-native"],
+      "requiredEvidence": ["unit", "parity", "coverage", "benchmark"]
+    },
+    {
+      "capability": "authorization",
+      "owner": "server-kit/policy",
+      "entrypoints": ["policy.Evaluate", "auth.OrgIDFromContext"],
+      "invariants": ["TenantScopeStable", "AuthorizationDefaultDeny"],
+      "consumers": ["handlers", "workers", "projection-gateway"],
+      "requiredEvidence": ["unit", "integration", "tenant-negative", "security-review"]
+    }
+  ]
+}

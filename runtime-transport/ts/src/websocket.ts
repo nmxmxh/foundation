@@ -272,7 +272,7 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
             eventType: "system:websocket_subscribe:v1:requested",
             payload: { pattern },
           });
-          void dispatchOnSocket(activeSocket, envelope, new AbortController().signal);
+          void dispatchOnSocket(activeSocket, envelope, new AbortController().signal).catch(() => undefined);
         }
 
         resolve(activeSocket);
@@ -305,12 +305,17 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
       activePatterns.set(pattern, count + 1);
 
       if (count === 0) {
+        const alreadyConnected = socket?.readyState === WebSocket.OPEN;
         const activeSocket = await connect();
-        const envelope = createEnvelope({
-          eventType: "system:websocket_subscribe:v1:requested",
-          payload: { pattern },
-        });
-        await dispatchOnSocket(activeSocket, envelope, new AbortController().signal);
+        // Initial/reconnecting connections replay activePatterns in
+        // resolveReady. Only an already-open session needs an explicit send.
+        if (alreadyConnected) {
+          const envelope = createEnvelope({
+            eventType: "system:websocket_subscribe:v1:requested",
+            payload: { pattern },
+          });
+          await dispatchOnSocket(activeSocket, envelope, new AbortController().signal);
+        }
       }
 
       return {
@@ -324,7 +329,7 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
                 eventType: "system:websocket_unsubscribe:v1:requested",
                 payload: { pattern },
               });
-              void dispatchOnSocket(socket, envelope, new AbortController().signal);
+              void dispatchOnSocket(socket, envelope, new AbortController().signal).catch(() => undefined);
             }
           } else {
             activePatterns.set(pattern, currentCount - 1);

@@ -93,3 +93,46 @@ func TestUpdatePassesAcknowledgeSeedDrift(t *testing.T) {
 		t.Fatalf("args = %#v, want %#v", runner.run.args, want)
 	}
 }
+
+func TestFleetUpdateForwardsSafetyAndReportingFlags(t *testing.T) {
+	root := foundationFixture(t)
+	runner := &recordingRunner{}
+	a := app{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, runner: runner, client: http.DefaultClient}
+	err := a.run(context.Background(), []string{
+		"fleet-update", "--foundation-dir=" + root, "--dry-run", "--force",
+		"--validate", "--verify-idempotence", "--report-dir=/tmp/fleet-report",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runner.run.name != filepath.Join(root, "scripts", "update-all.sh") {
+		t.Fatalf("fleet script = %q", runner.run.name)
+	}
+	want := []string{"--force", "--dry-run", "--report-dir", "/tmp/fleet-report", "--validate", "--verify-idempotence"}
+	if !equalStrings(runner.run.args, want) {
+		t.Fatalf("args = %#v, want %#v", runner.run.args, want)
+	}
+}
+
+func TestAgentGraphAndFeaturePlanUseSharedChangeTool(t *testing.T) {
+	root, err := discoverFoundationDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		args []string
+		want []string
+	}{
+		{args: []string{"agent", "graph", "--capability=live_projection"}, want: []string{filepath.Join(root, "tooling/scripts/agent_change.mjs"), "graph", "--capability", "live_projection"}},
+		{args: []string{"add", "feature", "review-task", "--commands=create,complete", "--projection=list", "--offline", "--realtime"}, want: []string{filepath.Join(root, "tooling/scripts/agent_change.mjs"), "plan", "--feature", "review-task"}},
+	} {
+		runner := &recordingRunner{}
+		a := app{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, runner: runner, client: http.DefaultClient}
+		if err := a.run(context.Background(), tt.args); err != nil {
+			t.Fatal(err)
+		}
+		if runner.run.name != "node" || len(runner.run.args) < len(tt.want) || !equalStrings(runner.run.args[:len(tt.want)], tt.want) {
+			t.Fatalf("run = %q %#v, want node prefix %#v", runner.run.name, runner.run.args, tt.want)
+		}
+	}
+}

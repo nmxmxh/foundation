@@ -2,6 +2,7 @@ package errors
 
 import (
 	stderrors "errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -131,5 +132,19 @@ func TestAdditionalErrorHelpers(t *testing.T) {
 	}
 	if got, ok := As(stderrors.New("plain")); ok || got != nil {
 		t.Fatalf("plain As = %+v %v", got, ok)
+	}
+	withFallback := New(CodeInternal, "fallback").WithField("unsupported", func() {})
+	if got, ok := withFallback.Details.GetString("unsupported"); !ok || got == "" {
+		t.Fatalf("unsupported detail fallback = %q, %v", got, ok)
+	}
+	if !IsTransient(stderrors.New("unknown")) {
+		t.Fatal("unknown errors should remain retryable")
+	}
+	if IsTransient(ExternalAPI("api")) || IsTransient(QuotaExceeded("quota")) || IsTransient(PaymentFailed("payment")) {
+		t.Fatal("permanent application error unexpectedly classified as transient")
+	}
+	chained := fmt.Errorf("outer: %w", NotFound("nested"))
+	if got, ok := As(chained); !ok || got.Code != CodeNotFound {
+		t.Fatalf("As chained = %+v, %v", got, ok)
 	}
 }

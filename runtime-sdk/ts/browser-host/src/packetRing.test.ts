@@ -64,6 +64,19 @@ describe("RuntimePacketRing", () => {
     expect(drained.descriptors.map((descriptor) => descriptor.id)).toEqual([0, 1]);
   });
 
+  it("publishes only the valid prefix of a burst", () => {
+    let now = 0n;
+    const ring = new RuntimePacketRing({ slots: 4, slotBytes: 2, nowNs: () => ++now });
+    const payloads = [new Uint8Array([1]), new Uint8Array([2, 3, 4]), new Uint8Array([5])];
+
+    expect(ring.enqueueBurst(payloads, 9)).toBe(1);
+    expect(ring.depth()).toBe(1);
+    expect(ring.counters()).toMatchObject({ enqueued: 1, dropped: 1, highWaterDepth: 1 });
+    const descriptor = ring.dequeue();
+    expect(descriptor?.flags).toBe(9);
+    expect(ring.view(descriptor?.id ?? -1)).toEqual(new Uint8Array([1]));
+  });
+
   it("drains descriptor ids into caller-owned scratch storage", () => {
     const ring = new RuntimePacketRing({ slots: 4, slotBytes: 8, nowNs: () => 1n });
     const payloads = [new Uint8Array([1]), new Uint8Array([2]), new Uint8Array([3])];
@@ -81,5 +94,34 @@ describe("RuntimePacketRing", () => {
     expect(drained.descriptorIds).toBe(ids);
     expect(drained.count).toBe(1);
     expect(drained.descriptorIds).toEqual([2]);
+  });
+
+  it("enforces ring bounds and descriptor lifecycle guards", () => {
+    expect(() => new RuntimePacketRing({ slots: 0, slotBytes: 8 })).toThrow("invalid packet ring slots");
+    expect(() => new RuntimePacketRing({ slots: 1, slotBytes: 0 })).toThrow("invalid packet ring slot bytes");
+    const ring = new RuntimePacketRing({ slots: 1, slotBytes: 2, nowNs: () => 1n });
+    expect(ring.capacity()).toBe(1);
+    expect(ring.dequeue()).toBeNull();
+    expect(ring.dequeueBurst(-1).count).toBe(0);
+    expect(ring.dequeueIdsBurstInto(-1, [])).toBe(0);
+    expect(ring.enqueue(new Uint8Array(3))).toBeNull();
+    const descriptor = ring.enqueue(new Uint8Array([1]));
+    expect(descriptor).not.toBeNull();
+    expect(ring.enqueue(new Uint8Array([2]))).toBeNull();
+    expect(() => ring.complete(descriptor?.id ?? -1)).toThrow("is not processing");
+    const processing = ring.dequeue();
+    ring.complete(processing?.id ?? -1);
+    ring.release(processing?.id ?? -1);
+    ring.release(processing?.id ?? -1);
+    expect(() => ring.view(-1)).toThrow("invalid packet descriptor id");
+    expect(ring.counters()).toMatchObject({ dropped: 2, released: 1 });
+  });
+
+  it("returns a zero accepted burst when capacity or the first payload is invalid", () => {
+    const ring = new RuntimePacketRing({ slots: 1, slotBytes: 1, nowNs: () => 1n });
+    expect(ring.enqueueBurst([new Uint8Array(2), new Uint8Array([1])])).toBe(0);
+    expect(ring.enqueueBurst([new Uint8Array([1])])).toBe(1);
+    expect(ring.enqueueBurst([new Uint8Array([2])])).toBe(0);
+    expect(ring.counters()).toMatchObject({ enqueued: 1, dropped: 2, highWaterDepth: 1 });
   });
 });

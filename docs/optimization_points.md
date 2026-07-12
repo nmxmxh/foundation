@@ -214,6 +214,31 @@ This document tracks the deliberate performance and architecture carryovers fold
     hard depth of 32. This replaced rejected eager rebuilding (~4.9 ms/2.84 MB
     for one 10K update) with amortized updates (~211 µs/133 KB) while preserving
     full-scan and post-compaction parity.
+89. Runtime worker scheduling must account for current in-flight ownership, not
+    only readiness. The browser runtime pool uses least-in-flight selection with
+    rotating tie-breaking so continuously ready workers share bounded work
+    without changing request/result semantics.
+90. Packet-ring bursts reserve and publish one valid prefix per call. Capacity
+    and payload bounds are checked before publication, counters update once per
+    burst, and the single-packet API remains the correctness fallback. The
+    initial Apple M1 Pro run kept x128 lifecycle work near 45.8 microseconds;
+    this is an orchestration/atomicity improvement, not yet a claimed material
+    throughput win over the prior 47.9-microsecond reference.
+91. Go runtime process execution now exposes `ExecuteInto` as a caller-owned
+    output lane while preserving `Execute` as the owned compatibility API. On
+    the 1KB fake-exchange benchmark, caller ownership reduced 1681 B/op and 11
+    allocs/op to 656 B/op and 10 allocs/op, with mean latency moving from about
+    1.74 microseconds to 1.66 microseconds. A bounded persistent exchange loop
+    now removes the per-call goroutine and channel: the follow-up measured 1456-
+    1457 B/op and 8 allocs/op for owned output, and 432 B/op and 7 allocs/op for
+    caller-owned output. Cancellation still terminates the worker before the
+    loop reports completion, and restart remains the compatibility fallback.
+92. Browser runtime orchestration coverage is a performance guard because
+    timeout, saturation, worker removal, pulse fallback, ring backpressure, and
+    shutdown cleanup are tail-latency states. The browser-host suite now gates
+    at 90% statements/lines/functions and 80% branches; the 2026-07-12 pass also
+    fixed orchestrator shutdown so pending timers and promises are rejected and
+    removed before worker/pulse ownership is released.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 

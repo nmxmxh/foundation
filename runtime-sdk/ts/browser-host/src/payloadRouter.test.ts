@@ -7,6 +7,7 @@ describe("runtime payload routing", () => {
     const routed = routeRuntimePayload(new Uint8Array(128), { controlMaxBytes: 4096 });
     expect(routed.lane).toBe("control");
     expect(routed.byteLength).toBe(128);
+    expect(routeRuntimePayload(new Uint8Array(0)).lane).toBe("control");
   });
 
   it("routes medium payloads into the shared arena when available", () => {
@@ -35,6 +36,9 @@ describe("runtime payload routing", () => {
       expect(chunk.byteLength).toBeLessThanOrEqual(256 * 1024);
     }
     expect(chunks).toBeGreaterThan(1);
+    const defaultStream = routeRuntimePayload(new Uint8Array(4096));
+    expect(defaultStream.lane).toBe("stream");
+    expect(await collectRuntimeStream(defaultStream.chunks!)).toHaveLength(4096);
   });
 
   it("normalizes arbitrary input streams into fixed chunks", async () => {
@@ -42,5 +46,26 @@ describe("runtime payload routing", () => {
       routeRuntimeStream([new Uint8Array(3), new Uint8Array(4), new Uint8Array(5)], { chunkBytes: 5 })
     );
     expect(output.byteLength).toBe(12);
+    expect((await collectRuntimeStream(routeRuntimeStream([new Uint8Array([1])])))).toEqual(new Uint8Array([1]));
+  });
+
+  it("normalizes empty chunks and minimum option bounds", async () => {
+    const output = await collectRuntimeStream(
+      routeRuntimeStream([new Uint8Array(0), new Uint8Array([1]), new Uint8Array([2, 3])], { chunkBytes: 0 })
+    );
+    expect(output).toEqual(new Uint8Array([1, 2, 3]));
+    const routed = routeRuntimePayload(new Uint8Array(1), { controlMaxBytes: 0, arenaMaxBytes: 0, chunkBytes: 0 });
+    expect(routed.lane).toBe("stream");
+    expect(await collectRuntimeStream(routed.chunks!)).toEqual(new Uint8Array(1));
+  });
+
+  it("surfaces arena queue backpressure after descriptor publication", () => {
+    const arena = {
+      allocate: () => ({ id: 1 }),
+      writeSlab: () => undefined,
+      enqueueDescriptorReady: () => false,
+      readDescriptor: () => ({ id: 1 }),
+    } as unknown as RuntimeSharedArena;
+    expect(() => routeRuntimePayload(new Uint8Array(8), { controlMaxBytes: 4, arenaMaxBytes: 16, arena })).toThrow("queue backpressure");
   });
 });

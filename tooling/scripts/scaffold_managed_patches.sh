@@ -1886,6 +1886,50 @@ GOEOF
   fi
 }
 
+patch_redundant_foundation_test_files() {
+  local foundation_root="$target/foundation"
+  [[ -d "$foundation_root" ]] || return 0
+
+  local relative
+  local removed=0
+  local retired=(
+    server-kit/go/events/coverage_edges_test.go
+    server-kit/go/events/envelope_edges_test.go
+    server-kit/go/extension/value_branches_test.go
+    server-kit/go/extension/value_convert_test.go
+    server-kit/go/extension/value_coverage_test.go
+    server-kit/go/graceful/emitters_edge_test.go
+    server-kit/go/hermes/columnar_extra_test.go
+    server-kit/go/hermes/contract_extra_test.go
+    server-kit/go/hermes/coverage_extra_test.go
+    server-kit/go/hermes/drift_extra_test.go
+    server-kit/go/hermes/helpers_extra_test.go
+    server-kit/go/hermes/indexes_extra_test.go
+    server-kit/go/hermes/state_store_extra_test.go
+    server-kit/go/httpserver/residual_test.go
+    server-kit/go/httpserver/server_extra_test.go
+    server-kit/go/httpserver/server_internal_test.go
+    server-kit/go/httpserver/server_operational_test.go
+    server-kit/go/httpserver/server_rbac_test.go
+    server-kit/go/httpserver/smoke_test.go
+    server-kit/go/logger/coverage_edges_test.go
+    server-kit/go/projectiongw/coverage_test.go
+    server-kit/go/projectiongw/residual_test.go
+    server-kit/go/protoapi/binding_branches_test.go
+    server-kit/go/servicebacked/gate_residual_test.go
+  )
+
+  for relative in "${retired[@]}"; do
+    if [[ -f "$foundation_root/$relative" ]]; then
+      rm -f "$foundation_root/$relative"
+      removed=$((removed + 1))
+    fi
+  done
+  if [[ "$removed" -gt 0 ]]; then
+    log_patch "removed $removed retired Foundation overflow test files"
+  fi
+}
+
 export PATCH_SEARCH PATCH_REPLACE
 
 patch_agent_native_guides
@@ -1927,6 +1971,7 @@ patch_startup_projection_warming
 patch_startup_envelope_fallback
 patch_startup_snapshot_shadow
 patch_worker_engine_canonical
+patch_redundant_foundation_test_files
 sync_go_work
 
 if [[ "$patched" -eq 0 ]]; then

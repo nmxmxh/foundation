@@ -278,6 +278,17 @@ Interpretation:
 - Dummy generation around 1 ms per 1k records is acceptable for fixture creation,
   scaffold smoke, and offline reset. It should not run during render.
 - Projection apply without snapshot reads is the live-ingest path. It should stay
+  batched through `applyMany` when several mutations are already available.
+  The 2026-07-12 Apple M1 Pro baseline measured 1k `applyMany` mutations at
+  about 0.120 ms versus about 0.149 ms for individual apply calls. Reading a
+  materialized snapshot after every mutation cost about 31.75 ms for the same
+  1k operations; render/store subscribers should read once per committed batch,
+  never inside the ingest loop.
+- Generated dummy factories are prototype and fixture infrastructure. Keep
+  deterministic generation, persistence hydration, and cache resets outside
+  React render and user-input hot paths; promote real behavior to generated
+  contracts plus runtime adapters rather than extending prototype state into a
+  second production architecture.
   sub-millisecond per 1k simple mutations on local development hardware.
 - Projection apply with a snapshot read after every mutation is intentionally
   measured as the expensive anti-pattern. If this benchmark dominates, generated

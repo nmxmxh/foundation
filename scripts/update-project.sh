@@ -31,6 +31,10 @@ Options:
   --with-native       Enable native/Tauri scaffold and runtime-native metadata
   --no-native         Disable native/Tauri scaffold and runtime-native metadata
   --acknowledge-seed-drift  Re-baseline the seed ledger to current templates
+  --no-auto-reseed    Preserve untouched create-mode files instead of safely reseeding
+  --report-dir <path> Write JSON, Markdown, and deterministic changed-file reports
+  --validate          Run project scaffold validation after synchronization
+  --verify-idempotence  Run a dry second pass and require no managed patch drift
   --help, -h          Show this help message
 EOF
 }
@@ -66,6 +70,10 @@ WITH_DOCKER_OVERRIDE=""
 WITH_WASM_OVERRIDE=""
 WITH_NATIVE_OVERRIDE=""
 ACKNOWLEDGE_SEED_DRIFT="false"
+AUTO_RESEED_UNTOUCHED="true"
+REPORT_DIR=""
+VALIDATE="false"
+VERIFY_IDEMPOTENCE="false"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -126,6 +134,23 @@ while [[ $# -gt 0 ]]; do
             ;;
         --acknowledge-seed-drift)
             ACKNOWLEDGE_SEED_DRIFT="true"
+            shift
+            ;;
+        --no-auto-reseed)
+            AUTO_RESEED_UNTOUCHED="false"
+            shift
+            ;;
+        --report-dir)
+            require_value "$1" "${2:-}"
+            REPORT_DIR="$2"
+            shift 2
+            ;;
+        --validate)
+            VALIDATE="true"
+            shift
+            ;;
+        --verify-idempotence)
+            VERIFY_IDEMPOTENCE="true"
             shift
             ;;
         --no-native)
@@ -216,6 +241,15 @@ foundation_log_info "Foundation version: $FOUNDATION_VERSION"
 foundation_log_info "Native scaffold: $WITH_NATIVE"
 [[ "$WITH_NATIVE" == "true" ]] && foundation_log_info "Native identifier: $(foundation_project_identifier)"
 
+if [[ ! -f "$FOUNDATION_FILE" ]]; then
+    foundation_log_warn "Preflight: .foundation metadata is missing; inferred project settings will be recorded"
+fi
+
+before_manifest=""
+if git -C "$PROJECT_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    before_manifest="$(git -C "$PROJECT_PATH" status --porcelain=v1 | LC_ALL=C sort)"
+fi
+
 foundation_write_metadata
 
 if [[ "$DOCS_ONLY" == "true" ]]; then
@@ -233,10 +267,81 @@ else
     foundation_log_success "Managed scaffold synchronized"
     scaffold_report_seed_drift
     if [[ -x "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" ]]; then
-        foundation_log_info "Applying managed scaffold patches..."
-        "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" "$PROJECT_PATH"
-        foundation_log_success "Managed scaffold patches applied"
+        if [[ "$DRY_RUN" == "true" ]]; then
+            foundation_log_info "[DRY RUN] Would apply managed scaffold patches"
+        else
+            foundation_log_info "Applying managed scaffold patches..."
+            "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" "$PROJECT_PATH"
+            foundation_log_success "Managed scaffold patches applied"
+        fi
     fi
+fi
+
+migration_id="20260712-managed-compat-v1"
+if [[ "$DRY_RUN" != "true" ]]; then
+    migration_ledger="$PROJECT_PATH/.foundation-migrations.tsv"
+    if ! grep -Fq "$migration_id" "$migration_ledger" 2>/dev/null; then
+        printf '%s\t%s\n' "$migration_id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$migration_ledger"
+    fi
+fi
+
+validation_status="skipped"
+if [[ "$VALIDATE" == "true" ]]; then
+    validation_status="passed"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        foundation_log_info "[DRY RUN] Would run project scaffold validation"
+    elif ! "$FOUNDATION_DIR/tooling/scripts/project_scaffold_check.sh" "$PROJECT_PATH"; then
+        validation_status="failed"
+    fi
+fi
+
+idempotence_status="skipped"
+if [[ "$VERIFY_IDEMPOTENCE" == "true" ]]; then
+    idempotence_status="passed"
+    if [[ "$DRY_RUN" == "true" ]]; then
+        foundation_log_info "[DRY RUN] Would verify a second update pass"
+    else
+        idempotence_before="$(git -C "$PROJECT_PATH" status --porcelain=v1 2>/dev/null | grep -v ' \.foundation$' | LC_ALL=C sort || true)"
+        second_args=("$PROJECT_PATH")
+        [[ "$FORCE" == "true" ]] && second_args+=(--force)
+        [[ "$AUTO_RESEED_UNTOUCHED" != "true" ]] && second_args+=(--no-auto-reseed)
+        if ! "$0" "${second_args[@]}" >/dev/null; then
+            idempotence_status="failed"
+        else
+            idempotence_after="$(git -C "$PROJECT_PATH" status --porcelain=v1 2>/dev/null | grep -v ' \.foundation$' | LC_ALL=C sort || true)"
+            if [[ "$idempotence_before" != "$idempotence_after" ]]; then
+                idempotence_status="failed"
+            fi
+        fi
+    fi
+fi
+
+if [[ -n "$REPORT_DIR" ]]; then
+    mkdir -p "$REPORT_DIR"
+    report_base="$REPORT_DIR/$(basename "$PROJECT_PATH")"
+    after_manifest=""
+    if git -C "$PROJECT_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        after_manifest="$(git -C "$PROJECT_PATH" status --porcelain=v1 | LC_ALL=C sort)"
+    fi
+    printf '%s\n' "$after_manifest" >"${report_base}.changes.txt"
+    cat >"${report_base}.json" <<EOF
+{"project":"$PROJECT_NAME","path":"$PROJECT_PATH","dry_run":$DRY_RUN,"status":"success","validation":"$validation_status","idempotence":"$idempotence_status","migration_id":"$migration_id","changed_manifest":"${report_base}.changes.txt"}
+EOF
+    cat >"${report_base}.md" <<EOF
+# Foundation update: $PROJECT_NAME
+
+- Status: success
+- Dry run: $DRY_RUN
+- Validation: $validation_status
+- Idempotence: $idempotence_status
+- Migration: $migration_id
+- Changed-file manifest: $(basename "${report_base}.changes.txt")
+EOF
+fi
+
+if [[ "$validation_status" == "failed" || "$idempotence_status" == "failed" ]]; then
+    foundation_log_error "Post-update validation failed"
+    exit 1
 fi
 
 foundation_log_success "Project synchronized to foundation v$FOUNDATION_VERSION"

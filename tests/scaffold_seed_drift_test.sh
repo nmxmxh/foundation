@@ -48,12 +48,20 @@ if echo "$output" | grep -q "Seed drift"; then
     exit 1
 fi
 
-test_step "evolved template + unmodified local copy warns with reseed hint"
+test_step "evolved template + unmodified local copy safely reseeds"
 fake_template_hash
 output="$(run_update)"
+if ! echo "$output" | grep -q "Safely reseeded untouched project-owned file: $SENTINEL"; then
+    echo "expected safe automatic reseed, got:" >&2
+    echo "$output" | grep -i "drift" >&2 || echo "(no drift lines)" >&2
+    exit 1
+fi
+
+test_step "no-auto-reseed preserves the prior warning behavior"
+fake_template_hash
+output="$(run_update --no-auto-reseed)"
 if ! echo "$output" | grep -q "Seed drift: $SENTINEL.*unmodified"; then
     echo "expected unmodified-copy drift warning, got:" >&2
-    echo "$output" | grep -i "drift" >&2 || echo "(no drift lines)" >&2
     exit 1
 fi
 

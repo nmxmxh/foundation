@@ -53,9 +53,36 @@ func TestFlagEvaluationRulesAndSources(t *testing.T) {
 }
 
 func TestManagerStopIsIdempotent(t *testing.T) {
+	(*Manager)(nil).Stop()
 	m := New(Config{})
 	m.Stop()
 	m.Stop()
+}
+
+func TestEvaluationAndSourceErrorBranches(t *testing.T) {
+	m := New(Config{DefaultEnvironment: "prod"})
+	defer m.Stop()
+	m.SetFlag(Flag{Name: "allowed-miss", Enabled: true, AllowedUsers: []string{"u1"}})
+	m.SetFlag(Flag{Name: "org-miss", Enabled: true, AllowedOrgs: []string{"org1"}})
+	m.SetFlag(Flag{Name: "full-rollout", Enabled: true, RolloutPercentage: 100})
+	if !m.IsEnabled(context.Background(), "allowed-miss", WithUser("u2")) {
+		t.Fatal("an allow-list miss should fall through to the enabled default")
+	}
+	if !m.IsEnabled(context.Background(), "org-miss", WithOrg("org2")) {
+		t.Fatal("an org allow-list miss should fall through to the enabled default")
+	}
+	if !m.IsEnabled(context.Background(), "full-rollout") {
+		t.Fatal("100 percent rollout should remain enabled")
+	}
+
+	t.Setenv("FF_INVALID_PERCENT", "101")
+	flags, err := NewEnvSource().Load(context.Background())
+	if err != nil || flags["invalid-percent"].Enabled {
+		t.Fatalf("invalid percentage flags = %+v err=%v", flags, err)
+	}
+	if _, err := NewJSONFileSource(t.TempDir() + "/missing.json").Load(context.Background()); err == nil {
+		t.Fatal("missing JSON source file unexpectedly loaded")
+	}
 }
 
 func TestMemoryEnvJSONSourcesAndMiddleware(t *testing.T) {

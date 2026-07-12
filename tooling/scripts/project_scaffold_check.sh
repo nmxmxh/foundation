@@ -83,6 +83,23 @@ check_file_contains() {
   fi
 }
 
+check_file_contains_any() {
+  local label="$1"
+  local file="$2"
+  shift 2
+  local pattern
+  for pattern in "$@"; do
+    if [[ -e "$file" ]] && grep -RFq -- "$pattern" "$file"; then
+      echo "[OK] $label"
+      return
+    fi
+  done
+  echo "[FAIL] $label"
+  echo "  missing supported pattern: $*"
+  echo "  file: ${file#$target/}"
+  failed=1
+}
+
 check_frontend_package_contains() {
   local label="$1"
   local file="$2"
@@ -434,10 +451,10 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   # (OpenAPI). The default derives routes from handlers; domains override
   # HTTPRoutes to aggregate explicit per-service routes. See
   # docs/foundation_project_standardization.md.
-  check_file_contains "bootstrap declares the HTTP route catalogue" "$target/internal/bootstrap/services.go" "func (s *Services) HTTPRoutes()"
+  check_file_contains_any "bootstrap declares the HTTP route catalogue" "$target/internal/bootstrap" "func (s *Services) HTTPRoutes()" "func RouteCatalog()" "func RouteCatalogHandlers()"
   check_file_contains "server command installs the route catalogue" "$target/cmd/server/main.go" "SetHTTPRoutes"
-  check_file_contains "server command sources routes from bootstrap catalogue" "$target/cmd/server/main.go" ".HTTPRoutes()"
-  check_file_contains "docgen consumes the route catalogue" "$target/cmd/docgen/main.go" "RouteCatalog()"
+  check_file_contains_any "server command sources routes from bootstrap catalogue" "$target/cmd/server/main.go" ".HTTPRoutes()" "RouteCatalog()"
+  check_file_contains_any "docgen consumes the route catalogue" "$target/cmd/docgen/main.go" "RouteCatalog()" "RouteCatalogHandlers()"
   check_file_not_contains "docgen avoids empty route catalogue" "$target/cmd/docgen/main.go" "Routes: []registry.HTTPRoute{}"
   check_file_not_contains "docgen avoids route TODO scaffold" "$target/cmd/docgen/main.go" "TODO: Import your domain handlers"
   check_file_not_contains "docgen avoids hand-maintained route collector" "$target/cmd/docgen/main.go" "func collectRoutes"
@@ -730,7 +747,7 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     check_file_contains "Postgres Dockerfile bakes config" "$target/Dockerfile.postgres" "COPY config/postgresql.conf"
     check_file_contains "Postgres Dockerfile bakes hba" "$target/Dockerfile.postgres" "COPY config/pg_hba.conf"
     check_file_contains "Redis Dockerfile bakes config" "$target/Dockerfile.redis" "COPY config/redis.conf"
-    check_file_contains "Compose builds Postgres config image" "$target/docker-compose.yml" "Dockerfile.postgres"
+    check_file_contains_any "Compose supplies a configured Postgres image" "$target/docker-compose.yml" "Dockerfile.postgres" "postgis/postgis:18-"
     check_file_contains "Compose builds Redis config image" "$target/docker-compose.yml" "Dockerfile.redis"
     check_file_contains "Compose uses baked Postgres hba" "$target/docker-compose.yml" "hba_file=/etc/postgresql/pg_hba.conf"
     check_file_contains "Compose migration fails auth after grace window" "$target/docker-compose.yml" "database authentication still failing after"

@@ -214,6 +214,12 @@ export const createRuntimeOrchestrator = (options: RuntimeOrchestratorOptions) =
         worker.terminate();
       }
       workers.clear();
+      const shutdownError = new Error("runtime orchestrator shut down");
+      for (const [requestId, pending] of inFlight.entries()) {
+        globalThis.clearTimeout(pending.timeoutId);
+        pending.reject(shutdownError);
+        inFlight.delete(requestId);
+      }
       pulseManager.shutdown();
       diagnostics = {
         ...diagnostics,

@@ -201,6 +201,22 @@ func TestCircuitBreaker_ExecuteWithFallback(t *testing.T) {
 	}
 }
 
+func TestCircuitBreaker_ExecuteWithFallbackSkipsFallbackOnSuccess(t *testing.T) {
+	cb := New("healthy", Config{})
+	fallbackCalled := false
+	result, err := cb.ExecuteWithFallback(
+		context.Background(),
+		func() (any, error) { return "primary", nil },
+		func(error) (any, error) {
+			fallbackCalled = true
+			return "fallback", nil
+		},
+	)
+	if err != nil || result != "primary" || fallbackCalled {
+		t.Fatalf("result=%v err=%v fallbackCalled=%v", result, err, fallbackCalled)
+	}
+}
+
 func TestCircuitBreaker_ContextCancellation(t *testing.T) {
 	cb := New("test-svc", Config{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -297,6 +313,21 @@ func TestCircuitBreaker_HalfOpenMaxCalls(t *testing.T) {
 func TestStateStringUnknown(t *testing.T) {
 	if got := State(99).String(); got != "unknown" {
 		t.Fatalf("unknown state string = %q", got)
+	}
+}
+
+func TestStateStringsAndRealClock(t *testing.T) {
+	for state, want := range map[State]string{
+		StateClosed:   "closed",
+		StateOpen:     "open",
+		StateHalfOpen: "half-open",
+	} {
+		if got := state.String(); got != want {
+			t.Fatalf("state %d = %q, want %q", state, got, want)
+		}
+	}
+	if (realClock{}).Now().IsZero() {
+		t.Fatal("real clock returned zero time")
 	}
 }
 

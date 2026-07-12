@@ -25,6 +25,18 @@ func TestDomainErrorDefaultsAndMatching(t *testing.T) {
 	if (*Error)(nil).Error() != "" || (*Error)(nil).Unwrap() != nil {
 		t.Fatal("nil error methods should be safe")
 	}
+	if errors.Is(err, errors.New("different")) {
+		t.Fatal("domain error unexpectedly matched a plain error")
+	}
+	if errors.Is(err, &Error{Kind: KindValidation}) {
+		t.Fatal("domain error unexpectedly matched a different kind")
+	}
+	if errors.Is(err, &Error{Code: "different"}) {
+		t.Fatal("domain error unexpectedly matched a different code")
+	}
+	if !errors.Is(err, &Error{}) {
+		t.Fatal("empty domain target should match")
+	}
 }
 
 func TestDomainErrorHelpersAndHTTPStatus(t *testing.T) {
@@ -59,6 +71,15 @@ func TestDomainErrorHelpersAndHTTPStatus(t *testing.T) {
 	}
 	if MessageOf(nil, " fallback ") != "fallback" {
 		t.Fatal("expected fallback message to be trimmed")
+	}
+	if MessageOf(errors.New(" explicit "), "fallback") != "explicit" {
+		t.Fatal("expected explicit message")
+	}
+	if MessageOf(errors.New(" "), " ") != "operation failed" {
+		t.Fatal("expected default message")
+	}
+	if CodeOf(&Error{}) != "unknown_error" || KindOf(&Error{}) != KindInternal {
+		t.Fatal("empty domain error should use stable defaults")
 	}
 }
 

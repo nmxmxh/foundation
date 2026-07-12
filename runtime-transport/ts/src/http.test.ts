@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHTTPTransport } from "./http";
 import { createEnvelope, type RuntimeRoute } from "./index";
@@ -110,5 +110,98 @@ describe("createHTTPTransport path parameters", () => {
     await expect(
       transport.dispatch(createEnvelope({ eventType: r.eventType, payload: { id: { nested: true } } }), r, new AbortController().signal),
     ).rejects.toThrow(/must be a scalar/);
+  });
+
+  it("rejects empty path parameter declarations and ArrayBuffer protobuf bodies remain valid", async () => {
+    const invalid = route({ path: "/v1/things/{ }", eventType: "things:get:v1:requested" });
+    const { transport } = transportWithCapture();
+    await expect(transport.dispatch(createEnvelope({ eventType: invalid.eventType, payload: {} }), invalid, new AbortController().signal)).rejects.toThrow("empty path parameter");
+
+    const binary = route({ eventType: "things:send:v1:requested" });
+    const envelope = createEnvelope({ eventType: binary.eventType, payload: Uint8Array.from([7]).buffer });
+    envelope.payloadEncoding = "protobuf";
+    await expect(transport.dispatch(envelope, binary, new AbortController().signal)).resolves.toEqual({ ok: true });
+  });
+});
+
+describe("createHTTPTransport response and cancellation contracts", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const transportFor = (response: Response | ((signal: AbortSignal) => Promise<Response>), timeoutMs = 100) =>
+    createHTTPTransport({
+      baseUrl: "https://api.test",
+      timeoutMs,
+      compression: { enabled: false },
+      getHeaders: () => ({ Authorization: "Bearer test" }),
+      fetchImpl: (async (_input, init) =>
+        typeof response === "function" ? response(init?.signal as AbortSignal) : response) as typeof fetch,
+    });
+
+  it("returns protobuf bytes, octet streams, JSON payloads, and NDJSON records", async () => {
+    const signal = new AbortController().signal;
+    const protobuf = transportFor(new Response(new Uint8Array([1, 2]), { headers: { "content-type": "application/x-protobuf" } }));
+    await expect(protobuf.dispatch(createEnvelope({ eventType: route({}).eventType, payload: {} }), route({}), signal)).resolves.toEqual(new Uint8Array([1, 2]));
+
+    const octets = transportFor(new Response(new Uint8Array([3]), { headers: { "content-type": "application/octet-stream" } }));
+    expect(await octets.dispatch(createEnvelope({ eventType: route({}).eventType, payload: {} }), route({}), signal)).toBeInstanceOf(ReadableStream);
+
+    const json = transportFor(new Response(JSON.stringify({ response_payload: { ok: 1 } }), { headers: { "content-type": "application/json" } }));
+    await expect(json.dispatch(createEnvelope({ eventType: route({}).eventType, payload: {} }), route({}), signal)).resolves.toEqual({ ok: 1 });
+
+    const ndjson = transportFor(new Response('{"id":1}\n\n{"id":2}', { headers: { "content-type": "application/x-ndjson" } }));
+    const stream = await ndjson.dispatch(createEnvelope({ eventType: route({}).eventType, payload: {} }), route({}), signal) as AsyncIterable<unknown>;
+    const records = [];
+    for await (const record of stream) records.push(record);
+    expect(records).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+
+  it("propagates caller cancellation and bounded timeout reasons", async () => {
+    vi.useFakeTimers();
+    const pending = (signal: AbortSignal) => new Promise<Response>((_resolve, reject) => {
+      if (signal.aborted) {
+        reject(signal.reason);
+        return;
+      }
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    });
+    const caller = new AbortController();
+    const cancelled = transportFor(pending).dispatch(createEnvelope({ eventType: route({}).eventType, payload: {} }), route({}), caller.signal);
+    await Promise.resolve();
+    caller.abort(new Error("caller stopped"));
+    await expect(cancelled).rejects.toThrow("caller stopped");
+
+    const timed = transportFor(pending, 5).dispatch(createEnvelope({ eventType: route({}).eventType, payload: {} }), route({}), new AbortController().signal);
+    const timedExpectation = expect(timed).rejects.toThrow("http transport timed out after 5ms");
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(5);
+    await timedExpectation;
+  });
+
+  it("normalizes structured, invalid JSON, text, and empty HTTP errors", async () => {
+    const envelope = createEnvelope({ eventType: route({}).eventType, payload: {} });
+    const signal = new AbortController().signal;
+    await expect(transportFor(new Response(JSON.stringify({ error: { message: "denied" } }), { status: 403, headers: { "content-type": "application/json" } })).dispatch(envelope, route({}), signal)).rejects.toThrow("denied");
+    await expect(transportFor(new Response("{", { status: 500, headers: { "content-type": "application/json" } })).dispatch(envelope, route({}), signal)).rejects.toThrow("status 500");
+    await expect(transportFor(new Response("unavailable", { status: 503 })).dispatch(envelope, route({}), signal)).rejects.toThrow("unavailable");
+    await expect(transportFor(new Response(null, { status: 502 })).dispatch(envelope, route({}), signal)).rejects.toThrow("status 502");
+  });
+
+  it("serializes protobuf bodies and GET array query values", async () => {
+    const captured: Captured[] = [];
+    const transport = createHTTPTransport({ baseUrl: "https://api.test", compression: { enabled: false }, fetchImpl: (async (input, init) => {
+      captured.push({ url: String(input), method: init?.method ?? "GET", headers: new Headers(init?.headers), body: init?.body });
+      return new Response("{}");
+    }) as typeof fetch });
+    const protobufRoute = route({ eventType: "binary:send:v1:requested" });
+    const protobufEnvelope = createEnvelope({ eventType: protobufRoute.eventType, payload: new Uint8Array([4, 5]) });
+    protobufEnvelope.payloadEncoding = "protobuf";
+    await transport.dispatch(protobufEnvelope, protobufRoute, new AbortController().signal);
+    expect(captured[0].headers.get("content-type")).toBe("application/x-protobuf");
+    expect(captured[0].body).toEqual(new Uint8Array([4, 5]));
+
+    await transport.dispatch(createEnvelope({ eventType: "items:list:v1:requested", payload: { tag: ["a", null, "b"], skip: undefined } }), route({ method: "GET", eventType: "items:list:v1:requested" }), new AbortController().signal);
+    expect(new URL(captured[1].url).searchParams.getAll("tag")).toEqual(["a", "b"]);
   });
 });

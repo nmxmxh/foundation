@@ -173,6 +173,7 @@ Read in order:
 | --- | --- |
 | [`../AGENTS.md`](../AGENTS.md) | Agent terminology, operating baseline, tech stack, architecture overview |
 | `agent_operating_contract.md` | Role split, definition of done, evidence ledger, handoff format |
+| `agent_change_contract.md` | Architecture graph, pre-edit simulation, risk tier, and evidence workflow |
 | `ai_practices.md` | AI runtime as product capability, trust boundary, bounded work, verification |
 | `ai_threat_model.md` | AI-specific threats: tool poisoning, memory poisoning, provenance, secrets |
 | `../agent_memory/CONDUCTOR.md` | Closed-loop autonomous build loop, verification gates, memory patterns (in-house; not yet shipped) |

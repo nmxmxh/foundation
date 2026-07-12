@@ -124,6 +124,31 @@ To update the entire fleet:
    ./foundation/scripts/update-all.sh --force
    ```
 
+   Use `--dry-run` first. Dry runs are regression-tested not to mutate project
+   state. Fleet updates continue after individual failures and write concise
+   JSON and Markdown summaries plus per-project changed-file manifests under
+   `test-results/` by default. A custom location can be supplied with
+   `--report-dir`.
+
+   ```bash
+   ovasabi fleet-update --dry-run --validate
+   ovasabi fleet-update --force --validate --verify-idempotence
+   ```
+
+   Create-mode files are automatically reseeded only when their current hash
+   exactly matches the recorded seed hash. Customized files remain untouched
+   and are reported as project-owned drift. `--no-auto-reseed` retains the old
+   warning-only behavior. Successful updates record the bounded compatibility
+   migration ID in `.foundation-migrations.tsv`.
+
+### Agent Change Orchestration
+
+`ovasabi agent graph`, `ovasabi add feature`, `ovasabi agent check`, and
+`ovasabi agent evidence` wrap `tooling/scripts/agent_change.mjs`. They connect
+capability ownership, lifecycle vocabulary, risk classification, pre-edit
+simulation, and evidence without replacing existing source generators.
+`tests/agent_change_test.sh` runs as `check-agent-change` in the lint gate.
+
 ### Documentation Restructuring & Cleaning
 
 To prevent project-level documentation drift, `scripts/update-project.sh` applies a strict synchronization policy:

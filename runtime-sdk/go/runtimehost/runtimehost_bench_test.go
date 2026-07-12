@@ -2,11 +2,32 @@ package runtimehost
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"sync"
 	"testing"
 
 	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
 )
+
+type benchmarkProcessExchange struct{}
+
+var benchmarkProcessOutput [1024]byte
+
+func (benchmarkProcessExchange) Exchange(_ context.Context, _ string, raw []byte) error {
+	buffer, err := NewBuffer(raw)
+	if err != nil {
+		return err
+	}
+	if err := buffer.SetOutputBytesFast(benchmarkProcessOutput[:]); err != nil {
+		return err
+	}
+	_, err = buffer.AddEpoch(generated.IDX_OUTPUT_WRITTEN, 1)
+	return err
+}
+
+func (benchmarkProcessExchange) Close() error   { return nil }
+func (benchmarkProcessExchange) Restart() error { return nil }
 
 func benchmarkBuffer(b *testing.B) *Buffer {
 	b.Helper()
@@ -167,6 +188,46 @@ func BenchmarkBufferDiagnosticsText(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		if got := buffer.DiagnosticsText(); got == "" {
 			b.Fatal("empty diagnostics")
+		}
+	}
+}
+
+func benchmarkProcessPool() *ProcessPool {
+	return &ProcessPool{
+		exchangeTimeout: DefaultProcessExchangeTimeout,
+		allWorkers: []*processWorker{{
+			testExchange: benchmarkProcessExchange{},
+		}},
+		bufferPool: sync.Pool{New: func() any {
+			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
+			return &buffer
+		}},
+	}
+}
+
+func BenchmarkProcessPoolExecuteOwned1KB(b *testing.B) {
+	pool := benchmarkProcessPool()
+	request := ProcessRequest{UnitID: "runtime.bench", Input: []byte("input")}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		response, err := pool.Execute(context.Background(), request)
+		if err != nil || len(response.Output) != 1024 {
+			b.Fatalf("Execute() output=%d err=%v", len(response.Output), err)
+		}
+	}
+}
+
+func BenchmarkProcessPoolExecuteInto1KB(b *testing.B) {
+	pool := benchmarkProcessPool()
+	request := ProcessRequest{UnitID: "runtime.bench", Input: []byte("input")}
+	dst := make([]byte, generated.OUTPUT_MAX_BYTES)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		response, err := pool.ExecuteInto(context.Background(), request, dst)
+		if err != nil || len(response.Output) != 1024 {
+			b.Fatalf("ExecuteInto() output=%d err=%v", len(response.Output), err)
 		}
 	}
 }

@@ -32,8 +32,8 @@ type commandRunner interface {
 type osRunner struct{}
 
 func (osRunner) Run(ctx context.Context, name string, args []string, dir string, env []string, stdout io.Writer, stderr io.Writer) error {
-	// #nosec G204 -- the CLI's purpose is launching the Foundation scaffold
-	// scripts; name/args come from internal call sites, not user input.
+	// #nosec G204,G702 -- the CLI's purpose is launching Foundation-owned
+	// commands; executable names come only from internal call sites.
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
@@ -75,6 +75,12 @@ func (a app) run(ctx context.Context, args []string) error {
 		return a.runUpdate(ctx, args[1:])
 	case "refresh":
 		return a.runRefresh(ctx, args[1:])
+	case "fleet-update":
+		return a.runFleetUpdate(ctx, args[1:])
+	case "add":
+		return a.runAdd(ctx, args[1:])
+	case "agent":
+		return a.runAgent(ctx, args[1:])
 	case "license":
 		return a.runLicense(ctx, args[1:])
 	case "doctor":
@@ -95,6 +101,11 @@ Usage:
   ovasabi init --profile=performance --name=trader_os [options]
   ovasabi update --project-dir=../trader_os_v1 [options]
   ovasabi refresh --project-dir=../trader_os_v1 [--dry-run] [--acknowledge-seed-drift]
+  ovasabi fleet-update [--dry-run] [--force] [--validate] [--verify-idempotence]
+  ovasabi add feature <name> --commands=create,assign,complete [--projection=list] [--offline] [--realtime]
+  ovasabi agent graph [--capability=live_projection]
+  ovasabi agent check --file=.foundation/changes/review-task.json
+  ovasabi agent evidence --plan=.foundation/changes/review-task.json
   ovasabi license verify [options]
   ovasabi doctor [--json]
 
@@ -103,6 +114,54 @@ overrides; update is the flag-driven variant for changing profile or features.
 
 The CLI wraps the existing Foundation scaffold scripts while adding the
 distribution and licensing boundary used by package-registry installs.`)
+}
+
+func (a app) runAdd(ctx context.Context, args []string) error {
+	if len(args) < 2 || args[0] != "feature" {
+		return errors.New("usage: ovasabi add feature <name> --commands=create,assign [options]")
+	}
+	feature := args[1]
+	if feature == "" {
+		return errors.New("feature name is required")
+	}
+	foundationDir, err := discoverFoundationDir()
+	if err != nil {
+		return err
+	}
+	projectDir, err := resolveCallerPath(".")
+	if err != nil {
+		return err
+	}
+	scriptArgs := []string{"plan", "--feature", feature, "--project-dir", projectDir}
+	for _, arg := range args[2:] {
+		if strings.HasPrefix(arg, "--commands=") {
+			scriptArgs = append(scriptArgs, "--commands", strings.TrimPrefix(arg, "--commands="))
+		} else if strings.HasPrefix(arg, "--projection=") {
+			scriptArgs = append(scriptArgs, "--projection", strings.TrimPrefix(arg, "--projection="))
+		} else {
+			scriptArgs = append(scriptArgs, arg)
+		}
+	}
+	return a.runner.Run(ctx, "node", append([]string{filepath.Join(foundationDir, "tooling/scripts/agent_change.mjs")}, scriptArgs...), foundationDir, nil, a.stdout, a.stderr)
+}
+
+func (a app) runAgent(ctx context.Context, args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: ovasabi agent graph|check|evidence [options]")
+	}
+	foundationDir, err := discoverFoundationDir()
+	if err != nil {
+		return err
+	}
+	scriptArgs := []string{args[0]}
+	for _, arg := range args[1:] {
+		if index := strings.IndexByte(arg, '='); strings.HasPrefix(arg, "--") && index > 2 {
+			scriptArgs = append(scriptArgs, arg[:index], arg[index+1:])
+		} else {
+			scriptArgs = append(scriptArgs, arg)
+		}
+	}
+	return a.runner.Run(ctx, "node", append([]string{filepath.Join(foundationDir, "tooling/scripts/agent_change.mjs")}, scriptArgs...), foundationDir, nil, a.stdout, a.stderr)
 }
 
 type licenseOptions struct {
@@ -193,6 +252,10 @@ func (a app) runUpdate(ctx context.Context, args []string) error {
 	toolingOnly := fs.Bool("tooling-only", false, "update tooling only")
 	foundationOnly := fs.Bool("foundation-only", false, "update vendored foundation modules only")
 	acknowledgeSeedDrift := fs.Bool("acknowledge-seed-drift", false, "re-baseline the seed ledger to current templates")
+	reportDir := fs.String("report-dir", "", "write JSON, Markdown, and changed-file reports")
+	validate := fs.Bool("validate", false, "run post-update scaffold validation")
+	verifyIdempotence := fs.Bool("verify-idempotence", false, "require a clean managed-patch second pass")
+	noAutoReseed := fs.Bool("no-auto-reseed", false, "preserve untouched create-mode files")
 	profile := fs.String("profile", "", "override profile")
 	lic := bindLicenseFlags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -231,6 +294,18 @@ func (a app) runUpdate(ctx context.Context, args []string) error {
 	if *acknowledgeSeedDrift {
 		scriptArgs = append(scriptArgs, "--acknowledge-seed-drift")
 	}
+	if *reportDir != "" {
+		scriptArgs = append(scriptArgs, "--report-dir", *reportDir)
+	}
+	if *validate {
+		scriptArgs = append(scriptArgs, "--validate")
+	}
+	if *verifyIdempotence {
+		scriptArgs = append(scriptArgs, "--verify-idempotence")
+	}
+	if *noAutoReseed {
+		scriptArgs = append(scriptArgs, "--no-auto-reseed")
+	}
 	if *profile != "" {
 		mapped, err := scriptProfile(*profile)
 		if err != nil {
@@ -239,6 +314,49 @@ func (a app) runUpdate(ctx context.Context, args []string) error {
 		scriptArgs = append(scriptArgs, "--profile", mapped)
 	}
 	return a.runner.Run(ctx, script, scriptArgs, *foundationDir, nil, a.stdout, a.stderr)
+}
+
+func (a app) runFleetUpdate(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("fleet-update", flag.ContinueOnError)
+	fs.SetOutput(a.stderr)
+	foundationDir := fs.String("foundation-dir", "", "Foundation core checkout")
+	force := fs.Bool("force", false, "overwrite force-managed files")
+	dryRun := fs.Bool("dry-run", false, "preview without writing project files")
+	reportDir := fs.String("report-dir", "", "fleet report directory")
+	validate := fs.Bool("validate", false, "run post-update scaffold validation")
+	verifyIdempotence := fs.Bool("verify-idempotence", false, "require a clean managed-patch second pass")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *foundationDir == "" {
+		dir, err := discoverFoundationDir()
+		if err != nil {
+			return err
+		}
+		*foundationDir = dir
+	}
+	absFoundationDir, err := resolveCallerPath(*foundationDir)
+	if err != nil {
+		return err
+	}
+	scriptArgs := []string{}
+	if *force {
+		scriptArgs = append(scriptArgs, "--force")
+	}
+	if *dryRun {
+		scriptArgs = append(scriptArgs, "--dry-run")
+	}
+	if *reportDir != "" {
+		scriptArgs = append(scriptArgs, "--report-dir", *reportDir)
+	}
+	if *validate {
+		scriptArgs = append(scriptArgs, "--validate")
+	}
+	if *verifyIdempotence {
+		scriptArgs = append(scriptArgs, "--verify-idempotence")
+	}
+	fmt.Fprintln(a.stdout, "Starting Foundation fleet update; failures will be summarized after all projects are attempted.")
+	return a.runner.Run(ctx, filepath.Join(absFoundationDir, "scripts", "update-all.sh"), scriptArgs, absFoundationDir, nil, a.stdout, a.stderr)
 }
 
 // runRefresh reconciles a project purely from its declared .foundation state:

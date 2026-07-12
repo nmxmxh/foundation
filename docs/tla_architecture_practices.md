@@ -193,6 +193,12 @@ Every high-risk component should name invariants explicitly. These are examples 
 5. `OutputAfterInput`: output epoch cannot advance for a unit before its matching input epoch.
 6. `OwnedDecodeLifetime`: borrowed frame views are not retained after the source buffer lifetime.
 7. `FallbackRefinement`: fallback lane produces the same domain result or a controlled error, not a different semantic event.
+8. `EligibleWorkerFairness`: when multiple runtime workers remain ready and
+   capacity is healthy, rotating load-aware selection cannot indefinitely route
+   all new work to one worker.
+9. `BatchPrefixVisible`: a runtime ring burst publishes either a valid bounded
+   prefix in queue order or nothing beyond that prefix; no descriptor becomes
+   visible before its payload and ownership state are complete.
 
 ### Queues and workers
 

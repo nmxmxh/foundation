@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createEventStore } from "./eventStore";
+import { buildRequestFingerprint, clearLoadingState, createEventStore, isMutationRequestedEvent, isReplayEligibleRequest, setLoadingState, stableStringify } from "./eventStore";
 
 describe("createEventStore", () => {
   it("coalesces semantically identical read requests within the same metadata context", async () => {
@@ -35,6 +35,34 @@ describe("createEventStore", () => {
 
     await expect(first).resolves.toEqual({ ok: true });
     await expect(second).resolves.toEqual({ ok: true });
+  });
+
+  it("tracks keyed loading, errors, cache lifecycle, and reset", async () => {
+    const eventStore = createEventStore(async () => { throw "offline"; });
+    await expect(eventStore.emitEvent("asset:get:v1:requested", {}, { loadingKey: "asset" })).rejects.toThrow("offline");
+    expect(eventStore.store.getState()).toMatchObject({ status: "error", lastError: "offline", isLoading: false });
+    eventStore.store.getState().setIsLoading(true, "a");
+    eventStore.store.getState().setIsLoading(true, "a");
+    expect(eventStore.store.getState().isLoadingKeyActive("a")).toBe(true);
+    eventStore.store.getState().setIsLoading(false, "a");
+    eventStore.store.getState().clearLoadingState("a");
+    eventStore.store.getState().clearCache();
+    eventStore.store.getState().reset();
+    expect(eventStore.store.getState()).toMatchObject({ status: "idle", lastError: null, loadingStates: {} });
+  });
+
+  it("normalizes stable replay fingerprints for binary and cyclic values", () => {
+    expect(stableStringify({ b: 2, a: new Uint8Array([1, 2]) })).toBe(stableStringify({ a: new Uint8Array([1, 2]), b: 2 }));
+    expect(buildRequestFingerprint(new ArrayBuffer(2))).toMatch(/^[a-z0-9]+$/);
+    const cyclic: Record<string, unknown> = {};
+    cyclic.self = cyclic;
+    expect(() => stableStringify(cyclic)).toThrow();
+    expect(isMutationRequestedEvent("workspace:update:v1:requested")).toBe(true);
+    expect(isMutationRequestedEvent("workspace:get:v1:success")).toBe(false);
+    expect(isReplayEligibleRequest("auth:get:v1:requested")).toBe(false);
+    expect(isReplayEligibleRequest("workspace:get:v1:requested")).toBe(true);
+    expect(clearLoadingState({}, "missing")).toEqual({});
+    expect(setLoadingState(setLoadingState({}, true), false)).toEqual({});
   });
 
   it("does not coalesce mutation requests unless explicitly opted in", async () => {

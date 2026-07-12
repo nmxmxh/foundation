@@ -37,6 +37,25 @@ func TestCreateEnvelopeNormalizesNilPayload(t *testing.T) {
 	}
 }
 
+func TestObjectArgumentAcceptedShapes(t *testing.T) {
+	direct := Object{"id": String("direct")}
+	if got := objectArgument(direct); got["id"].Interface() != "direct" {
+		t.Fatalf("direct object = %#v", got)
+	}
+	if got := objectArgument(map[string]any{"id": "map"}); got["id"].Interface() != "map" {
+		t.Fatalf("map object = %#v", got)
+	}
+	if got := objectArgument(nil); len(got) != 0 {
+		t.Fatalf("nil object = %#v", got)
+	}
+	if got := objectArgument("invalid"); len(got) != 0 {
+		t.Fatalf("invalid object = %#v", got)
+	}
+	if correlationID := NewCorrelationID(); !strings.HasPrefix(correlationID, "corr_") {
+		t.Fatalf("correlation ID = %q", correlationID)
+	}
+}
+
 func TestResolveRouteReturnsMatchingRoute(t *testing.T) {
 	routes := []Route{
 		{EventType: "workspace:create:requested", Path: "/workspaces"},
@@ -80,6 +99,10 @@ func TestCanDispatchAuthorizationMatrix(t *testing.T) {
 		{name: "view accepts write", route: &Route{RequiredCapability: "workspace.view", Permission: "view"}, capabilities: []string{"workspace.write"}, policy: policyAllow, want: true},
 		{name: "write rejects view", route: &Route{RequiredCapability: "workspace.write", Permission: "write"}, capabilities: []string{"workspace.view"}, policy: policyAllow, want: false},
 		{name: "admin fallback", route: &Route{RequiredCapability: "workspace.delete", Permission: "delete"}, capabilities: []string{"workspace.admin"}, policy: policyAllow, want: true},
+		{name: "empty capability domain", route: &Route{RequiredCapability: ".write", Permission: "write"}, policy: policyAllow, want: false},
+		{name: "view exact", route: &Route{RequiredCapability: "workspace.read", Permission: "view"}, capabilities: []string{"workspace.view"}, policy: policyAllow, want: true},
+		{name: "write wildcard", route: &Route{RequiredCapability: "workspace.edit", Permission: "write"}, capabilities: []string{"workspace.*"}, policy: policyAllow, want: true},
+		{name: "default wildcard", route: &Route{RequiredCapability: "workspace.delete", Permission: "delete"}, capabilities: []string{"workspace.*"}, policy: policyAllow, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

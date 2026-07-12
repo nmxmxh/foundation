@@ -103,6 +103,22 @@ scaffold_warn_seed_drift() {
     fi
 }
 
+scaffold_reseed_untouched() {
+    local dest_rel="$1"
+    local source_abs="$2"
+    local dest_abs="$3"
+    local template_hash="$4"
+
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        foundation_log_info "[DRY RUN] Would safely reseed untouched project-owned file: $dest_rel"
+        return 0
+    fi
+    cp "$source_abs" "$dest_abs"
+    foundation_render_file "$dest_abs"
+    scaffold_record_seed "$dest_rel" "$template_hash" "$(foundation_hash_file "$dest_abs")"
+    foundation_log_info "Safely reseeded untouched project-owned file: $dest_rel"
+}
+
 scaffold_report_seed_drift() {
     local manifest="$FOUNDATION_DIR/templates/scaffold.manifest.tsv"
     [[ -f "$manifest" ]] || return 0
@@ -140,6 +156,10 @@ scaffold_report_seed_drift() {
         fi
 
         seeded_rec="$(echo "$row" | cut -f3)"
+        if [[ "${AUTO_RESEED_UNTOUCHED:-true}" == "true" ]] && [[ "$(foundation_hash_file "$dest_abs")" == "$seeded_rec" ]]; then
+            scaffold_reseed_untouched "$dest_rel" "$source_abs" "$dest_abs" "$template_now"
+            continue
+        fi
         scaffold_warn_seed_drift "$dest_rel" "$source_abs" "$dest_abs" "$seeded_rec"
         drift_count=$((drift_count + 1))
     done < "$manifest"

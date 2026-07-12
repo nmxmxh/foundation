@@ -29,6 +29,7 @@ type WorkerRef = {
   id: string;
   worker: Worker;
   ready: boolean;
+  inFlight: number;
 };
 
 type PendingWorkerRequest = {
@@ -47,6 +48,7 @@ export class RuntimeWorkerPool implements RuntimeExecutor {
   private nextMessageId = 1;
   private maxPendingRequests: number;
   private defaultTimeoutMs: number;
+  private nextWorkerOffset = 0;
 
   constructor(options: RuntimeWorkerPoolOptions = {}) {
     this.maxPendingRequests = Math.max(1, options.maxPendingRequests ?? DEFAULT_MAX_PENDING);
@@ -54,7 +56,7 @@ export class RuntimeWorkerPool implements RuntimeExecutor {
   }
 
   addWorker(id: string, worker: Worker, ready = false): void {
-    const ref: WorkerRef = { id, worker, ready };
+    const ref: WorkerRef = { id, worker, ready, inFlight: 0 };
     this.workers.set(id, ref);
 
     worker.addEventListener("message", (event: MessageEvent<RuntimeWorkerPoolResponse>) => {
@@ -95,17 +97,26 @@ export class RuntimeWorkerPool implements RuntimeExecutor {
       const timeoutId = setTimeout(() => {
         if (!this.pending.has(id)) return;
         this.pending.delete(id);
+        this.decrementInFlight(worker.id);
         reject(new Error(`runtime worker request ${request.library}:${request.method} timed out after ${timeoutMs}ms`));
       }, timeoutMs);
       this.pending.set(id, { workerId: worker.id, resolve, reject, timeoutId });
-      worker.worker.postMessage({
-        type: "execute",
-        id,
-        library: request.library,
-        method: request.method,
-        params: request.params,
-        input: request.input ?? null,
-      } satisfies RuntimeWorkerMessage);
+      worker.inFlight += 1;
+      try {
+        worker.worker.postMessage({
+          type: "execute",
+          id,
+          library: request.library,
+          method: request.method,
+          params: request.params,
+          input: request.input ?? null,
+        } satisfies RuntimeWorkerMessage);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        this.pending.delete(id);
+        worker.inFlight -= 1;
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -116,10 +127,18 @@ export class RuntimeWorkerPool implements RuntimeExecutor {
   }
 
   private chooseWorker(_request: RuntimeDispatchRequest): WorkerRef | null {
-    for (const ref of this.workers.values()) {
-      if (ref.ready) return ref;
+    const ready = Array.from(this.workers.values()).filter((ref) => ref.ready);
+    if (ready.length === 0) return null;
+    const start = this.nextWorkerOffset % ready.length;
+    let selected = ready[start];
+    for (let offset = 1; offset < ready.length; offset += 1) {
+      const candidate = ready[(start + offset) % ready.length];
+      if (candidate.inFlight < selected.inFlight) {
+        selected = candidate;
+      }
     }
-    return null;
+    this.nextWorkerOffset = (ready.indexOf(selected) + 1) % ready.length;
+    return selected;
   }
 
   private settle(
@@ -131,6 +150,7 @@ export class RuntimeWorkerPool implements RuntimeExecutor {
     if (!pending) return;
     clearTimeout(pending.timeoutId);
     this.pending.delete(id);
+    this.decrementInFlight(pending.workerId);
     if (error) {
       pending.reject(error);
       return;
@@ -143,7 +163,15 @@ export class RuntimeWorkerPool implements RuntimeExecutor {
       if (pending.workerId !== workerId) continue;
       clearTimeout(pending.timeoutId);
       this.pending.delete(id);
+      this.decrementInFlight(workerId);
       pending.reject(error);
+    }
+  }
+
+  private decrementInFlight(workerId: string): void {
+    const worker = this.workers.get(workerId);
+    if (worker && worker.inFlight > 0) {
+      worker.inFlight -= 1;
     }
   }
 }

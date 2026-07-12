@@ -51,3 +51,18 @@ func TestGlobalRegistryExists(t *testing.T) {
 		t.Fatalf("Global() returned nil after SetGlobalConfig")
 	}
 }
+
+func TestRegistryNormalizesEmptyNameAndZeroGlobalConfig(t *testing.T) {
+	registry := NewRegistry(Config{})
+	first := registry.Get("")
+	if first.Name() != "" {
+		t.Fatalf("empty breaker name changed to %q", first.Name())
+	}
+	if again := registry.Get(""); again != first {
+		t.Fatal("normalized empty name did not reuse breaker")
+	}
+	SetGlobalConfig(Config{})
+	if Global() == nil {
+		t.Fatal("global registry missing after zero config")
+	}
+}

@@ -98,6 +98,18 @@ type processWorker struct {
 	stdin        io.WriteCloser
 	stdout       *bufio.Reader
 	testExchange workerExchange
+
+	exchangeLoopMu   sync.Mutex
+	exchangeRequests chan exchangeRequest
+	exchangeResults  chan error
+	exchangeStop     chan struct{}
+	exchangeLoopDone chan struct{}
+}
+
+type exchangeRequest struct {
+	ctx    context.Context
+	unitID string
+	buffer []byte
 }
 
 var errWorkerBusy = errors.New("process worker busy")
@@ -153,6 +165,20 @@ func NewProcessPool(opts ProcessPoolOptions) (*ProcessPool, error) {
 }
 
 func (p *ProcessPool) Execute(ctx context.Context, req ProcessRequest) (ProcessResponse, error) {
+	return p.execute(ctx, req, nil)
+}
+
+// ExecuteInto executes a runtime unit and copies the active output into dst.
+// The returned Output aliases dst and remains owned by the caller. Execute
+// remains the compatibility API for callers that need a newly owned slice.
+func (p *ProcessPool) ExecuteInto(ctx context.Context, req ProcessRequest, dst []byte) (ProcessResponse, error) {
+	if dst == nil {
+		return ProcessResponse{}, errors.New("process output destination is required")
+	}
+	return p.execute(ctx, req, dst)
+}
+
+func (p *ProcessPool) execute(ctx context.Context, req ProcessRequest, dst []byte) (ProcessResponse, error) {
 	if p == nil {
 		return ProcessResponse{}, errors.New("process pool is nil")
 	}
@@ -204,8 +230,16 @@ func (p *ProcessPool) Execute(ctx context.Context, req ProcessRequest) (ProcessR
 		return ProcessResponse{}, err
 	}
 
+	ownedOutput := dst
+	if ownedOutput == nil {
+		ownedOutput = make([]byte, len(output))
+	} else if len(ownedOutput) < len(output) {
+		return ProcessResponse{}, fmt.Errorf("process output destination too small: %d < %d", len(ownedOutput), len(output))
+	}
+	ownedOutput = ownedOutput[:len(output)]
+	copy(ownedOutput, output)
 	response := ProcessResponse{
-		Output:      append([]byte(nil), output...),
+		Output:      ownedOutput,
 		Diagnostics: strings.TrimSpace(buffer.DiagnosticsText()),
 		StatusCode:  statusCode,
 		OutputEpoch: buffer.LoadEpoch(generated.IDX_OUTPUT_WRITTEN),
@@ -355,6 +389,7 @@ func (w *processWorker) close() error {
 }
 
 func (w *processWorker) closeLocked() error {
+	w.stopExchangeLoop()
 	if w.testExchange != nil {
 		return w.testExchange.Close()
 	}
@@ -452,33 +487,81 @@ func (w *processWorker) executeHeld(ctx context.Context, unitID string, buffer [
 }
 
 func (w *processWorker) executeWithContext(ctx context.Context, unitID string, buffer []byte) error {
-	exchange := w.exchange()
 	if ctx == nil {
-		return exchange.Exchange(context.Background(), unitID, buffer)
+		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	result := make(chan error, 1)
-	go func() {
-		result <- exchange.Exchange(ctx, unitID, buffer)
-	}()
+	requests, results := w.ensureExchangeLoop()
+	request := exchangeRequest{ctx: ctx, unitID: unitID, buffer: buffer}
+	select {
+	case requests <- request:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 
 	select {
-	case err := <-result:
+	case err := <-results:
 		return err
 	case <-ctx.Done():
 		w.logger.WarnContext(ctx, "native runtime exchange timed out; terminating worker", "error", ctx.Err())
 		if w.cmd != nil && w.cmd.Process != nil {
 			_ = w.cmd.Process.Kill()
 		}
-		err := <-result
+		err := <-results
 		if err == nil {
 			return ctx.Err()
 		}
 		return errors.Join(ctx.Err(), err)
 	}
+}
+
+// ensureExchangeLoop starts one bounded exchange goroutine for the worker.
+// Worker execution is serialized by mu, so capacity one provides backpressure
+// without allocating request-specific goroutines or channels.
+func (w *processWorker) ensureExchangeLoop() (chan<- exchangeRequest, <-chan error) {
+	w.exchangeLoopMu.Lock()
+	defer w.exchangeLoopMu.Unlock()
+	if w.exchangeRequests != nil {
+		return w.exchangeRequests, w.exchangeResults
+	}
+	w.exchangeRequests = make(chan exchangeRequest, 1)
+	w.exchangeResults = make(chan error, 1)
+	w.exchangeStop = make(chan struct{})
+	w.exchangeLoopDone = make(chan struct{})
+	go w.runExchangeLoop(w.exchangeRequests, w.exchangeResults, w.exchangeStop, w.exchangeLoopDone)
+	return w.exchangeRequests, w.exchangeResults
+}
+
+func (w *processWorker) runExchangeLoop(requests <-chan exchangeRequest, results chan<- error, stop <-chan struct{}, done chan<- struct{}) {
+	defer close(done)
+	for {
+		select {
+		case request := <-requests:
+			results <- w.exchange().Exchange(request.ctx, request.unitID, request.buffer)
+		case <-stop:
+			return
+		}
+	}
+}
+
+func (w *processWorker) stopExchangeLoop() {
+	w.exchangeLoopMu.Lock()
+	if w.exchangeRequests == nil {
+		w.exchangeLoopMu.Unlock()
+		return
+	}
+	stop := w.exchangeStop
+	done := w.exchangeLoopDone
+	w.exchangeRequests = nil
+	w.exchangeResults = nil
+	w.exchangeStop = nil
+	w.exchangeLoopDone = nil
+	close(stop)
+	w.exchangeLoopMu.Unlock()
+	<-done
 }
 
 func (w *processWorker) exchange() workerExchange {

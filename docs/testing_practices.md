@@ -1,7 +1,7 @@
 # Ovasabi Testing Practices
 
 Status: 0.0.1
-Date: 2026-05-22
+Date: 2026-07-12
 Owner: Platform Architecture
 
 ## Purpose and scope
@@ -59,11 +59,13 @@ Requirements:
 2. Tests must verify visible behavior, not only implementation details.
 3. Boundary contracts must be tested from both sides when a producer and consumer can drift.
 4. Test files are subject to the same bounded-operation, error-handling, and clarity rules as production code unless this document gives a narrower exception.
+5. Unit tests must live in the test file owned by the production area they exercise. Use `<production_file>_test.go` for file-scoped behavior, or one clearly named package-level contract test when behavior spans files. Do not create generic overflow files named `extra`, `edges`, `coverage`, `residual`, or `smoke`; consolidate those cases into their production owner. Benchmark, integration, service-backed, platform/build-tag, generated-contract, and end-to-end lanes may remain separate when their execution contract is genuinely distinct.
 
 Enforcement:
 
 - Reviewer gate on changed production code without tests or a documented exception.
 - `make test`, `make lint`, and `tooling/scripts/testing_practices_check.sh`.
+- `tooling/scripts/testing_practices_check.sh` rejects generic Go overflow test filenames, and managed scaffold updates remove retired overflow files from vendored Foundation directories.
 
 ### TE-02: Use black-box tests before structural tests
 

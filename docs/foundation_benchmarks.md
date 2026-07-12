@@ -3363,6 +3363,102 @@ Remaining opportunity:
    next improvement would need a true normalized snapshot source that bypasses
    durable JSONB materialization, not more `BulkLoad` tuning.
 
+## 2026-07-12 Runtime SDK ownership and scheduling pass
+
+Environment: Apple M1 Pro, `darwin/arm64`, Go 1.26.5, Node 24.1.0.
+
+Commands:
+
+```bash
+cd runtime-sdk/go
+go test -run '^$' -bench 'BenchmarkProcessPoolExecute(Owned|Into)1KB$' -benchmem -count=5 ./runtimehost
+cd ../ts/browser-host
+npm test -- --run src/runtimeWorkerPool.test.ts src/packetRing.test.ts
+npm run bench -- src/arena.bench.ts --run --reporter=verbose
+```
+
+| Benchmark | Result | Interpretation |
+| --- | ---: | --- |
+| `BenchmarkProcessPoolExecuteOwned1KB` | 1733-1760 ns/op, 1681 B/op, 11 allocs/op | Compatibility response owns a new output slice. |
+| `BenchmarkProcessPoolExecuteInto1KB` | 1658-1680 ns/op, 656 B/op, 10 allocs/op | Caller-owned destination removes the 1KB response allocation and copy ownership remains explicit. |
+| `BenchmarkProcessPoolExecuteOwned1KB` after persistent loop | 1726-1778 ns/op, 1456-1457 B/op, 8 allocs/op | Reused worker channels remove three per-call allocations without changing the owned response contract. |
+| `BenchmarkProcessPoolExecuteInto1KB` after persistent loop | 1625-1742 ns/op, 432 B/op, 7 allocs/op | Reused worker channels plus caller ownership remove 224 B/op and three allocations from the prior `ExecuteInto` result. |
+| packet-ring lifecycle x1 | 444 ns mean, 500 ns p99 | Batch reservation retains competitive single-packet behavior. |
+| packet-ring lifecycle x8 | 2.9 microseconds mean, 3.3 microseconds p99 | One burst publishes a bounded valid prefix. |
+| packet-ring lifecycle x32 | 11.4 microseconds mean, 12.6 microseconds p99 | Per-descriptor timestamp/copy work dominates after reservation. |
+| packet-ring lifecycle x128 | 45.8 microseconds mean, 54.2 microseconds p99 | Near the prior 47.9-microsecond reference; no large speedup is claimed from this noisy single-host comparison. |
+
+The first Go result is a physical allocation win: 1025 fewer bytes and one fewer
+allocation per 1KB response, about 61% fewer allocated bytes. The follow-up
+replaces the per-call cancellation goroutine/channel pair with one capacity-one
+request/result loop per serialized worker. This reduces `ExecuteInto` from 656
+B/op and 10 allocs/op to 432 B/op and 7 allocs/op. Cancellation, restart, channel
+reuse, and shutdown are regression-tested; worker close remains the bounded
+fallback that terminates the loop and native process together.
+
+The browser worker pool now selects the least-loaded ready worker with rotating
+tie-breaking. This is primarily a saturation and tail-latency correction; a
+load-shaped async worker benchmark is still required before claiming a numeric
+throughput gain. Packet-ring batch reservation establishes prefix-atomic
+publication and removes repeated single-enqueue entry, but current measurements
+are close to the old baseline. Preserve the simpler single-item path and measure
+timestamp sampling separately before further ring specialization.
+
+Invariants: `FrameSizeBound`, `OwnedDecodeLifetime`,
+`EligibleWorkerFairness`, `BatchPrefixVisible`, `QueueBounded`, and
+`FallbackRefinement`. Public fallback: `ProcessPool.Execute` remains unchanged;
+`ExecuteInto` is additive, and single-packet `enqueue` remains available.
+
+Coverage/lifecycle follow-up: the browser-host suite increased from 63.2%
+statements, 56.1% branches, 61.78% functions, and 63.77% lines to 90.45%
+statements, 80.02% branches, 94.03% functions, and 91.13% lines. The added
+oracles cover host buffer imports, dispatcher saturation/timeouts, worker load
+accounting, module fallback/cache behavior, pulse worker/main-thread fallback,
+packet/arena bounds, payload routing, and shutdown. During this pass,
+orchestrator shutdown was corrected to clear timers and reject every pending
+request before releasing worker and pulse ownership; this is both leak
+prevention and bounded-shutdown evidence.
+
+## 2026-07-12 TypeScript side-effect and prototype audit
+
+Environment: Apple M1 Pro, Node 24.1.0, Vitest 4.1.x.
+
+| Lane | Representative result | Interpretation |
+| --- | ---: | --- |
+| Workbench `applyMany` 1k | 0.120 ms mean | Preferred already-batched projection ingest. |
+| Workbench individual apply 1k | 0.149 ms mean | Acceptable stream path, but more commit bookkeeping. |
+| Apply 1k with snapshot after every mutation | 31.75 ms mean | Render-coupled materialization is the dominant frontend gap; read once per committed batch. |
+| Runtime transport protobuf decode | 0.0016 ms mean | Binary decode remains substantially cheaper than JSON-to-protobuf encoding. |
+| Browser arena 1MB fast view | 0.0417 ms mean | Borrowed same-owner views retain the expected large-payload advantage. |
+| WebGPU resident-to-resident fake dispatch 4KB | 0.0011 ms mean | Avoiding materialized readback was about 3x faster in the CPU-side fake dispatch benchmark. |
+| Native response decode | 0.0004 ms mean | Native frame decode is not the current TypeScript bottleneck. |
+
+The optimization pass removed unowned pulse visibility listeners: repeated
+starts now share one listener set and stop/shutdown remove it symmetrically.
+All published TypeScript packages explicitly declare `sideEffects: false`, and
+the static gate blocks production React class components. Browser-host coverage
+remained above its gate at 90.51% statements, 80.11% branches, 94.05%
+functions, and 91.22% lines. Runtime-transport coverage improved after excluding
+bench sources and adding projection codec contract tests. The focused transport
+follow-up then raised the package from 71.49% statements, 59.85% branches,
+74.32% functions, and 72.16% lines to 91.13% statements, 80.09% branches,
+92.85% functions, and 92.07% lines, satisfying its configured 90%/80% gate.
+The added oracles cover HTTP cancellation/timeout and response formats,
+structured failures, WebSocket readiness/reconnect/abort/close, duplicate
+subscription reference counts, compression fallback/corruption, generated
+projection codecs, runtime metadata isolation, store replay/loading/error
+lifecycle, and projection source bounds.
+
+The coverage pass also removed two observable WebSocket side effects. A first
+subscription is no longer sent twice across `connect()` and ready-time replay;
+new patterns on an already-open connection still send once. Best-effort
+resubscribe/unsubscribe requests now consume close-time rejection so reconnect
+or shutdown cannot produce unhandled promise rejections. Post-change routing
+and envelope benchmarks remained in the same performance class: exact
+capability checks measured about 25.3M ops/s, event route lookup about 21.7M
+ops/s, identity binary-frame decode about 5.16M ops/s, and protobuf envelope
+decode about 613k ops/s on the Apple M1 Pro run.
+
 ## 2026-06 Hermes Hotplane Optimizations (Lock-Free reads, Map Sharding, TTL, Watermarking)
 
 In 2026-06, we addressed critical architectural trade-offs in the Hermes Hotplane:

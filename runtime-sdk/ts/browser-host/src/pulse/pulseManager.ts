@@ -40,6 +40,7 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
   let worker: Worker | null = null;
   let mainThreadTimer: number | null = null;
   let buffer: SharedArrayBuffer | null = null;
+  let visibilityHandlersInstalled = false;
 
   const emitDiagnostics = () => {
     onDiagnostics({
@@ -127,16 +128,28 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
   };
 
   const installVisibilityHandlers = () => {
-    if (typeof document === "undefined" || typeof window === "undefined") {
+    if (visibilityHandlersInstalled || typeof document === "undefined" || typeof window === "undefined") {
       return;
     }
-
-    document.addEventListener("visibilitychange", () => {
-      setVisibility(document.visibilityState === "visible");
-    });
-    window.addEventListener("focus", () => setVisibility(true));
-    window.addEventListener("blur", () => setVisibility(false));
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
+    visibilityHandlersInstalled = true;
     visible = document.visibilityState === "visible";
+  };
+
+  const handleVisibilityChange = () => setVisibility(document.visibilityState === "visible");
+  const handleFocus = () => setVisibility(true);
+  const handleBlur = () => setVisibility(false);
+
+  const removeVisibilityHandlers = () => {
+    if (!visibilityHandlersInstalled || typeof document === "undefined" || typeof window === "undefined") {
+      return;
+    }
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.removeEventListener("focus", handleFocus);
+    window.removeEventListener("blur", handleBlur);
+    visibilityHandlersInstalled = false;
   };
 
   const attachWorker = () => {
@@ -260,6 +273,7 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
         worker.postMessage(message);
       }
       stopMainThreadLoop();
+      removeVisibilityHandlers();
       mode = "stopped";
       emitDiagnostics();
     },
@@ -269,6 +283,7 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
         worker = null;
       }
       stopMainThreadLoop();
+      removeVisibilityHandlers();
       handlers.clear();
       lastSeen.clear();
       mode = "stopped";

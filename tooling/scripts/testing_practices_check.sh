@@ -62,6 +62,14 @@ else
 fi
 
 if rg --files "$target" | rg -q '_test\.go$'; then
+  if rg --files "$target" | rg '/([^/]+_)?(extra|extras|edge|edges|coverage|residual|smoke)_test\.go$' >"$tmp_output"; then
+    echo "[FAIL] TE Go tests use production-owner filenames instead of generic overflow files"
+    cat "$tmp_output"
+    failed=1
+  else
+    echo "[OK] TE Go tests use production-owner filenames"
+  fi
+
   check_no_match "TE Go tests avoid extreme fixed sleeps outside load tests" "time\.Sleep\s*\(\s*([5-9][0-9]{2}|[1-9][0-9]{3,})\s*\*\s*time\.Millisecond|time\.Sleep\s*\(\s*([2-9]|[1-9][0-9]+)\s*\*\s*time\.(Second|Minute)|time\.Sleep\s*\(\s*time\.(Second|Minute)\s*\)" "$target" \
     --glob '*_test.go' --glob '!**/tests/load/**' --glob '!**/load/**'
 

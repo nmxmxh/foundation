@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"testing"
-	"time"
-
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	redispkg "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker"
+	"testing"
+	"time"
 )
 
 // TestApplyBatchSkipsEventLevelRejections pins the batch-tolerance contract:
@@ -610,5 +609,244 @@ func TestMirrorSweeperConvergesHardDeletes(t *testing.T) {
 	// Cursor advanced: the same tombstone is not re-swept.
 	if n, _ := sweeper.SweepOnce(ctx); n != 0 {
 		t.Fatalf("idle delete sweep swept %d, want 0", n)
+	}
+}
+
+func TestNewQueryFilterValidation(t *testing.T) {
+	if _, ok := NewQueryFilter("symbol", "OVS"); !ok {
+		t.Fatal("string filter should be accepted")
+	}
+	if _, ok := NewQueryFilter("  ", "OVS"); ok {
+		t.Fatal("blank field must be rejected")
+	}
+	if _, ok := NewQueryFilter("x", []string{"not", "scalar"}); ok {
+		t.Fatal("non-scalar value must be rejected")
+	}
+}
+
+func TestNormalizeSpecBoundsRangeIndexes(t *testing.T) {
+	spec, err := normalizeSpec(ProjectionSpec{
+		Name: "range_bounds", Domain: "signals", Collection: "ticks",
+		RangeIndexedFields: []string{"price", "bucket", "price", " ", "ordinal"},
+		MaxRangeIndexes:    2,
+	})
+	if err != nil {
+		t.Fatalf("normalizeSpec: %v", err)
+	}
+	if len(spec.RangeIndexedFields) != 2 || spec.RangeIndexedFields[0] != "price" || spec.RangeIndexedFields[1] != "bucket" {
+		t.Fatalf("bounded range fields = %v, want [price bucket]", spec.RangeIndexedFields)
+	}
+}
+
+func TestQueryFilterValueRoundTrip(t *testing.T) {
+	cases := map[string]any{
+		"string": "OVS",
+		"int":    int64(-42),
+		"uint":   uint64(42),
+		"bool":   true,
+		"float":  3.5,
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			filter, ok := NewQueryFilter("field", in)
+			if !ok {
+				t.Fatalf("NewQueryFilter(%v) not ok", in)
+			}
+			got := queryFilterValue(filter)
+			want, ok := database.RecordValueFromAny(in)
+			if !ok {
+				t.Fatalf("RecordValueFromAny(%v) not ok", in)
+			}
+			gk, gv, _ := got.ScalarIndex()
+			wk, wv, _ := want.ScalarIndex()
+			if gk != wk || gv != wv {
+				t.Fatalf("round trip drift: got (%c,%q) want (%c,%q)", gk, gv, wk, wv)
+			}
+		})
+	}
+
+	for _, kind := range []byte{'i', 'u', 'f'} {
+		v := queryFilterValue(QueryFilter{Field: "f", Kind: kind, Value: "not-a-number"})
+		if v.Kind != database.RecordValueString {
+			t.Fatalf("malformed %c value = kind %v, want string fallback", kind, v.Kind)
+		}
+	}
+}
+
+func TestQueryWithFiltersPlanShape(t *testing.T) {
+	sym, _ := NewQueryFilter("symbol", "OVS")
+	region, _ := NewQueryFilter("region", "us")
+	blank := QueryFilter{Field: "  ", Kind: 's', Value: "x"}
+
+	if q := QueryWithFilters("org_1", 10); q.Plan.count != 0 {
+		t.Fatalf("zero filters -> count %d, want 0", q.Plan.count)
+	}
+	if q := QueryWithFilters("org_1", 10, sym); q.Plan.count != 1 || q.Plan.first.Field != "symbol" {
+		t.Fatalf("one filter plan = %+v", q.Plan)
+	}
+
+	q := QueryWithFilters("org_1", 10, sym, region, blank)
+	if q.Plan.count != 2 {
+		t.Fatalf("two valid filters (one blank dropped) -> count %d, want 2", q.Plan.count)
+	}
+	if q.Plan.filters[0].Field != "region" || q.Plan.filters[1].Field != "symbol" {
+		t.Fatalf("filters not sorted by field: %+v", q.Plan.filters)
+	}
+
+	rf := q.Plan.RecordFilters()
+	if len(rf) != 2 {
+		t.Fatalf("RecordFilters len = %d, want 2", len(rf))
+	}
+}
+
+func TestQueryFromRecordQuery(t *testing.T) {
+
+	single := database.RecordQuery{Limit: 5, Filters: []database.RecordFilter{
+		{Field: "symbol", Value: database.StringValue("OVS")},
+	}}
+	if q := QueryFromRecordQuery("org_1", single); q.Plan.count != 1 || q.Limit != 5 {
+		t.Fatalf("single = %+v", q)
+	}
+
+	blank := database.RecordQuery{Limit: 1, Filters: []database.RecordFilter{
+		{Field: "  ", Value: database.StringValue("x")},
+	}}
+	if q := QueryFromRecordQuery("org_1", blank); q.Plan.count != 0 {
+		t.Fatalf("blank single -> count %d, want 0", q.Plan.count)
+	}
+
+	many := database.RecordQuery{Limit: 9, Filters: []database.RecordFilter{
+		{Field: "symbol", Value: database.StringValue("OVS")},
+		{Field: "", Value: database.StringValue("skip")},
+		{Field: "region", Value: database.StringValue("us")},
+	}}
+	if q := QueryFromRecordQuery("org_1", many); q.Plan.count != 2 {
+		t.Fatalf("many -> count %d, want 2", q.Plan.count)
+	}
+}
+
+func TestRecordMatchesPlannedFilters(t *testing.T) {
+	spec := driftSpec()
+	rec := testRecord("signals", "ticks", "org_1", "tick_1", map[string]any{"symbol": "OVS"})
+
+	if !recordMatches(rec, spec, Query{OrganizationID: "org_1"}) {
+		t.Fatal("record should match its own tenant with no filters")
+	}
+
+	if recordMatches(rec, spec, Query{OrganizationID: "org_other"}) {
+		t.Fatal("record must not match a different tenant")
+	}
+
+	match := QueryWithFilters("org_1", 0, mustFilter(t, "symbol", "OVS"))
+	if !recordMatches(rec, spec, match) {
+		t.Fatal("record should match an equal planned filter")
+	}
+
+	noMatch := QueryWithFilters("org_1", 0, mustFilter(t, "symbol", "NOPE"))
+	if recordMatches(rec, spec, noMatch) {
+		t.Fatal("record must not match a differing planned filter")
+	}
+}
+
+func mustFilter(t *testing.T, field string, value any) QueryFilter {
+	t.Helper()
+	f, ok := NewQueryFilter(field, value)
+	if !ok {
+		t.Fatalf("NewQueryFilter(%q,%v) not ok", field, value)
+	}
+	return f
+}
+
+func TestCountIndexedDoesNotAllocate(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name: "count_alloc", Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"bucket"}, MaxRecords: 1024, MaxBytes: 8 << 20,
+	})
+	records := make([]database.DomainRecord, 256)
+	for i := range records {
+		records[i] = testRecord("signals", "ticks", "org_1", fmt.Sprintf("tick_%03d", i), map[string]any{"bucket": i % 8})
+	}
+	if _, err := store.BulkLoad(t.Context(), "count_alloc", records); err != nil {
+		t.Fatalf("BulkLoad: %v", err)
+	}
+	query := QueryWithFilters("org_1", 0, mustFilter(t, "bucket", 7))
+	if got := testing.AllocsPerRun(100, func() {
+		count, countErr := store.Count(context.Background(), "count_alloc", query, Fence{})
+		if countErr != nil || count != 32 {
+			t.Fatalf("Count = %d, %v; want 32, nil", count, countErr)
+		}
+	}); got != 0 {
+		t.Fatalf("Count allocations = %g, want 0", got)
+	}
+}
+
+func TestIndexCompactionPreservesQueryCorrectness(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name: "signals", Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"symbol"}, MaxRecords: 8192, MaxBytes: 64 << 20,
+	})
+	ctx := t.Context()
+
+	const total = maxIndexDeltaDepth + 64
+	const deleted = 50
+	for i := range total {
+		if _, err := store.Apply(ctx, "signals", Event{
+			Operation: OperationUpsert,
+			SourceID:  fmt.Sprintf("src_up_%d", i),
+			Version:   uint64(i + 1),
+			Record:    testRecord("signals", "ticks", "org_1", fmt.Sprintf("tick_%d", i), map[string]any{"symbol": "OVS"}),
+		}); err != nil {
+			t.Fatalf("upsert %d err=%v", i, err)
+		}
+	}
+	for i := range deleted {
+		if _, err := store.Apply(ctx, "signals", Event{
+			Operation: OperationDelete,
+			SourceID:  fmt.Sprintf("src_del_%d", i),
+			Version:   uint64(total + i + 1),
+			Record:    testRecord("signals", "ticks", "org_1", fmt.Sprintf("tick_%d", i), nil),
+		}); err != nil {
+			t.Fatalf("delete %d err=%v", i, err)
+		}
+	}
+
+	count, err := store.Count(ctx, "signals",
+		QueryWithFilters("org_1", 0, mustFilter(t, "symbol", "OVS")), Fence{})
+	if err != nil {
+		t.Fatalf("Count() err=%v", err)
+	}
+	if want := int64(total - deleted); count != want {
+		t.Fatalf("indexed count after compaction = %d, want %d", count, want)
+	}
+}
+
+func TestEstimateValueBytes(t *testing.T) {
+	cases := []struct {
+		name  string
+		value any
+		want  int
+	}{
+		{"nil", nil, 0},
+		{"string", "abcd", 4},
+		{"bytes", []byte("xyz"), 3},
+		{"float32 slice", []float32{1, 2, 3}, 12},
+		{"float64 slice", []float64{1, 2}, 16},
+		{"string slice", []string{"ab", "c"}, 3},
+		{"bool", true, 1},
+		{"int", int64(7), 8},
+		{"record value text", database.StringValue("hello"), 5},
+		{"record value raw", database.RawValue([]byte(`{"a":1}`)), len(`{"a":1}`)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := estimateValueBytes(tc.value); got != tc.want {
+				t.Fatalf("estimateValueBytes(%v) = %d, want %d", tc.value, got, tc.want)
+			}
+		})
+	}
+
+	m := map[string]any{"k": "vv"}
+	if got := estimateValueBytes(m); got != 1+2+16 {
+		t.Fatalf("estimateValueBytes(map) = %d, want 19", got)
 	}
 }

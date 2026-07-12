@@ -24,6 +24,11 @@ for pkg in "${packages[@]}"; do
   if [[ ! -f "$pkg_dir/package.json" ]]; then
     continue
   fi
+  if ! rg -q '"sideEffects"[[:space:]]*:[[:space:]]*false' "$pkg_dir/package.json"; then
+    echo "[FAIL] Foundation TypeScript package must declare sideEffects=false: $pkg/package.json" >&2
+    exit 1
+  fi
+  echo "[OK] side-effect-free package metadata: $pkg"
   if [[ ! -d "$pkg_dir/node_modules" ]]; then
     echo "[SKIP] TypeScript typecheck: $pkg (node_modules missing)"
     continue
@@ -34,6 +39,18 @@ for pkg in "${packages[@]}"; do
   echo "[OK] TypeScript typecheck: $pkg"
   checked=1
 done
+
+class_component_matches="$(rg -n 'extends[[:space:]]+(React\.)?(PureComponent|Component)' \
+  "$target/frontend-kit/ts/src" "$target/ui-minimal/ts/src" \
+  "$target/runtime-transport/ts/src" "$target/runtime-sdk/ts/browser-host/src" \
+  "$target/config-contracts/ts/src" "$target/runtime-native/ts/src" \
+  --glob '*.{ts,tsx}' --glob '!**/*.test.*' --glob '!**/*.bench.*' --glob '!**/generated/**' 2>/dev/null || true)"
+if [[ -n "$class_component_matches" ]]; then
+  echo "[FAIL] Foundation UI/runtime packages use functional composition; React class components require an explicit exception" >&2
+  echo "$class_component_matches" >&2
+  exit 1
+fi
+echo "[OK] no production React class components"
 
 practice_checked=0
 for native_index in "$target/runtime-native/ts/src/index.ts" "$target/foundation/runtime-native/ts/src/index.ts"; do

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createMetadataStore } from "./metadataStore";
+import { createMetadataStore, type BaseMetadata } from "./metadataStore";
 
 describe("createMetadataStore", () => {
   it("initializes metadata with a generated runtime session id", () => {
@@ -47,5 +47,17 @@ describe("createMetadataStore", () => {
       trace_hint: "edge",
       auth_token: "token_2",
     });
+  });
+
+  it("updates metadata through an isolated copy and manages organization scope", () => {
+    const store = createMetadataStore<BaseMetadata>({ correlationId: "corr-fixed", global_context: { organization_id: "org-1" } });
+    store.getState().updateMetadata((current) => ({ ...current, correlationId: "", global_context: { ...current.global_context, extras: { mode: "updated" } } }));
+    expect(store.getState().metadata).toMatchObject({ correlationId: "corr-fixed", global_context: { organization_id: "org-1", extras: { mode: "updated" } } });
+    store.getState().setOrganizationId("org-2");
+    expect(store.getState().metadata.global_context?.organization_id).toBe("org-2");
+    store.getState().setOrganizationId(undefined);
+    expect(store.getState().metadata.global_context?.organization_id).toBeUndefined();
+    store.getState().reset();
+    expect(store.getState().metadata.global_context).toMatchObject({ source: "backend" });
   });
 });

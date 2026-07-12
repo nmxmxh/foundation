@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createHttpProjectionSource,
+  createDefaultProjectionSource,
+  createProjectionSource,
   createWebSocketProjectionSource,
   httpToWebSocketUrl,
   mapMutation,
@@ -111,6 +113,19 @@ describe("createHttpProjectionSource", () => {
     expect(result.sourceWatermark).toBe("3");
     expect(result.version).toBe(7);
   });
+
+  it("passes bounded query options and headers and rejects failed snapshots", async () => {
+    const seen: URL[] = [];
+    const fetchImpl = vi.fn(async (input: string | URL, init?: RequestInit) => {
+      seen.push(new URL(String(input)));
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer projection");
+      return new Response(null, { status: 503 });
+    }) as unknown as typeof fetch;
+    const source = createHttpProjectionSource({ baseUrl: "https://host/v1/projections/", codec, headers: async () => ({ authorization: "Bearer projection" }), fetch: fetchImpl, maxPages: 0 });
+    await expect(source.loadProjection(scope, { scope, sinceWatermark: "wm", limit: 20 })).rejects.toThrow("projection snapshot failed: 503");
+    expect(seen[0].searchParams.get("since")).toBe("wm");
+    expect(seen[0].searchParams.get("limit")).toBe("20");
+  });
 });
 
 class FakeSocket {
@@ -182,6 +197,23 @@ describe("createWebSocketProjectionSource", () => {
     unsubscribe();
   });
 
+  it("ignores malformed control and delta frames and closes safely", async () => {
+    let instance: FakeSocket | undefined;
+    const badCodec: ProjectionProtoCodec = { ...codec, decodeDeltaFrame: () => { throw new Error("bad frame"); } };
+    const source = createWebSocketProjectionSource({ url: "wss://host/v1/projections/", codec: badCodec, query: async () => ({ token: "safe" }), createSocket: (url) => {
+      expect(new URL(url).searchParams.get("token")).toBe("safe");
+      instance = new FakeSocket();
+      return instance as unknown as WebSocket;
+    } });
+    const unsubscribe = source.subscribeProjection(scope, vi.fn());
+    await Promise.resolve();
+    await Promise.resolve();
+    instance!.onmessage?.({ data: "not-json" } as MessageEvent);
+    instance!.onmessage?.({ data: new Uint8Array([1]) } as MessageEvent);
+    instance!.onmessage?.({ data: new Uint8Array([1]).buffer } as MessageEvent);
+    unsubscribe();
+  });
+
   it("surfaces a degraded status on a resync control frame", async () => {
     let instance: FakeSocket | undefined;
     const statuses: string[] = [];
@@ -243,5 +275,13 @@ describe("createWebSocketProjectionSource", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("projection source composition", () => {
+  it("composes explicit lanes and returns offline when endpoint derivation fails", () => {
+    expect(createProjectionSource({ http: { baseUrl: "https://host", codec }, ws: { url: "wss://host", codec, createSocket: () => new FakeSocket() as unknown as WebSocket } })).toMatchObject({ loadProjection: expect.any(Function), subscribeProjection: expect.any(Function) });
+    expect(createDefaultProjectionSource({ originUrl: "" })).toBeUndefined();
+    expect(createDefaultProjectionSource({ baseUrl: "https://host/v1/projections", codec })).toMatchObject({ loadProjection: expect.any(Function), subscribeProjection: expect.any(Function) });
   });
 });

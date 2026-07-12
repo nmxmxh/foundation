@@ -158,12 +158,36 @@ export class RuntimePacketRing {
   }
 
   enqueueBurst(payloads: readonly Uint8Array[], flags = 0, lane: RuntimePacketDescriptor["lane"] = "packet-ring"): number {
-    let accepted = 0;
-    for (const payload of payloads) {
-      if (!this.enqueue(payload, flags, lane)) {
+    const available = Math.min(this.freeList.length, this.queue.length - this.depth());
+    let accepted = Math.min(payloads.length, available);
+    for (let index = 0; index < accepted; index += 1) {
+      if (payloads[index].byteLength > this.slotBytes()) {
+        accepted = index;
         break;
       }
-      accepted += 1;
+    }
+    for (let index = 0; index < accepted; index += 1) {
+      const id = this.freeList.pop();
+      if (id === undefined) {
+        throw new Error("packet ring free-list reservation drift");
+      }
+      const descriptor = this.descriptors[id];
+      this.bytes.set(payloads[index], descriptor.offset);
+      descriptor.state = "rx-ready";
+      descriptor.length = payloads[index].byteLength;
+      descriptor.flags = flags;
+      descriptor.lane = lane;
+      resetTimestamps(descriptor.timestamps, this.timestampSource);
+      descriptor.timestamps.ingressNs = this.nowNs();
+      this.queue[(this.tail + index) % this.queue.length] = id;
+    }
+    this.tail += accepted;
+    this.stats.enqueued += accepted;
+    if (accepted < payloads.length) {
+      this.stats.dropped += 1;
+    }
+    if (accepted > 0) {
+      this.stats.highWaterDepth = Math.max(this.stats.highWaterDepth, this.depth());
     }
     return accepted;
   }

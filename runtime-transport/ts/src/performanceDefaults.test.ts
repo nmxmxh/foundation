@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PERFORMANCE_TRANSPORT_ORDER, createEnvelope, createRouteRegistry, createCommandBus, type TransportDiagnostics, type TransportStrategy } from "./index";
+import { PERFORMANCE_TRANSPORT_ORDER, assertCompatibleSchemaVersion, canDispatch, createEnvelope, createProtobufEnvelope, createRouteRegistry, createCommandBus, decodeProtobufPayload, eventTerminalState, parseEventType, type TransportDiagnostics, type TransportStrategy } from "./index";
 
 describe("performance-first transport defaults", () => {
   it("defaults routes to the performance ladder", () => {
@@ -124,5 +124,56 @@ describe("performance-first transport defaults", () => {
       "http",
       "postMessage",
     ]);
+  });
+
+  it("validates event, schema, route, and protobuf boundaries", () => {
+    expect(eventTerminalState("asset:get:v1:success")).toBe("success");
+    expect(parseEventType("asset:get:preview:v2:requested")).toMatchObject({ domain: "asset", action: "get:preview", version: "v2" });
+    for (const invalid of ["", "asset:get", "asset:get:unknown", "Asset:get:requested", "asset:v1:requested", "asset:bad-action:requested"]) {
+      expect(() => parseEventType(invalid)).toThrow();
+    }
+    expect(assertCompatibleSchemaVersion("v1")).toBe("1.0");
+    expect(() => assertCompatibleSchemaVersion("v2")).toThrow("unsupported envelope schema version");
+
+    const codec = { encode: (value: string) => new TextEncoder().encode(value), decode: (bytes: Uint8Array) => new TextDecoder().decode(bytes) };
+    const encoded = createProtobufEnvelope({ eventType: "asset:get:v1:requested", payload: "asset" }, codec);
+    expect(decodeProtobufPayload(encoded.payload, codec)).toBe("asset");
+    expect(decodeProtobufPayload(Uint8Array.from(encoded.payload).buffer, codec)).toBe("asset");
+    expect(() => decodeProtobufPayload({}, codec)).toThrow("require Uint8Array");
+
+    expect(() => createRouteRegistry([{ method: "", path: "/x", eventType: "asset:get:v1:requested", requiredCapability: "", permission: "view" }])).toThrow("requires method and path");
+    const duplicate = { method: "GET", path: "/x", eventType: "asset:get:v1:requested", requiredCapability: "", permission: "view" as const };
+    expect(() => createRouteRegistry([duplicate, duplicate])).toThrow("duplicate route registration");
+    expect(() => createRouteRegistry([duplicate, { ...duplicate, eventType: "asset:list:v1:requested" }])).toThrow("duplicate route registration for path");
+  });
+
+  it("enforces capability inheritance and command-bus failure contracts", async () => {
+    const route = { method: "POST", path: "/x", eventType: "asset:update:v1:requested", requiredCapability: "asset.update", permission: "write" as const };
+    expect(canDispatch(route, ["asset.admin"], () => true)).toBe(true);
+    expect(canDispatch(route, ["asset.view"], () => true)).toBe(false);
+    expect(canDispatch(route, ["asset.*"], () => true)).toBe(true);
+    expect(canDispatch(undefined, ["*"], () => true)).toBe(false);
+    expect(canDispatch({ ...route, permission: "view" }, ["asset.write"], () => true)).toBe(true);
+    expect(canDispatch({ ...route, permission: "view" }, ["other.view"], () => true)).toBe(false);
+    expect(canDispatch({ ...route, permission: "admin" }, ["asset.admin"], () => true)).toBe(true);
+    expect(canDispatch({ ...route, permission: "admin" }, ["asset.write"], () => true)).toBe(false);
+
+    const registry = createRouteRegistry([route]);
+    const denied = createCommandBus({ registry, strategies: [], grantedCapabilities: [], hasPolicyAccess: () => false });
+    await expect(denied.dispatch(createEnvelope({ eventType: route.eventType, payload: {} }))).rejects.toThrow("not allowed");
+    await expect(denied.dispatch(createEnvelope({ eventType: "asset:get:v1:requested", payload: {} }))).rejects.toThrow("not registered");
+    await expect(denied.subscribe("*", () => undefined)).rejects.toThrow("websocket transport is required");
+
+    const allowed = createCommandBus({ registry, strategies: [], grantedCapabilities: ["asset.write"], hasPolicyAccess: () => true });
+    await expect(allowed.dispatch(createEnvelope({ eventType: route.eventType, payload: {} }))).rejects.toThrow("no transport strategy");
+
+    const stringFailure: TransportStrategy = { kind: "http", async dispatch() { throw "offline"; } };
+    const failed = createCommandBus({ registry, strategies: [stringFailure], grantedCapabilities: ["asset.write"], hasPolicyAccess: () => true });
+    await expect(failed.dispatch(createEnvelope({ eventType: route.eventType, payload: {} }))).rejects.toThrow("transport dispatch failed");
+
+    const subscription = { unsubscribe: () => undefined };
+    const ws: TransportStrategy = { kind: "ws", async dispatch() { return undefined; }, async subscribe() { return subscription; } };
+    const subscribed = createCommandBus({ registry, strategies: [ws], grantedCapabilities: ["asset.write"], hasPolicyAccess: () => true });
+    await expect(subscribed.subscribe("asset:*", () => undefined)).resolves.toBe(subscription);
   });
 });

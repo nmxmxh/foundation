@@ -358,6 +358,7 @@ if [[ -x "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" ]]; then
     "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" "$PROJECT_PATH"
     foundation_log_success "Managed scaffold patches applied"
 fi
+printf '%s\t%s\n' "20260712-managed-compat-v1" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$PROJECT_PATH/.foundation-migrations.tsv"
 
 foundation_log_success "$PROJECT_NAME created at $PROJECT_PATH"
 echo ""

@@ -41,6 +41,18 @@ The foundation communication contract is native to foundation and consumed by ap
 - TypeScript, Vite, and Vitest must set `preserveSymlinks: true` so peer dependencies resolve through the app frontend graph.
 - Vite and Vitest aliases may point to app paths such as `@` or `@generated`; they must not point to `foundation/ui-minimal/ts/src` or `foundation/runtime-transport/ts/src`.
 - Frontend Docker contexts must include the package directories required by local file dependencies. Do not ignore `foundation/runtime-transport`, `foundation/frontend-kit`, or `foundation/ui-minimal` for frontend builds.
+- Publishable Foundation TypeScript packages declare `"sideEffects": false`.
+  Import-time work must therefore stay limited to immutable constants and pure
+  factory definitions; listeners, timers, workers, storage access, network
+  access, and DOM mutation belong behind explicit start/connect/install APIs
+  with symmetric stop/disconnect/uninstall cleanup.
+- Shared Foundation React surfaces use function components and hooks. Class
+  components require a documented interoperability exception; the static
+  analysis gate rejects accidental production class-component drift.
+- Generated TypeScript stays under an explicit `generated/` boundary, carries
+  a generated-file header, is excluded from handwritten coverage pressure, and
+  is verified through generator `--check`/contract tests rather than edited by
+  hand.
 
 ## Drift Notes
 

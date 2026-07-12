@@ -25,6 +25,7 @@ import {
   ARENA_DESCRIPTOR_STATE_FREE,
   ARENA_DESCRIPTOR_STATE_READY,
   ARENA_HEAVY_BYTES,
+  ARENA_INTERACTIVE_BYTES,
   ARENA_MIN_BYTES,
   BUFFER_TOTAL_BYTES,
 } from "./generated/runtimeBuffer";
@@ -35,6 +36,64 @@ describe("RuntimeSharedArena", () => {
     expect(clampRuntimeArenaBytes(0)).toBe(ARENA_DEFAULT_BYTES);
     expect(clampRuntimeArenaBytes(1)).toBe(ARENA_MIN_BYTES);
     expect(clampRuntimeArenaBytes(ARENA_MIN_BYTES + 1) % 4096).toBe(0);
+  });
+
+  it("selects arena profiles and rejects invalid allocation boundaries", () => {
+    expect(RuntimeSharedArena.create({ arenaProfile: "minimal" }).capacity()).toBe(ARENA_MIN_BYTES);
+    expect(RuntimeSharedArena.create({ arenaProfile: "interactive" }).capacity()).toBe(ARENA_INTERACTIVE_BYTES);
+    expect(RuntimeSharedArena.create({ arenaProfile: "heavy" }).capacity()).toBe(ARENA_HEAVY_BYTES);
+    expect(RuntimeSharedArena.create().capacity()).toBe(ARENA_DEFAULT_BYTES);
+    expect(() => new RuntimeSharedArena(new SharedArrayBuffer(4096))).toThrow("too small");
+    const arena = RuntimeSharedArena.create({ arenaBytes: ARENA_MIN_BYTES });
+    expect(arena.epochView()).toBeInstanceOf(Int32Array);
+    expect(() => arena.allocate(0)).toThrow("invalid runtime arena allocation length");
+    expect(() => arena.allocate(Number.NaN)).toThrow("invalid runtime arena allocation length");
+    expect(() => arena.allocate(ARENA_MIN_BYTES)).toThrow("capacity exceeded");
+  });
+
+  it("guards descriptor snapshot copy and write boundaries", () => {
+    const arena = RuntimeSharedArena.create({ arenaBytes: ARENA_MIN_BYTES });
+    const descriptor = arena.allocate(8);
+    expect(() => arena.writeSlabReady(descriptor.id, new Uint8Array(descriptor.capacity + 1))).toThrow("slab too small");
+    arena.writeSlabReady(descriptor.id, new Uint8Array([1, 2, 3, 4]));
+    const ready = arena.readDescriptor(descriptor.id);
+    expect(arena.readDescriptorBytesView(ready, 2)).toEqual(new Uint8Array([1, 2]));
+    expect(arena.descriptorByteOffset(ready)).toBe(ready.offset);
+    expect(arena.readArenaBytesView().buffer).toBe(arena.buffer);
+    expect(() => arena.copyDescriptorBytesTo(ready, new Uint8Array(1), 0, 2)).toThrow("target too small");
+    expect(() => arena.readDescriptorBytesView(ready, 5)).toThrow("exceeds snapshot bounds");
+    expect(() => arena.writeDescriptorBytesReady(ready, new Uint8Array(2), -1, 1)).toThrow("source too small");
+    expect(() => arena.writeDescriptorBytesReady(ready, new Uint8Array(ready.capacity + 1))).toThrow("snapshot capacity");
+    arena.markConsumedById(descriptor.id);
+    arena.releaseDescriptorById(descriptor.id);
+    arena.releaseDescriptorById(descriptor.id);
+    expect(() => arena.writeSlabReady(descriptor.id, new Uint8Array(1))).toThrow("is free");
+    expect(() => arena.readDescriptorBytesView(arena.readDescriptor(descriptor.id), 0)).toThrow("is free");
+    expect(() => arena.readDescriptor(-1)).toThrow("invalid runtime arena descriptor id");
+  });
+
+  it("rejects malformed columnar headers and identifiers", () => {
+    const base = {
+      schemaVersion: COLUMNAR_BATCH_SCHEMA_VERSION,
+      rowCount: 1,
+      columnCount: 1,
+      flags: 0,
+      metadataDescriptorId: COLUMNAR_DESCRIPTOR_ID_NONE,
+      dictionaryDescriptorId: COLUMNAR_DESCRIPTOR_ID_NONE,
+      fields: [{ fieldId: 1, logicalType: COLUMNAR_LOGICAL_TYPE_INT, physicalType: COLUMNAR_PHYSICAL_TYPE_FIXED_WIDTH, length: 1, valuesDescriptorId: 1, byteWidth: 4 }],
+    };
+    expect(() => encodeRuntimeColumnarBatchDescriptor({ ...base, schemaVersion: 99 })).toThrow("unsupported columnar batch schema");
+    expect(() => encodeRuntimeColumnarBatchDescriptor({ ...base, rowCount: -1 })).toThrow("rowCount must be a uint32");
+    expect(() => encodeRuntimeColumnarBatchDescriptor({ ...base, columnCount: 2 })).toThrow("does not match fields");
+    expect(() => encodeRuntimeColumnarBatchDescriptor({ ...base, columnCount: 0, fields: [] })).toThrow("invalid columnar batch column count");
+    expect(() => decodeRuntimeColumnarBatchDescriptor(new Uint8Array(1))).toThrow("too small");
+    const encoded = encodeRuntimeColumnarBatchDescriptor(base);
+    const badMagic = encoded.slice();
+    new DataView(badMagic.buffer).setUint32(0, 0, true);
+    expect(() => decodeRuntimeColumnarBatchDescriptor(badMagic)).toThrow("invalid columnar batch magic");
+    const badSchema = encoded.slice();
+    new DataView(badSchema.buffer).setUint32(4, 99, true);
+    expect(() => decodeRuntimeColumnarBatchDescriptor(badSchema)).toThrow("unsupported columnar batch schema");
   });
 
   it("allocates slabs and publishes descriptor-ready queue entries", () => {

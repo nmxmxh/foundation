@@ -133,6 +133,9 @@ func TestBufferBoundsAndReset(t *testing.T) {
 	if err := buffer.StoreEpoch(generated.EPOCH_SLOT_COUNT, 1); err == nil {
 		t.Fatal("expected invalid epoch store to fail")
 	}
+	if err := buffer.StoreEpoch(generated.IDX_RUNTIME_TICK, 7); err != nil || buffer.LoadEpoch(generated.IDX_RUNTIME_TICK) != 7 {
+		t.Fatalf("StoreEpoch(valid) error=%v value=%d", err, buffer.LoadEpoch(generated.IDX_RUNTIME_TICK))
+	}
 	if _, err := buffer.AddEpoch(generated.EPOCH_SLOT_COUNT, 1); err == nil {
 		t.Fatal("expected invalid epoch add to fail")
 	}
@@ -319,6 +322,11 @@ func TestRuntimeNativeGPUDescriptorValidation(t *testing.T) {
 			Producer:   "camera.plugin",
 			Fallback:   RuntimeNativeGPUFallbackCopyToWebGPU,
 		}},
+		{name: "missing producer", descriptor: RuntimeNativeGPUDescriptor{ID: "frame", Kind: RuntimeNativeGPUKindBuffer, Platform: RuntimeNativeGPUPlatformLinuxDMABUF, ByteLength: 1, Fallback: RuntimeNativeGPUFallbackCopyToArena}},
+		{name: "invalid schema", descriptor: RuntimeNativeGPUDescriptor{ID: "frame", Kind: RuntimeNativeGPUKindBuffer, Platform: RuntimeNativeGPUPlatformLinuxDMABUF, ByteLength: 1, SchemaName: " ", Producer: "producer", Fallback: RuntimeNativeGPUFallbackCopyToArena}},
+		{name: "invalid format", descriptor: RuntimeNativeGPUDescriptor{ID: "frame", Kind: RuntimeNativeGPUKindBuffer, Platform: RuntimeNativeGPUPlatformLinuxDMABUF, ByteLength: 1, Format: " ", Producer: "producer", Fallback: RuntimeNativeGPUFallbackCopyToArena}},
+		{name: "unsupported kind", descriptor: RuntimeNativeGPUDescriptor{ID: "frame", Kind: RuntimeNativeGPUKind("other"), Platform: RuntimeNativeGPUPlatformLinuxDMABUF, Producer: "producer", Fallback: RuntimeNativeGPUFallbackCopyToArena}},
+		{name: "unsupported fallback", descriptor: RuntimeNativeGPUDescriptor{ID: "frame", Kind: RuntimeNativeGPUKindBuffer, Platform: RuntimeNativeGPUPlatformLinuxDMABUF, ByteLength: 1, Producer: "producer", Fallback: RuntimeNativeGPUFallback("other")}},
 	}
 	for _, tt := range tests {
 		if err := tt.descriptor.Validate(); err == nil {
@@ -364,6 +372,15 @@ func TestRuntimeNativeGPUContractCodes(t *testing.T) {
 		if !ok || got != want {
 			t.Fatalf("fallback %q contract code = %d ok=%v, want %d", fallback, got, ok, want)
 		}
+	}
+	if _, ok := RuntimeNativeGPUKind("invalid").ContractCode(); ok {
+		t.Fatal("invalid kind unexpectedly has a contract code")
+	}
+	if _, ok := RuntimeNativeGPUPlatform("invalid").ContractCode(); ok {
+		t.Fatal("invalid platform unexpectedly has a contract code")
+	}
+	if _, ok := RuntimeNativeGPUFallback("invalid").ContractCode(); ok {
+		t.Fatal("invalid fallback unexpectedly has a contract code")
 	}
 }
 
@@ -699,6 +716,9 @@ func TestProcessPoolDiagnosticsAndErrorPaths(t *testing.T) {
 	if _, err := (*ProcessPool)(nil).Execute(context.Background(), ProcessRequest{UnitID: "unit"}); err == nil {
 		t.Fatal("expected nil pool execute to fail")
 	}
+	if _, err := (*ProcessPool)(nil).ExecuteInto(context.Background(), ProcessRequest{UnitID: "unit"}, make([]byte, 1)); err == nil {
+		t.Fatal("expected nil pool ExecuteInto to fail")
+	}
 	pool := &ProcessPool{
 		exchangeTimeout: DefaultProcessExchangeTimeout,
 		bufferPool: sync.Pool{New: func() any {
@@ -745,6 +765,32 @@ func TestProcessPoolDiagnosticsAndErrorPaths(t *testing.T) {
 	diagnostics := pool.Diagnostics()
 	if diagnostics.ExchangeTimeoutMS != 2000 || len(diagnostics.Workers) != 1 {
 		t.Fatalf("diagnostics = %+v", diagnostics)
+	}
+}
+
+func TestProcessPoolExecuteIntoUsesCallerOwnedOutput(t *testing.T) {
+	worker := workerWithEchoTransport(t, ProcessTransportStdio)
+	pool := &ProcessPool{
+		exchangeTimeout: DefaultProcessExchangeTimeout,
+		allWorkers:      []*processWorker{worker},
+		bufferPool: sync.Pool{New: func() any {
+			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
+			return &buffer
+		}},
+	}
+	dst := make([]byte, generated.OUTPUT_MAX_BYTES)
+	response, err := pool.ExecuteInto(context.Background(), ProcessRequest{UnitID: "runtime.echo", Input: []byte("owned")}, dst)
+	if err != nil {
+		t.Fatalf("ExecuteInto() error = %v", err)
+	}
+	if string(response.Output) != "OWNED" || &response.Output[0] != &dst[0] {
+		t.Fatalf("ExecuteInto() output = %q aliases=%v", response.Output, &response.Output[0] == &dst[0])
+	}
+	if _, err := pool.ExecuteInto(context.Background(), ProcessRequest{UnitID: "runtime.echo", Input: []byte("small")}, make([]byte, 1)); err == nil {
+		t.Fatal("expected undersized destination to fail")
+	}
+	if _, err := pool.ExecuteInto(context.Background(), ProcessRequest{UnitID: "runtime.echo"}, nil); err == nil {
+		t.Fatal("expected nil destination to fail")
 	}
 }
 
@@ -832,6 +878,34 @@ func TestProcessWorkerExchangeRestartAndClosePaths(t *testing.T) {
 	if err := worker.executeWithContext(timeoutCtx, "runtime.echo", newRuntimeBuffer(t, "timeout")); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("timeout exchange error = %v", err)
 	}
+}
+
+func TestProcessWorkerPersistentExchangeLoopReuseAndShutdown(t *testing.T) {
+	exchange := &scriptedExchange{}
+	worker := &processWorker{logger: testLogger(t), testExchange: exchange}
+	for i := range 3 {
+		if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "loop")); err != nil {
+			t.Fatalf("execute %d error = %v", i, err)
+		}
+	}
+	requests := worker.exchangeRequests
+	results := worker.exchangeResults
+	if requests == nil || results == nil || exchange.calls != 3 {
+		t.Fatalf("loop requests=%p results=%p calls=%d", requests, results, exchange.calls)
+	}
+	if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "reuse")); err != nil {
+		t.Fatalf("reuse execute error = %v", err)
+	}
+	if worker.exchangeRequests != requests || worker.exchangeResults != results {
+		t.Fatal("exchange loop channels changed between serialized calls")
+	}
+	if err := worker.close(); err != nil {
+		t.Fatalf("close error = %v", err)
+	}
+	if worker.exchangeRequests != nil || worker.exchangeResults != nil || exchange.closes != 1 {
+		t.Fatalf("loop not released or exchange not closed: %+v", exchange)
+	}
+	worker.stopExchangeLoop()
 }
 
 func TestProcessWorkerSharedMemoryGuard(t *testing.T) {
