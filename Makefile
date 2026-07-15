@@ -1,8 +1,8 @@
-.PHONY: all generate-contracts build frontend-build delivery-metrics test test-go test-go-race test-ts test-rust test-rust-sdk test-native-rust test-rust-loom check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history bench-simd lint verify docker-up docker-down migrate-up help \
+.PHONY: all generate-contracts build install-ts-deps audit-ts-deps frontend-build delivery-metrics test test-go test-go-race test-ts test-rust test-rust-sdk test-native-rust test-rust-loom check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history bench-simd lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-scaffold-idempotency check-scaffold-seed-drift check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator check-agent-change \
-	check-contract-drift check-runtime-contract-field-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
+	check-core-validation-contract check-contract-drift check-runtime-contract-field-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
-	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux \
+	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-package-licenses check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet lifecycle-manifest
 
 .DEFAULT_GOAL := help
@@ -19,7 +19,9 @@ FOUNDATION_LINT_CHECKS := \
 	check-frontend-prototype-generator \
 	check-frontend-commands-generator \
 	check-agent-change \
+	check-core-validation-contract \
 	check-ovasabi-cli \
+	check-package-licenses \
 	check-contract-drift \
 	check-runtime-contract-field-drift \
 	check-doc-references \
@@ -65,6 +67,8 @@ FOUNDATION_GO_RACE_FLAGS ?=
 FOUNDATION_VITEST_WORKERS ?= 0
 FOUNDATION_CARGO_TEST_JOBS ?= 1
 FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY ?= never
+FOUNDATION_NPM_CACHE_DIR ?= /tmp/ovasabi-foundation-npm-cache
+TS_PACKAGES := runtime-transport/ts runtime-sdk/ts/browser-host runtime-native/ts frontend-kit/ts ui-minimal/ts config-contracts/ts
 
 all: build
 
@@ -77,14 +81,25 @@ generate-contracts:
 
 build: test-go test-rust frontend-build
 
+install-ts-deps:
+	@mkdir -p "$(FOUNDATION_NPM_CACHE_DIR)"
+	@set -e; for pkg in $(TS_PACKAGES); do \
+		echo "[RUN] npm ci: $$pkg"; \
+		NPM_CONFIG_CACHE="$(FOUNDATION_NPM_CACHE_DIR)" npm --prefix "$$pkg" ci --ignore-scripts --no-audit --no-fund; \
+		echo "[OK] npm ci: $$pkg"; \
+	done
+
+audit-ts-deps:
+	@mkdir -p "$(FOUNDATION_NPM_CACHE_DIR)"
+	@set -e; for pkg in $(TS_PACKAGES); do \
+		echo "[RUN] npm audit: $$pkg"; \
+		NPM_CONFIG_CACHE="$(FOUNDATION_NPM_CACHE_DIR)" npm --prefix "$$pkg" audit --audit-level=high; \
+		echo "[OK] npm audit: $$pkg"; \
+	done
+
 frontend-build:
 	@echo "Typechecking shared TypeScript packages..."
-	@if [ -d runtime-transport/ts/node_modules ]; then npm --prefix runtime-transport/ts run typecheck; else echo "Skipping runtime-transport/ts typecheck; run npm install first"; fi
-	@if [ -d runtime-sdk/ts/browser-host/node_modules ]; then npm --prefix runtime-sdk/ts/browser-host run typecheck; else echo "Skipping runtime-sdk/ts/browser-host typecheck; run npm install first"; fi
-	@if [ -d runtime-native/ts/node_modules ]; then npm --prefix runtime-native/ts run typecheck; else echo "Skipping runtime-native/ts typecheck; run npm install first"; fi
-	@if [ -d frontend-kit/ts/node_modules ]; then npm --prefix frontend-kit/ts run typecheck; else echo "Skipping frontend-kit/ts typecheck; run npm install first"; fi
-	@if [ -d ui-minimal/ts/node_modules ]; then npm --prefix ui-minimal/ts run typecheck; else echo "Skipping ui-minimal/ts typecheck; run npm install first"; fi
-	@if [ -d config-contracts/ts/node_modules ]; then npm --prefix config-contracts/ts run typecheck; else echo "Skipping config-contracts/ts typecheck; run npm install first"; fi
+	@tooling/scripts/ts_static_analysis_check.sh .
 
 delivery-metrics:
 	@node tooling/scripts/ci_delivery_metrics.mjs --out delivery-metrics/local-event.json
@@ -115,10 +130,10 @@ test-go-race:
 
 test-ts:
 	@echo "Running TypeScript tests..."
-	@if [ -d runtime-transport/ts/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-transport/ts run; else echo "Skipping runtime-transport/ts tests; run npm install first"; fi
-	@if [ -d runtime-sdk/ts/browser-host/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host run; else echo "Skipping runtime-sdk/ts/browser-host tests; run npm install first"; fi
-	@if [ -d runtime-native/ts/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-native/ts run; else echo "Skipping runtime-native/ts tests; run npm install first"; fi
-	@if [ -d frontend-kit/ts/node_modules ]; then FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh frontend-kit/ts run; else echo "Skipping frontend-kit/ts tests; run npm install first"; fi
+	@FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-transport/ts run
+	@FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host run
+	@FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh runtime-native/ts run
+	@FOUNDATION_VITEST_WORKERS="$(FOUNDATION_VITEST_WORKERS)" tooling/scripts/run_vitest.sh frontend-kit/ts run
 
 test-rust: test-rust-sdk test-native-rust
 
@@ -235,10 +250,16 @@ check-frontend-commands-generator:
 check-agent-change:
 	@tests/agent_change_test.sh
 
+check-core-validation-contract:
+	@tests/core_validation_contract_test.sh
+
 check-ovasabi-cli:
 	@mkdir -p "$(FOUNDATION_GO_CACHE_DIR)"
 	@cd cmd/ovasabi && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test ./...
 	@GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" node cmd/ovasabi/bin/ovasabi.js --help >/dev/null
+
+check-package-licenses:
+	@node tooling/scripts/package_license_check.mjs --verify-pack
 
 check-contract-drift:
 	@tooling/scripts/contract_drift_check.sh .
@@ -395,6 +416,8 @@ help:
 	@echo "Foundation core targets:"
 	@echo "  make generate-contracts  Regenerate shared transport/runtime bindings"
 	@echo "  make build               Run Go/Rust tests and TS typechecks"
+	@echo "  make install-ts-deps     Reproducibly install all Core TypeScript dependencies"
+	@echo "  make audit-ts-deps       Fail on high/critical Core TypeScript vulnerabilities"
 	@echo "  make frontend-build      Typecheck shared TS packages"
 	@echo "  make delivery-metrics    Emit a local DORA/incident collection event"
 	@echo "  make test                Run Go, TS, and Rust tests"

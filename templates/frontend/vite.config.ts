@@ -34,6 +34,8 @@ export default defineConfig({
       '/v1': {
         target: 'http://localhost:8080',
         changeOrigin: true,
+        // Projection delta streams upgrade to WebSocket on /v1/projections/…
+        ws: true,
       },
       '/ws': {
         target: 'ws://localhost:8080',

@@ -65,6 +65,27 @@ export interface MinimalFocusTheme {
   ringWidth: string;
 }
 
+export interface MinimalControlHeightTheme {
+  sm: string;
+  md: string;
+  lg: string;
+}
+
+/** Shared dimensions for inputs, buttons, toggles, and other direct controls. */
+export interface MinimalControlTheme {
+  /** Minimum pointer target, including compact controls used on touch screens. */
+  minTargetSize: string;
+  height: MinimalControlHeightTheme;
+  iconSize: string;
+}
+
+/** Viewport-aware defaults shared by popovers, pickers, menus, and dialogs. */
+export interface MinimalOverlayTheme {
+  viewportGutter: string;
+  anchoredOffset: string;
+  maxHeight: string;
+}
+
 export interface MinimalTypographyTheme {
   displayFamily: string;
   bodyFamily: string;
@@ -109,12 +130,25 @@ export interface MinimalZIndexTheme {
 
 export interface MinimalTheme {
   name: string;
+  /** Optional on legacy full-theme literals; normalized by `createMinimalTheme`. */
+  colorScheme?: "light" | "dark";
   color: MinimalColorTheme;
   spacing: MinimalSpacingTheme;
   radius: MinimalRadiusTheme;
   shadow: MinimalShadowTheme;
   focus: MinimalFocusTheme;
+  /** Optional on legacy full-theme literals; normalized by `createMinimalTheme`. */
+  control?: MinimalControlTheme;
+  /** Optional on legacy full-theme literals; normalized by `createMinimalTheme`. */
+  overlay?: MinimalOverlayTheme;
   typography: MinimalTypographyTheme;
   motion: MinimalMotionTheme;
   zIndex: MinimalZIndexTheme;
+}
+
+/** Fully normalized theme returned by the provider and theme factory. */
+export interface ResolvedMinimalTheme extends MinimalTheme {
+  colorScheme: "light" | "dark";
+  control: MinimalControlTheme;
+  overlay: MinimalOverlayTheme;
 }

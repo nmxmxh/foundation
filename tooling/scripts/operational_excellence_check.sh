@@ -81,6 +81,17 @@ else
   check_contains "metrics collector records SLSA provenance path" "$metrics_script" "slsa_provenance_path"
 fi
 
+if [[ -d "$target/server-kit/go" && -d "$target/runtime-sdk" && -d "$target/tooling/scripts" ]]; then
+  core_ci="$target/.github/workflows/core-ci.yml"
+  check_exists "Foundation Core CI workflow exists" "$core_ci"
+  check_contains "Core CI fails closed on missing TypeScript dependencies" "$core_ci" 'FOUNDATION_REQUIRE_TS_DEPS: "1"'
+  check_contains "Core CI enables strict vulnerability checks" "$core_ci" 'GOVULNCHECK_STRICT: "1"'
+  check_contains "Core CI exercises Loom models" "$core_ci" 'RUST_RUNTIME_LOOM: "1"'
+  check_contains "Core CI installs reproducible TypeScript dependencies" "$core_ci" "make install-ts-deps"
+  check_contains "Core CI gates high TypeScript dependency findings" "$core_ci" "make audit-ts-deps"
+  check_contains "Core CI runs the local verification contract" "$core_ci" "make verify"
+fi
+
 security_workflow="$(first_existing \
   "$target/templates/github/workflows/security.yml" \
   "$target/.github/workflows/security.yml" || true)"

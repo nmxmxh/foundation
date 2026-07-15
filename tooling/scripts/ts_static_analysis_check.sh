@@ -4,6 +4,17 @@ set -euo pipefail
 target="${1:-.}"
 target="$(cd "$target" && pwd)"
 
+is_truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+strict_dependency_check() {
+  is_truthy "${CI:-}" || is_truthy "${FOUNDATION_REQUIRE_TS_DEPS:-}"
+}
+
 if ! command -v npm >/dev/null 2>&1; then
   echo "[FAIL] missing npm for TypeScript analysis" >&2
   exit 1
@@ -29,7 +40,17 @@ for pkg in "${packages[@]}"; do
     exit 1
   fi
   echo "[OK] side-effect-free package metadata: $pkg"
+  if [[ ! -f "$pkg_dir/package-lock.json" ]]; then
+    echo "[FAIL] Foundation TypeScript package lockfile missing: $pkg/package-lock.json" >&2
+    exit 1
+  fi
+  echo "[OK] reproducible package lock: $pkg"
   if [[ ! -d "$pkg_dir/node_modules" ]]; then
+    if strict_dependency_check; then
+      echo "[FAIL] TypeScript dependencies missing in strict mode: $pkg/node_modules" >&2
+      echo "  Run: make install-ts-deps" >&2
+      exit 1
+    fi
     echo "[SKIP] TypeScript typecheck: $pkg (node_modules missing)"
     continue
   fi
@@ -79,7 +100,7 @@ if (( practice_checked == 0 )); then
 fi
 
 if (( checked == 0 )); then
-  echo "[OK] no installed Foundation TypeScript packages found"
+  echo "[OK] no installed Foundation TypeScript packages found (local fallback mode)"
   exit 0
 fi
 

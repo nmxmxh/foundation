@@ -28,6 +28,7 @@ hash_file() {
 
 default_paths() {
   printf '%s\n' \
+    .github/workflows/core-ci.yml \
     Makefile \
     rustfmt.toml \
     scripts/check-rust.sh \
@@ -42,6 +43,7 @@ default_paths() {
     tests/update_project_test.sh \
     tests/migration_seed_policy_test.sh \
     tests/lifecycle_contract_generator_test.sh \
+    tests/core_validation_contract_test.sh \
     tests/frontend_commands_generator_test.sh
   find "$target/tooling/scripts" -maxdepth 1 -type f | while IFS= read -r file; do
     printf '%s\n' "${file#$target/}"

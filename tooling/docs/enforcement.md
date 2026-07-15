@@ -14,6 +14,7 @@ It does not replace app-specific CI, but it sets the baseline for:
 8. documentation link integrity
 9. machine-readable lifecycle manifests
 10. app-owned security profile contracts
+11. fail-closed Foundation Core dependency and verification CI
 
 Contract drift is expected to fail hard when:
 
@@ -134,6 +135,13 @@ Project scaffold checks verify:
 
 `operational_excellence_check.sh` verifies those delivery and supply-chain
 hooks without requiring a production deployment platform.
+
+Foundation Core additionally owns `.github/workflows/core-ci.yml`. That lane
+uses the same `make install-ts-deps`, `make audit-ts-deps`, and `make verify`
+commands available locally. `CI=true` or `FOUNDATION_REQUIRE_TS_DEPS=1` makes
+missing TypeScript dependencies a hard failure; ordinary local checks retain a
+visible skip fallback so offline source inspection remains possible. Every Core
+TypeScript package must still commit a lockfile in either mode.
 
 ## Runtime and Formal-Methods Enforcement
 

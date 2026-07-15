@@ -150,24 +150,6 @@ run_govulncheck() {
   return "$exit_code"
 }
 
-required_tools=(go staticcheck gopls govulncheck gosec)
-missing_tools=()
-for tool in "${required_tools[@]}"; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    missing_tools+=("$tool")
-  fi
-done
-
-if (( ${#missing_tools[@]} > 0 )); then
-  echo "[FAIL] missing required Go analysis tools: ${missing_tools[*]}" >&2
-  echo "Install with:" >&2
-  echo "  go install honnef.co/go/tools/cmd/staticcheck@latest" >&2
-  echo "  go install golang.org/x/tools/gopls@latest" >&2
-  echo "  go install golang.org/x/vuln/cmd/govulncheck@latest" >&2
-  echo "  go install github.com/securego/gosec/v2/cmd/gosec@latest" >&2
-  exit 1
-fi
-
 is_foundation_repo=0
 if [[ -d "$target/server-kit/go" && -d "$target/runtime-transport/go" && -d "$target/tooling/scripts" ]]; then
   is_foundation_repo=1
@@ -178,7 +160,7 @@ gopls_file="$(mktemp "${TMPDIR:-/tmp}/go-files.XXXXXX")"
 trap 'rm -f "$module_file" "$gopls_file"' EXIT
 
 find "$target" \
-  \( -path '*/.git' -o -path '*/.cache' -o -path '*/node_modules' -o -path '*/vendor' -o -path '*/tmp' -o -path '*/dist' -o -path '*/build' \) -prune \
+  \( -path '*/.git' -o -path '*/.cache' -o -path '*/.gocache' -o -path '*/.claude/worktrees' -o -path '*/.codex/worktrees' -o -path '*/.worktrees' -o -path '*/node_modules' -o -path '*/vendor' -o -path '*/target' -o -path '*/tmp' -o -path '*/dist' -o -path '*/build' \) -prune \
   -o -name go.mod -type f -print | sort >"$module_file"
 
 go_modules=()
@@ -199,9 +181,32 @@ while IFS= read -r mod_file; do
   go_modules+=("$mod_dir")
 done <"$module_file"
 
+if is_truthy "${GO_ANALYSIS_DISCOVERY_ONLY:-}"; then
+  for mod_dir in "${go_modules[@]}"; do
+    rel="${mod_dir#$target/}"
+    [[ "$mod_dir" == "$target" ]] && rel="."
+    echo "$rel"
+  done
+  exit 0
+fi
+
 if (( ${#go_modules[@]} == 0 )); then
   echo "[OK] no Go modules found"
   exit 0
+fi
+
+required_tools=(go staticcheck gopls govulncheck gosec)
+missing_tools=()
+for tool in "${required_tools[@]}"; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    missing_tools+=("$tool")
+  fi
+done
+
+if (( ${#missing_tools[@]} > 0 )); then
+  echo "[FAIL] missing required Go analysis tools: ${missing_tools[*]}" >&2
+  echo "Install the pinned versions documented in .github/workflows/core-ci.yml" >&2
+  exit 1
 fi
 
 go_cache="$(ensure_writable_dir_or_tmp "${GO_CACHE_DIR:-${GOCACHE:-}}" "${TMPDIR:-/tmp}/ovasabi-go-build")"

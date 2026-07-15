@@ -226,6 +226,102 @@ func TestJWTAuthBypassRejectAndContextPropagation(t *testing.T) {
 	}
 }
 
+// TestJWTAuthAcceptsWebSocketQueryToken covers the browser WebSocket
+// handshake: it cannot set an Authorization header, so the credential rides
+// the access_token query parameter — accepted for upgrade requests only.
+func TestJWTAuthAcceptsWebSocketQueryToken(t *testing.T) {
+	manager, err := auth.NewJWTManager("this-is-a-very-secure-secret")
+	if err != nil {
+		t.Fatalf("new jwt manager: %v", err)
+	}
+	token, err := manager.GenerateAccessToken(auth.Claims{
+		UserID:         "usr_ws",
+		OrganizationID: "org_ws",
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
+
+	handler := JWTAuth(manager, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if GetOrganizationIDFromContext(r.Context()) != "org_ws" {
+			t.Fatalf("missing organization from websocket query token")
+		}
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/v1/projections/profile/chow_profiles?access_token="+token, nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusSwitchingProtocols {
+		t.Fatalf("expected websocket upgrade with query token to authenticate, got %d", recorder.Code)
+	}
+
+	// An ordinary request must not authenticate via query parameter — tokens
+	// in URLs leak into logs and caches, so the channel is upgrade-only.
+	req = httptest.NewRequest(http.MethodGet, "https://api.example.com/v1/orders?access_token="+token, nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected non-upgrade query token to be rejected, got %d", recorder.Code)
+	}
+}
+
+// TestOptionalJWTAuthIdentityAndFailClosedCredentials covers the development
+// posture: no credential proceeds anonymously, a valid credential establishes
+// identity, and a presented-but-invalid credential still fails closed.
+func TestOptionalJWTAuthIdentityAndFailClosedCredentials(t *testing.T) {
+	manager, err := auth.NewJWTManager("this-is-a-very-secure-secret")
+	if err != nil {
+		t.Fatalf("new jwt manager: %v", err)
+	}
+	token, err := manager.GenerateAccessToken(auth.Claims{
+		UserID:         "usr_opt",
+		OrganizationID: "org_opt",
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
+
+	var gotUser string
+	handler := OptionalJWTAuth(manager, []string{"/public"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUser = GetUserIDFromContext(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "https://api.example.com/v1/orders", nil))
+	if recorder.Code != http.StatusNoContent || gotUser != "" {
+		t.Fatalf("expected anonymous pass-through, got status %d user %q", recorder.Code, gotUser)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/v1/orders", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusNoContent || gotUser != "usr_opt" {
+		t.Fatalf("expected identity established, got status %d user %q", recorder.Code, gotUser)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "https://api.example.com/v1/orders", nil)
+	req.Header.Set("Authorization", "Bearer not-a-real-token")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected invalid credential to fail closed, got %d", recorder.Code)
+	}
+
+	// A public path stays reachable even with a stale credential riding along.
+	req = httptest.NewRequest(http.MethodGet, "https://api.example.com/public/status", nil)
+	req.Header.Set("Authorization", "Bearer not-a-real-token")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected public path to serve despite stale credential, got %d", recorder.Code)
+	}
+}
+
 func TestRequireCapabilitiesAndContextHelpers(t *testing.T) {
 	authorizer := NewAuthorizer([]RoleTemplate{{Role: "operator", Capabilities: []string{"orders.write"}}})
 	protected := RequireCapabilities(authorizer, "orders.write")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -270,6 +366,26 @@ func TestRequireCapabilitiesAndContextHelpers(t *testing.T) {
 	}
 	if GetUserIDFromContext(context.Background()) != "" || GetCapabilitiesFromContext(context.Background()) != nil {
 		t.Fatalf("expected empty defaults for missing context values")
+	}
+}
+
+// TestRateLimiterRejectionsDoNotExtendWindow guards recovery: a client that
+// is over the limit and keeps retrying must be admitted again once its
+// *allowed* requests age out — rejections themselves must not be recorded, or
+// a retry loop throttles itself indefinitely.
+func TestRateLimiterRejectionsDoNotExtendWindow(t *testing.T) {
+	limiter := NewRateLimiter(2, 40*time.Millisecond)
+	if !limiter.Allow("client") || !limiter.Allow("client") {
+		t.Fatalf("expected budget of 2 to be admitted")
+	}
+	for i := 0; i < 20; i++ {
+		if limiter.Allow("client") {
+			t.Fatalf("expected over-limit request %d to be rejected", i)
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+	if !limiter.Allow("client") {
+		t.Fatalf("expected client to recover after window despite rejected retries")
 	}
 }
 

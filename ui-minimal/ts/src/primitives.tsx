@@ -39,6 +39,7 @@ type InputState = "default" | "invalid" | "locked";
 type ButtonVariant = "primary" | "secondary" | "ghost" | "quiet";
 type TooltipPlacement = "top" | "bottom";
 type FloatingPlacement = "top" | "bottom";
+type CalendarViewMode = "day" | "month" | "year";
 type MinimalScrollBehavior = "auto" | "smooth";
 type LandingAnchor =
   | "center"
@@ -236,8 +237,15 @@ export interface MinimalCalendarProps extends Omit<HTMLAttributes<HTMLElement>, 
   onChange?: (next: Date) => void;
   month?: Date | string | null;
   onMonthChange?: (next: Date) => void;
+  minDate?: Date | string | null;
+  maxDate?: Date | string | null;
+  isDateDisabled?: (date: Date) => boolean;
   weekStartsOn?: 0 | 1;
   locale?: string;
+  /** Show the leading/trailing days required to keep a stable six-week grid. */
+  showAdjacentDays?: boolean;
+  /** Show a shortcut that returns the view to the current local date. */
+  showTodayAction?: boolean;
   renderDayContent?: (date: Date, selected: boolean, inCurrentMonth: boolean) => ReactNode;
 }
 
@@ -391,12 +399,6 @@ const cardPadding = {
   sm: "16px",
   md: "20px",
   lg: "24px",
-} satisfies Record<MinimalSize, string>;
-
-const buttonMinHeight = {
-  sm: "32px",
-  md: "34px",
-  lg: "40px",
 } satisfies Record<MinimalSize, string>;
 
 const inputPadding = {
@@ -631,7 +633,7 @@ const Style = {
     justify-content: center;
     letter-spacing: 0.02em;
     line-height: 1;
-    min-height: ${({ $size }) => buttonMinHeight[$size]};
+    min-height: ${({ $size }) => `var(--minimal-control-height-${$size})`};
     padding: ${({ $size }) => sizePadding[$size]};
     /* Per-property timing: the lift eases out slowly, colour moves a touch
        faster, and the press transform is its own quick curve. Uniform timing is
@@ -957,7 +959,7 @@ const Style = {
     font-weight: ${({ theme }) => theme.typography.weightSemibold};
     letter-spacing: 0.02em;
     line-height: 1;
-    min-height: ${({ $size }) => buttonMinHeight[$size]};
+    min-height: ${({ $size }) => `var(--minimal-control-height-${$size})`};
     opacity: ${({ $selected }) => ($selected ? 1 : 0.84)};
     padding: ${({ $size }) => sizePadding[$size]};
     text-transform: uppercase;
@@ -1215,6 +1217,9 @@ const Style = {
   CalendarShell: styled.section`
     display: grid;
     gap: ${({ theme }) => theme.spacing.md};
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
     border-radius: ${({ theme }) => theme.radius.md};
     background: ${({ theme }) => theme.color.bgSurface};
@@ -1226,23 +1231,75 @@ const Style = {
     justify-content: space-between;
     gap: ${({ theme }) => theme.spacing.sm};
   `,
+  CalendarTitleButton: styled.button`
+    ${clickableReset}
+    ${focusRing}
+    min-width: 0;
+    min-height: var(--minimal-control-min-target);
+    display: inline-flex;
+    align-items: center;
+    gap: ${({ theme }) => theme.spacing.xs};
+    padding: 4px 8px;
+    border-radius: ${({ theme }) => theme.radius.sm};
+    color: ${({ theme }) => theme.color.textPrimary};
+    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    cursor: pointer;
+
+    &:disabled {
+      cursor: default;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      &:not(:disabled):hover {
+        background: ${({ theme }) => theme.color.bgSurfaceHover};
+      }
+    }
+  `,
+  CalendarNavGroup: styled.div`
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+  `,
   CalendarNavButton: styled.button`
     ${clickableReset}
     ${focusRing}
     color: ${({ theme }) => theme.color.textSecondary};
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
+    border: 1px solid transparent;
     border-radius: ${({ theme }) => theme.radius.sm};
-    width: 34px;
-    height: 34px;
+    width: var(--minimal-control-min-target);
+    height: var(--minimal-control-min-target);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.42;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      &:not(:disabled):hover {
+        color: ${({ theme }) => theme.color.textPrimary};
+        border-color: ${({ theme }) => theme.color.borderSubtle};
+        background: ${({ theme }) => theme.color.bgSurfaceHover};
+      }
+    }
+  `,
+  CalendarViewport: styled.div`
+    position: relative;
+    min-height: 300px;
+    overflow: hidden;
+  `,
+  CalendarViewPanel: styled(motion.div)`
+    position: absolute;
+    inset: 0;
+    width: 100%;
   `,
   CalendarGrid: styled.div`
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: 3px;
   `,
   CalendarWeekday: styled.div`
     color: ${({ theme }) => theme.color.textTertiary};
@@ -1250,31 +1307,42 @@ const Style = {
     font-family: ${({ theme }) => theme.typography.monoFamily};
     text-align: center;
     text-transform: uppercase;
-    padding-bottom: ${({ theme }) => theme.spacing.xs};
+    padding: 4px 0 ${({ theme }) => theme.spacing.xs};
+  `,
+  CalendarBlank: styled.span`
+    min-height: 40px;
   `,
   CalendarDay: styled.button<{
     $selected: boolean;
     $currentMonth: boolean;
+    $disabled: boolean;
+    $today: boolean;
+    $hasContent: boolean;
   }>`
     ${clickableReset}
     ${focusRing}
-    ${({ theme, $selected, $currentMonth }) =>
+    ${({ theme, $selected, $currentMonth, $today }) =>
       $selected
         ? css`
-            background: ${theme.color.brand};
+            background: transparent;
             color: ${theme.color.textInverse};
-            border: 1px solid ${theme.color.brand};
+            border: 1px solid transparent;
           `
         : css`
             background: ${theme.color.bgSurface};
             color: ${$currentMonth ? theme.color.textPrimary : theme.color.textTertiary};
-            border: 1px solid transparent;
+            border: 1px solid ${$today ? theme.color.brand : "transparent"};
           `}
-    min-height: 52px;
+    position: relative;
+    isolation: isolate;
+    min-width: 0;
+    min-height: ${({ $hasContent }) => ($hasContent ? "52px" : "40px")};
+    aspect-ratio: ${({ $hasContent }) => ($hasContent ? "auto" : "1")};
     border-radius: ${({ theme }) => theme.radius.sm};
-    padding: ${({ theme }) => theme.spacing.sm};
+    padding: ${({ theme, $hasContent }) => ($hasContent ? theme.spacing.sm : theme.spacing.xs)};
     display: grid;
-    align-content: start;
+    place-items: center;
+    align-content: ${({ $hasContent }) => ($hasContent ? "start" : "center")};
     gap: ${({ theme }) => theme.spacing.xs};
     cursor: pointer;
     transition:
@@ -1282,11 +1350,87 @@ const Style = {
       background-color 160ms ${enterCurve},
       color 160ms ${enterCurve};
 
+    ${({ theme, $disabled }) =>
+      $disabled
+        ? css`
+            color: ${theme.color.textTertiary};
+            cursor: not-allowed;
+            opacity: 0.46;
+          `
+        : null}
+
     @media (hover: hover) and (pointer: fine) {
-      &:hover {
+      &:not([aria-disabled="true"]):hover {
         border-color: ${({ theme, $selected }) => ($selected ? theme.color.brand : theme.color.borderStrong)};
         background: ${({ theme, $selected }) => ($selected ? theme.color.brand : theme.color.bgSurfaceAlt)};
       }
+    }
+  `,
+  CalendarSelection: styled(motion.span)`
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    background: ${({ theme }) => theme.color.brand};
+    box-shadow: ${({ theme }) => theme.shadow.subtle};
+  `,
+  CalendarDayContent: styled.span`
+    position: relative;
+    z-index: 1;
+    display: contents;
+  `,
+  CalendarSelectorGrid: styled.div<{ $columns: number }>`
+    display: grid;
+    grid-template-columns: repeat(${({ $columns }) => $columns}, minmax(0, 1fr));
+    gap: ${({ theme }) => theme.spacing.xs};
+    padding-top: ${({ theme }) => theme.spacing.xs};
+  `,
+  CalendarOption: styled.button<{ $active: boolean }>`
+    ${clickableReset}
+    ${focusRing}
+    min-height: var(--minimal-control-min-target);
+    padding: 8px;
+    border: 1px solid ${({ theme, $active }) => ($active ? theme.color.brand : theme.color.borderSubtle)};
+    border-radius: ${({ theme }) => theme.radius.sm};
+    background: ${({ theme, $active }) => ($active ? theme.color.brand : theme.color.bgSurface)};
+    color: ${({ theme, $active }) => ($active ? theme.color.textInverse : theme.color.textPrimary)};
+    cursor: pointer;
+    font-size: ${({ theme }) => theme.typography.captionSize};
+    font-weight: ${({ theme, $active }) =>
+      $active ? theme.typography.weightSemibold : theme.typography.weightMedium};
+
+    &:disabled {
+      cursor: not-allowed;
+      opacity: 0.42;
+    }
+
+    @media (hover: hover) and (pointer: fine) {
+      &:not(:disabled):hover {
+        border-color: ${({ theme }) => theme.color.brand};
+        background: ${({ theme, $active }) => ($active ? theme.color.brand : theme.color.brandSoft)};
+      }
+    }
+  `,
+  CalendarFooter: styled.div`
+    display: flex;
+    justify-content: flex-start;
+    padding-top: ${({ theme }) => theme.spacing.xs};
+    border-top: 1px solid ${({ theme }) => theme.color.borderSubtle};
+  `,
+  CalendarTodayButton: styled.button`
+    ${clickableReset}
+    ${focusRing}
+    min-height: var(--minimal-control-min-target);
+    padding: 6px 8px;
+    border-radius: ${({ theme }) => theme.radius.sm};
+    color: ${({ theme }) => theme.color.brand};
+    cursor: pointer;
+    font-size: ${({ theme }) => theme.typography.captionSize};
+    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+
+    &:disabled {
+      cursor: not-allowed;
+      color: ${({ theme }) => theme.color.textTertiary};
     }
   `,
   FloatingPanelContainer: styled.div<{
@@ -1307,8 +1451,11 @@ const Style = {
     flex-direction: column;
   `,
   FloatingPanel: styled(motion.div)`
+    display: flex;
+    flex-direction: column;
     width: 100%;
     max-height: inherit;
+    min-height: 0;
     background: ${({ theme }) => theme.color.bgSurface};
     border: 1px solid ${({ theme }) => theme.color.borderStrong};
     border-radius: ${({ theme }) => theme.radius.md};
@@ -1336,12 +1483,16 @@ const Style = {
     white-space: nowrap;
   `,
   DropdownList: styled.div`
-    max-height: inherit;
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: ${({ theme }) => theme.spacing.xs};
   `,
   DropdownSearchWrap: styled.div`
-    padding: ${({ theme }) => theme.spacing.md} ${({ theme }) => theme.spacing.md} 0;
+    flex: 0 0 auto;
+    padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.xs};
+    border-bottom: 1px solid ${({ theme }) => theme.color.borderSubtle};
   `,
   DropdownSearch: styled.input`
     width: 100%;
@@ -1747,10 +1898,21 @@ const {
   TableCell,
   CalendarShell,
   CalendarHeader,
+  CalendarTitleButton,
+  CalendarNavGroup,
   CalendarNavButton,
+  CalendarViewport,
+  CalendarViewPanel,
   CalendarGrid,
   CalendarWeekday,
+  CalendarBlank,
   CalendarDay,
+  CalendarSelection,
+  CalendarDayContent,
+  CalendarSelectorGrid,
+  CalendarOption,
+  CalendarFooter,
+  CalendarTodayButton,
   FloatingPanel,
   FloatingPanelContainer,
   DropdownTriggerButton,
@@ -1813,6 +1975,18 @@ const formatSearchableText = <T extends string>(option: MinimalOption<T>) =>
 const normalizeDateValue = (value?: Date | string | null) => {
   if (!value) {
     return null;
+  }
+  if (typeof value === "string") {
+    const plainDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (plainDate) {
+      const [, year, month, day] = plainDate;
+      const localDate = new Date(Number(year), Number(month) - 1, Number(day));
+      return localDate.getFullYear() === Number(year) &&
+        localDate.getMonth() === Number(month) - 1 &&
+        localDate.getDate() === Number(day)
+        ? localDate
+        : null;
+    }
   }
   const date = value instanceof Date ? new Date(value) : new Date(value);
   if (Number.isNaN(date.getTime())) {
@@ -1993,13 +2167,26 @@ const useFloatingPosition = (
         Math.max(viewportPadding, window.innerWidth - width - viewportPadding),
       );
 
-      setPosition({
+      const next: FloatingPosition = {
         top: placement === "bottom" ? rect.bottom + floatingYOffset : rect.top - floatingYOffset,
         left,
         width,
         maxHeight: Math.min(panelHeight, availableHeight),
         placement,
-      });
+      };
+      // Scroll fires in capture phase for every scrollable (including the
+      // panel's own option list); only commit real moves so an open panel
+      // isn't re-rendered on every scrolled frame.
+      setPosition((current) =>
+        current &&
+        current.top === next.top &&
+        current.left === next.left &&
+        current.width === next.width &&
+        current.maxHeight === next.maxHeight &&
+        current.placement === next.placement
+          ? current
+          : next,
+      );
     };
 
     update();
@@ -2618,7 +2805,7 @@ export const MinimalDropdown = <T extends string>({
   useEffect(() => {
     if (open && showSearch) {
       const timer = setTimeout(() => {
-        searchInputRef.current?.focus();
+        searchInputRef.current?.focus({ preventScroll: true });
       }, 50);
       return () => clearTimeout(timer);
     }
@@ -2633,13 +2820,25 @@ export const MinimalDropdown = <T extends string>({
   }, [open]);
 
   useEffect(() => {
-    if (highlightedIndex >= 0 && panelRef.current) {
-      const activeEl = panelRef.current.querySelector(
-        `[id="${listboxId}-option-${highlightedIndex}"]`
-      );
-      if (activeEl) {
-        activeEl.scrollIntoView({ block: "nearest" });
-      }
+    if (highlightedIndex < 0 || !panelRef.current) {
+      return;
+    }
+    const activeEl = panelRef.current.querySelector<HTMLElement>(
+      `[id="${listboxId}-option-${highlightedIndex}"]`
+    );
+    const listEl = activeEl?.parentElement;
+    if (!activeEl || !listEl) {
+      return;
+    }
+    // Scroll only the option list. `scrollIntoView` would also scroll the
+    // overflow-hidden panel (clipping the search input out of view) and any
+    // scrollable page ancestors, shifting the whole layout when the panel opens.
+    const optionTop = activeEl.offsetTop - listEl.offsetTop;
+    const optionBottom = optionTop + activeEl.offsetHeight;
+    if (optionTop < listEl.scrollTop) {
+      listEl.scrollTop = optionTop;
+    } else if (optionBottom > listEl.scrollTop + listEl.clientHeight) {
+      listEl.scrollTop = optionBottom - listEl.clientHeight;
     }
   }, [highlightedIndex, listboxId]);
 
@@ -3157,162 +3356,343 @@ export const MinimalTable = <T,>({
   </TableShell>
 );
 
+const CalendarChevron = ({ direction }: { direction: "left" | "right" | "down" }) => {
+  const points = direction === "left" ? "15 18 9 12 15 6" : direction === "right" ? "9 18 15 12 9 6" : "6 9 12 15 18 9";
+  return (
+    <svg aria-hidden width="14" height="14" viewBox="0 0 24 24" fill="none">
+      <polyline points={points} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+};
+
 export const MinimalCalendar = ({
   value,
   onChange,
   month,
   onMonthChange,
+  minDate,
+  maxDate,
+  isDateDisabled,
   weekStartsOn = 1,
   locale = "en-US",
+  showAdjacentDays = true,
+  showTodayAction = true,
   renderDayContent,
   ...props
 }: MinimalCalendarProps) => {
   const selectedDate = normalizeDateValue(value);
+  const selectedTimestamp = selectedDate?.getTime();
   const externalMonth = normalizeDateValue(month);
+  const minimumDate = normalizeDateValue(minDate);
+  const maximumDate = normalizeDateValue(maxDate);
+  const today = normalizeDateValue(new Date()) as Date;
+  const selectionLayoutId = `minimal-calendar-selection-${useId().replace(/:/g, "")}`;
+  const [viewMode, setViewMode] = useState<CalendarViewMode>("day");
+  const [direction, setDirection] = useState(0);
   const [internalMonth, setInternalMonth] = useState(
-    externalMonth ?? selectedDate ?? new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+    externalMonth ?? selectedDate ?? new Date(today.getFullYear(), today.getMonth(), 1)
   );
   const visibleMonth = externalMonth ?? internalMonth;
-  const days = useMemo(() => buildMonthGrid(visibleMonth, weekStartsOn), [visibleMonth, weekStartsOn]);
-  const weekdayFormatter = useMemo(
-    () => new Intl.DateTimeFormat(locale, { weekday: "short" }),
-    [locale]
+  const visibleYear = visibleMonth.getFullYear();
+  const visibleMonthIndex = visibleMonth.getMonth();
+  const yearPageStart = Math.floor(visibleYear / 16) * 16;
+  const days = useMemo(
+    () => buildMonthGrid(new Date(visibleYear, visibleMonthIndex, 1), weekStartsOn),
+    [visibleYear, visibleMonthIndex, weekStartsOn]
   );
+  const weekdayFormatter = useMemo(() => new Intl.DateTimeFormat(locale, { weekday: "short" }), [locale]);
   const monthFormatter = useMemo(
     () => new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }),
+    [locale]
+  );
+  const monthNameFormatter = useMemo(() => new Intl.DateTimeFormat(locale, { month: "short" }), [locale]);
+  const dayFormatter = useMemo(
+    () => new Intl.DateTimeFormat(locale, { weekday: "long", year: "numeric", month: "long", day: "numeric" }),
     [locale]
   );
   const weekDays = Array.from({ length: 7 }, (_, index) => {
     const base = new Date(2024, 0, 7 + ((index + weekStartsOn) % 7));
     return weekdayFormatter.format(base);
   });
-
+  const monthOptions = Array.from({ length: 12 }, (_, index) => ({
+    index,
+    label: monthNameFormatter.format(new Date(2024, index, 1)),
+  }));
+  const yearOptions = Array.from({ length: 16 }, (_, index) => yearPageStart + index);
   const [focusedDate, setFocusedDate] = useState<Date>(
-    () => selectedDate ?? new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1)
+    () => selectedDate ?? new Date(visibleYear, visibleMonthIndex, 1)
   );
   const gridRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (selectedDate) {
-      setFocusedDate(selectedDate);
-    }
-  }, [selectedDate]);
+  const updateMonth = (next: Date) => {
+    const normalized = new Date(next.getFullYear(), next.getMonth(), 1);
+    if (!externalMonth) setInternalMonth(normalized);
+    onMonthChange?.(normalized);
+  };
 
-  const adjustMonthForFocusedDate = (newFocusedDate: Date) => {
-    setFocusedDate(newFocusedDate);
-    if (
-      newFocusedDate.getMonth() !== visibleMonth.getMonth() ||
-      newFocusedDate.getFullYear() !== visibleMonth.getFullYear()
-    ) {
-      const nextMonth = new Date(newFocusedDate.getFullYear(), newFocusedDate.getMonth(), 1);
-      updateMonth(nextMonth);
+  const dateIsOutsideBounds = (date: Date) => {
+    const timestamp = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    const minimum = minimumDate?.getTime();
+    const maximum = maximumDate?.getTime();
+    return (minimum !== undefined && timestamp < minimum) || (maximum !== undefined && timestamp > maximum);
+  };
+
+  const isDisabled = (date: Date) => dateIsOutsideBounds(date) || Boolean(isDateDisabled?.(date));
+
+  const canNavigateToMonth = (candidate: Date) => {
+    const first = new Date(candidate.getFullYear(), candidate.getMonth(), 1);
+    const last = new Date(candidate.getFullYear(), candidate.getMonth() + 1, 0);
+    return !(minimumDate && last < minimumDate) && !(maximumDate && first > maximumDate);
+  };
+
+  const canNavigateToYear = (year: number) => {
+    const first = new Date(year, 0, 1);
+    const last = new Date(year, 11, 31);
+    return !(minimumDate && last < minimumDate) && !(maximumDate && first > maximumDate);
+  };
+
+  const canNavigateYearPage = (startYear: number) => {
+    const first = new Date(startYear, 0, 1);
+    const last = new Date(startYear + 15, 11, 31);
+    return !(minimumDate && last < minimumDate) && !(maximumDate && first > maximumDate);
+  };
+
+  const periodCandidate = (delta: number) => {
+    if (viewMode === "day") return addMonths(visibleMonth, delta);
+    if (viewMode === "month") return new Date(visibleYear + delta, visibleMonthIndex, 1);
+    return new Date(visibleYear + delta * 16, visibleMonthIndex, 1);
+  };
+
+  const canNavigatePeriod = (delta: number) => {
+    const candidate = periodCandidate(delta);
+    if (viewMode === "day") return canNavigateToMonth(candidate);
+    if (viewMode === "month") return canNavigateToYear(candidate.getFullYear());
+    return canNavigateYearPage(yearPageStart + delta * 16);
+  };
+
+  const navigatePeriod = (delta: number) => {
+    if (!canNavigatePeriod(delta)) return;
+    setDirection(delta);
+    updateMonth(periodCandidate(delta));
+  };
+
+  const adjustMonthForFocusedDate = (next: Date) => {
+    setFocusedDate(next);
+    if (next.getMonth() !== visibleMonthIndex || next.getFullYear() !== visibleYear) {
+      setDirection(next > visibleMonth ? 1 : -1);
+      updateMonth(next);
     }
   };
 
   useEffect(() => {
-    if (
-      focusedDate.getMonth() !== visibleMonth.getMonth() ||
-      focusedDate.getFullYear() !== visibleMonth.getFullYear()
-    ) {
-      setFocusedDate(new Date(visibleMonth.getFullYear(), visibleMonth.getMonth(), 1));
-    }
-  }, [visibleMonth]);
+    if (selectedTimestamp !== undefined) setFocusedDate(new Date(selectedTimestamp));
+  }, [selectedTimestamp]);
 
   useEffect(() => {
-    if (!gridRef.current) return;
-    const active = document.activeElement;
-    if (gridRef.current.contains(active)) {
-      const targetBtn = gridRef.current.querySelector<HTMLButtonElement>(
-        `[data-date="${focusedDate.toISOString()}"]`
-      );
-      targetBtn?.focus();
+    if (focusedDate.getMonth() !== visibleMonthIndex || focusedDate.getFullYear() !== visibleYear) {
+      setFocusedDate(new Date(visibleYear, visibleMonthIndex, 1));
     }
+  }, [focusedDate, visibleMonthIndex, visibleYear]);
+
+  useEffect(() => {
+    if (!gridRef.current || !gridRef.current.contains(document.activeElement)) return;
+    gridRef.current
+      .querySelector<HTMLButtonElement>(`[data-date="${focusedDate.toISOString()}"]`)
+      ?.focus();
   }, [focusedDate]);
 
   const handleDayKeyDown = (day: Date, event: React.KeyboardEvent<HTMLButtonElement>) => {
-    let nextDate: Date | null = null;
-    switch (event.key) {
-      case "ArrowLeft":
-        nextDate = new Date(day.getFullYear(), day.getMonth(), day.getDate() - 1);
-        break;
-      case "ArrowRight":
-        nextDate = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
-        break;
-      case "ArrowUp":
-        nextDate = new Date(day.getFullYear(), day.getMonth(), day.getDate() - 7);
-        break;
-      case "ArrowDown":
-        nextDate = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 7);
-        break;
-      case "PageUp":
-        nextDate = new Date(day.getFullYear(), day.getMonth() - 1, day.getDate());
-        break;
-      case "PageDown":
-        nextDate = new Date(day.getFullYear(), day.getMonth() + 1, day.getDate());
-        break;
-      case "Home":
-        nextDate = startOfWeek(day, weekStartsOn);
-        break;
-      case "End":
-        const start = startOfWeek(day, weekStartsOn);
-        nextDate = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
-        break;
-      default:
-        return;
+    let next: Date | null = null;
+    if (event.key === "ArrowLeft") next = new Date(day.getFullYear(), day.getMonth(), day.getDate() - 1);
+    if (event.key === "ArrowRight") next = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+    if (event.key === "ArrowUp") next = new Date(day.getFullYear(), day.getMonth(), day.getDate() - 7);
+    if (event.key === "ArrowDown") next = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 7);
+    if (event.key === "PageUp") next = new Date(day.getFullYear(), day.getMonth() - 1, day.getDate());
+    if (event.key === "PageDown") next = new Date(day.getFullYear(), day.getMonth() + 1, day.getDate());
+    if (event.key === "Home") next = startOfWeek(day, weekStartsOn);
+    if (event.key === "End") {
+      const start = startOfWeek(day, weekStartsOn);
+      next = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
     }
-
-    if (nextDate) {
-      event.preventDefault();
-      adjustMonthForFocusedDate(nextDate);
-    }
+    if (!next) return;
+    event.preventDefault();
+    if (!dateIsOutsideBounds(next)) adjustMonthForFocusedDate(next);
   };
 
-  const updateMonth = (next: Date) => {
-    if (!externalMonth) {
-      setInternalMonth(next);
-    }
-    onMonthChange?.(next);
+  const selectYear = (year: number) => {
+    const preferred = new Date(year, visibleMonthIndex, 1);
+    const candidate = canNavigateToMonth(preferred)
+      ? preferred
+      : monthOptions.map(({ index }) => new Date(year, index, 1)).find(canNavigateToMonth);
+    if (!candidate) return;
+    setDirection(year >= visibleYear ? 1 : -1);
+    updateMonth(candidate);
+    setViewMode("month");
+  };
+
+  const title = viewMode === "day"
+    ? monthFormatter.format(visibleMonth)
+    : viewMode === "month"
+      ? String(visibleYear)
+      : `${yearPageStart}–${yearPageStart + 15}`;
+  const periodName = viewMode === "day" ? "month" : viewMode === "month" ? "year" : "year range";
+  const viewKey = `${viewMode}:${viewMode === "year" ? yearPageStart : `${visibleYear}:${visibleMonthIndex}`}`;
+  const slide = {
+    initial: { opacity: 0, x: direction === 0 ? 0 : direction > 0 ? 18 : -18 },
+    animate: { opacity: 1, x: 0 },
+    exit: { opacity: 0, x: direction === 0 ? 0 : direction > 0 ? -18 : 18 },
   };
 
   return (
-    <CalendarShell data-minimal="Calendar" {...props}>
+    <CalendarShell data-minimal="Calendar" aria-label="Calendar" {...props}>
       <CalendarHeader>
-        <CalendarNavButton type="button" onClick={() => updateMonth(addMonths(visibleMonth, -1))}>
-          ‹
-        </CalendarNavButton>
-        <strong>{monthFormatter.format(visibleMonth)}</strong>
-        <CalendarNavButton type="button" onClick={() => updateMonth(addMonths(visibleMonth, 1))}>
-          ›
-        </CalendarNavButton>
+        <CalendarTitleButton
+          type="button"
+          disabled={viewMode === "year"}
+          aria-label={viewMode === "day" ? "Choose month" : viewMode === "month" ? "Choose year" : title}
+          onClick={() => {
+            setDirection(0);
+            setViewMode(viewMode === "day" ? "month" : "year");
+          }}
+        >
+          <span aria-live="polite">{title}</span>
+          {viewMode !== "year" ? <CalendarChevron direction="down" /> : null}
+        </CalendarTitleButton>
+        <CalendarNavGroup>
+          <CalendarNavButton
+            type="button"
+            aria-label={`Previous ${periodName}`}
+            disabled={!canNavigatePeriod(-1)}
+            onClick={() => navigatePeriod(-1)}
+          >
+            <CalendarChevron direction="left" />
+          </CalendarNavButton>
+          <CalendarNavButton
+            type="button"
+            aria-label={`Next ${periodName}`}
+            disabled={!canNavigatePeriod(1)}
+            onClick={() => navigatePeriod(1)}
+          >
+            <CalendarChevron direction="right" />
+          </CalendarNavButton>
+        </CalendarNavGroup>
       </CalendarHeader>
-      <CalendarGrid ref={gridRef}>
-        {weekDays.map((day) => (
-          <CalendarWeekday key={day}>{day}</CalendarWeekday>
-        ))}
-        {days.map((day) => {
-          const selected = sameDay(selectedDate, day);
-          const currentMonth = day.getMonth() === visibleMonth.getMonth();
-          const isFocused = sameDay(focusedDate, day);
-          return (
-            <CalendarDay
-              key={day.toISOString()}
-              data-date={day.toISOString()}
-              type="button"
-              $selected={selected}
-              $currentMonth={currentMonth}
-              tabIndex={isFocused ? 0 : -1}
-              onKeyDown={(event) => handleDayKeyDown(day, event)}
-              onClick={() => {
-                setFocusedDate(day);
-                onChange?.(day);
-              }}
-            >
-              <span>{day.getDate()}</span>
-              {renderDayContent ? renderDayContent(day, selected, currentMonth) : null}
-            </CalendarDay>
-          );
-        })}
-      </CalendarGrid>
+
+      <CalendarViewport>
+        <AnimatePresence initial={false}>
+          <CalendarViewPanel
+            key={viewKey}
+            initial={slide.initial}
+            animate={slide.animate}
+            exit={slide.exit}
+            transition={{ duration: 0.16, ease: "easeOut" }}
+          >
+            {viewMode === "day" ? (
+              <CalendarGrid ref={gridRef}>
+                {weekDays.map((day, index) => (
+                  <CalendarWeekday key={`${day}:${index}`}>{day}</CalendarWeekday>
+                ))}
+                {days.map((day) => {
+                  const selected = sameDay(selectedDate, day);
+                  const currentMonth = day.getMonth() === visibleMonthIndex;
+                  if (!showAdjacentDays && !currentMonth) {
+                    return <CalendarBlank key={day.toISOString()} aria-hidden />;
+                  }
+                  const focused = sameDay(focusedDate, day);
+                  const disabled = isDisabled(day);
+                  const isToday = sameDay(today, day);
+                  return (
+                    <CalendarDay
+                      key={day.toISOString()}
+                      data-date={day.toISOString()}
+                      type="button"
+                      $selected={selected}
+                      $currentMonth={currentMonth}
+                      $disabled={disabled}
+                      $today={isToday}
+                      $hasContent={Boolean(renderDayContent)}
+                      aria-label={dayFormatter.format(day)}
+                      aria-current={isToday ? "date" : undefined}
+                      aria-selected={selected}
+                      aria-disabled={disabled || undefined}
+                      tabIndex={focused ? 0 : -1}
+                      onKeyDown={(event) => handleDayKeyDown(day, event)}
+                      onClick={() => {
+                        setFocusedDate(day);
+                        if (!disabled) onChange?.(day);
+                      }}
+                    >
+                      {selected ? (
+                        <CalendarSelection
+                          layoutId={selectionLayoutId}
+                          transition={{ type: "spring", stiffness: 520, damping: 38 }}
+                        />
+                      ) : null}
+                      <CalendarDayContent>
+                        <span>{day.getDate()}</span>
+                        {renderDayContent?.(day, selected, currentMonth)}
+                      </CalendarDayContent>
+                    </CalendarDay>
+                  );
+                })}
+              </CalendarGrid>
+            ) : viewMode === "month" ? (
+              <CalendarSelectorGrid $columns={3} role="group" aria-label={`Months in ${visibleYear}`}>
+                {monthOptions.map(({ index, label }) => {
+                  const candidate = new Date(visibleYear, index, 1);
+                  return (
+                    <CalendarOption
+                      key={index}
+                      type="button"
+                      $active={index === visibleMonthIndex}
+                      disabled={!canNavigateToMonth(candidate)}
+                      aria-label={new Intl.DateTimeFormat(locale, { month: "long", year: "numeric" }).format(candidate)}
+                      onClick={() => {
+                        setDirection(index >= visibleMonthIndex ? 1 : -1);
+                        updateMonth(candidate);
+                        setViewMode("day");
+                      }}
+                    >
+                      {label}
+                    </CalendarOption>
+                  );
+                })}
+              </CalendarSelectorGrid>
+            ) : (
+              <CalendarSelectorGrid $columns={4} role="group" aria-label={`Years ${yearPageStart} to ${yearPageStart + 15}`}>
+                {yearOptions.map((year) => (
+                  <CalendarOption
+                    key={year}
+                    type="button"
+                    $active={year === visibleYear}
+                    disabled={!canNavigateToYear(year)}
+                    onClick={() => selectYear(year)}
+                  >
+                    {year}
+                  </CalendarOption>
+                ))}
+              </CalendarSelectorGrid>
+            )}
+          </CalendarViewPanel>
+        </AnimatePresence>
+      </CalendarViewport>
+
+      {showTodayAction ? (
+        <CalendarFooter>
+          <CalendarTodayButton
+            type="button"
+            disabled={dateIsOutsideBounds(today)}
+            onClick={() => {
+              setDirection(today >= visibleMonth ? 1 : -1);
+              setViewMode("day");
+              setFocusedDate(today);
+              updateMonth(today);
+            }}
+          >
+            Today
+          </CalendarTodayButton>
+        </CalendarFooter>
+      ) : null}
     </CalendarShell>
   );
 };

@@ -1,0 +1,73 @@
+name: Foundation Core CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "1"
+  FOUNDATION_REQUIRE_TS_DEPS: "1"
+  GOVULNCHECK_STRICT: "1"
+  RUST_RUNTIME_LOOM: "1"
+  GO_VERSION: "1.26.x"
+  NODE_VERSION: "24"
+  STATICCHECK_VERSION: "v0.7.0"
+  GOPLS_VERSION: "v0.23.0"
+  GOVULNCHECK_VERSION: "v1.3.0"
+  GOSEC_VERSION: "v2.26.1"
+
+jobs:
+  verify:
+    name: Verify Core contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          components: clippy, rustfmt
+
+      - name: Install pinned Go analysis tools
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}
+          go install golang.org/x/tools/gopls@${GOPLS_VERSION}
+          go install golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}
+          go install github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install locked TypeScript dependencies
+        run: make install-ts-deps
+
+      - name: Audit TypeScript dependencies
+        run: make audit-ts-deps
+
+      - name: Verify Core
+        run: make verify

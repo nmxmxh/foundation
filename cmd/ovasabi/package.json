@@ -10,7 +10,7 @@
     "go.mod",
     "main.go"
   ],
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE",
   "engines": {
     "node": ">=20"
   }

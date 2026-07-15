@@ -108,6 +108,8 @@ Use the `ui-minimal` theme model as the baseline:
 2. theme provider merges overrides instead of replacing the whole tree
 3. CSS variables are exported once from the active theme
 4. shared primitives read semantic tokens, not hard-coded palette literals
+5. direct controls read `theme.control` dimensions and overlays read `theme.overlay` constraints; compact visuals must still preserve the 44px pointer target
+6. nested edition and embedded-widget overrides use `MinimalThemeScope` instead of installing another document-global theme
 
 Recommended split:
 
@@ -284,6 +286,8 @@ Before merging frontend work, verify:
 8. overlays clamp width and height to the viewport
 9. modals have explicit max-height and scroll-body behavior
 10. media/display sections declare aspect-ratio and min-height instead of depending on content accidents
+11. generated application manifests install the `@base-ui/react` peer required by the preserved local-package workflow, but application source does not import it; all Base UI composition stays behind shared `Minimal*` contracts
+12. date-only values use local `YYYY-MM-DD`, wall times use `HH:mm`, and scheduled instants use ISO/RFC3339 plus an explicit product timezone policy
 
 ## 10. Fluid Sizing, Proportions, and Primitive Intelligence
 

@@ -218,6 +218,13 @@ func (s *Server) registerPublicRoutePaths() {
 	}
 	add := func(path string) {
 		path = strings.TrimSpace(path)
+		// Public paths are prefix-matched against concrete request paths, so a
+		// route template's "{param}" segments would never match anything
+		// (e.g. "/v1/media/objects/{key...}" vs a real key). Expose the static
+		// prefix before the first parameter instead.
+		if i := strings.Index(path, "{"); i >= 0 {
+			path = path[:i]
+		}
 		if path == "" || path == "/" {
 			return
 		}
@@ -330,8 +337,17 @@ func (s *Server) Handler() http.Handler {
 		}
 	}
 
-	if s.requireAuthForDispatch {
-		handler = security.JWTAuth(s.jwt, s.publicPaths)(handler)
+	// Authentication is installed whenever a JWT manager is configured:
+	// identity is established whenever a credential is presented. Whether a
+	// credential is *required* is the separate enforcement knob — without
+	// this split, development (auth not required) silently ignores valid
+	// tokens and every identity-scoped surface breaks.
+	if s.jwt != nil {
+		if s.requireAuthForDispatch {
+			handler = security.JWTAuth(s.jwt, s.publicPaths)(handler)
+		} else {
+			handler = security.OptionalJWTAuth(s.jwt, s.publicPaths)(handler)
+		}
 	}
 
 	handler = kitcompress.HTTPMiddleware(s.httpCompressionEnabled, s.httpCompressionMinBytes, s.httpCompressionLevel)(handler)

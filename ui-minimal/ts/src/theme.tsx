@@ -1,13 +1,14 @@
-import { PropsWithChildren, useMemo } from "react";
+import { type CSSProperties, type HTMLAttributes, PropsWithChildren, useMemo } from "react";
 import { ThemeProvider, createGlobalStyle, useTheme as useStyledTheme, type DefaultTheme } from "styled-components";
 
-import type { DeepPartial, MinimalTheme } from "./types";
+import type { DeepPartial, MinimalTheme, ResolvedMinimalTheme } from "./types";
 
 const isPlainObject = (value: unknown): value is object =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-export const minimalBaseTheme: MinimalTheme = {
+export const minimalBaseTheme: ResolvedMinimalTheme = {
   name: "ovasabi-minimal",
+  colorScheme: "light",
   color: {
     bgApp: "#faf9f6",
     bgSurface: "#ffffff",
@@ -55,6 +56,20 @@ export const minimalBaseTheme: MinimalTheme = {
   },
   focus: {
     ringWidth: "3px",
+  },
+  control: {
+    minTargetSize: "44px",
+    height: {
+      sm: "36px",
+      md: "44px",
+      lg: "52px",
+    },
+    iconSize: "20px",
+  },
+  overlay: {
+    viewportGutter: "16px",
+    anchoredOffset: "8px",
+    maxHeight: "min(70dvh, 480px)",
   },
   typography: {
     displayFamily: "\"Fraunces\", Georgia, serif",
@@ -121,10 +136,10 @@ const mergeRecord = <T extends object>(base: T, override?: DeepPartial<T>): T =>
   return next;
 };
 
-export const createMinimalTheme = (overrides?: DeepPartial<MinimalTheme>): MinimalTheme =>
-  mergeRecord(minimalBaseTheme, overrides);
+export const createMinimalTheme = (overrides?: DeepPartial<MinimalTheme>): ResolvedMinimalTheme =>
+  mergeRecord(minimalBaseTheme, overrides as DeepPartial<ResolvedMinimalTheme>);
 
-export const minimalThemeToCSSVariables = (theme: MinimalTheme): Record<string, string | number> => ({
+export const minimalThemeToCSSVariables = (theme: ResolvedMinimalTheme): Record<string, string | number> => ({
   "--minimal-bg-app": theme.color.bgApp,
   "--minimal-bg-surface": theme.color.bgSurface,
   "--minimal-bg-surface-alt": theme.color.bgSurfaceAlt,
@@ -163,6 +178,14 @@ export const minimalThemeToCSSVariables = (theme: MinimalTheme): Record<string, 
   "--minimal-shadow-medium": theme.shadow.medium,
   "--minimal-shadow-floating": theme.shadow.floating,
   "--minimal-focus-ring-width": theme.focus.ringWidth,
+  "--minimal-control-min-target": theme.control.minTargetSize,
+  "--minimal-control-height-sm": theme.control.height.sm,
+  "--minimal-control-height-md": theme.control.height.md,
+  "--minimal-control-height-lg": theme.control.height.lg,
+  "--minimal-control-icon-size": theme.control.iconSize,
+  "--minimal-overlay-viewport-gutter": theme.overlay.viewportGutter,
+  "--minimal-overlay-anchored-offset": theme.overlay.anchoredOffset,
+  "--minimal-overlay-max-height": theme.overlay.maxHeight,
   "--minimal-font-display-family": theme.typography.displayFamily,
   "--minimal-font-body-family": theme.typography.bodyFamily,
   "--minimal-font-mono-family": theme.typography.monoFamily,
@@ -172,6 +195,15 @@ export const minimalThemeToCSSVariables = (theme: MinimalTheme): Record<string, 
   "--minimal-font-body-size": theme.typography.bodySize,
   "--minimal-font-caption-size": theme.typography.captionSize,
   "--minimal-font-meta-size": theme.typography.metaSize,
+  "--minimal-font-weight-regular": theme.typography.weightRegular,
+  "--minimal-font-weight-medium": theme.typography.weightMedium,
+  "--minimal-font-weight-semibold": theme.typography.weightSemibold,
+  "--minimal-font-weight-bold": theme.typography.weightBold,
+  "--minimal-line-height-tight": theme.typography.lineHeightTight,
+  "--minimal-line-height-body": theme.typography.lineHeightBody,
+  "--minimal-motion-micro": `${theme.motion.microDuration}s`,
+  "--minimal-motion-standard": `${theme.motion.standardDuration}s`,
+  "--minimal-motion-slow": `${theme.motion.slowDuration}s`,
   "--minimal-z-base": theme.zIndex.base,
   "--minimal-z-sticky": theme.zIndex.sticky,
   "--minimal-z-dock": theme.zIndex.dock,
@@ -184,8 +216,9 @@ export const minimalThemeToCSSVariables = (theme: MinimalTheme): Record<string, 
 
 const GlobalStyles = createGlobalStyle`
   :root {
+    color-scheme: ${({ theme }) => theme.colorScheme ?? "light"};
     ${({ theme }) =>
-      Object.entries(minimalThemeToCSSVariables(theme)).map(([key, value]) => `${key}: ${value};`).join("\n")}
+      Object.entries(minimalThemeToCSSVariables(theme as ResolvedMinimalTheme)).map(([key, value]) => `${key}: ${value};`).join("\n")}
   }
 
   *,
@@ -195,6 +228,10 @@ const GlobalStyles = createGlobalStyle`
   }
 
   body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100dvh;
+    position: relative;
     background: ${({ theme }) => theme.color.bgApp};
     color: ${({ theme }) => theme.color.textPrimary};
     font-family: ${({ theme }) => theme.typography.bodyFamily};
@@ -202,6 +239,29 @@ const GlobalStyles = createGlobalStyle`
     line-height: ${({ theme }) => theme.typography.lineHeightBody};
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  #root {
+    isolation: isolate;
+    min-height: 100dvh;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  ::selection {
+    background: ${({ theme }) => theme.color.brandSoft};
+    color: ${({ theme }) => theme.color.textPrimary};
+  }
+
+  [data-theme-switching] *,
+  [data-theme-switching] *::before,
+  [data-theme-switching] *::after {
+    transition: none !important;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -212,6 +272,13 @@ const GlobalStyles = createGlobalStyle`
       animation-iteration-count: 1 !important;
       scroll-behavior: auto !important;
       transition-duration: 0.01ms !important;
+    }
+  }
+
+  @media (forced-colors: active) {
+    :focus-visible {
+      outline: 2px solid CanvasText !important;
+      outline-offset: 2px;
     }
   }
 `;
@@ -226,8 +293,43 @@ export const MinimalThemeProvider = ({
   return <ThemeProvider theme={mergedTheme as unknown as DefaultTheme}>{children}</ThemeProvider>;
 };
 
-export const useMinimalTheme = (): MinimalTheme => {
-  const theme = useStyledTheme() as MinimalTheme | undefined;
+export interface MinimalThemeScopeProps extends HTMLAttributes<HTMLDivElement> {
+  themeOverride?: DeepPartial<MinimalTheme>;
+}
+
+/**
+ * Applies a nested token override to both styled-components and CSS-variable
+ * consumers. Use this for edition panels, embedded widgets, and previews that
+ * must not rewrite the document-level `:root` variables.
+ */
+export const MinimalThemeScope = ({
+  themeOverride,
+  children,
+  style,
+  ...props
+}: PropsWithChildren<MinimalThemeScopeProps>) => {
+  const parentTheme = useMinimalTheme();
+  const scopedTheme = useMemo(
+    () => mergeRecord(parentTheme, themeOverride as DeepPartial<ResolvedMinimalTheme>),
+    [parentTheme, themeOverride]
+  );
+  const variables = minimalThemeToCSSVariables(scopedTheme);
+
+  return (
+    <ThemeProvider theme={scopedTheme as unknown as DefaultTheme}>
+      <div
+        data-minimal-theme-scope={scopedTheme.name}
+        style={{ ...variables, colorScheme: scopedTheme.colorScheme, ...style } as CSSProperties}
+        {...props}
+      >
+        {children}
+      </div>
+    </ThemeProvider>
+  );
+};
+
+export const useMinimalTheme = (): ResolvedMinimalTheme => {
+  const theme = useStyledTheme() as ResolvedMinimalTheme | undefined;
   if (theme && typeof theme.name === "string") {
     return theme;
   }

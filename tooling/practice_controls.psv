@@ -44,7 +44,7 @@ CP-24|docs/coding_practices.md|workers|medium|partial|script:tooling/scripts/riv
 CP-25|docs/coding_practices.md|frontend|medium|strong|script:tooling/scripts/testing_practices_check.sh;review|dedupe-test|yes
 CP-26|docs/coding_practices.md|frontend|high|partial|review|boot-smoke-test|yes
 CP-27|docs/coding_practices.md|security|critical|partial|script:tooling/scripts/project_scaffold_check.sh;review|header-test|yes
-CP-28|docs/coding_practices.md|supply-chain|critical|partial|review|dependency-review|yes
+CP-28|docs/coding_practices.md|supply-chain|critical|partial|script:tooling/scripts/operational_excellence_check.sh;review|dependency-review|yes
 CP-29|docs/coding_practices.md|security|critical|human|review|threat-model|yes
 CP-30|docs/coding_practices.md|testing|high|partial|script:tooling/scripts/testing_practices_check.sh;review|coverage-hotspot-report|yes
 CP-31|docs/coding_practices.md|frontend|medium|partial|script:tooling/scripts/coding_practices_check.sh;review|observer-exception|yes

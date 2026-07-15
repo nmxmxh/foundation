@@ -697,6 +697,67 @@ patch_native_tauri_startup_expect() {
   PATCH_SEARCH="$search" PATCH_REPLACE="$replace" replace_in_file "$file" "$search" "$replace" "native Tauri startup avoids expect"
 }
 
+patch_native_tauri_command_acl() {
+  local build="$target/native/src-tauri/build.rs"
+  local capability="$target/native/src-tauri/capabilities/main.json"
+  local lib="$target/native/src-tauri/src/lib.rs"
+
+  replace_in_file "$build" 'fn main() {
+    tauri_build::build();
+}' 'fn main() {
+    tauri_build::try_build(
+        tauri_build::Attributes::new().app_manifest(
+            tauri_build::AppManifest::new().commands(&[
+                "foundation_runtime_dispatch",
+                "foundation_runtime_capabilities",
+            ]),
+        ),
+    )
+    .expect("failed to build the bounded Foundation Tauri command manifest");
+}' "native Tauri command ACL manifest"
+
+  replace_in_file "$capability" '"core:default"' '"allow-foundation-runtime-dispatch",
+    "allow-foundation-runtime-capabilities"' "native Tauri least-privilege capability"
+
+  replace_in_file "$lib" 'use ovasabi_runtime_native::{NativeRuntimeBridge, NativeSecureStore};' 'use ovasabi_runtime_native::NativeRuntimeBridge;' "native Tauri removes ephemeral store import"
+  replace_in_file "$lib" '    secure_store: NativeSecureStore,
+' '' "native Tauri removes ephemeral store state"
+  replace_in_file "$lib" '            secure_store: NativeSecureStore::default(),
+' '' "native Tauri removes ephemeral store initialization"
+
+  local store_commands='#[tauri::command]
+fn foundation_secure_store_get(
+    key: String,
+    state: State<'\''_, NativeState>,
+) -> Result<Option<Vec<u8>>, String> {
+    state.secure_store.get(&key).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn foundation_secure_store_put(
+    key: String,
+    value: Vec<u8>,
+    state: State<'\''_, NativeState>,
+) -> Result<(), String> {
+    state.secure_store.put(&key, &value).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn foundation_secure_store_delete(
+    key: String,
+    state: State<'\''_, NativeState>,
+) -> Result<bool, String> {
+    state.secure_store.delete(&key).map_err(|error| error.to_string())
+}
+
+'
+  replace_in_file "$lib" "$store_commands" '' "native Tauri removes unbacked secure-store commands"
+  replace_in_file "$lib" '            foundation_runtime_capabilities,
+            foundation_secure_store_get,
+            foundation_secure_store_put,
+            foundation_secure_store_delete' '            foundation_runtime_capabilities' "native Tauri narrows invoke handler"
+}
+
 patch_go_dependency_manifests() {
   local file="$target/Dockerfile"
   [[ -f "$file" ]] || return 0
@@ -1955,6 +2016,7 @@ patch_docgen_pointer_helper
 patch_docgen_named_schema_refs
 patch_docgen_route_catalog
 patch_native_tauri_startup_expect
+patch_native_tauri_command_acl
 patch_go_dependency_manifests
 patch_server_binary_path
 patch_websocket_runtime_backpressure

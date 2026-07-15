@@ -127,21 +127,54 @@ func InputValidation(next http.Handler) http.Handler {
 }
 
 // JWTAuth validates bearer tokens and injects claims into request context.
+// Requests without a credential are rejected on non-public paths.
 func JWTAuth(jwtManager *auth.JWTManager, publicPaths []string) func(http.Handler) http.Handler {
+	return jwtAuth(jwtManager, publicPaths, true)
+}
+
+// OptionalJWTAuth authenticates like JWTAuth without requiring a credential:
+// a request presenting a valid token gets its claims injected into context; a
+// request without one proceeds anonymously. This is the development posture —
+// identity is established whenever it is presented, so identity-scoped
+// surfaces (command metadata, projection tenancy) behave the same as under
+// enforced auth. A presented-but-invalid token is still rejected on
+// non-public paths: credentials fail closed.
+func OptionalJWTAuth(jwtManager *auth.JWTManager, publicPaths []string) func(http.Handler) http.Handler {
+	return jwtAuth(jwtManager, publicPaths, false)
+}
+
+func jwtAuth(jwtManager *auth.JWTManager, publicPaths []string, required bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if jwtManager == nil || isPublicPath(r.URL.Path, publicPaths) {
+			if jwtManager == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// CORS preflights never carry credentials; the CORS middleware
+			// downstream answers them.
+			if r.Method == http.MethodOptions {
 				next.ServeHTTP(w, r)
 				return
 			}
 
-			token, err := auth.ParseBearerToken(r.Header.Get("Authorization"))
-			if err != nil {
-				domainerr.WriteHTTP(w, domainerr.Unauthorized("authorization_required", "authorization required"), domainerr.ResponseOptions{})
+			public := isPublicPath(r.URL.Path, publicPaths)
+			token := requestToken(r)
+			if token == "" {
+				if required && !public {
+					domainerr.WriteHTTP(w, domainerr.Unauthorized("authorization_required", "authorization required"), domainerr.ResponseOptions{})
+					return
+				}
+				next.ServeHTTP(w, r)
 				return
 			}
 			claims, err := jwtManager.ValidateToken(token)
 			if err != nil {
+				if public {
+					// A public path stays reachable even when a stale token
+					// rides along; serve it anonymously.
+					next.ServeHTTP(w, r)
+					return
+				}
 				domainerr.WriteHTTP(w, domainerr.Unauthorized("authorization_invalid", "invalid authorization"), domainerr.ResponseOptions{})
 				return
 			}
@@ -161,6 +194,27 @@ func JWTAuth(jwtManager *auth.JWTManager, publicPaths []string) func(http.Handle
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// requestToken extracts the credential a request carries: the Authorization
+// bearer header or — for WebSocket upgrades only — the access_token query
+// parameter. Browsers cannot set headers on WebSocket handshakes, so the
+// query parameter is the standard channel there (and only there: tokens must
+// not ride URLs on ordinary requests, where they leak into logs and caches).
+func requestToken(r *http.Request) string {
+	if bearer, err := auth.ParseBearerToken(r.Header.Get("Authorization")); err == nil {
+		if token := strings.TrimSpace(bearer); token != "" {
+			return token
+		}
+	}
+	if isWebSocketUpgrade(r) {
+		return strings.TrimSpace(r.URL.Query().Get("access_token"))
+	}
+	return ""
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket")
 }
 
 // RequireCapabilities enforces RBAC capability checks for downstream handlers.
@@ -283,9 +337,15 @@ func (rl *RateLimiter) Allow(key string) bool {
 			filtered = append(filtered, at)
 		}
 	}
-	filtered = append(filtered, now)
-	rl.requests[key] = filtered
-	return len(filtered) <= rl.limit
+	// Rejected requests are not recorded: a client that is over the limit and
+	// keeps retrying must recover once its allowed requests age out, not be
+	// throttled indefinitely by its own rejections.
+	if len(filtered) >= rl.limit {
+		rl.requests[key] = filtered
+		return false
+	}
+	rl.requests[key] = append(filtered, now)
+	return true
 }
 
 func GetClientIP(r *http.Request) string {

@@ -654,6 +654,7 @@ Requirements:
 Enforcement:
 
 - Dependency and lockfile diff review.
+- Foundation Core uses `make install-ts-deps`, `make audit-ts-deps`, and the fail-closed `.github/workflows/core-ci.yml` verification lane.
 - CI vulnerability scan / secret scan gates where available.
 - Config review for new external integrations.
 

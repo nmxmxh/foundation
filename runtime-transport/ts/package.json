@@ -1,7 +1,7 @@
 {
   "name": "@ovasabi/runtime-transport",
   "version": "0.1.0",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "sideEffects": false,
   "dependencies": {

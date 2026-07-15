@@ -808,6 +808,85 @@ func TestIsPublicRouteBypassesAuth(t *testing.T) {
 	}
 }
 
+// TestIsPublicRouteWithPathParamsBypassesAuth registers a public route the way
+// domains actually do — with a "{param}" template in the path — and asserts an
+// unauthenticated request to a concrete key still bypasses enforced JWT auth.
+// The template's brace segment never prefix-matches a real request path, so
+// registerPublicRoutePaths must expose the static prefix before the first
+// parameter.
+func TestIsPublicRouteWithPathParamsBypassesAuth(t *testing.T) {
+	s := serverWithDispatch(t, func(context.Context, extension.Object) (any, error) { return nil, nil })
+	manager, err := auth.NewJWTManager("this-is-a-very-secure-secret")
+	if err != nil {
+		t.Fatalf("new jwt manager: %v", err)
+	}
+	s.ConfigureAuth(manager, security.NewAuthorizer(nil), true)
+
+	reached := 0
+	s.SetHTTPRoutes([]registry.HTTPRoute{{
+		Method:   http.MethodGet,
+		Path:     "/v1/media/objects/{key...}",
+		Handler:  func(w http.ResponseWriter, _ *http.Request) { reached++; w.WriteHeader(http.StatusOK) },
+		IsPublic: true,
+	}})
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/media/objects/seed/chef/amara.png", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unauthenticated GET of templated public route: status = %d, want 200", rec.Code)
+	}
+	if reached != 1 {
+		t.Fatalf("templated public handler reached %d times, want 1", reached)
+	}
+}
+
+// TestOptionalAuthEstablishesIdentityWithoutRequiringIt covers the development
+// posture: auth not required, but a presented bearer token must still populate
+// the security context — command metadata and projection tenancy depend on it.
+func TestOptionalAuthEstablishesIdentityWithoutRequiringIt(t *testing.T) {
+	s := serverWithDispatch(t, func(context.Context, extension.Object) (any, error) { return nil, nil })
+	manager, err := auth.NewJWTManager("this-is-a-very-secure-secret")
+	if err != nil {
+		t.Fatalf("new jwt manager: %v", err)
+	}
+	s.ConfigureAuth(manager, security.NewAuthorizer(nil), false)
+
+	token, err := manager.GenerateAccessToken(auth.Claims{
+		UserID:         "usr_1",
+		OrganizationID: "org_1",
+		Role:           "customer",
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
+
+	var gotOrg string
+	s.SetHTTPRoutes([]registry.HTTPRoute{{
+		Method: http.MethodGet,
+		Path:   "/v1/whoami",
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			gotOrg = security.GetOrganizationIDFromContext(r.Context())
+			w.WriteHeader(http.StatusOK)
+		},
+	}})
+	handler := s.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/whoami", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || gotOrg != "org_1" {
+		t.Fatalf("optional auth with token: status = %d, org = %q; want 200/org_1", rec.Code, gotOrg)
+	}
+
+	gotOrg = "unset"
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/whoami", nil))
+	if rec.Code != http.StatusOK || gotOrg != "" {
+		t.Fatalf("optional auth without token: status = %d, org = %q; want 200/anonymous", rec.Code, gotOrg)
+	}
+}
+
 func TestTerminalEventType(t *testing.T) {
 	cases := []struct {
 		in       string

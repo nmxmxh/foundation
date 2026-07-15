@@ -2,7 +2,7 @@
 name = "ovasabi-runtime-native"
 version = "0.1.0"
 edition = "2021"
-license = "UNLICENSED"
+license-file = "../../LICENSE"
 
 [dependencies]
 ovrt-core = { path = "../../runtime-sdk/rust/crates/ovrt-core" }

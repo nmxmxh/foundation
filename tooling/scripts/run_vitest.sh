@@ -10,6 +10,17 @@ package_dir="$1"
 shift
 package_dir="$(cd "$package_dir" && pwd)"
 
+is_truthy() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+strict_dependency_check() {
+  is_truthy "${CI:-}" || is_truthy "${FOUNDATION_REQUIRE_TS_DEPS:-}"
+}
+
 is_codex_bundled_node() {
   local node_path="$1"
   [[ "$node_path" == /Applications/Codex.app/Contents/Resources/node ]]
@@ -51,7 +62,12 @@ find_vitest_node() {
 }
 
 if [[ ! -d "$package_dir/node_modules" ]]; then
-  echo "Skipping ${package_dir}: node_modules not installed"
+  if strict_dependency_check; then
+    echo "TypeScript test dependencies missing in strict mode: ${package_dir}/node_modules" >&2
+    echo "Run: make install-ts-deps" >&2
+    exit 1
+  fi
+  echo "Skipping ${package_dir}: node_modules not installed (local fallback mode)"
   exit 0
 fi
 
@@ -63,14 +79,19 @@ if [[ ! -f "$vitest_cli" ]]; then
   if [[ -f "$shared_vitest" ]]; then
     vitest_cli="$shared_vitest"
   else
-    echo "Skipping ${package_dir}: vitest is not installed"
+    if strict_dependency_check; then
+      echo "Vitest is not installed for strict test run: ${package_dir}" >&2
+      echo "Run: make install-ts-deps" >&2
+      exit 1
+    fi
+    echo "Skipping ${package_dir}: vitest is not installed (local fallback mode)"
     exit 0
   fi
 fi
 
 if ! node_bin="$(find_vitest_node)"; then
   message="Skipping ${package_dir}: native Vitest/Rolldown bindings cannot run under Codex's bundled hardened Node; install a developer Node or set TEST_NODE/BENCH_NODE"
-  if [[ "${CI:-}" == "1" ]]; then
+  if strict_dependency_check; then
     echo "$message" >&2
     exit 1
   fi

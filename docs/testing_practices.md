@@ -435,10 +435,12 @@ Requirements:
 1. Skips must state the missing capability or explicit opt-in variable.
 2. Required CI tests must not skip because a local service is absent unless that lane is explicitly optional.
 3. Long, load, destructive, or external tests must use explicit `RUN_*` gates.
+4. Missing package dependencies may remain a visible local fallback, but CI and explicit verification modes must fail closed before reporting success.
 
 Enforcement:
 
 - Reviewer gate on `t.Skip`, `test.skip`, and environment-gated tests.
+- `tests/core_validation_contract_test.sh` proves strict TypeScript test and typecheck dependency behavior.
 
 ### TE-25: Generated contracts must be checked for drift
 
@@ -603,6 +605,7 @@ Requirements:
 1. Every CI test/lint lane must have a local make target or script.
 2. Scripts must use explicit roots and avoid hidden global state.
 3. Test scripts must be copied into generated projects through scaffold sync.
+4. Core CI must call the same `make verify`, dependency-install, and dependency-audit targets available to developers.
 
 Enforcement:
 
