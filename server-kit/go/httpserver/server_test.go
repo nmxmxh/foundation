@@ -688,6 +688,48 @@ func TestOperationalAuthRBACDeniesInsufficientCapability(t *testing.T) {
 	}
 }
 
+// TestAuthenticateOperationalRequestValidToken drives the direct token path of
+// authenticateOperationalRequest: a request carrying a valid bearer token but no
+// pre-set identity is validated and its claims are projected into the request
+// context. The HTTP handler tests only reach the early-return branch (upstream
+// auth middleware pre-populates the context), so this exercises the
+// token-validation-to-context build — and the nil-request guard — directly.
+func TestAuthenticateOperationalRequestValidToken(t *testing.T) {
+	jwt, err := auth.NewJWTManager("ops-secret-value-1234567890")
+	if err != nil {
+		t.Fatalf("jwt: %v", err)
+	}
+	s := newOperationalServer(t, jwt, nil) // nil authorizer → rbac disabled, authorize passes
+
+	token, err := jwt.GenerateAccessToken(auth.Claims{
+		UserID: "ops_user", OrganizationID: "org_9", Role: "admin", SessionID: "sess_9",
+	}, time.Minute)
+	if err != nil {
+		t.Fatalf("token: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/metricsz", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	got, err := s.authenticateOperationalRequest(req)
+	if err != nil {
+		t.Fatalf("authenticateOperationalRequest() err=%v", err)
+	}
+	ctx := got.Context()
+	if security.GetUserIDFromContext(ctx) != "ops_user" ||
+		security.GetOrganizationIDFromContext(ctx) != "org_9" ||
+		security.GetRoleFromContext(ctx) != "admin" ||
+		security.GetSessionIDFromContext(ctx) != "sess_9" {
+		t.Fatalf("claims not projected into context: user=%q org=%q role=%q sess=%q",
+			security.GetUserIDFromContext(ctx), security.GetOrganizationIDFromContext(ctx),
+			security.GetRoleFromContext(ctx), security.GetSessionIDFromContext(ctx))
+	}
+
+	// A nil request is rejected rather than panicking.
+	if _, err := s.authenticateOperationalRequest(nil); err == nil {
+		t.Fatal("nil request must be unauthorized")
+	}
+}
+
 func TestOperationalAuthHonorsUpstreamContextIdentity(t *testing.T) {
 	h := newOperationalServer(t, nil, nil).Handler()
 

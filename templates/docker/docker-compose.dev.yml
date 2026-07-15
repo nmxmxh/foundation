@@ -13,7 +13,7 @@
 
 services:
   # PostgreSQL Database (local development only)
-  postgres:
+  app-postgres:
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-postgres
     networks:
       - app-network
@@ -51,7 +51,7 @@ services:
       DB_USER: "${DB_USER:-postgres}"
       DB_PASSWORD: "${DB_PASSWORD:-postgres}"
       DB_NAME: "${DB_NAME:-{{PROJECT_NAME}}_dev}"
-      DB_HOST: "${DB_HOST:-postgres}"
+      DB_HOST: "${DB_HOST:-app-postgres}"
       DB_PORT: "5432"
       DB_SSLMODE: "disable"
       DB_MAX_CONNS: "${DB_MAX_CONNS:-16}"
@@ -75,7 +75,7 @@ services:
       BILLING_DISABLED: "${BILLING_DISABLED:-true}"
     labels: {}  # Remove Traefik labels in dev
     depends_on:
-      postgres:
+      app-postgres:
         condition: service_healthy
       app-redis:
         condition: service_healthy
@@ -89,13 +89,13 @@ services:
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - DB_NAME=${DB_NAME:-{{PROJECT_NAME}}_dev}
-      - DB_HOST=postgres
+      - DB_HOST=app-postgres
       - DB_PORT=5432
       - DB_SSLMODE=disable
     volumes:
       - ./migrations:/migrations:ro
     depends_on:
-      postgres:
+      app-postgres:
         condition: service_healthy
 
   # Frontend - development

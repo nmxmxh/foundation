@@ -2,9 +2,14 @@ package projectiongw
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/gorilla/websocket"
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes"
@@ -203,4 +208,125 @@ func BenchmarkApplyWithObserver(b *testing.B) {
 	}
 	b.Run("bare", func(b *testing.B) { run(b, false) })
 	b.Run("with_observer", func(b *testing.B) { run(b, true) })
+}
+
+func benchDeliveryGateway(b *testing.B) *Gateway {
+	b.Helper()
+	store, err := hermes.NewStore(hermes.ProjectionSpec{
+		Name: "signals", Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"symbol"}, MaxRecords: 16, MaxBytes: 1 << 20,
+	})
+	if err != nil {
+		b.Fatalf("NewStore() err=%v", err)
+	}
+	gw, err := NewGateway(store, 1<<16)
+	if err != nil {
+		b.Fatalf("NewGateway() err=%v", err)
+	}
+	return gw
+}
+
+func benchAwaitSubscribers(b *testing.B, gw *Gateway, keys []string) {
+	b.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for _, key := range keys {
+		for gw.Hub().SubscriberCount(key) == 0 {
+			if time.Now().After(deadline) {
+				b.Fatalf("subscription %s not registered", key)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+// benchDeliver drives one broadcast -> pump -> gorilla write -> client read
+// round trip per iteration. With one frame in flight at a time the hub queue
+// never drops, so the numbers isolate the delivery path itself.
+func benchDeliver(b *testing.B, gw *Gateway, conn *websocket.Conn, keys []string, frames []Frame) {
+	b.Helper()
+	b.ReportAllocs()
+	i := 0
+	for b.Loop() {
+		gw.Hub().Broadcast(keys[i%len(keys)], frames[i%len(frames)])
+		if _, _, err := conn.ReadMessage(); err != nil {
+			b.Fatalf("ReadMessage() err=%v", err)
+		}
+		i++
+	}
+}
+
+// BenchmarkWebSocketDelivery measures a frame's full delivery path through the
+// real handler stack for the single-scope stream and the multiplexed stream
+// (SubscribeMultiplexHandler) at 1 and 8 scopes. The multiplexed pump adds a
+// shared write mutex and per-frame drop check on top of the single-scope
+// loop; this keeps that overhead visible next to the baseline.
+func BenchmarkWebSocketDelivery(b *testing.B) {
+	b.Run("single-scope", func(b *testing.B) {
+		gw := benchDeliveryGateway(b)
+		defer gw.Close()
+		srv := httptest.NewServer(orgContextHandler("org_1", gw.Handler(HandlerConfig{})))
+		defer srv.Close()
+
+		conn, resp, err := websocket.DefaultDialer.Dial(
+			"ws"+strings.TrimPrefix(srv.URL, "http")+"/v1/projections/signals/ticks", nil)
+		if resp != nil {
+			defer func() { _ = resp.Body.Close() }()
+		}
+		if err != nil {
+			b.Fatalf("ws dial err=%v", err)
+		}
+		defer conn.Close()
+
+		key := ScopeKey(&foundationpb.ProjectionScope{TenantId: "org_1", Domain: "signals", Collection: "ticks"})
+		benchAwaitSubscribers(b, gw, []string{key})
+		frame, err := encodeFrame([]*foundationpb.RecordMutation{tickMutation("tick_1", 1, "OVS")}, 1, "1", "bench")
+		if err != nil {
+			b.Fatalf("encodeFrame() err=%v", err)
+		}
+		benchDeliver(b, gw, conn, []string{key}, []Frame{frame})
+	})
+
+	for _, scopes := range []int{1, 8} {
+		b.Run(fmt.Sprintf("multiplex/scopes=%d", scopes), func(b *testing.B) {
+			gw := benchDeliveryGateway(b)
+			defer gw.Close()
+			srv := httptest.NewServer(orgContextHandler("org_1", gw.Handler(HandlerConfig{})))
+			defer srv.Close()
+
+			conn, resp, err := websocket.DefaultDialer.Dial(
+				"ws"+strings.TrimPrefix(srv.URL, "http")+"/v1/projections/", nil)
+			if resp != nil {
+				defer func() { _ = resp.Body.Close() }()
+			}
+			if err != nil {
+				b.Fatalf("ws dial err=%v", err)
+			}
+			defer conn.Close()
+
+			cmd := MultiplexCommand{Type: "subscribe"}
+			keys := make([]string, 0, scopes)
+			frames := make([]Frame, 0, scopes)
+			for i := range scopes {
+				collection := fmt.Sprintf("ticks_%d", i)
+				cmd.Scopes = append(cmd.Scopes, MultiplexScope{Domain: "signals", Collection: collection})
+				keys = append(keys, "org_1:signals:"+collection)
+				mut := tickMutation("tick_1", 1, "OVS")
+				mut.Collection = collection
+				frame, err := encodeFrame([]*foundationpb.RecordMutation{mut}, 1, "1", "bench")
+				if err != nil {
+					b.Fatalf("encodeFrame() err=%v", err)
+				}
+				frames = append(frames, frame)
+			}
+			payload, err := json.Marshal(cmd)
+			if err != nil {
+				b.Fatalf("marshal subscribe err=%v", err)
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+				b.Fatalf("subscribe write err=%v", err)
+			}
+			benchAwaitSubscribers(b, gw, keys)
+			benchDeliver(b, gw, conn, keys, frames)
+		})
+	}
 }

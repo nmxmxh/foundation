@@ -11,6 +11,17 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/domainerr"
 )
 
+// DefaultOrganizationID is the deployment-default tenant for applications
+// without a user-facing organization model. Tenancy is load-bearing across the
+// foundation — every projection scope, record key, and command is
+// tenant-scoped, which is what guarantees isolation when a deployment is
+// multi-tenant — so "no organization" cannot mean an empty tenant in storage.
+// Instead it normalizes to this well-known constant at the trust boundary
+// (token issuance): absent at the API surface, one stable tenant underneath.
+// It must never be derived from user attributes (an email domain, a name) and
+// must not depend on any seed data existing.
+const DefaultOrganizationID = "org_default"
+
 // SecurityHeaders adds baseline hardening headers including CSP and HSTS.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

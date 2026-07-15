@@ -181,6 +181,36 @@ func TestHTTPMiddlewareCompressesJSON(t *testing.T) {
 	}
 }
 
+// TestHTTPMiddlewarePassesThroughWithoutAcceptableEncoding covers the branch
+// that runs when the client advertises no encoding the server offers: the
+// response must pass through uncompressed, and — because the check precedes the
+// buffering writer — reach the handler on the original ResponseWriter.
+func TestHTTPMiddlewarePassesThroughWithoutAcceptableEncoding(t *testing.T) {
+	middleware := HTTPMiddleware(true, 10, 1)
+	body := strings.Repeat("compressible json ", 32)
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+
+	// "identity" is a valid Accept-Encoding but names nothing the server emits,
+	// so PreferredEncoding resolves to "" and the response is left uncompressed.
+	req := httptest.NewRequest(http.MethodGet, "/metricsz", nil)
+	req.Header.Set("Accept-Encoding", "identity")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	if enc := rr.Header().Get("Content-Encoding"); enc != "" {
+		t.Fatalf("Content-Encoding = %q, want empty (uncompressed passthrough)", enc)
+	}
+	if rr.Body.String() != body {
+		t.Fatalf("body was altered on passthrough")
+	}
+}
+
 func TestHTTPMiddlewareSkipsIneligibleResponses(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
@@ -320,4 +350,44 @@ func TestJoinVaryAndBufferedWriter(t *testing.T) {
 	if rr.Code != http.StatusCreated || rr.Header().Get("X-Test") != "true" || rr.Body.String() != "created" {
 		t.Fatalf("unexpected buffered flush: status=%d header=%q body=%q", rr.Code, rr.Header().Get("X-Test"), rr.Body.String())
 	}
+}
+
+// TestHTTPMiddlewareSkipsUpgradeRequests guards the WebSocket handshake:
+// upgrade requests must reach the handler with the server's original
+// ResponseWriter (which implements http.Hijacker), not the buffering
+// compression wrapper — otherwise every projection WebSocket behind a proxy
+// that adds Accept-Encoding fails with a 500. The skip is protocol-based, so
+// it covers upgrades on any path, not just /ws.
+func TestHTTPMiddlewareSkipsUpgradeRequests(t *testing.T) {
+	middleware := HTTPMiddleware(true, 1, 5)
+
+	var sawOriginalWriter bool
+	var marker *markerResponseWriter
+	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, sawOriginalWriter = w.(*markerResponseWriter)
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/projections/profile/chow_profiles?access_token=t", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	marker = &markerResponseWriter{ResponseWriter: httptest.NewRecorder()}
+	handler.ServeHTTP(marker, req)
+	if !sawOriginalWriter {
+		t.Fatalf("upgrade request must bypass the buffering compression writer")
+	}
+
+	// A plain request with Accept-Encoding still goes through the wrapper.
+	req = httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	marker = &markerResponseWriter{ResponseWriter: httptest.NewRecorder()}
+	handler.ServeHTTP(marker, req)
+	if sawOriginalWriter {
+		t.Fatalf("plain request should have been wrapped by the compression writer")
+	}
+}
+
+type markerResponseWriter struct {
+	http.ResponseWriter
 }

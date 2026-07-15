@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
@@ -90,14 +91,25 @@ func (c HandlerConfig) scopeFromRequest(r *http.Request) (*foundationpb.Projecti
 	return scope, nil
 }
 
-// Handler returns a single http.Handler for {prefix}{domain}/{collection} that
-// dispatches a WebSocket upgrade to the delta subscription and any other request
-// to the snapshot reader. Mount it at the path prefix (e.g. "/v1/projections/").
+// Handler returns a single http.Handler mounted at the path prefix (e.g.
+// "/v1/projections/"):
+//
+//   - a WebSocket upgrade at exactly the prefix root is the multiplexed delta
+//     stream — one connection carries every scope the client subscribes to via
+//     control frames (see SubscribeMultiplexHandler);
+//   - a WebSocket upgrade at {prefix}{domain}/{collection} is the single-scope
+//     delta stream, kept for older clients;
+//   - any other request is the snapshot reader.
 func (g *Gateway) Handler(config HandlerConfig) http.Handler {
 	snapshot := g.SnapshotHandler(config)
 	subscribe := g.SubscribeHandler(config)
+	multiplex := g.SubscribeMultiplexHandler(config)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+			if strings.Trim(strings.TrimPrefix(r.URL.Path, config.prefix()), "/") == "" {
+				multiplex.ServeHTTP(w, r)
+				return
+			}
 			subscribe.ServeHTTP(w, r)
 			return
 		}
@@ -230,20 +242,198 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 	})
 }
 
+// MultiplexScope names one projection topic inside a multiplexed subscription
+// command. The tenant is never client-supplied — it comes from the
+// authenticated request context, exactly like the single-scope handlers.
+type MultiplexScope struct {
+	Domain     string `json:"domain"`
+	Collection string `json:"collection"`
+	// Since is an advisory resume watermark, mirroring the single-scope
+	// stream's first text frame. The hub does not replay history; a gap is
+	// reconciled with a fresh snapshot.
+	Since string `json:"since,omitempty"`
+}
+
+// MultiplexCommand is a client→server text frame on the multiplexed stream.
+type MultiplexCommand struct {
+	// Type is "subscribe" or "unsubscribe".
+	Type   string           `json:"type"`
+	Scopes []MultiplexScope `json:"scopes"`
+}
+
+// SubscribeMultiplexHandler serves ONE WebSocket connection carrying delta
+// streams for many scopes. Browsers cap and tax per-connection fan-out — a
+// screen binding N collections must not cost N sockets — so the client
+// subscribes and unsubscribes topics with JSON text frames and the gateway
+// fans every subscribed scope's binary delta frames into the single
+// connection. Frames need no extra envelope: every RecordMutation already
+// carries its organization/domain/collection, so the client routes by scope
+// from the payload itself. Resync notices are tagged with the scope they
+// belong to.
+func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tenant, err := config.tenant()(r)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		conn, err := projectionUpgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
+		// gorilla connections allow one concurrent writer; every scope pump and
+		// the reader-driven error notices serialize through writeFrame.
+		var writeMu sync.Mutex
+		writeFrame := func(messageType int, payload []byte) error {
+			writeMu.Lock()
+			defer writeMu.Unlock()
+			return conn.WriteMessage(messageType, payload)
+		}
+		writeControl := func(frame ControlFrame) error {
+			payload, err := json.Marshal(frame)
+			if err != nil {
+				return err
+			}
+			return writeFrame(websocket.TextMessage, payload)
+		}
+
+		var subsMu sync.Mutex
+		subs := map[string]*Subscription{}
+		defer func() {
+			subsMu.Lock()
+			for _, sub := range subs {
+				sub.Cancel()
+			}
+			subsMu.Unlock()
+		}()
+
+		startScope := func(domain, collection string) {
+			scope := &foundationpb.ProjectionScope{TenantId: tenant, Domain: domain, Collection: collection}
+			key := domain + "/" + collection
+			subsMu.Lock()
+			if _, exists := subs[key]; exists {
+				subsMu.Unlock()
+				return
+			}
+			// g.Subscribe validates the scope; a bad scope (e.g. an empty
+			// collection) is answered with a scoped ControlError rather than
+			// tearing the connection down.
+			sub, err := g.Subscribe(scope)
+			if err != nil {
+				subsMu.Unlock()
+				_ = writeControl(ControlFrame{Type: ControlError, Reason: err.Error(), Domain: domain, Collection: collection})
+				return
+			}
+			subs[key] = sub
+			subsMu.Unlock()
+
+			go func() {
+				var lastDropped, lastEpoch uint64
+				emitResyncIfDropped := func() error {
+					if dropped := sub.Dropped(); dropped > lastDropped {
+						lastDropped = dropped
+						return writeControl(ControlFrame{
+							Type:       ControlResync,
+							Reason:     "slow-consumer",
+							Epoch:      lastEpoch,
+							Dropped:    dropped,
+							Domain:     domain,
+							Collection: collection,
+						})
+					}
+					return nil
+				}
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-sub.Drops():
+						if err := emitResyncIfDropped(); err != nil {
+							cancel()
+							return
+						}
+					case frame, ok := <-sub.Frames:
+						if !ok {
+							return
+						}
+						lastEpoch = frame.Epoch
+						if err := emitResyncIfDropped(); err != nil {
+							cancel()
+							return
+						}
+						if err := writeFrame(websocket.BinaryMessage, frame.Envelope); err != nil {
+							cancel()
+							return
+						}
+					}
+				}
+			}()
+		}
+		stopScope := func(domain, collection string) {
+			key := domain + "/" + collection
+			subsMu.Lock()
+			if sub, ok := subs[key]; ok {
+				sub.Cancel()
+				delete(subs, key)
+			}
+			subsMu.Unlock()
+		}
+
+		// Reader loop: control commands in, connection liveness out. Any read
+		// error (including client close) tears the whole stream down.
+		for {
+			messageType, payload, err := conn.ReadMessage()
+			if err != nil {
+				cancel()
+				return
+			}
+			if messageType != websocket.TextMessage {
+				continue
+			}
+			var cmd MultiplexCommand
+			if err := json.Unmarshal(payload, &cmd); err != nil {
+				continue
+			}
+			switch strings.ToLower(strings.TrimSpace(cmd.Type)) {
+			case "subscribe":
+				for _, s := range cmd.Scopes {
+					startScope(strings.TrimSpace(s.Domain), strings.TrimSpace(s.Collection))
+				}
+			case "unsubscribe":
+				for _, s := range cmd.Scopes {
+					stopScope(strings.TrimSpace(s.Domain), strings.TrimSpace(s.Collection))
+				}
+			}
+		}
+	})
+}
+
 // ControlType labels a projection control frame. Control frames are text frames
 // (distinct from the binary delta frames) carrying out-of-band stream state.
 const (
 	// ControlResync tells the client its stream has gaps (frames were dropped
 	// for a slow consumer) and it must reconcile from a fresh snapshot.
 	ControlResync = "resync"
+	// ControlError reports a rejected control command (e.g. an invalid scope
+	// in a multiplexed subscribe) without tearing the connection down.
+	ControlError = "error"
 )
 
 // ControlFrame is the JSON shape of a projection WebSocket control message.
+// Domain/Collection scope the notice on the multiplexed stream; they are empty
+// on the single-scope stream, where the connection itself names the scope.
 type ControlFrame struct {
-	Type    string `json:"type"`
-	Reason  string `json:"reason,omitempty"`
-	Epoch   uint64 `json:"epoch,omitempty"`
-	Dropped uint64 `json:"dropped,omitempty"`
+	Type       string `json:"type"`
+	Reason     string `json:"reason,omitempty"`
+	Epoch      uint64 `json:"epoch,omitempty"`
+	Dropped    uint64 `json:"dropped,omitempty"`
+	Domain     string `json:"domain,omitempty"`
+	Collection string `json:"collection,omitempty"`
 }
 
 // sendResync emits a resync control frame as a WebSocket text message. The

@@ -277,153 +277,274 @@ type ProjectionControlFrame = {
   reason?: string;
   dropped?: number;
   epoch?: number;
+  // Scope tags on the multiplexed stream; empty on a single-scope stream.
+  domain?: string;
+  collection?: string;
 };
 
 const DEFAULT_MIN_BACKOFF = 500;
 const DEFAULT_MAX_BACKOFF = 15_000;
 const DEFAULT_MAX_CONSECUTIVE_FAILURES = 8;
 
+// createWebSocketProjectionSource multiplexes every subscribed scope over ONE
+// WebSocket to the gateway root ({url}/). Browsers cap and tax per-connection
+// fan-out — a screen binding N collections must not cost N sockets — so scopes
+// ride in subscribe/unsubscribe control frames (projectiongw's multiplexed
+// endpoint) and inbound delta frames are routed by the (domain, collection)
+// every mutation already carries. The connection is opened lazily at the first
+// subscription, resubscribes everything on reconnect, and closes when the last
+// subscription is disposed.
 export const createWebSocketProjectionSource = (
   config: WebSocketProjectionSourceConfig,
 ): Required<Pick<HermesProjectionSourceCompatible, "subscribeProjection">> => {
   const codec = config.codec ?? createRuntimeTransportProjectionCodec();
+  const createSocket = config.createSocket ?? ((url: string) => new WebSocket(url));
+  const minBackoff = Math.max(0, config.minBackoffMs ?? DEFAULT_MIN_BACKOFF);
+  const maxBackoff = Math.max(minBackoff, config.maxBackoffMs ?? DEFAULT_MAX_BACKOFF);
+  const maxFailures = Math.max(
+    1,
+    config.maxConsecutiveFailures ?? DEFAULT_MAX_CONSECUTIVE_FAILURES,
+  );
+
+  type Entry = {
+    scope: ProjectionScope;
+    listener: (event: unknown) => void;
+    resumeWatermark: string;
+  };
+
+  const entries = new Map<string, Set<Entry>>();
+  let socket: WebSocket | undefined;
+  let opening = false;
+  let live = false;
+  let exhausted = false;
+  let attempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const entryKey = (scope: Pick<ProjectionScope, "domain" | "collection">): string =>
+    `${scope.domain}/${scope.collection}`;
+
+  const allEntries = (): Entry[] => {
+    const out: Entry[] = [];
+    for (const set of entries.values()) out.push(...set);
+    return out;
+  };
+
+  const emitStatus = (scope: ProjectionScope, status: Omit<ProjectionTransportStatus, "scope">) => {
+    config.onStatus?.({ scope, ...status });
+  };
+  const emitStatusAll = (status: Omit<ProjectionTransportStatus, "scope">) => {
+    for (const entry of allEntries()) emitStatus(entry.scope, status);
+  };
+
+  const trySend = (payload: string) => {
+    if (!socket || !live) return;
+    try {
+      socket.send(payload);
+    } catch {
+      /* a failed send surfaces as a close; the reconnect path recovers */
+    }
+  };
+
+  const subscribeMessage = (targets: Entry[]): string =>
+    JSON.stringify({
+      type: "subscribe",
+      scopes: targets.map((entry) => ({
+        domain: entry.scope.domain,
+        collection: entry.scope.collection,
+        ...(entry.resumeWatermark ? { since: entry.resumeWatermark } : {}),
+      })),
+    });
+
+  const handleFrame = (data: ArrayBuffer | Uint8Array) => {
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+    let batch: { mutations?: WireRecordMutation[] };
+    try {
+      batch = codec.decodeDeltaFrame(bytes);
+    } catch {
+      return;
+    }
+    for (const wire of batch.mutations ?? []) {
+      // Route by the scope the mutation carries. A mutation without them can
+      // only be resolved when a single scope is subscribed (legacy frames).
+      let set = wire.domain && wire.collection ? entries.get(entryKey(wire)) : undefined;
+      if (!set && entries.size === 1) {
+        set = entries.values().next().value;
+      }
+      if (!set) continue;
+      for (const entry of set) {
+        const mutation = mapMutation(wire, entry.scope);
+        if (!mutation) continue;
+        if (mutation.version) entry.resumeWatermark = String(mutation.version);
+        entry.listener(mutation);
+      }
+    }
+  };
+
+  const handleControl = (raw: string) => {
+    let control: ProjectionControlFrame;
+    try {
+      control = JSON.parse(raw) as ProjectionControlFrame;
+    } catch {
+      return;
+    }
+    if (control.type !== "resync") return;
+    // The server shed frames for this consumer: the stream now has gaps.
+    // Surface "degraded" so the app re-runs the snapshot load and reconciles.
+    const status = {
+      phase: "degraded",
+      reason: control.reason ?? "resync",
+      dropped: control.dropped,
+      epoch: control.epoch,
+    } as const;
+    const set =
+      control.domain && control.collection
+        ? entries.get(entryKey({ domain: control.domain, collection: control.collection }))
+        : undefined;
+    if (set) {
+      for (const entry of set) emitStatus(entry.scope, status);
+      return;
+    }
+    // An untagged resync (single-scope server) degrades everything subscribed.
+    emitStatusAll(status);
+  };
+
+  const backoffDelay = (): number => {
+    const exp = Math.min(maxBackoff, minBackoff * 2 ** attempt);
+    return Math.random() * exp;
+  };
+
+  const scheduleReconnect = () => {
+    if (entries.size === 0 || exhausted) return;
+    // attempt counts reconnects already scheduled, so this close is
+    // consecutive failure number attempt + 1.
+    if (attempt + 1 >= maxFailures) {
+      exhausted = true;
+      emitStatusAll({ phase: "closed", reason: "retry-limit" });
+      return;
+    }
+    const delay = backoffDelay();
+    attempt += 1;
+    reconnectTimer = setTimeout(() => {
+      void connect();
+    }, delay);
+  };
+
+  const connect = async () => {
+    if (socket || opening || exhausted || entries.size === 0) return;
+    opening = true;
+    emitStatusAll({ phase: "connecting" });
+    const params = (await config.query?.()) ?? {};
+    if (entries.size === 0) {
+      opening = false;
+      return;
+    }
+    // The multiplexed stream lives at the gateway root; scopes ride in
+    // subscribe control frames instead of the URL path.
+    const url = new URL(`${config.url.replace(/\/+$/, "")}/`);
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+
+    const ws = createSocket(url.toString());
+    ws.binaryType = "arraybuffer";
+    socket = ws;
+
+    ws.onopen = () => {
+      opening = false;
+      live = true;
+      attempt = 0;
+      exhausted = false;
+      trySend(subscribeMessage(allEntries()));
+      emitStatusAll({ phase: "live" });
+    };
+    ws.onmessage = (event: MessageEvent) => {
+      const { data } = event;
+      // Binary frames are deltas; text frames are out-of-band control signals.
+      if (typeof data === "string") handleControl(data);
+      else if (data instanceof ArrayBuffer) handleFrame(data);
+      else if (data instanceof Uint8Array) handleFrame(data);
+    };
+    ws.onclose = () => {
+      socket = undefined;
+      opening = false;
+      live = false;
+      // Nothing to do after a deliberate shutdown or once the budget is spent
+      // (a retired socket may still fire onclose).
+      if (entries.size === 0 || exhausted) return;
+      emitStatusAll({ phase: "reconnecting" });
+      scheduleReconnect();
+    };
+    ws.onerror = () => {
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+    };
+  };
+
   return {
     subscribeProjection<TRecord extends Record<string, unknown>>(
       scope: ProjectionScope,
       listener: (event: unknown, record?: TRecord) => void,
     ): () => void {
-      const createSocket = config.createSocket ?? ((url: string) => new WebSocket(url));
-      const minBackoff = Math.max(0, config.minBackoffMs ?? DEFAULT_MIN_BACKOFF);
-      const maxBackoff = Math.max(minBackoff, config.maxBackoffMs ?? DEFAULT_MAX_BACKOFF);
-      const maxFailures = Math.max(
-        1,
-        config.maxConsecutiveFailures ?? DEFAULT_MAX_CONSECUTIVE_FAILURES,
-      );
-
-      let closed = false;
-      let socket: WebSocket | undefined;
-      let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-      let attempt = 0;
-      let resumeWatermark = "";
-
-      const emitStatus = (status: Omit<ProjectionTransportStatus, "scope">) => {
-        config.onStatus?.({ scope, ...status });
+      const key = entryKey(scope);
+      const entry: Entry = {
+        scope,
+        listener: listener as Entry["listener"],
+        resumeWatermark: "",
       };
+      let set = entries.get(key);
+      if (!set) {
+        set = new Set();
+        entries.set(key, set);
+      }
+      set.add(entry);
+      // A fresh subscription restarts an exhausted budget, preserving the
+      // old per-subscription contract: new subscribeProjection, fresh budget.
+      if (exhausted) {
+        exhausted = false;
+        attempt = 0;
+      }
+      if (live) {
+        trySend(subscribeMessage([entry]));
+        emitStatus(scope, { phase: "live" });
+      } else {
+        void connect();
+      }
 
-      const handleControl = (raw: string) => {
-        let control: ProjectionControlFrame;
-        try {
-          control = JSON.parse(raw) as ProjectionControlFrame;
-        } catch {
-          return;
+      let disposed = false;
+      return () => {
+        if (disposed) return;
+        disposed = true;
+        const bucket = entries.get(key);
+        if (bucket) {
+          bucket.delete(entry);
+          if (bucket.size === 0) {
+            entries.delete(key);
+            trySend(
+              JSON.stringify({
+                type: "unsubscribe",
+                scopes: [{ domain: scope.domain, collection: scope.collection }],
+              }),
+            );
+          }
         }
-        if (control.type === "resync") {
-          // The server shed frames for this slow consumer: the stream now has
-          // gaps. Surface "degraded" so the app re-runs the snapshot load and
-          // reconciles.
-          emitStatus({
-            phase: "degraded",
-            reason: control.reason ?? "resync",
-            dropped: control.dropped,
-            epoch: control.epoch,
-          });
-        }
-      };
-
-      const backoffDelay = (): number => {
-        const exp = Math.min(maxBackoff, minBackoff * 2 ** attempt);
-        return Math.random() * exp;
-      };
-
-      const handleFrame = (data: ArrayBuffer | Uint8Array) => {
-        const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-        let batch: { mutations?: WireRecordMutation[] };
-        try {
-          batch = codec.decodeDeltaFrame(bytes);
-        } catch {
-          return;
-        }
-        for (const wire of batch.mutations ?? []) {
-          const mutation = mapMutation(wire, scope);
-          if (!mutation) continue;
-          if (mutation.version) resumeWatermark = String(mutation.version);
-          listener(mutation);
-        }
-      };
-
-      const scheduleReconnect = () => {
-        if (closed) return;
-        // attempt counts reconnects already scheduled, so this close is
-        // consecutive failure number attempt + 1.
-        if (attempt + 1 >= maxFailures) {
-          closed = true;
-          emitStatus({ phase: "closed", reason: "retry-limit" });
-          return;
-        }
-        const delay = backoffDelay();
-        attempt += 1;
-        reconnectTimer = setTimeout(() => {
-          void connect();
-        }, delay);
-      };
-
-      const connect = async () => {
-        if (closed) return;
-        emitStatus({ phase: "connecting" });
-        const params = (await config.query?.()) ?? {};
-        const url = new URL(`${config.url.replace(/\/+$/, "")}/${scopePath(scope)}`);
-        for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-
-        const ws = createSocket(url.toString());
-        ws.binaryType = "arraybuffer";
-        socket = ws;
-
-        ws.onopen = () => {
+        emitStatus(scope, { phase: "closed" });
+        if (entries.size === 0) {
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          exhausted = false;
           attempt = 0;
-          emitStatus({ phase: "live" });
-          if (resumeWatermark) {
+          const ws = socket;
+          socket = undefined;
+          opening = false;
+          live = false;
+          if (ws) {
             try {
-              ws.send(resumeWatermark);
+              ws.close();
             } catch {
-              /* resume is best-effort */
+              /* ignore */
             }
           }
-        };
-        ws.onmessage = (event: MessageEvent) => {
-          const { data } = event;
-          // Binary frames are deltas; text frames are out-of-band control signals.
-          if (typeof data === "string") handleControl(data);
-          else if (data instanceof ArrayBuffer) handleFrame(data);
-          else if (data instanceof Uint8Array) handleFrame(data);
-        };
-        ws.onclose = () => {
-          socket = undefined;
-          if (!closed) emitStatus({ phase: "reconnecting" });
-          scheduleReconnect();
-        };
-        ws.onerror = () => {
-          try {
-            ws.close();
-          } catch {
-            /* ignore */
-          }
-        };
-      };
-
-      void connect();
-
-      return () => {
-        closed = true;
-        if (reconnectTimer) clearTimeout(reconnectTimer);
-        if (socket) {
-          try {
-            socket.close();
-          } catch {
-            /* ignore */
-          }
-          socket = undefined;
         }
-        emitStatus({ phase: "closed" });
       };
     },
   };

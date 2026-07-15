@@ -18,8 +18,15 @@ func HTTPMiddleware(enabled bool, minBytes, level int) func(http.Handler) http.H
 				next.ServeHTTP(w, r)
 				return
 			}
-			encoding := PreferredEncoding(r.Header.Get("Accept-Encoding"))
-			if encoding == "" || shouldSkipCompressionPath(r.URL.Path) {
+			// Cheap header/path skips run before PreferredEncoding: parsing the
+			// Accept-Encoding qvalues allocates a map, and a WebSocket handshake
+			// (the common projection case) would only discard it. Order matters
+			// for allocations, not correctness — all three lead to the same skip.
+			if isUpgradeRequest(r) || shouldSkipCompressionPath(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if PreferredEncoding(r.Header.Get("Accept-Encoding")) == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -99,6 +106,16 @@ func HTTPRequestDecompressionMiddleware(enabled bool, maxDecodedBytes int64) fun
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isUpgradeRequest reports whether the request negotiates a protocol upgrade
+// (WebSocket and friends). Upgraded connections are hijacked from the HTTP
+// layer; the buffering writer implements no http.Hijacker, so wrapping such a
+// request breaks the handshake with a 500 (observed on projection WebSockets
+// whenever a proxy adds Accept-Encoding). The skip must be protocol-based —
+// upgrades can arrive on any path, not just /ws.
+func isUpgradeRequest(r *http.Request) bool {
+	return strings.TrimSpace(r.Header.Get("Upgrade")) != ""
 }
 
 func shouldSkipCompressionPath(path string) bool {

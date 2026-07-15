@@ -278,6 +278,95 @@ describe("createWebSocketProjectionSource", () => {
   });
 });
 
+describe("createWebSocketProjectionSource multiplexing", () => {
+  it("carries every subscribed scope over one socket and routes frames by scope", async () => {
+    const sockets: FakeSocket[] = [];
+    const quotesScope: ProjectionScope = { tenantId: "org_1", domain: "signals", collection: "quotes" };
+    const multiplexCodec: ProjectionProtoCodec = {
+      ...codec,
+      decodeDeltaFrame: () =>
+        ({
+          mutations: [
+            wireMutation({ recordId: "tick_5", version: 5 }),
+            wireMutation({ recordId: "quote_1", version: 2, collection: "quotes" }),
+          ],
+        }) as ReturnType<ProjectionProtoCodec["decodeDeltaFrame"]>,
+    };
+    const ticks: ProjectionMutation[] = [];
+    const quotes: ProjectionMutation[] = [];
+    const source = createWebSocketProjectionSource({
+      url: "wss://host/v1/projections",
+      codec: multiplexCodec,
+      createSocket: () => {
+        const instance = new FakeSocket();
+        sockets.push(instance);
+        return instance as unknown as WebSocket;
+      },
+    });
+
+    const unsubscribeTicks = source.subscribeProjection(scope, (m) => ticks.push(m as ProjectionMutation));
+    const unsubscribeQuotes = source.subscribeProjection(quotesScope, (m) => quotes.push(m as ProjectionMutation));
+    await Promise.resolve();
+
+    // One socket for both scopes, connected at the gateway root.
+    expect(sockets).toHaveLength(1);
+    sockets[0].onopen?.();
+
+    // The open handshake subscribes every registered scope in one frame.
+    const subscribeFrame = JSON.parse(String(sockets[0].sent[0])) as {
+      type: string;
+      scopes: { domain: string; collection: string }[];
+    };
+    expect(subscribeFrame.type).toBe("subscribe");
+    expect(subscribeFrame.scopes).toEqual([
+      { domain: "signals", collection: "ticks" },
+      { domain: "signals", collection: "quotes" },
+    ]);
+
+    // A mixed delta frame routes each mutation to its scope's listener.
+    sockets[0].onmessage?.({ data: new Uint8Array([7]).buffer } as MessageEvent);
+    expect(ticks.map((m) => m.recordId)).toEqual(["tick_5"]);
+    expect(quotes.map((m) => m.recordId)).toEqual(["quote_1"]);
+
+    // Dropping one scope sends an unsubscribe but keeps the socket for the other.
+    unsubscribeQuotes();
+    const lastFrame = JSON.parse(String(sockets[0].sent.at(-1))) as { type: string };
+    expect(lastFrame.type).toBe("unsubscribe");
+    expect(sockets).toHaveLength(1);
+
+    // Dropping the last scope closes the shared socket for good.
+    unsubscribeTicks();
+    expect(sockets).toHaveLength(1);
+  });
+
+  it("degrades only the scope a tagged resync names", async () => {
+    const degraded: string[] = [];
+    let instance: FakeSocket | undefined;
+    const quotesScope: ProjectionScope = { tenantId: "org_1", domain: "signals", collection: "quotes" };
+    const source = createWebSocketProjectionSource({
+      url: "wss://host/v1/projections",
+      codec,
+      createSocket: () => {
+        instance = new FakeSocket();
+        return instance as unknown as WebSocket;
+      },
+      onStatus: (status) => {
+        if (status.phase === "degraded") degraded.push(status.scope.collection);
+      },
+    });
+    const u1 = source.subscribeProjection(scope, () => {});
+    const u2 = source.subscribeProjection(quotesScope, () => {});
+    await Promise.resolve();
+    instance!.onopen?.();
+    instance!.onmessage?.({
+      data: JSON.stringify({ type: "resync", dropped: 3, domain: "signals", collection: "quotes" }),
+    } as MessageEvent);
+    expect(degraded).toEqual(["quotes"]);
+    u1();
+    u2();
+  });
+});
+
 describe("projection source composition", () => {
   it("composes explicit lanes and returns offline when endpoint derivation fails", () => {
     expect(createProjectionSource({ http: { baseUrl: "https://host", codec }, ws: { url: "wss://host", codec, createSocket: () => new FakeSocket() as unknown as WebSocket } })).toMatchObject({ loadProjection: expect.any(Function), subscribeProjection: expect.any(Function) });

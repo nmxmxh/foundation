@@ -165,7 +165,7 @@ check_no_rg "production Compose avoids Postgres config bind" "./config/postgresq
 check_no_rg "production Compose avoids Redis config bind" "./config/redis.conf" "$target/templates/docker/docker-compose.yml"
 check_no_rg "production Compose avoids default CA bind" "config/certs/ca.crt" "$target/templates/docker/docker-compose.yml"
 check_file_contains "template Redis baseline is Redis 8" "$target/templates/docker/Dockerfile.redis" "ARG REDIS_VERSION=8-alpine"
-check_file_contains "template production Compose includes Postgres service" "$target/templates/docker/docker-compose.yml" "  postgres:"
+check_file_contains "template production Compose includes Postgres service" "$target/templates/docker/docker-compose.yml" "  app-postgres:"
 check_file_contains "template Postgres mount uses PostgreSQL root" "$target/templates/docker/docker-compose.yml" "/var/lib/postgresql"
 check_file_contains "template Postgres config is baked" "$target/templates/docker/Dockerfile.postgres" "COPY config/postgresql.conf"
 check_file_contains "template Postgres hba is baked" "$target/templates/docker/Dockerfile.postgres" "COPY config/pg_hba.conf"
@@ -174,8 +174,8 @@ check_file_contains "template Postgres uses baked hba" "$target/templates/docker
 check_file_contains "template Postgres Compose auth allows SCRAM clients" "$target/templates/config/pg_hba.conf" "0.0.0.0/0"
 check_file_contains "template Postgres local socket supports operator recovery" "$target/templates/config/pg_hba.conf" "local   all             all                                     trust"
 check_file_contains "template migration fails auth after grace window" "$target/templates/docker/docker-compose.yml" "database authentication still failing after"
-check_file_contains "template server receives DB host" "$target/templates/docker/docker-compose.yml" 'DB_HOST: "${DB_HOST:-postgres}"'
-check_file_contains "template migrate defaults to Compose Postgres host" "$target/templates/docker/docker-compose.yml" 'DB_HOST=${DB_HOST:-postgres}'
+check_file_contains "template server receives DB host" "$target/templates/docker/docker-compose.yml" 'DB_HOST: "${DB_HOST:-app-postgres}"'
+check_file_contains "template migrate defaults to Compose Postgres host" "$target/templates/docker/docker-compose.yml" 'DB_HOST=${DB_HOST:-app-postgres}'
 
 if [[ "$failed" -ne 0 ]]; then
   echo "foundation assets check failed"

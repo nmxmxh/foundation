@@ -6,8 +6,12 @@
 # =============================================================================
 
 services:
-  # PostgreSQL Database
-  postgres:
+  # PostgreSQL Database. The service is named app-postgres (not "postgres")
+  # for the same reason redis is app-redis: on a shared proxy network
+  # (Coolify's), the bare alias collides with the platform's own database —
+  # Docker DNS then round-robins between the two and roughly half of all
+  # connections hit the wrong server and fail auth.
+  app-postgres:
     build:
       context: .
       dockerfile: Dockerfile.postgres
@@ -83,7 +87,7 @@ services:
     environment:
       APP_ENV: "${APP_ENV:-production}"
       DATABASE_URL: "${DATABASE_URL:-}"
-      DB_HOST: "${DB_HOST:-postgres}"
+      DB_HOST: "${DB_HOST:-app-postgres}"
       DB_PORT: "${DB_PORT:-5432}"
       DB_USER: "${DB_USER:-postgres}"
       DB_PASSWORD: "${DB_PASSWORD:-postgres}"
@@ -132,12 +136,12 @@ services:
     networks:
       - app-network
     depends_on:
-      postgres:
+      app-postgres:
         condition: service_healthy
     environment:
       - DATABASE_URL=${DATABASE_URL:-}
       - DB_RESET=${DB_RESET:-false}
-      - DB_HOST=${DB_HOST:-postgres}
+      - DB_HOST=${DB_HOST:-app-postgres}
       - DB_PORT=${DB_PORT:-5432}
       - DB_USER=${DB_USER:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
@@ -152,7 +156,7 @@ services:
         db_url="$${DATABASE_URL:-}"
         if printf '%s' "$$db_url" | grep -Eqi '@(localhost|127\.0\.0\.1|\[::1\]|::1)(:|/)'; then
           echo "DATABASE_URL points at localhost, which is the migrate container itself."
-          echo "Unset DATABASE_URL and use DB_HOST=postgres, or set DATABASE_URL to the reachable Postgres service hostname."
+          echo "Unset DATABASE_URL and use DB_HOST=app-postgres, or set DATABASE_URL to the reachable Postgres service hostname."
           exit 1
         fi
         if [ -z "$${db_url}" ]; then

@@ -1,6 +1,8 @@
 package compress
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -41,6 +43,56 @@ func BenchmarkDecompressLargeBatch(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			_, _ = decompressZstd(zstdData)
+		}
+	})
+}
+
+// BenchmarkHTTPMiddlewareDispatch measures the middleware's per-request
+// dispatch cost on its three routes: an upgrade handshake (bypassed via the
+// protocol check, must stay allocation-free), a small response below minBytes
+// (buffered then flushed uncompressed), and a compressible response (buffered
+// and re-encoded). Every projection WebSocket handshake and every API request
+// crosses this dispatch, so its overhead is a per-request tax.
+func BenchmarkHTTPMiddlewareDispatch(b *testing.B) {
+	payload := compressionFixture()[:16*1024]
+	handler := func(status int, body []byte) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = w.Write(body)
+		})
+	}
+
+	b.Run("upgrade-bypass", func(b *testing.B) {
+		wrapped := HTTPMiddleware(true, 1024, 4)(handler(http.StatusSwitchingProtocols, nil))
+		req := httptest.NewRequest(http.MethodGet, "/v1/projections/signals/ticks", nil)
+		req.Header.Set("Accept-Encoding", "gzip, br")
+		req.Header.Set("Connection", "Upgrade")
+		req.Header.Set("Upgrade", "websocket")
+		rec := httptest.NewRecorder()
+		b.ReportAllocs()
+		for b.Loop() {
+			wrapped.ServeHTTP(rec, req)
+		}
+	})
+
+	b.Run("small-uncompressed", func(b *testing.B) {
+		wrapped := HTTPMiddleware(true, 1024, 4)(handler(http.StatusOK, payload[:128]))
+		req := httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
+		req.Header.Set("Accept-Encoding", "gzip, br")
+		b.ReportAllocs()
+		for b.Loop() {
+			wrapped.ServeHTTP(httptest.NewRecorder(), req)
+		}
+	})
+
+	b.Run("compressible-16k", func(b *testing.B) {
+		wrapped := HTTPMiddleware(true, 1024, 4)(handler(http.StatusOK, payload))
+		req := httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
+		req.Header.Set("Accept-Encoding", "br")
+		b.ReportAllocs()
+		for b.Loop() {
+			wrapped.ServeHTTP(httptest.NewRecorder(), req)
 		}
 	})
 }

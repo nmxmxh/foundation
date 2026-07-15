@@ -1,7 +1,7 @@
 {
   "name": "@ovasabi/ui-minimal",
   "version": "0.2.0",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "sideEffects": false,
   "exports": {

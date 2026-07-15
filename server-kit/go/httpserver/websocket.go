@@ -42,11 +42,22 @@ type wsRuntime struct {
 	startedAt     time.Time
 }
 
+// wsRawConn is the subset of *websocket.Conn the connection goroutines drive.
+// Holding the field as an interface lets tests inject a socket whose writes fail
+// on demand, so the writer's disconnect branch is covered deterministically
+// instead of racing a real socket teardown against context cancellation.
+type wsRawConn interface {
+	WriteMessage(messageType int, data []byte) error
+	ReadMessage() (messageType int, p []byte, err error)
+	SetWriteDeadline(t time.Time) error
+	Close() error
+}
+
 type wsConnection struct {
 	id       string
 	deviceID string
 	ip       string
-	conn     *websocket.Conn
+	conn     wsRawConn
 	send     chan wsOutbound
 	cancel   context.CancelFunc
 	reserved bool

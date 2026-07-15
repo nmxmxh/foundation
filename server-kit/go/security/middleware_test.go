@@ -375,10 +375,14 @@ func TestRequireCapabilitiesAndContextHelpers(t *testing.T) {
 // a retry loop throttles itself indefinitely.
 func TestRateLimiterRejectionsDoNotExtendWindow(t *testing.T) {
 	limiter := NewRateLimiter(2, 40*time.Millisecond)
-	if !limiter.Allow("client") || !limiter.Allow("client") {
+	// Consume both budget tokens unconditionally — a short-circuited `||` would
+	// skip the second Allow once the first passes, and never spend token two.
+	first := limiter.Allow("client")
+	second := limiter.Allow("client")
+	if !first || !second {
 		t.Fatalf("expected budget of 2 to be admitted")
 	}
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		if limiter.Allow("client") {
 			t.Fatalf("expected over-limit request %d to be rejected", i)
 		}

@@ -2,6 +2,7 @@ package httpserver
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -327,5 +328,50 @@ func TestDispatchRejectsInvalidEnvelopeFields(t *testing.T) {
 				t.Fatalf("body missing %q: %s", tc.code, rec.Body.String())
 			}
 		})
+	}
+}
+
+// failingWSConn is a wsRawConn whose writes fail on demand, letting the writer's
+// disconnect branch be driven deterministically (no real socket teardown to
+// race against context cancellation).
+type failingWSConn struct {
+	writeErr error
+	closed   bool
+}
+
+func (f *failingWSConn) WriteMessage(int, []byte) error { return f.writeErr }
+func (f *failingWSConn) ReadMessage() (int, []byte, error) {
+	return 0, nil, errors.New("closed")
+}
+func (f *failingWSConn) SetWriteDeadline(time.Time) error { return nil }
+func (f *failingWSConn) Close() error                     { f.closed = true; return nil }
+
+// TestRunWSWriterRecordsFailureOnWriteError covers the writer's disconnect path:
+// a queued frame whose write fails must record a failed-message metric and stop
+// the writer loop. Previously this branch was only hit by chance when a real
+// client vanished mid-write, which made the package's coverage flaky.
+func TestRunWSWriterRecordsFailureOnWriteError(t *testing.T) {
+	srv := newTestWSRuntimeServer(1)
+	srv.wsPingInterval = time.Minute // positive so NewTicker doesn't panic; it never fires here
+	conn := &wsConnection{
+		id:   "writer-fail",
+		conn: &failingWSConn{writeErr: errors.New("broken pipe")},
+		send: make(chan wsOutbound, 1),
+	}
+	conn.send <- wsOutbound{messageType: websocket.TextMessage, payload: []byte("frame")}
+
+	done := make(chan struct{})
+	go func() {
+		srv.runWSWriter(context.Background(), conn)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runWSWriter did not return after a write error")
+	}
+	if got := srv.ws.metrics.Snapshot().MessagesFailed; got != 1 {
+		t.Fatalf("MessagesFailed = %d, want 1", got)
 	}
 }

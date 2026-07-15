@@ -695,11 +695,14 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     echo "[OK] Dockerfiles avoid removed nginx-brotli image"
   fi
   check_file_contains "Redis config image baseline is Redis 8" "$target/Dockerfile.redis" "ARG REDIS_VERSION=8-alpine"
-  check_file_contains "compose Postgres service" "$target/docker-compose.yml" "  postgres:"
+  check_file_contains "compose Postgres service" "$target/docker-compose.yml" "  app-postgres:"
+  # The bare "postgres" alias collides with the platform database on shared
+  # proxy networks (Coolify): Docker DNS round-robins between the two.
+  check_file_not_contains "compose avoids bare postgres service alias" "$target/docker-compose.yml" "  postgres:"
   check_file_contains "compose Postgres 18 mounts parent data directory" "$target/docker-compose.yml" "/var/lib/postgresql"
   check_file_not_contains "compose Postgres 18 avoids legacy data mount" "$target/docker-compose.yml" "/var/lib/postgresql/data"
-  check_file_contains "compose server receives DB host" "$target/docker-compose.yml" 'DB_HOST: "${DB_HOST:-postgres}"'
-  check_file_contains "compose migrate defaults to Compose Postgres host" "$target/docker-compose.yml" 'DB_HOST=${DB_HOST:-postgres}'
+  check_file_contains "compose server receives DB host" "$target/docker-compose.yml" 'DB_HOST: "${DB_HOST:-app-postgres}"'
+  check_file_contains "compose migrate defaults to Compose Postgres host" "$target/docker-compose.yml" 'DB_HOST=${DB_HOST:-app-postgres}'
   check_file_contains "compose migrate waits for Postgres" "$target/docker-compose.yml" "condition: service_healthy"
   check_file_contains "compose migrate rejects container-local DATABASE_URL" "$target/docker-compose.yml" "DATABASE_URL points at localhost"
   if awk '

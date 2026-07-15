@@ -86,6 +86,33 @@ project_name_from_metadata() {
   basename "$target" | sed 's/_v[0-9]*$//'
 }
 
+# The compose Postgres service is app-postgres, not "postgres": on a shared
+# proxy network (Coolify's) the bare alias collides with the platform's own
+# database and Docker DNS round-robins between the two. Existing projects that
+# still carry the old name are renamed in place — service key, depends_on
+# entries, DB_HOST defaults, and the migrate guard message — never credentials
+# like POSTGRES_USER/DB_USER, whose value "postgres" is unrelated to the alias.
+rename_compose_postgres_service() {
+  local compose="$1"
+  [[ -f "$compose" ]] || return 0
+  grep -Eq '^  postgres:' "$compose" || return 0
+
+  local before
+  before="$(mktemp)"
+  cp "$compose" "$before"
+  perl -0pi -e '
+    s/^  postgres:/  app-postgres:/mg;
+    s/^      postgres:/      app-postgres:/mg;
+    s/\{DB_HOST:-postgres\}/{DB_HOST:-app-postgres}/g;
+    s/^(\s*- DB_HOST)=postgres$/$1=app-postgres/mg;
+    s/use DB_HOST=postgres,/use DB_HOST=app-postgres,/g;
+  ' "$compose"
+  if ! cmp -s "$before" "$compose"; then
+    log_patch "Docker Compose Postgres service renamed to app-postgres: ${compose#$target/}"
+  fi
+  rm -f "$before"
+}
+
 patch_compose_database_contract() {
   local compose="$target/docker-compose.yml"
   [[ -f "$compose" ]] || return 0
@@ -93,11 +120,14 @@ patch_compose_database_contract() {
   local project_name
   project_name="$(project_name_from_metadata)"
 
-  if ! grep -Eq '^  postgres:' "$compose"; then
+  rename_compose_postgres_service "$compose"
+  rename_compose_postgres_service "$target/docker-compose.dev.yml"
+
+  if ! grep -Eq '^  app-postgres:' "$compose"; then
     local postgres_block
     postgres_block="$(cat <<EOF
   # PostgreSQL Database
-  postgres:
+  app-postgres:
     build:
       context: .
       dockerfile: Dockerfile.postgres
@@ -130,11 +160,11 @@ EOF
     insert_before_marker_or_append "$compose" "  # Redis Cache" "$postgres_block" "Docker Compose managed Postgres service"
   fi
 
-  if ! grep -Fq '      DB_HOST: "${DB_HOST:-postgres}"' "$compose"; then
+  if ! grep -Fq '      DB_HOST: "${DB_HOST:-app-postgres}"' "$compose"; then
     local server_db_env
     server_db_env="$(cat <<EOF
       DATABASE_URL: "\${DATABASE_URL:-}"
-      DB_HOST: "\${DB_HOST:-postgres}"
+      DB_HOST: "\${DB_HOST:-app-postgres}"
       DB_PORT: "\${DB_PORT:-5432}"
       DB_USER: "\${DB_USER:-postgres}"
       DB_PASSWORD: "\${DB_PASSWORD:-postgres}"
@@ -145,13 +175,13 @@ EOF
     replace_in_file "$compose" '      DATABASE_URL: "${DATABASE_URL:-}"' "$server_db_env" "Docker Compose server database environment"
   fi
 
-  replace_in_file "$compose" '      - DB_HOST=${DB_HOST:-}' '      - DB_HOST=${DB_HOST:-postgres}' "Docker Compose migrate database host default"
+  replace_in_file "$compose" '      - DB_HOST=${DB_HOST:-}' '      - DB_HOST=${DB_HOST:-app-postgres}' "Docker Compose migrate database host default"
   replace_in_file "$compose" '      - DB_PASSWORD=${DB_PASSWORD:-}' '      - DB_PASSWORD=${DB_PASSWORD:-postgres}' "Docker Compose migrate database password default"
 
   local before_frontend
   before_frontend="$(mktemp)"
   cp "$compose" "$before_frontend"
-  perl -0pi -e 's/(^  frontend:\n(?:(?!^  [A-Za-z0-9_-]+:).)*?    networks:\n      - app-network\n)    depends_on:\n      postgres:\n        condition: service_healthy\n    environment:/${1}    environment:/ms' "$compose"
+  perl -0pi -e 's/(^  frontend:\n(?:(?!^  [A-Za-z0-9_-]+:).)*?    networks:\n      - app-network\n)    depends_on:\n      (?:app-)?postgres:\n        condition: service_healthy\n    environment:/${1}    environment:/ms' "$compose"
   if ! cmp -s "$before_frontend" "$compose"; then
     log_patch "Docker Compose removes accidental frontend Postgres dependency: ${compose#$target/}"
   fi
@@ -166,7 +196,7 @@ EOF
     local before_migrate
     before_migrate="$(mktemp)"
     cp "$compose" "$before_migrate"
-    perl -0pi -e 's/(^  migrate:\n(?:(?!^  [A-Za-z0-9_-]+:).)*?    networks:\n      - app-network\n)    environment:/${1}    depends_on:\n      postgres:\n        condition: service_healthy\n    environment:/ms' "$compose"
+    perl -0pi -e 's/(^  migrate:\n(?:(?!^  [A-Za-z0-9_-]+:).)*?    networks:\n      - app-network\n)    environment:/${1}    depends_on:\n      app-postgres:\n        condition: service_healthy\n    environment:/ms' "$compose"
     if ! cmp -s "$before_migrate" "$compose"; then
       log_patch "Docker Compose migrate waits for Postgres: ${compose#$target/}"
     fi
@@ -178,7 +208,7 @@ EOF
     local db_url_guard='        db_url="$${DATABASE_URL:-}"
         if printf '\''%s'\'' "$$db_url" | grep -Eqi '\''@(localhost|127\.0\.0\.1|\[::1\]|::1)(:|/)'\''; then
           echo "DATABASE_URL points at localhost, which is the migrate container itself."
-          echo "Unset DATABASE_URL and use DB_HOST=postgres, or set DATABASE_URL to the reachable Postgres service hostname."
+          echo "Unset DATABASE_URL and use DB_HOST=app-postgres, or set DATABASE_URL to the reachable Postgres service hostname."
           exit 1
         fi'
     replace_in_file "$compose" "$db_url_line" "$db_url_guard" "Docker Compose migrate rejects container-local DATABASE_URL"
