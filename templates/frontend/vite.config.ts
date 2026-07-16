@@ -27,18 +27,20 @@ export default defineConfig({
       'Origin-Agent-Cluster': '?1',
     },
     proxy: {
+      // Backend origin the dev server proxies to. Override with VITE_PROXY_TARGET
+      // (e.g. an alternate local port) without editing this file.
       '/api': {
-        target: 'http://localhost:8080',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8080',
         changeOrigin: true,
       },
       '/v1': {
-        target: 'http://localhost:8080',
+        target: process.env.VITE_PROXY_TARGET || 'http://localhost:8080',
         changeOrigin: true,
         // Projection delta streams upgrade to WebSocket on /v1/projections/…
         ws: true,
       },
       '/ws': {
-        target: 'ws://localhost:8080',
+        target: (process.env.VITE_PROXY_TARGET || 'http://localhost:8080').replace(/^http/, 'ws'),
         ws: true,
         changeOrigin: true,
       },

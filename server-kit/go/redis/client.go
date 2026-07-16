@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"maps"
 	"sort"
 	"strconv"
@@ -1027,13 +1026,38 @@ func newShardedClient(opts Options) (*shardedClient, error) {
 	return &shardedClient{shards: shards}, nil
 }
 
-func (c *shardedClient) shard(key string) *redisClient {
-	if len(c.shards) == 1 {
-		return c.shards[0]
+// shardIndex is the sharded router's key-routing function — the "vindex" in
+// Vitess terms: it maps a routing key to a shard index. FNV-1a is computed
+// inline over the string's bytes. The previous fnv.New32a()+[]byte(key) form is
+// also zero-allocation today because escape analysis inlines the hasher, but
+// that is a compiler-dependent property of a hot path on every sharded op;
+// computing the hash inline makes the zero-allocation guarantee structural
+// (pinned by TestShardIndexDoesNotAllocate) and shaves the hasher indirection.
+// The result is bit-identical to int(fnv.New32a().Sum32()) % n on 64-bit hosts
+// (proven by TestShardIndexMatchesStdlibFNVOracle), so this changes cost, not
+// placement — existing sharded data stays on the same shard.
+func shardIndex(key string, n int) int {
+	if n <= 1 {
+		return 0
 	}
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(key))
-	return c.shards[int(h.Sum32())%len(c.shards)]
+	const (
+		fnvOffset32 = 2166136261
+		fnvPrime32  = 16777619
+	)
+	h := uint32(fnvOffset32)
+	for i := 0; i < len(key); i++ {
+		h ^= uint32(key[i])
+		h *= fnvPrime32
+	}
+	// int(uint32) is a non-negative widening on 64-bit hosts, so int(h) % n is
+	// in [0, n) — the exact reduction the previous hasher path used. (Kept as
+	// int(h) % n rather than uint32(n) modulo to avoid a narrowing int->uint32
+	// conversion; n is only reached here when > 1 per the guard above.)
+	return int(h) % n
+}
+
+func (c *shardedClient) shard(key string) *redisClient {
+	return c.shards[shardIndex(key, len(c.shards))]
 }
 
 func (c *redisClient) Publish(ctx context.Context, channel string, payload []byte) error {

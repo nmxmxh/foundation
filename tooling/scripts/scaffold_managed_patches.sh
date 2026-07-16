@@ -1983,9 +1983,20 @@ patch_redundant_foundation_test_files() {
 
   local relative
   local removed=0
+  # Includes the 2026-07-16 TE-42 mirror consolidation: fragment test files
+  # folded into their source file's mirror (foo.go -> foo_test.go). Stale
+  # copies left behind by non-mirror syncs would redeclare the moved tests and
+  # break the vendored module's compile.
   local retired=(
+    server-kit/go/bulk/capabilities_probed_test.go
+    server-kit/go/bulk/manager_filerange_test.go
+    server-kit/go/database/connect_test.go
+    server-kit/go/database/pool_options_test.go
     server-kit/go/events/coverage_edges_test.go
+    server-kit/go/events/envelope_binary_test.go
+    server-kit/go/events/envelope_correlation_test.go
     server-kit/go/events/envelope_edges_test.go
+    server-kit/go/events/object_test.go
     server-kit/go/extension/value_branches_test.go
     server-kit/go/extension/value_convert_test.go
     server-kit/go/extension/value_coverage_test.go
@@ -1997,17 +2008,28 @@ patch_redundant_foundation_test_files() {
     server-kit/go/hermes/helpers_extra_test.go
     server-kit/go/hermes/indexes_extra_test.go
     server-kit/go/hermes/state_store_extra_test.go
+    server-kit/go/hermes/store_observer_test.go
+    server-kit/go/hermes/test_record_data_test.go
+    server-kit/go/hermessnapshot/filestore_errors_test.go
+    server-kit/go/httpserver/dispatch_test.go
+    server-kit/go/httpserver/protobuf_dispatch_test.go
     server-kit/go/httpserver/residual_test.go
     server-kit/go/httpserver/server_extra_test.go
     server-kit/go/httpserver/server_internal_test.go
     server-kit/go/httpserver/server_operational_test.go
     server-kit/go/httpserver/server_rbac_test.go
     server-kit/go/httpserver/smoke_test.go
+    server-kit/go/httpserver/websocket_decode_test.go
+    server-kit/go/httpserver/websocket_lifecycle_test.go
+    server-kit/go/httpserver/websocket_metrics_test.go
     server-kit/go/logger/coverage_edges_test.go
     server-kit/go/projectiongw/coverage_test.go
+    server-kit/go/projectiongw/encode_frame_test.go
     server-kit/go/projectiongw/residual_test.go
     server-kit/go/protoapi/binding_branches_test.go
+    server-kit/go/protoapi/binding_scalar_test.go
     server-kit/go/servicebacked/gate_residual_test.go
+    server-kit/go/worker/conformance_trace_test.go
   )
 
   for relative in "${retired[@]}"; do

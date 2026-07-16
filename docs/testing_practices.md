@@ -753,6 +753,40 @@ Enforcement:
   tests, skipped tests, long sleeps, uncontrolled randomness, and benchmark
   percentile misuse.
 
+### TE-42: Go test files mirror their source file
+
+Level: `Mandatory`
+
+A Go test file is named after the source file it exercises: tests for `foo.go`
+live in `foo_test.go`, and new tests for existing code are added to that
+existing mirror file — not to a new per-feature or per-fix test file. Fragment
+files (`foo_scalar_test.go`, `foo_errors_test.go`, `foo_lifecycle_test.go`
+beside an existing `foo_test.go`) scatter a source file's contract across the
+package and hide coverage gaps during review.
+
+Sanctioned exceptions, each for a structural reason:
+
+1. Benchmark/perf suites: `bench_test.go`, `*_bench_test.go`, `*_perf_test.go`.
+2. Test-only packages (`servicebacked`, `appbench`, `contracttest`,
+   conformance suites) — there is no source file to mirror.
+3. End-to-end suites that span the package's files (e.g. `handler_e2e_test.go`).
+4. Build-tag isolation: a test needing its own `//go:build` constraint (e.g.
+   `runtimehost/ffi_backend_test.go`, `cgo && (linux || darwin)`).
+5. External test packages forced by import cycles: `package foo_test` files
+   whose dependencies import `foo` (e.g. `metadata/aci_merge_test.go`, whose
+   `contracttest` dependency imports `metadata` back).
+6. Cross-cutting integration suites that exercise many source files as one
+   behavior (e.g. `hermes/consolidation_test.go`).
+
+When a fragment file is found outside these exceptions, fold it into the
+mirror file verbatim (content unchanged, imports unioned) and prove the fold
+with an unchanged test-function count for the package.
+
+Enforcement:
+
+- Reviewer gate; the 2026-07-16 consolidation (13 fragment files folded across
+  8 packages with test counts proven unchanged) is the reference precedent.
+
 ## Foundation test checks
 
 The conservative automated check set is:

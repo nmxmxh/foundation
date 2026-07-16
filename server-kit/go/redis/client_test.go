@@ -3,6 +3,9 @@ package redis
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
+	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -635,6 +638,219 @@ func BenchmarkMemoryClientLockUnlock(b *testing.B) {
 		ok, err := client.Unlock(ctx, "resource", token)
 		if err != nil || !ok {
 			b.Fatalf("Unlock() = %v err=%v", ok, err)
+		}
+	}
+}
+
+// fnvShardIndexOracle reproduces the pre-refactor shard() routing exactly:
+// stdlib FNV-1a hasher over []byte(key), then modulo. Parity against it proves
+// the allocation-free shardIndex places every key on the same shard the old
+// hasher-based implementation did — i.e. the optimization changes cost, not
+// placement, so no sharded data is remapped.
+func fnvShardIndexOracle(key string, n int) int {
+	if n <= 1 {
+		return 0
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(key))
+	return int(h.Sum32()) % n
+}
+
+func shardKeyCorpus() []string {
+	keys := []string{
+		"",
+		"a",
+		"tenant:123",
+		"tenant:org_default:signals:ticks",
+		"app:prod:billing:sub:cache:999",
+		"ovasabi:prod:media:objects:upload:9f3c",
+		"stream:events:ticks",
+		"🧵:unicode:key:Ωμέγα",
+	}
+	for i := range 512 {
+		keys = append(keys, fmt.Sprintf("tenant:org_%d:signals:ticks:%d", i, i*7+3))
+	}
+	return keys
+}
+
+// TestShardIndexMatchesStdlibFNVOracle is the no-regression proof: for every key
+// in the corpus and every shard count, the inline router must select the exact
+// same shard the previous stdlib-hasher router did.
+func TestShardIndexMatchesStdlibFNVOracle(t *testing.T) {
+	for _, n := range []int{1, 2, 3, 4, 5, 8, 16, 32, 64, 257, 768} {
+		for _, key := range shardKeyCorpus() {
+			if got, want := shardIndex(key, n), fnvShardIndexOracle(key, n); got != want {
+				t.Fatalf("shardIndex(%q, %d) = %d, stdlib oracle = %d — placement drift", key, n, got, want)
+			}
+		}
+	}
+}
+
+// TestShardIndexBounds pins the routing range: an index is always within
+// [0, n) and degenerate shard counts collapse to shard 0.
+func TestShardIndexBounds(t *testing.T) {
+	for _, n := range []int{0, 1, 2, 8, 768} {
+		for _, key := range shardKeyCorpus() {
+			idx := shardIndex(key, n)
+			hi := max(n, 1)
+			if idx < 0 || idx >= hi {
+				t.Fatalf("shardIndex(%q, %d) = %d, out of [0, %d)", key, n, idx, hi)
+			}
+		}
+	}
+}
+
+// TestShardIndexIsDeterministic guards the core routing contract: the same key
+// always resolves to the same shard (otherwise reads and writes would diverge).
+func TestShardIndexIsDeterministic(t *testing.T) {
+	for _, key := range shardKeyCorpus() {
+		first := shardIndex(key, 16)
+		for range 100 {
+			if got := shardIndex(key, 16); got != first {
+				t.Fatalf("shardIndex(%q, 16) is non-deterministic: %d != %d", key, got, first)
+			}
+		}
+	}
+}
+
+// TestShardIndexDistributesKeys is a sanity check that the reduction spreads a
+// realistic tenant keyspace across every shard rather than collapsing onto one.
+func TestShardIndexDistributesKeys(t *testing.T) {
+	const n = 8
+	counts := make([]int, n)
+	const keys = 10000
+	for i := range keys {
+		counts[shardIndex(fmt.Sprintf("tenant:org_%d:signals:ticks", i), n)]++
+	}
+	for s, c := range counts {
+		if c == 0 {
+			t.Fatalf("shard %d received no keys; hash is not distributing", s)
+		}
+		// A uniform hash puts ~keys/n on each shard; flag gross imbalance
+		// (more than 2x the fair share) as a distribution regression.
+		if c > (keys/n)*2 {
+			t.Fatalf("shard %d received %d keys, far above the ~%d fair share", s, c, keys/n)
+		}
+	}
+}
+
+// TestShardIndexDoesNotAllocate is the allocation guard that keeps the router's
+// hot path free of the hasher/[]byte churn the previous implementation paid on
+// every sharded operation. Mirrors hermes's TestCountIndexedDoesNotAllocate.
+func TestShardIndexDoesNotAllocate(t *testing.T) {
+	key := "app:prod:billing:sub:cache:999"
+	if avg := testing.AllocsPerRun(1000, func() {
+		_ = shardIndex(key, 16)
+	}); avg != 0 {
+		t.Fatalf("shardIndex allocated %.2f times/op, want 0", avg)
+	}
+}
+
+// BenchmarkShardRouting measures the router's key-routing hot path: the inline
+// FNV-1a shardIndex against the previous stdlib-hasher shape. Every sharded
+// Get/Set/Incr/XAdd routes through this, so its per-call cost is a tax on every
+// sharded operation.
+func BenchmarkShardRouting(b *testing.B) {
+	keys := map[string]string{
+		"short_key": "tenant:123",
+		"long_key":  "ovasabi:prod:media:objects:upload:9f3c1e2a-4b8d-11ef-9c7a-0242ac120002:chunk:0007",
+	}
+	for name, key := range keys {
+		b.Run(name+"/inline_fnv1a", func(b *testing.B) {
+			b.ReportAllocs()
+			var idx int
+			for b.Loop() {
+				idx = shardIndex(key, 16)
+			}
+			_ = idx
+		})
+		b.Run(name+"/stdlib_fnv_hasher", func(b *testing.B) {
+			b.ReportAllocs()
+			var idx int
+			for b.Loop() {
+				idx = fnvShardIndexOracle(key, 16)
+			}
+			_ = idx
+		})
+	}
+}
+
+// TestShardedClientPlacesKeysServiceBacked is the service-backed proof that the
+// router's logical placement (shardIndex) matches physical storage: against a
+// real multi-shard Redis, a key written through the sharded client is retrievable
+// on exactly the shard shardIndex predicts and is absent from every other shard.
+// This is the end-to-end check the pure parity test cannot make — it confirms
+// the physical clients are indexed in the same order shardIndex assumes.
+//
+// Skipped unless FOUNDATION_SHARD_REDIS_URLS names >= 2 comma-separated redis
+// URLs. Run it against a throwaway cluster, e.g.:
+//
+//	docker run -d --rm -p 6390:6379 redis:8-alpine
+//	docker run -d --rm -p 6391:6379 redis:8-alpine
+//	FOUNDATION_SHARD_REDIS_URLS=redis://localhost:6390,redis://localhost:6391 \
+//	  go test -run TestShardedClientPlacesKeysServiceBacked ./redis
+func TestShardedClientPlacesKeysServiceBacked(t *testing.T) {
+	raw := strings.TrimSpace(os.Getenv("FOUNDATION_SHARD_REDIS_URLS"))
+	if raw == "" {
+		t.Skip("set FOUNDATION_SHARD_REDIS_URLS=redis://h1,redis://h2[,...] to run the service-backed shard placement test")
+	}
+	urls := strings.Split(raw, ",")
+	if len(urls) < 2 {
+		t.Skipf("need >= 2 shard URLs to exercise routing, got %d", len(urls))
+	}
+
+	client, err := ConnectWithOptions(Options{URLs: urls, Prefix: "svc-shardtest", Driver: DriverRedis})
+	if err != nil {
+		t.Fatalf("connect sharded client: %v", err)
+	}
+	defer func() { _ = client.Close() }()
+	sc, ok := client.(*shardedClient)
+	if !ok {
+		t.Fatalf("expected *shardedClient, got %T", client)
+	}
+
+	ctx := context.Background()
+	keys := shardKeyCorpus()[:64]
+	placed := make([]int, len(sc.shards))
+
+	for _, key := range keys {
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		val := "v-" + key
+		if err := client.Set(ctx, key, val, time.Minute); err != nil {
+			t.Fatalf("Set(%q): %v", key, err)
+		}
+		want := shardIndex(key, len(sc.shards))
+		placed[want]++
+
+		for i, shard := range sc.shards {
+			got, getErr := shard.Get(ctx, key)
+			if i == want {
+				if getErr != nil || string(got) != val {
+					t.Fatalf("key %q missing on predicted shard %d: got=%q err=%v", key, want, got, getErr)
+				}
+				continue
+			}
+			if getErr == nil && got != nil {
+				t.Fatalf("key %q leaked to shard %d (shardIndex predicted %d)", key, i, want)
+			}
+		}
+	}
+
+	used := 0
+	for _, c := range placed {
+		if c > 0 {
+			used++
+		}
+	}
+	if used < 2 {
+		t.Fatalf("routed keys only touched %d shard(s); distribution not exercised", used)
+	}
+
+	for _, key := range keys {
+		if strings.TrimSpace(key) != "" {
+			_ = client.Del(ctx, key)
 		}
 	}
 }

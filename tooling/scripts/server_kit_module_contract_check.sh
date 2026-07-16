@@ -124,7 +124,7 @@ check_module "contracttest" "contracttest/lifecycle.go" "contracttest/lifecycle_
 check_module "database" "database/executor.go" "database/executor_test.go"
 check_module "domainerr" "domainerr/errors.go" "domainerr/errors_test.go"
 check_module "eventlog" "eventlog/eventlog.go" "eventlog/eventlog_test.go"
-check_module "events" "events/envelope.go" "events/envelope_binary_test.go"
+check_module "events" "events/envelope.go" "events/envelope_test.go"
 check_module "graceful" "graceful/graceful.go" "graceful/graceful_test.go"
 check_module "grpcsvc" "grpcsvc/grpcsvc.go" "grpcsvc/grpcsvc_test.go"
 check_module "healthcheck" "healthcheck/healthcheck.go" "healthcheck/healthcheck_test.go"

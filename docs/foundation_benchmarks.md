@@ -140,6 +140,67 @@ and `BenchmarkHermesColumnarRangeIndexScale`,
 `BenchmarkHermesRangeIndexBuild10K`, and
 `BenchmarkHermesRangeIndexUpdate10K`.
 
+## 2026-07-15 Sharded Redis key-router hot path (and a "measure, don't assume" lesson)
+
+Prompted by external sharding write-ups (PlanetScale/Neki, Vitess), Foundation's
+own sharded Redis client was examined under the router lens. `shardedClient.shard`
+is the router's key-routing function — the "vindex" in Vitess terms: it maps a
+routing key to a shard index, and every sharded `Get/Set/Incr/XAdd/Del` passes
+through it. It previously built a `fnv.New32a()` hasher and converted
+`[]byte(key)` per call; it now computes FNV-1a inline over the string
+(`shardIndex(key, n)`).
+
+The hypothesis was "this removes a hot-path allocation." The benchmark
+disproved it, which is the point of having the benchmark:
+
+Apple M1 Pro, medians of 5, 16 shards:
+
+| Routing key | Inline FNV-1a | Stdlib `fnv.New32a()` | allocs/op (both) | Delta |
+| --- | ---: | ---: | ---: | ---: |
+| short (`tenant:123`) | ~4.84 ns/op | ~6.09 ns/op | 0 | **~21% faster** |
+| long (84-byte object key) | ~63.6 ns/op | ~64.7–68.3 ns/op | 0 | converges (within run noise) |
+
+Both paths are already zero-allocation on Go 1.26 — escape analysis inlines the
+stdlib hasher and elides the `[]byte(key)` copy. So the measured value is not an
+allocation win; it is:
+
+1. **~23% lower latency on short keys** (the common shard-key shape: tenant IDs,
+   key prefixes), where the fixed hasher-setup cost is a larger fraction. Long
+   keys converge because both do the same per-byte FNV work.
+2. **Zero-allocation made structural.** The stdlib form's zero-alloc property
+   silently depends on the compiler continuing to inline `New32a` on a hot path;
+   the inline form pins it with `TestShardIndexDoesNotAllocate` (mirrors
+   `hermes` `TestCountIndexedDoesNotAllocate`).
+3. **A parity oracle where none existed.** `TestShardIndexMatchesStdlibFNVOracle`
+   proves the inline router is bit-identical to `int(fnv.New32a().Sum32()) % n`
+   across a 520-key corpus and shard counts 1…768 — i.e. the change moves no
+   key to a different shard. A routing-hash change is a silent data-remap bug;
+   the oracle is the guard that makes future hash edits safe to attempt.
+
+Service-backed proof (`TestShardedClientPlacesKeysServiceBacked`, gated on
+`FOUNDATION_SHARD_REDIS_URLS`): against a real two-shard Redis cluster, a key
+written through the sharded client is retrievable on exactly the shard
+`shardIndex` predicts and absent from every other shard — confirming the
+physical clients are indexed in the order the router assumes, which the pure
+parity test cannot.
+
+The wider lesson for the ledger's own philosophy: the sharded router had no
+parity/distribution/allocation coverage at all, so an "optimization" of its hash
+would have silently corrupted key placement with nothing to catch it. The test
+suite is the larger win here; the ~23% is the smaller one.
+
+Commands:
+
+```bash
+cd foundation/server-kit/go
+go test -run '^$' -bench BenchmarkShardRouting -benchmem -count=5 ./redis
+go test -run 'TestShardIndex|TestShardedClient' ./redis
+# service-backed (throwaway two-shard cluster):
+docker run -d --rm -p 6390:6379 redis:8-alpine; docker run -d --rm -p 6391:6379 redis:8-alpine
+FOUNDATION_SHARD_REDIS_URLS=redis://localhost:6390,redis://localhost:6391 \
+  go test -run TestShardedClientPlacesKeysServiceBacked ./redis
+```
+
 ## 2026-07-09 Canonical record-projection bridge (normalized tables → Hermes)
 
 The projection subsystem consolidation landed a single canonical path from
@@ -2709,6 +2770,7 @@ Interpretation: packet-ring mechanics are useful for packet-like streams where d
 5. Any benchmark improvement that changes behavior must land with correctness tests for malformed input, cancellation, oversized frames, and diagnostics.
 6. Any optimized lane must prove refinement against the higher-level lane it bypasses or replaces: same canonical metadata, same accepted payload semantics, same terminal event, and same controlled error class.
 7. Hard bounds such as queue depth, acquire timeout, write deadline, retry cap, and frame size are not benchmark targets; they are behavioral contracts and must have direct tests.
+8. Key/shard routing functions (the "vindex" mapping a key to a shard/partition) must stay allocation-free — they sit on every routed operation — and any change to the routing hash must ship with a parity oracle proving no key changes shard, because a routing-hash change is a silent data-remap, not a perf tweak.
 
 ## 2026-05-17 Server-Kit Table Refresh
 

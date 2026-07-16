@@ -94,4 +94,5 @@ TE-38|docs/testing_practices.md|performance|high|contextual|script:tooling/scrip
 TE-39|docs/testing_practices.md|scaffold|medium|partial|script:tooling/scripts/project_scaffold_check.sh;review|scaffold-smoke|yes
 TE-40|docs/testing_practices.md|performance|high|partial|script:tooling/scripts/testing_practices_check.sh;script:tooling/scripts/benchmark_history.sh|variance-ledger|yes
 TE-41|docs/testing_practices.md|agent|high|partial|script:tooling/scripts/agent_contract_check.sh;review|oracle-strength-note|yes
+TE-42|docs/testing_practices.md|testing|medium|human|review|mirror-layout-precedent|yes
 MATH-01|docs/mathematical_practices.md|formal|high|human|review|mathematical-practices-checklist|yes

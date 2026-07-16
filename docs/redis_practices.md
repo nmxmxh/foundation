@@ -86,6 +86,7 @@ Rules:
 8. Use `REDIS_SHARD_URLS` for coarse application-level sharding when one Redis node becomes a CPU/memory hotspot. Stable key hashing keeps single-key operations local to one shard; cross-key analytics should move to Postgres/read models instead of Redis-wide fanout.
 9. Use Redis Streams only for ephemeral or coordination-heavy event lanes. Durable business workflows still need Postgres/River/outbox as the replayable source.
 10. The scaffold Redis config disables RDB/AOF persistence by default. Re-enable persistence only if an app explicitly makes Redis part of its recovery contract and has tests for restart/replay semantics.
+11. The shard-routing function (key → shard index) sits on every routed operation, so keep it allocation-free — compute the hash inline over the key, do not build a hasher or `[]byte(key)` per call — and treat its hash as a data-placement contract. Changing the routing hash silently remaps existing keys onto different shards, so any change must ship with a parity oracle proving identical placement (see `server-kit/go/redis` `TestShardIndexMatchesStdlibFNVOracle`) and a service-backed physical-placement check against a real multi-shard cluster (`TestShardedClientPlacesKeysServiceBacked`).
 
 ## Safety and security
 

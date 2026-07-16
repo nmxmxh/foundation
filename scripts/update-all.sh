@@ -39,7 +39,10 @@ while IFS=$'\t' read -r slug path || [[ -n "$slug" ]]; do
     echo "========================================="
     echo "Updating project: $slug ($project_path)"
     echo "========================================="
-    if "$SCRIPT_DIR/update-project.sh" "$project_path" "${FORWARD_ARGS[@]}" --report-dir "$REPORT_DIR"; then
+    # Expand FORWARD_ARGS through the "+" alternate form so an empty array does
+    # not trip `set -u` on bash 3.2 (macOS default), where "${arr[@]}" on an
+    # empty array raises "unbound variable".
+    if "$SCRIPT_DIR/update-project.sh" "$project_path" ${FORWARD_ARGS[@]+"${FORWARD_ARGS[@]}"} --report-dir "$REPORT_DIR"; then
         status="success"
         code=0
     else
