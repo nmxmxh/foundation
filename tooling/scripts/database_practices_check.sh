@@ -76,6 +76,13 @@ else
   echo "[OK] no SELECT * in Go/SQL hot-path sources"
 fi
 
+if rg -n "\b(crypt|gen_salt|pgp_sym_encrypt|pgp_pub_encrypt)\s*\(" "$target" --glob '*.go' --glob '*.sql' --glob '!**/node_modules/**' >/dev/null 2>&1; then
+  echo "[FAIL] Database-side cryptographic operations (crypt/gen_salt/pgp_sym_encrypt/pgp_pub_encrypt) found in SQL or Go sources. Perform credential hashing, encryption, and verification in the application layer (Go/Rust/TS) instead of SQL queries."
+  failed=1
+else
+  echo "[OK] no database-side cryptographic operations (crypt/gen_salt/pgp_sym_encrypt/pgp_pub_encrypt) in Go/SQL sources"
+fi
+
 if [[ -d "$target/internal/service/persistence" ]] || rg -n "internal/service/persistence" "$target" --glob '*.go' --glob '!**/node_modules/**' >/dev/null 2>&1; then
   echo "[FAIL] persistence helper package found under internal/service; shared database helpers must come from server-kit/go/database"
   failed=1

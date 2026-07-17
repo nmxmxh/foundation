@@ -139,6 +139,10 @@ Apply the appropriate severity validation tier to prevent over-engineering:
 - **Tier 2 (Domain & Logic)**: Touches domain services, workers, or API handlers. Requires standard unit tests and static lints.
 - **Tier 3 (Presentation & Copy)**: Touches CSS layout styles, copywriting, translation tokens, or non-functional UI code. Requires local lint verification only.
 
+### 10. Database vs Compute Separation (Wrong Lane Prevention)
+
+**NEVER** perform CPU-bound cryptographic operations (e.g. `bcrypt`, `pgcrypto` hashing like `crypt` or `gen_salt`), complex validations, regex parsing on unindexed text columns, or heavy mathematical/spatial loops inside SQL queries. Keep the database (PostgreSQL) focused on durable truth, constraints, and relational integrity. Perform compute tasks in the application layer (Go/Rust/TS) to scale compute horizontally and protect the connection pool from timeout exhaustion.
+
 ## Commands
 
 ```bash

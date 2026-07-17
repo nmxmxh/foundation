@@ -119,6 +119,26 @@ const scalarToValue = (scalar: WireScalarValue | undefined): unknown => {
   return undefined;
 };
 
+// A tenant-mismatch drop is indistinguishable from "no data" in the UI: the
+// server scopes every record to the authenticated organization, so a runtime
+// created with the wrong (or default placeholder) tenantId silently filters
+// out every real record and the app renders empty despite full snapshots
+// arriving. Warn once per scope/tenant pair so the misconfiguration is
+// visible in the console instead of costing a debugging session.
+const warnedTenantMismatches = new Set<string>();
+const warnTenantMismatch = (scope: ProjectionScope, recordTenantId: string): void => {
+  const key = `${scope.domain}/${scope.collection}:${scope.tenantId}!=${recordTenantId}`;
+  if (warnedTenantMismatches.has(key)) return;
+  warnedTenantMismatches.add(key);
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[runtime-transport] dropped projection record(s) for ${scope.domain}/${scope.collection}: ` +
+      `record tenant "${recordTenantId}" does not match scope tenant "${scope.tenantId}". ` +
+      `If the app looks empty, the runtime was likely created without the authenticated ` +
+      `organization as its tenantId.`,
+  );
+};
+
 // mapMutation projects a decoded proto mutation onto a scope-validated
 // ProjectionMutation. Mutations with an unknown operation, an empty record id,
 // or which fall outside the requested scope are dropped (returns undefined).
@@ -132,7 +152,11 @@ export const mapMutation = (
   const tenantId = mutation.organizationId || scope.tenantId;
   const domain = mutation.domain || scope.domain;
   const collection = mutation.collection || scope.collection;
-  if (tenantId !== scope.tenantId || domain !== scope.domain || collection !== scope.collection) {
+  if (tenantId !== scope.tenantId) {
+    warnTenantMismatch(scope, tenantId);
+    return undefined;
+  }
+  if (domain !== scope.domain || collection !== scope.collection) {
     return undefined;
   }
   if (!mutation.recordId) return undefined;

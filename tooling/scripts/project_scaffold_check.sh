@@ -750,7 +750,7 @@ if [[ "${WITH_DOCKER:-}" == "true" ]]; then
     check_file_contains "Postgres Dockerfile bakes config" "$target/Dockerfile.postgres" "COPY config/postgresql.conf"
     check_file_contains "Postgres Dockerfile bakes hba" "$target/Dockerfile.postgres" "COPY config/pg_hba.conf"
     check_file_contains "Redis Dockerfile bakes config" "$target/Dockerfile.redis" "COPY config/redis.conf"
-    check_file_contains_any "Compose supplies a configured Postgres image" "$target/docker-compose.yml" "Dockerfile.postgres" "postgis/postgis:18-"
+    check_file_contains "Compose supplies a configured Postgres image" "$target/docker-compose.yml" "Dockerfile.postgres"
     check_file_contains "Compose builds Redis config image" "$target/docker-compose.yml" "Dockerfile.redis"
     check_file_contains "Compose uses baked Postgres hba" "$target/docker-compose.yml" "hba_file=/etc/postgresql/pg_hba.conf"
     check_file_contains "Compose migration fails auth after grace window" "$target/docker-compose.yml" "database authentication still failing after"

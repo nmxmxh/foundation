@@ -216,6 +216,7 @@ References checked for wording:
 9. Externally referenced rows must expose opaque public identifiers or tightly scoped lookup keys. Authorization must not depend on guess-resistance of sequential IDs.
 10. Security-critical uniqueness, balance, and state-transition rules must be enforced by constraints or in-transaction locking, not app-side prechecks alone.
 11. Schema changes must be synchronized with service code and integration test mocks in the same commit. A migration is incomplete until all dependent queries and mocks are reconciled.
+12. No CPU-bound cryptographic operations, heavy computations, or complex validations inside SQL/database queries on hot runtime lanes. Hash credentials, generate keys, and perform expensive computation/parsing in the application layer (Go/Rust/TS). The database owns durable state, constraints, and relational integrity; the application layer scales compute horizontally.
 
 ## Schema design rules
 
@@ -548,6 +549,40 @@ Columnar-read design rules:
    possible. Contiguous validity, offset, and value buffers let downstream
    filters count cache lines and use SIMD/vector lanes when benchmarks justify
    them.
+
+## Compute vs Durable Truth Separation (The Runtime-Lane/Crypto Conflict)
+
+Placing CPU-bound, blocking, or non-deterministic computation inside SQL queries (the "Durable Truth Lane") violates execution lane budgets, starves pooled connection resources, breaks query duration predictability, and severely degrades horizontal scalability. 
+
+The database (PostgreSQL) is a scarce, vertically scaled, state-oriented resource. The application layer (Go/Rust/TS) is a horizontally scaled, compute-oriented resource. Crossing these concerns is a "Wrong Lane" architectural error.
+
+### 1. Cryptographic Hashing and Column Encryption (pgcrypto)
+- **The Conflict**: Invoking `pgcrypto` functions like `crypt('password', gen_salt('bf', 12))` directly in SQL. Bcrypt with cost factor 12 takes ~300ms of pure CPU time by design. Under a default database statement timeout of 250ms (`CP-02`), this query will reliably fail with `canceling statement due to statement timeout`, locking database connection slots for 250ms of pure CPU block time and starving other queries.
+- **The Remediation**: Perform all cryptographic hashing, salt generation, and verification at the application layer (e.g., using Go's `bcrypt` package). The database should execute only a trivial, sub-1ms query to retrieve the hashed credential:
+  ```sql
+  SELECT hashed_password FROM users WHERE email = $1;
+  ```
+  Verify the password in the Go application (e.g., `bcrypt.CompareHashAndPassword(hashedPassword, plaintextPassword)`). Go-level hashing runs on application CPUs, scales horizontally with application replicas, does not hold scarce database pool connections, and fails gracefully with clear application logs.
+
+### 2. Complex Pattern Matching & Regex Parsing
+- **The Conflict**: Running sequential evaluations of complex regular expressions (`~`, `~*`, `regexp_like`, `regexp_matches`) over unindexed text columns in a hot database lane. Regex parsing and compilation is highly CPU-bound. Sequential regex checks over millions of rows will instantly consume database CPU cores and trip statement timeouts.
+- **The Remediation**: Use `tsvector`/GIN full-text search or trigram search (`pg_trgm`/GiST) for filtering at the database boundary. If complex regex transformation or schema extraction is required, fetch candidates using indexed SQL fields first, and perform the final regex parsing or manipulation in the Go/Rust application.
+
+### 3. JSON/XML Schema Validation & Complex Transformations
+- **The Conflict**: Implementing JSON schema validation, deep recursive JSON path traversals (`jsonb_to_recordset`), or complex XML conversions in database triggers and functions. Parsing, validating, and mutating complex document formats in the DB consumes massive amounts of database CPU and memory allocator overhead.
+- **The Remediation**: Validate, structure, and serialize document payloads in the application layer. The database should only store fully validated JSONB, or extract key queryable attributes into dedicated relational columns.
+
+### 4. Heavy Spatial / Distance Computations
+- **The Conflict**: Calculating exact distances or intersections between complex polygons (e.g., PostGIS `ST_Distance` or `ST_Contains`) over large datasets without spatial indexes or pre-filtering. Calculating spatial geometric relations on complex shapes is extremely float-compute intensive.
+- **The Remediation**: Always pair spatial operator predicates with the bounding-box overlap operator (`&&`) and ensure a spatial GiST index is defined on geometry fields. If exact, high-precision geo-computations are needed, perform coarse-grained bounding-box filtering in SQL first, then run high-fidelity geometric calculations in the application layer (e.g., utilizing a fast native Rust/WASM library).
+
+### 5. Intensive Mathematical / Financial Calculation Loops
+- **The Conflict**: Computing amortization schedules, financial forecasts, Monte Carlo simulations, or multi-step statistical projections inside database triggers or PL/pgSQL procedural code.
+- **The Remediation**: Implement state-machines and calculation loops in Go or Rust. Fetch the required inputs via simple database queries, compute the calculations in memory, and save the final values in a single database transaction.
+
+### 6. UUID/Key Generation in High-Volume Ingest
+- **The Conflict**: Forcing PostgreSQL to generate UUIDs (`uuid_generate_v4()`) during high-frequency bulk insert paths, which introduces unnecessary DB CPU overhead and creates transaction lock contention.
+- **The Remediation**: Generate UUIDs (V4 or V7) in the Go application layer and supply them as part of the `INSERT` payload. This ensures the application knows the record identifiers prior to writing them, simplifies idempotency keys, and keeps the database focused purely on write durability.
 
 ## Security and compliance
 

@@ -73,9 +73,12 @@ func main() {
 	// onto the same river bundle as the raw river.Worker registrations above,
 	// and the engine is the EnqueueTx/Enqueue surface for foundation jobs.
 	engine := workerkit.NewEngine(nil, log)
-	worker.RegisterProcessors(engine, deps)
+	if err := worker.RegisterProcessors(engine, deps); err != nil {
+		log.ErrorContext(ctx, "failed to register engine processors", "error", err)
+		os.Exit(1)
+	}
 	if err := engine.AddToWorkers(workers); err != nil {
-		log.Error("failed to bridge engine processors onto river", "error", err)
+		log.ErrorContext(ctx, "failed to bridge engine processors onto river", "error", err)
 		os.Exit(1)
 	}
 

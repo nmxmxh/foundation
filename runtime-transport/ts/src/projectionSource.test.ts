@@ -56,6 +56,25 @@ describe("mapMutation", () => {
     expect(mapMutation(wireMutation({ operation: 0 }), scope)).toBeUndefined();
     expect(mapMutation(wireMutation({ recordId: "" }), scope)).toBeUndefined();
   });
+
+  it("warns once per scope/tenant pair on a tenant-mismatch drop", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const mismatchScope: ProjectionScope = {
+        tenantId: "tenant-warn-test",
+        domain: "signals",
+        collection: "ticks",
+      };
+      expect(mapMutation(wireMutation(), mismatchScope)).toBeUndefined();
+      expect(mapMutation(wireMutation(), mismatchScope)).toBeUndefined();
+      const tenantWarnings = warn.mock.calls.filter((call) =>
+        String(call[0]).includes('scope tenant "tenant-warn-test"'),
+      );
+      expect(tenantWarnings).toHaveLength(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
 });
 
 describe("resolveProjectionEndpoints", () => {

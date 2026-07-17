@@ -115,9 +115,9 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	// the app assigns ProjectionFetcher — the in-process worker for the hermes
 	// projection queue, so hot applies fan WS deltas out of the serving process.
 	if deps.Projected != nil {
-		engine, stopWorkers, err := initWorkerEngine(ctx, deps.Projected, kitLog)
-		if err != nil {
-			kitLog.WarnContext(ctx, "worker engine unavailable; foundation job enqueue disabled", "error", err)
+		engine, stopWorkers, engineErr := initWorkerEngine(ctx, deps.Projected, kitLog)
+		if engineErr != nil {
+			kitLog.WarnContext(ctx, "worker engine unavailable; foundation job enqueue disabled", "error", engineErr)
 		} else {
 			deps.WorkerEngine = engine
 			if stopWorkers != nil {
@@ -176,12 +176,12 @@ func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeSto
 	engine := workerkit.NewEngine(nil, log)
 	registered := false
 	if ProjectionFetcher != nil {
-		processor, err := hermes.NewRecordProjectionProcessor(projected, ProjectionFetcher)
-		if err != nil {
-			return nil, nil, fmt.Errorf("init projection processor: %w", err)
+		processor, initErr := hermes.NewRecordProjectionProcessor(projected, ProjectionFetcher)
+		if initErr != nil {
+			return nil, nil, fmt.Errorf("init projection processor: %w", initErr)
 		}
-		if err := engine.Register(processor); err != nil {
-			return nil, nil, fmt.Errorf("register projection processor: %w", err)
+		if regErr := engine.Register(processor); regErr != nil {
+			return nil, nil, fmt.Errorf("register projection processor: %w", regErr)
 		}
 		registered = true
 	}
@@ -320,10 +320,10 @@ func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger)
 	// source rebuild diffs and refreshes a durable artifact (evidence counters
 	// in hermes runtime stats). The served warm path is unchanged.
 	if dir := strings.TrimSpace(cfg.HermesSnapshotDir); dir != "" {
-		snaps, err := hermessnapshot.NewFileStore(dir)
-		if err != nil {
+		snaps, snapErr := hermessnapshot.NewFileStore(dir)
+		if snapErr != nil {
 			db.Close()
-			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", err)
+			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", snapErr)
 		}
 		storeOpts.SnapshotStore = snaps
 	}

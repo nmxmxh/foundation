@@ -191,9 +191,22 @@ func databaseURLFromParts(user, password, host string, port int, dbName, sslMode
 }
 
 func (c *Config) validate() error {
-	if c.DatabaseURL == "" && c.StateStore != "memory" {
-		return fmt.Errorf("DATABASE_URL is required")
+	if err := c.validateSecurity(); err != nil {
+		return err
 	}
+	if err := c.validateDatabase(); err != nil {
+		return err
+	}
+	if err := c.validateRedis(); err != nil {
+		return err
+	}
+	if err := c.validateRuntime(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Config) validateSecurity() error {
 	if c.JWTSecret == "" && c.Env == "production" {
 		return fmt.Errorf("JWT_SECRET is required in production")
 	}
@@ -208,6 +221,13 @@ func (c *Config) validate() error {
 			return fmt.Errorf("ALLOWED_ORIGINS cannot contain wildcard origins in production")
 		}
 	}
+	return nil
+}
+
+func (c *Config) validateDatabase() error {
+	if c.DatabaseURL == "" && c.StateStore != "memory" {
+		return fmt.Errorf("DATABASE_URL is required")
+	}
 	if c.DBMaxConns < 0 || c.DBMinConns < 0 || c.DBShardCount < 0 {
 		return fmt.Errorf("database pool and shard settings must be zero or greater")
 	}
@@ -220,12 +240,20 @@ func (c *Config) validate() error {
 	if c.HermesMaxRecords <= 0 || c.HermesMaxBytes <= 0 || len(c.HermesIndexedFields) == 0 {
 		return fmt.Errorf("hermes bounds and indexed fields must be configured")
 	}
+	return nil
+}
+
+func (c *Config) validateRedis() error {
 	if c.RedisPoolSize < 0 || c.RedisMinIdle < 0 || c.RedisMaxRetries < 0 {
 		return fmt.Errorf("redis pool settings must be zero or greater")
 	}
 	if c.RedisDialTimeout <= 0 || c.RedisReadTimeout <= 0 || c.RedisWriteTimeout <= 0 {
 		return fmt.Errorf("redis timeout settings must be positive")
 	}
+	return nil
+}
+
+func (c *Config) validateRuntime() error {
 	if !oneOf(c.RuntimeSharedMemory, "off", "auto", "required") {
 		return fmt.Errorf("RUNTIME_SHARED_MEMORY must be off, auto, or required")
 	}

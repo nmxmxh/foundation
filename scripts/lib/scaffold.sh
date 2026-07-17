@@ -280,12 +280,27 @@ scaffold_sync_frontend_manifest_contract() {
         return 0
     fi
 
-    if [[ "${DRY_RUN:-false}" == "true" ]]; then
-        foundation_log_info "[DRY RUN] Would synchronize frontend manifest contract"
-        return 0
+    local old_hash=""
+    if [[ -f "$target_manifest" ]]; then
+        old_hash="$(foundation_hash_file "$target_manifest")"
     fi
 
     WITH_NATIVE="${WITH_NATIVE:-false}" node "$sync_script" "$template_manifest" "$target_manifest"
+
+    local new_hash=""
+    if [[ -f "$target_manifest" ]]; then
+        new_hash="$(foundation_hash_file "$target_manifest")"
+    fi
+
+    if [[ "$old_hash" != "$new_hash" ]]; then
+        foundation_log_info "Frontend manifest contract updated; running npm install to synchronize lockfile..."
+        if command -v npm >/dev/null 2>&1; then
+            (cd "$frontend_root" && npm install --package-lock-only)
+            foundation_log_success "Frontend lockfile synchronized"
+        else
+            foundation_log_warn "npm not found; lockfile may be desynchronized from manifest"
+        fi
+    fi
 }
 
 scaffold_apply_manifest() {

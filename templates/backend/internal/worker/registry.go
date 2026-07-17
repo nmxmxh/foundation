@@ -2,6 +2,7 @@
 package worker
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 
@@ -44,15 +45,20 @@ func RegisterAll(workers *river.Workers, deps *Dependencies) {
 // the engine; they bridge onto the river bundle via engine.AddToWorkers. This
 // is the canonical seam for foundation-shaped jobs — raw river.Worker
 // registrations in RegisterAll coexist on the same client.
-func RegisterProcessors(engine *workerkit.Engine, deps *Dependencies) {
+func RegisterProcessors(engine *workerkit.Engine, deps *Dependencies) error {
 	if engine == nil || deps == nil {
-		return
+		return nil
 	}
 	if deps.Projected != nil && deps.ProjectionFetch != nil {
-		if processor, err := hermes.NewRecordProjectionProcessor(deps.Projected, deps.ProjectionFetch); err == nil {
-			_ = engine.Register(processor)
+		processor, err := hermes.NewRecordProjectionProcessor(deps.Projected, deps.ProjectionFetch)
+		if err != nil {
+			return fmt.Errorf("init record projection processor: %w", err)
+		}
+		if err := engine.Register(processor); err != nil {
+			return fmt.Errorf("register record projection processor: %w", err)
 		}
 	}
+	return nil
 }
 
 // DefaultQueueConfig returns queue configuration for River.
