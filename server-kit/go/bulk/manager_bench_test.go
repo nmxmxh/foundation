@@ -54,8 +54,8 @@ func BenchmarkManagerAcceptPartWithCacheAndEvents(b *testing.B) {
 	ctx := benchmarkContext()
 	b.SetBytes(int64(size))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
 		mgr := newBenchmarkManager(b, redis.NewMemoryClient("bench"), events.NewInMemoryBus(256))
 		transferID := fmt.Sprintf("identity-cache-events-%d", i)
@@ -96,8 +96,8 @@ func BenchmarkManagerAcceptPartDuplicateReplay(b *testing.B) {
 	desc := PartDescriptor{PartNumber: receipt.PartNumber, Size: receipt.RawSize, ExpectedRawSHA256: receipt.RawSHA256}
 	b.SetBytes(int64(size))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		replayed, err := mgr.AcceptPart(ctx, plan.TransferID, desc, errReader{})
 		if err != nil {
 			b.Fatal(err)
@@ -195,8 +195,8 @@ func BenchmarkManagerCompleteManifestSparseMissing(b *testing.B) {
 	totalSize := int64(parts) * partSize
 	b.SetBytes(totalSize)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
 		mgr := newBenchmarkManager(b, nil, nil)
 		transferID := fmt.Sprintf("sparse-complete-%d", i)
@@ -226,8 +226,8 @@ func BenchmarkManagerOpenRangeIdentity(b *testing.B) {
 
 	b.SetBytes(rangeSize)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		offset := int64(i) % (totalSize - rangeSize)
 		reader, _, err := mgr.OpenRange(ctx, plan.TransferID, offset, rangeSize)
 		if err != nil {
@@ -247,8 +247,8 @@ func BenchmarkManagerForEachRangeIdentity(b *testing.B) {
 
 	b.SetBytes(rangeSize)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		offset := int64(i) % (totalSize - rangeSize)
 		if _, err := mgr.ForEachRange(ctx, plan.TransferID, offset, rangeSize, func(part RangePart) error {
 			_, err := io.Copy(io.Discard, part.Reader)

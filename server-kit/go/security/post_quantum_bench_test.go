@@ -26,7 +26,7 @@ func BenchmarkApplyPostQuantumTLSAuto(b *testing.B) {
 	base := &tls.Config{CurvePreferences: []tls.CurveID{tls.X25519}}
 
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := ApplyPostQuantumTLS(base, PostQuantumTLSAuto); err != nil {
 			b.Fatal(err)
 		}

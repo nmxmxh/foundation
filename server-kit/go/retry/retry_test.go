@@ -230,9 +230,9 @@ func BenchmarkPolicy_Do_Success(b *testing.B) {
 	ctx := context.Background()
 	policy := NewPolicy(Config{MaxAttempts: 3})
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = policy.Do(ctx, func() error {
 			return nil
 		})
@@ -248,9 +248,9 @@ func BenchmarkPolicy_Do_Retry(b *testing.B) {
 		Jitter:       0,
 	})
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		attempts := 0
 		_ = policy.Do(ctx, func() error {
 			attempts++
@@ -265,9 +265,9 @@ func BenchmarkPolicy_Do_Retry(b *testing.B) {
 func BenchmarkPolicy_CalculateDelay(b *testing.B) {
 	policy := NewPolicy(DefaultConfig())
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		_ = policy.calculateDelay(i%10 + 1)
 	}
 }

@@ -468,8 +468,8 @@ func BenchmarkDispatchOverBufconn(b *testing.B) {
 		SchemaVersion: "1.0",
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := Dispatch(context.Background(), conn, req); err != nil {
 			b.Fatal(err)
 		}
@@ -487,8 +487,8 @@ func BenchmarkDispatchFrameOverBufconn(b *testing.B) {
 		SchemaVersion: "1.0",
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := DispatchFrame(context.Background(), conn, req); err != nil {
 			b.Fatal(err)
 		}
@@ -507,8 +507,8 @@ func BenchmarkClientDispatchFrameOverBufconn(b *testing.B) {
 		SchemaVersion: "1.0",
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := client.DispatchFrame(context.Background(), req); err != nil {
 			b.Fatal(err)
 		}
@@ -524,8 +524,8 @@ func BenchmarkRouterDispatchFrameDirect(b *testing.B) {
 		SchemaVersion: "1.0",
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := router.DispatchFrame(context.Background(), req); err != nil {
 			b.Fatal(err)
 		}
@@ -541,8 +541,8 @@ func BenchmarkDirectFrameClientDispatch(b *testing.B) {
 		SchemaVersion: "1.0",
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := client.DispatchFrame(context.Background(), req); err != nil {
 			b.Fatal(err)
 		}
@@ -561,8 +561,8 @@ func BenchmarkBoundFrameClientDispatch(b *testing.B) {
 		SchemaVersion: "1.0",
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := client.DispatchFrame(context.Background(), req); err != nil {
 			b.Fatal(err)
 		}
@@ -581,8 +581,8 @@ func BenchmarkBoundFrameClientDispatchTrusted(b *testing.B) {
 		SchemaVersion: "1.0",
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := client.DispatchFrameTrusted(context.Background(), req); err != nil {
 			b.Fatal(err)
 		}
@@ -599,8 +599,8 @@ func BenchmarkBinaryFrameCodecRoundTrip(b *testing.B) {
 	}
 	var out Frame
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		raw, err := codec.Marshal(req)
 		if err != nil {
 			b.Fatal(err)
@@ -621,8 +621,8 @@ func BenchmarkBinaryFrameAppendRoundTrip(b *testing.B) {
 	var out Frame
 	buf := make([]byte, 0, 256)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		buf = AppendMarshalFrame(buf[:0], req)
 		if err := (binaryFrameCodec{}).Unmarshal(buf, &out); err != nil {
 			b.Fatal(err)
@@ -640,8 +640,8 @@ func BenchmarkBinaryFrameAppendViewRoundTrip(b *testing.B) {
 	buf := make([]byte, 0, 256)
 	var view FrameView
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		buf = AppendMarshalFrame(buf[:0], req)
 		var err error
 		view, err = UnmarshalFrameView(buf)
@@ -663,8 +663,8 @@ func BenchmarkBinaryFrameAppendOnly(b *testing.B) {
 	}
 	buf := make([]byte, 0, 256)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		buf = AppendMarshalFrame(buf[:0], req)
 	}
 	_ = buf
@@ -680,8 +680,8 @@ func BenchmarkBinaryFrameViewReadOnly(b *testing.B) {
 	buf := AppendMarshalFrame(make([]byte, 0, 256), req)
 	var view FrameView
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		var err error
 		view, err = UnmarshalFrameView(buf)
 		if err != nil {
@@ -703,8 +703,8 @@ func BenchmarkBinaryFrameReadFieldOnly(b *testing.B) {
 	buf := AppendMarshalFrame(make([]byte, 0, 256), req)
 	var offset int
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		var err error
 		_, offset, err = readField(buf, 0)
 		if err != nil {
@@ -729,8 +729,8 @@ func BenchmarkGeneratedProtoMarshalAppendRoundTrip(b *testing.B) {
 	buf := make([]byte, 0, opts.Size(req))
 	var out testprotos.TestRequest
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		buf = buf[:0]
 		raw, err := opts.MarshalAppend(buf, req)
 		if err != nil {
@@ -760,8 +760,8 @@ func BenchmarkGeneratedProtoUnmarshalReset(b *testing.B) {
 	}
 	var out testprotos.TestRequest
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		out.Reset()
 		if err := proto.Unmarshal(raw, &out); err != nil {
 			b.Fatal(err)
@@ -787,8 +787,8 @@ func BenchmarkGeneratedProtoUnmarshalMergeReuse(b *testing.B) {
 	opts := proto.UnmarshalOptions{Merge: true}
 	out := testprotos.TestRequest{Metadata: &testprotos.Metadata{}}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if err := opts.Unmarshal(raw, &out); err != nil {
 			b.Fatal(err)
 		}

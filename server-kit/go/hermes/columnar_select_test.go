@@ -405,9 +405,9 @@ func BenchmarkHermesColumnarBitmapFilterSum(b *testing.B) {
 	bytesTouched := int64(batch.Rows)*8*2 + wordBytes + int64(merged.Count())*8
 
 	b.ReportAllocs()
-	b.ResetTimer()
+	
 	var sink float64
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		batch, err := store.GetColumnarBatch(ctx, "ticks", query, fields, Fence{})
 		if err != nil {
 			b.Fatal(err)
@@ -442,9 +442,9 @@ func BenchmarkHermesListRecordsFilterSum(b *testing.B) {
 	query := Query{OrganizationID: "org_1"}
 
 	b.ReportAllocs()
-	b.ResetTimer()
+	
 	var sink float64
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		list, err := store.ListRecords(ctx, "ticks", query, Fence{})
 		if err != nil {
 			b.Fatal(err)
@@ -496,9 +496,9 @@ func BenchmarkHermesSelectionBitmapMerge10K(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	b.ResetTimer()
+	
 	var sink int
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		merged := clone(left)
 		if err := merged.And(&right); err != nil {
 			b.Fatal(err)
@@ -518,9 +518,9 @@ func BenchmarkHermesColumnarBitmapFilterCachedBatch(b *testing.B) {
 	batch := fetchSelectFixtureBatch(b, store, "price", "bucket")
 
 	b.ReportAllocs()
-	b.ResetTimer()
+	
 	var sink float64
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		priceSel, err := batch.SelectFloat64("price", CompareGt, 7500)
 		if err != nil {
 			b.Fatal(err)

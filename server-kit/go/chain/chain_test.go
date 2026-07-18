@@ -152,7 +152,7 @@ func BenchmarkRunParallel(b *testing.B) {
 		{Name: "c", Run: func(context.Context) (int, error) { return 3, nil }},
 	}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		RunParallel(context.Background(), ops)
 	}
 }
@@ -165,7 +165,7 @@ func BenchmarkRunParallelInto(b *testing.B) {
 	}
 	results := make([]Result[int], 0, len(ops))
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		results = RunParallelInto(context.Background(), ops, results)
 	}
 }
@@ -183,7 +183,7 @@ func BenchmarkHasCriticalFailure(b *testing.B) {
 		{Name: "c"},
 	}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		HasCriticalFailure(ops, results)
 	}
 }
@@ -201,7 +201,7 @@ func BenchmarkHasCriticalFailureOrdered(b *testing.B) {
 		{Name: "c"},
 	}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		HasCriticalFailureOrdered(ops, results)
 	}
 }

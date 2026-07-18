@@ -127,7 +127,7 @@ func TestBuildDispatchRequestPayloadVariants(t *testing.T) {
 func BenchmarkPayloadFromRequestJSONBody(b *testing.B) {
 	body := []byte(`{"include_permissions":true,"view":"full"}`)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		req := httptest.NewRequest(http.MethodPost, "/v1/users/user-123/profile", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		payload, raw, requestEncoding, responseEncoding, err := payloadFromRequest(req)
@@ -153,7 +153,7 @@ func BenchmarkBuildDispatchRequestJSONBody(b *testing.B) {
 	}
 	body := []byte(`{"include_permissions":true,"view":"full"}`)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		req := httptest.NewRequest(http.MethodPost, "/v1/users/user-123/profile", bytes.NewReader(body))
 		req.SetPathValue("id", "user-123")
 		req.Header.Set("Content-Type", "application/json")
@@ -176,7 +176,7 @@ func BenchmarkPlannedDispatchRequestJSONBody(b *testing.B) {
 	plan := CompileDispatchRoute(route)
 	body := []byte(`{"include_permissions":true,"view":"full"}`)
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		req := httptest.NewRequest(http.MethodPost, "/v1/users/user-123/profile", bytes.NewReader(body))
 		req.SetPathValue("id", "user-123")
 		req.Header.Set("Content-Type", "application/json")

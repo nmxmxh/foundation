@@ -63,6 +63,16 @@ strict_vuln_check() {
   is_truthy "${CI:-}" || is_truthy "${GOVULNCHECK_STRICT:-}" || is_truthy "${FOUNDATION_STRICT_SECURITY:-}"
 }
 
+# gopls check emits modernize/analysis diagnostics (for example the b.N ->
+# b.Loop() "bloop" hint) but always exits 0, so on its own it never gates.
+# This is an explicit opt-in gate: it stays warn-only (including under CI) until
+# GOPLS_CHECK_STRICT/FOUNDATION_STRICT_LINT is set, so existing diagnostics can
+# be cleaned up incrementally without breaking dev loops or CI on rollout. Flip
+# the flag in CI once the fleet is clean.
+strict_gopls_check() {
+  is_truthy "${GOPLS_CHECK_STRICT:-}" || is_truthy "${FOUNDATION_STRICT_LINT:-}"
+}
+
 run_with_timeout() {
   local timeout_sec="$1"
   shift
@@ -245,7 +255,29 @@ for mod_dir in "${go_modules[@]}"; do
     go list -f '{{range .GoFiles}}{{printf "%s/%s%c" $.Dir . 0}}{{end}}{{range .TestGoFiles}}{{printf "%s/%s%c" $.Dir . 0}}{{end}}' ./... | tr -d '\n' >"$gopls_file"
     if [[ -s "$gopls_file" ]]; then
       echo "[RUN] gopls check: $rel"
-      run_with_timeout "${GO_ANALYSIS_TOOL_TIMEOUT_SEC:-120}" xargs -0 gopls check <"$gopls_file"
+      gopls_out="$(mktemp "${TMPDIR:-/tmp}/gopls-check.XXXXXX")"
+      # gopls check exits 0 even when it prints diagnostics, so gate on whether
+      # any output was produced rather than on the exit code. Capture the exit
+      # code without tripping `set -e` on a genuine tool failure.
+      gopls_code=0
+      run_with_timeout "${GO_ANALYSIS_TOOL_TIMEOUT_SEC:-120}" xargs -0 gopls check >"$gopls_out" 2>&1 <"$gopls_file" || gopls_code=$?
+      if [[ "$gopls_code" -ne 0 ]]; then
+        cat "$gopls_out"
+        rm -f "$gopls_out"
+        exit "$gopls_code"
+      fi
+      if [[ -s "$gopls_out" ]]; then
+        cat "$gopls_out"
+        if strict_gopls_check; then
+          echo "[FAIL] gopls check reported diagnostics: $rel" >&2
+          echo "Run 'gopls check <file>' or apply the suggested rewrites (for example 'modernize -fix')." >&2
+          rm -f "$gopls_out"
+          exit 1
+        fi
+        echo "[WARN] gopls check reported diagnostics: $rel (non-gating; opt-in gate)" >&2
+        echo "[WARN] set GOPLS_CHECK_STRICT=1 (or FOUNDATION_STRICT_LINT=1) to fail closed" >&2
+      fi
+      rm -f "$gopls_out"
       echo "[OK] gopls check: $rel"
     fi
     echo "[RUN] govulncheck: $rel"

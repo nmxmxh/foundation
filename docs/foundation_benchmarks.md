@@ -3537,3 +3537,85 @@ Under active concurrent write pressure (4 background writers aggressively applyi
 | Benchmark | ns/op | B/op | allocs/op | Interpretation |
 | --- | ---: | ---: | ---: | --- |
 | `BenchmarkHermesConcurrentReadWrite-8` | 156.9 | 197 | 4 | Sub-microsecond read latency under heavy write contention. |
+
+## 2026-07-17 Benchmark correctness: dead-code elimination and the `b.Loop()` migration
+
+The whole Go benchmark tree migrated from the classic `for i := 0; i < b.N; i++`
+form to `for b.Loop()` (Go 1.24+). This is a **measurement-correctness** change,
+not a performance change: `b.Loop()` does not alter what the code does. It was
+applied with the authoritative fixer (gopls `bloop` code action), so loops that
+still reference the index keep it (`for i := 0; b.Loop(); i++`) and the rest
+collapse to `for b.Loop()`. All four Go modules are Go >= 1.24
+(`runtime-transport/go` at 1.24.1, the rest at 1.26.0), so the construct is
+valid fleet-wide.
+
+### Why the old form lied: dead-code elimination (DCE)
+
+A benchmark that assigns a result and never observes it invites the compiler to
+prove the work is unobserved and delete it:
+
+```go
+for i := 0; i < b.N; i++ {
+    result := StateRead() // result never read -> whole body is dead -> deleted
+}
+```
+
+What remained was an empty counting loop, so the "benchmark" measured `i++`, not
+`StateRead()`. `b.Loop()` closes this by contract: values produced inside a
+`b.Loop()` body are treated as observed, so DCE cannot strip them. It bakes in
+the protection that previously required manually sinking results into a
+package-level variable — which contributors routinely forgot.
+
+### Measured corrections (Apple M1 Pro, `-benchtime=100ms -count=6`, benchstat)
+
+Allocations and `B/op` were byte-identical before/after everywhere. The timing
+deltas below are the old numbers being corrected upward to honest cost, not
+regressions. The signature is telling: the damage was concentrated in the
+sub-nanosecond micro-benchmarks, exactly where DCE can see through cheap,
+result-ignored work.
+
+| Benchmark | old (`b.N`) | new (`b.Loop`) | Delta | Reading |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkCircuitBreaker_StateRead` | 0.525 ns | 2.169 ns | +313% | Body was fully DCE'd; 0.5 ns was never achievable. ~2.2 ns is real. |
+| `BenchmarkHasCriticalFailureOrdered` | 1.262 ns | 2.130 ns | +69% | Partially optimized away before. |
+| `BenchmarkEnvelope_FromBinary` | 514.9 ns | 530.2 ns | +3.0% | Real work; barely affected. |
+| `BenchmarkEnvelope_FromJSON` | 2.464 us | 2.479 us | +0.6% | Real work; noise-level. |
+
+Everything else (`BenchmarkInMemoryBus_Publish*`, `BenchmarkEnvelope_ToJSON`,
+`BenchmarkEnvelope_ToBinary`, chain, retry, metrics, circuit-breaker execute)
+was statistically unchanged (`~`, p>0.05). **Rule of thumb: any benchmark
+reporting below ~1 ns/op with 0 allocs is suspect — it is very likely timing an
+empty loop.**
+
+### Other benchmark-correctness hazards (`b.Loop()` does not cover all of them)
+
+Researched against the current tree; each is a distinct trap:
+
+1. **`for pb.Next()` parallel loops** (8 in the tree) are outside the `b.Loop()`
+   contract. They still need results sunk (assigned to a package var or a field
+   the compiler cannot prove dead) or they DCE just like the old serial form.
+2. **Discarding to `_`** (e.g. `compress/bench_test.go` uses `_, _ = Compress...`)
+   is weaker than a real sink. It preserves side effects, but for a provably
+   pure function with an unused result the compiler may still eliminate it.
+   Prefer a package-level sink for pure computations.
+3. **Loop-invariant / constant inputs** let the compiler hoist the work out of
+   the loop or constant-fold it. Vary inputs by iteration or source them from a
+   sink the compiler cannot predict.
+4. **Setup inside the timed region.** `b.Loop()` runs setup/teardown outside the
+   timer cleanly, but any expensive construction still placed *inside* the loop
+   is measured. Keep using `b.ResetTimer()`/`b.StopTimer()` for per-iteration
+   setup (22 files already do).
+5. **`b.N` used as a value in the body** — e.g. `scale_paths_test.go` asserts
+   `deliveries == b.N`. These are legitimate and gopls correctly refused to
+   auto-migrate them; migrating requires a local counter, since `b.Loop()` does
+   not expose an iteration total up front. Do not force these to `b.Loop()`.
+6. **Missing `b.ReportAllocs()`** (e.g. `database/executor_bench_test.go`) hides
+   allocation shape unless `-benchmem` is passed globally. Prefer per-benchmark
+   `b.ReportAllocs()`.
+
+### Regression guard
+
+`gopls check` emits the `bloop` diagnostic for any reintroduced `b.N` loop.
+`tooling/scripts/go_static_analysis_check.sh` runs `gopls check` and gates on it
+under `GOPLS_CHECK_STRICT=1` / `FOUNDATION_STRICT_LINT=1` (warn-only otherwise),
+so the fleet cannot silently regress back to the DCE-prone form.

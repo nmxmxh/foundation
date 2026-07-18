@@ -434,8 +434,8 @@ func BenchmarkMemoryDBCountRecordsTenantScoped(b *testing.B) {
 	db := benchmarkMemoryDBWithTenants(b, 32, 256)
 	ctx := context.Background()
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		count, err := db.CountRecords(ctx, "signals", "ticks", "org_07", RecordQuery{})
 		if err != nil {
 			b.Fatal(err)
@@ -451,8 +451,8 @@ func BenchmarkMemoryDBListRecordsTenantScopedFiltered(b *testing.B) {
 	ctx := context.Background()
 	filter := testQuery(b, 64, "bucket", 3)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		items, err := db.ListRecords(ctx, "signals", "ticks", "org_07", filter)
 		if err != nil {
 			b.Fatal(err)

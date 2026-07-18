@@ -9,7 +9,7 @@ import (
 // RetryConfig controls the request-level retry policy applied by Connector.Call.
 // Backoff is exponential with full jitter, capped at MaxDelay.
 type RetryConfig struct {
-	MaxAttempts int           // total attempts including the first (<=1 disables retry)
+	MaxAttempts int           // total attempts including the first (1 disables retry; <=0 adopts DefaultRetryConfig's count)
 	BaseDelay   time.Duration // delay before the first retry
 	MaxDelay    time.Duration // upper bound on any single backoff
 	Multiplier  float64       // growth factor per attempt (default 2.0)
@@ -26,8 +26,10 @@ func DefaultRetryConfig() RetryConfig {
 }
 
 func (c RetryConfig) normalized() RetryConfig {
+	// The zero value adopts the default policy (Config documents this);
+	// MaxAttempts: 1 is the explicit way to disable retry.
 	if c.MaxAttempts <= 0 {
-		c.MaxAttempts = 1
+		c.MaxAttempts = DefaultRetryConfig().MaxAttempts
 	}
 	if c.BaseDelay <= 0 {
 		c.BaseDelay = 50 * time.Millisecond

@@ -12,15 +12,15 @@ func BenchmarkCompressLargeBatch(b *testing.B) {
 	data := compressionFixture()
 
 	b.Run("Brotli-Q4", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		b.ReportAllocs()
+		for b.Loop() {
 			_, _ = CompressBrotli(data, 4)
 		}
 	})
 
 	b.Run("Zstd-Fastest", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		b.ReportAllocs()
+		for b.Loop() {
 			_, _ = CompressZstd(data)
 		}
 	})
@@ -33,15 +33,15 @@ func BenchmarkDecompressLargeBatch(b *testing.B) {
 	zstdData, _ := CompressZstd(data)
 
 	b.Run("Brotli", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		b.ReportAllocs()
+		for b.Loop() {
 			_, _ = decompressBrotli(brData)
 		}
 	})
 
 	b.Run("Zstd", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		b.ReportAllocs()
+		for b.Loop() {
 			_, _ = decompressZstd(zstdData)
 		}
 	})

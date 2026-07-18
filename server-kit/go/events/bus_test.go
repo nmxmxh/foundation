@@ -394,9 +394,9 @@ func BenchmarkInMemoryBus_Publish_NoSubscribers(b *testing.B) {
 	bus := NewInMemoryBus(100)
 	env := makeTestEnvelope("media:upload:requested", "bench-corr")
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = bus.Publish(context.Background(), env)
 	}
 }
@@ -406,9 +406,9 @@ func BenchmarkInMemoryBus_Publish_1Subscriber(b *testing.B) {
 	bus.Subscribe("media:upload:requested", func(_ context.Context, _ Envelope) {})
 	env := makeTestEnvelope("media:upload:requested", "bench-corr")
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = bus.Publish(context.Background(), env)
 	}
 }
@@ -420,9 +420,9 @@ func BenchmarkInMemoryBus_Publish_10Subscribers(b *testing.B) {
 	}
 	env := makeTestEnvelope("media:upload:requested", "bench-corr")
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = bus.Publish(context.Background(), env)
 	}
 }
@@ -443,14 +443,14 @@ func BenchmarkInMemoryBus_Publish_Parallel(b *testing.B) {
 
 func BenchmarkMatches(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = Matches("media:*", "media:upload:requested")
 	}
 }
 
 func BenchmarkMatches_Exact(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = Matches("media:upload:requested", "media:upload:requested")
 	}
 }
@@ -458,7 +458,7 @@ func BenchmarkMatches_Exact(b *testing.B) {
 func BenchmarkTerminalState(b *testing.B) {
 	eventType := "media:upload:v1:success"
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if TerminalState(eventType) != "success" {
 			b.Fatal("unexpected terminal state")
 		}

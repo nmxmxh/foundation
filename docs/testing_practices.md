@@ -337,7 +337,7 @@ Requirements:
 
 1. Hard correctness bounds such as max attempts, queue capacity, acquire timeout, payload size, and page limit must be asserted as behavior.
 2. Statistical targets such as p95/p99 latency, RPS, heap, CPU, and allocation counts belong in benchmarks/load tests.
-3. Benchmarks must include representative fixtures and must not silently skip the hot path they claim to measure.
+3. Benchmarks must include representative fixtures and must not silently skip the hot path they claim to measure. Use `for b.Loop()` (Go 1.24+), not `for i := 0; i < b.N; i++`: the classic form invites dead-code elimination that measures an empty loop instead of the target. For `for pb.Next()` parallel loops and pure computations, sink results so the compiler cannot delete them. See `docs/foundation_benchmarks.md` (2026-07-17) for the DCE mechanism, corrected numbers, and the full hazard list; `gopls check` gates reintroductions via the `bloop` diagnostic.
 4. Load tests must define request mix, duration, concurrency, think time, error budget, and pass/fail threshold.
 5. Memory claims must distinguish cumulative allocation
    (`alloc_space`/`alloc_objects`) from retained memory

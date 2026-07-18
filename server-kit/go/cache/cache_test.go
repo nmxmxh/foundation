@@ -448,9 +448,9 @@ func BenchmarkMemoryBackend_Set(b *testing.B) {
 	ctx := context.Background()
 	data := []byte(`{"user_id":123,"name":"benchmark_user","email":"bench@test.com"}`)
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		_ = backend.Set(ctx, fmt.Sprintf("key:%d", i), data, 5*time.Minute)
 	}
 }
@@ -461,9 +461,9 @@ func BenchmarkMemoryBackend_Get(b *testing.B) {
 	data := []byte(`{"user_id":123}`)
 	_ = backend.Set(ctx, "bench-key", data, time.Hour)
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = backend.Get(ctx, "bench-key")
 	}
 }
@@ -498,9 +498,9 @@ func BenchmarkGetOrSet(b *testing.B) {
 		return "cached_value", nil
 	})
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = GetOrSet(ctx, c, "bench-key", func() (string, error) {
 			return "should_not_compute", nil
 		})
@@ -537,7 +537,7 @@ func BenchmarkGetOrSet_ParallelHotHit(b *testing.B) {
 
 func BenchmarkCacheKey(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = CacheKey("user", 123, "profile", "v2")
 	}
 }
@@ -546,9 +546,9 @@ func BenchmarkMemoryBackend_DeletePattern(b *testing.B) {
 	backend := NewMemoryBackend()
 	ctx := context.Background()
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		b.StopTimer()
 		for j := range 100 {
 			_ = backend.Set(ctx, fmt.Sprintf("prefix:%d", j), []byte("data"), time.Hour)

@@ -13,8 +13,8 @@ func BenchmarkHermesGetRecordCopied(b *testing.B) {
 	ctx := context.Background()
 	query := Query{OrganizationID: "org_1"}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		_, ok, err := store.GetRecord(ctx, "bench_ticks", query, "tick_000123", Fence{})
 		if err != nil || !ok {
 			b.Fatalf("GetRecord() ok=%v err=%v", ok, err)
@@ -27,8 +27,8 @@ func BenchmarkHermesForEachViewLimit50(b *testing.B) {
 	ctx := context.Background()
 	query := QueryFromRecordQuery("org_1", testRecordQuery(50, map[string]any{"bucket": 7}))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		seen, err := store.ForEachView(ctx, "bench_ticks", query, Fence{}, func(view RecordView) error {
 			if view.RecordID == "" {
 				b.Fatal("empty view")
@@ -50,8 +50,8 @@ func BenchmarkHermesForEachViewTypedFilterLimit50(b *testing.B) {
 	}
 	query := QueryWithFilters("org_1", 50, filter)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		seen, err := store.ForEachView(ctx, "bench_ticks", query, Fence{}, func(view RecordView) error {
 			if view.RecordID == "" {
 				b.Fatal("empty view")
@@ -69,8 +69,8 @@ func BenchmarkHermesCountIndexed(b *testing.B) {
 	ctx := context.Background()
 	query := QueryFromRecordQuery("org_1", testRecordQuery(0, map[string]any{"bucket": 7}))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		count, err := store.Count(ctx, "bench_ticks", query, Fence{})
 		if err != nil || count == 0 {
 			b.Fatalf("Count() count=%d err=%v", count, err)
@@ -87,8 +87,8 @@ func BenchmarkHermesCountTypedFilterIndexed(b *testing.B) {
 	}
 	query := QueryWithFilters("org_1", 0, filter)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		count, err := store.Count(ctx, "bench_ticks", query, Fence{})
 		if err != nil || count == 0 {
 			b.Fatalf("Count() count=%d err=%v", count, err)
@@ -124,8 +124,8 @@ func BenchmarkHermesListRecordsCopiedLimit50(b *testing.B) {
 	ctx := context.Background()
 	query := QueryFromRecordQuery("org_1", testRecordQuery(50, map[string]any{"bucket": 7}))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		items, err := store.ListRecords(ctx, "bench_ticks", query, Fence{})
 		if err != nil || len(items) != 50 {
 			b.Fatalf("ListRecords() len=%d err=%v", len(items), err)
@@ -142,8 +142,8 @@ func BenchmarkHermesListRecordsTypedFilterCopiedLimit50(b *testing.B) {
 	}
 	query := QueryWithFilters("org_1", 50, filter)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		items, err := store.ListRecords(ctx, "bench_ticks", query, Fence{})
 		if err != nil || len(items) != 50 {
 			b.Fatalf("ListRecords() len=%d err=%v", len(items), err)
@@ -155,8 +155,8 @@ func BenchmarkHermesApplyEventUpsert(b *testing.B) {
 	store := newBenchStore(b)
 	ctx := context.Background()
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		_, err := store.Apply(ctx, "bench_ticks", Event{
 			Operation: OperationUpsert,
 			SourceID:  fmt.Sprintf("bench_%d", i),
@@ -192,8 +192,8 @@ func BenchmarkHermesApplyEventPatchIndexedFields(b *testing.B) {
 		b.Fatalf("BulkLoad() error = %v", err)
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		_, err := store.Apply(ctx, "bench_ticks", Event{
 			Operation: OperationPatch,
 			SourceID:  fmt.Sprintf("patch_%d", i),
@@ -217,8 +217,8 @@ func BenchmarkHermesApplyBatch64(b *testing.B) {
 	ctx := context.Background()
 	events := make([]Event, 64)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		for j := range events {
 			id := i*len(events) + j
 			events[j] = Event{
@@ -245,8 +245,8 @@ func BenchmarkHermesApplyRecords64(b *testing.B) {
 	ctx := context.Background()
 	records := make([]database.DomainRecord, 64)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		for j := range records {
 			id := i*len(records) + j
 			records[j] = database.DomainRecord{
@@ -277,8 +277,8 @@ func BenchmarkHermesBulkLoad512(b *testing.B) {
 		}
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := store.BulkLoad(ctx, "bench_ticks", records); err != nil {
 			b.Fatalf("BulkLoad() error = %v", err)
 		}
@@ -326,8 +326,8 @@ func BenchmarkHermesApplyRecordPayloads64(b *testing.B) {
 	ctx := context.Background()
 	payloads := make([]RecordPayload, 64)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		for j := range payloads {
 			id := i*len(payloads) + j
 			payloads[j] = RecordPayload{
@@ -349,8 +349,8 @@ func BenchmarkHermesApplyRecordPayloadEvents64(b *testing.B) {
 	ctx := context.Background()
 	payloads := make([]RecordPayload, 64)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		for j := range payloads {
 			id := i*len(payloads) + j
 			payloads[j] = RecordPayload{
@@ -371,8 +371,8 @@ func BenchmarkHermesProjectedRuntimeStoreHotGet(b *testing.B) {
 	store := benchmarkProjectedRuntimeStore(b, 10000)
 	ctx := context.Background()
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		_, ok, err := store.GetRecord(ctx, "signals", "ticks", "org_1", "tick_000123")
 		if err != nil || !ok {
 			b.Fatalf("GetRecord() ok=%v err=%v", ok, err)
@@ -388,8 +388,8 @@ func BenchmarkHermesProjectedRuntimeStoreWarmCount(b *testing.B) {
 		b.Fatalf("warm CountRecords() error = %v", err)
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		count, err := store.CountRecords(ctx, "signals", "ticks", "org_1", filters)
 		if err != nil || count == 0 {
 			b.Fatalf("CountRecords() count=%d err=%v", count, err)
@@ -419,8 +419,8 @@ func BenchmarkHermesDriftCheckMerkle(b *testing.B) {
 	opts := DriftOptions{MaxRecords: 10000, SampleSize: 64}
 	query := Query{OrganizationID: "org_1"}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		report, err := store.CheckDrift(ctx, "bench_ticks", source, query, opts)
 		if err != nil || !report.OK() {
 			b.Fatalf("CheckDrift() ok=%v err=%v", report.OK(), err)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,11 +29,50 @@ var projectionUpgrader = websocket.Upgrader{
 // projection read. A request without it is rejected, not defaulted.
 var ErrUnauthenticated = errors.New("projectiongw: unauthenticated projection request")
 
+// ErrScopeForbidden is returned when a request names a scope outside the
+// mount's ScopeAllowlist. Distinct from ErrScopeInvalid (malformed) and
+// ErrUnauthenticated (no identity): the request is well-formed and identified,
+// but this mount does not publish that scope.
+var ErrScopeForbidden = errors.New("projectiongw: scope not published on this mount")
+
 // TenantFunc derives the authenticated tenant (organization) for a request. It
 // is the trust boundary: the scope tenant comes from authenticated context, not
 // from client-supplied path, header, or query, so a client cannot read another
 // tenant's projection (TenantScopeStable).
 type TenantFunc func(r *http.Request) (string, error)
+
+// PublicTenantFunc pins every request on a mount to one fixed public
+// organization, regardless of identity. This is the anonymous read posture: a
+// public mount (e.g. a discovery/landing surface) serves ONE tenant's
+// deliberately-published projections to everyone, so no request can steer the
+// tenant. Always pair it with a ScopeAllowlist — a public tenant without a
+// scope allowlist would publish every collection in that organization.
+func PublicTenantFunc(organization string) TenantFunc {
+	org := strings.TrimSpace(organization)
+	return func(*http.Request) (string, error) {
+		if org == "" {
+			// An unset public org disables the mount rather than defaulting.
+			return "", ErrUnauthenticated
+		}
+		return org, nil
+	}
+}
+
+// ScopeAllowlist names the {domain}/{collection} scopes a mount will serve,
+// as domain -> collections. A nil map applies no restriction (the
+// identity-scoped default); a non-nil map rejects any scope not listed with
+// ErrScopeForbidden — including subscribe control frames on the multiplexed
+// stream. Public mounts must be fail-closed: an empty (non-nil) map allows
+// nothing.
+type ScopeAllowlist map[string][]string
+
+// Allows reports whether the allowlist publishes domain/collection.
+func (a ScopeAllowlist) Allows(domain, collection string) bool {
+	if a == nil {
+		return true
+	}
+	return slices.Contains(a[domain], collection)
+}
 
 // SecurityTenantFunc is the default identity-scoped tenant resolver. It reads the
 // authenticated organization the security middleware placed in request context
@@ -56,6 +96,9 @@ type HandlerConfig struct {
 	// PathPrefix is stripped before parsing {domain}/{collection}. Defaults to
 	// "/v1/projections/". Used by both the snapshot and subscribe handlers.
 	PathPrefix string
+	// Allowlist restricts which scopes this mount serves (see ScopeAllowlist).
+	// Nil applies no restriction.
+	Allowlist ScopeAllowlist
 }
 
 func (c HandlerConfig) tenant() TenantFunc {
@@ -87,6 +130,9 @@ func (c HandlerConfig) scopeFromRequest(r *http.Request) (*foundationpb.Projecti
 	scope := &foundationpb.ProjectionScope{TenantId: tenant, Domain: parts[0], Collection: parts[1]}
 	if err := validateScope(scope); err != nil {
 		return nil, err
+	}
+	if !c.Allowlist.Allows(scope.GetDomain(), scope.GetCollection()) {
+		return nil, ErrScopeForbidden
 	}
 	return scope, nil
 }
@@ -313,6 +359,12 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 		}()
 
 		startScope := func(domain, collection string) {
+			// The allowlist gates subscribe frames exactly like path scopes: a
+			// public mount must not stream a scope it does not publish.
+			if !config.Allowlist.Allows(domain, collection) {
+				_ = writeControl(ControlFrame{Type: ControlError, Reason: ErrScopeForbidden.Error(), Domain: domain, Collection: collection})
+				return
+			}
 			scope := &foundationpb.ProjectionScope{TenantId: tenant, Domain: domain, Collection: collection}
 			key := domain + "/" + collection
 			subsMu.Lock()
@@ -455,6 +507,8 @@ func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrUnauthenticated):
 		http.Error(w, err.Error(), http.StatusUnauthorized)
+	case errors.Is(err, ErrScopeForbidden):
+		http.Error(w, err.Error(), http.StatusForbidden)
 	case errors.Is(err, ErrScopeInvalid):
 		http.Error(w, err.Error(), http.StatusBadRequest)
 	default:

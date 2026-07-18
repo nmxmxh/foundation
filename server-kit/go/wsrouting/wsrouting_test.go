@@ -698,8 +698,8 @@ func BenchmarkRouterRegisterLocalOnly(b *testing.B) {
 	router := NewRouter(nil, "bench-server")
 	ctx := context.Background()
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		id := strconv.Itoa(i)
 		err := router.Register(ctx, ConnectionInfo{
 			ConnectionID: "conn-" + id,
@@ -728,8 +728,8 @@ func BenchmarkRouterResolveTargetsUserLocal(b *testing.B) {
 	}
 	target := TargetedDelivery{TargetType: "user", TargetID: "user-1", LocalOnly: true}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		ids, err := router.ResolveTargets(ctx, target)
 		if err != nil {
 			b.Fatal(err)
@@ -756,8 +756,8 @@ func BenchmarkRouterResolveTargetsUserSparseLocal(b *testing.B) {
 	}
 	target := TargetedDelivery{TargetType: "user", TargetID: "user-777", LocalOnly: true}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		ids, err := router.ResolveTargets(ctx, target)
 		if err != nil {
 			b.Fatal(err)
@@ -784,8 +784,8 @@ func BenchmarkRouterResolveTargetsDeviceLocal(b *testing.B) {
 	}
 	target := TargetedDelivery{TargetType: "device", TargetID: "device-8191", LocalOnly: true}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		ids, err := router.ResolveTargets(ctx, target)
 		if err != nil {
 			b.Fatal(err)
@@ -810,8 +810,8 @@ func BenchmarkRouterForEachLocal1024(b *testing.B) {
 		}
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		count := 0
 		router.ForEachLocal(func(*ConnectionInfo) bool {
 			count++
@@ -837,8 +837,8 @@ func BenchmarkRouterForEachLocalValue1024(b *testing.B) {
 		}
 	}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		count := 0
 		router.ForEachLocalValue(func(ConnectionInfo) bool {
 			count++

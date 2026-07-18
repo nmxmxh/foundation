@@ -316,8 +316,8 @@ func BenchmarkValidateServerRuntimeConfig(b *testing.B) {
 	cfg.Security.PostQuantum = PostQuantumConfig{TLSHybridKEM: "auto", SignatureAlgorithm: "classical"}
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if err := ValidateServer(cfg); err != nil {
 			b.Fatal(err)
 		}
@@ -330,8 +330,8 @@ func BenchmarkDerivePublicRuntimeConfig(b *testing.B) {
 	cfg.Public.SchemaVersion = "v1"
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if public := DerivePublic(cfg); public.SchemaVersion != RuntimeConfigSchemaVersion {
 			b.Fatalf("schema = %q, want %q", public.SchemaVersion, RuntimeConfigSchemaVersion)
 		}

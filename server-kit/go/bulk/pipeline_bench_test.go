@@ -25,8 +25,8 @@ func BenchmarkPipelineHandleStatus(b *testing.B) {
 	}, nil)
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := pipeline.HandleControl(ctx, env); err != nil {
 			b.Fatalf("HandleControl(status) error = %v", err)
 		}
@@ -52,8 +52,8 @@ func BenchmarkPipelinePlanLane(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+	
+	for b.Loop() {
 		if plan := pipeline.PlanLane(req); plan.Selected != LaneSignedObjectStore {
 			b.Fatalf("PlanLane() = %+v", plan)
 		}

@@ -38,9 +38,9 @@ func BenchmarkEngine_Enqueue_InMemory(b *testing.B) {
 		Payload: extension.Object{"key": extension.String("value"), "id": extension.Int(123)},
 	}
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = engine.Enqueue(ctx, job)
 	}
 }
@@ -60,9 +60,9 @@ func BenchmarkEngine_Enqueue_RawPayload(b *testing.B) {
 		RawPayload: raw,
 	}
 
-	b.ResetTimer()
+	
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = engine.Enqueue(ctx, job)
 	}
 }
@@ -125,7 +125,7 @@ func BenchmarkJob_Normalize(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		job.Normalize()
 	}
 }
@@ -140,7 +140,7 @@ func BenchmarkJob_HealthKey(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = job.HealthKey()
 	}
 }

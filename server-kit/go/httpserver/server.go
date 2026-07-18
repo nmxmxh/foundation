@@ -93,6 +93,16 @@ type Server struct {
 	// Projection read path (Hermes projection gateway). When set, mounted at
 	// /v1/projections/ to serve scoped snapshots and stream live deltas.
 	projectionHandler http.Handler
+
+	// Public subtree mounts (see MountPublic): prefix -> handler, mounted on
+	// the mux and exempted from auth. Registration order is preserved so
+	// Handler() builds deterministically.
+	publicMounts []publicMount
+}
+
+type publicMount struct {
+	prefix  string
+	handler http.Handler
 }
 
 type dispatchExecution struct {
@@ -258,6 +268,21 @@ func (s *Server) ConfigureHealthChecks(health, liveness, readiness http.Handler)
 	s.readinessHandler = readiness
 }
 
+// MountPublic mounts handler at the given path prefix and marks the prefix as
+// bypassing authentication. Use it for deliberately-public surfaces that are
+// safe for anonymous access by construction — e.g. a discovergw mount (fixed
+// public tenant + scope allowlist). Subtree mounts must end in "/" (ServeMux
+// semantics); exact-path domain routes registered under the same prefix still
+// win, so a public live mount can coexist with public JSON routes.
+func (s *Server) MountPublic(prefix string, handler http.Handler) {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" || prefix == "/" || handler == nil {
+		return
+	}
+	s.publicMounts = append(s.publicMounts, publicMount{prefix: prefix, handler: handler})
+	s.AddPublicPath(prefix)
+}
+
 // ConfigureProjectionGateway mounts the Hermes projection read path at
 // /v1/projections/. Pass projectiongw.Gateway.Handler(...); nil leaves the path
 // unmounted.
@@ -311,6 +336,11 @@ func (s *Server) Handler() http.Handler {
 	// Projection read path: scoped snapshots (GET) and live delta streams (WS).
 	if s.projectionHandler != nil {
 		mux.Handle("/v1/projections/", s.projectionHandler)
+	}
+
+	// Deliberately-public subtree mounts (e.g. a discovergw public read path).
+	for _, mount := range s.publicMounts {
+		mux.Handle(mount.prefix, mount.handler)
 	}
 
 	// WebSocket endpoint

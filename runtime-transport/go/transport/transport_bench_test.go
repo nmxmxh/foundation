@@ -12,7 +12,7 @@ func BenchmarkCreateEnvelopeJSON(b *testing.B) {
 	})
 	extra := ObjectFromMap(map[string]any{"source": "bench"})
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		envelope := CreateEnvelope("workspace:create:v1:requested", payload, extra)
 		if envelope.Metadata.CorrelationID == "" {
 			b.Fatal("missing correlation id")
@@ -31,7 +31,7 @@ func BenchmarkResolveRouteLinear16(b *testing.B) {
 	}
 	target := routes[len(routes)-1].EventType
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if ResolveRoute(routes, target) == nil {
 			b.Fatal("route not resolved")
 		}
@@ -49,7 +49,7 @@ func BenchmarkResolveRouteLinear1024(b *testing.B) {
 	}
 	target := routes[len(routes)-1].EventType
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if ResolveRoute(routes, target) == nil {
 			b.Fatal("route not resolved")
 		}
@@ -68,7 +68,7 @@ func BenchmarkRouteIndexResolve1024(b *testing.B) {
 	index := NewRouteIndex(routes)
 	target := routes[len(routes)-1].EventType
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if index.Resolve(target) == nil {
 			b.Fatal("route not resolved")
 		}
@@ -80,7 +80,7 @@ func BenchmarkCanDispatchExactCapability(b *testing.B) {
 	capabilities := []string{"profile.view", "workspace.write", "billing.view"}
 	allow := func(*Route) bool { return true }
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if !CanDispatch(route, capabilities, allow) {
 			b.Fatal("dispatch denied")
 		}
@@ -92,7 +92,7 @@ func BenchmarkCanDispatchWriteViaAdminFallback(b *testing.B) {
 	capabilities := []string{"profile.view", "workspace.admin", "billing.view"}
 	allow := func(*Route) bool { return true }
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if !CanDispatch(route, capabilities, allow) {
 			b.Fatal("dispatch denied")
 		}
@@ -111,7 +111,7 @@ func BenchmarkSchemaRegistryNegotiate(b *testing.B) {
 	}
 	accepted := []string{"v4", "v3", "v2"}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		schema, err := registry.Negotiate("runtime:dispatch:v1:requested", accepted)
 		if err != nil {
 			b.Fatal(err)

@@ -488,8 +488,8 @@ func BenchmarkMemoryClientGetHit(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		value, err := client.Get(ctx, "cache:key")
 		if err != nil || string(value) != "value" {
 			b.Fatalf("Get() = %q err=%v", value, err)
@@ -510,8 +510,8 @@ func BenchmarkMemoryClientSetManyGetMany64(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if err := batch.SetMany(ctx, values, time.Minute); err != nil {
 			b.Fatal(err)
 		}
@@ -529,8 +529,8 @@ func BenchmarkMemoryClientSetGetMany64(b *testing.B) {
 	values, keys := memoryBatchValues(64)
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		got, err := batch.SetGetMany(ctx, values, time.Minute)
 		if err != nil || len(got) != len(keys) {
 			b.Fatalf("SetGetMany() len=%d err=%v", len(got), err)
@@ -568,8 +568,8 @@ func BenchmarkMemoryClientPublish1KSubscribers(b *testing.B) {
 
 	payload := []byte("event-ready")
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if err := client.Publish(ctx, "events", payload); err != nil {
 			b.Fatal(err)
 		}
@@ -595,8 +595,8 @@ func BenchmarkMemoryClientPSubscribePrefix1K(b *testing.B) {
 
 	payload := []byte("event-ready")
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if err := client.Publish(ctx, "tenant:org_0999:signal", payload); err != nil {
 			b.Fatal(err)
 		}
@@ -608,8 +608,8 @@ func BenchmarkMemoryClientStreamXAddReadAck(b *testing.B) {
 	ctx := context.Background()
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for i := 0; b.Loop(); i++ {
 		id, err := client.XAdd(ctx, "events", Values{Field("n", i)})
 		if err != nil {
 			b.Fatal(err)
@@ -629,8 +629,8 @@ func BenchmarkMemoryClientLockUnlock(b *testing.B) {
 	ctx := context.Background()
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		token, err := client.Lock(ctx, "resource", time.Second)
 		if err != nil {
 			b.Fatal(err)

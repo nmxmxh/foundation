@@ -94,8 +94,8 @@ func BenchmarkAppLane_DirectFrame_DomainCall(b *testing.B) {
 	frame := grpcsvc.Frame{EventType: "user.profile.read", Payload: []byte(`{"user_id":"user-123"}`)}
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := client.DispatchFrame(context.Background(), frame); err != nil {
 			b.Fatal(err)
 		}
@@ -113,8 +113,8 @@ func BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest(b *testing.B) {
 	body := []byte(`{"include_permissions":true,"view":"full"}`)
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		req := httptest.NewRequest(http.MethodPost, "/v1/users/user-123/profile", bytes.NewReader(body))
 		req.SetPathValue("id", "user-123")
 		req.Header.Set("Content-Type", "application/json")
@@ -130,8 +130,8 @@ func BenchmarkAppLane_Auth_ValidateToken(b *testing.B) {
 	manager, token := testJWT(b)
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := manager.ValidateToken(token); err != nil {
 			b.Fatal(err)
 		}
@@ -157,8 +157,8 @@ func BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC(b *testing.B) {
 	)
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		req := httptest.NewRequest(http.MethodPost, "/v1/users/user-123/profile", bytes.NewReader([]byte(`{}`)))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -173,8 +173,8 @@ func BenchmarkAppLane_Cache_GetHit_JSONValue(b *testing.B) {
 	_ = backend.Set(ctx, "user:123", []byte(`{"id":"user-123","role":"admin"}`), time.Minute)
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		value, err := backend.Get(ctx, "user:123")
 		if err != nil || len(value) == 0 {
 			b.Fatalf("cache get: value=%q err=%v", value, err)
@@ -187,8 +187,8 @@ func BenchmarkAppLane_Retry_NoRetrySuccess(b *testing.B) {
 	ctx := context.Background()
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if err := policy.Do(ctx, func() error { return nil }); err != nil {
 			b.Fatal(err)
 		}
@@ -200,8 +200,8 @@ func BenchmarkAppLane_CircuitBreaker_ClosedSuccess(b *testing.B) {
 	ctx := context.Background()
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if _, err := cb.Execute(ctx, func() (any, error) { return nil, nil }); err != nil {
 			b.Fatal(err)
 		}
@@ -247,8 +247,8 @@ func BenchmarkAppLane_Worker_RejectFullQueue(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if err := engine.Enqueue(ctx, job); err == nil {
 			b.Fatal("expected full queue rejection")
 		}
@@ -261,8 +261,8 @@ func BenchmarkAppLane_Worker_DropNoProcessor(b *testing.B) {
 	job := worker.Job{JobKind: "app.missing", Queue: "app"}
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		if err := engine.Enqueue(ctx, job); err == nil {
 			b.Fatal("expected missing processor error")
 		}
@@ -278,8 +278,8 @@ func BenchmarkAppLane_Retry_CanceledWait(b *testing.B) {
 	errRetryable := errors.New("retryable")
 
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	
+	for b.Loop() {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		err := policy.Do(ctx, func() error { return errRetryable })
