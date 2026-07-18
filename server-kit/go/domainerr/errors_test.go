@@ -1,13 +1,16 @@
 package domainerr
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 )
 
 func TestDomainErrorDefaultsAndMatching(t *testing.T) {
@@ -113,5 +116,81 @@ func TestBodyAndWriteHTTP(t *testing.T) {
 	}
 	if WriteHTTP(nil, errors.New("x"), ResponseOptions{}) != 0 {
 		t.Fatal("nil writer should return zero")
+	}
+}
+
+func TestWithCauseAndCauseOf(t *testing.T) {
+	cause := errors.New("underlying failure")
+	err := Forbidden("deny", "denied").WithCause(cause)
+	if !errors.Is(CauseOf(err), cause) {
+		t.Fatalf("CauseOf() = %v, want %v", CauseOf(err), cause)
+	}
+	if !errors.Is(err, cause) {
+		t.Fatal("expected cause to participate in errors.Is chains")
+	}
+	if CauseOf(errors.New("plain")) != nil {
+		t.Fatal("plain errors carry no cause")
+	}
+	var nilErr *Error
+	if nilErr.WithCause(cause) != nil {
+		t.Fatal("nil receiver should stay nil")
+	}
+}
+
+// captureLogs installs a buffer-backed JSON logger and restores the previous
+// default when the test ends.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prev := logger.Default()
+	l, err := logger.New(logger.Config{Format: "json", LogLevel: "debug", Output: &buf})
+	if err != nil {
+		t.Fatalf("logger.New() error = %v", err)
+	}
+	logger.SetDefault(l)
+	t.Cleanup(func() { logger.SetDefault(prev) })
+	return &buf
+}
+
+// Regression guard for the sanitized-error diagnosability contract: rendering
+// a domain error must log the attached cause (which is never serialized to the
+// client), and any 5xx must log even without one. Without this backstop a
+// swallowed infrastructure error (e.g. a missing table) is invisible in logs.
+func TestBodyLogsSanitizedFailures(t *testing.T) {
+	buf := captureLogs(t)
+	cause := errors.New(`relation "chow_user_credentials" does not exist`)
+	body := Body(Internal("register_failed", "could not create account").WithCause(cause), ResponseOptions{EventType: "user:register"})
+	if !strings.Contains(buf.String(), "chow_user_credentials") {
+		t.Fatalf("expected cause in log output, got: %s", buf.String())
+	}
+	if !strings.Contains(buf.String(), "register_failed") {
+		t.Fatalf("expected code in log output, got: %s", buf.String())
+	}
+	if strings.Contains(body.Error.Message, "chow_user_credentials") {
+		t.Fatalf("cause leaked into response message: %q", body.Error.Message)
+	}
+
+	buf.Reset()
+	Body(Internal("boom_failed", "operation failed"), ResponseOptions{})
+	if !strings.Contains(buf.String(), "boom_failed") {
+		t.Fatalf("expected 5xx to log without a cause, got: %s", buf.String())
+	}
+
+	buf.Reset()
+	Body(Forbidden("cart_profile_forbidden", "denied").WithCause(cause), ResponseOptions{CorrelationID: "corr_1"})
+	if !strings.Contains(buf.String(), "cart_profile_forbidden") {
+		t.Fatalf("expected 4xx with cause to log, got: %s", buf.String())
+	}
+
+	buf.Reset()
+	Body(Forbidden("plain_denial", "denied"), ResponseOptions{})
+	if buf.Len() != 0 {
+		t.Fatalf("plain 4xx without cause should not log, got: %s", buf.String())
+	}
+
+	buf.Reset()
+	Body(nil, ResponseOptions{Status: http.StatusInternalServerError})
+	if !strings.Contains(buf.String(), "unknown_error") {
+		t.Fatalf("nil error with forced 5xx should still log, got: %s", buf.String())
 	}
 }

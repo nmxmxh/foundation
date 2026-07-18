@@ -6,7 +6,39 @@ import (
 	"strings"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 )
+
+// logSanitized is the diagnosability backstop for every rendered domain error:
+// responses stay sanitized, but a server-side fault (5xx) or an attached cause
+// must land in the structured log or outages become invisible to operators.
+// Client-kind errors without a cause (plain 4xx denials) are not logged here.
+func logSanitized(err error, status int, kind Kind, opts ResponseOptions) {
+	cause := CauseOf(err)
+	if cause == nil && status < http.StatusInternalServerError {
+		return
+	}
+	detail := ""
+	if cause != nil {
+		detail = cause.Error()
+	} else if err != nil {
+		detail = err.Error()
+	}
+	// Server faults are errors; sanitized client denials that still carry a
+	// cause are warnings so the error lane stays actionable.
+	log := logger.Default().Error
+	if status < http.StatusInternalServerError {
+		log = logger.Default().Warn
+	}
+	log("request failed",
+		"kind", string(kind),
+		"code", CodeOf(err),
+		"status", status,
+		"event_type", strings.TrimSpace(opts.EventType),
+		"correlation_id", strings.TrimSpace(opts.CorrelationID),
+		"cause", detail,
+	)
+}
 
 type Response struct {
 	State string   `json:"state"`
@@ -39,6 +71,7 @@ func Body(err error, opts ResponseOptions) Response {
 	if status == http.StatusMethodNotAllowed && kind == KindInternal {
 		kind = KindValidation
 	}
+	logSanitized(err, status, kind, opts)
 	return Response{
 		State: "failed",
 		Error: APIError{

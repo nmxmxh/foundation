@@ -161,3 +161,24 @@ func HTTPStatus(err error) int {
 		return http.StatusInternalServerError
 	}
 }
+
+// WithCause returns a copy of e carrying cause for logging and errors.Is/As
+// chains. The cause is diagnostic context only: Body/WriteHTTP never serialize
+// it, so services can attach raw infrastructure errors without leaking them.
+func (e *Error) WithCause(cause error) *Error {
+	if e == nil {
+		return nil
+	}
+	out := *e
+	out.Cause = cause
+	return &out
+}
+
+// CauseOf returns the diagnostic cause carried by a domain error, or nil.
+func CauseOf(err error) error {
+	var typed *Error
+	if errors.As(err, &typed) && typed != nil {
+		return typed.Cause
+	}
+	return nil
+}
