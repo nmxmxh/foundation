@@ -69,11 +69,11 @@ if rg -n "database|postgres|pgx|DATABASE_URL|DB_MAX_CONNS" "$target" --glob '!**
   fi
 fi
 
-if rg -n "SELECT \\*" "$target" --glob '*.go' --glob '*.sql' --glob '!**/node_modules/**' >/dev/null 2>&1; then
-  echo "[FAIL] SELECT * found in Go/SQL hot-path sources; project explicit columns"
+if rg -n "(SELECT|RETURNING) \\*" "$target" --glob '*.go' --glob '*.sql' --glob '!**/node_modules/**' >/dev/null 2>&1; then
+  echo "[FAIL] wildcard SELECT */RETURNING * found in Go/SQL hot-path sources; project explicit columns"
   failed=1
 else
-  echo "[OK] no SELECT * in Go/SQL hot-path sources"
+  echo "[OK] no wildcard SELECT */RETURNING * in Go/SQL hot-path sources"
 fi
 
 if rg -n "\b(crypt|gen_salt|pgp_sym_encrypt|pgp_pub_encrypt)\s*\(" "$target" --glob '*.go' --glob '*.sql' --glob '!**/node_modules/**' >/dev/null 2>&1; then
@@ -111,6 +111,20 @@ if rg -n "database\\.(QuerySQL|ExecSQL)" "$target/internal/service" --glob '*.go
   failed=1
 else
   echo "[OK] no transitional SQL compatibility helpers in service repositories"
+fi
+
+
+# Ambiguous SQL parameter types: a bare $N inside arithmetic gives Postgres no
+# type anchor, and pgx sends no parameter OIDs — deduction then conflicts with
+# the parameter's other uses (SQLSTATE 42P08, e.g. "integer versus text") or
+# silently lands on text. Every parameter in an arithmetic expression must
+# carry an explicit cast ($N::bigint). This caught a production checkout
+# outage; keep it strict.
+if rg -nP '\$[0-9]+\s*[+\-*/]|[+\-*/]\s*\$[0-9]+(?!::)' "$target/internal" --glob '*.go' --glob '!*_test.go' --glob '!**/node_modules/**' 2>/dev/null | rg -v '\$[0-9]+::' ; then
+  echo "[FAIL] SQL parameters used in arithmetic without an explicit ::cast (ambiguous type deduction, 42P08)"
+  failed=1
+else
+  echo "[OK] SQL parameters in arithmetic carry explicit casts"
 fi
 
 if [[ "$failed" -ne 0 ]]; then
