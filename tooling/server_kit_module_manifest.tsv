@@ -13,6 +13,7 @@ connector	vendored
 contracttest	vendored	
 database	vendored	
 degradation	vendored	
+discovergw	vendored	
 domainerr	vendored	
 errors	vendored	
 eventlog	vendored	
