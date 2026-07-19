@@ -1,6 +1,6 @@
 # Foundation Intelligence
 
-> Universal instruction file for AI coding assistants (Claude, Codex, Cursor, Copilot, Windsurf, etc.)
+> Universal instruction file for AI coding assistants (Claude, Codex, Cursor, Copilot, Windsurf, and similar).
 
 **New here?** Start with [`README.md`](README.md) → [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) → [`docs/foundation_quick_start.md`](docs/foundation_quick_start.md), then come back to this file for the agent operating contract.
 
@@ -8,9 +8,9 @@
 
 | Term | Definition |
 | :--- | :--- |
-| **Foundation Core** | The shared infrastructure repository containing `server-kit`, `runtime-transport`, `runtime-sdk`, etc. |
+| **Foundation Core** | The shared infrastructure repository containing `server-kit`, `runtime-transport`, `runtime-sdk`, and related modules. |
 | **Foundation Template** | The skeletal structure in `templates/` used to bootstrap new projects. |
-| **Foundation Project** | A specific application (e.g., `trader_os`, `fintech_v1`) generated from the template. |
+| **Foundation Project** | A specific application (for example, `trader_os`, `fintech_v1`) generated from the template. |
 | **Foundation Reference** | The `/foundation` directory inside a **Project**, which is a local copy/reference to Core modules. |
 
 ## Project Context
@@ -61,7 +61,7 @@ A **Foundation Project** is structured to separate shared infrastructure from ap
 project/
 ├── cmd/                    # Entry points (server, worker)
 ├── internal/               # Application logic
-│   ├── service/           # Domain services (e.g., service/order, service/user)
+│   ├── service/           # Domain services (for example, service/order, service/user)
 │   ├── worker/            # Background job handlers
 │   └── startup/           # App-specific initialization
 ├── api/                    # Protocol definitions
@@ -141,7 +141,17 @@ Apply the appropriate severity validation tier to prevent over-engineering:
 
 ### 10. Database vs Compute Separation (Wrong Lane Prevention)
 
-**NEVER** perform CPU-bound cryptographic operations (e.g. `bcrypt`, `pgcrypto` hashing like `crypt` or `gen_salt`), complex validations, regex parsing on unindexed text columns, or heavy mathematical/spatial loops inside SQL queries. Keep the database (PostgreSQL) focused on durable truth, constraints, and relational integrity. Perform compute tasks in the application layer (Go/Rust/TS) to scale compute horizontally and protect the connection pool from timeout exhaustion.
+**NEVER** perform CPU-bound cryptographic operations (for example, `bcrypt`, `pgcrypto` hashing like `crypt` or `gen_salt`), complex validations, regex parsing on unindexed text columns, or heavy mathematical loops inside SQL queries. Keep the database (PostgreSQL) focused on durable truth, constraints, and relational integrity. Perform compute tasks in the application layer (Go, Rust, TypeScript) to scale compute horizontally and protect the connection pool from timeout exhaustion.
+
+### 11. Simplified Technical English (STE) Documentation Standard
+
+All documentation and code comments must follow the ASD-STE100 Simplified Technical English standard as adapted in `docs/ste_documentation_practices.md`. Key constraints:
+
+- Procedural sentences and code comments: maximum 20 words.
+- Descriptive sentences: maximum 25 words.
+- Noun clusters: maximum 3 words.
+- No contractions (`don't` → `do not`), no phrasal verbs (`set up` → `configure`), no Latin abbreviations (`e.g.` → `for example`).
+- Safety alerts must use `WARNING` (data loss, security), `CAUTION` (bugs, performance), or `NOTE` (information only).
 
 ## Commands
 
@@ -157,7 +167,7 @@ make lint                    # Run all linters
 make verify                  # Full CI verification suite
 
 # Infrastructure
-make docker-up               # Start dev stack (PG, Redis, etc.)
+make docker-up               # Start dev stack (PG, Redis, and supporting services)
 make migrate-up              # Run DB migrations
 ```
 
@@ -210,7 +220,7 @@ Use `@ovasabi/runtime-transport` for all backend communication. It handles binar
 
 ### UI Primitives (`ui-minimal`)
 
-Check `foundation/ui-minimal` before creating local components. Use `MinimalButton`, `MinimalInput`, `MinimalAppShell`, etc. App-level components should be thin wrappers.
+Check `foundation/ui-minimal` before creating local components. Use `MinimalButton`, `MinimalInput`, `MinimalAppShell`, and related primitives. App-level components should be thin wrappers.
 
 ### Runtime SDK (`runtime-sdk`)
 
@@ -263,6 +273,7 @@ The foundation enforces 36 coding practices. Key ones to remember:
 | CP-18 | Rate limit all ingress APIs |
 | CP-20 | Server-side authorization on every object |
 | CP-36 | Agent-authored changes must carry evidence |
+| CP-37 | Documentation and comments follow ASD-STE100 |
 
 Full reference: `docs/foundation/coding_practices.md` in generated apps, or `docs/coding_practices.md` in the foundation source repo.
 
@@ -292,6 +303,7 @@ For deeper context, read these files (`docs/foundation/` in generated apps, `doc
 | Transfer lane | `docs/foundation/transfer_lane.md` or `docs/transfer_lane.md` |
 | Adding a Rust performance unit | `docs/foundation/rust_unit_guide.md` or `docs/rust_unit_guide.md` |
 | Frontend command registry | `docs/foundation/frontend_command_registry.md` or `docs/frontend_command_registry.md` |
+| STE documentation standard | `docs/foundation/ste_documentation_practices.md` or `docs/ste_documentation_practices.md` |
 
 ## Security Checklist
 

@@ -4,7 +4,7 @@ description: "Ovasabi Foundation: Exhaustive Agent Operations Workflow & Archite
 
 # Ovasabi Foundation: Detailed Agent Workflow & Architecture Guide
 
-The **Ovasabi Foundation** is the strict platform infrastructure layer designed to be copied **as-is** across the standalone application ecosystem (e.g., `reframe_v1`, `field_os`, `fintech_v1`). Its goal is absolute predictability: zero variance in how apps communicate, execute performance-bound tasks, connect to databases, and handle events.
+The **Ovasabi Foundation** is the strict platform infrastructure layer designed to be copied **as-is** across the standalone application ecosystem (for example, `reframe_v1`, `field_os`, `fintech_v1`). Its goal is absolute predictability: zero variance in how apps communicate, execute performance-bound tasks, connect to databases, and handle events.
 
 As an AI Agent operating within an encompassing app that uses this foundation, **you must follow these exact instructions and constraints** whenever modifying communication, performance code, or data layers.
 
@@ -48,12 +48,12 @@ When you are asked to connect a new React component or Frontend module to the Ba
 1. **Initialize the Singletons in App-Space**:
    Do NOT build independent fetching hooks. Ensure the application initializes `createMetadataStore()` and `createEventStore()`.
 2. **Metadata Rule - Implicit Tracking**:
-   NEVER manually attach context metadata to your view payloads unless overriding context (e.g. `organization_id`). The framework-agnostic `MetadataStore` state carries the correlation hashes invisibly.
+   NEVER manually attach context metadata to your view payloads unless overriding context (for example, `organization_id`). The framework-agnostic `MetadataStore` state carries the correlation hashes invisibly.
 3. **Dispatch Rule - Deduplication**:
    To prevent React re-render floods, route all mutations and data requests through the `EventStore`.
    `eventStore.emitEvent('domain:action:v1:requested', payload, { cacheDurationMs: 3000 })`
 4. **Offline Resilience (WebSocket)**:
-   The stateless `CommandBus` owns a **Re-Subscription Map**. When writing socket listeners (e.g., `media:*`), know that on disconnect/reconnect, the foundation automatically resubscribes. Do not build redundant polling algorithms.
+   The stateless `CommandBus` owns a **Re-Subscription Map**. When writing socket listeners (for example, `media:*`), know that on disconnect/reconnect, the foundation automatically resubscribes. Do not build redundant polling algorithms.
 5. **Envelopes**:
    Every payload traverses the wire inside a `RuntimeEnvelope` (preferring binary protobuf). The stateless command bus automatically falls back from `WS -> HTTP` on failure.
 
@@ -89,7 +89,7 @@ When adding schemas or DB features inside the app:
 When adding caches or locks:
 
 1. **Strict Key Naming**:
-   Keys must look like `<app>:<env>:<domain>:<entity>:<purpose>[:<id>]` (e.g., `app:prod:billing:sub:cache:999`).
+   Keys must look like `<app>:<env>:<domain>:<entity>:<purpose>[:<id>]` (for example, `app:prod:billing:sub:cache:999`).
 2. **Strict Expiration**:
    Never default to indefinite TTLs.
 3. **Graceful Degradation**:

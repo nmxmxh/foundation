@@ -111,7 +111,7 @@ Handles transport-level optimization.
 
 ## LLM Agent Patterns: Implementing a New Route
 
-When adding a new capability (e.g., `media:process`):
+When adding a new capability (for example, `media:process`):
 1. Define the route in the `registry`.
 2. Determine if it requires **Streaming**. If so, return a channel.
 3. Use the `EventEmitter` to signal progress.

@@ -769,14 +769,14 @@ Sanctioned exceptions, each for a structural reason:
 1. Benchmark/perf suites: `bench_test.go`, `*_bench_test.go`, `*_perf_test.go`.
 2. Test-only packages (`servicebacked`, `appbench`, `contracttest`,
    conformance suites) — there is no source file to mirror.
-3. End-to-end suites that span the package's files (e.g. `handler_e2e_test.go`).
-4. Build-tag isolation: a test needing its own `//go:build` constraint (e.g.
+3. End-to-end suites that span the package's files (for example, `handler_e2e_test.go`).
+4. Build-tag isolation: a test needing its own `//go:build` constraint (for example,
    `runtimehost/ffi_backend_test.go`, `cgo && (linux || darwin)`).
 5. External test packages forced by import cycles: `package foo_test` files
-   whose dependencies import `foo` (e.g. `metadata/aci_merge_test.go`, whose
+   whose dependencies import `foo` (for example, `metadata/aci_merge_test.go`, whose
    `contracttest` dependency imports `metadata` back).
 6. Cross-cutting integration suites that exercise many source files as one
-   behavior (e.g. `hermes/consolidation_test.go`).
+   behavior (for example, `hermes/consolidation_test.go`).
 
 When a fragment file is found outside these exceptions, fold it into the
 mirror file verbatim (content unchanged, imports unioned) and prove the fold

@@ -87,7 +87,7 @@ The lower-level `createCommandBus` / `createRouteRegistry` remain available for
 advanced cases; `createAppRuntime` is the recommended default.
 
 **Templated routes need no call-site plumbing.** When a registered route has
-`{param}` segments (e.g. `marketplace:get_order` → `/v1/marketplace/orders/{order_id}`),
+`{param}` segments (for example, `marketplace:get_order` → `/v1/marketplace/orders/{order_id}`),
 the HTTP transport resolves each `{param}` from the payload field of the same
 name, percent-encodes it, and drops that key from the JSON body / query string so
 it is never sent twice — the server re-derives path params from the URL anyway. A

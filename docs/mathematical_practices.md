@@ -151,13 +151,13 @@ Mitzenmacher, "Less Hashing, Same Performance," ESA 2006.
 
 **Result.** Drawing `r` uniform random IDs from a space of size `N`, the
 collision probability is `P ≈ 1 − e^(−r²/2N)`. The 50% threshold is
-`r ≈ 1.177 √N`; a "safe" regime keeps `P` tiny, i.e. `r ≪ √N`. A 64-bit random
+`r ≈ 1.177 √N`; a "safe" regime keeps `P` tiny, that is, `r ≪ √N`. A 64-bit random
 ID reaches ~40% collision risk near `2^32 ≈ 4.3e9` IDs.
 
 **Rules.**
 
 - **ID-1** Choose ID width so that the *lifetime* maximum count `r` satisfies
-  `r²/2N ≤ ε_collision` for an explicit `ε_collision` (e.g. `1e-9`). For
+  `r²/2N ≤ ε_collision` for an explicit `ε_collision` (for example, `1e-9`). For
   high-volume distributed IDs use ≥ 128 bits (UUIDv4/v7: 122 random bits ⇒ 50%
   collision near `2^61.5`).
 - **ID-2** 64-bit random IDs are acceptable only for bounded, short-lived,
@@ -275,7 +275,7 @@ bit-identical to the unfused path.
   on NaN (propagates), ±Inf (saturates), and subnormals (flush-to-zero only if
   the lane config says so, and then documented). Tests include these inputs.
 - **FP-5 — Determinism is opt-in and costly.** If a result must be
-  bit-reproducible (e.g. cross-node consensus on a float), pin reduction order
+  bit-reproducible (for example, cross-node consensus on a float), pin reduction order
   or use integer/decimal; do not expect SIMD/GPU to be deterministic across
   hardware.
 
@@ -322,7 +322,7 @@ equal state, with no coordination. These are the same three properties
   doc).
 - **CRDT-3 — LWW needs a total order on the tiebreak.** Last-writer-wins is a
   semilattice only if timestamps are totally ordered with a deterministic
-  tiebreaker (e.g. `(hlc, replica_id)`); wall-clock ties without a tiebreak
+  tiebreaker (for example, `(hlc, replica_id)`); wall-clock ties without a tiebreak
   break idempotency.
 - **CRDT-4 — Counters: grow-only or PN.** Use G-Counter (per-replica maxima,
   merged by max) or PN-Counter; never a single shared integer merged by "take

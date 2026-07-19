@@ -53,6 +53,7 @@ CP-33|docs/coding_practices.md|security|high|partial|review|crypto-agility-revie
 CP-34|docs/coding_practices.md|operations|high|partial|script:tooling/scripts/performance_check.sh;review|slo-or-chaos-evidence|yes
 CP-35|docs/coding_practices.md|workers|high|partial|script:tooling/scripts/river_practices_check.sh;review|job-reliability-test|yes
 CP-36|docs/coding_practices.md|agent|high|partial|script:tooling/scripts/agent_contract_check.sh;review|evidence-ledger|yes
+CP-37|docs/coding_practices.md|documentation|low|human|review|doc-comment-review|contextual
 TE-01|docs/testing_practices.md|testing|high|partial|script:tooling/scripts/testing_practices_check.sh;review|architecture-test|yes
 TE-02|docs/testing_practices.md|testing|medium|human|review|black-box-case|contextual
 TE-03|docs/testing_practices.md|testing|high|human|review|oracle-statement|yes

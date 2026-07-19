@@ -49,8 +49,8 @@ Foundation uses a consistent event naming pattern:
 
 **Components:**
 
-- `domain`: Business domain (user, incident, media, etc.)
-- `action`: The operation (create, update, authenticate, etc.)
+- `domain`: Business domain (user, incident, media, and similar)
+- `action`: The operation (create, update, authenticate, and similar)
 - `version`: Schema version (v1, v2)
 - `state`: Event state (requested, success, failed, ack)
 

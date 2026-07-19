@@ -12,7 +12,7 @@ nine, but **mounting** it required editing each project's `cmd/server/main.go`,
 `internal/server/server.go`, and `internal/startup/dependencies.go` — and those
 files had diverged so far that only 3 of 9 could take the change mechanically.
 
-This document explains why the drift happened, what is and isn't legitimate, and
+This document explains why the drift happened, what is and is not legitimate, and
 the architecture change that prevents this class of drift going forward.
 
 ## What actually drifted (measured)

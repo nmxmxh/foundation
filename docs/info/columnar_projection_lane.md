@@ -6,7 +6,7 @@ This document specifies the architecture and implementation design for the **Her
 
 ## 1. Architectural Motivation
 
-Currently, Hermes partitions store projections as row-oriented slices: `[]DomainRecord`. While highly efficient for point-lookups (e.g., retrieving a single entity by ID), scan-heavy operations like:
+Currently, Hermes partitions store projections as row-oriented slices: `[]DomainRecord`. While highly efficient for point-lookups (for example, retrieving a single entity by ID), scan-heavy operations like:
 
 - "Compute the average latency for tenant X over the last 1 hour"
 - "Sum total bandwidth consumed by all client nodes"
@@ -19,7 +19,7 @@ By restructuring the in-memory layout into columnar buffers matching the **Apach
 
 - Execute filter-and-sum loops in a single pass with contiguous memory access.
 - Leverage **SIMD instructions** (via Go vector packages or assembly code generation) for parallel vector scanning.
-- Integrate directly with embedded columnar engines (e.g., DuckDB via Arrow C Data Interface) with zero serialization cost.
+- Integrate directly with embedded columnar engines (for example, DuckDB via Arrow C Data Interface) with zero serialization cost.
 
 ---
 

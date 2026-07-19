@@ -138,8 +138,8 @@ Requirements:
 4. Goroutine closures must not accidentally share mutable loop, request, tenant, or correlation state. Pass values as parameters or copy them locally when the value is part of the concurrency contract.
 5. Values passed through channels, contexts, worker args, or library objects can still point to mutable shared state. Passing a pointer through a channel is not data privatization.
 6. Channel, goroutine, timer, ticker, and context ownership must be explicit in code structure: identify who sends, receives, closes, cancels, stops, and observes terminal failure.
-7. **Lock-Free COW Pointer-Swap**: For high-concurrency read-heavy caching and projection stores (e.g. Hermes), prefer using atomic pointer swaps (`atomic.Pointer`) of immutable configurations or state snapshots (Copy-On-Write) to eliminate read locks and spin-loops entirely, ensuring zero-blocking reads.
-8. **Scope Transaction Limits**: In-memory projections and caching partitions must restrict transactional lock boundaries to a single partition scope (e.g. per-tenant/per-collection); do not attempt multi-partition atomic transactions.
+7. **Lock-Free COW Pointer-Swap**: For high-concurrency read-heavy caching and projection stores (for example, Hermes), prefer using atomic pointer swaps (`atomic.Pointer`) of immutable configurations or state snapshots (Copy-On-Write) to eliminate read locks and spin-loops entirely, ensuring zero-blocking reads.
+8. **Scope Transaction Limits**: In-memory projections and caching partitions must restrict transactional lock boundaries to a single partition scope (for example, per-tenant/per-collection); do not attempt multi-partition atomic transactions.
 
 Enforcement:
 
@@ -191,7 +191,7 @@ Requirements:
      metric so contract drift is observable instead of silently hidden.
 15. Same-process hot communication must not use gRPC, HTTP, Redis, or JSON. Use direct typed calls, direct frame dispatch, worker channels, or shared-memory descriptors so the hot path can remain zero-copy or near-zero allocation.
 16. Serialization boundaries should expose both owned and borrowed decode APIs where safe. Borrowed views are preferred inside synchronous hot paths; owned decoded values are required when data escapes the frame lifetime.
-16a. De-serialize protobuf event envelope metadata lazily. Store raw metadata pointers and parse the metadata map only when explicitly requested (e.g., via `MaterializeMetadata()`). Enable fast-path validation directly on the protobuf structure to bypass map allocations.
+16a. De-serialize protobuf event envelope metadata lazily. Store raw metadata pointers and parse the metadata map only when explicitly requested (for example, via `MaterializeMetadata()`). Enable fast-path validation directly on the protobuf structure to bypass map allocations.
 16b. Convert custom structs directly to generic extension containers (like `extension.Object` maps) using reflection (`reflect.Struct` kinds) instead of performing expensive `json.Marshal`/`json.Unmarshal` round-trips in hot paths.
 17. Prefer Foundation database executor helpers for repository code. Use `QueryOne`, `QueryEach`, `QueryAll`, `ExecRowsAffected`, `AtomicLane`, and only then driver-native `pgx.Batch`/`CopyFrom` through the Foundation Postgres adapter for high-volume paths. `AtomicLane` closures must stay pure database work so query, lock, and idle-transaction budgets remain meaningful.
 18. When populating a Hermes projection from validated materialized records, prefer `ApplyRecords` for incremental pure-upsert projector batches and `BulkLoad` for trusted snapshot replacement. Avoid constructing `Event` values unless the batch needs delete operations, per-event idempotency, source correlation, or mixed mutation semantics.
@@ -782,7 +782,7 @@ Requirements:
 1. **Idempotency Deduplication**: In-memory idempotency maps must use TTL-based expiry or a bounded LRU to avoid unbounded memory growth. Default success retention should be 24 hours unless otherwise specified.
 2. **Retry Context and Shutdown**: Background retries and re-enqueuing must respect the parent context cancellation/shutdown signals. Do not use `context.Background()` in retry loops that fire during process draining.
 3. **Backoff Jitter**: All retry backoff calculations must include ±25% jitter to prevent thundering herd effects on downstream services and databases.
-4. **Metadata Sidecar Architecture**: Large binary payloads or extensive tracking metadata should be stored in a dedicated metadata sidecar table (e.g., `river_job_metadata` with a `bytea` column) rather than being stuffed into River's `args` JSONB column. Use FK cascades for automatic cleanup.
+4. **Metadata Sidecar Architecture**: Large binary payloads or extensive tracking metadata should be stored in a dedicated metadata sidecar table (for example, `river_job_metadata` with a `bytea` column) rather than being stuffed into River's `args` JSONB column. Use FK cascades for automatic cleanup.
 5. **Postgres Pool Integration**: Metadata stores and job persistence logic must use `*pgxpool.Pool` directly for performance and connection lifecycle management, rather than generic/wrapped database interfaces that may obscure driver-specific optimizations.
 6. **Idempotent Migrations**: SQL setup scripts for queue infrastructure must be idempotent. Avoid destructive `DROP TABLE` statements at the top of migrations that might fire against non-empty production environments; use `CREATE TABLE IF NOT EXISTS` and separate reset scripts.
 7. **Production-Representative Benchmarks**: Performance-critical workers must include benchmarks that hit the River/Postgres path (using `testcontainers-go`) to capture serialization, indexing, and fsync costs, not just the in-memory fallback path.
@@ -828,6 +828,29 @@ Enforcement:
 - Reviewer gate on missing definition-of-done evidence for architecture,
   security, runtime, scaffold, or performance-sensitive changes.
 
+### CP-37: Documentation and comments follow ASD-STE100
+
+Level: `Recommended` (Mandatory for practice docs and agent contracts)
+
+Requirements:
+
+1. All documentation and code comments must follow the ASD-STE100 Simplified
+   Technical English standard as adapted in `docs/ste_documentation_practices.md`.
+2. Procedural sentences and code comments: maximum 20 words per sentence.
+3. Descriptive sentences in architecture docs: maximum 25 words per sentence.
+4. Noun clusters: maximum 3 words. Expand longer clusters with prepositions.
+5. No contractions (`don't` → `do not`), no phrasal verbs (`set up` →
+   `configure`), no Latin abbreviations (`e.g.` → `for example`).
+6. Safety alerts must use `WARNING` (data loss, security), `CAUTION` (bugs,
+   performance), or `NOTE` (information only).
+7. Active voice and imperative form are required for procedural steps.
+8. Paragraphs must contain a maximum of 6 sentences with a topic-sentence lead.
+
+Enforcement:
+
+- Reviewer gate on documentation and comment changes.
+- Future: lint script for word count, contraction, and Latin abbreviation scanning.
+
 ## Enforcement matrix
 
 | Rule ID | Primary enforcement | Automation | Merge gate |
@@ -868,6 +891,7 @@ Enforcement:
 | `CP-34` | Metrics/SLO/chaos/runtime benchmark tests | Partial | Yes |
 | `CP-35` | Review + automated migration check | Partial | Yes |
 | `CP-36` | Agent contract check + review evidence | Partial | Yes |
+| `CP-37` | Review gate on doc and comment changes | Contextual | Contextual |
 
 ## Exception process and ADR linkage
 

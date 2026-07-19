@@ -227,7 +227,7 @@ References checked for wording:
 5. Metadata tags must be low-cardinality, namespaced, and safe to index (`actor:*`, `entity:*`, `domain:*`, `service:*`, `event:*`, `state:*`, `risk:*`, `security:*`, `intent:*`, `source:*`, `channel:*`, `region:*`, `locale:*`, `privacy:*`, `compliance:*`, `kg:*`). Store high-cardinality graph facts in explicit columns, `source_ref`, `knowledge_graph`, or bounded `attributes`, not arbitrary tag strings.
 6. Expression indexes must mirror the actual predicate shape. Example: if the query is `LOWER(name)` with `is_active = TRUE`, the index should be `ON (..., LOWER(name)) WHERE is_active = TRUE`.
 7. Index all foreign keys and high-selectivity predicates.
-8. Keep domain table prefixes explicit (`identity_*`, `operations_*`, `billing_*`, etc.).
+8. Keep domain table prefixes explicit (`identity_*`, `operations_*`, `billing_*`, and similar).
 9. Store password-reset tokens, invite tokens, API tokens, and other bearer secrets as digests or encrypted blobs when raw-value lookup is unnecessary.
 10. Separate especially sensitive fields (PII, tax identifiers, recovery data) from broad read paths and duplicate them as little as possible.
 11. App runtime roles must default to least privilege on tables, sequences, functions, and views.
@@ -317,7 +317,7 @@ lock contention fail as controlled database errors instead of silent queueing.
 6. Do not wrap indexed columns in runtime casts/functions on hot paths. Use range predicates like `timestamp >= day_start AND timestamp < day_end` instead of `timestamp::date = ...`.
 7. N+1 reads inside write loops are performance bugs. Preload reusable reference data once per command or document.
 8. Dynamic sort fields, projection lists, and filter operators must come from allowlists. Do not concatenate user input into SQL identifiers or query fragments.
-9. **No `SELECT *`**: Explicitly list required columns. This reduces network I/O, prevents "wide-row" performance penalties, and ensures schema evolution (e.g., adding a large JSONB column) doesn't accidentally degrade unrelated read paths.
+9. **No `SELECT *`**: Explicitly list required columns. This reduces network I/O, prevents "wide-row" performance penalties, and ensures schema evolution (for example, adding a large JSONB column) does not accidentally degrade unrelated read paths.
 10. Authorization predicates must be part of the read/write query itself or enforced by an equivalent DB policy. Do not fetch by ID first and rely on a later in-memory scope check for sensitive rows.
 11. High-value or uniqueness-sensitive mutations must use unique constraints, row/advisory locks, or `SERIALIZABLE` transactions to prevent race-driven double execution, quota bypass, or state desynchronization.
 12. Audit tables or append-only logs must capture privilege changes, exports, payout/billing actions, and destructive operations with actor and correlation data.
@@ -558,11 +558,11 @@ The database (PostgreSQL) is a scarce, vertically scaled, state-oriented resourc
 
 ### 1. Cryptographic Hashing and Column Encryption (pgcrypto)
 - **The Conflict**: Invoking `pgcrypto` functions like `crypt('password', gen_salt('bf', 12))` directly in SQL. Bcrypt with cost factor 12 takes ~300ms of pure CPU time by design. Under a default database statement timeout of 250ms (`CP-02`), this query will reliably fail with `canceling statement due to statement timeout`, locking database connection slots for 250ms of pure CPU block time and starving other queries.
-- **The Remediation**: Perform all cryptographic hashing, salt generation, and verification at the application layer (e.g., using Go's `bcrypt` package). The database should execute only a trivial, sub-1ms query to retrieve the hashed credential:
+- **The Remediation**: Perform all cryptographic hashing, salt generation, and verification at the application layer (for example, using Go's `bcrypt` package). The database should execute only a trivial, sub-1ms query to retrieve the hashed credential:
   ```sql
   SELECT hashed_password FROM users WHERE email = $1;
   ```
-  Verify the password in the Go application (e.g., `bcrypt.CompareHashAndPassword(hashedPassword, plaintextPassword)`). Go-level hashing runs on application CPUs, scales horizontally with application replicas, does not hold scarce database pool connections, and fails gracefully with clear application logs.
+  Verify the password in the Go application (for example, `bcrypt.CompareHashAndPassword(hashedPassword, plaintextPassword)`). Go-level hashing runs on application CPUs, scales horizontally with application replicas, does not hold scarce database pool connections, and fails gracefully with clear application logs.
 
 ### 2. Complex Pattern Matching & Regex Parsing
 - **The Conflict**: Running sequential evaluations of complex regular expressions (`~`, `~*`, `regexp_like`, `regexp_matches`) over unindexed text columns in a hot database lane. Regex parsing and compilation is highly CPU-bound. Sequential regex checks over millions of rows will instantly consume database CPU cores and trip statement timeouts.
@@ -573,8 +573,8 @@ The database (PostgreSQL) is a scarce, vertically scaled, state-oriented resourc
 - **The Remediation**: Validate, structure, and serialize document payloads in the application layer. The database should only store fully validated JSONB, or extract key queryable attributes into dedicated relational columns.
 
 ### 4. Heavy Spatial / Distance Computations
-- **The Conflict**: Calculating exact distances or intersections between complex polygons (e.g., PostGIS `ST_Distance` or `ST_Contains`) over large datasets without spatial indexes or pre-filtering. Calculating spatial geometric relations on complex shapes is extremely float-compute intensive.
-- **The Remediation**: Always pair spatial operator predicates with the bounding-box overlap operator (`&&`) and ensure a spatial GiST index is defined on geometry fields. If exact, high-precision geo-computations are needed, perform coarse-grained bounding-box filtering in SQL first, then run high-fidelity geometric calculations in the application layer (e.g., utilizing a fast native Rust/WASM library).
+- **The Conflict**: Calculating exact distances or intersections between complex polygons (for example, PostGIS `ST_Distance` or `ST_Contains`) over large datasets without spatial indexes or pre-filtering. Calculating spatial geometric relations on complex shapes is extremely float-compute intensive.
+- **The Remediation**: Always pair spatial operator predicates with the bounding-box overlap operator (`&&`) and ensure a spatial GiST index is defined on geometry fields. If exact, high-precision geo-computations are needed, perform coarse-grained bounding-box filtering in SQL first, then run high-fidelity geometric calculations in the application layer (for example, utilizing a fast native Rust/WASM library).
 
 ### 5. Intensive Mathematical / Financial Calculation Loops
 - **The Conflict**: Computing amortization schedules, financial forecasts, Monte Carlo simulations, or multi-step statistical projections inside database triggers or PL/pgSQL procedural code.

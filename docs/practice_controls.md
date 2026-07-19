@@ -20,7 +20,7 @@ into stale prose.
 | --- | --- |
 | `control_id` | Stable rule or cross-cutting control ID. |
 | `owner_doc` | Canonical document that owns the control. |
-| `category` | Main lane: coding, testing, security, runtime, agent, tooling, etc. |
+| `category` | Main lane: coding, testing, security, runtime, agent, tooling, documentation, and similar. |
 | `risk` | `low`, `medium`, `high`, or `critical`. |
 | `automation` | `strong`, `partial`, `contextual`, or `human`. |
 | `enforcement` | Semicolon-separated checks: `script:...`, `review`, or both. |

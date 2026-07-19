@@ -28,7 +28,7 @@ To eliminate API drift across different languages, the Foundation defines all cr
 ### 1. Protobuf (Network and Event Envelope)
 
 * **Format source**: `.proto` files located in `runtime-transport/protos/foundation/v1/` (`envelope.proto`, `metadata.proto`, `projection.proto`, `types.proto`).
-* **Purpose**: Defines the network layout, event stream layout, tracing metadata (e.g., `CorrelationID`, `TenantID`), and progress-bearing transfer payloads.
+* **Purpose**: Defines the network layout, event stream layout, tracing metadata (for example, `CorrelationID`, `TenantID`), and progress-bearing transfer payloads.
 * **Compiler Targets**:
   * **Go**: Compiled via `protoc-gen-go` to `runtime-transport/go/generated/`.
   * **TypeScript**: Compiled via `protoc` using the `ts-proto` plugin to `runtime-transport/ts/src/generated/` with browser options optimized for minimal allocation and native interoperability.
@@ -36,7 +36,7 @@ To eliminate API drift across different languages, the Foundation defines all cr
 
 ### 2. Cap'n Proto (Shared-Memory WASM Buffer)
 
-* **Format source**: `.capnp` files located in `runtime-sdk/protocols/system/v1/` (e.g., `runtime_buffer.capnp` defining the 4KB control-buffer, `runtime_shared_arena.capnp` defining WebAssembly memory layout).
+* **Format source**: `.capnp` files located in `runtime-sdk/protocols/system/v1/` (for example, `runtime_buffer.capnp` defining the 4KB control-buffer, `runtime_shared_arena.capnp` defining WebAssembly memory layout).
 * **Purpose**: Defines the precise hardware-aligned byte offsets and integers for zero-copy communication between the JavaScript host and WebAssembly/Rust guests.
 * **Compiler Targets**:
   * Because parsing dynamic schema descriptors adds runtime overhead, the Cap'n Proto schemas are compiled directly into raw static constants.
@@ -83,7 +83,7 @@ All automated checks are run via `make lint` or specific `make check-*` targets.
 | `check-scaffold-idempotency` | `tests/scaffold_idempotency_test.sh` | Shell | Asserts a fresh `init.sh` followed by a default `update-project.sh` produces zero tracked drift beyond the `.foundation` `LAST_UPDATED` stamp. |
 | `check-scaffold-seed-drift` | `tests/scaffold_seed_drift_test.sh` | Shell | Proves the seed-ledger contract: silence while templates are unchanged, warnings when templates evolve, `--acknowledge-seed-drift` re-baselining, and reseed-on-delete. |
 | **Enforcement & Policy** | | | |
-| `check-coding-practices` | `coding_practices_check.sh` | Shell | Scans code against CP rules (e.g., CP-01 no uncontrolled recursion, CP-02 bounded loops, CP-03 function size limits). |
+| `check-coding-practices` | `coding_practices_check.sh` | Shell | Scans code against CP rules (for example, CP-01 no uncontrolled recursion, CP-02 bounded loops, CP-03 function size limits). |
 | `check-testing-practices` | `testing_practices_check.sh` | Shell | Enforces test adequacy rules and checks for generated event contract test files. |
 | `check-go-concurrency-practices` | `go_concurrency_practices_check.sh` | Shell | Scans Go code for concurrency bugs: zero-duration timers, select-default close guards, and goroutine WaitGroup capture. |
 | `check-practice-controls` | `practice_controls_check.sh` | Shell | Verifies that `tooling/practice_controls.psv` aligns perfectly with current documentation and scripts. |
@@ -94,13 +94,13 @@ All automated checks are run via `make lint` or specific `make check-*` targets.
 | `check-ovasabi-cli` | `go test ./cmd/ovasabi`; `node cmd/ovasabi/bin/ovasabi.js --help` | Go/Node | Verifies CLI scaffold wrapping, npm entrypoint launch, and online/offline license validation primitives. |
 | `check-coverage-ratchet` | `coverage_ratchet_check.sh` | Shell | Enforces statement coverage floors per package (target >= 95% for new code) against `tooling/coverage_baseline.psv`. |
 | `check-benchmark-evidence` | `benchmark_evidence_check.sh` | Shell | Fails when `docs/foundation_benchmarks.md` references a benchmark function, source path, or `benchmark-results/` artifact that no longer exists, keeping the evidence ledger honest across all lanes. |
-| `check-server-kit-module-parity` | `server_kit_module_parity_check.sh` | Shell | In Core, verifies `tooling/server_kit_module_manifest.tsv` matches the real `server-kit/go` module surface both ways. In projects, verifies every vendored module arrived and every foundation-only module (e.g. `servicebacked`) was pruned. New modules get fleet verification by adding one manifest row. |
+| `check-server-kit-module-parity` | `server_kit_module_parity_check.sh` | Shell | In Core, verifies `tooling/server_kit_module_manifest.tsv` matches the real `server-kit/go` module surface both ways. In projects, verifies every vendored module arrived and every foundation-only module (for example, `servicebacked`) was pruned. New modules get fleet verification by adding one manifest row. |
 
 ---
 
 ## Fleet Updates and Documentation Patches
 
-When a development organization maintains multiple downstream applications (e.g., `trader_os`, `fintech_v1`), keeping them synchronized with core changes is critical to prevent code drift and framework decay.
+When a development organization maintains multiple downstream applications (for example, `trader_os`, `fintech_v1`), keeping them synchronized with core changes is critical to prevent code drift and framework decay.
 
 The external distribution target is the Ovasabi CLI:
 
@@ -174,5 +174,5 @@ The Foundation requires all structural and runtime modifications to prove their 
 Benchmarks are relevant to the application lifecycle in three ways:
 
 1. **Ladder Verification**: They ensure that fast, direct pathways (same-process direct typed dispatch) do not pay network or JSON serialization costs.
-2. **Allocation Enforcement**: The hotpaths must stay allocation-free at the unit boundary (e.g., progress readers, stream encoders). Benchmarks act as regression guards to catch accidental memory escapes in new PRs.
+2. **Allocation Enforcement**: The hotpaths must stay allocation-free at the unit boundary (for example, progress readers, stream encoders). Benchmarks act as regression guards to catch accidental memory escapes in new PRs.
 3. **Data-Lane Proofs**: They justify complex architectural shifts. For example, the Arrow-layout columnar rewrite for Hermes was only merged after benchmarks proved it yielded **24% faster scans**, **70% less memory usage**, and **99.6% fewer allocations** than the pointer-chase baseline.

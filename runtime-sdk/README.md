@@ -4,7 +4,7 @@ The `runtime-sdk` is the high-performance kernel of the Ovasabi ecosystem. It pr
 
 ## The Performance Model: 4KB RuntimeControlBuffer
 
-Traditional data exchange between runtimes (e.g., JS to WASM or Go to C++) relies on heavy serialization (JSON/Protobuf) and dynamic memory allocation. The `runtime-sdk` bypasses this using a **Fixed-Layout 4096-byte Shared Buffer**.
+Traditional data exchange between runtimes (for example, JS to WASM or Go to C++) relies on heavy serialization (JSON/Protobuf) and dynamic memory allocation. The `runtime-sdk` bypasses this using a **Fixed-Layout 4096-byte Shared Buffer**.
 
 The 4KB buffer is the hot control plane, not the whole runtime. Large payloads use the optional `RuntimeSharedArena`, transferable buffers, or runtime-transport binary envelopes so the control plane stays cache-friendly and predictable.
 
@@ -26,7 +26,7 @@ The 4KB buffer is the hot control plane, not the whole runtime. Large payloads u
 
 ## Getting Started: Developing a "Unit"
 
-A "Unit" is a single piece of logic (e.g., `image:resize`, `tax:calculate_nigeria`).
+A "Unit" is a single piece of logic (for example, `image:resize`, `tax:calculate_nigeria`).
 The full walkthrough — crate layout, all execution lanes (stdio, FFI, shm,
 browser WASM), Go integration, and the evidence checklist — lives in
 [`docs/rust_unit_guide.md`](../docs/rust_unit_guide.md), with

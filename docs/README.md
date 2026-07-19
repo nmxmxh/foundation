@@ -14,7 +14,7 @@ them. See [`PHILOSOPHY.md`](PHILOSOPHY.md#complexity-becomes-infrastructure).
 
 ## Getting Started (Pick Your Path)
 
-### I'm New Here—Show Me the Essentials (15 minutes)
+### New Here — The Essentials (15 minutes)
 
 Read in order:
 
@@ -27,7 +27,7 @@ You do not need to understand every execution plane before describing or
 building a feature. Begin with behavior and guarantees; Foundation agents should
 translate those into contracts and surface only consequential choices.
 
-### I'm a Developer—What Do I Need to Know?
+### Developer Path — What You Need to Know
 
 Read in order:
 
@@ -40,14 +40,14 @@ For how state flows across the whole stack (commands, events, projections,
 stores), read [`state_event_model.md`](state_event_model.md) — it is the map
 that connects backend and frontend.
 
-Then read only the lane-specific docs for code you're changing:
+Then read only the lane-specific docs for code you are changing:
 
 - Backend/domain logic: `coding_practices.md`, `database_practices.md`, `security_practices.md`, `testing_practices.md`
 - Real-time/WebSocket: `websocket_scaling.md`, `hermes_read_modes.md`
 - Workers/async: `go_concurrency_bug_practices.md`, `coding_practices.md` (bounded work rules)
 - Frontend: `state_event_model.md`, `frontend_scaffold_sync.md`, `frontend_command_registry.md`, `styling_design_practices.md`
 
-### I'm an Architect—Show Me the Full Picture
+### Architect Path — The Full Picture
 
 Read in order:
 
@@ -64,7 +64,7 @@ Then read deeply into domains that matter for your product:
 - **Security**: `security_practices.md`, `ai_threat_model.md`, `post_quantum_security.md`
 - **Performance**: `performance_lab.md`, `foundation_benchmarks.md`, `optimization_points.md`
 
-### I'm Working With AI Agents or Partners
+### Working With AI Agents or Partners
 
 Read in order:
 
@@ -118,7 +118,8 @@ Read in order:
 | `security_practices.md` | Trust boundaries, auth posture, secrets, audit, ingress controls |
 | `go_concurrency_bug_practices.md` | Bounded concurrency patterns, known Go failure modes |
 | `practice_controls.md` | Machine-readable mapping from rules to scripts, evidence, merge-gate posture |
-| `ai_threat_model.md` | Prompt/tool/memory poisoning, generated-code provenance, validation vocabulary |
+| `ai_threat_model.md` | Prompt, tool, and memory poisoning; generated-code provenance; validation vocabulary |
+| `ste_documentation_practices.md` | ASD-STE100 documentation and comment standard (CP-37) |
 
 ---
 
@@ -197,11 +198,11 @@ Non-practice reference documents:
 ## How to Navigate
 
 1. **If you need a concept definition**: Jump to `foundation_glossary.md`
-2. **If you're new to Foundation**: Start with `foundation_quick_start.md` (15 min), then `foundation_tour.md`
-3. **If you're reviewing architecture**: Read `foundation_architecture_contract.md` and `practice_controls.md`
-4. **If you're changing code**: Read the lane-specific practice doc (see "Coding Practices" above)
+2. **If you are new to Foundation**: Start with `foundation_quick_start.md` (15 min), then `foundation_tour.md`
+3. **If you are reviewing architecture**: Read `foundation_architecture_contract.md` and `practice_controls.md`
+4. **If you are changing code**: Read the lane-specific practice doc (see "Coding Practices" above)
 5. **If performance matters**: Read `foundation_benchmarks.md` and the relevant performance practice doc
-6. **If you're working with agents**: Read `AGENTS.md`, then `agent_operating_contract.md`, then lane-specific docs
+6. **If you are working with agents**: Read `AGENTS.md`, then `agent_operating_contract.md`, then lane-specific docs
 7. **If you want to understand why**: Read `PHILOSOPHY.md`
 
 ---

@@ -110,7 +110,7 @@ Invariants: chunks must align to the plan's chunk size (`Offset % ChunkSize == 0
 `PartNumber = Offset / ChunkSize`); each `PATCH` carries a per-chunk SHA-256; the
 chunk body is bounded by `MaxChunkBytes` (CP-02/CP-18); a re-sent chunk is a
 no-op via bulk's receipt replay, so retries are safe. Progress mirroring is
-**best-effort** — if the in-memory tracker is gone (e.g. after a restart) bulk
+**best-effort** — if the in-memory tracker is gone (for example, after a restart) bulk
 remains the durable source of truth and the upload still resumes from `HEAD`.
 Errors from bulk are surfaced through `errors.HTTPError` so the app error code
 maps to the right status (404 unknown, 401 missing org, 409 conflict, …).
@@ -124,7 +124,7 @@ subscribes to the progress lane through a transport-supplied
 (`phase`, `bytesDone/bytesTotal`, `fraction`, `checksum`, `error`, `terminal`).
 The reducer enforces the same invariants as the server: stale/duplicate `seq`
 dropped, byte progress never regresses, terminal phase is a sink — replacing the
-per-app upload stores (e.g. the fintech_v1 `mediaUploadStore`).
+per-app upload stores (for example, the fintech_v1 `mediaUploadStore`).
 
 ## Testing posture
 

@@ -34,9 +34,9 @@ pre-answered questions without scanning multiple files.
 | **Extension** | `server-kit/go/extension` — typed payload wrappers for event bus payloads, supporting direct struct serialization without JSON round-trips. | `foundation_guide.md` |
 | **Feature flags** | `server-kit/go/featureflags` — structured feature toggles with percentage rollouts, user/org targeting, and environment overrides. | `foundation_guide.md` |
 | **Force mode** | Scaffold manifest mode: foundation-managed baseline, overwritten only when `--force` is used or the file does not exist. | `scaffold_manifest.md` |
-| **Foundation Core** | This repository — the shared infrastructure containing `server-kit`, `runtime-transport`, `runtime-sdk`, etc. | `AGENTS.md` |
+| **Foundation Core** | This repository — the shared infrastructure containing `server-kit`, `runtime-transport`, `runtime-sdk`, and related modules. | `AGENTS.md` |
 | **Foundation Profile** | Configuration level (`core`, `lite`, `performance`, `regulated`) that controls which scaffold surfaces a generated project receives. | `foundation_architecture_contract.md` |
-| **Foundation Project** | A specific application generated from Foundation templates (e.g., Trader, Civic, Global). | `AGENTS.md` |
+| **Foundation Project** | A specific application generated from Foundation templates (for example, Trader, Civic, Global). | `AGENTS.md` |
 | **Foundation Reference** | The `/foundation` directory inside a generated project — a local copy/reference to Core modules. Read-only. | `AGENTS.md` |
 | **Foundation Template** | The skeletal structure in `templates/` used to bootstrap new projects via `init-project.sh`. | `AGENTS.md` |
 | **Ovasabi CLI** | Planned distribution CLI exposed as `@ovasabi/cli`; wraps scaffold init/update, package registry setup, license verification, agent config generation, and baseline checks. | `foundation_distribution.md` |
@@ -56,7 +56,7 @@ pre-answered questions without scanning multiple files.
 | **Nervous system** | The canonical lifecycle path connecting contracts, metadata, dispatch, workers, Redis, WebSocket, frontend stores, and observability. | `foundation_nervous_system.md` |
 | **Object store** | `server-kit/go/objectstore` — object-storage helpers with tenant-scoped key derivation, streaming put/get, and presigned URLs. | `transfer_lane.md` |
 | **Overwrite mode** | Scaffold manifest mode: foundation-owned file, always synchronized during updates. | `scaffold_manifest.md` |
-| **Platform module** | Shared modules versioned, tested, and rarely edited inside applications: `server-kit`, `runtime-transport`, `runtime-sdk`, etc. | `foundation_architecture_contract.md` |
+| **Platform module** | Shared modules versioned, tested, and rarely edited inside applications: `server-kit`, `runtime-transport`, `runtime-sdk`, and related modules. | `foundation_architecture_contract.md` |
 | **Policy engine** | `server-kit/go/policy` — Cedar-inspired policy-as-code authorization with principal/action/resource matching. | `foundation_guide.md` |
 | **Post-quantum** | Crypto agility posture: hybrid TLS, configurable algorithms, artifact signing for long-lived data. No PQ crypto on hot render paths. | `post_quantum_security.md` |
 | **Practice controls** | Machine-readable matrix at `tooling/practice_controls.psv` mapping every CP/TE rule to enforcement, evidence, and merge-gate posture. | `practice_controls.md` |
@@ -78,6 +78,9 @@ pre-answered questions without scanning multiple files.
 | **Seed ledger** | `.foundation-seeds.tsv` in a generated project — per create-mode file, the template hash and rendered hash at seed time. Update/refresh warn when the Foundation template evolves after seeding; user edits are never flagged and project-owned files are never rewritten. | `scaffold_manifest.md` |
 | **Signed license file** | Offline `ovasabi.lic` JWT validated with Ovasabi's public key for air-gapped enterprise package/update authorization. | `foundation_distribution.md` |
 | **Server-kit** | Go backend platform primitives: the largest Foundation module containing 50+ packages for events, workers, database, resilience, auth, and more. | `foundation_guide.md` |
+| **Simplified Technical English (STE)** | ASD-STE100 controlled-language standard adapted for Foundation documentation and code comments. Governs sentence length, noun clusters, vocabulary, voice, and safety alerts. | `ste_documentation_practices.md` |
+| **STE controlled vocabulary** | The set of approved words with single-meaning assignments and approved parts of speech. Technical names from the Foundation glossary and module API surface are always permitted as nouns. | `ste_documentation_practices.md` |
+| **STE noun cluster** | A group of nouns or adjectives functioning as a single noun phrase. Foundation limits noun clusters to a maximum of 3 words and requires expansion with prepositions for longer names. | `ste_documentation_practices.md` |
 | **Tenant isolation** | Organization scope derived from authenticated context, never from client-supplied data. Preserved through all lifecycle lanes. | `foundation_nervous_system.md` |
 | **Tracing** | `server-kit/go/tracing` — OpenTelemetry integration with correlation ID bridging and HTTP middleware for automatic span creation. | `foundation_guide.md` |
 | **Transfer lane** | `server-kit/go/transfer` — progress-bearing operation lifecycle: monotonic byte progress on an ephemeral lane, bracketed by durable bookend events. | `transfer_lane.md` |

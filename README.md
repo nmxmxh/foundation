@@ -135,7 +135,7 @@ Bootstrapping a new project should not require reinventing the wheel. Foundation
 ### Why the Scaffold Facilitates Modern Development
 
 - **Instant Production Stack**: Humans get a ready-to-run environment with PostgreSQL, Redis, DORA telemetry, and a Go-React-Rust runtime pre-wired.
-- **Deterministic AI Context**: Agents get strict `.cursorrules` / `.clauderules`, a clear `AGENTS.md` operating contract, and automated checks in `tooling/` that act as compilation gates. They don't have to guess or hallucinate APIs.
+- **Deterministic AI Context**: Agents get strict `.cursorrules` / `.clauderules`, a clear `AGENTS.md` operating contract, and automated checks in `tooling/` that act as compilation gates. They do not have to guess or hallucinate APIs.
 - **Clean Sync Boundaries**: Upstream updates to core foundation modules (like `server-kit` or `runtime-transport`) can be merged into existing projects cleanly using the `update` command (shown below) without overwriting custom application code.
 
 ### Bootstrapping a New Project
@@ -182,7 +182,7 @@ Read [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) to understand the design.
 4. [`docs/foundation_architecture_contract.md`](docs/foundation_architecture_contract.md) — ownership split
 5. [`docs/foundation_nervous_system.md`](docs/foundation_nervous_system.md) — lifecycle contract
 
-**If you're using AI tools**: [`AGENTS.md`](AGENTS.md) — agent workflows and evidence requirements
+**If you are using AI tools**: [`AGENTS.md`](AGENTS.md) — agent workflows and evidence requirements
 
 **To understand why**: [`docs/PHILOSOPHY.md`](docs/PHILOSOPHY.md) — the motivation and design principles
 

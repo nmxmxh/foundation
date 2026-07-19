@@ -80,7 +80,7 @@ prior epoch returned for the same partition.
 
 ### `stale_while_revalidate`
 
-> "Serve the current local snapshot immediately; schedule a refresh in the background if it's getting old."
+> "Serve the current local snapshot immediately; schedule a refresh in the background if it is getting old."
 
 **Behavior:**
 

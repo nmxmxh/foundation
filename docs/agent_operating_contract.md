@@ -156,7 +156,7 @@ contract silently.
 AI agents operating in this repository must manage their context window carefully. Loading all architecture and practice documentation at once degrades attention and wastes tokens.
 
 1. **Start Small**: Always load `docs/foundation/foundation_glossary.md` (or `docs/foundation_glossary.md` in Core) first. It serves as the primary dictionary and index.
-2. **Retrieve on Demand**: Only use `view_file` to load detailed lane guides (e.g. `transfer_lane.md`, `hermes_projection.md`, `runtime_foundation.md`) when you are actively editing or verifying code in those specific packages.
+2. **Retrieve on Demand**: Only use `view_file` to load detailed lane guides (for example, `transfer_lane.md`, `hermes_projection.md`, `runtime_foundation.md`) when you are actively editing or verifying code in those specific packages.
 3. **Minimize File Reads**: Avoid executing massive recursive directory searches (`find` / `grep`) across the entire repository if the target file path is already indexed.
 
 ## Scaffold Ownership Validation

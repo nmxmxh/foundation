@@ -324,7 +324,7 @@ Spacing and typography must scale dynamically with the viewport width without br
 All margins, paddings, and sizing increments must adhere to a modular scale (based on the 8px grid or the Golden Ratio $1.618$):
 
 * **Spacing Increments**: `4px (xs)`, `8px (sm)`, `16px (md)`, `24px (lg)`, `40px (xl)`, `64px (xxl)`.
-* Avoid arbitrary numbers (e.g. `13px`, `19px`).
+* Avoid arbitrary numbers (for example, `13px`, `19px`).
 
 ### 4. Z-Index Layering Scale
 

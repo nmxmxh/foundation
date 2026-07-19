@@ -87,14 +87,14 @@ deployable and rollbackable independently.
 
 ### Numbering in Phase 2
 
-After Phase 1 closes at `0003`, new migrations use `0004`, `0005`, etc.
+After Phase 1 closes at `0003`, new migrations use `0004`, `0005`, and so on.
 Each migration must be:
 
 1. Numbered strictly increasing from the previous.
 2. Named for the domain operation it performs:
    `0004_users_add_verified_at.up.sql`
 3. Paired with a reversible down migration unless reversal is documented as
-   explicitly not required (e.g., data deletion is itself the rollback).
+   explicitly not required (for example, data deletion is itself the rollback).
 
 ### Migration rules in production
 
@@ -112,7 +112,7 @@ Each migration must be:
 5. **Tenant predicate on every backfill.** Any DML backfill must include
    `WHERE organization_id = ...` or process all rows in bounded batches.
 6. **Idempotent seeds in production.** If `0002_seed_system_data` or any
-   production-seed migration runs again (e.g., on a fresh replica), it must
+   production-seed migration runs again (for example, on a fresh replica), it must
    produce the same final state with `ON CONFLICT DO UPDATE`.
 7. **Restartable data movement.** Backfills affecting >10K rows must use keyset
    pagination and checkpoint progress so they can be restarted after a failure.

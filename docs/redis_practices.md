@@ -63,7 +63,7 @@ Rules:
 5. **Fencing Tokens**: Distributed locks must use unique lock tokens (fencing tokens) or CAS semantics (`SET NX`). Locks must be released using a script that verifies the token to prevent accidental release of a lock re-acquired by another process.
 6. **Consumer Groups**: Use Redis Stream consumer groups to distribute event load across multiple worker instances while ensuring every message is acknowledged (`XACK`).
 7. **Big Key Prevention**: Do not store more than 10,000 elements in a single Hash, Set, or List. Large keys cause high latency during access and deletion (blocking the main thread) and lead to memory fragmentation.
-8. **Scalable Counting**: Use **HyperLogLog** (`PFADD`, `PFCOUNT`) for estimating the cardinality of unique items (e.g., daily unique users) when a ~1% error margin is acceptable. This maintains a constant 12KB memory footprint regardless of scale.
+8. **Scalable Counting**: Use **HyperLogLog** (`PFADD`, `PFCOUNT`) for estimating the cardinality of unique items (for example, daily unique users) when a ~1% error margin is acceptable. This maintains a constant 12KB memory footprint regardless of scale.
 9. **No O(N) Commands**: Strictly avoid `KEYS *`, `SMEMBERS` on large sets, or `HGETALL` on large hashes. Use `SCAN`, `SSCAN`, and `HSCAN` instead to prevent blocking the Redis event loop.
 10. Group repeated cache writes/invalidations into bounded pipeline batches. Large pipelines must be chunked so queued replies do not become the memory problem.
 11. Use `allkeys-lfu` for generic cache nodes unless the workload demands TTL-only eviction. LFU adapts better to mixed hot/cold cache traffic than pure recency.

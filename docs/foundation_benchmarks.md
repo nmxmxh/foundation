@@ -140,7 +140,7 @@ and `BenchmarkHermesColumnarRangeIndexScale`,
 `BenchmarkHermesRangeIndexBuild10K`, and
 `BenchmarkHermesRangeIndexUpdate10K`.
 
-## 2026-07-15 Sharded Redis key-router hot path (and a "measure, don't assume" lesson)
+## 2026-07-15 Sharded Redis key-router hot path (and a "measure, do not assume" lesson)
 
 Prompted by external sharding write-ups (PlanetScale/Neki, Vitess), Foundation's
 own sharded Redis client was examined under the router lens. `shardedClient.shard`
@@ -173,7 +173,7 @@ allocation win; it is:
    `hermes` `TestCountIndexedDoesNotAllocate`).
 3. **A parity oracle where none existed.** `TestShardIndexMatchesStdlibFNVOracle`
    proves the inline router is bit-identical to `int(fnv.New32a().Sum32()) % n`
-   across a 520-key corpus and shard counts 1…768 — i.e. the change moves no
+   across a 520-key corpus and shard counts 1…768 — that is, the change moves no
    key to a different shard. A routing-hash change is a silent data-remap bug;
    the oracle is the guard that makes future hash edits safe to attempt.
 
@@ -312,7 +312,7 @@ Apple M1 Pro (ARM64), same 10K-record partition, cold warm per iteration
 | Format | ns/op | artifact bytes | B/op | allocs/op | Interpretation |
 | --- | ---: | ---: | ---: | ---: | --- |
 | `proto_rows` (legacy) | ~31.6 ms | 1,279,873 | 29.3 MB | 325,133 | Decode dominates: ~250K of the allocations are proto messages and per-field conversions. |
-| `columnar` (HCS1) | **~18.1 ms** | **677,637** | **18.5 MB** | **75,142** | **43% faster, 47% smaller, 77% fewer allocations** — and 75.1K allocs is exactly the partition/index-construction floor the streaming-rebuild benchmark reports (75,127–75,136), i.e. decode allocation is eliminated; warm is now pure partition construction. |
+| `columnar` (HCS1) | **~18.1 ms** | **677,637** | **18.5 MB** | **75,142** | **43% faster, 47% smaller, 77% fewer allocations** — and 75.1K allocs is exactly the partition/index-construction floor the streaming-rebuild benchmark reports (75,127–75,136), that is, decode allocation is eliminated; warm is now pure partition construction. |
 
 Honesty note: the ledger's earlier ">10× compression" speculation assumed wide
 analytical scans; this 3-field fixture yields 1.9×. The structural win — the
@@ -911,7 +911,7 @@ The numbers above are only sound under the constraints in
    A gating tail metric needs a confidence/variance band (binomial rank
    interval is sufficient); compare distributions, not single tail points
    (§3.3).
-4. **Float tolerances.** SIMD/GPU/parallel reductions (e.g.
+4. **Float tolerances.** SIMD/GPU/parallel reductions (for example,
    `server-kit/go/hermes` `sumFloat64s`) are validated against the scalar
    reference with an absolute+relative tolerance scaled with `n` — never
    bit-equality — because float addition is non-associative (§4).
@@ -3594,7 +3594,7 @@ Researched against the current tree; each is a distinct trap:
 1. **`for pb.Next()` parallel loops** (8 in the tree) are outside the `b.Loop()`
    contract. They still need results sunk (assigned to a package var or a field
    the compiler cannot prove dead) or they DCE just like the old serial form.
-2. **Discarding to `_`** (e.g. `compress/bench_test.go` uses `_, _ = Compress...`)
+2. **Discarding to `_`** (for example, `compress/bench_test.go` uses `_, _ = Compress...`)
    is weaker than a real sink. It preserves side effects, but for a provably
    pure function with an unused result the compiler may still eliminate it.
    Prefer a package-level sink for pure computations.
@@ -3605,11 +3605,11 @@ Researched against the current tree; each is a distinct trap:
    timer cleanly, but any expensive construction still placed *inside* the loop
    is measured. Keep using `b.ResetTimer()`/`b.StopTimer()` for per-iteration
    setup (22 files already do).
-5. **`b.N` used as a value in the body** — e.g. `scale_paths_test.go` asserts
+5. **`b.N` used as a value in the body** — for example, `scale_paths_test.go` asserts
    `deliveries == b.N`. These are legitimate and gopls correctly refused to
    auto-migrate them; migrating requires a local counter, since `b.Loop()` does
    not expose an iteration total up front. Do not force these to `b.Loop()`.
-6. **Missing `b.ReportAllocs()`** (e.g. `database/executor_bench_test.go`) hides
+6. **Missing `b.ReportAllocs()`** (for example, `database/executor_bench_test.go`) hides
    allocation shape unless `-benchmem` is passed globally. Prefer per-benchmark
    `b.ReportAllocs()`.
 

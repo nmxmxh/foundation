@@ -10,12 +10,12 @@ The central dispatch mechanism. It uses a `TransportStrategy` to decide how an e
 - **WebSocket Transport**: Persistent connection for real-time events and high-frequency updates.
 
 ### 2. Resilience: Re-Subscription logic
-Network drops shouldn't mean state loss. The `WebSocketTransport` implements a **Re-Subscription Map**.
-- When you subcribe to a pattern (e.g., `media:*`), the client stores this in an internal registry.
+Network drops should not cause state loss. The `WebSocketTransport` implements a **Re-Subscription Map**.
+- When you subscribe to a pattern (for example, `media:*`), the client stores this in an internal registry.
 - Upon reconnection, it automatically clears the server state and re-sends all active subscription requests.
 
 ### 3. Ingress Optimization
-Large request bodies (e.g., file uploads, large state patches) are automatically intercepted and compressed using **GZIP**. This is transparent to the developer.
+Large request bodies (for example, file uploads, large state patches) are automatically intercepted and compressed using **GZIP**. This is transparent to the developer.
 
 ## LLM Agent Patterns: Command Dispatch
 

@@ -95,7 +95,7 @@ _No mutating contracts discovered yet. Add proto files under `api/protos` and re
 // In a tooling script or agent context:
 const manifest = JSON.parse(fs.readFileSync("docs/references/lifecycle/lifecycle_contract.json", "utf8"));
 for (const contract of manifest.contracts) {
-  console.log(contract.events.requested); // e.g. "order:create:v1:requested"
+  console.log(contract.events.requested); // for example, "order:create:v1:requested"
   console.log(contract.review_vectors);   // one per invariant
 }
 ```
