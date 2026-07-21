@@ -298,7 +298,7 @@ That's Foundation.
 
 ## Next Steps
 
-- Read [`README.md`](../README.md) for an overview of components and quick-start paths
+- Read `README.md` (repository root) for an overview of components and quick-start paths
 - Read [`foundation_quick_start.md`](foundation_quick_start.md) for the 15-minute technical path
 - Read [`foundation_tour.md`](foundation_tour.md) to walk through one complete product action
-- Read [`AGENTS.md`](../AGENTS.md) if you're working with AI partners or planning to use agents
+- Read `AGENTS.md` (repository root) if you're working with AI partners or planning to use agents

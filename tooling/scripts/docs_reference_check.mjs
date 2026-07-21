@@ -14,6 +14,15 @@ const markdownRoots = [
 
 const failures = [];
 
+// Foundation's `docs/` is copied wholesale into generated projects as
+// `docs/foundation/`, so links inside that subtree must not escape it or they
+// dangle once re-rooted. In the foundation repo the subtree is `docs/`; in a
+// generated project it is `docs/foundation/`. Project-authored docs sitting
+// alongside it are never relocated and may link freely into the project.
+const docsRoot = path.join(target, "docs");
+const vendoredDocsRoot = path.join(docsRoot, "foundation");
+const relocatableRoot = existsSync(vendoredDocsRoot) ? vendoredDocsRoot : docsRoot;
+
 for (const root of markdownRoots) {
   const full = path.join(target, root);
   if (!existsSync(full)) {
@@ -58,6 +67,7 @@ function* walkMarkdown(dir) {
 }
 
 function checkMarkdownFile(file) {
+  const enforceContainment = !escapesRoot(file, relocatableRoot);
   const relFile = rel(file);
   const content = stripFencedBlocks(readFileSync(file, "utf8"));
   const linkPattern = /!?\[[^\]\n]*\]\(([^)\n]+)\)/g;
@@ -102,8 +112,25 @@ function checkMarkdownFile(file) {
         label: "broken local documentation link",
         details: [`${relFile}: ${rawTarget}`, `missing: ${rel(resolved)}`],
       });
+      continue;
+    }
+    if (enforceContainment && escapesRoot(resolved, relocatableRoot)) {
+      failures.push({
+        label: "documentation link escapes the relocatable docs tree",
+        details: [
+          `${relFile}: ${rawTarget}`,
+          `resolves outside: ${rel(relocatableRoot)}`,
+          "this subtree is re-rooted into generated projects; the link breaks there",
+          "reference the path as inline code instead of a Markdown link",
+        ],
+      });
     }
   }
+}
+
+function escapesRoot(resolved, root) {
+  const relative = path.relative(root, resolved);
+  return relative.startsWith("..") || path.isAbsolute(relative);
 }
 
 function normalizeLinkTarget(value) {

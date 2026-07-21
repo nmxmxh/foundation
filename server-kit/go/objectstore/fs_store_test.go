@@ -30,6 +30,28 @@ func TestNewFSStoreRequiresRoot(t *testing.T) {
 	}
 }
 
+func TestNewFSStoreRejectsUnwritableRoot(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	root := filepath.Join(t.TempDir(), "readonly")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Chmod(root, 0o550); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o750) })
+	// Regression: a pre-existing root the process cannot write to (e.g. a
+	// root-owned volume mounted over the path) must fail at construction, not
+	// on the first Put.
+	if _, err := NewFSStore(root, "b"); err == nil {
+		t.Fatal("unwritable root should error at construction")
+	} else if !strings.Contains(err.Error(), "not writable") {
+		t.Fatalf("error should name the writability failure, got: %v", err)
+	}
+}
+
 func TestFSStorePutStreamReadBackAndDelete(t *testing.T) {
 	s := newFSStore(t)
 	ctx := context.Background()

@@ -68,7 +68,7 @@ Then read deeply into domains that matter for your product:
 
 Read in order:
 
-1. [`../AGENTS.md`](../AGENTS.md) — agent workflows and role definitions
+1. `AGENTS.md` (repository root) — agent workflows and role definitions
 2. [`foundation_glossary.md`](foundation_glossary.md) — concept lookup
 3. [`foundation_quick_start.md`](foundation_quick_start.md) — minimum viable path
 4. [`foundation_architecture_contract.md`](foundation_architecture_contract.md) — ownership boundaries
@@ -172,7 +172,7 @@ Read in order:
 
 | Document | Purpose |
 | --- | --- |
-| [`../AGENTS.md`](../AGENTS.md) | Agent terminology, operating baseline, tech stack, architecture overview |
+| `AGENTS.md` (repository root) | Agent terminology, operating baseline, tech stack, architecture overview |
 | `agent_operating_contract.md` | Role split, definition of done, evidence ledger, handoff format |
 | `agent_change_contract.md` | Architecture graph, pre-edit simulation, risk tier, and evidence workflow |
 | `ai_practices.md` | AI runtime as product capability, trust boundary, bounded work, verification |

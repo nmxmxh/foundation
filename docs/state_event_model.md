@@ -134,7 +134,7 @@ the same events over WebSocket/HTTP and exposes a snapshot the UI subscribes to:
 - Degrade cleanly when IndexedDB, SharedArrayBuffer, or workers are unavailable.
 
 See [`frontend_runtime_workbench.md`](frontend_runtime_workbench.md) and
-[`frontend-kit/README.md`](../frontend-kit/README.md) for the store/runtime
+`frontend-kit/README.md` (repository root) for the store/runtime
 adapters.
 
 ## What the developer actually writes

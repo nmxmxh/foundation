@@ -1,6 +1,6 @@
 # source	destination	profiles	feature	mode
 # mode: overwrite = foundation-owned, force = overwrite only with --force, create = create once then project-owned
-AGENTS.md	AGENTS.md	all	always	create
+templates/AGENTS.md	AGENTS.md	all	always	create
 templates/.cursorrules	.cursorrules	all	always	create
 templates/.clauderules	.clauderules	all	always	create
 templates/CLAUDE.md	CLAUDE.md	all	always	create

@@ -34,6 +34,22 @@ func NewFSStore(dir, bucket string) (*FSStore, error) {
 	if err := os.MkdirAll(clean, 0o750); err != nil {
 		return nil, err
 	}
+	// MkdirAll succeeds when the root already exists even if it is not writable
+	// by this process (e.g. a volume mounted root-owned over the path), which
+	// would otherwise surface only as per-request Put failures. Probe once at
+	// construction so misconfiguration fails at boot, where operators see it.
+	probe, err := os.CreateTemp(clean, ".writeprobe-*")
+	if err != nil {
+		return nil, fmt.Errorf("filesystem object store root %q is not writable: %w", clean, err)
+	}
+	probeName := probe.Name()
+	if err := probe.Close(); err != nil {
+		_ = os.Remove(probeName)
+		return nil, fmt.Errorf("filesystem object store root %q write probe: %w", clean, err)
+	}
+	if err := os.Remove(probeName); err != nil {
+		return nil, fmt.Errorf("filesystem object store root %q write probe cleanup: %w", clean, err)
+	}
 	return &FSStore{root: clean, bucket: strings.TrimSpace(bucket)}, nil
 }
 
