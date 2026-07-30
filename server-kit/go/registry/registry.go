@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -23,6 +24,27 @@ import (
 
 // ConcurrencyOptions defines event registration throttling.
 type ConcurrencyOptions = bootstrap.ConcurrencyOptions
+
+// ErrDuplicateEventType reports a second registration for an event type that is
+// already claimed.
+//
+// Registration used to be a plain map assignment, so a second claim silently
+// replaced the first and which handler served the event was decided by
+// registration order. That is a bad failure because it is invisible: the
+// displaced handler still compiles, still looks wired, and is simply never
+// called. It has already cost one production behaviour — a service registered a
+// ranked read path and an unranked one under the same event name, and the
+// unranked one won, which made an entire ranking subsystem unreachable from the
+// client while every test of that subsystem passed.
+//
+// Registration is therefore first-claim-wins and reports the conflict. Callers
+// that cannot handle an error should still surface it (see VerifyRoutes) rather
+// than discard it, because the alternative is choosing a handler by accident.
+var ErrDuplicateEventType = errors.New("event_type is already registered")
+
+// ErrRouteWithoutHandler reports an advertised HTTP route whose event type has
+// no registered handler — a published URL that can only answer 404.
+var ErrRouteWithoutHandler = errors.New("http route has no registered handler")
 
 type registeredMethod struct {
 	handler      bootstrap.HandlerFunc
@@ -56,8 +78,11 @@ type MetricsSnapshot struct {
 
 // ServiceRegistry routes request events to registered domain handlers.
 type ServiceRegistry struct {
-	mu              sync.RWMutex
-	methods         map[string]registeredMethod
+	mu      sync.RWMutex
+	methods map[string]registeredMethod
+	// kinds records how each event type was claimed ("typed"/"untyped"), so a
+	// rejected duplicate can name what already holds the slot.
+	kinds           map[string]string
 	redis           redis.Client
 	handler         *graceful.Handler
 	log             logger.Logger
@@ -88,6 +113,7 @@ func NewWithOptions(redisClient redis.Client, gh *graceful.Handler, l logger.Log
 	}
 	return &ServiceRegistry{
 		methods:         map[string]registeredMethod{},
+		kinds:           map[string]string{},
 		redis:           redisClient,
 		handler:         gh,
 		log:             l.With("component", "service_registry"),
@@ -126,9 +152,37 @@ func (r *ServiceRegistry) RegisterWithOptions(eventType string, handler bootstra
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.claim(eventType, "untyped"); err != nil {
+		return err
+	}
 	r.methods[eventType] = registeredMethod{handler: wrapped}
 	r.log.Info("registered handler", "event_type", eventType)
 	return nil
+}
+
+// claim reserves an event type, reporting a conflict rather than overwriting.
+// Callers must hold r.mu.
+func (r *ServiceRegistry) claim(eventType, kind string) error {
+	existing, taken := r.methods[eventType]
+	if !taken {
+		r.kinds[eventType] = kind
+		return nil
+	}
+	existingKind := r.kinds[eventType]
+	if existingKind == "" {
+		if existing.typedHandler != nil {
+			existingKind = "typed"
+		} else {
+			existingKind = "untyped"
+		}
+	}
+	// Logged as well as returned: the historical failure mode is a caller that
+	// discards the error, and a silent overwrite is exactly what this exists to
+	// stop being silent.
+	r.log.Error("duplicate handler registration rejected",
+		"event_type", eventType, "registered_kind", existingKind, "rejected_kind", kind)
+	return fmt.Errorf("%w: %s (already registered as %s, rejected %s)",
+		ErrDuplicateEventType, eventType, existingKind, kind)
 }
 
 func (r *ServiceRegistry) RegisterTypedWithOptions(eventType string, binding protoapi.Binding, handler bootstrap.TypedHandlerFunc, opts ConcurrencyOptions) error {
@@ -169,6 +223,9 @@ func (r *ServiceRegistry) RegisterTypedWithOptions(eventType string, binding pro
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.claim(eventType, "typed"); err != nil {
+		return err
+	}
 	r.methods[eventType] = registeredMethod{
 		typedHandler: wrapped,
 		binding:      &currentBinding,
@@ -176,6 +233,45 @@ func (r *ServiceRegistry) RegisterTypedWithOptions(eventType string, binding pro
 	}
 	r.log.Info("registered typed handler", "event_type", eventType)
 	return nil
+}
+
+// VerifyRoutes reports advertised HTTP routes that have no registered handler.
+//
+// This closes the other half of the same seam. A project declares its HTTP
+// surface in one place (Services.AllHandlers, from which the route table is
+// derived) and installs handlers in another; nothing previously reconciled the
+// two. A route published without a handler resolves to handler_not_found — a 404
+// on a URL the server advertised in its own catalogue and OpenAPI document.
+//
+// Call it once after registration and before serving. The inverse direction is
+// deliberately not an error: a handler with no route is normal for events driven
+// by the worker lane or the bus rather than by HTTP.
+func (r *ServiceRegistry) VerifyRoutes(routes []HTTPRoute) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var missing []string
+	seen := make(map[string]struct{}, len(routes))
+	for _, route := range routes {
+		eventType := strings.TrimSpace(route.EventType)
+		// A route without an event type is served directly by its own handler
+		// and has nothing to reconcile against.
+		if eventType == "" {
+			continue
+		}
+		if _, duplicate := seen[eventType]; duplicate {
+			continue
+		}
+		seen[eventType] = struct{}{}
+		if _, ok := r.methods[eventType]; !ok {
+			missing = append(missing, eventType)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("%w: %s", ErrRouteWithoutHandler, strings.Join(missing, ", "))
 }
 
 // Listen starts the Redis subscription and dispatches events to registered handlers.

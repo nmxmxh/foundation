@@ -315,6 +315,46 @@ Enforcement:
 - Contract tests (integration/e2e).
 - Schema/event validation checks in CI.
 
+### CP-10A: One handler per event type, reconciled with the route table
+
+Level: `Mandatory`
+
+A project's HTTP surface is declared in two places that must agree:
+`Services.AllHandlers()` (whose keys become the route table, the OpenAPI
+document, and the generated frontend commands) and the `ServiceRegistry`
+registration calls that install dispatch handlers. Nothing used to reconcile
+them, and both directions of divergence have shipped.
+
+Requirements:
+
+1. An event type may be claimed once. Registration is first-claim-wins and
+   returns `registry.ErrDuplicateEventType`; do not discard that error. Two
+   claims mean the served handler is chosen by registration order.
+2. Every advertised route must have a registered handler.
+   `httpserver.Server.Run` calls `ServiceRegistry.VerifyRoutes` and refuses to
+   start otherwise. Do not bypass it by serving a hand-built mux.
+3. A handler with no route is allowed — worker- and bus-driven events are not
+   HTTP-facing — so the reconciliation is one-directional by design.
+
+Why this is `Mandatory` rather than advisory, from two real defects:
+
+- A service registered a ranked read path and an unranked one under the same
+  event name. The map assignment resolved it silently, the unranked handler won
+  on ordering, and an entire ranking subsystem became unreachable from the client
+  while every test of that subsystem still passed.
+- Billing and MCP routes were published from `AllHandlers()` while no handler was
+  registered for their events. The server advertised four routes at startup — in
+  its own catalogue and its docs — and answered each with `handler_not_found`.
+
+Both are invisible failures: the code compiles, the wiring looks present, and the
+symptom appears only at call time, or not at all.
+
+Enforcement:
+
+- `registry.ErrDuplicateEventType` returned from all `Register*` methods.
+- `httpserver.Server.VerifyRouteCoverage`, called by `Run`.
+- Project-level test asserting `reg.VerifyRoutes(services.HTTPRoutes())`.
+
 ### CP-11: Code for testability-first behavior
 
 Level: `Mandatory`
@@ -796,6 +836,7 @@ Requirements:
    of River.
 10. **State-Machine Contract**: Worker queues must document accepted visible states, hidden retry/lease state, terminal states, and liveness expectations. Every accepted job must eventually reach success, failed, cancelled, quarantined, or expired under its retry/deadline budget.
 11. **Finite Model Candidate**: New queue semantics that alter leases, retries, dedupe, cancellation, or terminal-state rules should be small enough to model with two workers, queue depth two, and retry cap two, even if implemented only as table-driven tests rather than TLC.
+12. **Batch Enqueueing and UniqueOpts**: Avoid bulk `client.InsertMany` when jobs carry `UniqueOpts` (`ByArgs`, `ByPeriod`, `ByKind`, etc.). Bulk CTE array unnesting in `-- name: JobInsertFastMany :many` spills to disk (`pgsql_tmp`) under memory budgets and triggers B-tree index tuple lock contention (`ShareLock` waits). Use `workerkit.Engine.EnqueueMany` / `EnqueueManyTx` or an individual `client.Insert` loop with `res != nil && res.Job != nil` checks.
 
 Enforcement:
 

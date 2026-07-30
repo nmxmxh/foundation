@@ -52,6 +52,18 @@ type ProcessPoolOptions struct {
 	Transport       ProcessTransportMode
 	SharedMemoryDir string
 	ExchangeTimeout time.Duration
+
+	// ArenaBytes requests a shared data-plane arena per worker.
+	//
+	// Zero means no arena, which is the right default: most units exchange
+	// control-sized payloads and an arena would be unused address space. Set it
+	// for units that carry bulk data — an embedding matrix, a columnar batch —
+	// which otherwise cannot cross the 1 KiB control payload at all. Clamped to
+	// the tiers in runtime_shared_arena.capnp.
+	//
+	// Requires the shared-memory transport: the arena is a second mapping beside
+	// the control buffer, so a stdio worker has nowhere to put it.
+	ArenaBytes uint32
 }
 
 type ProcessPool struct {
@@ -83,6 +95,11 @@ type processWorker struct {
 	mode    ProcessTransportMode
 	shmDir  string
 	shm     *sharedMemorySegment
+
+	// arenaBytes is zero when this worker has no data plane.
+	arenaBytes uint32
+	arenaShm   *sharedMemorySegment
+	arena      *Arena
 
 	busy   atomic.Bool
 	health sync.RWMutex
@@ -147,13 +164,14 @@ func NewProcessPool(opts ProcessPoolOptions) (*ProcessPool, error) {
 	}
 	for index := 0; index < opts.Workers; index++ {
 		worker := &processWorker{
-			command: append([]string(nil), opts.Command...),
-			env:     append([]string(nil), opts.Env...),
-			dir:     strings.TrimSpace(opts.Dir),
-			index:   index + 1,
-			logger:  opts.Logger.With("worker_index", index+1),
-			mode:    transportSupport.Resolved,
-			shmDir:  strings.TrimSpace(opts.SharedMemoryDir),
+			command:    append([]string(nil), opts.Command...),
+			env:        append([]string(nil), opts.Env...),
+			dir:        strings.TrimSpace(opts.Dir),
+			index:      index + 1,
+			logger:     opts.Logger.With("worker_index", index+1),
+			mode:       transportSupport.Resolved,
+			shmDir:     strings.TrimSpace(opts.SharedMemoryDir),
+			arenaBytes: normalizeArenaBytes(opts.ArenaBytes),
 		}
 		if err := worker.start(); err != nil {
 			_ = pool.Close()
@@ -178,7 +196,24 @@ func (p *ProcessPool) ExecuteInto(ctx context.Context, req ProcessRequest, dst [
 	return p.execute(ctx, req, dst)
 }
 
-func (p *ProcessPool) execute(ctx context.Context, req ProcessRequest, dst []byte) (ProcessResponse, error) {
+// ExecuteOnWorker runs a request on one specific worker.
+//
+// Required whenever the request references that worker's arena. The pool
+// otherwise picks a worker by availability, so a caller that staged a batch into
+// worker 0's arena and then executed through the pool would, half the time, run
+// on a worker whose arena is empty — the descriptors read back as FREE and the
+// call fails. Staging and execution must name the same worker.
+func (p *ProcessPool) ExecuteOnWorker(ctx context.Context, index int, req ProcessRequest) (ProcessResponse, error) {
+	if p == nil {
+		return ProcessResponse{}, errors.New("process pool is nil")
+	}
+	if index < 0 || index >= len(p.allWorkers) {
+		return ProcessResponse{}, fmt.Errorf("worker index %d out of range (%d workers)", index, len(p.allWorkers))
+	}
+	return p.execute(ctx, req, nil, p.allWorkers[index])
+}
+
+func (p *ProcessPool) execute(ctx context.Context, req ProcessRequest, dst []byte, pinned ...*processWorker) (ProcessResponse, error) {
 	if p == nil {
 		return ProcessResponse{}, errors.New("process pool is nil")
 	}
@@ -217,7 +252,7 @@ func (p *ProcessPool) execute(ctx context.Context, req ProcessRequest, dst []byt
 		return ProcessResponse{}, err
 	}
 
-	if err := p.executeOnSelectedWorker(execCtx, req, raw); err != nil {
+	if err := p.executeOnSelectedWorker(execCtx, req, raw, pinned...); err != nil {
 		return ProcessResponse{}, err
 	}
 
@@ -270,12 +305,17 @@ func (p *ProcessPool) Diagnostics() ProcessPoolDiagnostics {
 	}
 }
 
-func (p *ProcessPool) executeOnSelectedWorker(ctx context.Context, req ProcessRequest, buffer []byte) error {
+func (p *ProcessPool) executeOnSelectedWorker(ctx context.Context, req ProcessRequest, buffer []byte, pinned ...*processWorker) error {
 	if len(p.allWorkers) == 0 {
 		return errors.New("process pool has no workers")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	// A pinned worker bypasses selection entirely: the request references that
+	// worker's arena, so any other worker would read an empty one.
+	if len(pinned) > 0 && pinned[0] != nil {
+		return pinned[0].execute(ctx, req.UnitID, buffer)
 	}
 
 	preferredIndex := p.preferredWorkerIndex(req.ContextHash)
@@ -340,13 +380,48 @@ func (w *processWorker) startLocked() error {
 	env = append(env, "OVRT_RUNTIME_TRANSPORT="+string(w.mode))
 	if w.mode == ProcessTransportSharedMemory {
 		if w.shm == nil {
-			segment, err := newSharedMemorySegment(w.shmDir)
+			segment, err := newSharedMemorySegment(w.shmDir, int(generated.BUFFER_TOTAL_BYTES))
 			if err != nil {
 				return err
 			}
 			w.shm = segment
 		}
 		env = append(env, "OVRT_SHM_PATH="+w.shm.path)
+
+		// The data-plane arena is a second, much larger mapping. Bulk payloads
+		// live here; the control buffer carries only a descriptor id.
+		if w.arenaBytes > 0 {
+			if w.arenaShm == nil {
+				segment, arenaErr := newSharedMemoryFile(w.shmDir, int(w.arenaBytes))
+				if arenaErr != nil {
+					return fmt.Errorf("create arena segment: %w", arenaErr)
+				}
+				staging := make([]byte, int(w.arenaBytes))
+				publish := func(staged int) error {
+					if staged <= 0 || staged > len(staging) {
+						staged = len(staging)
+					}
+					return segment.WriteAt(staging[:staged], 0)
+				}
+				arena, arenaErr := NewArenaOverMapping(staging, publish, segment.ReadAt)
+				if arenaErr != nil {
+					_ = segment.Close()
+					return fmt.Errorf("initialize arena: %w", arenaErr)
+				}
+				// Publish the freshly initialized header before any staging.
+				// The arena is built in the staging buffer, so until the first
+				// flush the file is all zeroes — a consumer opening it would
+				// fail header validation and report no arena at all, rather
+				// than an empty one.
+				if arenaErr := arena.Sync(); arenaErr != nil {
+					_ = segment.Close()
+					return fmt.Errorf("publish arena header: %w", arenaErr)
+				}
+				w.arenaShm = segment
+				w.arena = arena
+			}
+			env = append(env, "OVRT_SHM_ARENA_PATH="+w.arenaShm.path)
+		}
 	}
 
 	// #nosec G204 -- runtime worker command comes from trusted ProcessPoolOptions, never request input.
@@ -411,6 +486,13 @@ func (w *processWorker) closeLocked() error {
 	w.cmd = nil
 	w.stdin = nil
 	w.stdout = nil
+	if w.arenaShm != nil {
+		if err := w.arenaShm.Close(); err != nil && waitErr == nil {
+			waitErr = err
+		}
+		w.arenaShm = nil
+		w.arena = nil
+	}
 	if w.shm != nil {
 		if err := w.shm.Close(); err != nil && waitErr == nil {
 			waitErr = err
@@ -568,14 +650,65 @@ func (w *processWorker) exchange() workerExchange {
 	if w.testExchange != nil {
 		return w.testExchange
 	}
+	// Honour the resolved transport. This used to return stdioExchange
+	// unconditionally, which quietly disabled the shared-memory transport for
+	// every caller: Execute routes through the exchange loop, so the shm branch
+	// in executeLocked had no production caller and a pool configured for shm
+	// still copied its control buffer over stdio on every exchange. The bug was
+	// invisible because stdio is correct — just slower, and unable to carry an
+	// arena handle.
+	if w.mode == ProcessTransportSharedMemory {
+		// Deliberately not falling back to stdio when the segment is missing.
+		// The child was launched with OVRT_RUNTIME_TRANSPORT=shm and is waiting
+		// on the mapping, so stdio would hang rather than degrade; a clear error
+		// from Exchange is the honest outcome.
+		return sharedMemoryExchange{stdin: w.stdin, stdout: w.stdout, shm: w.shm}
+	}
 	return stdioExchange{stdin: w.stdin, stdout: w.stdout}
 }
 
-func (w *processWorker) executeLocked(unitID string, buffer []byte) error {
-	if w.mode == ProcessTransportSharedMemory {
-		return w.executeSharedMemoryLocked(unitID, buffer)
+// sharedMemoryExchange swaps the control buffer through a shared mapping and
+// uses stdio only to signal the unit id and await an acknowledgement.
+//
+// The buffer never travels over the pipe, so the exchange cost is independent of
+// its size — which is what makes an arena handle in the control buffer useful.
+type sharedMemoryExchange struct {
+	stdin  io.WriteCloser
+	stdout *bufio.Reader
+	shm    *sharedMemorySegment
+}
+
+func (x sharedMemoryExchange) Exchange(_ context.Context, unitID string, buffer []byte) error {
+	if x.shm == nil {
+		return errors.New("shared memory segment is not initialized")
 	}
-	return stdioExchange{stdin: w.stdin, stdout: w.stdout}.Exchange(context.Background(), unitID, buffer)
+	if len(buffer) > len(x.shm.raw) {
+		return fmt.Errorf("control buffer is %d bytes, shared segment is %d", len(buffer), len(x.shm.raw))
+	}
+	copy(x.shm.raw, buffer)
+	if err := writeStringFrame(x.stdin, unitID); err != nil {
+		return err
+	}
+	ack, err := readFrame(x.stdout)
+	if err != nil {
+		return err
+	}
+	if len(ack) > 0 {
+		return fmt.Errorf("unexpected shared memory ack payload: %s", string(ack))
+	}
+	copy(buffer, x.shm.raw)
+	return nil
+}
+
+func (x sharedMemoryExchange) Close() error {
+	if x.stdin != nil {
+		return x.stdin.Close()
+	}
+	return nil
+}
+
+func (x sharedMemoryExchange) Restart() error {
+	return nil
 }
 
 func (x stdioExchange) Exchange(_ context.Context, unitID string, buffer []byte) error {
@@ -596,25 +729,6 @@ func (x stdioExchange) Close() error {
 }
 
 func (x stdioExchange) Restart() error {
-	return nil
-}
-
-func (w *processWorker) executeSharedMemoryLocked(unitID string, buffer []byte) error {
-	if w.shm == nil {
-		return errors.New("shared memory segment is not initialized")
-	}
-	copy(w.shm.raw, buffer)
-	if err := writeStringFrame(w.stdin, unitID); err != nil {
-		return err
-	}
-	ack, err := readFrame(w.stdout)
-	if err != nil {
-		return err
-	}
-	if len(ack) > 0 {
-		return fmt.Errorf("unexpected shared memory ack payload: %s", string(ack))
-	}
-	copy(buffer, w.shm.raw)
 	return nil
 }
 
@@ -776,4 +890,47 @@ func (w *processWorker) snapshot() ProcessWorkerSnapshot {
 		LastSuccess:  w.lastSuccess,
 		LastFailure:  w.lastFailure,
 	}
+}
+
+// normalizeArenaBytes clamps a requested arena size to the tiers the shared
+// arena contract defines. Zero passes through as "no data plane".
+//
+// Clamped rather than rejected: a caller asking for more than the maximum wants
+// as much as it can get, and failing pool construction over a sizing hint would
+// take down a service that would otherwise run.
+func normalizeArenaBytes(requested uint32) uint32 {
+	if requested == 0 {
+		return 0
+	}
+	if requested < generated.ARENA_MIN_BYTES {
+		return generated.ARENA_MIN_BYTES
+	}
+	if requested > generated.ARENA_MAX_BYTES {
+		return generated.ARENA_MAX_BYTES
+	}
+	return requested
+}
+
+// Arena exposes a worker's data plane, for tests and for callers that write
+// batches before dispatching. Nil when the worker has no arena.
+func (w *processWorker) Arena() *Arena { return w.arena }
+
+// WorkerArena returns a worker's data-plane arena, or nil when the pool has none.
+//
+// Exposed so a caller can stage a batch into the same region the worker will
+// read. Callers must serialise their own use of a given arena: it is a bump
+// allocator reset per exchange, so two concurrent stagings into one arena would
+// overwrite each other.
+func (p *ProcessPool) WorkerArena(index int) *Arena {
+	if p == nil || index < 0 || index >= len(p.allWorkers) {
+		return nil
+	}
+	worker := p.allWorkers[index]
+	worker.mu.Lock()
+	defer worker.mu.Unlock()
+	// The arena is created when the worker process starts, so ensure it has.
+	if err := worker.startLocked(); err != nil {
+		return nil
+	}
+	return worker.arena
 }

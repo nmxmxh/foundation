@@ -120,3 +120,7 @@ create table if not exists river_job_metadata (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Resynchronize river_job primary key sequence after setup/seeds
+select setval('river_job_id_seq', (select coalesce(max(id), 1) from river_job));
+

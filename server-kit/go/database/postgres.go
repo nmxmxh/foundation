@@ -219,6 +219,88 @@ func ApplyPoolOptions(cfg *pgxpool.Config, opts PoolOptions) {
 	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = fmt.Sprintf("%d", opts.IdleTxTimeout.Milliseconds())
 }
 
+// ApplyRiverPoolOptions configures a pgx pool that will host a River job queue
+// (riverpgxv5). It applies Foundation sizing and connection caches but
+// deliberately OMITS the session-level statement_timeout and lock_timeout that
+// ApplyPoolOptions stamps on domain pools.
+//
+// Rationale: those RuntimeParams are per-connection, so they apply to every
+// statement on the connection — including River's own internal queries (batch
+// JobInsertFastMany, job fetch, and the maintenance services). A hot-path domain
+// budget (e.g. 250ms) canceling a bulk job insert or a cleaner sweep surfaces as
+// "canceling statement due to statement timeout" and is a well-known River
+// footgun. River already bounds each of its queries with a Go context deadline,
+// so the session guardrail is redundant here and only cancels legitimate work.
+// Domain queries stay protected by QueryBudgetContext/AcquireBudgetContext on
+// their own pool; give River a dedicated pool built with this helper.
+//
+// idle_in_transaction_session_timeout is retained: River keeps its transactions
+// short, so it never trips, and it still protects against a wedged connection.
+func ApplyRiverPoolOptions(cfg *pgxpool.Config, opts PoolOptions) {
+	if cfg == nil {
+		return
+	}
+	opts = normalizePoolOptions(opts)
+	cfg.MaxConns = clampInt32(opts.MaxConns)
+	cfg.MinConns = clampInt32(opts.MinConns)
+	cfg.HealthCheckPeriod = opts.HealthCheckPeriod
+	cfg.ConnConfig.ConnectTimeout = opts.ConnectTimeout
+	cfg.ConnConfig.StatementCacheCapacity = opts.StatementCacheCapacity
+	cfg.ConnConfig.DescriptionCacheCapacity = opts.DescriptionCacheCapacity
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheStatement
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = make(map[string]string, 1)
+	}
+	// No statement_timeout / lock_timeout: River owns its own deadlines.
+	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = fmt.Sprintf("%d", opts.IdleTxTimeout.Milliseconds())
+}
+
+// NewRiverPool builds a dedicated pgx pool for a River job queue from a database
+// URL, isolated from the domain pool so River's inserts and maintenance never
+// inherit a hot-path statement_timeout. Callers own the returned pool and must
+// Close it. See ApplyRiverPoolOptions for the reasoning.
+func NewRiverPool(ctx context.Context, databaseURL string, opts PoolOptions) (*pgxpool.Pool, error) {
+	if strings.TrimSpace(databaseURL) == "" {
+		return nil, errors.New("database url is required for river pool")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfg, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, err
+	}
+	ApplyRiverPoolOptions(cfg, opts)
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return pool, nil
+}
+
+// ResyncRiverJobSequence resynchronizes the river_job_id_seq primary key sequence
+// with the maximum existing ID in river_job. This prevents sequence collision
+// errors (duplicate key value violates unique constraint "river_job_pkey") if
+// explicit IDs were inserted during load testing, seed scripts, or manual data imports.
+func ResyncRiverJobSequence(ctx context.Context, pool *pgxpool.Pool) error {
+	if pool == nil {
+		return errors.New("database pool is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	const query = `SELECT setval('river_job_id_seq', (SELECT COALESCE(MAX(id), 1) FROM river_job))`
+	if _, err := pool.Exec(ctx, query); err != nil {
+		return fmt.Errorf("failed to resynchronize river_job_id_seq: %w", err)
+	}
+	return nil
+}
+
+
 // WrapPostgresPool projects an existing pgx pool into Foundation's RuntimeStore
 // surface. This is the migration lane for scaffolded projects that still need
 // the raw pool for River, health checks, or provider-specific hooks while new

@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+pub mod arena;
+pub mod arena_blob;
 mod buffer;
 mod shared_memory;
 mod stdio;
@@ -15,6 +17,7 @@ use std::time::Duration;
 use ovrt_core::{RuntimeDiagnostics, RuntimeMode, RuntimeRole};
 use ovrt_unit::{RuntimeUnit, UnitRegistry};
 
+pub use arena_blob::{ArenaBlobUnit, ARENA_BLOB_MAGIC, ARENA_BLOB_REQUEST_BYTES};
 pub use buffer::NativeBuffer;
 pub use shared_memory::serve_transport;
 pub use stdio::{

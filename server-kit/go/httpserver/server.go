@@ -386,8 +386,33 @@ func (s *Server) Handler() http.Handler {
 	return handler
 }
 
+// VerifyRouteCoverage reports advertised routes whose event type has no
+// registered handler.
+//
+// The two halves of a project's HTTP surface are declared separately: the route
+// table is derived from the project's handler map, while dispatch handlers are
+// installed on the registry. Nothing reconciled them, so a route could appear in
+// the catalogue and the OpenAPI document while the registry held no handler for
+// its event — an advertised URL whose only possible answer is handler_not_found.
+//
+// Called automatically by Run. Exposed so a project can check earlier, and so a
+// test can assert its own surface without starting a listener.
+func (s *Server) VerifyRouteCoverage() error {
+	if s.registry == nil {
+		return nil
+	}
+	return s.registry.VerifyRoutes(s.routes)
+}
+
 // Run starts the server and handles graceful shutdown
 func (s *Server) Run(ctx context.Context) error {
+	// Fail before listening rather than serving a surface that cannot answer.
+	// This turns a runtime 404 on a documented endpoint into a startup error
+	// naming the events that are missing handlers.
+	if err := s.VerifyRouteCoverage(); err != nil {
+		return err
+	}
+
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", s.cfg.Port),
 		Handler:      s.Handler(),

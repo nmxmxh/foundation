@@ -43,7 +43,7 @@ func BenchmarkBufferSetInputBytes1KB(b *testing.B) {
 	buffer := benchmarkBuffer(b)
 	payload := bytes.Repeat([]byte{17}, int(generated.INPUT_MAX_BYTES))
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if err := buffer.SetInputBytes(payload); err != nil {
 			b.Fatal(err)
@@ -57,7 +57,7 @@ func BenchmarkBufferSetInputBytesFast1KB(b *testing.B) {
 	buffer.Reset()
 	buffer.Initialize(1)
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if err := buffer.SetInputBytesFast(payload); err != nil {
 			b.Fatal(err)
@@ -72,7 +72,7 @@ func BenchmarkBufferInputBytesOwned1KB(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		got, err := buffer.InputBytes()
 		if err != nil {
@@ -91,7 +91,7 @@ func BenchmarkBufferInputBytesView1KB(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		got, err := buffer.InputBytesView()
 		if err != nil {
@@ -107,7 +107,7 @@ func BenchmarkBufferSetOutputBytes2KB(b *testing.B) {
 	buffer := benchmarkBuffer(b)
 	payload := bytes.Repeat([]byte{29}, int(generated.OUTPUT_MAX_BYTES))
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if err := buffer.SetOutputBytes(payload); err != nil {
 			b.Fatal(err)
@@ -121,7 +121,7 @@ func BenchmarkBufferSetOutputBytesFast2KB(b *testing.B) {
 	buffer.Reset()
 	buffer.Initialize(1)
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if err := buffer.SetOutputBytesFast(payload); err != nil {
 			b.Fatal(err)
@@ -136,7 +136,7 @@ func BenchmarkBufferOutputBytesOwned2KB(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		got, err := buffer.OutputBytes()
 		if err != nil {
@@ -155,7 +155,7 @@ func BenchmarkBufferOutputBytesView2KB(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		got, err := buffer.OutputBytesView()
 		if err != nil {
@@ -170,7 +170,7 @@ func BenchmarkBufferOutputBytesView2KB(b *testing.B) {
 func BenchmarkBufferEpochAdd(b *testing.B) {
 	buffer := benchmarkBuffer(b)
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if _, err := buffer.AddEpoch(generated.IDX_RUNTIME_TICK, 1); err != nil {
 			b.Fatal(err)
@@ -184,7 +184,7 @@ func BenchmarkBufferDiagnosticsText(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if got := buffer.DiagnosticsText(); got == "" {
 			b.Fatal("empty diagnostics")
@@ -245,7 +245,7 @@ func BenchmarkRuntimeNativeGPUDescriptorValidate(b *testing.B) {
 		Fallback:   RuntimeNativeGPUFallbackCopyToWebGPU,
 	}
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if err := descriptor.Validate(); err != nil {
 			b.Fatal(err)
@@ -258,7 +258,7 @@ func BenchmarkBufferReadFrameAllocCopy4KB(b *testing.B) {
 	dst := make([]byte, generated.BUFFER_TOTAL_BYTES)
 	reader := bytes.NewReader(frame)
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		reader.Reset(frame)
 		updated, err := readFrame(reader)
@@ -274,7 +274,7 @@ func BenchmarkBufferReadFrameInto4KB(b *testing.B) {
 	dst := make([]byte, generated.BUFFER_TOTAL_BYTES)
 	reader := bytes.NewReader(frame)
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		reader.Reset(frame)
 		if err := readFrameInto(reader, dst); err != nil {

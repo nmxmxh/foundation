@@ -263,7 +263,7 @@ fn write_frame<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(any(test, target_os = "linux"))]
+#[cfg(any(test, unix))]
 pub(crate) fn read_frame_for_test<R: Read>(reader: &mut R) -> io::Result<Vec<u8>> {
     match read_frame_bounded(reader, BUFFER_TOTAL_BYTES as usize) {
         Ok(payload) => Ok(payload),
@@ -274,7 +274,7 @@ pub(crate) fn read_frame_for_test<R: Read>(reader: &mut R) -> io::Result<Vec<u8>
     }
 }
 
-#[cfg(any(test, target_os = "linux"))]
+#[cfg(any(test, unix))]
 pub(crate) fn write_frame_for_test<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
     write_frame(writer, payload)
 }

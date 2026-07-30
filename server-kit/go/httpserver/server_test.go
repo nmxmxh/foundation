@@ -9,6 +9,7 @@ import (
 	// without assuming a project has preserved the baseline constructor shape.
 	"bytes"
 	"encoding/json"
+	"errors"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
@@ -1251,5 +1252,49 @@ func TestDispatchProtobufResponseLane(t *testing.T) {
 	}
 	if resp.GetResourceId() != "wrk_123:processed" {
 		t.Fatalf("resource_id = %q, want wrk_123:processed", resp.GetResourceId())
+	}
+}
+
+// A route table is derived from the project's handler declarations while
+// dispatch handlers are installed separately on the registry. When the two
+// disagree the server publishes a URL — in its catalogue and its OpenAPI
+// document — that can only answer handler_not_found. Run must refuse to start
+// rather than serve it.
+func TestVerifyRouteCoverageRejectsAdvertisedRouteWithoutHandler(t *testing.T) {
+	s := newSmokeServer(t)
+	s.SetHTTPRoutes([]registry.HTTPRoute{
+		{Method: "GET", Path: "/v1/orphan", EventType: "orphan:list:v1:requested"},
+	})
+
+	err := s.VerifyRouteCoverage()
+	if err == nil {
+		t.Fatal("VerifyRouteCoverage passed with an unhandled advertised route")
+	}
+	if !errors.Is(err, registry.ErrRouteWithoutHandler) {
+		t.Fatalf("error = %v, want ErrRouteWithoutHandler", err)
+	}
+	if !strings.Contains(err.Error(), "orphan:list:v1:requested") {
+		t.Errorf("error %q should name the unhandled event", err)
+	}
+
+	// Run must surface the same failure rather than begin listening.
+	ctx := t.Context()
+	if runErr := s.Run(ctx); !errors.Is(runErr, registry.ErrRouteWithoutHandler) {
+		t.Fatalf("Run() = %v, want it to refuse to start", runErr)
+	}
+}
+
+func TestVerifyRouteCoveragePassesWhenHandlerIsRegistered(t *testing.T) {
+	s := newSmokeServer(t)
+	if err := s.registry.Register("orphan:list:v1:requested",
+		func(context.Context, extension.Object) (any, error) { return extension.Object{}, nil }); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	s.SetHTTPRoutes([]registry.HTTPRoute{
+		{Method: "GET", Path: "/v1/orphan", EventType: "orphan:list:v1:requested"},
+	})
+
+	if err := s.VerifyRouteCoverage(); err != nil {
+		t.Fatalf("VerifyRouteCoverage = %v, want nil", err)
 	}
 }

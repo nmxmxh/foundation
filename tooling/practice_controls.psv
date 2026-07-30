@@ -26,6 +26,7 @@ CP-07C|docs/coding_practices.md|performance|high|partial|script:tooling/scripts/
 CP-08|docs/coding_practices.md|tooling|high|strong|script:tooling/scripts/go_fix_check.sh;script:tooling/scripts/go_static_analysis_check.sh;script:tooling/scripts/rust_static_analysis_check.sh;script:tooling/scripts/ts_static_analysis_check.sh|lint-report|yes
 CP-09|docs/coding_practices.md|coding|high|partial|script:tooling/scripts/coding_practices_check.sh;review|exception-note|yes
 CP-10|docs/coding_practices.md|contracts|high|strong|script:tooling/scripts/contract_drift_check.sh;review|contract-test|yes
+CP-10A|docs/coding_practices.md|contracts|high|strong|test:server-kit/go/registry/seam_test.go;test:server-kit/go/httpserver/server_test.go|startup-check|yes
 CP-11|docs/coding_practices.md|testing|high|strong|script:tooling/scripts/testing_practices_check.sh;review|test-evidence|yes
 CP-11A|docs/coding_practices.md|coding|medium|partial|script:tooling/scripts/go_static_analysis_check.sh;script:tooling/scripts/atomic_lane_purity_check.sh;review|cleanup-test|yes
 CP-12|docs/coding_practices.md|docs|medium|partial|review|doc-update|contextual

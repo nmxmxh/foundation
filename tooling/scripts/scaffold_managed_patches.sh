@@ -1886,6 +1886,19 @@ patch_worker_engine_canonical() {
     rm -f "$before"
   fi
 
+  if [[ -f "$main" ]] && ! grep -Fq 'ResyncRiverJobSequence' "$main" && grep -Fq 'database.NewRiverPool' "$main"; then
+    local logvar
+    logvar="$(perl -ne 'if (/(\w+)\.Error\("failed to initialize River client"/) { print $1; exit }' "$main")"
+    [[ -n "$logvar" ]] || logvar="log"
+    export LOGVAR="$logvar"
+    perl -0pi -e 's/(\tlog\.Info\("database connected"\)\n)/$1\n\tif resyncErr := database.ResyncRiverJobSequence(context.Background(), riverPool); resyncErr != nil {\n\t\t$ENV{LOGVAR}.Warn("unable to resynchronize river_job sequence", "error", resyncErr)\n\t}\n/' "$main"
+    if grep -Fq 'ResyncRiverJobSequence' "$main"; then
+      touched=1
+      log_patch "worker main resynchronizes river_job sequence: ${main#$target/}"
+    fi
+  fi
+
+
   # --- internal/startup/dependencies.go (additive, canonical apps only) ---
   local deps_file="$target/internal/startup/dependencies.go"
   if [[ -f "$deps_file" ]] && ! grep -Fq 'initWorkerEngine' "$deps_file" \

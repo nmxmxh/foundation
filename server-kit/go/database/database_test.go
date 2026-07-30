@@ -5,14 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func testData(t testing.TB, fields ...any) RecordData {
@@ -434,7 +435,7 @@ func BenchmarkMemoryDBCountRecordsTenantScoped(b *testing.B) {
 	db := benchmarkMemoryDBWithTenants(b, 32, 256)
 	ctx := context.Background()
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		count, err := db.CountRecords(ctx, "signals", "ticks", "org_07", RecordQuery{})
 		if err != nil {
@@ -451,7 +452,7 @@ func BenchmarkMemoryDBListRecordsTenantScopedFiltered(b *testing.B) {
 	ctx := context.Background()
 	filter := testQuery(b, 64, "bucket", 3)
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		items, err := db.ListRecords(ctx, "signals", "ticks", "org_07", filter)
 		if err != nil {
@@ -892,3 +893,49 @@ func TestApplyPoolOptionsConfiguresPgxPool(t *testing.T) {
 	}
 	ApplyPoolOptions(nil, PoolOptions{})
 }
+func TestApplyRiverPoolOptionsOmitsStatementTimeout(t *testing.T) {
+	cfg, err := pgxpool.ParseConfig("postgres://user:pass@localhost:5432/db?sslmode=disable")
+	if err != nil {
+		t.Fatalf("ParseConfig() error = %v", err)
+	}
+	ApplyRiverPoolOptions(cfg, PoolOptions{
+		MaxConns:                 12,
+		MinConns:                 3,
+		HealthCheckPeriod:        9 * time.Second,
+		ConnectTimeout:           4 * time.Second,
+		QueryTimeout:             75 * time.Millisecond,
+		LockTimeout:              50 * time.Millisecond,
+		IdleTxTimeout:            11 * time.Second,
+		StatementCacheCapacity:   128,
+		DescriptionCacheCapacity: 32,
+	})
+	// Sizing and caches still apply.
+	if cfg.MaxConns != 12 || cfg.MinConns != 3 || cfg.HealthCheckPeriod != 9*time.Second {
+		t.Fatalf("pool sizing not applied: %+v", cfg)
+	}
+	if cfg.ConnConfig.StatementCacheCapacity != 128 || cfg.ConnConfig.DefaultQueryExecMode != pgx.QueryExecModeCacheStatement {
+		t.Fatalf("connection/cache options not applied: %+v", cfg.ConnConfig)
+	}
+	// The domain query-budget guardrails must NOT leak onto a River pool: River
+	// bounds its own queries with context deadlines, and a hot-path timeout here
+	// cancels legitimate batch inserts and maintenance sweeps.
+	if got, ok := cfg.ConnConfig.RuntimeParams["statement_timeout"]; ok {
+		t.Fatalf("river pool must not set statement_timeout, got %q", got)
+	}
+	if got, ok := cfg.ConnConfig.RuntimeParams["lock_timeout"]; ok {
+		t.Fatalf("river pool must not set lock_timeout, got %q", got)
+	}
+	// idle_in_transaction_session_timeout is retained as a wedged-connection guard.
+	if got := cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"]; got != "11000" {
+		t.Fatalf("idle_in_transaction_session_timeout = %q, want 11000", got)
+	}
+	ApplyRiverPoolOptions(nil, PoolOptions{})
+}
+
+func TestResyncRiverJobSequenceValidation(t *testing.T) {
+	err := ResyncRiverJobSequence(context.Background(), nil)
+	if err == nil || err.Error() != "database pool is required" {
+		t.Fatalf("expected database pool is required error, got %v", err)
+	}
+}
+

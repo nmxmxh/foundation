@@ -243,3 +243,7 @@ CREATE TABLE IF NOT EXISTS river_job_metadata (
     created_at timestamptz NOT NULL DEFAULT NOW(),
     updated_at timestamptz NOT NULL DEFAULT NOW()
 );
+
+-- Resynchronize river_job primary key sequence after migration/seeds
+SELECT setval('river_job_id_seq', (SELECT COALESCE(MAX(id), 1) FROM river_job));
+

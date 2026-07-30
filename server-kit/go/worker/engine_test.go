@@ -493,3 +493,35 @@ func TestAddToWorkersRegistersDynamicKinds(t *testing.T) {
 		t.Fatalf("processor queue missing from merged config: %+v", engineOnly)
 	}
 }
+
+func TestEngine_EnqueueMany_InMemory(t *testing.T) {
+	engine := NewEngine(map[string]int{"operations_core": 2}, nil)
+	processor := &fakeProcessor{
+		kind:        "operations_batch",
+		queue:       "operations_core",
+		maxAttempts: 2,
+	}
+	if err := engine.Register(processor); err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	ctx := t.Context()
+	if err := engine.Start(ctx); err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+
+	jobs := []Job{
+		{JobKind: "operations_batch", Queue: "operations_core", MaxAttempts: 2, IdempotencyKey: "b1"},
+		{JobKind: "operations_batch", Queue: "operations_core", MaxAttempts: 2, IdempotencyKey: "b2"},
+		{JobKind: "operations_batch", Queue: "operations_core", MaxAttempts: 2, IdempotencyKey: "b3"},
+	}
+
+	if err := engine.EnqueueMany(ctx, jobs); err != nil {
+		t.Fatalf("EnqueueMany failed: %v", err)
+	}
+
+	waitForWorkerCondition(t, 2*time.Second, func() bool {
+		return processor.calls.Load() >= 3
+	}, "batch job execution")
+}
+

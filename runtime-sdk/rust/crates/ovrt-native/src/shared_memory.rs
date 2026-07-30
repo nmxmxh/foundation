@@ -9,7 +9,7 @@ pub fn serve_transport(host: &NativeRuntimeHost) -> Result<(), String> {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
 fn serve_shared_memory(host: &NativeRuntimeHost) -> Result<(), String> {
     use std::fs::OpenOptions;
     use std::io::{self, Write};
@@ -47,7 +47,7 @@ fn serve_shared_memory(host: &NativeRuntimeHost) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(unix))]
 fn serve_shared_memory(_host: &NativeRuntimeHost) -> Result<(), String> {
-    Err("shared memory transport is only supported on linux".to_string())
+    Err("shared memory transport requires a unix platform".to_string())
 }

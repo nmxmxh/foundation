@@ -909,12 +909,35 @@ func TestProcessWorkerPersistentExchangeLoopReuseAndShutdown(t *testing.T) {
 }
 
 func TestProcessWorkerSharedMemoryGuard(t *testing.T) {
+	// A worker resolved to shared memory but without a mapping must fail loudly.
+	// Falling back to stdio would hang instead: the child was launched with
+	// OVRT_RUNTIME_TRANSPORT=shm and is waiting on the segment.
 	worker := &processWorker{mode: ProcessTransportSharedMemory, stdin: nopWriteCloser{Writer: io.Discard}, stdout: bufio.NewReader(strings.NewReader(""))}
-	if err := worker.executeLocked("runtime.echo", newRuntimeBuffer(t, "shm")); err == nil {
+	exchange := worker.exchange()
+	if _, ok := exchange.(sharedMemoryExchange); !ok {
+		t.Fatalf("worker in shared-memory mode built a %T; the transport would be silently downgraded", exchange)
+	}
+	if err := exchange.Exchange(context.Background(), "runtime.echo", newRuntimeBuffer(t, "shm")); err == nil {
 		t.Fatal("expected shared memory execution without segment to fail")
 	}
-	if _, err := newSharedMemorySegment(""); sharedMemorySupported("") || err == nil {
-		t.Fatalf("unsupported shared memory probe supported=%v err=%v", sharedMemorySupported(""), err)
+	// Shared memory is available on linux and darwin and absent elsewhere, so
+	// this asserts the probe and the constructor agree rather than assuming
+	// either answer. It previously hardcoded "unsupported", which was only true
+	// while the implementation was linux-only.
+	segment, err := newSharedMemorySegment("", int(generated.BUFFER_TOTAL_BYTES))
+	if supported := sharedMemorySupported(""); supported {
+		if err != nil {
+			t.Fatalf("shared memory reported supported but segment creation failed: %v", err)
+		}
+		if len(segment.raw) != int(generated.BUFFER_TOTAL_BYTES) {
+			t.Fatalf("segment mapped %d bytes, want the control buffer size %d",
+				len(segment.raw), generated.BUFFER_TOTAL_BYTES)
+		}
+		if closeErr := segment.Close(); closeErr != nil {
+			t.Fatalf("segment Close() error = %v", closeErr)
+		}
+	} else if err == nil {
+		t.Fatal("shared memory reported unsupported but segment creation succeeded")
 	}
 	if err := (*sharedMemorySegment)(nil).Close(); err != nil {
 		t.Fatalf("nil shared memory Close() error = %v", err)
@@ -925,19 +948,20 @@ func TestProcessWorkerSharedMemoryGuard(t *testing.T) {
 	}
 	buffer := newRuntimeBuffer(t, "shared")
 	worker = &processWorker{
+		mode:   ProcessTransportSharedMemory,
 		shm:    &sharedMemorySegment{raw: make([]byte, generated.BUFFER_TOTAL_BYTES)},
 		stdin:  nopWriteCloser{Writer: io.Discard},
 		stdout: bufio.NewReader(&ack),
 	}
-	if err := worker.executeSharedMemoryLocked("runtime.echo", buffer); err != nil {
-		t.Fatalf("executeSharedMemoryLocked() error = %v", err)
+	if err := worker.exchange().Exchange(context.Background(), "runtime.echo", buffer); err != nil {
+		t.Fatalf("shared memory Exchange() error = %v", err)
 	}
 	var badAck bytes.Buffer
 	if err := writeFrame(&badAck, []byte("bad")); err != nil {
 		t.Fatalf("write bad ack error = %v", err)
 	}
 	worker.stdout = bufio.NewReader(&badAck)
-	if err := worker.executeSharedMemoryLocked("runtime.echo", buffer); err == nil {
+	if err := worker.exchange().Exchange(context.Background(), "runtime.echo", buffer); err == nil {
 		t.Fatal("expected bad shared memory ack to fail")
 	}
 }

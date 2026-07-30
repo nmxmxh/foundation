@@ -45,6 +45,19 @@ func main() {
 	}
 	defer dbPool.Close()
 
+	// River gets a dedicated pool, isolated from the domain pool above. The
+	// domain pool stamps a session statement_timeout (the hot-path query budget)
+	// on every connection; on River's pool that budget would cancel legitimate
+	// batch inserts (JobInsertFastMany) and the maintenance sweeps, surfacing as
+	// "canceling statement due to statement timeout". River bounds its own
+	// queries with context deadlines, so this pool omits that guardrail.
+	riverPool, err := database.NewRiverPool(context.Background(), cfg.DatabaseURL, workerPoolOptions(cfg))
+	if err != nil {
+		log.Error("unable to connect river database pool", "error", err)
+		os.Exit(1)
+	}
+	defer riverPool.Close()
+
 	// Verify database connection
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	if pingErr := dbPool.Ping(ctx); pingErr != nil {
@@ -55,7 +68,13 @@ func main() {
 	cancel()
 	log.Info("database connected")
 
+	// Resynchronize river_job_id_seq sequence in case explicit IDs were inserted (e.g. during load tests or seed scripts)
+	if resyncErr := database.ResyncRiverJobSequence(context.Background(), riverPool); resyncErr != nil {
+		log.Warn("unable to resynchronize river_job sequence", "error", resyncErr)
+	}
+
 	// Create context that cancels on interrupt signal
+
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
 
@@ -83,7 +102,7 @@ func main() {
 	}
 
 	// Initialize River Client
-	riverClient, err := river.NewClient(riverpgxv5.New(dbPool), &river.Config{
+	riverClient, err := river.NewClient(riverpgxv5.New(riverPool), &river.Config{
 		Workers:      workers,
 		Queues:       engine.RiverQueueConfig(worker.DefaultQueueConfig(cfg)),
 		PeriodicJobs: worker.PeriodicJobs(cfg),

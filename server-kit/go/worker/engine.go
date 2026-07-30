@@ -307,7 +307,9 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 			if err != nil {
 				return fmt.Errorf("failed to insert job into river: %w", err)
 			}
-			jobID = res.Job.ID
+			if res != nil && res.Job != nil {
+				jobID = res.Job.ID
+			}
 		} else {
 			insertCtx, cancel := DetachedContextWithTimeout(ctx, defaultRiverInsertTimeout)
 			defer cancel()
@@ -315,11 +317,13 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 			if err != nil {
 				return fmt.Errorf("failed to insert job into river: %w", err)
 			}
-			jobID = res.Job.ID
+			if res != nil && res.Job != nil {
+				jobID = res.Job.ID
+			}
 		}
 
-		// If there is a raw payload or explicit metadata, save it to the sidecar table
-		if len(job.RawPayload) > 0 || len(job.Metadata) > 0 {
+		// If there is a raw payload or explicit metadata and a valid job was inserted, save it to the sidecar table
+		if jobID > 0 && (len(job.RawPayload) > 0 || len(job.Metadata) > 0) {
 			e.mu.RLock()
 			ms := e.metadataStore
 			e.mu.RUnlock()
@@ -379,6 +383,27 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 		return err
 	}
 }
+
+// EnqueueMany enqueues a batch of jobs, evaluating each job safely against UniqueOpts
+// deduplication checks to avoid CTE collisions in batch inserts.
+func (e *Engine) EnqueueMany(ctx context.Context, jobs []Job) error {
+	return e.EnqueueManyTx(ctx, nil, jobs)
+}
+
+// EnqueueManyTx enqueues a batch of jobs within a transaction, evaluating each job safely against
+// UniqueOpts deduplication checks (res.Job == nil) to avoid CTE collisions in bulk SQL statements.
+func (e *Engine) EnqueueManyTx(ctx context.Context, tx pgx.Tx, jobs []Job) error {
+	if len(jobs) == 0 {
+		return nil
+	}
+	for _, job := range jobs {
+		if err := e.EnqueueTx(ctx, tx, job); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 
 func (e *Engine) spawnWorkers(ctx context.Context, queue string, jobs <-chan Job, count int) {
 	indices := make([]int, 0, count)
