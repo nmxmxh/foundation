@@ -45,7 +45,9 @@ services:
       - "${SERVER_PORT:-8080}:8080"
     volumes:
       - ${UPLOADS_HOST_PATH:-./uploads}:/srv/uploads
+      - ${HERMES_SNAPSHOTS_HOST_PATH:-./snapshots}:/srv/snapshots
     environment:
+      HERMES_SNAPSHOT_DIR: "${HERMES_SNAPSHOT_DIR:-/srv/snapshots}"
       APP_ENV: "development"
       DATABASE_URL: ""
       DB_USER: "${DB_USER:-postgres}"

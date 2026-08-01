@@ -84,7 +84,9 @@ services:
     restart: on-failure:3
     volumes:
       - uploads_data:/srv/uploads
+      - hermes_snapshots:/srv/snapshots
     environment:
+      HERMES_SNAPSHOT_DIR: "${HERMES_SNAPSHOT_DIR:-/srv/snapshots}"
       APP_ENV: "${APP_ENV:-production}"
       DATABASE_URL: "${DATABASE_URL:-}"
       DB_HOST: "${DB_HOST:-app-postgres}"
@@ -253,4 +255,6 @@ volumes:
   redis_data:
     driver: local
   uploads_data:
+    driver: local
+  hermes_snapshots:
     driver: local
