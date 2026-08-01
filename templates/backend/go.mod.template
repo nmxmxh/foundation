@@ -5,6 +5,7 @@ go 1.26
 require (
 	// Foundation modules
 	github.com/nmxmxh/ovasabi_foundation/config-contracts/go v0.0.0
+	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go v0.0.0
 	github.com/nmxmxh/ovasabi_foundation/runtime-transport/go v0.0.0
 	github.com/nmxmxh/ovasabi_foundation/server-kit/go v0.0.0
 
@@ -25,6 +26,8 @@ require (
 )
 
 replace github.com/nmxmxh/ovasabi_foundation/config-contracts/go => ./foundation/config-contracts/go
+
+replace github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go => ./foundation/runtime-sdk/go
 
 replace github.com/nmxmxh/ovasabi_foundation/runtime-transport/go => ./foundation/runtime-transport/go
 

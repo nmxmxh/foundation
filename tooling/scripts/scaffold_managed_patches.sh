@@ -788,6 +788,30 @@ fn foundation_secure_store_delete(
             foundation_secure_store_delete' '            foundation_runtime_capabilities' "native Tauri narrows invoke handler"
 }
 
+patch_go_mod_runtime_sdk() {
+  local file="$target/go.mod"
+  [[ -f "$file" ]] || return 0
+  [[ -d "$target/foundation/runtime-sdk/go" ]] || return 0
+
+  if ! grep -Fq '=> ./foundation/runtime-sdk/go' "$file"; then
+    if grep -Fq 'replace github.com/nmxmxh/ovasabi_foundation/server-kit/go => ./foundation/server-kit/go' "$file"; then
+      PATCH_SEARCH='replace github.com/nmxmxh/ovasabi_foundation/server-kit/go => ./foundation/server-kit/go'
+      PATCH_REPLACE='replace github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go => ./foundation/runtime-sdk/go
+
+replace github.com/nmxmxh/ovasabi_foundation/server-kit/go => ./foundation/server-kit/go'
+      replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Go module replace directive: runtime-sdk"
+    fi
+  fi
+  if ! grep -Fq 'github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go v0.0.0' "$file"; then
+    if grep -Fq 'github.com/nmxmxh/ovasabi_foundation/server-kit/go' "$file"; then
+      PATCH_SEARCH='github.com/nmxmxh/ovasabi_foundation/server-kit/go v0.0.0'
+      PATCH_REPLACE='github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go v0.0.0
+	github.com/nmxmxh/ovasabi_foundation/server-kit/go v0.0.0'
+      replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Go module require dependency: runtime-sdk"
+    fi
+  fi
+}
+
 patch_go_dependency_manifests() {
   local file="$target/Dockerfile"
   [[ -f "$file" ]] || return 0
@@ -2082,6 +2106,7 @@ patch_docgen_named_schema_refs
 patch_docgen_route_catalog
 patch_native_tauri_startup_expect
 patch_native_tauri_command_acl
+patch_go_mod_runtime_sdk
 patch_go_dependency_manifests
 patch_server_binary_path
 patch_websocket_runtime_backpressure
