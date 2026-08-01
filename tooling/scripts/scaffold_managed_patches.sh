@@ -788,6 +788,41 @@ fn foundation_secure_store_delete(
             foundation_secure_store_delete' '            foundation_runtime_capabilities' "native Tauri narrows invoke handler"
 }
 
+patch_gitignore_root_bin() {
+  local file="$target/.gitignore"
+  [[ -f "$file" ]] || return 0
+
+  if grep -Fq '# Binaries' "$file" && grep -Fq $'# Binaries\nbin/' "$file"; then
+    PATCH_SEARCH='# Binaries
+bin/'
+    PATCH_REPLACE='# Binaries
+/bin/'
+    replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Gitignore scopes binary output to root /bin/"
+  fi
+}
+
+patch_makefile_docker_redeploy() {
+  local file="$target/Makefile"
+  [[ -f "$file" ]] || return 0
+
+  if ! grep -Fq 'docker-redeploy:' "$file"; then
+    if grep -Fq 'docker-up:' "$file"; then
+      PATCH_SEARCH='docker-up:
+	@if [ -f docker-compose.yml ]; then $(DOCKER_COMPOSE) up -d; fi'
+      PATCH_REPLACE='docker-up:
+	@if [ -f docker-compose.dev.yml ]; then \
+		$(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml up -d; \
+	elif [ -f docker-compose.yml ]; then \
+		$(DOCKER_COMPOSE) up -d; \
+	fi
+
+docker-redeploy:
+	@if [ -f docker-compose.yml ]; then $(DOCKER_COMPOSE) -f docker-compose.yml -f docker-compose.dev.yml up -d --no-deps --force-recreate $(or $(SERVICE),server); fi'
+      replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Makefile adds docker-redeploy target"
+    fi
+  fi
+}
+
 patch_go_mod_runtime_sdk() {
   local file="$target/go.mod"
   [[ -f "$file" ]] || return 0
@@ -2106,8 +2141,10 @@ patch_docgen_named_schema_refs
 patch_docgen_route_catalog
 patch_native_tauri_startup_expect
 patch_native_tauri_command_acl
+patch_gitignore_root_bin
 patch_go_mod_runtime_sdk
 patch_go_dependency_manifests
+patch_makefile_docker_redeploy
 patch_server_binary_path
 patch_websocket_runtime_backpressure
 patch_typed_server_runtime
