@@ -61,6 +61,24 @@ type HTTPRoute struct {
 // Validate checks the declarative HTTP-to-event route shape used by routing and
 // doc generation. It does not require proto request/response types because some
 // routes are static or streaming, but doc-producing routes should set them.
+//
+// A route is answerable in exactly three ways, and the check is built around
+// that rather than around any one of them:
+//
+//   - registry dispatch — no Handler; the server synthesizes one and looks the
+//     work up by EventType, so the event type is what makes the route answerable
+//     and is therefore required (this is what MakeEventRoute produces, and it is
+//     the common case)
+//   - its own http.HandlerFunc — answered directly, never consulting the
+//     registry, so EventType is optional and purely descriptive
+//   - a StaticPayload — answered from the declaration itself
+//
+// Requiring both an EventType and a Handler/StaticPayload on every route, as an
+// earlier version did, described none of these three. It rejected the canonical
+// dispatch route — the shape of nearly every route a project declares — while
+// also rejecting the directly served, event-less route that the server
+// (registerDomainRoutes) and the registry (VerifyRoutes) both explicitly
+// support. Nothing called Validate, so the contradiction stayed invisible.
 func (r HTTPRoute) Validate() error {
 	method := strings.ToUpper(strings.TrimSpace(r.Method))
 	if method == "" {
@@ -75,20 +93,33 @@ func (r HTTPRoute) Validate() error {
 	if !strings.HasPrefix(r.Path, "/") {
 		return fmt.Errorf("http route path %q must start with /", r.Path)
 	}
-	if strings.TrimSpace(r.EventType) == "" {
-		return errors.New("http route event_type is required")
+
+	eventType := strings.TrimSpace(r.EventType)
+	servesItself := r.Handler != nil || len(r.StaticPayload) > 0
+	if eventType == "" && !servesItself {
+		return errors.New("http route requires an event_type, a handler, or a static payload")
 	}
-	if err := eventcontract.ValidateEventType(r.EventType); err != nil {
-		return err
+	// Grammar is checked whenever an event type is present, including on
+	// directly served routes: it is still published in the lifecycle catalogue
+	// and the OpenAPI document, so a malformed one is a docs defect even when it
+	// is never dispatched.
+	if eventType != "" {
+		if err := eventcontract.ValidateEventType(eventType); err != nil {
+			return err
+		}
+		if !strings.HasSuffix(eventType, ":requested") &&
+			!strings.HasSuffix(eventType, ":success") &&
+			!strings.HasSuffix(eventType, ":failed") {
+			return fmt.Errorf("http route event_type %q must use a lifecycle terminal or requested state", r.EventType)
+		}
+		// Only a dispatched route is looked up by event type, and the registry
+		// accepts nothing but :requested. A terminal state here would name a
+		// registration that can never exist.
+		if !servesItself && !strings.HasSuffix(eventType, ":requested") {
+			return fmt.Errorf("http route event_type %q is dispatched and must end with :requested", r.EventType)
+		}
 	}
-	if !strings.HasSuffix(r.EventType, ":requested") &&
-		!strings.HasSuffix(r.EventType, ":success") &&
-		!strings.HasSuffix(r.EventType, ":failed") {
-		return fmt.Errorf("http route event_type %q must use a lifecycle terminal or requested state", r.EventType)
-	}
-	if r.Handler == nil && len(r.StaticPayload) == 0 {
-		return errors.New("http route requires handler or static payload")
-	}
+
 	if r.SuccessStatusCode != 0 && (r.SuccessStatusCode < 200 || r.SuccessStatusCode > 299) {
 		return fmt.Errorf("http route success status %d must be 2xx", r.SuccessStatusCode)
 	}

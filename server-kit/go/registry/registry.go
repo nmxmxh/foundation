@@ -259,6 +259,18 @@ func (r *ServiceRegistry) VerifyRoutes(routes []HTTPRoute) error {
 		if eventType == "" {
 			continue
 		}
+		// Nor does a route carrying its own http.HandlerFunc: the server mounts
+		// that function directly and never consults the registry, so there is no
+		// registration to find and none is needed. Such a route still declares an
+		// event_type — HTTPRoute.Validate requires one, and the lifecycle
+		// catalogue keys documentation off it — and that event_type is frequently
+		// a terminal (:success/:failed) state that Register rejects outright.
+		// Reconciling those reported a 404 that cannot happen and demanded a
+		// registration that cannot be made, which failed startup on a surface
+		// that in fact served correctly.
+		if route.Handler != nil {
+			continue
+		}
 		if _, duplicate := seen[eventType]; duplicate {
 			continue
 		}

@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -209,6 +210,48 @@ func TestVerifyRoutesIgnoresHandlersWithoutRoutes(t *testing.T) {
 	}
 	if err := registry.VerifyRoutes(routes); err != nil {
 		t.Fatalf("VerifyRoutes = %v, want nil for a worker-only handler", err)
+	}
+}
+
+// A route that carries its own http.HandlerFunc is served by that function and
+// never reaches the registry, so it needs no registration — even though it must
+// still declare an event_type, and even when that event_type is a terminal state
+// that Register would refuse. Reconciling these failed startup for a surface
+// that served correctly (media uploads, whose two routes share the
+// media:upload:v1 head and are answered directly).
+func TestVerifyRoutesIgnoresRoutesWithDirectHandlers(t *testing.T) {
+	registry := New(nil, nil, nil)
+
+	direct := func(http.ResponseWriter, *http.Request) {}
+	routes := []HTTPRoute{
+		{Method: "POST", Path: "/v1/media/uploads", EventType: "media:upload:v1:requested", Handler: direct},
+		{Method: "GET", Path: "/v1/media/objects/{key...}", EventType: "media:upload:v1:success", Handler: direct},
+	}
+
+	if err := registry.VerifyRoutes(routes); err != nil {
+		t.Fatalf("VerifyRoutes = %v, want nil for directly served routes", err)
+	}
+}
+
+// The skip is scoped to routes that bypass the registry. A dispatch route (no
+// handler of its own) still has to be backed by a registration.
+func TestVerifyRoutesStillReportsDispatchRoutesAlongsideDirectOnes(t *testing.T) {
+	registry := New(nil, nil, nil)
+
+	routes := []HTTPRoute{
+		{Method: "POST", Path: "/v1/media/uploads", EventType: "media:upload:v1:requested", Handler: func(http.ResponseWriter, *http.Request) {}},
+		{Method: "GET", Path: "/v1/media/list", EventType: "media:list:v1:requested"},
+	}
+
+	err := registry.VerifyRoutes(routes)
+	if !errors.Is(err, ErrRouteWithoutHandler) {
+		t.Fatalf("error = %v, want ErrRouteWithoutHandler", err)
+	}
+	if !strings.Contains(err.Error(), "media:list:v1:requested") {
+		t.Errorf("error %q should name the unhandled dispatch route", err)
+	}
+	if strings.Contains(err.Error(), "media:upload:v1:requested") {
+		t.Error("error should not name the directly served route")
 	}
 }
 

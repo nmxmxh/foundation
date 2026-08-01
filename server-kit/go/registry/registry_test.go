@@ -220,7 +220,13 @@ func TestHTTPRouteValidate(t *testing.T) {
 		{Method: http.MethodPost, Path: "orders", EventType: "orders:create:v1:requested", Handler: valid.Handler},
 		{Method: http.MethodPost, Path: "/orders", EventType: "bad event", Handler: valid.Handler},
 		{Method: http.MethodPost, Path: "/orders", EventType: "orders:create:v1:requested", SuccessStatusCode: 301, Handler: valid.Handler},
-		{Method: http.MethodPost, Path: "/orders", EventType: "orders:create:v1:requested"},
+		// Nothing can answer this route: no event type to dispatch on, no
+		// handler, no static payload.
+		{Method: http.MethodPost, Path: "/orders"},
+		// Dispatched (no handler of its own) but named after a terminal state.
+		// The registry only ever registers :requested, so this names a handler
+		// that can never exist.
+		{Method: http.MethodPost, Path: "/orders", EventType: "orders:create:v1:success"},
 	}
 	for _, route := range cases {
 		if err := route.Validate(); err == nil {
@@ -236,6 +242,50 @@ func TestHTTPRouteValidate(t *testing.T) {
 	}
 	if err := static.Validate(); err != nil {
 		t.Fatalf("static route Validate() error = %v", err)
+	}
+}
+
+// The three answerable shapes, each of which a project actually declares today.
+// The first is what MakeEventRoute emits and is the overwhelming majority of any
+// project's surface; an earlier Validate rejected it outright, which is how the
+// check came to be both wrong and uncalled.
+func TestHTTPRouteValidateAcceptsEveryAnswerableShape(t *testing.T) {
+	direct := func(http.ResponseWriter, *http.Request) {}
+
+	cases := map[string]HTTPRoute{
+		"registry dispatch": {
+			Method:    http.MethodPost,
+			Path:      "/v1/orders",
+			EventType: "orders:create:v1:requested",
+		},
+		"own handler, descriptive event type": {
+			Method:    http.MethodPost,
+			Path:      "/v1/media/uploads",
+			EventType: "media:upload:v1:requested",
+			Handler:   direct,
+		},
+		"own handler, terminal event type": {
+			Method:    http.MethodGet,
+			Path:      "/v1/media/objects/{key...}",
+			EventType: "media:upload:v1:success",
+			Handler:   direct,
+		},
+		"own handler, no event type": {
+			Method:  http.MethodGet,
+			Path:    "/v1/discover/dishes",
+			Handler: direct,
+		},
+		"static payload": {
+			Method:        http.MethodGet,
+			Path:          "/healthz",
+			StaticPayload: extension.Object{"ok": extension.Bool(true)},
+		},
+	}
+
+	for name, route := range cases {
+		if err := route.Validate(); err != nil {
+			t.Errorf("%s: Validate() = %v, want nil", name, err)
+		}
 	}
 }
 
