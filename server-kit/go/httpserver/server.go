@@ -688,6 +688,20 @@ func (s *Server) executeDispatch(w http.ResponseWriter, r *http.Request, req htt
 		return
 	}
 
+	// Unwrapped JSON-RPC 2.0 response for standard MCP clients (Glama.ai, Cursor, Claude Desktop)
+	if isJSONRPCResponse(execution.Response.Payload, execution.Response.PayloadEncoding) {
+		w.Header().Set("Content-Type", "application/json")
+		if len(execution.Response.PayloadBytes) > 0 {
+			if _, writeErr := w.Write(execution.Response.PayloadBytes); writeErr != nil {
+				s.log.Warn("failed to write json-rpc dispatch response", "event_type", execution.EventType, "error", writeErr)
+				return
+			}
+		} else {
+			writeJSON(s.log, w, execution.Response.Payload)
+		}
+		observedState = "success"
+		return
+	}
 	// Standard JSON response
 	w.Header().Set("Content-Type", "application/json")
 	writeJSON(s.log, w, map[string]any{
@@ -697,6 +711,18 @@ func (s *Server) executeDispatch(w http.ResponseWriter, r *http.Request, req htt
 		"response_payload": execution.Response.Payload,
 	})
 	observedState = "success"
+}
+
+func isJSONRPCResponse(payload any, encoding string) bool {
+	if encoding == "json-rpc" || encoding == "raw_json" {
+		return true
+	}
+	switch v := payload.(type) {
+	case map[string]any:
+		_, hasJSONRPC := v["jsonrpc"]
+		return hasJSONRPC
+	}
+	return false
 }
 
 //nolint:gocognit // Streaming response handling keeps channel type selection and cancellation together.
