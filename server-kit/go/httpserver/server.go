@@ -721,6 +721,9 @@ func isJSONRPCResponse(payload any, encoding string) bool {
 	case map[string]any:
 		_, hasJSONRPC := v["jsonrpc"]
 		return hasJSONRPC
+	case extension.Object:
+		_, hasJSONRPC := v["jsonrpc"]
+		return hasJSONRPC
 	}
 	return false
 }
