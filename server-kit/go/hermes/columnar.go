@@ -49,9 +49,17 @@ func (b *validityBitmap) isValid(i int) bool {
 // POPCNT on x86 and CNT on ARM — no aspirational claims; this is
 // a guaranteed single-instruction operation on both platforms.
 func (b *validityBitmap) nullCount() int {
-	ones := 0
-	for _, w := range b.words {
-		ones += bits.OnesCount64(w)
+	var c0, c1, c2, c3 int
+	i := 0
+	for ; i+4 <= len(b.words); i += 4 {
+		c0 += bits.OnesCount64(b.words[i])
+		c1 += bits.OnesCount64(b.words[i+1])
+		c2 += bits.OnesCount64(b.words[i+2])
+		c3 += bits.OnesCount64(b.words[i+3])
+	}
+	ones := (c0 + c1) + (c2 + c3)
+	for ; i < len(b.words); i++ {
+		ones += bits.OnesCount64(b.words[i])
 	}
 	return b.n - ones
 }

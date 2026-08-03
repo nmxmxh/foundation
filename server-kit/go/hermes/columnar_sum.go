@@ -25,9 +25,18 @@ func (v *Float64Vector) Sum() float64 {
 // every non-SIMD build. The SIMD lane must stay within floating-point tolerance
 // of this result; see TestFloat64VectorSumMatchesScalarReference.
 func sumFloat64sScalar(xs []float64) float64 {
-	var s float64
-	for _, x := range xs {
-		s += x
+	var s0, s1, s2, s3 float64
+	i := 0
+	for ; i+4 <= len(xs); i += 4 {
+		s0 += xs[i]
+		s1 += xs[i+1]
+		s2 += xs[i+2]
+		s3 += xs[i+3]
 	}
-	return s
+	sum := (s0 + s1) + (s2 + s3)
+	for ; i < len(xs); i++ {
+		sum += xs[i]
+	}
+	return sum
 }
+

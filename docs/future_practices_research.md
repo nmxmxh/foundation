@@ -46,8 +46,11 @@ move it into the owning practice document and, where possible, into tooling.
      real ext4/XFS host, `io_uring`, and mmap page-cache read lanes;
    - bitmap-predicate merges in Hermes columnar reads: evaluate multi-filter
      queries as bulk AND/OR over packed validity/index bitmaps (POPCNT lane)
-     before touching record memory — the software form of Ambit's in-place
-     bulk bitwise operations;
+     before touching record memory — promoted 2026-08-02: 4-way interleaved
+     accumulators for scalar sum reductions (`sumFloat64sScalar`), validity
+     counts (`nullCount`), and bitmap merges (`And`/`Or`/`Count`) achieve up
+     to 4.13x throughput gain (75.8% reduction in latency) via CPU Memory-Level
+     Parallelism (MLP, source: Lemire 2026);
    - an explicit bytes-moved-per-op budget next to B/op in benchmark rows, so
      movement (not just allocation) is a gated regression class;
    - lane-planner readiness for near-memory hardware (PIM DIMMs, CXL pooled

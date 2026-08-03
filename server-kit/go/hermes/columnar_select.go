@@ -71,9 +71,17 @@ func (s *SelectionBitmap) Len() int { return s.n }
 // Count returns the number of selected rows. bits.OnesCount64 lowers to a
 // single POPCNT/CNT instruction per word.
 func (s *SelectionBitmap) Count() int {
-	total := 0
-	for _, w := range s.words {
-		total += bits.OnesCount64(w)
+	var c0, c1, c2, c3 int
+	i := 0
+	for ; i+4 <= len(s.words); i += 4 {
+		c0 += bits.OnesCount64(s.words[i])
+		c1 += bits.OnesCount64(s.words[i+1])
+		c2 += bits.OnesCount64(s.words[i+2])
+		c3 += bits.OnesCount64(s.words[i+3])
+	}
+	total := (c0 + c1) + (c2 + c3)
+	for ; i < len(s.words); i++ {
+		total += bits.OnesCount64(s.words[i])
 	}
 	return total
 }
@@ -111,8 +119,16 @@ func (s *SelectionBitmap) And(other *SelectionBitmap) error {
 	if err := s.sameShape(other); err != nil {
 		return err
 	}
-	for i := range s.words {
-		s.words[i] &= other.words[i]
+	w1, w2 := s.words, other.words
+	i := 0
+	for ; i+4 <= len(w1); i += 4 {
+		w1[i] &= w2[i]
+		w1[i+1] &= w2[i+1]
+		w1[i+2] &= w2[i+2]
+		w1[i+3] &= w2[i+3]
+	}
+	for ; i < len(w1); i++ {
+		w1[i] &= w2[i]
 	}
 	return nil
 }
@@ -122,8 +138,16 @@ func (s *SelectionBitmap) Or(other *SelectionBitmap) error {
 	if err := s.sameShape(other); err != nil {
 		return err
 	}
-	for i := range s.words {
-		s.words[i] |= other.words[i]
+	w1, w2 := s.words, other.words
+	i := 0
+	for ; i+4 <= len(w1); i += 4 {
+		w1[i] |= w2[i]
+		w1[i+1] |= w2[i+1]
+		w1[i+2] |= w2[i+2]
+		w1[i+3] |= w2[i+3]
+	}
+	for ; i < len(w1); i++ {
+		w1[i] |= w2[i]
 	}
 	return nil
 }
@@ -133,16 +157,32 @@ func (s *SelectionBitmap) AndNot(other *SelectionBitmap) error {
 	if err := s.sameShape(other); err != nil {
 		return err
 	}
-	for i := range s.words {
-		s.words[i] &^= other.words[i]
+	w1, w2 := s.words, other.words
+	i := 0
+	for ; i+4 <= len(w1); i += 4 {
+		w1[i] &^= w2[i]
+		w1[i+1] &^= w2[i+1]
+		w1[i+2] &^= w2[i+2]
+		w1[i+3] &^= w2[i+3]
+	}
+	for ; i < len(w1); i++ {
+		w1[i] &^= w2[i]
 	}
 	return nil
 }
 
 // Not complements the selection in place. Rows beyond Len() stay unselected.
 func (s *SelectionBitmap) Not() {
-	for i := range s.words {
-		s.words[i] = ^s.words[i]
+	w := s.words
+	i := 0
+	for ; i+4 <= len(w); i += 4 {
+		w[i] = ^w[i]
+		w[i+1] = ^w[i+1]
+		w[i+2] = ^w[i+2]
+		w[i+3] = ^w[i+3]
+	}
+	for ; i < len(w); i++ {
+		w[i] = ^w[i]
 	}
 	s.tailMask()
 }
