@@ -1,0 +1,32 @@
+# Benchmarks gated by tooling/scripts/benchmark_ratchet_check.sh.
+#
+# module_dir	package	bench_regex
+#
+# Selection rule: a gated benchmark must be DETERMINISTIC in allocs/op and
+# B/op. Benchmarks that fan work across goroutines (b.RunParallel, bus publish
+# with live subscribers) allocate a scheduler-dependent number of times per
+# iteration and would flake the gate, so they stay out and are covered by the
+# benchmark ledger instead. Benchmarks over real sockets, disks, or databases
+# belong to the service-backed lane, not here.
+#
+# Add a row, then record ceilings:
+#   HUMAN_SUPERVISED_CHECK_UPDATE=1 UPDATE=1 tooling/scripts/benchmark_ratchet_check.sh . --write
+
+# The null lane (framework floor) and the single-goroutine app-path lanes.
+# BenchmarkAppLane_Worker_* is deliberately excluded: it hands work to a pool,
+# so its allocs/op and B/op move with goroutine scheduling. Measured drift of
+# ~40 B/op between consecutive runs on identical hardware confirmed it cannot
+# be gated. Worker-pool cost is tracked in the benchmark ledger instead.
+server-kit/go	./appbench	^Benchmark(NullLane_|AppLane_(Auth|Cache|CircuitBreaker|DirectFrame|HTTPIngress|HTTPMiddleware|Retry))
+
+# Frame codec and same-process dispatch: the top rungs of the transport ladder.
+server-kit/go	./grpcsvc	^Benchmark(RouterDispatchFrameDirect|DirectFrameClientDispatch|BoundFrameClientDispatch|BoundFrameClientDispatchTrusted|BinaryFrame|GeneratedProto)
+
+# Event envelope encode/decode and subscription matching.
+server-kit/go	./events	^Benchmark(Envelope_|Matches|TerminalState)
+
+# Dynamic extension container: the JSON/typed compatibility boundary.
+server-kit/go	./extension	^Benchmark
+
+# Chain result inspection (ordered/unordered), excluding the parallel runners.
+server-kit/go	./chain	^BenchmarkHasCriticalFailure

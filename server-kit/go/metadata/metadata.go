@@ -86,6 +86,31 @@ type contextKey string
 
 const metadataKey contextKey = "ovasabi_server_kit_metadata"
 
+// New returns metadata with its four containers already allocated.
+//
+// # Invariant
+//
+// Tags, Categories, Attributes, and Extras are non-nil in every
+// EnvelopeMetadata this package hands out. FromContextOK re-establishes it for
+// values recovered from a context, because a context may carry a struct built
+// elsewhere. Code inside this package writes into Attributes and Extras
+// directly (FromObject) and relies on that guarantee.
+//
+// # Cost
+//
+// The guarantee costs four allocations per call, paid by every request whose
+// context carries no metadata yet — FromContext calls New on that path. Two of
+// the four are maps that are usually never written to; Extras is an
+// extension.Object, so its first key costs ~1 KB (see the extension package
+// cost model).
+//
+// Making these lazy is the next meaningful cut to HTTP ingress. It is a
+// narrower change than it looks: only four sites write into a nil-able map
+// (three in this file, one in featureflags). The real exposure is that
+// EnvelopeMetadata is public and vendored apps construct and populate it
+// directly, so the invariant is part of the contract, not an implementation
+// detail. Removing it needs a deprecation pass across the vendored apps, not
+// just an edit here.
 func New() EnvelopeMetadata {
 	return EnvelopeMetadata{
 		Tags:       []string{},
@@ -414,7 +439,10 @@ func (m EnvelopeMetadata) ToMap() map[string]any {
 }
 
 func (m EnvelopeMetadata) ToObject() extension.Object {
-	result := extension.Object{}
+	// An ingress envelope lands 4-6 keys here, so this fits one bucket either
+	// way; the hint documents the expected width and keeps a caller that adds a
+	// seventh field from silently buying a second ~1 KB bucket.
+	result := make(extension.Object, 8)
 	m.appendGlobalContextObject(result)
 	m.appendCollectionsObject(result)
 	m.appendScalarFieldsObject(result)
@@ -458,17 +486,21 @@ func (m EnvelopeMetadata) appendGlobalContextObject(result extension.Object) {
 	if m.GlobalContext == nil {
 		return
 	}
-	result["global_context"] = extension.ObjectValue(extension.Object{
-		"user_id":         extension.String(m.GlobalContext.UserID),
-		"session_id":      extension.String(m.GlobalContext.SessionID),
-		"source":          extension.String(m.GlobalContext.Source),
-		"device_id":       extension.String(m.GlobalContext.DeviceID),
-		"organization_id": extension.String(m.GlobalContext.OrganizationID),
-		"role_id":         extension.String(m.GlobalContext.RoleID),
-		"audit_context":   extension.String(m.GlobalContext.AuditContext),
-		"ip_address":      extension.String(m.GlobalContext.IPAddress),
-		"user_agent":      extension.String(m.GlobalContext.UserAgent),
-	})
+	// Empty fields are omitted, matching appendScalarFieldsObject and the
+	// omitempty tags on GlobalContext itself. A typical ingress request fills
+	// two or three of these nine; materializing the rest as empty strings sized
+	// the map for nine entries on every request.
+	gc := make(extension.Object, 4)
+	setObjectString(gc, "user_id", m.GlobalContext.UserID)
+	setObjectString(gc, "session_id", m.GlobalContext.SessionID)
+	setObjectString(gc, "source", m.GlobalContext.Source)
+	setObjectString(gc, "device_id", m.GlobalContext.DeviceID)
+	setObjectString(gc, "organization_id", m.GlobalContext.OrganizationID)
+	setObjectString(gc, "role_id", m.GlobalContext.RoleID)
+	setObjectString(gc, "audit_context", m.GlobalContext.AuditContext)
+	setObjectString(gc, "ip_address", m.GlobalContext.IPAddress)
+	setObjectString(gc, "user_agent", m.GlobalContext.UserAgent)
+	result["global_context"] = extension.ObjectValueOwned(gc)
 }
 
 func (m EnvelopeMetadata) appendCollectionsObject(result extension.Object) {
@@ -503,7 +535,7 @@ func (m EnvelopeMetadata) appendValidityPeriodObject(result extension.Object) {
 	if m.ValidityPeriod == nil {
 		return
 	}
-	result["validity_period"] = extension.ObjectValue(extension.Object{
+	result["validity_period"] = extension.ObjectValueOwned(extension.Object{
 		"effective_from": extension.String(m.ValidityPeriod.EffectiveFrom),
 		"effective_to":   extension.String(m.ValidityPeriod.EffectiveTo),
 	})
@@ -517,7 +549,7 @@ func (m EnvelopeMetadata) appendAttributesObject(result extension.Object) {
 	for key, value := range m.Attributes {
 		attrs[key] = extension.String(value)
 	}
-	result["attributes"] = extension.ObjectValue(attrs)
+	result["attributes"] = extension.ObjectValueOwned(attrs)
 }
 
 func setObjectString(target extension.Object, key, value string) {

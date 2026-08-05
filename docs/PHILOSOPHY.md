@@ -194,7 +194,17 @@ Foundation uses a seven-tier performance ladder:
 6. **Native FFI/SHM** (varies) — trusted same-host compute
 7. **Browser worker + WASM + SharedArrayBuffer** — where supported
 
-The design rule: **the fastest lane must not pay the cost of the compatibility lane**. Direct dispatch should not suffer network overhead. JSON should remain visibly more expensive than binary paths. Benchmarks measure this automatically; regressions are caught before they land.
+The design rule: **the fastest lane must not pay the cost of the compatibility lane**. Direct dispatch should not suffer network overhead. JSON should remain visibly more expensive than binary paths. Benchmarks measure this automatically; regressions are caught before they land — allocation ceilings for each rung are recorded in `tooling/benchmark_baseline.psv` and gated on the merge path, and the ladder's rule 1 is enforced by an AST check rather than by review.
+
+### Boundaries must be affordable
+
+A framework is a layer-adding machine. That is what makes it valuable — every contract, lane, and scope boundary encodes a decision nobody has to re-derive. It is also the thing that quietly spends the latency budget, because each layer looks cheap in isolation and only the sum is visible to the user.
+
+Foundation's answer is not fewer boundaries. It is that **a boundary is an organizational and compile-time good that must cost as close to nothing as possible at runtime**. Keep the process boundary, the ownership boundary, the contract — and make the transport across it free. Where a boundary genuinely cannot be made cheap, it is collapsed at runtime, not deleted from the design.
+
+This has a practical consequence, and it is the discipline that keeps the principle honest: **measure the framework doing nothing**. The null lane (`server-kit/go/appbench/null_lane_test.go`) runs an empty handler at every rung and publishes the floor. A component benchmark showing a handler at 200 ns says nothing if reaching that handler costs 9 µs. When the floor dominates, the fix is to remove a layer — not to tune the code sitting on top of it.
+
+Two orders of magnitude, in the systems that have achieved it, came from deleting layers whose generality was not being used. The floor is how you find out which layers those are.
 
 ---
 

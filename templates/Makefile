@@ -20,6 +20,14 @@ include .env
 export
 endif
 
+# Project-owned targets and variable overrides. Foundation force-overwrites this
+# Makefile on update, so anything app-specific (e.g. a `fusion-binding` or
+# `airplane` target) MUST live in Makefile.local, which foundation creates once
+# and never overwrites. The leading '-' keeps make quiet when it is absent. The
+# include is read before the `.DEFAULT_GOAL` assignment further down, so a target
+# defined in Makefile.local cannot become the default goal.
+-include Makefile.local
+
 GOCMD := go
 GOBUILD := $(GOCMD) build
 GOTEST := $(GOCMD) test

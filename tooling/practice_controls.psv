@@ -10,6 +10,8 @@ AISEC-01|docs/ai_threat_model.md|security|critical|human|review|threat-model|yes
 AISEC-02|docs/security_practices.md|security|critical|partial|script:tooling/scripts/app_security_profile_check.sh;review|app-threat-profile|yes
 PERFLAB-01|docs/performance_lab.md|performance|high|contextual|script:tooling/scripts/performance_check.sh;review|benchmark-artifact|contextual
 PERFLAB-02|docs/foundation_benchmarks.md|performance|medium|strong|script:tooling/scripts/benchmark_evidence_check.sh|benchmark-evidence|yes
+PERFLAB-03|docs/performance_practices.md|performance|high|strong|script:tooling/scripts/benchmark_ratchet_check.sh|allocation-ceiling|yes
+PERFLAB-04|docs/performance_practices.md|performance|high|strong|script:tooling/scripts/transport_ladder_check.sh|transport-ladder|yes
 RUNTIME-01|docs/performance_lab.md|performance|high|partial|script:tooling/scripts/runtime_performance_contract_check.sh;script:tooling/scripts/performance_check.sh;review|profile-trace-benchmark|yes
 FORMAL-01|docs/tla_architecture_practices.md|formal|high|partial|script:tooling/scripts/formal_methods_check.sh;review|spec-template|yes
 OPS-01|docs/delivery_metrics_practices.md|operations|high|partial|script:tooling/scripts/operational_excellence_check.sh;review|delivery-event|yes

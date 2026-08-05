@@ -94,87 +94,96 @@ This document tracks the deliberate performance and architecture carryovers fold
     and word-at-a-time loop processing. Breaking CPU pipeline latency chains
     improves scalar reduction throughput by up to 4.13x (a 75.8% reduction in
     latency/cycle count) without SIMD build dependencies (source: Lemire 2026).
-60. GPU launch and transfer optimizations are edge-case heavy. Default-stream
+    Propagated 2026-08-04: the word kernels are consolidated in
+    `server-kit/go/hermes/columnar_mlp.go` (`popcountWords`/`andWords`/`orWords`/
+    `andNotWords`/`notWords`); all six call sites route through them and
+    `SelectionBitmap.maskValidity` was moved onto the branch-free bulk+tail form.
+    Applicability is bounded to tight loops over large homogeneous arrays — i.e.
+    the columnar/bitmap engine; a survey found no other hot reduction loops in
+    server-kit (`money.Sum`, `worker` counters are cold, small-N, order-sensitive
+    and were deliberately left alone). Measured gains and reproduction command:
+    see docs/foundation_benchmarks.md (2026-08-04 entry).
+61. GPU launch and transfer optimizations are edge-case heavy. Default-stream
     serialization, graph capture invalidation, prohibited operations, lazy
     loading, JIT/cache warmth, managed-memory migration, page oversubscription,
     peer access, and memory-pool reuse must appear in benchmark notes when
     those features are used.
-61. Interactive runtime performance borrows from AAA game engines: optimize
+62. Interactive runtime performance borrows from AAA game engines: optimize
     frame time, hitch count, first-use latency, pass boundaries, resource
     lifetime, and target-device captures before chasing average FPS or mean
     request latency.
-62. Render-graph thinking applies outside rendering. Multi-stage media, canvas,
+63. Render-graph thinking applies outside rendering. Multi-stage media, canvas,
     GPU, native, streaming, and dashboard work should declare passes, resources,
     barriers, transient lifetimes, fallback lanes, and validation checks before
     low-level optimization.
-63. Culling, LOD, instancing, batching, and streaming are data-reduction tools.
+64. Culling, LOD, instancing, batching, and streaming are data-reduction tools.
     Foundation should filter by visibility, tenant, permission, subscription,
     viewport, quality tier, and interest mask before decoding, ranking,
     uploading, dispatching, or rendering.
-64. First-use hitches are production defects. Shader variants, PSOs, WebGPU
+65. First-use hitches are production defects. Shader variants, PSOs, WebGPU
     pipelines, WASM modules, FFI backends, prepared SQL, route handlers, and
     hot caches need prewarm or explicit cold-path budgets when they touch the
     first viewport or first interaction.
-65. Stable performance markers are now a Foundation review primitive. Marker
+66. Stable performance markers are now a Foundation review primitive. Marker
     names must be hierarchical and low-cardinality; correlation IDs, tenant IDs,
     hashes, and timestamps belong in fields so traces and captures can be
     compared across runs.
-66. Hermes rebuild performance depends on using the right ingestion lane.
+67. Hermes rebuild performance depends on using the right ingestion lane.
     Trusted snapshot refreshes use `BulkLoad`, incremental pure-upsert
     projector batches use `ApplyRecords`, and durable mixed mutation streams use
     `ApplyBatch`. Byte-bound estimation must stay approximate and allocation
     light; do not format every record field just to maintain a guardrail.
-67. Typed payload contracts and JSON compatibility performance are separate
+68. Typed payload contracts and JSON compatibility performance are separate
     optimization lanes. The 2026-06-02 typed refactor improved indexed/query/list
     and frame adapter paths by removing dynamic maps and conversion churn, but
     regressed HTTP/event JSON decode where compatibility adapters still build
     owned typed object trees early.
-68. JSON ingress optimization now means direct decode, not map removal. Hot
+69. JSON ingress optimization now means direct decode, not map removal. Hot
     adapters should walk JSON tokens, generated schema fields, or protobuf
     reflection directly into `extension.Object`, domain structs, or preserved raw
     payload bytes. A `json.Unmarshal` to `interface{}` followed by typed
     conversion is an explicit compatibility fallback.
-69. Binary/event envelopes should preserve raw payload bytes until the owner
+70. Binary/event envelopes should preserve raw payload bytes until the owner
     needs a typed object. Lazy object decode, borrowed views, and schema-guided
     validation are the preferred way to keep binary lanes healthy while retaining
     external JSON support.
-70. Hermes service-backed projector performance depends on avoiding per-field
+71. Hermes service-backed projector performance depends on avoiding per-field
     object churn in trusted batch lanes. `BulkLoad` and `ApplyRecords` should keep
     growing toward borrowed or builder-backed `RecordData` flows, while
     `ApplyBatch` remains the durable mixed-mutation path.
-71. Route-planned HTTP dispatch is now an opt-in generated/scaffolded lane.
+72. Route-planned HTTP dispatch is now an opt-in generated/scaffolded lane.
     Compile path params and included headers once with `CompileDispatchRoute`,
     but do not copy an already-decoded payload merely to pre-size it; the copy
     can cost more than ordinary map growth.
-72. Event JSON compatibility should parse envelope control fields separately from
+73. Event JSON compatibility should parse envelope control fields separately from
     payload ownership. Single-pass top-level parsing plus lazy payload
     materialization gives the best current balance: time below the old baseline,
     old allocation count retained, and typed payload safety preserved.
-73. JSON encoders now have two lanes: deterministic `MarshalJSON` for canonical
+74. JSON encoders now have two lanes: deterministic `MarshalJSON` for canonical
     output, drift, signing, and stable logs; unordered `MarshalJSONFast` for
     non-canonical compatibility responses where key order is irrelevant.
-74. Hermes rebuild now supports an optional normalized snapshot interface. Keep
+75. Hermes rebuild now supports an optional normalized snapshot interface. Keep
     `StateStore` canonical, and let high-performance sources opt into
     `NormalizedSnapshotStore` only when they can hand over already-normalized
     `RecordData` without JSONB re-materialization.
-75. HTTP JSON dispatch should not retain raw request bytes unless the route
+76. HTTP JSON dispatch should not retain raw request bytes unless the route
     explicitly asks for `IncludeRawBody`. Protobuf request bytes are the payload
     contract and remain retained; JSON routes should carry typed payload objects
     and preserve raw body only for audit/replay/streaming compatibility.
-76. Redis Stream eventlog drains should avoid per-entry map adapters. Durable
+77. Redis Stream eventlog drains should avoid per-entry map adapters. Durable
     relay bursts use an ordered field/value append path for the common
     single-envelope field shape, while generic `XAddMany` remains available for
     multi-field stream entries.
-77. Binary frame regressions must be split before optimization. Keep separate
+78. Binary frame regressions must be split before optimization. Keep separate
     append-only, view-read-only, and full append/view benchmarks so nanosecond
     hot-lane movement can be attributed to write growth, field validation, or
     benchmark noise before changing the codec.
-78. JSON encoding is an append-down lane, not a per-node lane. `extension`
+79. JSON encoding is an append-down lane, not a per-node lane. `extension`
     `MarshalJSON`/`MarshalJSONFast` write through one growing buffer via internal
     `appendJSON` helpers; canonical output stays byte-identical while allocations
     drop ~81%/93% on a nested document (2026-06-14). This mirrors the decode-side
     token parser — the encode side had the same intermediate-allocation shape.
-79. Go SIMD is now a real, opt-in lane behind one experimental gate.
+80. Go SIMD is now a real, opt-in lane behind one experimental gate.
     `Float64Vector.Sum` is the first instance: an AVX2 `float64` column reduction
     over the Arrow SoA buffer, behind `amd64 && goexperiment.simd` with a scalar
     fallback, runtime feature check, tolerance-based parity test, and the
@@ -183,54 +192,54 @@ This document tracks the deliberate performance and architecture carryovers fold
     on amd64 (Rosetta-emulated; native AVX2 host expected larger). Validity-masked
     reduction and additional numeric kernels (filter, min/max) are the next steps.
 
-80. Hot-path resource handles should be returned and stored as by-value structs
+81. Hot-path resource handles should be returned and stored as by-value structs
     with release methods, not capture closures or method values. The
     `database.acquireConn` cancel closure and `conn.Release` method values were
     the largest per-op allocators on the DB hot path (2026-07-09); `connLease`
     carries the same semantics allocation-free.
-81. Per-operation metric keys with bounded vocabularies must use composite
+82. Per-operation metric keys with bounded vocabularies must use composite
     struct map keys internally and build display strings only at snapshot time.
     String concatenation per recorded operation is an avoidable hot-path
     allocation (see `observability.opStateKey`, gated by a zero-alloc test).
-82. Per-batch builders that hand results to immutable COW snapshots should
+83. Per-batch builders that hand results to immutable COW snapshots should
     transfer ownership of their maps/slices instead of cloning, when the
     builder is provably discarded after publish (`hermes.indexPublisher`).
-83. `pprof alloc_objects` shares are extrapolated from sampled bytes and
+84. `pprof alloc_objects` shares are extrapolated from sampled bytes and
     overstate tiny allocations. Use the profile to *locate* allocators, but
     size and verify each cut with `-benchmem` physical allocs/op before and
     after; a "20% of objects" closure can be 2 physical allocs/op.
-84. Cumulative allocation and retained footprint are separate evidence lanes.
+85. Cumulative allocation and retained footprint are separate evidence lanes.
     Capture `alloc_space`/`alloc_objects` for churn and
     `inuse_space`/`inuse_objects` for retention under the same active workload;
     a small live heap can coexist with gigabytes of short-lived construction.
-85. Hermes compact index traversal must not allocate a full-size reconciliation
+86. Hermes compact index traversal must not allocate a full-size reconciliation
     map. Count-only reads traverse live indexed candidates directly instead of
     materializing a columnar batch; equality-index counts are guarded at zero
     timed allocations and scale with selected candidates.
-86. Predicate pushdown without indexed candidate selection is late
+87. Predicate pushdown without indexed candidate selection is late
     materialization, not an indexed query. Large range-filter scopes require a
     declared ordered/range or bitmap index with candidates-inspected counters,
     memory/write-amplification budgets, and full-scan parity evidence.
-87. Hermes ordered numeric candidate indexes are now an explicit read/write
+88. Hermes ordered numeric candidate indexes are now an explicit read/write
     trade through `RangeIndexedFields`. Binary-searched intervals preserve the
     full-scan fallback and delivered ~9.1× faster 100K range reads on the
     reference fixture, while one 10K index added ~38% build time and ~27%
     allocated bytes. Promote only measured range-heavy fields.
-88. Ordered indexes publish immutable addition/removal deltas and compact at a
+89. Ordered indexes publish immutable addition/removal deltas and compact at a
     hard depth of 32. This replaced rejected eager rebuilding (~4.9 ms/2.84 MB
     for one 10K update) with amortized updates (~211 µs/133 KB) while preserving
     full-scan and post-compaction parity.
-89. Runtime worker scheduling must account for current in-flight ownership, not
+90. Runtime worker scheduling must account for current in-flight ownership, not
     only readiness. The browser runtime pool uses least-in-flight selection with
     rotating tie-breaking so continuously ready workers share bounded work
     without changing request/result semantics.
-90. Packet-ring bursts reserve and publish one valid prefix per call. Capacity
+91. Packet-ring bursts reserve and publish one valid prefix per call. Capacity
     and payload bounds are checked before publication, counters update once per
     burst, and the single-packet API remains the correctness fallback. The
     initial Apple M1 Pro run kept x128 lifecycle work near 45.8 microseconds;
     this is an orchestration/atomicity improvement, not yet a claimed material
     throughput win over the prior 47.9-microsecond reference.
-91. Go runtime process execution now exposes `ExecuteInto` as a caller-owned
+92. Go runtime process execution now exposes `ExecuteInto` as a caller-owned
     output lane while preserving `Execute` as the owned compatibility API. On
     the 1KB fake-exchange benchmark, caller ownership reduced 1681 B/op and 11
     allocs/op to 656 B/op and 10 allocs/op, with mean latency moving from about
@@ -239,7 +248,7 @@ This document tracks the deliberate performance and architecture carryovers fold
     1457 B/op and 8 allocs/op for owned output, and 432 B/op and 7 allocs/op for
     caller-owned output. Cancellation still terminates the worker before the
     loop reports completion, and restart remains the compatibility fallback.
-92. Browser runtime orchestration coverage is a performance guard because
+93. Browser runtime orchestration coverage is a performance guard because
     timeout, saturation, worker removal, pulse fallback, ring backpressure, and
     shutdown cleanup are tail-latency states. The browser-host suite now gates
     at 90% statements/lines/functions and 80% branches; the 2026-07-12 pass also

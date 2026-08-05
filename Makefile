@@ -3,7 +3,7 @@
 	check-core-validation-contract check-contract-drift check-runtime-contract-field-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
 	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-package-licenses check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux \
-	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet lifecycle-manifest
+	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet check-benchmark-ratchet check-transport-ladder lifecycle-manifest
 
 .DEFAULT_GOAL := help
 
@@ -59,7 +59,9 @@ FOUNDATION_LINT_CHECKS := \
 	check-benchmark-evidence \
 	check-lifecycle-manifest \
 	check-app-security-profile \
-	check-coverage-ratchet
+	check-coverage-ratchet \
+	check-transport-ladder \
+	check-benchmark-ratchet
 
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 FOUNDATION_GO_CACHE_DIR ?= /tmp/ovasabi-foundation-go-build
@@ -204,16 +206,26 @@ lint:
 	@tmp_log=$$(mktemp "$${TMPDIR:-/tmp}/foundation-lint.XXXXXX"); \
 	trap 'rm -f "$$tmp_log"' EXIT; \
 	runner="tooling/scripts/foundation_lint_check_runner.sh"; \
+	failed=""; \
 	for check in $(FOUNDATION_LINT_CHECKS); do \
 		printf '[RUN] %s\n' "$$check"; \
 		if FOUNDATION_LINT_CHECK_TIMEOUT_SEC="$(FOUNDATION_LINT_CHECK_TIMEOUT_SEC)" zsh "$$runner" "$$tmp_log" "$(MAKE)" --no-print-directory "$$check"; then \
 			printf '[OK] %s\n' "$$check"; \
-			: >"$$tmp_log"; \
 		else \
+			printf '[FAIL] %s\n' "$$check"; \
 			cat "$$tmp_log"; \
-			exit 1; \
+			failed="$$failed $$check"; \
+			if [ -n "$${FOUNDATION_LINT_FAILFAST:-}" ]; then \
+				printf '\nfoundation checks aborted (FOUNDATION_LINT_FAILFAST) at:%s\n' "$$failed"; \
+				exit 1; \
+			fi; \
 		fi; \
+		: >"$$tmp_log"; \
 	done; \
+	if [ -n "$$failed" ]; then \
+		printf '\nfoundation checks FAILED —%s\n' "$$failed"; \
+		exit 1; \
+	fi; \
 	echo "foundation checks passed"
 
 check-scaffold-manifest:
@@ -395,6 +407,14 @@ check-app-security-profile:
 check-coverage-ratchet:
 	@FOUNDATION_GO_CACHE_DIR="$(FOUNDATION_GO_CACHE_DIR)" tooling/scripts/coverage_ratchet_check.sh .
 
+# Allocation budgets as a merge gate. Gates allocs/op exactly and B/op with a
+# bounded tolerance; ns/op is never gated here (see the script header).
+check-benchmark-ratchet:
+	@FOUNDATION_GO_CACHE_DIR="$(FOUNDATION_GO_CACHE_DIR)" tooling/scripts/benchmark_ratchet_check.sh .
+
+check-transport-ladder:
+	@tooling/scripts/transport_ladder_check.sh .
+
 lifecycle-manifest:
 	@proto_root=api/protos; \
 	if [ ! -d "$$proto_root" ]; then proto_root=templates/api/protos; fi; \
@@ -444,4 +464,6 @@ help:
 	@echo "  make check-formal-methods  Validate formal-method templates and spec coverage"
 	@echo "  make check-operational-excellence  Validate DORA/SPACE/SLSA/OTel delivery evidence hooks"
 	@echo "  make check-coverage-ratchet  Enforce per-package coverage floors ratcheting toward 95%"
+	@echo "  make check-benchmark-ratchet  Enforce per-benchmark allocation ceilings that only fall"
+	@echo "  make check-transport-ladder  Enforce the same-process transport ladder (no network transports on hot dispatch)"
 	@echo "  make check-database-practices  Run a single foundation check"

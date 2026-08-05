@@ -154,6 +154,19 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
     patterns for repeated whole-buffer copying. Use a deque/ring, reserved head
     room, chunked representation, builder, or ownership transfer when the
     operation otherwise becomes quadratic; preserve bounds and ownership tests.
+19. An allocation budget is a contract, not a comment. Every rule above is a
+    judgment call until a number is recorded and enforced, so hot paths carry a
+    declared ceiling in `tooling/benchmark_baseline.psv`, gated on the merge
+    path by `tooling/scripts/benchmark_ratchet_check.sh`. Ceilings only fall:
+    improving a path lowers its ceiling permanently and the improvement cannot
+    silently erode. Gate `allocs/op` exactly — it is an exact per-iteration
+    count and a property of the code, not the machine. Gate `B/op` only with a
+    bounded tolerance; it is an average that absorbs amortized capacity growth
+    and was measured drifting between runs on identical hardware. Never gate
+    `ns/op` in a merge check; timing belongs to the benchmark ledger under the
+    variance rules in `performance_lab.md`. Benchmarks whose allocation shape
+    depends on goroutine scheduling cannot be gated and must stay out of the
+    baseline rather than be papered over with a wide tolerance.
 
 ### CPU microarchitecture posture
 
@@ -211,7 +224,7 @@ hardware can feed predictably.
 
 Ovasabi uses a transport ladder. Pick the lowest layer that preserves the required process boundary.
 
-1. Same-process hot dispatch uses direct typed calls, direct frame dispatch, worker channels, or runtime buffer dispatch. It must not use gRPC, HTTP, Redis, or JSON for convenience.
+1. Same-process hot dispatch uses direct typed calls, direct frame dispatch, worker channels, or runtime buffer dispatch. It must not use gRPC, HTTP, Redis, or JSON for convenience. This is enforced, not merely stated: `tooling/scripts/transport_ladder_check.sh` fails a registered frame handler that calls into `http`, `grpc`, `redis`, `nats`, `kafka`, or `encoding/json`. Annotate a genuine exception with `// perf:allow-transport-hop` and record the rationale.
 2. Same-host trusted native compute may use `ffi`; isolated same-host compute may use `shm`; portable process boundaries may use framed `stdio`.
 3. Cross-host or polyglot service boundaries use generated protobuf or `grpcsvc.Frame`; `grpcsvc.Envelope` and JSON maps are compatibility paths.
 4. A typed service binding must feed both registry protobuf dispatch and frame dispatch when the service has typed contracts. Use `bootstrap.RegisterTypedHandlers` for ingress/event/lifecycle dispatch and `bootstrap.RegisterTypedFrameHandlers` for synchronous internal calls.
@@ -232,6 +245,8 @@ Ovasabi uses a transport ladder. Pick the lowest layer that preserves the requir
 14. Treat DNS as a latency source. Use resolver metrics, dialer instrumentation, and explicit caching/pre-resolution only when failure modes are understood.
 15. Keep native and TypeScript frame codecs in parity with Rust frame limits. Encoders must reject payloads whose declared lengths exceed the shared frame budget; decoders must validate declared field lengths against remaining bytes before slicing or creating views.
 16. In TypeScript byte lanes, prefer `subarray` views for same-owner, same-lifetime reads and `slice` copies for retained chunks, worker transfer boundaries, or any path where later mutation would violate the contract.
+17. Kernel accelerators follow one shape, and `server-kit/go/kernellane` is their home: a real fast path behind a build tag, a cached capability probe that tests behaviour rather than a flag, a behaviour-preserving portable fallback, and a public API that exposes no OS-specific type. A failed accelerator degrades, never errors. Current rungs: `CloneFile` (reflink, then `copy_file_range`, then userspace — reporting which lane actually ran), `CopyFile` (`copy_file_range`), `MultipathDialer`/`MultipathListenConfig` (MPTCP), and `ReusePortListenConfig` (`SO_REUSEPORT`, moving accept fan-out into the kernel). Every accelerator needs a parity test proving the fast path and the fallback produce identical results, and cross-platform claims need a probe rather than an assumption: `SO_REUSEPORT` load-balances on Linux 3.9+ but hands all connections to the most recent binder on Darwin, so distribution fairness is not portable.
+18. Do not add an accelerator that the standard library already provides. Go's `io.Copy` already selects `sendfile` and `splice` for the file-to-socket and socket-to-socket cases; wrapping them again adds a maintenance surface and no speed. Add a rung only where the stdlib genuinely leaves the capability unreachable, as with `SO_REUSEPORT` and reflink.
 
 ## PostgreSQL performance
 

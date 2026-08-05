@@ -1,0 +1,46 @@
+# package|benchmark|max_allocs|max_bytes|ns_ref
+# Ceilings only fall. max_allocs and max_bytes are gated; ns_ref is a
+# machine-dependent reference value reported as drift, never gated.
+./appbench|BenchmarkAppLane_Auth_ValidateToken|27|2104|5599
+./appbench|BenchmarkAppLane_Cache_GetHit_JSONValue|0|3|82.70
+./appbench|BenchmarkAppLane_CircuitBreaker_ClosedSuccess|0|0|90.00
+./appbench|BenchmarkAppLane_DirectFrame_DomainCall|1|32|44.17
+./appbench|BenchmarkAppLane_HTTPIngress_JSONBodyKilobyte|32|17828|21630
+./appbench|BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest|43|12508|7393
+./appbench|BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC|81|11286|10976
+./appbench|BenchmarkAppLane_Retry_CanceledWait|2|96|178.1
+./appbench|BenchmarkAppLane_Retry_NoRetrySuccess|0|0|8.960
+./appbench|BenchmarkNullLane_00_GoCall|0|0|3.750
+./appbench|BenchmarkNullLane_01_RouterFrameDispatch|0|0|17.71
+./appbench|BenchmarkNullLane_02_DirectFrameClient|0|0|29.16
+./appbench|BenchmarkNullLane_03_HTTPDispatchBuild|14|2891|2350
+./appbench|BenchmarkNullLane_04_HTTPRouteHandler|14|2891|2357
+./appbench|BenchmarkNullLane_05_HTTPRouteHandlerCorrelated|22|3756|2898
+./appbench|BenchmarkNullLane_06_HTTPSecuredChain|75|6837|8992
+./appbench|BenchmarkNullLane_07_JSONObjectMaterialization|1|48|265.4
+./chain|BenchmarkHasCriticalFailure|0|0|117.1
+./chain|BenchmarkHasCriticalFailureOrdered|0|0|7.290
+./events|BenchmarkEnvelope_FromBinary|10|929|824.2
+./events|BenchmarkEnvelope_FromJSON|40|4064|3672
+./events|BenchmarkEnvelope_ToBinary|20|5691|9307
+./events|BenchmarkEnvelope_ToJSON|14|3586|13902
+./events|BenchmarkMatches|0|0|10.62
+./events|BenchmarkMatches_Exact|0|0|7.710
+./events|BenchmarkTerminalState|0|0|229.2
+./extension|BenchmarkExtensionMarshalJSON|3|304|997.1
+./extension|BenchmarkExtensionMarshalJSONFast|1|160|759.8
+./extension|BenchmarkObjectFromMapApplicationPayload|27|5768|2657
+./extension|BenchmarkObjectInterfaceMapObjectList|16|1464|880.6
+./grpcsvc|BenchmarkBinaryFrameAppendOnly|0|0|24.79
+./grpcsvc|BenchmarkBinaryFrameAppendRoundTrip|0|0|434.6
+./grpcsvc|BenchmarkBinaryFrameAppendViewRoundTrip|0|0|43.12
+./grpcsvc|BenchmarkBinaryFrameCodecRoundTrip|2|147|361.9
+./grpcsvc|BenchmarkBinaryFrameReadFieldOnly|0|0|4.795
+./grpcsvc|BenchmarkBinaryFrameViewReadOnly|0|0|24.59
+./grpcsvc|BenchmarkBoundFrameClientDispatch|0|0|140.6
+./grpcsvc|BenchmarkBoundFrameClientDispatchTrusted|0|0|21.66
+./grpcsvc|BenchmarkDirectFrameClientDispatch|0|0|36.88
+./grpcsvc|BenchmarkGeneratedProtoMarshalAppendRoundTrip|6|152|800.0
+./grpcsvc|BenchmarkGeneratedProtoUnmarshalMergeReuse|5|56|290.6
+./grpcsvc|BenchmarkGeneratedProtoUnmarshalReset|6|152|435.6
+./grpcsvc|BenchmarkRouterDispatchFrameDirect|0|0|39.16

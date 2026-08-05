@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/bits"
 	"sort"
 	"strconv"
 	"time"
@@ -44,24 +43,11 @@ func (b *validityBitmap) isValid(i int) bool {
 	return (b.words[i>>6]>>uint(i&63))&1 == 1
 }
 
-// nullCount returns the number of null (invalid) entries.
-// bits.OnesCount64 is recognized by the Go compiler and maps to
-// POPCNT on x86 and CNT on ARM — no aspirational claims; this is
-// a guaranteed single-instruction operation on both platforms.
+// nullCount returns the number of null (invalid) entries. Validity bits are set
+// for present values, so nulls are the total row count minus the set-bit count
+// (see popcountWords for the interleaved POPCNT/CNT kernel).
 func (b *validityBitmap) nullCount() int {
-	var c0, c1, c2, c3 int
-	i := 0
-	for ; i+4 <= len(b.words); i += 4 {
-		c0 += bits.OnesCount64(b.words[i])
-		c1 += bits.OnesCount64(b.words[i+1])
-		c2 += bits.OnesCount64(b.words[i+2])
-		c3 += bits.OnesCount64(b.words[i+3])
-	}
-	ones := (c0 + c1) + (c2 + c3)
-	for ; i < len(b.words); i++ {
-		ones += bits.OnesCount64(b.words[i])
-	}
-	return b.n - ones
+	return b.n - popcountWords(b.words)
 }
 
 // Vector is the columnar data interface. StringVector intentionally

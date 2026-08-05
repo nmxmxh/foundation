@@ -294,6 +294,30 @@ Postgres/Redis/Hermes pipeline tuning rule:
    concurrent tailing, inspect owned materialization, index count, tombstone
    pressure, and projection byte caps before tuning Postgres.
 
+## Framework Floor (the null lane)
+
+Before optimizing anything on a request path, know what the path costs when the
+domain does nothing. The null lane
+(`server-kit/go/appbench/null_lane_test.go`) runs an empty handler at each rung
+of the transport ladder and publishes the result in
+`docs/foundation_benchmarks.md`.
+
+This exists because per-component benchmarks cannot answer the question that
+decides the strategy. If the framework floor already consumes most of the
+latency budget, tuning the domain cannot recover it and the correct response is
+to remove a layer, not to tune one. A component benchmark showing a handler at
+200 ns is meaningless if reaching that handler costs 9 us.
+
+Rules:
+
+1. Optimization work on a lane cites that lane's floor. "This path is slow" is
+   not evidence until the floor is subtracted from it.
+2. Any change that adds a layer to a request path — middleware, contract check,
+   adapter, observability hop — reports its cost against the floor. A layer
+   whose cost is not measured is a layer whose cost is unbounded.
+3. The floor is a ratcheted budget, not a reading. Allocation ceilings for every
+   rung are gated by `tooling/scripts/benchmark_ratchet_check.sh`.
+
 ## Do-Not-Optimize Gate
 
 Do not add a faster lane unless all are true:
@@ -305,3 +329,6 @@ Do not add a faster lane unless all are true:
 5. the owning practice doc and controls matrix still match the evidence
 6. a cheaper algorithm, data structure, index, batch, or round-trip removal was
    considered before allocation shaving, pooling, SIMD, FFI, or GPU promotion
+7. the framework floor for the lane is known, and the measured cost is the
+   product's rather than the floor's. Optimizing domain code on a path whose
+   floor dominates it is wasted work; removing the layer is the real fix

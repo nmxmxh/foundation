@@ -823,6 +823,84 @@ docker-redeploy:
   fi
 }
 
+patch_makefile_local_include() {
+  local file="$target/Makefile"
+  [[ -f "$file" ]] || return 0
+
+  # The root Makefile is foundation-owned and force-overwritten on update, which
+  # wipes any app-specific targets (e.g. fusion-binding, airplane) an app added
+  # to it. Foundation now sources a project-owned Makefile.local that it never
+  # overwrites; wire the include into existing apps and seed the file so app
+  # targets have a durable home. Idempotent: guarded on the include line, and
+  # only touches the canonical scaffold shape (the .env include block).
+  local fresh_block='# Project-owned targets and variable overrides. Foundation force-overwrites this
+# Makefile on update, so anything app-specific (e.g. a `fusion-binding` or
+# `airplane` target) MUST live in Makefile.local, which foundation creates once
+# and never overwrites. The leading '"'"'-'"'"' keeps make quiet when it is absent. The
+# include is read before the `.DEFAULT_GOAL` assignment further down, so a target
+# defined in Makefile.local cannot become the default goal.
+-include Makefile.local'
+
+  # Self-heal apps patched by an earlier revision that injected a dead
+  # `.DEFAULT_GOAL := all` above the include: the root Makefile already pins
+  # `.DEFAULT_GOAL := help` after this include, so that line was redundant and
+  # its comment wrong. Guarded on the distinctive `:= all` string so it never
+  # fires on an already-corrected app (whose only .DEFAULT_GOAL is `:= help`).
+  if grep -Fq -- '.DEFAULT_GOAL := all' "$file"; then
+    local stale_tail='# and never overwrites. The leading '"'"'-'"'"' keeps make quiet when it is absent.
+# .DEFAULT_GOAL is pinned so a target defined in Makefile.local cannot displace
+# `all` as the default goal, even though the include is read before `all:`.
+.DEFAULT_GOAL := all'
+    local fresh_tail='# and never overwrites. The leading '"'"'-'"'"' keeps make quiet when it is absent. The
+# include is read before the `.DEFAULT_GOAL` assignment further down, so a target
+# defined in Makefile.local cannot become the default goal.'
+    replace_in_file "$file" "$stale_tail" "$fresh_tail" "Makefile corrects Makefile.local default-goal note"
+  fi
+
+  if ! grep -Fq -- '-include Makefile.local' "$file"; then
+    PATCH_SEARCH='ifneq (,$(wildcard .env))
+include .env
+export
+endif'
+    PATCH_REPLACE='ifneq (,$(wildcard .env))
+include .env
+export
+endif
+
+'"$fresh_block"
+    replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Makefile sources project-owned Makefile.local"
+  fi
+
+  # Seed Makefile.local if the app does not have one yet (create-mode file).
+  local local_file="$target/Makefile.local"
+  if [[ ! -f "$local_file" ]]; then
+    cat > "$local_file" <<'MKEOF'
+# Makefile.local — project-owned Make targets and overrides.
+#
+# This file is yours. Foundation creates it once and NEVER overwrites it, so
+# anything app-specific belongs here and survives every `make foundation-update`.
+# The root Makefile is foundation-owned and is replaced wholesale on update — do
+# not add project targets there, they will be lost.
+#
+# Everything defined in the root Makefile is in scope here: variables such as
+# $(DOCKER_COMPOSE), $(PROJECT_NAME) and $(GO_MODULE), and targets such as
+# `docker-redeploy`. Declare your targets in .PHONY (it is additive) and, if you
+# want them in `make help`, echo them from your own `help-local` target.
+#
+# Example (delete or replace):
+#
+# .PHONY: fusion-binding airplane
+#
+# fusion-binding: ## Regenerate this app's fusion bindings
+# 	@echo "building fusion bindings..."
+#
+# airplane: ## Run the airplane workflow for this app
+# 	@echo "running airplane..."
+MKEOF
+    log_patch "seeded project-owned Makefile.local: ${local_file#$target/}"
+  fi
+}
+
 patch_go_mod_runtime_sdk() {
   local file="$target/go.mod"
   [[ -f "$file" ]] || return 0
@@ -1593,6 +1671,48 @@ patch_frontend_tsconfig_baseurl() {
   rm -f "$before"
 }
 
+patch_frontend_nginx_security_headers() {
+  local file="$target/frontend/nginx.conf"
+  [[ -f "$file" ]] || return 0
+
+  # The frontend nginx template historically shipped with no security headers,
+  # so a passive scan of the public web origin (served by this config, not the
+  # Go API server) flags missing X-Content-Type-Options, X-Frame-Options and
+  # HSTS. Inject the baseline set foundation now ships. CSP is deliberately not
+  # added here (it must be tuned per-app). nginx drops inherited add_header in a
+  # location that sets its own, so the block is repeated into the two locations
+  # that add headers. Guarded on the nosniff header: no-op once applied, and a
+  # skip on apps that already added their own headers so we never double them.
+  grep -Fq 'X-Content-Type-Options' "$file" && return 0
+  # Only patch the canonical scaffold shape; a diverged config is left untouched.
+  grep -Fq 'index index.html;' "$file" || return 0
+
+  local headers='    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000" always;'
+  local loc_headers='        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;'
+
+  local before
+  before="$(mktemp)"
+  cp "$file" "$before"
+
+  # server level (covers locations that do not set their own add_header)
+  PATCH_REPLACE="$headers" perl -0pi -e 's/(\n    index index.html;\n)/$1\n$ENV{PATCH_REPLACE}\n/' "$file"
+  # location / (the HTML documents a passive scan actually fetches)
+  PATCH_REPLACE="$loc_headers" perl -0pi -e 's/(\n        add_header Cache-Control "no-cache";\n)/$1$ENV{PATCH_REPLACE}\n/' "$file"
+  # location /assets/ (hashed subresources)
+  PATCH_REPLACE="$loc_headers" perl -0pi -e 's/(\n        add_header Cache-Control "public, immutable";\n)/$1$ENV{PATCH_REPLACE}\n/' "$file"
+
+  if ! cmp -s "$before" "$file"; then
+    log_patch "frontend nginx adds baseline security headers: ${file#$target/}"
+  fi
+  rm -f "$before"
+}
+
 patch_env_example_hermes_warm_scopes() {
   local file="$target/.env.example"
   [[ -f "$file" ]] || return 0
@@ -2145,6 +2265,7 @@ patch_gitignore_root_bin
 patch_go_mod_runtime_sdk
 patch_go_dependency_manifests
 patch_makefile_docker_redeploy
+patch_makefile_local_include
 patch_server_binary_path
 patch_websocket_runtime_backpressure
 patch_typed_server_runtime
@@ -2155,6 +2276,7 @@ patch_test_compose_ephemeral_ports
 patch_postgres_config_baseline
 patch_startup_dependencies_double_close_redis
 patch_frontend_tsconfig_baseurl
+patch_frontend_nginx_security_headers
 patch_env_example_hermes_warm_scopes
 patch_startup_projection_warming
 patch_startup_envelope_fallback

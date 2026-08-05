@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -94,7 +95,7 @@ func BenchmarkAppLane_DirectFrame_DomainCall(b *testing.B) {
 	frame := grpcsvc.Frame{EventType: "user.profile.read", Payload: []byte(`{"user_id":"user-123"}`)}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if _, err := client.DispatchFrame(context.Background(), frame); err != nil {
 			b.Fatal(err)
@@ -113,7 +114,7 @@ func BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest(b *testing.B) {
 	body := []byte(`{"include_permissions":true,"view":"full"}`)
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		req := httptest.NewRequest(http.MethodPost, "/v1/users/user-123/profile", bytes.NewReader(body))
 		req.SetPathValue("id", "user-123")
@@ -126,11 +127,41 @@ func BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest(b *testing.B) {
 	}
 }
 
+// BenchmarkAppLane_HTTPIngress_JSONBodyKilobyte is the same ingress path over a
+// body of the size real product traffic actually carries.
+//
+// It exists because the null lane cannot see body-read cost: rung 03 posts two
+// bytes, so it reports the same number whether ingress sizes its read buffer
+// from Content-Length or grows one from io.ReadAll's fixed 512. The difference
+// only appears once the body outgrows that buffer — at 4 KB, growth costs eight
+// extra allocations and roughly twice the bytes. Keep this benchmark alongside
+// rung 03: the pair is what distinguishes per-request overhead from
+// per-kilobyte overhead, and only the second scales with the product.
+func BenchmarkAppLane_HTTPIngress_JSONBodyKilobyte(b *testing.B) {
+	route := registry.HTTPRoute{
+		Method:    http.MethodPost,
+		Path:      "/v1/documents",
+		EventType: "document.create",
+	}
+	// ~4 KB of JSON: a document create, an audit payload, a batch of records.
+	body := []byte(`{"title":"quarterly report","body":"` + strings.Repeat("content ", 500) + `"}`)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		req := httptest.NewRequest(http.MethodPost, "/v1/documents", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if _, err := httpapi.BuildDispatchRequest(req, route); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkAppLane_Auth_ValidateToken(b *testing.B) {
 	manager, token := testJWT(b)
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if _, err := manager.ValidateToken(token); err != nil {
 			b.Fatal(err)
@@ -157,7 +188,7 @@ func BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC(b *testing.B) {
 	)
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		req := httptest.NewRequest(http.MethodPost, "/v1/users/user-123/profile", bytes.NewReader([]byte(`{}`)))
 		req.Header.Set("Content-Type", "application/json")
@@ -173,7 +204,7 @@ func BenchmarkAppLane_Cache_GetHit_JSONValue(b *testing.B) {
 	_ = backend.Set(ctx, "user:123", []byte(`{"id":"user-123","role":"admin"}`), time.Minute)
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		value, err := backend.Get(ctx, "user:123")
 		if err != nil || len(value) == 0 {
@@ -187,7 +218,7 @@ func BenchmarkAppLane_Retry_NoRetrySuccess(b *testing.B) {
 	ctx := context.Background()
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if err := policy.Do(ctx, func() error { return nil }); err != nil {
 			b.Fatal(err)
@@ -200,7 +231,7 @@ func BenchmarkAppLane_CircuitBreaker_ClosedSuccess(b *testing.B) {
 	ctx := context.Background()
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if _, err := cb.Execute(ctx, func() (any, error) { return nil, nil }); err != nil {
 			b.Fatal(err)
@@ -247,7 +278,7 @@ func BenchmarkAppLane_Worker_RejectFullQueue(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if err := engine.Enqueue(ctx, job); err == nil {
 			b.Fatal("expected full queue rejection")
@@ -261,7 +292,7 @@ func BenchmarkAppLane_Worker_DropNoProcessor(b *testing.B) {
 	job := worker.Job{JobKind: "app.missing", Queue: "app"}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if err := engine.Enqueue(ctx, job); err == nil {
 			b.Fatal("expected missing processor error")
@@ -278,7 +309,7 @@ func BenchmarkAppLane_Retry_CanceledWait(b *testing.B) {
 	errRetryable := errors.New("retryable")
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()

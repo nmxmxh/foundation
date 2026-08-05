@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -257,7 +258,7 @@ func payloadFromRequest(r *http.Request) (extension.Object, []byte, string, stri
 	if r.Body == nil {
 		return extension.Object{}, nil, requestEncoding, responseEncoding, nil
 	}
-	rawBody, err := io.ReadAll(r.Body)
+	rawBody, err := readRequestBody(r)
 	if err != nil {
 		return nil, nil, "", "", err
 	}
@@ -273,6 +274,39 @@ func payloadFromRequest(r *http.Request) (extension.Object, []byte, string, stri
 		return nil, rawBody, "", "", err
 	}
 	return payload, rawBody, "json", responseEncoding, nil
+}
+
+// maxPresizedBody caps how much the reader will trust Content-Length for
+// up-front sizing. Larger or unknown lengths fall back to io.ReadAll's growth.
+const maxPresizedBody = 1 << 20
+
+// readRequestBody is io.ReadAll with the first buffer sized from
+// Content-Length. io.ReadAll always starts at 512 bytes, so every request —
+// including a two-byte body — paid a 512-byte allocation it never used.
+func readRequestBody(r *http.Request) ([]byte, error) {
+	size := r.ContentLength
+	if size == 0 {
+		return nil, nil
+	}
+	if size < 0 || size > maxPresizedBody {
+		return io.ReadAll(r.Body)
+	}
+	// One byte of headroom: a body longer than its declared Content-Length is
+	// read in full and rejected downstream rather than silently truncated here.
+	buf := make([]byte, 0, size+1)
+	for {
+		if len(buf) == cap(buf) {
+			buf = append(buf, 0)[:len(buf)]
+		}
+		n, err := r.Body.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				err = nil
+			}
+			return buf, err
+		}
+	}
 }
 
 func requestEncodingFromRequest(r *http.Request) string {

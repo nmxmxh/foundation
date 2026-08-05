@@ -68,22 +68,10 @@ func NewSelectionBitmap(n int) SelectionBitmap {
 // Len returns the row count the bitmap covers.
 func (s *SelectionBitmap) Len() int { return s.n }
 
-// Count returns the number of selected rows. bits.OnesCount64 lowers to a
-// single POPCNT/CNT instruction per word.
+// Count returns the number of selected rows. See popcountWords for the
+// interleaved POPCNT/CNT kernel.
 func (s *SelectionBitmap) Count() int {
-	var c0, c1, c2, c3 int
-	i := 0
-	for ; i+4 <= len(s.words); i += 4 {
-		c0 += bits.OnesCount64(s.words[i])
-		c1 += bits.OnesCount64(s.words[i+1])
-		c2 += bits.OnesCount64(s.words[i+2])
-		c3 += bits.OnesCount64(s.words[i+3])
-	}
-	total := (c0 + c1) + (c2 + c3)
-	for ; i < len(s.words); i++ {
-		total += bits.OnesCount64(s.words[i])
-	}
-	return total
+	return popcountWords(s.words)
 }
 
 // IsSelected reports whether row i is selected. Out-of-range rows are not
@@ -119,17 +107,7 @@ func (s *SelectionBitmap) And(other *SelectionBitmap) error {
 	if err := s.sameShape(other); err != nil {
 		return err
 	}
-	w1, w2 := s.words, other.words
-	i := 0
-	for ; i+4 <= len(w1); i += 4 {
-		w1[i] &= w2[i]
-		w1[i+1] &= w2[i+1]
-		w1[i+2] &= w2[i+2]
-		w1[i+3] &= w2[i+3]
-	}
-	for ; i < len(w1); i++ {
-		w1[i] &= w2[i]
-	}
+	andWords(s.words, other.words)
 	return nil
 }
 
@@ -138,17 +116,7 @@ func (s *SelectionBitmap) Or(other *SelectionBitmap) error {
 	if err := s.sameShape(other); err != nil {
 		return err
 	}
-	w1, w2 := s.words, other.words
-	i := 0
-	for ; i+4 <= len(w1); i += 4 {
-		w1[i] |= w2[i]
-		w1[i+1] |= w2[i+1]
-		w1[i+2] |= w2[i+2]
-		w1[i+3] |= w2[i+3]
-	}
-	for ; i < len(w1); i++ {
-		w1[i] |= w2[i]
-	}
+	orWords(s.words, other.words)
 	return nil
 }
 
@@ -157,33 +125,13 @@ func (s *SelectionBitmap) AndNot(other *SelectionBitmap) error {
 	if err := s.sameShape(other); err != nil {
 		return err
 	}
-	w1, w2 := s.words, other.words
-	i := 0
-	for ; i+4 <= len(w1); i += 4 {
-		w1[i] &^= w2[i]
-		w1[i+1] &^= w2[i+1]
-		w1[i+2] &^= w2[i+2]
-		w1[i+3] &^= w2[i+3]
-	}
-	for ; i < len(w1); i++ {
-		w1[i] &^= w2[i]
-	}
+	andNotWords(s.words, other.words)
 	return nil
 }
 
 // Not complements the selection in place. Rows beyond Len() stay unselected.
 func (s *SelectionBitmap) Not() {
-	w := s.words
-	i := 0
-	for ; i+4 <= len(w); i += 4 {
-		w[i] = ^w[i]
-		w[i+1] = ^w[i+1]
-		w[i+2] = ^w[i+2]
-		w[i+3] = ^w[i+3]
-	}
-	for ; i < len(w); i++ {
-		w[i] = ^w[i]
-	}
+	notWords(s.words)
 	s.tailMask()
 }
 
@@ -233,17 +181,19 @@ func validityWords(vec Vector) []uint64 {
 }
 
 // maskValidity clears selection bits for null cells using one AND per word.
+// The bulk region (where both bitmaps have words) runs through the interleaved
+// andWords kernel; any receiver words beyond the validity bitmap select rows
+// with no validity information and are zeroed. Hoisting that split out of the
+// per-word loop keeps the hot path branch-free.
 func (s *SelectionBitmap) maskValidity(vec Vector) {
 	words := validityWords(vec)
 	if words == nil {
 		return
 	}
-	for i := range s.words {
-		if i < len(words) {
-			s.words[i] &= words[i]
-		} else {
-			s.words[i] = 0
-		}
+	n := min(len(words), len(s.words))
+	andWords(s.words[:n], words[:n])
+	for i := n; i < len(s.words); i++ {
+		s.words[i] = 0
 	}
 }
 

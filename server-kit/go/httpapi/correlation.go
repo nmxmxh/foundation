@@ -9,7 +9,26 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing"
 )
 
-const correlationHeader = "X-Correlation-ID"
+// Header names are spelled in canonical MIME form ("X-Request-Id", not
+// "X-Request-ID"). http.Header.Get and Set canonicalize their argument, and
+// textproto allocates a new string whenever the key is not already canonical
+// and not in its common-header table. Ingress reads a dozen of these per
+// request, so the spelling is a per-request allocation, not a style choice.
+// Lookups stay case-insensitive: callers may still Set any casing they like.
+const (
+	correlationHeader    = "X-Correlation-Id"
+	requestIDHeader      = "X-Request-Id"
+	idempotencyKeyHeader = "X-Idempotency-Key"
+	traceIDHeader        = "X-Trace-Id"
+	spanIDHeader         = "X-Span-Id"
+	channelHeader        = "X-Channel"
+	localeHeader         = "Accept-Language"
+	userIDHeader         = "X-User-Id"
+	sessionIDHeader      = "X-Session-Id"
+	deviceIDHeader       = "X-Device-Id"
+	forwardedForHeader   = "X-Forwarded-For"
+	realIPHeader         = "X-Real-Ip"
+)
 
 // CorrelationMiddleware guarantees every HTTP request has a correlation ID.
 func CorrelationMiddleware(next http.Handler) http.Handler {
@@ -36,7 +55,7 @@ func CorrelationIDFromRequest(r *http.Request) string {
 	if correlationID := strings.TrimSpace(r.Header.Get(correlationHeader)); correlationID != "" {
 		return correlationID
 	}
-	if correlationID := strings.TrimSpace(r.Header.Get("X-Request-ID")); correlationID != "" {
+	if correlationID := strings.TrimSpace(r.Header.Get(requestIDHeader)); correlationID != "" {
 		return correlationID
 	}
 	return ""
@@ -97,34 +116,34 @@ func enrichMetadataFromHeaders(md *metadata.EnvelopeMetadata, r *http.Request) {
 	// Header-derived identity is request metadata only. Authentication middleware
 	// must overwrite user, session, device, organization, and role fields with
 	// trusted claims before authorization or domain handlers rely on them.
-	if requestID := strings.TrimSpace(r.Header.Get("X-Request-ID")); requestID != "" {
+	if requestID := strings.TrimSpace(r.Header.Get(requestIDHeader)); requestID != "" {
 		md.RequestID = requestID
 	}
-	if idempotencyKey := strings.TrimSpace(r.Header.Get("X-Idempotency-Key")); idempotencyKey != "" {
+	if idempotencyKey := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); idempotencyKey != "" {
 		md.IdempotencyKey = idempotencyKey
 	}
-	if traceID := strings.TrimSpace(r.Header.Get("X-Trace-ID")); traceID != "" {
+	if traceID := strings.TrimSpace(r.Header.Get(traceIDHeader)); traceID != "" {
 		md.TraceID = traceID
 	}
-	if spanID := strings.TrimSpace(r.Header.Get("X-Span-ID")); spanID != "" {
+	if spanID := strings.TrimSpace(r.Header.Get(spanIDHeader)); spanID != "" {
 		md.SpanID = spanID
 	}
-	if channel := strings.TrimSpace(r.Header.Get("X-Channel")); channel != "" {
+	if channel := strings.TrimSpace(r.Header.Get(channelHeader)); channel != "" {
 		md.Channel = channel
 	}
-	if locale := strings.TrimSpace(r.Header.Get("Accept-Language")); locale != "" {
+	if locale := strings.TrimSpace(r.Header.Get(localeHeader)); locale != "" {
 		md.Locale = locale
 	}
 	if md.GlobalContext == nil {
 		md.GlobalContext = &metadata.GlobalContext{}
 	}
-	if userID := strings.TrimSpace(r.Header.Get("X-User-ID")); userID != "" {
+	if userID := strings.TrimSpace(r.Header.Get(userIDHeader)); userID != "" {
 		md.GlobalContext.UserID = userID
 	}
-	if sessionID := strings.TrimSpace(r.Header.Get("X-Session-ID")); sessionID != "" {
+	if sessionID := strings.TrimSpace(r.Header.Get(sessionIDHeader)); sessionID != "" {
 		md.GlobalContext.SessionID = sessionID
 	}
-	if deviceID := strings.TrimSpace(r.Header.Get("X-Device-ID")); deviceID != "" {
+	if deviceID := strings.TrimSpace(r.Header.Get(deviceIDHeader)); deviceID != "" {
 		md.GlobalContext.DeviceID = deviceID
 	}
 	if md.GlobalContext.Source == "" {
@@ -142,13 +161,13 @@ func clientIP(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	if forwardedFor := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); forwardedFor != "" {
+	if forwardedFor := strings.TrimSpace(r.Header.Get(forwardedForHeader)); forwardedFor != "" {
 		if before, _, ok := strings.Cut(forwardedFor, ","); ok {
 			return strings.TrimSpace(before)
 		}
 		return forwardedFor
 	}
-	if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+	if realIP := strings.TrimSpace(r.Header.Get(realIPHeader)); realIP != "" {
 		return realIP
 	}
 	host, _, ok := strings.Cut(r.RemoteAddr, ":")

@@ -1,0 +1,21 @@
+# Makefile.local — project-owned Make targets and overrides.
+#
+# This file is yours. Foundation creates it once and NEVER overwrites it, so
+# anything app-specific belongs here and survives every `make foundation-update`.
+# The root Makefile is foundation-owned and is replaced wholesale on update — do
+# not add project targets there, they will be lost.
+#
+# Everything defined in the root Makefile is in scope here: variables such as
+# $(DOCKER_COMPOSE), $(PROJECT_NAME) and $(GO_MODULE), and targets such as
+# `docker-redeploy`. Declare your targets in .PHONY (it is additive) and, if you
+# want them in `make help`, echo them from your own `help-local` target.
+#
+# Example (delete or replace):
+#
+# .PHONY: fusion-binding airplane
+#
+# fusion-binding: ## Regenerate this app's fusion bindings
+# 	@echo "building fusion bindings..."
+#
+# airplane: ## Run the airplane workflow for this app
+# 	@echo "running airplane..."

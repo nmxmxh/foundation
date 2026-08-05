@@ -20,6 +20,95 @@ The benchmark suite exists to prove that ladder stays honest. The fastest lane s
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
 
+## 2026-08-04 The null lane: measuring the Foundation tax
+
+Every benchmark before this one measured Foundation doing something. The null
+lane measures Foundation doing **nothing** — the same empty handler run at each
+rung of the transport ladder, so the framework's own cost is separated from the
+product's. It is the "empty program that only forwards packets" measurement:
+if the floor already consumes the latency budget, no domain-level optimization
+can recover it, and the correct response is to remove a layer rather than tune
+one.
+
+Measured on this host (Apple M1 Pro, darwin/arm64, `-8`, `-benchtime=1s`,
+median of 5 runs). Requests, response writers, and bodies are constructed once
+and reset per iteration, so the numbers attribute cost to Foundation rather
+than to `net/http` and `httptest` scaffolding — this is a floor, not a model of
+production traffic.
+
+| Rung | Lane | ns/op | B/op | allocs/op | vs rung 00 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 00 | bare Go call (floor) | 2.18 | 0 | 0 | 1x |
+| 01 | router frame dispatch | 10.29 | 0 | 0 | 4.7x |
+| 02 | direct frame client (validated) | 18.60 | 0 | 0 | 8.5x |
+| 03 | HTTP ingress -> DispatchRequest | 3353 | 7080 | 28 | 1538x |
+| 04 | HTTP route handler + empty executor | 3381 | 7080 | 28 | 1551x |
+| 05 | + correlation middleware | 4310 | 8072 | 44 | 1977x |
+| 06 | + security headers, validation, JWT, RBAC | 9539 | 11136 | 97 | 4376x |
+| 07 | JSON object materialization (`{}`) | 35.26 | 48 | 1 | 16x |
+
+Three findings.
+
+**The same-process frame lane delivers on its promise.** Rungs 01 and 02 are
+genuinely zero-allocation: a validated dispatch costs 18.6 ns and allocates
+nothing. The top of the transport ladder is not aspirational, and rung 07 shows
+why rule 1 forbids JSON there — materializing an *empty* object already costs
+twice a full validated frame dispatch.
+
+**The HTTP ingress cliff is the framework's dominant cost.** Rung 02 to rung 04
+is a single step down the ladder and it costs 180x the time, 28 allocations,
+and 7 KB — for an empty `{}` body. The wrapper itself is free (rung 03 and 04
+are within noise of each other); the cost is entirely in ingress translation.
+`buildDispatchRequest` materializes an `extension.Object`, an envelope metadata
+map, and an RFC3339 timestamp string on every request regardless of payload.
+
+**The floor for an authenticated route is 9.5 us, 97 allocations, and 11 KB**
+before a single line of product code runs. Roughly 55% of that is the security
+chain (rung 05 to 06: +5.2 us, +53 allocs) and 22% is correlation (rung 04 to
+05: +0.9 us, +16 allocs for ID propagation).
+
+No optimization is proposed here. Per the Do-Not-Optimize Gate, this entry is
+the measurement that must exist before any of it is touched; the ingress
+allocation shape is now the best-evidenced first target in the Core lane.
+
+Allocation ceilings for all eight rungs are recorded in
+`tooling/benchmark_baseline.psv` and gated by
+`tooling/scripts/benchmark_ratchet_check.sh`, so the frame lane cannot silently
+stop being zero-allocation. Source: `server-kit/go/appbench/null_lane_test.go`.
+Reproduce with
+`cd server-kit/go && go test ./appbench/ -run '^$' -bench '^BenchmarkNullLane_' -benchmem -count=5`.
+
+## 2026-08-04 Columnar MLP kernels consolidated (propagation of item 60)
+
+The 4-way interleaved ("Memory-Level Parallelism") loop kernels introduced for
+`sumFloat64sScalar`, `validityBitmap.nullCount`, and the selection bitmap
+bitwise ops were extracted into shared, individually benchmarked helpers in
+`server-kit/go/hermes/columnar_mlp.go` (`popcountWords`, `andWords`, `orWords`,
+`andNotWords`, `notWords`). All six former call sites now route through them —
+removing ~6 hand-rolled copies — and `SelectionBitmap.maskValidity` was fixed to
+use the same kernel: its per-word `if i < len(words)` branch is hoisted into a
+bulk `andWords` region plus a zeroed tail, so the filter hot path is branch-free.
+
+Correctness is guarded by scalar-reference parity tests across every tail length
+around the 4-word stride (`0,1,2,3,4,5,7,8,9,15,16,17,63,64,65`) plus a
+fail-closed panic test for the `len(src) < len(dst)` contract violation
+(`columnar_mlp_test.go`).
+
+Measured on this host (Apple Silicon, `-8`, `benchWords=4096` ≈ 256 Ki bitmap
+rows, best of 3, 0 B/op 0 allocs/op):
+
+| Kernel | Naive (single stream) | Interleaved (MLP) | Speedup |
+| --- | ---: | ---: | ---: |
+| `andWords` (element-wise `&=`) | 2091–2125 ns/op | 1271–1374 ns/op | ~1.65x |
+| `popcountWords` (POPCNT reduce) | 1758–1772 ns/op | 1597–1618 ns/op | ~1.10x |
+
+The element-wise store stream (used by `And`/`Or`/`AndNot`/`maskValidity`) gains
+most, since the naive form serializes on a single destination stream. Popcount
+gains little: `bits.OnesCount64` already pipelines, so only the single reduction
+accumulator is freed — an honest, smaller win than the 4.13x reported for the
+pure-latency scalar float-sum microbench in item 60. Reproduce with
+`go test ./hermes/ -run '^$' -bench 'PopcountWords|AndWords' -benchmem -count=3`.
+
 ## 2026-07-11 Cumulative-work profiling and Hermes count traversal
 
 Foundation now distinguishes cumulative allocation (`alloc_space`,
@@ -3619,3 +3708,132 @@ Researched against the current tree; each is a distinct trap:
 `tooling/scripts/go_static_analysis_check.sh` runs `gopls check` and gates on it
 under `GOPLS_CHECK_STRICT=1` / `FOUNDATION_STRICT_LINT=1` (warn-only otherwise),
 so the fleet cannot silently regress back to the DCE-prone form.
+
+## 2026-08-04 HTTP ingress allocation pass
+
+Rung 03 of the null lane parsed `{}` into a `DispatchRequest` in 28 allocations
+and 7080 bytes. Rung 07 materializes that same `{}` into the extension
+container in 1 allocation and 48 bytes. Ingress was spending ~20x the parse it
+wraps and 7 KB on a two-character body, against a well-tuned-Go target of
+single-digit allocations. This pass closed the gap that was closable and priced
+the rest.
+
+### Where the 28 allocations actually went
+
+Profiled with `-memprofile` on rung 03 rather than reasoned about:
+
+| Cause | Share |
+| --- | --- |
+| `net/textproto.canonicalMIMEHeaderKey` | 33% of allocations |
+| `metadata.appendGlobalContextObject` + its `Clone` | 84% of bytes |
+| `metadata.New` (four eager empty containers) | 13% of allocations |
+| `io.ReadAll` fixed 512-byte start buffer | 512 bytes |
+
+Three of the four are not translation cost. They are spelling and defaults.
+
+### Changes
+
+1. **Canonical MIME header spellings** (`httpapi/correlation.go`).
+   `Header.Get("X-Request-ID")` allocates a new string on every call, because
+   the key is neither already canonical nor in textproto's common-header table.
+   Ingress performs a dozen such lookups per request. `"X-Request-Id"` is free
+   and behaviourally identical — `Get`/`Set` canonicalize either way, and Go
+   was already emitting the canonical spelling on the wire.
+2. **`appendGlobalContextObject` omits empty fields** (`metadata/metadata.go`).
+   It had been materializing all nine `GlobalContext` fields as empty strings
+   and then deep-cloning the map it had just built. It now skips empties, in
+   line with `appendScalarFieldsObject` and the struct's own `omitempty` tags,
+   and takes ownership via the new `extension.ObjectValueOwned`.
+3. **`ToObject` sizes its result map.** Neutral on this path (4-6 keys fit one
+   bucket either way); it documents the expected width and stops a seventh
+   field from silently buying a second ~1 KB bucket.
+4. **`readRequestBody` sizes the first buffer from Content-Length**
+   (`httpapi/dispatch_route.go`), replacing `io.ReadAll`'s fixed 512.
+
+Attribution matters here: **changes 1 and 2 produced the entire null-lane
+win.** Change 3 is documentation with a guard rail, and change 4 is invisible
+to the null lane for the reason described below.
+
+### Results (Apple M1 Pro)
+
+| Benchmark | Before | After |
+| --- | --- | --- |
+| `NullLane_03_HTTPDispatchBuild` | 28 allocs, 7080 B | 14 allocs, 2891 B |
+| `NullLane_04_HTTPRouteHandler` | 28 allocs, 7080 B | 14 allocs, 2891 B |
+| `NullLane_05_HTTPRouteHandlerCorrelated` | 44 allocs, 8073 B | 22 allocs, 3756 B |
+| `NullLane_06_HTTPSecuredChain` | 97 allocs, 11141 B | 75 allocs, 6837 B |
+| `AppLane_HTTPIngress_JSONToDispatchRequest` | 56 allocs, 16643 B | 43 allocs, 12508 B |
+
+### Null-lane fidelity correction
+
+`nullRequest` wrapped its payload in a custom `nullBody` type, which
+`httptest.NewRequest` does not recognize, so `ContentLength` was `-1` and every
+HTTP rung measured the chunked-transfer path that almost no client uses. The
+lane now sets `ContentLength` explicitly, as a real server does from the
+request header. This is what exposed the remaining 509 bytes in rungs 03-06.
+
+The lesson generalizes: the null lane's scaffolding is deliberately synthetic,
+and synthetic scaffolding can silently select a different code path than
+production traffic takes. Check which branch the lane is actually measuring
+before trusting a rung to be a floor.
+
+### `AppLane_HTTPIngress_JSONBodyKilobyte`
+
+Added, because a two-byte body cannot show body-read cost. Measured against
+`io.ReadAll` at realistic payload sizes:
+
+| Body | Sized read | `io.ReadAll` |
+| --- | --- | --- |
+| 41 B | 48 B, 1 alloc | 512 B, 1 alloc |
+| 4 KB | 4864 B, 1 alloc | 10368 B, 9 allocs |
+| 64 KB | 73728 B, 1 alloc | 138112 B, 16 allocs |
+
+Rung 03 measures per-request overhead; this benchmark measures per-kilobyte
+overhead. Only the second scales with the product, and the pair is what keeps
+the two from being confused.
+
+### The finding underneath: `extension.Value` is 112 bytes
+
+`Object` is `map[string]Value`, so one entry costs 128 bytes, and Go allocates
+map buckets eight entries at a time. **Writing the first key into any `Object`
+costs roughly 1 KB, whether it ends up holding one field or eight.** That, not
+translation, is why an empty request cost 7 KB. 25 packages hold
+`extension.Object` on request paths.
+
+This is now documented as a cost model in the `extension` package doc, with
+three rules ordered by savings: prefer a struct on per-request paths; omit
+empty fields; prefer `ObjectValueOwned` over `ObjectValue` for freshly built
+maps. `extension/value_size_test.go` gates the width so it cannot grow
+silently.
+
+### Packing `Value`: measured and declined
+
+Overlapping the union was measured, per populated `Object`, on go1.26:
+
+| `Value` size | bytes/Object | allocs | ns |
+| --- | --- | --- | --- |
+| 112 (today) | 1200 | 2 | 288 |
+| 88 (no unsafe) | 944 | 2 | 225 |
+| 48 (sanctioned unsafe) | 624 | 2 | 166 |
+| 40 (full union) | 528 | 2 | 168 |
+
+**The allocation count does not move at any width.** Shrinking `Value` is a
+bytes-and-latency lever, not an allocations lever; single-digit allocations
+comes from not carrying an `Object` per request at all. The remaining step to
+40 bytes additionally requires storing a Go map through `unsafe.Pointer` — a
+representation the runtime does not promise, and which changed shape when maps
+moved to Swiss tables in Go 1.24 — for 96 bytes and zero nanoseconds.
+
+Declined: putting `unsafe.Pointer` into the most widely held type in server-kit
+was not justified by a benefit that did not address the goal. Reopen with new
+measurements, not intuition. The ceiling constant in
+`extension/value_size_test.go` records the decision.
+
+### Not done
+
+`metadata.New()` eagerly allocates four containers, still 28% of the remaining
+allocations on the ingress path. Only four sites write into a nil-able map
+(three in `metadata`, one in `featureflags`), but `EnvelopeMetadata` is public
+and vendored apps construct and populate it directly, so the non-nil guarantee
+is contract rather than implementation. Removing it needs a deprecation pass
+across the vendored apps, not an edit in `metadata.go`.

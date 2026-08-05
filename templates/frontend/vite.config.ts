@@ -14,9 +14,8 @@ export default defineConfig({
       'react-dom': path.resolve(__dirname, './node_modules/react-dom'),
       'styled-components': path.resolve(__dirname, './node_modules/styled-components'),
       'framer-motion': path.resolve(__dirname, './node_modules/framer-motion'),
-      zustand: path.resolve(__dirname, './node_modules/zustand'),
     },
-    dedupe: ['react', 'react-dom', 'styled-components', 'framer-motion'],
+    dedupe: ['react', 'react-dom', 'styled-components', 'framer-motion', 'zustand'],
   },
   server: {
     port: 5173,

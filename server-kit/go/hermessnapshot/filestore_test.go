@@ -441,6 +441,15 @@ func TestWriteFileAtomicRenameFailure(t *testing.T) {
 	}
 }
 
+// closeQuiet closes a file and discards the error. It lives here because the
+// tests are its only remaining user: the production clone lanes that once
+// needed it now delegate to kernellane.
+func closeQuiet(f *os.File) {
+	_ = f.Close()
+}
+
+// TestCloneFileSourceErrors exercises the delegation to kernellane.CloneFile:
+// the error paths must still surface through hermessnapshot unchanged.
 func TestCloneFileSourceErrors(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := cloneFile(filepath.Join(dir, "dst"), filepath.Join(dir, "absent")); err == nil {
@@ -522,32 +531,10 @@ func TestObjectStoreNewerThanEdges(t *testing.T) {
 	}
 }
 
-func TestUserspaceCopySeekErrors(t *testing.T) {
-	dir := t.TempDir()
-	openFile := func(name string) *os.File {
-		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-		f, err := os.OpenFile(path, os.O_RDWR, 0o600)
-		if err != nil {
-			t.Fatalf("open %s: %v", name, err)
-		}
-		return f
-	}
-	src := openFile("src")
-	dst := openFile("dst")
-	closeQuiet(src)
-	if _, err := userspaceCopy(dst, src); err == nil {
-		t.Fatal("closed source must fail seek")
-	}
-	src2 := openFile("src2")
-	defer closeQuiet(src2)
-	closeQuiet(dst)
-	if _, err := userspaceCopy(dst, src2); err == nil {
-		t.Fatal("closed destination must fail seek")
-	}
-}
+// The userspace clone lane's seek/copy error handling moved to kernellane along
+// with the implementation; it is covered there by
+// TestUserspaceCloneSurfacesSeekAndCopyErrors. Duplicating it here would test
+// another package's internals through a delegation.
 
 func TestWriteFileAtomicRenameOntoDirectory(t *testing.T) {
 	dir := t.TempDir()

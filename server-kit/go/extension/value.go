@@ -2,6 +2,30 @@
 //
 // It is intentionally narrower than any/interface{}: callers keep an open
 // schema surface without pushing type assertions into hot product paths.
+//
+// # Cost model
+//
+// Object is a map[string]Value, and Value is 112 bytes wide (see
+// value_size_test.go, which gates that number). One key/value entry is
+// therefore 128 bytes, and Go allocates map buckets eight entries at a time —
+// so writing the first key into any Object costs roughly 1 KB, whether it ends
+// up holding one field or eight.
+//
+// Three rules follow, in order of how much they save:
+//
+//  1. On a path that runs per request, prefer a struct. Object is for open
+//     schema at serialization boundaries. A handler that needs three known
+//     fields should not reach for Object to carry them.
+//  2. Omit empty fields rather than materializing them. Nine string fields of
+//     which two are set still costs a full bucket, and the seven empty ones
+//     travel through every downstream clone and encode.
+//  3. Prefer ObjectValueOwned over ObjectValue when wrapping an object you
+//     just built and do not retain. ObjectValue deep-clones; on a freshly
+//     constructed map that clone is pure waste.
+//
+// These are not micro-optimizations at this scale: 25 packages hold
+// extension.Object on request paths, so a habit here is multiplied everywhere.
+// docs/foundation_benchmarks.md records what the HTTP null lane pays.
 package extension
 
 import (
@@ -32,6 +56,15 @@ const (
 	KindObject
 )
 
+// Value is a tagged union: kind selects exactly one of the fields below, and
+// the rest are dead weight for the lifetime of the Value.
+//
+// The layout is unpacked on purpose: readable, no unsafe, and safe for a type
+// this widely held. Packing it into ptr/len/cap reaches 48 bytes but was
+// measured and declined — it saves bytes and latency, not allocations. See
+// value_size_test.go for the numbers and the reasoning.
+//
+// Adding a field here is not free anywhere. See the package cost model.
 type Value struct {
 	kind  Kind
 	str   string
@@ -44,6 +77,9 @@ type Value struct {
 	obj   Object
 }
 
+// Object is an open map of extension values. Populating it costs about 1 KB
+// for the first key; see the package cost model before using it on a path that
+// runs per request.
 type Object map[string]Value
 
 // ObjectFromMap converts an open JSON-like map into a typed extension object.
@@ -76,6 +112,12 @@ func List(v []Value) Value  { return Value{kind: KindList, list: append([]Value(
 func ObjectValue(v Object) Value {
 	return Value{kind: KindObject, obj: v.Clone()}
 }
+
+// ObjectValueOwned wraps v without cloning it. The Value takes ownership: the
+// caller must not read or mutate v afterwards. Use it only for objects built
+// immediately beforehand and never aliased elsewhere; otherwise use
+// ObjectValue. Same contract as ObjectView, in the other direction.
+func ObjectValueOwned(v Object) Value { return objectValueOwned(v) }
 
 func listValueOwned(v []Value) Value {
 	return Value{kind: KindList, list: v}
