@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
@@ -42,9 +43,9 @@ func TestBuildRouteCatalog_SkipsIncompleteAndDeduplicates(t *testing.T) {
 	routes := []registry.HTTPRoute{
 		{Method: "POST", Path: "/v1/a/create", EventType: "a:create:v1:requested"},
 		{Method: "POST", Path: "/v1/a/create", EventType: "a:create:v1:requested"}, // dup method+path
-		{Method: "POST", Path: "", EventType: "b:create:v1:requested"},              // no path
-		{Method: "", Path: "/v1/c", EventType: "c:create:v1:requested"},             // no method
-		{Method: "POST", Path: "/v1/d", EventType: ""},                              // no event
+		{Method: "POST", Path: "", EventType: "b:create:v1:requested"},             // no path
+		{Method: "", Path: "/v1/c", EventType: "c:create:v1:requested"},            // no method
+		{Method: "POST", Path: "/v1/d", EventType: ""},                             // no event
 	}
 	catalog := BuildRouteCatalog(routes)
 	if len(catalog.Routes) != 1 {
@@ -101,5 +102,42 @@ func TestMarshalRouteCatalog_StableAndTrailingNewline(t *testing.T) {
 	}
 	if len(rt.Routes) != 1 || rt.Routes[0].EventType != "user:create:v1:requested" {
 		t.Errorf("round-trip=%+v", rt)
+	}
+}
+
+// The catalogue must not be able to carry an ambiguity the generated clients
+// cannot express. A stated route displaces its derived twin on the way in.
+func TestBuildRouteCatalog_StatedRouteDisplacesDerived(t *testing.T) {
+	t.Parallel()
+	routes := append(
+		RoutesFromEventTypes([]string{"identity:login:v1:requested"}),
+		MakeEventRoute("POST", "/v1/login", "identity:login:v1:requested", "", "", ""),
+	)
+
+	catalog := BuildRouteCatalog(routes)
+
+	if len(catalog.Routes) != 1 {
+		t.Fatalf("routes=%d want 1: %+v", len(catalog.Routes), catalog.Routes)
+	}
+	if catalog.Routes[0].Path != "/v1/login" {
+		t.Errorf("path=%q want the stated /v1/login", catalog.Routes[0].Path)
+	}
+	if err := ValidateRouteCatalog(catalog); err != nil {
+		t.Errorf("validate: %v", err)
+	}
+}
+
+// A conflict between two hand-written routes is the author's to settle, and it
+// fails the build that produced the catalogue rather than the browser that
+// imports the file generated from it.
+func TestMarshalRouteCatalog_RejectsDuplicateEventTypes(t *testing.T) {
+	t.Parallel()
+	routes := []registry.HTTPRoute{
+		MakeEventRoute("POST", "/v1/login", "identity:login:v1:requested", "", "", ""),
+		MakeEventRoute("POST", "/v1/session", "identity:login:v1:requested", "", "", ""),
+	}
+
+	if _, err := MarshalRouteCatalog(routes); !errors.Is(err, ErrDuplicateRouteEventType) {
+		t.Fatalf("err=%v want ErrDuplicateRouteEventType", err)
 	}
 }

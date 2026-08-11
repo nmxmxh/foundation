@@ -46,6 +46,74 @@ func RoutesFromEventTypes(eventTypes []string) []registry.HTTPRoute {
 	return routes
 }
 
+// DerivedRouteSource marks a route whose method and path were inferred from its
+// event_type rather than stated by the project. See MergeRoutes.
+const DerivedRouteSource = "event_type"
+
+// MergeRoutes reconciles derived routes with the ones a project states by hand,
+// so an event_type names exactly one route.
+//
+// The two are produced independently and both are legitimate. A project lists
+// its handlers in one map, from which RoutesFromHandlerMap derives a
+// conventional route for every event; separately it states routes for the
+// events that need a custom path, their own middleware, or a rate limiter. What
+// nothing did was subtract the first from the second, so an event with a stated
+// route was published twice — once at the path a client actually calls, once at
+// the derived path, which reaches the same handler with none of the wrapping.
+//
+// Two routes for one event is not a cosmetic redundancy. The generated frontend
+// registry (@ovasabi/runtime-transport createRouteRegistry) keys routes by event
+// type and refuses to build on a duplicate, so it takes down every dispatch in
+// the browser at import — not just its own. On the server it publishes a second
+// door to a handler whose stated door was wrapped for a reason.
+//
+// The stated route wins. It carries the path a client already calls and the
+// handler the project chose; the derived route is the convention fallback for
+// events nobody gave a path. Routes are identified as derived by the
+// route_source metadata RouteFromEventType stamps, so a project that states a
+// route never has to say so twice.
+//
+// Only the fallback is dropped. Two *stated* routes for one event are a
+// conflict this cannot resolve — nothing distinguishes them, and picking by
+// declaration order would decide a contract by the order of two appends — so
+// both survive here and ValidateRouteCatalog reports them. Order is otherwise
+// preserved, and routes without an event_type, served directly by their own
+// handler, are all kept.
+func MergeRoutes(derived []registry.HTTPRoute, stated ...[]registry.HTTPRoute) []registry.HTTPRoute {
+	combined := make([]registry.HTTPRoute, 0, len(derived))
+	combined = append(combined, derived...)
+	for _, routes := range stated {
+		combined = append(combined, routes...)
+	}
+
+	claimed := make(map[string]struct{}, len(combined))
+	for _, route := range combined {
+		eventType := strings.TrimSpace(route.EventType)
+		if eventType != "" && !isDerivedRoute(route) {
+			claimed[eventType] = struct{}{}
+		}
+	}
+
+	merged := make([]registry.HTTPRoute, 0, len(combined))
+	for _, route := range combined {
+		eventType := strings.TrimSpace(route.EventType)
+		if eventType != "" && isDerivedRoute(route) {
+			if _, stated := claimed[eventType]; stated {
+				continue
+			}
+		}
+		merged = append(merged, route)
+	}
+	return merged
+}
+
+// isDerivedRoute reports whether a route's shape was inferred from its event
+// name rather than stated by the project.
+func isDerivedRoute(route registry.HTTPRoute) bool {
+	source, _ := route.Metadata.GetString("route_source")
+	return source == DerivedRouteSource
+}
+
 // RouteFromEventType derives a conventional REST route from an event_type.
 func RouteFromEventType(eventType string) registry.HTTPRoute {
 	eventType = strings.TrimSpace(eventType)

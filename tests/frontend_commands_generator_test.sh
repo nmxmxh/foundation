@@ -97,4 +97,24 @@ if node "$GEN" --catalog "$BAD_CATALOG" --out "$OUT_DIR/badRoutes.ts" >/dev/null
   exit 1
 fi
 
+# Duplicate event type -> hard failure, and no output written. The browser
+# registry keys routes by event type and throws while building, so a catalog
+# that names one twice generates a file that cannot be imported at all.
+DUP_CATALOG="$OUT_DIR/duplicate.json"
+DUP_OUT="$OUT_DIR/dupRoutes.ts"
+cat >"$DUP_CATALOG" <<'EOF'
+{ "schema_version": "1.0", "generated_by": "test", "routes": [
+  { "method": "POST", "path": "/v1/auth/login", "event_type": "auth:login:v1:requested", "required_capability": "auth", "permission": "write" },
+  { "method": "POST", "path": "/v1/app/auth/login", "event_type": "auth:login:v1:requested", "required_capability": "auth", "permission": "write" }
+] }
+EOF
+if node "$GEN" --catalog "$DUP_CATALOG" --out "$DUP_OUT" >/dev/null 2>&1; then
+  echo "duplicate event type should fail generation" >&2
+  exit 1
+fi
+if [[ -f "$DUP_OUT" ]]; then
+  echo "duplicate event type should not produce output" >&2
+  exit 1
+fi
+
 echo "frontend commands generator test passed"

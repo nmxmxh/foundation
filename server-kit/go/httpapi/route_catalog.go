@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -36,12 +38,25 @@ type RouteCatalog struct {
 	Routes        []RouteCatalogEntry `json:"routes"`
 }
 
+// ErrDuplicateRouteEventType reports a catalog that names one event_type twice.
+//
+// The clients generated from this catalog index routes by event type — the
+// browser registry (@ovasabi/runtime-transport createRouteRegistry) throws on a
+// duplicate while *building*, which takes down every dispatch in the app, not
+// only the ambiguous one. A catalog carrying that ambiguity is unusable, and it
+// must not be possible to write one to disk and find out at import time in
+// someone's browser. MarshalRouteCatalog refuses instead.
+var ErrDuplicateRouteEventType = errors.New("route catalog names an event_type more than once")
+
 // BuildRouteCatalog projects the registered routes into the client catalog. It
-// is pure and deterministic: entries are de-duplicated by method+path, the
-// permission is normalized to the view/write/admin vocabulary the client
-// understands, and the result is sorted by event type then method+path so the
-// generated artifact is stable across runs.
+// is pure and deterministic: a stated route displaces the fallback derived from
+// its event name (see MergeRoutes), what remains is de-duplicated by
+// method+path, the permission is normalized to the view/write/admin vocabulary
+// the client understands, and the result is sorted by event type then
+// method+path so the generated artifact is stable across runs.
 func BuildRouteCatalog(routes []registry.HTTPRoute) RouteCatalog {
+	routes = MergeRoutes(routes)
+
 	entries := make([]RouteCatalogEntry, 0, len(routes))
 	seen := make(map[string]struct{}, len(routes))
 	for _, route := range routes {
@@ -83,11 +98,41 @@ func BuildRouteCatalog(routes []registry.HTTPRoute) RouteCatalog {
 	}
 }
 
+// ValidateRouteCatalog reports a catalog the generated clients cannot index.
+//
+// One rule: an event_type names at most one route. MergeRoutes already removes
+// the common cause — a stated route and the fallback derived from the same
+// event — so what reaches here is a genuine conflict between two hand-written
+// routes, which nothing but the author can settle.
+func ValidateRouteCatalog(catalog RouteCatalog) error {
+	seen := make(map[string]string, len(catalog.Routes))
+	var conflicts []string
+	for _, entry := range catalog.Routes {
+		if first, dup := seen[entry.EventType]; dup {
+			conflicts = append(conflicts, fmt.Sprintf(
+				"%s (%s and %s %s)", entry.EventType, first, entry.Method, entry.Path))
+			continue
+		}
+		seen[entry.EventType] = entry.Method + " " + entry.Path
+	}
+	if len(conflicts) == 0 {
+		return nil
+	}
+	sort.Strings(conflicts)
+	return fmt.Errorf("%w: %s", ErrDuplicateRouteEventType, strings.Join(conflicts, ", "))
+}
+
 // MarshalRouteCatalog serializes the catalog as stable, indented JSON with a
 // trailing newline so it round-trips cleanly through the generator's staleness
 // check and version control. Apps call this from a small route-catalog command.
+//
+// It validates before serializing, so a catalog the clients cannot index fails
+// the build that produced it rather than the browser that loads it.
 func MarshalRouteCatalog(routes []registry.HTTPRoute) ([]byte, error) {
 	catalog := BuildRouteCatalog(routes)
+	if err := ValidateRouteCatalog(catalog); err != nil {
+		return nil, err
+	}
 	data, err := json.MarshalIndent(catalog, "", "  ")
 	if err != nil {
 		return nil, err

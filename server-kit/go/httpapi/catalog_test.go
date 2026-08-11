@@ -1,6 +1,10 @@
 package httpapi
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
+)
 
 func TestRoutesFromHandlerMapDerivesStableCatalogue(t *testing.T) {
 	routes := RoutesFromHandlerMap(map[string]func(){
@@ -50,5 +54,74 @@ func TestRoutesFromEventTypesDedupesAndSorts(t *testing.T) {
 	}
 	if routes[0].EventType != "a:create:v1:requested" {
 		t.Fatalf("routes not sorted: %+v", routes)
+	}
+}
+
+// A stated route displaces the fallback derived from the same event name.
+//
+// The two arrive from different places — the handler map derives one, the
+// project states the other — and both used to reach the catalogue, which is how
+// an auth surface came to be published at both /v1/auth/login and the derived
+// /v1/pronto/auth/login: two doors to one handler, only one of them wrapped in
+// the credential rate limiter, and a duplicate the browser registry refuses to
+// build from.
+func TestMergeRoutesPrefersStatedOverDerived(t *testing.T) {
+	derived := RoutesFromEventTypes([]string{
+		"identity:login:v1:requested",
+		"identity:get_user:v1:requested",
+	})
+	stated := []registry.HTTPRoute{
+		MakeEventRoute("POST", "/v1/login", "identity:login:v1:requested", "", "", ""),
+	}
+
+	merged := MergeRoutes(derived, stated)
+
+	if len(merged) != 2 {
+		t.Fatalf("routes=%d want 2: %+v", len(merged), merged)
+	}
+	byEvent := map[string]string{}
+	for _, route := range merged {
+		if _, dup := byEvent[route.EventType]; dup {
+			t.Fatalf("%s survived twice: %+v", route.EventType, merged)
+		}
+		byEvent[route.EventType] = route.Method + " " + route.Path
+	}
+	if got := byEvent["identity:login:v1:requested"]; got != "POST /v1/login" {
+		t.Errorf("login=%q want the stated route", got)
+	}
+	// The event nobody stated keeps its convention route.
+	if got := byEvent["identity:get_user:v1:requested"]; got != "GET /v1/identity/get-user" {
+		t.Errorf("get_user=%q want the derived route", got)
+	}
+}
+
+// Routes with no event type are served directly by their own handler and are
+// never in competition with anything.
+func TestMergeRoutesKeepsEventlessRoutes(t *testing.T) {
+	stated := []registry.HTTPRoute{
+		{Method: "GET", Path: "/robots.txt"},
+		{Method: "GET", Path: "/sitemap.xml"},
+	}
+
+	merged := MergeRoutes(nil, stated)
+
+	if len(merged) != 2 {
+		t.Fatalf("routes=%d want 2: %+v", len(merged), merged)
+	}
+}
+
+// Two stated routes for one event cannot be resolved here: nothing tells them
+// apart, and deciding a published contract by which append ran last would be
+// worse than saying so. They survive for ValidateRouteCatalog to report.
+func TestMergeRoutesKeepsStatedConflictsForValidation(t *testing.T) {
+	stated := []registry.HTTPRoute{
+		MakeEventRoute("POST", "/v1/login", "identity:login:v1:requested", "", "", ""),
+		MakeEventRoute("POST", "/v1/session", "identity:login:v1:requested", "", "", ""),
+	}
+
+	merged := MergeRoutes(nil, stated)
+
+	if len(merged) != 2 {
+		t.Fatalf("routes=%d want both stated routes kept: %+v", len(merged), merged)
 	}
 }

@@ -91,7 +91,34 @@ function loadCatalog(catalogPath) {
   for (const route of routes) {
     validateRoute(route, catalogPath);
   }
+  validateUniqueEventTypes(routes, catalogPath);
   return { schemaVersion: parsed.schema_version, routes };
+}
+
+// createRouteRegistry indexes routes by event type and throws on a duplicate
+// while building — so a catalog naming one event twice generates a file that
+// takes down every dispatch in the browser the moment it is imported, and the
+// error surfaces in a test run or a user's console rather than here. Refuse to
+// write it. The Go side removes the ordinary cause (a stated route and the
+// fallback derived from the same event); this catches whatever reached the
+// artifact anyway, including a hand-edited catalog.
+function validateUniqueEventTypes(routes, catalogPath) {
+  const seen = new Map();
+  const conflicts = [];
+  for (const route of routes) {
+    const first = seen.get(route.event_type);
+    if (first) {
+      conflicts.push(`  ${route.event_type}: ${first} and ${route.method} ${route.path}`);
+      continue;
+    }
+    seen.set(route.event_type, `${route.method} ${route.path}`);
+  }
+  if (conflicts.length > 0) {
+    fail(
+      `route catalog names an event type more than once in ${rel(catalogPath)}; ` +
+        `the generated registry cannot be built from it:\n${conflicts.sort().join("\n")}`,
+    );
+  }
 }
 
 const PERMISSIONS = new Set(["view", "write", "admin"]);
