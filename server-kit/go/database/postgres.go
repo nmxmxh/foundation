@@ -212,11 +212,23 @@ func ApplyPoolOptions(cfg *pgxpool.Config, opts PoolOptions) {
 	cfg.ConnConfig.DescriptionCacheCapacity = opts.DescriptionCacheCapacity
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheStatement
 	if cfg.ConnConfig.RuntimeParams == nil {
-		cfg.ConnConfig.RuntimeParams = make(map[string]string, 3)
+		cfg.ConnConfig.RuntimeParams = make(map[string]string, 4)
 	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = "public"
 	cfg.ConnConfig.RuntimeParams["statement_timeout"] = fmt.Sprintf("%d", opts.QueryTimeout.Milliseconds())
 	cfg.ConnConfig.RuntimeParams["lock_timeout"] = fmt.Sprintf("%d", opts.LockTimeout.Milliseconds())
 	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = fmt.Sprintf("%d", opts.IdleTxTimeout.Milliseconds())
+
+	existingAfterConnect := cfg.AfterConnect
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		if _, err := conn.Exec(ctx, "SET search_path TO public;"); err != nil {
+			return err
+		}
+		if existingAfterConnect != nil {
+			return existingAfterConnect(ctx, conn)
+		}
+		return nil
+	}
 }
 
 // ApplyRiverPoolOptions configures a pgx pool that will host a River job queue
@@ -249,10 +261,22 @@ func ApplyRiverPoolOptions(cfg *pgxpool.Config, opts PoolOptions) {
 	cfg.ConnConfig.DescriptionCacheCapacity = opts.DescriptionCacheCapacity
 	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeCacheStatement
 	if cfg.ConnConfig.RuntimeParams == nil {
-		cfg.ConnConfig.RuntimeParams = make(map[string]string, 1)
+		cfg.ConnConfig.RuntimeParams = make(map[string]string, 2)
 	}
+	cfg.ConnConfig.RuntimeParams["search_path"] = "public"
 	// No statement_timeout / lock_timeout: River owns its own deadlines.
 	cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"] = fmt.Sprintf("%d", opts.IdleTxTimeout.Milliseconds())
+
+	existingAfterConnect := cfg.AfterConnect
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		if _, err := conn.Exec(ctx, "SET search_path TO public;"); err != nil {
+			return err
+		}
+		if existingAfterConnect != nil {
+			return existingAfterConnect(ctx, conn)
+		}
+		return nil
+	}
 }
 
 // NewRiverPool builds a dedicated pgx pool for a River job queue from a database
@@ -298,6 +322,46 @@ func ResyncRiverJobSequence(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("failed to resynchronize river_job_id_seq: %w", err)
 	}
 	return nil
+}
+
+// WaitForRiverTableReady blocks until the public.river_job table exists in PostgreSQL,
+// or until timeout expires. This prevents background worker clients from attempting
+// to poll or acquire job locks during database startup/recovery before migrations have run.
+func WaitForRiverTableReady(ctx context.Context, pool *pgxpool.Pool, timeout time.Duration) error {
+	if pool == nil {
+		return errors.New("database pool is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		var ready bool
+		err := pool.QueryRow(waitCtx, `
+			SELECT EXISTS (
+				SELECT 1 FROM information_schema.tables 
+				WHERE table_schema = 'public' AND table_name = 'river_job'
+			)
+		`).Scan(&ready)
+
+		if err == nil && ready {
+			return nil
+		}
+
+		select {
+		case <-waitCtx.Done():
+			if err != nil {
+				return fmt.Errorf("river_job table readiness check failed: %w", err)
+			}
+			return fmt.Errorf("river_job table not ready before timeout: %w", waitCtx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 

@@ -1,0 +1,91 @@
+# Project-owned Compose overrides.
+#
+# Docker Compose loads this file automatically alongside docker-compose.yml and
+# merges it on top — no -f flags, no extra commands. Anything declared here wins.
+#
+# WHY THIS FILE EXISTS
+#
+# docker-compose.yml is seeded once and is yours, but Foundation updates still
+# reach into it through managed patches, which is how a fix to service wiring,
+# a healthcheck, or a network alias gets delivered to a project that was
+# scaffolded two years ago. That is deliberate and it is what keeps old projects
+# working.
+#
+# The cost is that a managed patch cannot always tell a Foundation default you
+# never touched from a value you chose on purpose. This file removes the
+# ambiguity: a setting here is unambiguously yours, Foundation never writes to
+# this file, and the merge guarantees it wins over whatever the patch did.
+#
+# So: keep deliberate, project-specific choices here. Leave the shared wiring in
+# docker-compose.yml where it can keep receiving fixes.
+#
+# WHAT BELONGS HERE
+#
+#   - service versions you have deliberately pinned and do not want moved
+#   - a different database distribution (PostGIS, TimescaleDB, pgvector, Valkey)
+#   - published host ports, which are deployment-specific
+#   - resource limits, replica counts, restart policies
+#   - extra services that are yours alone
+#   - local bind mounts for development
+#
+# WHAT DOES NOT BELONG HERE
+#
+#   - secrets. Use .env, which is gitignored. This file is committed.
+#   - anything you want Foundation to keep maintaining for you.
+#
+# NOTE ON VERSIONS
+#
+# Most version pinning is better done in .env (POSTGRES_VERSION, POSTGRES_BASE_IMAGE,
+# and friends) because docker-compose.yml already reads those variables and
+# Foundation treats them as project-owned. Reach for this file when you need to
+# change the shape of a service rather than a value it already parameterises.
+#
+# Foundation declares a supported RANGE for irreversible services and checks your
+# .env against it — not against Foundation's current default. Staying on an older
+# in-range Postgres is a supported state, not drift. See tooling/versions.tsv and
+# `make check-version-consistency`.
+
+services: {}
+
+# ---------------------------------------------------------------------------
+# Examples — uncomment and adapt.
+# ---------------------------------------------------------------------------
+#
+# Run PostGIS instead of stock Postgres. Prefer setting POSTGRES_BASE_IMAGE and
+# POSTGRES_VERSION in .env; use this form only if you also need to change how
+# the service is built or run.
+#
+# services:
+#   app-postgres:
+#     build:
+#       args:
+#         POSTGRES_BASE_IMAGE: "postgis/postgis"
+#         POSTGRES_VERSION: "16-3.4"
+#
+# Publish the database on the host for local tooling.
+#
+# services:
+#   app-postgres:
+#     ports:
+#       - "5432:5432"
+#
+# Bound the API container's resources.
+#
+# services:
+#   app:
+#     deploy:
+#       resources:
+#         limits:
+#           cpus: "2.0"
+#           memory: 2G
+#
+# Add a service that is yours alone.
+#
+# services:
+#   worker-extra:
+#     build:
+#       context: .
+#       dockerfile: Dockerfile
+#     command: ["/app/worker", "--queue=reports"]
+#     networks:
+#       - app-network

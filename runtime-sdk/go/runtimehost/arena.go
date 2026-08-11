@@ -97,7 +97,10 @@ func NewArenaOverMapping(raw []byte, flush func(staged int) error, readAt func([
 // stays in the build-tagged files and this logic is testable on any OS with a
 // plain byte slice.
 func NewArenaOver(raw []byte) (*Arena, error) {
-	if uint32(len(raw)) < generated.ARENA_MIN_BYTES {
+	// Both bounds are checked in int/uint64 space before any narrowing. A
+	// uint32(len(raw)) comparison would truncate a region larger than 4 GiB and
+	// could report it as undersized rather than oversized.
+	if len(raw) < int(generated.ARENA_MIN_BYTES) {
 		return nil, fmt.Errorf("arena region is %d bytes, below the %d minimum",
 			len(raw), generated.ARENA_MIN_BYTES)
 	}
@@ -105,6 +108,7 @@ func NewArenaOver(raw []byte) (*Arena, error) {
 		return nil, fmt.Errorf("arena region is %d bytes, above the %d maximum",
 			len(raw), generated.ARENA_MAX_BYTES)
 	}
+	// #nosec G115 -- guarded above: len(raw) <= ARENA_MAX_BYTES < MaxUint32.
 	a := &Arena{raw: raw, capacity: uint32(len(raw))}
 	a.reset()
 	return a, nil

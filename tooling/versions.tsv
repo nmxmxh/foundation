@@ -1,0 +1,43 @@
+# Single source of truth for toolchain and service versions.
+#
+# Every version literal in templates/, tooling/, tests/, and .github/ must agree
+# with the value here. version_consistency_check.sh proves it.
+#
+# class decides whether Foundation may move a scaffolded app forward on its own:
+#
+#   reversible    Reverting costs a version-number change and nothing else. No
+#                 state is written that a downgrade cannot read. Foundation may
+#                 bump these for apps; a customized value only warns.
+#   irreversible  Reverting requires restoring from backup, because upgrading
+#                 rewrites on-disk state (pg_upgrade, RDB/AOF format). Foundation
+#                 must NEVER bump these for an app. A customized value fails.
+#
+# supported is what an app is allowed to be on, not what Foundation ships:
+#
+#   current       The app must match value exactly. Used for reversible things,
+#                 where there is no cost to staying current.
+#   MIN..MAX      The app may sit anywhere in the inclusive range. Used for
+#                 irreversible things, so a 2027 app can still be supported in
+#                 2035 without being force-migrated. `value` is what a NEW app is
+#                 seeded with; existing apps are only checked against the range.
+#   any           Foundation seeds a default and never checks or moves it.
+#
+# Bumping an irreversible MIN is a breaking change for apps below it and needs a
+# migration note in CHANGELOG.md.
+#
+# Distributions vs versions. A project may run PostGIS, TimescaleDB, pgvector, or
+# Valkey instead of the stock image. That choice is the project's and Foundation
+# does not constrain it — hence the *_IMAGE keys with `any`. What Foundation does
+# constrain is the ENGINE MAJOR, because that is what decides whether an existing
+# data directory can be read. So POSTGRES_VERSION=16-3.4 (PostGIS on Postgres 16)
+# is range-checked as 16, and only the leading integer is compared.
+#
+# key	value	class	supported	notes
+GO_VERSION	1.26	reversible	current	Go toolchain for builds and CI; wrapper substrate, no persisted state.
+NODE_VERSION	24	reversible	current	Node for frontend build and CI.
+ALPINE_VERSION	3.23	reversible	current	Base image for Go build and runtime stages.
+MIGRATE_VERSION	v4.17.0	reversible	current	golang-migrate CLI image; the tool is stateless, the migrations it applies are not.
+POSTGRES_BASE_IMAGE	postgres	app-owned	any	Distribution: postgres, postgis/postgis, timescale/timescaledb, pgvector/pgvector.
+POSTGRES_VERSION	18	irreversible	15..18	Major version upgrade rewrites the data directory (pg_upgrade). Range-checked on the leading engine major, so 16-3.4 reads as 16.
+REDIS_BASE_IMAGE	redis	app-owned	any	Distribution: redis, valkey/valkey.
+REDIS_VERSION	8-alpine	irreversible	7..8	RDB/AOF format is not downgrade-safe once written. Range-checked on the leading major.

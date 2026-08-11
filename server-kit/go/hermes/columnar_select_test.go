@@ -203,7 +203,7 @@ func assertSelection(t *testing.T, label string, sel *SelectionBitmap, expected 
 func clone(sel SelectionBitmap) SelectionBitmap {
 	words := make([]uint64, len(sel.words))
 	copy(words, sel.words)
-	return SelectionBitmap{words: words, n: sel.n}
+	return SelectionBitmap{bitmap: bitmap{words: words, n: sel.n}}
 }
 
 func TestSelectionBitmapNullsNeverMatch(t *testing.T) {
@@ -405,7 +405,7 @@ func BenchmarkHermesColumnarBitmapFilterSum(b *testing.B) {
 	bytesTouched := int64(batch.Rows)*8*2 + wordBytes + int64(merged.Count())*8
 
 	b.ReportAllocs()
-	
+
 	var sink float64
 	for b.Loop() {
 		batch, err := store.GetColumnarBatch(ctx, "ticks", query, fields, Fence{})
@@ -442,7 +442,7 @@ func BenchmarkHermesListRecordsFilterSum(b *testing.B) {
 	query := Query{OrganizationID: "org_1"}
 
 	b.ReportAllocs()
-	
+
 	var sink float64
 	for b.Loop() {
 		list, err := store.ListRecords(ctx, "ticks", query, Fence{})
@@ -496,7 +496,7 @@ func BenchmarkHermesSelectionBitmapMerge10K(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	
+
 	var sink int
 	for b.Loop() {
 		merged := clone(left)
@@ -518,7 +518,7 @@ func BenchmarkHermesColumnarBitmapFilterCachedBatch(b *testing.B) {
 	batch := fetchSelectFixtureBatch(b, store, "price", "bucket")
 
 	b.ReportAllocs()
-	
+
 	var sink float64
 	for b.Loop() {
 		priceSel, err := batch.SelectFloat64("price", CompareGt, 7500)

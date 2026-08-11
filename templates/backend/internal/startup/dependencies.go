@@ -204,6 +204,9 @@ func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeSto
 	if !registered {
 		return engine, nil, nil // insert-only: nothing to start or stop
 	}
+	if err := database.WaitForRiverTableReady(ctx, pool, 30*time.Second); err != nil {
+		return nil, nil, fmt.Errorf("wait for river_job table: %w", err)
+	}
 	if err := client.Start(ctx); err != nil {
 		return nil, nil, fmt.Errorf("start river client: %w", err)
 	}

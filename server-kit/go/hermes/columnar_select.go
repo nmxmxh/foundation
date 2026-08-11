@@ -13,10 +13,7 @@ package hermes
 // Null semantics follow SQL's practical reading: a null cell never matches any
 // predicate, so every constructor intersects with the column's validity words.
 
-import (
-	"fmt"
-	"math/bits"
-)
+import "fmt"
 
 // CompareOp is the comparison operator for typed predicate constructors.
 type CompareOp int
@@ -52,17 +49,17 @@ func (op CompareOp) String() string {
 // SelectionBitmap is a packed row-selection mask over one RecordBatch. Bit i
 // set means row i is selected. Bits at positions >= Len() are always zero
 // (tail-word hygiene is preserved by every constructor and merge).
+//
+// It is the shared columnar bitmap (columnar_bitmap.go) with the selection
+// vocabulary on top; validity masks are the same structure, which is what lets
+// maskValidity be a single bulk AND.
 type SelectionBitmap struct {
-	words []uint64
-	n     int
+	bitmap
 }
 
 // NewSelectionBitmap returns an empty (nothing selected) bitmap for n rows.
 func NewSelectionBitmap(n int) SelectionBitmap {
-	if n < 0 {
-		n = 0
-	}
-	return SelectionBitmap{words: make([]uint64, (n+63)/64), n: n}
+	return SelectionBitmap{bitmap: newBitmap(n)}
 }
 
 // Len returns the row count the bitmap covers.
@@ -70,86 +67,33 @@ func (s *SelectionBitmap) Len() int { return s.n }
 
 // Count returns the number of selected rows. See popcountWords for the
 // interleaved POPCNT/CNT kernel.
-func (s *SelectionBitmap) Count() int {
-	return popcountWords(s.words)
-}
+func (s *SelectionBitmap) Count() int { return s.count() }
 
 // IsSelected reports whether row i is selected. Out-of-range rows are not
 // selected.
-func (s *SelectionBitmap) IsSelected(i int) bool {
-	if i < 0 || i >= s.n {
-		return false
-	}
-	return (s.words[i>>6]>>uint(i&63))&1 == 1
-}
-
-// tailMask zeroes any bits above n in the final word so complement-style
-// operations cannot select phantom rows.
-func (s *SelectionBitmap) tailMask() {
-	if s.n == 0 || len(s.words) == 0 {
-		return
-	}
-	rem := uint(s.n & 63)
-	if rem != 0 {
-		s.words[len(s.words)-1] &= (1 << rem) - 1
-	}
-}
-
-func (s *SelectionBitmap) sameShape(other *SelectionBitmap) error {
-	if s.n != other.n {
-		return fmt.Errorf("hermes selection bitmaps cover different row counts: %d vs %d", s.n, other.n)
-	}
-	return nil
-}
+func (s *SelectionBitmap) IsSelected(i int) bool { return s.get(i) }
 
 // And intersects the receiver with other in place.
-func (s *SelectionBitmap) And(other *SelectionBitmap) error {
-	if err := s.sameShape(other); err != nil {
-		return err
-	}
-	andWords(s.words, other.words)
-	return nil
-}
+func (s *SelectionBitmap) And(other *SelectionBitmap) error { return s.and(&other.bitmap) }
 
 // Or unions the receiver with other in place.
-func (s *SelectionBitmap) Or(other *SelectionBitmap) error {
-	if err := s.sameShape(other); err != nil {
-		return err
-	}
-	orWords(s.words, other.words)
-	return nil
-}
+func (s *SelectionBitmap) Or(other *SelectionBitmap) error { return s.or(&other.bitmap) }
 
 // AndNot removes other's selected rows from the receiver in place.
-func (s *SelectionBitmap) AndNot(other *SelectionBitmap) error {
-	if err := s.sameShape(other); err != nil {
-		return err
-	}
-	andNotWords(s.words, other.words)
-	return nil
-}
+func (s *SelectionBitmap) AndNot(other *SelectionBitmap) error { return s.andNot(&other.bitmap) }
 
 // Not complements the selection in place. Rows beyond Len() stay unselected.
-func (s *SelectionBitmap) Not() {
-	notWords(s.words)
-	s.tailMask()
-}
+//
+// Over a nullable column this re-selects null rows: under two-valued logic
+// "did not match" and "had no value" are the same bit, so the complement of a
+// validity-masked selection includes the nulls. Re-intersect with validity when
+// that matters — see docs/columnar_null_algebra.md ("The complement trap").
+func (s *SelectionBitmap) Not() { s.not() }
 
 // ForEachSelected visits selected rows in ascending order until fn returns
 // false. Iteration is a word bit-scan: zero words are skipped in one compare,
 // and each selected row costs one TrailingZeros64.
-func (s *SelectionBitmap) ForEachSelected(fn func(row int) bool) {
-	for wi, w := range s.words {
-		base := wi << 6
-		for w != 0 {
-			bit := bits.TrailingZeros64(w)
-			if !fn(base + bit) {
-				return
-			}
-			w &= w - 1
-		}
-	}
-}
+func (s *SelectionBitmap) ForEachSelected(fn func(row int) bool) { s.forEachSet(fn) }
 
 // column resolves a named column or fails with the available names.
 func (b *RecordBatch) column(name string) (Vector, error) {
@@ -181,20 +125,10 @@ func validityWords(vec Vector) []uint64 {
 }
 
 // maskValidity clears selection bits for null cells using one AND per word.
-// The bulk region (where both bitmaps have words) runs through the interleaved
-// andWords kernel; any receiver words beyond the validity bitmap select rows
-// with no validity information and are zeroed. Hoisting that split out of the
-// per-word loop keeps the hot path branch-free.
+// Selection and validity are the same bitmap structure, so this is a single
+// bulk intersection rather than a per-row test.
 func (s *SelectionBitmap) maskValidity(vec Vector) {
-	words := validityWords(vec)
-	if words == nil {
-		return
-	}
-	n := min(len(words), len(s.words))
-	andWords(s.words[:n], words[:n])
-	for i := n; i < len(s.words); i++ {
-		s.words[i] = 0
-	}
+	s.andClamped(validityWords(vec))
 }
 
 func compareMatches[T int64 | float64 | string](op CompareOp, value, operand T) bool {

@@ -283,7 +283,7 @@ func TestReusePortDistributesAcrossListeners(t *testing.T) {
 		}(ln)
 	}
 
-	for i := 0; i < dials; i++ {
+	for i := range dials {
 		conn, err := net.Dial("tcp", first.Addr().String())
 		if err != nil {
 			t.Fatalf("dial %d: %v", i, err)
@@ -291,7 +291,7 @@ func TestReusePortDistributesAcrossListeners(t *testing.T) {
 		_ = conn.Close()
 	}
 
-	for i := 0; i < dials; i++ {
+	for i := range dials {
 		select {
 		case <-served:
 		case <-ctx.Done():

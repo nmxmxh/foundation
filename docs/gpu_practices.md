@@ -106,7 +106,10 @@ Before implementing a GPU lane:
    objects usually turn into scattered memory access and branch-heavy decoding.
 2. Pack GPU buffers from Foundation arena descriptors or typed columnar batches.
    Keep schema metadata, row count, validity bitmap, offsets, and value buffers
-   explicit.
+   explicit. Null representation and null-aware reduction semantics are fixed by
+   `docs/columnar_null_algebra.md`: nulls stay out-of-band in a bitmap, kernels
+   substitute the monoid identity rather than branching per lane, and any
+   reduction whose identity is a legal value returns a `(value, count)` pair.
 3. Align host-shared and storage-buffer data according to the active API:
    WGSL/WebGPU layout rules in the browser, `wgpu`/Vulkan/Metal rules in native
    Rust, and CUDA alignment rules in CUDA-specific adapters.
@@ -469,3 +472,5 @@ runtime language, but several should become explicit review vocabulary:
     <https://kernel.org/doc/html/next/driver-api/sync_file.html>
 18. NVIDIA CUDA external resource interoperability:
     <https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXTRES__INTEROP.html>
+19. Columnar null representation, identity-substitution reductions, and the
+    cross-lane bitmap word-width contract: `docs/columnar_null_algebra.md`

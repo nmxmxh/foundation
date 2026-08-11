@@ -1,5 +1,18 @@
+# The distribution is a parameter, not a hardcoded base image, so a project that
+# needs PostGIS, TimescaleDB, or pgvector can express that as configuration
+# rather than by forking this file. Forking it means losing every later fix to
+# the config wiring below; setting POSTGRES_BASE_IMAGE keeps both.
+#
+#   plain:      POSTGRES_BASE_IMAGE=postgres          POSTGRES_VERSION=18
+#   postgis:    POSTGRES_BASE_IMAGE=postgis/postgis   POSTGRES_VERSION=16-3.4
+#   timescale:  POSTGRES_BASE_IMAGE=timescale/timescaledb POSTGRES_VERSION=2.17.2-pg16
+#
+# Whatever the distribution, POSTGRES_VERSION must start with the PostgreSQL
+# engine major — that is what version_consistency_check.sh range-checks, because
+# the engine major is what decides whether a data directory can be read.
+ARG POSTGRES_BASE_IMAGE=postgres
 ARG POSTGRES_VERSION=18
-FROM postgres:${POSTGRES_VERSION}
+FROM ${POSTGRES_BASE_IMAGE}:${POSTGRES_VERSION}
 
 COPY config/postgresql.conf /etc/postgresql/postgresql.conf
 COPY config/pg_hba.conf /etc/postgresql/pg_hba.conf

@@ -23,6 +23,12 @@ import (
 // the layout is the one the browser host already produces, so a kernel does not
 // need a second decoder for the native path.
 
+// maxFixedWidth4Elements is the largest element count whose 4-byte-wide byte
+// length still fits in the uint32 the wire format uses. Guarding on it before
+// the multiply is what keeps `count * 4` from wrapping to a small number and
+// letting an oversized column past a size check.
+const maxFixedWidth4Elements = math.MaxUint32 / 4
+
 // ColumnarField describes one fixed-width column in a batch.
 type ColumnarField struct {
 	// FieldID identifies the column to the consumer.
@@ -47,8 +53,14 @@ func WriteFloat32Column(arena *Arena, fieldID uint32, values []float32) (Columna
 	if len(values) == 0 {
 		return ColumnarField{}, fmt.Errorf("float32 column %d is empty", fieldID)
 	}
-	byteLen := uint32(len(values)) * 4
-	desc, slab, err := arena.Allocate(byteLen, generated.ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALUES)
+	if len(values) > maxFixedWidth4Elements {
+		return ColumnarField{}, fmt.Errorf("float32 column %d has %d elements, above the %d addressable in a uint32 byte length",
+			fieldID, len(values), maxFixedWidth4Elements)
+	}
+	// #nosec G115 -- guarded above: len(values) <= MaxUint32/4, so both the
+	// count and the count*4 byte length fit in a uint32 without wrapping.
+	count := uint32(len(values))
+	desc, slab, err := arena.Allocate(count*4, generated.ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALUES)
 	if err != nil {
 		return ColumnarField{}, fmt.Errorf("allocate float32 column %d: %w", fieldID, err)
 	}
@@ -60,7 +72,7 @@ func WriteFloat32Column(arena *Arena, fieldID uint32, values []float32) (Columna
 	return ColumnarField{
 		FieldID:            fieldID,
 		LogicalType:        generated.COLUMNAR_LOGICAL_TYPE_FLOAT,
-		Length:             uint32(len(values)),
+		Length:             count,
 		ByteWidth:          4,
 		ValuesDescriptorID: desc.ID,
 	}, nil
@@ -71,8 +83,13 @@ func WriteUint32Column(arena *Arena, fieldID uint32, values []uint32) (ColumnarF
 	if len(values) == 0 {
 		return ColumnarField{}, fmt.Errorf("uint32 column %d is empty", fieldID)
 	}
-	byteLen := uint32(len(values)) * 4
-	desc, slab, err := arena.Allocate(byteLen, generated.ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALUES)
+	if len(values) > maxFixedWidth4Elements {
+		return ColumnarField{}, fmt.Errorf("uint32 column %d has %d elements, above the %d addressable in a uint32 byte length",
+			fieldID, len(values), maxFixedWidth4Elements)
+	}
+	// #nosec G115 -- guarded above, see WriteFloat32Column.
+	count := uint32(len(values))
+	desc, slab, err := arena.Allocate(count*4, generated.ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALUES)
 	if err != nil {
 		return ColumnarField{}, fmt.Errorf("allocate uint32 column %d: %w", fieldID, err)
 	}
@@ -84,7 +101,7 @@ func WriteUint32Column(arena *Arena, fieldID uint32, values []uint32) (ColumnarF
 	return ColumnarField{
 		FieldID:            fieldID,
 		LogicalType:        generated.COLUMNAR_LOGICAL_TYPE_UINT,
-		Length:             uint32(len(values)),
+		Length:             count,
 		ByteWidth:          4,
 		ValuesDescriptorID: desc.ID,
 	}, nil
@@ -97,13 +114,17 @@ func WriteColumnarBatch(arena *Arena, rowCount uint32, fields []ColumnarField) (
 	if len(fields) == 0 {
 		return 0, fmt.Errorf("columnar batch has no fields")
 	}
-	if uint32(len(fields)) > generated.COLUMNAR_BATCH_MAX_COLUMNS {
+	// Compared in int space: converting first would let a slice longer than
+	// MaxUint32 truncate to a small count and pass the bound.
+	if len(fields) > int(generated.COLUMNAR_BATCH_MAX_COLUMNS) {
 		return 0, fmt.Errorf("columnar batch has %d columns, above the %d maximum",
 			len(fields), generated.COLUMNAR_BATCH_MAX_COLUMNS)
 	}
+	// #nosec G115 -- guarded above: len(fields) <= COLUMNAR_BATCH_MAX_COLUMNS.
+	columnCount := uint32(len(fields))
 
 	size := generated.COLUMNAR_BATCH_HEADER_BYTES +
-		uint32(len(fields))*generated.COLUMNAR_FIELD_DESCRIPTOR_BYTES
+		columnCount*generated.COLUMNAR_FIELD_DESCRIPTOR_BYTES
 	desc, slab, err := arena.Allocate(size, generated.ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH)
 	if err != nil {
 		return 0, fmt.Errorf("allocate columnar batch header: %w", err)
@@ -115,14 +136,15 @@ func WriteColumnarBatch(arena *Arena, rowCount uint32, fields []ColumnarField) (
 	put(generated.COLUMNAR_BATCH_HEADER_IDX_MAGIC*4, generated.COLUMNAR_BATCH_MAGIC)
 	put(generated.COLUMNAR_BATCH_HEADER_IDX_SCHEMA_VERSION*4, generated.COLUMNAR_BATCH_SCHEMA_VERSION)
 	put(generated.COLUMNAR_BATCH_HEADER_IDX_ROW_COUNT*4, rowCount)
-	put(generated.COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT*4, uint32(len(fields)))
+	put(generated.COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT*4, columnCount)
 	put(generated.COLUMNAR_BATCH_HEADER_IDX_FLAGS*4, 0)
 	put(generated.COLUMNAR_BATCH_HEADER_IDX_METADATA_DESCRIPTOR_ID*4, generated.COLUMNAR_DESCRIPTOR_ID_NONE)
 	put(generated.COLUMNAR_BATCH_HEADER_IDX_DICTIONARY_DESCRIPTOR_ID*4, generated.COLUMNAR_DESCRIPTOR_ID_NONE)
 
-	for i, field := range fields {
-		base := generated.COLUMNAR_BATCH_HEADER_BYTES +
-			uint32(i)*generated.COLUMNAR_FIELD_DESCRIPTOR_BYTES
+	// base advances by one descriptor per field rather than being recomputed
+	// from the index, which removes the int->uint32 conversion entirely.
+	base := generated.COLUMNAR_BATCH_HEADER_BYTES
+	for _, field := range fields {
 		putField := func(idx, value uint32) {
 			off := base + idx*4
 			binary.LittleEndian.PutUint32(slab[off:off+4], value)
@@ -141,6 +163,7 @@ func WriteColumnarBatch(arena *Arena, rowCount uint32, fields []ColumnarField) (
 		putField(generated.COLUMNAR_FIELD_IDX_AUX_DESCRIPTOR_ID, generated.COLUMNAR_DESCRIPTOR_ID_NONE)
 		putField(generated.COLUMNAR_FIELD_IDX_BYTE_WIDTH, field.ByteWidth)
 		putField(generated.COLUMNAR_FIELD_IDX_DICTIONARY_ID, generated.COLUMNAR_DESCRIPTOR_ID_NONE)
+		base += generated.COLUMNAR_FIELD_DESCRIPTOR_BYTES
 	}
 
 	arena.Commit(desc)
@@ -157,7 +180,9 @@ func ReadColumnarBatch(arena *Arena, batchDescriptorID uint32) (uint32, []Column
 	if err != nil {
 		return 0, nil, err
 	}
-	if uint32(len(slab)) < generated.COLUMNAR_BATCH_HEADER_BYTES {
+	// Slab lengths are compared in int space throughout: converting a length to
+	// uint32 first can truncate a large slab to a small one and invert the test.
+	if len(slab) < int(generated.COLUMNAR_BATCH_HEADER_BYTES) {
 		return 0, nil, fmt.Errorf("columnar batch header is %d bytes, want at least %d",
 			len(slab), generated.COLUMNAR_BATCH_HEADER_BYTES)
 	}
@@ -170,8 +195,17 @@ func ReadColumnarBatch(arena *Arena, batchDescriptorID uint32) (uint32, []Column
 	rowCount := get(generated.COLUMNAR_BATCH_HEADER_IDX_ROW_COUNT * 4)
 	columnCount := get(generated.COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT * 4)
 
+	// columnCount comes off the wire, so it is bounded before it is used in any
+	// arithmetic. Without this, a declared count above MaxUint32/64 wraps
+	// `need` to a small value, passes the length check below, and then walks the
+	// field loop straight off the end of the slab.
+	if columnCount > generated.COLUMNAR_BATCH_MAX_COLUMNS {
+		return 0, nil, fmt.Errorf("columnar batch declares %d columns, above the %d maximum",
+			columnCount, generated.COLUMNAR_BATCH_MAX_COLUMNS)
+	}
+
 	need := generated.COLUMNAR_BATCH_HEADER_BYTES + columnCount*generated.COLUMNAR_FIELD_DESCRIPTOR_BYTES
-	if uint32(len(slab)) < need {
+	if len(slab) < int(need) {
 		return 0, nil, fmt.Errorf("columnar batch slab is %d bytes, want %d for %d columns",
 			len(slab), need, columnCount)
 	}
@@ -197,9 +231,14 @@ func ReadFloat32Column(arena *Arena, field ColumnarField) ([]float32, error) {
 	if err != nil {
 		return nil, err
 	}
-	if uint32(len(slab)) < field.Length*4 {
+	// Widened to uint64 before the multiply: field.Length is attacker-controlled
+	// once a descriptor round-trips through shared memory, and Length*4 in
+	// uint32 wraps for any Length above MaxUint32/4 — which would shrink the
+	// requirement to nothing and let the loop below read past the slab.
+	wantBytes := uint64(field.Length) * 4
+	if uint64(len(slab)) < wantBytes {
 		return nil, fmt.Errorf("float32 column %d slab is %d bytes, want %d",
-			field.FieldID, len(slab), field.Length*4)
+			field.FieldID, len(slab), wantBytes)
 	}
 	out := make([]float32, field.Length)
 	for i := range out {

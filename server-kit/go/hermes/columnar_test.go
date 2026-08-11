@@ -166,7 +166,7 @@ func BenchmarkHermesGetColumnarBatch(b *testing.B) {
 	fields := []string{"record_id", "symbol", "bucket", "price"}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		batch, err := store.GetColumnarBatch(ctx, "ticks", query, fields, Fence{})
 		if err != nil || batch.Rows != 10000 {
@@ -212,7 +212,7 @@ func BenchmarkHermesListRecordsComparison(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		list, err := store.ListRecords(ctx, "ticks", query, Fence{})
 		if err != nil || len(list) != 10000 {
@@ -260,7 +260,7 @@ func BenchmarkHermesColumnarSumPrice(b *testing.B) {
 	fields := []string{"price"}
 
 	b.ReportAllocs()
-	
+
 	var sink float64
 	for b.Loop() {
 		batch, err := store.GetColumnarBatch(ctx, "ticks", query, fields, Fence{})
@@ -314,7 +314,7 @@ func BenchmarkHermesListRecordsSumPrice(b *testing.B) {
 	query := Query{OrganizationID: "org_1"}
 
 	b.ReportAllocs()
-	
+
 	var sink float64
 	for b.Loop() {
 		list, err := store.ListRecords(ctx, "ticks", query, Fence{})
@@ -374,7 +374,7 @@ func BenchmarkHermesColumnarStringValueAt(b *testing.B) {
 	fields := []string{"record_id"}
 
 	b.ReportAllocs()
-	
+
 	var sink int
 	for b.Loop() {
 		batch, err := store.GetColumnarBatch(ctx, "ticks", query, fields, Fence{})
@@ -432,7 +432,7 @@ func BenchmarkHermesColumnarStringValuesSlice(b *testing.B) {
 	fields := []string{"record_id"}
 
 	b.ReportAllocs()
-	
+
 	var sink int
 	for b.Loop() {
 		batch, err := store.GetColumnarBatch(ctx, "ticks", query, fields, Fence{})

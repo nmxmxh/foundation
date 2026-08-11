@@ -23,6 +23,7 @@ templates/docker/Dockerfile.postgres	Dockerfile.postgres	full,backend	docker	cre
 templates/docker/Dockerfile.redis	Dockerfile.redis	full,backend	docker	create
 templates/docker/Dockerfile.migrate	Dockerfile.migrate	full,backend	docker	create
 templates/docker/docker-compose.yml	docker-compose.yml	full,backend	docker	create
+templates/docker/docker-compose.override.yml	docker-compose.override.yml	full,backend	docker	create
 templates/docker/docker-compose.dev.yml	docker-compose.dev.yml	full,backend	docker	create
 templates/docker/docker-compose.test.yml	docker-compose.test.yml	full,backend	docker	create
 templates/docker/start.sh	start.sh	full,backend	docker	create

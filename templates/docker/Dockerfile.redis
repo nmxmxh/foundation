@@ -1,5 +1,9 @@
+# Distribution is a parameter for the same reason as Dockerfile.postgres: a
+# project on Valkey or a vendor-tuned Redis sets REDIS_BASE_IMAGE rather than forking
+# this file and losing later config fixes.
+ARG REDIS_BASE_IMAGE=redis
 ARG REDIS_VERSION=8-alpine
-FROM redis:${REDIS_VERSION}
+FROM ${REDIS_BASE_IMAGE}:${REDIS_VERSION}
 
 COPY config/redis.conf /usr/local/etc/redis/redis.conf
 

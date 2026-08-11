@@ -16,6 +16,7 @@ services:
       context: .
       dockerfile: Dockerfile.postgres
       args:
+        POSTGRES_BASE_IMAGE: "${POSTGRES_BASE_IMAGE:-postgres}"
         POSTGRES_VERSION: "${POSTGRES_VERSION:-18}"
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-postgres
     command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
@@ -46,6 +47,7 @@ services:
       context: .
       dockerfile: Dockerfile.redis
       args:
+        REDIS_BASE_IMAGE: "${REDIS_BASE_IMAGE:-redis}"
         REDIS_VERSION: "${REDIS_VERSION:-8-alpine}"
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-redis
     expose:
@@ -76,6 +78,7 @@ services:
         VERSION: "${VERSION:-dev}"
         BUILDKIT_INLINE_CACHE: "1"
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-server
+    stop_grace_period: 15s
     depends_on:
       app-redis:
         condition: service_healthy

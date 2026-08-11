@@ -15,8 +15,15 @@ package hermes
 // reference. Because floating-point addition is not associative, the SIMD
 // lane's lane-wise accumulation can differ from the strict left-to-right scalar
 // sum by a few ULPs — acceptable for the analytical/telemetry lane this serves,
-// and bounded by the parity test. Null entries are summed as their zero value;
-// null-aware (validity-masked) reduction is a separate future lane.
+// and bounded by the parity test.
+//
+// Null entries are summed as their zero value, and for a sum specifically that
+// is not a shortcut: 0 is the additive identity, so nulls provably cannot
+// perturb the total. The same reasoning does not carry to product, min, or max,
+// whose identities are 1 and ±∞ — use SumValid/MinValid/MaxValid for those, and
+// whenever the count of contributing rows matters (an all-null column sums to 0
+// here, indistinguishable from a column of real zeros). See
+// columnar_reduce.go and docs/columnar_null_algebra.md.
 func (v *Float64Vector) Sum() float64 {
 	return sumFloat64s(v.values)
 }
@@ -39,4 +46,3 @@ func sumFloat64sScalar(xs []float64) float64 {
 	}
 	return sum
 }
-

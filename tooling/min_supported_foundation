@@ -1,0 +1,16 @@
+# The oldest Foundation version a project may be updated FROM.
+#
+# This single number is what makes managed patches retirable. A patch exists to
+# move projects from some older state to the current one; once no supported
+# project can still be in that older state, the patch is dead weight that still
+# has to be read, reviewed, and reasoned about — and whose search string can
+# re-fire years later if someone legitimately reintroduces the old value.
+#
+# A patch whose @since is STRICTLY OLDER than this version has, by definition,
+# already been applied everywhere it could apply, and managed_patch_hygiene_check.sh
+# will report it as retirable.
+#
+# Raising this is a support decision, not a technical one: it declares that
+# projects older than this must run an intermediate update before jumping to
+# current. Raise it deliberately, and note it in CHANGELOG.md.
+0.0.1

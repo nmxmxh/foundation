@@ -272,7 +272,7 @@ func BenchmarkHermesColumnarPushdownFilterSum(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	
+
 	var sink float64
 	for b.Loop() {
 		batch, err := store.GetColumnarBatchWhere(ctx, "ticks", query, fields, predicates, Fence{})

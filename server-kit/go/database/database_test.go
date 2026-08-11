@@ -882,6 +882,9 @@ func TestApplyPoolOptionsConfiguresPgxPool(t *testing.T) {
 	if cfg.ConnConfig.DescriptionCacheCapacity != 32 || cfg.ConnConfig.DefaultQueryExecMode != pgx.QueryExecModeCacheStatement {
 		t.Fatalf("cache options not applied: %+v", cfg.ConnConfig)
 	}
+	if got := cfg.ConnConfig.RuntimeParams["search_path"]; got != "public" {
+		t.Fatalf("search_path = %q, want public", got)
+	}
 	if got := cfg.ConnConfig.RuntimeParams["statement_timeout"]; got != "75" {
 		t.Fatalf("statement_timeout = %q, want 75", got)
 	}
@@ -890,6 +893,9 @@ func TestApplyPoolOptionsConfiguresPgxPool(t *testing.T) {
 	}
 	if got := cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"]; got != "11000" {
 		t.Fatalf("idle_in_transaction_session_timeout = %q, want 11000", got)
+	}
+	if cfg.AfterConnect == nil {
+		t.Fatalf("expected AfterConnect hook to be set for search_path enforcement")
 	}
 	ApplyPoolOptions(nil, PoolOptions{})
 }
@@ -925,15 +931,28 @@ func TestApplyRiverPoolOptionsOmitsStatementTimeout(t *testing.T) {
 	if got, ok := cfg.ConnConfig.RuntimeParams["lock_timeout"]; ok {
 		t.Fatalf("river pool must not set lock_timeout, got %q", got)
 	}
+	if got := cfg.ConnConfig.RuntimeParams["search_path"]; got != "public" {
+		t.Fatalf("search_path = %q, want public", got)
+	}
 	// idle_in_transaction_session_timeout is retained as a wedged-connection guard.
 	if got := cfg.ConnConfig.RuntimeParams["idle_in_transaction_session_timeout"]; got != "11000" {
 		t.Fatalf("idle_in_transaction_session_timeout = %q, want 11000", got)
+	}
+	if cfg.AfterConnect == nil {
+		t.Fatalf("expected AfterConnect hook to be set for search_path enforcement")
 	}
 	ApplyRiverPoolOptions(nil, PoolOptions{})
 }
 
 func TestResyncRiverJobSequenceValidation(t *testing.T) {
 	err := ResyncRiverJobSequence(context.Background(), nil)
+	if err == nil || err.Error() != "database pool is required" {
+		t.Fatalf("expected database pool is required error, got %v", err)
+	}
+}
+
+func TestWaitForRiverTableReadyValidation(t *testing.T) {
+	err := WaitForRiverTableReady(context.Background(), nil, 100*time.Millisecond)
 	if err == nil || err.Error() != "database pool is required" {
 		t.Fatalf("expected database pool is required error, got %v", err)
 	}

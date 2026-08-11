@@ -59,7 +59,7 @@ Read in order:
 
 Then read deeply into domains that matter for your product:
 
-- **Data**: `database_practices.md`, `redis_practices.md`, `hermes_hotplane.md`, `projection_freshness_contract.md`
+- **Data**: `database_practices.md`, `redis_practices.md`, `hermes_hotplane.md`, `projection_freshness_contract.md`, `columnar_null_algebra.md`
 - **Observability**: `delivery_metrics_practices.md`, `performance_practices.md`
 - **Security**: `security_practices.md`, `ai_threat_model.md`, `post_quantum_security.md`
 - **Performance**: `performance_lab.md`, `foundation_benchmarks.md`, `optimization_points.md`
@@ -136,6 +136,7 @@ Read in order:
 | `runtime_native.md` | Tauri/native shell device access, native byte lanes, secure storage, GPU policy |
 | `gpu_practices.md` | WebGPU/native GPU batching, memory, verification |
 | `game_runtime_practices.md` | Frame-budgeted runtime practices for visual and interactive loops |
+| `columnar_null_algebra.md` | Null representation, identity-substitution reductions, and the cross-lane bitmap contract |
 | `mathematical_practices.md` | Numerical analysis, floating-point, probability, statistics, CRDT convergence |
 | `tla_architecture_practices.md` | State-machine, invariant, liveness, real-time bound practices from Specifying Systems |
 
@@ -161,6 +162,7 @@ Read in order:
 | --- | --- |
 | `foundation_distribution.md` | CLI bootstrap, registry boundaries, agent bundle, license verification |
 | `scaffold_manifest.md` | Scaffold manifest columns, update modes, safe maintenance workflow |
+| `scaffold_ownership_boundary.md` | What Foundation may change in an existing project and what it must never touch |
 | `foundation_project_standardization.md` | Project drift measurement, `appkit` extraction plan |
 | `foundation_tooling.md` | Protocol compiler targets, route generators, verification matrix, fleet updates |
 | `delivery_metrics_practices.md` | DORA, SPACE/DevEx, OpenTelemetry linkage, SBOM, provenance |

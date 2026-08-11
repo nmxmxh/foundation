@@ -21,33 +21,38 @@ const (
 	TypeTimestamp
 )
 
-// validityBitmap is a bit-packed Arrow-style validity bitmap.
-// Bit i is 1 (valid) when (words[i>>6]>>(i&63))&1 == 1.
-// This is 64× more memory-efficient than []bool and enables
-// future SIMD-accelerated null counting via bits.OnesCount64.
+// validityBitmap is the Arrow-style validity mask over one column: bit i is 1
+// when row i holds a value. It is the shared columnar bitmap (see
+// columnar_bitmap.go) plus the null-specific vocabulary, so validity and
+// selection share one set of word kernels and one tail-hygiene rule.
+//
+// Bit-packing is 64× more memory-efficient than []bool, and it is what makes
+// null counting a POPCNT rather than a scan.
 type validityBitmap struct {
-	words []uint64
-	n     int // total row count
+	bitmap
 }
 
 func newValidityBitmap(n int) validityBitmap {
-	words := (n + 63) / 64
-	return validityBitmap{words: make([]uint64, words), n: n}
+	return validityBitmap{bitmap: newBitmap(n)}
 }
 
-func (b *validityBitmap) set(i int) {
-	b.words[i>>6] |= 1 << uint(i&63)
-}
-
+// isValid reports whether row i holds a value. Out-of-range rows read as null.
 func (b *validityBitmap) isValid(i int) bool {
-	return (b.words[i>>6]>>uint(i&63))&1 == 1
+	return b.get(i)
 }
 
-// nullCount returns the number of null (invalid) entries. Validity bits are set
-// for present values, so nulls are the total row count minus the set-bit count
+// validCount returns the number of present (non-null) entries. This is the
+// count component of every null-aware reduction, and it is free: one POPCNT per
+// word rather than a pass over the values. See docs/columnar_null_algebra.md.
+func (b *validityBitmap) validCount() int {
+	return b.count()
+}
+
+// nullCount returns the number of null entries. Validity bits are set for
+// present values, so nulls are the total row count minus the set-bit count
 // (see popcountWords for the interleaved POPCNT/CNT kernel).
 func (b *validityBitmap) nullCount() int {
-	return b.n - popcountWords(b.words)
+	return b.n - b.count()
 }
 
 // Vector is the columnar data interface. StringVector intentionally

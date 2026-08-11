@@ -113,6 +113,12 @@ func main() {
 	}
 	engine.SetRiverClient(riverClient, dbPool)
 
+	// Wait for River tables to be ready before starting queue polling
+	if err := database.WaitForRiverTableReady(ctx, riverPool, 30*time.Second); err != nil {
+		log.ErrorContext(ctx, "river_job table not ready", "error", err)
+		os.Exit(1)
+	}
+
 	// Start River Client
 	if err := riverClient.Start(ctx); err != nil {
 		log.ErrorContext(ctx, "failed to start River client", "error", err)

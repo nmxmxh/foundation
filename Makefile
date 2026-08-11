@@ -24,6 +24,8 @@ FOUNDATION_LINT_CHECKS := \
 	check-package-licenses \
 	check-contract-drift \
 	check-runtime-contract-field-drift \
+	check-version-consistency \
+	check-managed-patch-hygiene \
 	check-doc-references \
 	check-markdown-frontmatter \
 	check-agent-contract \
@@ -308,6 +310,12 @@ check-operational-excellence:
 
 check-go-fix:
 	@tooling/scripts/go_fix_check.sh .
+
+check-version-consistency:
+	@tooling/scripts/version_consistency_check.sh .
+
+check-managed-patch-hygiene:
+	@tooling/scripts/managed_patch_hygiene_check.sh .
 
 check-go-static-analysis:
 	@tooling/scripts/go_static_analysis_check.sh .

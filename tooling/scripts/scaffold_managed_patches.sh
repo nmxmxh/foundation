@@ -13,13 +13,143 @@ if [[ ! -d "$target" ]]; then
   exit 2
 fi
 
-patched=0
+foundation_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+versions_tsv="$foundation_root/tooling/versions.tsv"
+foundation_version="$(cat "$foundation_root/VERSION" 2>/dev/null || echo "unknown")"
 
-log_patch() {
-  printf '[PATCH] %s\n' "$1"
-  patched=$((patched + 1))
+patched=0
+version_conflicts=0
+
+# The patch ledger makes "which fixes has this project received" answerable.
+#
+# log_patch used to print and forget, so the only record that a patch had ever
+# run was the console scrollback of whoever ran the update. That is also why
+# stale patches are hard to retire: without evidence that every project has
+# passed through a fix, nobody can safely delete it.
+ledger_path() {
+  printf '%s/.foundation-patches.tsv' "$target"
 }
 
+log_patch() {
+  local label="$1"
+  printf '[PATCH] %s\n' "$label"
+  patched=$((patched + 1))
+
+  local ledger
+  ledger="$(ledger_path)"
+  if [[ ! -f "$ledger" ]]; then
+    printf '# applied_at\tfoundation_version\tpatch\n' >"$ledger"
+  fi
+  printf '%s\t%s\t%s\n' \
+    "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" "$foundation_version" "$label" >>"$ledger"
+}
+
+# ---------------------------------------------------------------------------
+# Manifest-driven version patching
+#
+# The old form of this hardcoded a migration pair per bump — "rewrite 1.25 to
+# 1.26" — which has two failure modes. A project sitting on 1.24 matches no pair
+# and is silently stranded, and every historical pair has to be kept forever or
+# older projects stop upgrading. Over a decade that is an accumulating ladder
+# nobody can safely prune.
+#
+# Instead: read the wanted value from tooling/versions.tsv and rewrite whatever
+# is there. State stays O(1) per key, and no project can be stranded by not
+# matching a literal.
+#
+# The class column decides whether the rewrite is allowed at all.
+# ---------------------------------------------------------------------------
+
+version_field() {
+  local key="$1" field="$2"
+  [[ -f "$versions_tsv" ]] || return 0
+  awk -F'\t' -v k="$key" -v f="$field" '
+    /^#/ { next }
+    NF && $1 == k { print $f; exit }
+  ' "$versions_tsv"
+}
+
+# retarget_version FILE KEY
+#
+# Rewrites every declaration of KEY in FILE to the manifest value, covering the
+# three shapes the templates use: `ARG KEY=x`, `KEY=x`, and `${KEY:-x}`.
+#
+# Reversible keys are rewritten, because reverting one costs a number change and
+# nothing else. Irreversible keys are never rewritten here — a Postgres or Redis
+# major rewrites the data directory, so moving it is a migration the project
+# plans, not something an update does on its way past.
+retarget_version() {
+  local file="$1" key="$2"
+  [[ -f "$file" ]] || return 0
+
+  local want class
+  want="$(version_field "$key" 2)"
+  class="$(version_field "$key" 3)"
+  [[ -n "$want" ]] || return 0
+
+  if [[ "$class" != "reversible" ]]; then
+    # Irreversible: report a project value that differs, never touch it.
+    local found
+    found="$(perl -ne "print \$1 if /(?:ARG\\s+)?${key}(?::-|=)([^\"'}\\s]+)/" "$file" | head -n 1)"
+    if [[ -n "$found" && "$found" != "$want" ]]; then
+      printf '[HOLD] %s=%s in %s is project-owned (%s); Foundation ships %s and will not move it.\n' \
+        "$key" "$found" "${file#$target/}" "$class" "$want"
+    fi
+    return 0
+  fi
+
+  local before
+  before="$(mktemp)"
+  cp "$file" "$before"
+  PATCH_KEY="$key" PATCH_WANT="$want" perl -0pi -e '
+    my $k = $ENV{PATCH_KEY};
+    my $w = $ENV{PATCH_WANT};
+    s/(ARG\s+\Q$k\E=)[^\s"]+/$1$w/g;
+    s/(^|\n)(\Q$k\E=)[^\s"]*/$1$2$w/g;
+    s/(\$\{\Q$k\E:-)[^}]*(\})/$1$w$2/g;
+  ' "$file"
+
+  if ! cmp -s "$before" "$file"; then
+    log_patch "$key retargeted to $want: ${file#$target/}"
+  fi
+  rm -f "$before"
+}
+
+# report_irreversible_range checks the project's own .env — what Compose
+# actually resolves — against the supported range, and fails the update when an
+# irreversible service is outside it. This is the one version condition that
+# stops an update rather than warning, because proceeding would mean running
+# migrations against an engine Foundation no longer supports.
+report_irreversible_range() {
+  local env_file="$target/.env"
+  [[ -f "$env_file" ]] || return 0
+  [[ -f "$versions_tsv" ]] || return 0
+
+  local key class supported found lo hi major
+  while IFS=$'\t' read -r key _value class supported _notes; do
+    [[ -z "${key:-}" || "${key:0:1}" == "#" ]] && continue
+    [[ "$class" == "irreversible" ]] || continue
+    [[ "$supported" == *".."* ]] || continue
+
+    found="$(perl -ne "print \$1 if /^${key}=(.+?)\\s*\$/" "$env_file" | head -n 1)"
+    [[ -n "$found" ]] || continue
+
+    major="$(printf '%s\n' "${found##*:}" | perl -ne 'if (/-pg(\d+)/) { print $1; exit } print $1 if /^(\d+)/')"
+    lo="$(printf '%s\n' "${supported%%..*}" | perl -ne 'print $1 if /^(\d+)/')"
+    hi="$(printf '%s\n' "${supported##*..}" | perl -ne 'print $1 if /^(\d+)/')"
+    [[ -n "$major" && -n "$lo" && -n "$hi" ]] || continue
+
+    if (( major < lo || major > hi )); then
+      printf '[CONFLICT] %s=%s is outside the supported range %s.\n' "$key" "$found" "$supported"
+      printf '           Upgrading rewrites on-disk state and cannot be undone by\n'
+      printf '           setting the old value back. Plan the data migration, then\n'
+      printf '           re-run the update.\n'
+      version_conflicts=$((version_conflicts + 1))
+    fi
+  done < "$versions_tsv"
+}
+
+# @since 0.0.1
 replace_in_file() {
   local file="$1"
   local search="$2"
@@ -31,19 +161,44 @@ replace_in_file() {
     return 0
   fi
 
+  # Compare before and after rather than logging on the search hit alone.
+  #
+  # A match does not imply a change: where the search string is a substring of
+  # the replacement, the substitution is a no-op on an already-patched file and
+  # the patch would report work it did not do. That was invisible while
+  # log_patch only printed; once it writes a ledger entry, an untruthful log
+  # becomes drift, and the idempotency invariant catches it.
+  local before
+  before="$(mktemp)"
+  cp "$file" "$before"
+
   PATCH_SEARCH="$search" PATCH_REPLACE="$replace" perl -0pi -e 's/\Q$ENV{PATCH_SEARCH}\E/$ENV{PATCH_REPLACE}/g' "$file"
-  log_patch "$label: ${file#$target/}"
+
+  if ! cmp -s "$before" "$file"; then
+    log_patch "$label: ${file#$target/}"
+  fi
+  rm -f "$before"
 }
 
+# replace_go_version_defaults now retargets every reversible toolchain version
+# from tooling/versions.tsv rather than carrying a hardcoded 1.25 -> 1.26 pair.
+# Adding Go 1.27 later is a one-line manifest edit, and a project on any older
+# version is picked up rather than stranded for not matching a literal.
+# @since 0.0.1
 replace_go_version_defaults() {
   local file="$1"
   [[ -f "$file" ]] || return 0
 
-  PATCH_SEARCH='ARG GO_VERSION=1.25' PATCH_REPLACE='ARG GO_VERSION=1.26' replace_in_file "$file" 'ARG GO_VERSION=1.25' 'ARG GO_VERSION=1.26' "Go 1.26 scaffold default"
-  PATCH_SEARCH='${GO_VERSION:-1.25}' PATCH_REPLACE='${GO_VERSION:-1.26}' replace_in_file "$file" '${GO_VERSION:-1.25}' '${GO_VERSION:-1.26}' "Go 1.26 scaffold default"
-  PATCH_SEARCH='GO_VERSION=1.25' PATCH_REPLACE='GO_VERSION=1.26' replace_in_file "$file" 'GO_VERSION=1.25' 'GO_VERSION=1.26' "Go 1.26 scaffold default"
+  retarget_version "$file" GO_VERSION
+  retarget_version "$file" ALPINE_VERSION
+  retarget_version "$file" NODE_VERSION
+  retarget_version "$file" MIGRATE_VERSION
+  # POSTGRES_VERSION and REDIS_VERSION are deliberately absent: they are
+  # irreversible and project-owned. retarget_version would refuse them anyway,
+  # but leaving them out states the intent at the call site.
 }
 
+# @since 0.0.1
 patch_generated_ignore_contract() {
   local file="$1"
   [[ -f "$file" ]] || return 0
@@ -54,6 +209,7 @@ patch_generated_ignore_contract() {
   replace_in_file "$file" "$broad_generated_ignore" "" "remove blanket generated ignore"
 }
 
+# @since 0.0.1
 patch_compose_targets() {
   local compose="$1"
   local dockerfile="$target/Dockerfile"
@@ -92,6 +248,7 @@ project_name_from_metadata() {
 # still carry the old name are renamed in place — service key, depends_on
 # entries, DB_HOST defaults, and the migrate guard message — never credentials
 # like POSTGRES_USER/DB_USER, whose value "postgres" is unrelated to the alias.
+# @since 0.0.1
 rename_compose_postgres_service() {
   local compose="$1"
   [[ -f "$compose" ]] || return 0
@@ -113,6 +270,7 @@ rename_compose_postgres_service() {
   rm -f "$before"
 }
 
+# @since 0.0.1
 patch_compose_database_contract() {
   local compose="$target/docker-compose.yml"
   [[ -f "$compose" ]] || return 0
@@ -132,6 +290,7 @@ patch_compose_database_contract() {
       context: .
       dockerfile: Dockerfile.postgres
       args:
+        POSTGRES_BASE_IMAGE: "\${POSTGRES_BASE_IMAGE:-postgres}"
         POSTGRES_VERSION: "\${POSTGRES_VERSION:-18}"
     container_name: \${SERVICE_NAME:-$project_name}-postgres
     command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]
@@ -230,6 +389,7 @@ EOF
   fi
 }
 
+# @since 0.0.1
 patch_coolify_deploy_contract() {
   local compose="$target/docker-compose.yml"
   local dev_compose="$target/docker-compose.dev.yml"
@@ -250,6 +410,7 @@ patch_coolify_deploy_contract() {
       context: .
       dockerfile: Dockerfile.postgres
       args:
+        POSTGRES_BASE_IMAGE: "${POSTGRES_BASE_IMAGE:-postgres}"
         POSTGRES_VERSION: "${POSTGRES_VERSION:-18}"' "Docker Compose bakes Postgres config"
 
     replace_in_file "$compose" '    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]' '    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf", "-c", "hba_file=/etc/postgresql/pg_hba.conf"]' "Docker Compose uses baked Postgres hba"
@@ -270,6 +431,7 @@ patch_coolify_deploy_contract() {
       context: .
       dockerfile: Dockerfile.redis
       args:
+        REDIS_BASE_IMAGE: "${REDIS_BASE_IMAGE:-redis}"
         REDIS_VERSION: "${REDIS_VERSION:-8-alpine}"' "Docker Compose bakes Redis config"
 
     replace_in_file "$compose" '      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
@@ -363,6 +525,7 @@ patch_coolify_deploy_contract() {
   fi
 }
 
+# @since 0.0.1
 patch_coolify_routing_labels() {
   local compose="$target/docker-compose.yml"
   [[ -f "$compose" ]] || return 0
@@ -386,6 +549,7 @@ patch_coolify_routing_labels() {
   rm -f "$before"
 }
 
+# @since 0.0.1
 patch_reframe_frontend_dockerfile() {
   local file="$target/frontend/Dockerfile"
   [[ -f "$file" ]] || return 0
@@ -407,6 +571,7 @@ CMD ["nginx", "-g", "daemon off;"]'
   PATCH_SEARCH="$search" PATCH_REPLACE="$replace" replace_in_file "$file" "$search" "$replace" "removed nginx brotli image"
 }
 
+# @since 0.0.1
 patch_runtime_native_dockerfile() {
   local file="$target/Dockerfile"
   local package_json="$target/frontend/package.json"
@@ -428,6 +593,7 @@ COPY foundation/runtime-native/ts ./foundation/runtime-native/ts'
   fi
 }
 
+# @since 0.0.1
 patch_openapi_dockerfile() {
   local file="$target/Dockerfile"
   [[ -f "$file" ]] || return 0
@@ -447,6 +613,7 @@ COPY --from=builder /tmp/openapi.json ./openapi.json' "Docker server image embed
   fi
 }
 
+# @since 0.0.1
 patch_apidocs_server() {
   local file="$target/internal/server/server.go"
   [[ -f "$file" ]] || return 0
@@ -526,6 +693,7 @@ patch_apidocs_server() {
   fi
 }
 
+# @since 0.0.1
 patch_docgen_pointer_helper() {
   local file="$target/cmd/docgen/main.go"
   [[ -f "$file" ]] || return 0
@@ -544,6 +712,7 @@ patch_docgen_pointer_helper() {
   fi
 }
 
+# @since 0.0.1
 patch_docgen_named_schema_refs() {
   local file="$target/cmd/docgen/main.go"
   [[ -f "$file" ]] || return 0
@@ -656,6 +825,7 @@ func (g *schemaGenerator) ensureNamedSchema(name, description string) string {
   fi
 }
 
+# @since 0.0.1
 patch_docgen_route_catalog() {
   # Evolve the create-managed docgen command so existing projects gain the
   # `route-catalog` subcommand that emits route_catalog.json for the frontend
@@ -693,6 +863,7 @@ patch_docgen_route_catalog() {
   rm -f "$before"
 }
 
+# @since 0.0.1
 patch_native_tauri_startup_expect() {
   local file="$target/native/src-tauri/src/lib.rs"
   [[ -f "$file" ]] || return 0
@@ -727,6 +898,7 @@ patch_native_tauri_startup_expect() {
   PATCH_SEARCH="$search" PATCH_REPLACE="$replace" replace_in_file "$file" "$search" "$replace" "native Tauri startup avoids expect"
 }
 
+# @since 0.0.1
 patch_native_tauri_command_acl() {
   local build="$target/native/src-tauri/build.rs"
   local capability="$target/native/src-tauri/capabilities/main.json"
@@ -788,6 +960,7 @@ fn foundation_secure_store_delete(
             foundation_secure_store_delete' '            foundation_runtime_capabilities' "native Tauri narrows invoke handler"
 }
 
+# @since 0.0.1
 patch_gitignore_root_bin() {
   local file="$target/.gitignore"
   [[ -f "$file" ]] || return 0
@@ -801,6 +974,7 @@ bin/'
   fi
 }
 
+# @since 0.0.1
 patch_makefile_docker_redeploy() {
   local file="$target/Makefile"
   [[ -f "$file" ]] || return 0
@@ -823,6 +997,7 @@ docker-redeploy:
   fi
 }
 
+# @since 0.0.1
 patch_makefile_local_include() {
   local file="$target/Makefile"
   [[ -f "$file" ]] || return 0
@@ -901,6 +1076,7 @@ MKEOF
   fi
 }
 
+# @since 0.0.1
 patch_go_mod_runtime_sdk() {
   local file="$target/go.mod"
   [[ -f "$file" ]] || return 0
@@ -925,6 +1101,7 @@ replace github.com/nmxmxh/ovasabi_foundation/server-kit/go => ./foundation/serve
   fi
 }
 
+# @since 0.0.1
 patch_go_dependency_manifests() {
   local file="$target/Dockerfile"
   [[ -f "$file" ]] || return 0
@@ -961,6 +1138,7 @@ COPY api/protos/go.mod ./api/protos/'
   fi
 }
 
+# @since 0.0.1
 patch_server_binary_path() {
   local file="$target/Dockerfile"
   [[ -f "$file" ]] || return 0
@@ -974,6 +1152,7 @@ patch_server_binary_path() {
   PATCH_SEARCH='COPY --from=builder /bin/${PROJECT_NAME} ./server' PATCH_REPLACE='COPY --from=builder /bin/server ./server' replace_in_file "$file" 'COPY --from=builder /bin/${PROJECT_NAME} ./server' 'COPY --from=builder /bin/server ./server' "Docker server binary fixed copy"
 }
 
+# @since 0.0.1
 patch_websocket_runtime_backpressure() {
   local file="$target/internal/server/websocket.go"
   [[ -f "$file" ]] || return 0
@@ -1113,6 +1292,7 @@ func (s *Server) registerWSConnection(ctx context.Context, conn *wsConnection) b
   PATCH_SEARCH="$enqueue_search" PATCH_REPLACE="$enqueue_replace" replace_in_file "$file" "$enqueue_search" "$enqueue_replace" "WebSocket backpressure metric"
 }
 
+# @since 0.0.1
 patch_typed_server_runtime() {
   local server_file="$target/internal/server/server.go"
   if [[ -f "$server_file" ]]; then
@@ -1312,6 +1492,7 @@ func (s *Server) ensureEventSubscription() {'
   fi
 }
 
+# @since 0.0.1
 patch_foundation_event_log_trigger_function() {
   local migration
   while IFS= read -r migration; do
@@ -1330,6 +1511,7 @@ patch_foundation_event_log_trigger_function() {
   done < <(find "$target/migrations" -maxdepth 1 -type f -name '*.up.sql' 2>/dev/null | sort)
 }
 
+# @since 0.0.1
 patch_foundation_event_log_publish_claim_schema() {
   local migration
 
@@ -1363,6 +1545,7 @@ CREATE INDEX IF NOT EXISTS idx_foundation_event_log_claim
   done < <(find "$target/migrations" -maxdepth 1 -type f -name '*.up.sql' 2>/dev/null | sort)
 }
 
+# @since 0.0.1
 patch_test_postgres_platform() {
   local file="$target/docker-compose.test.yml"
   [[ -f "$file" ]] || return 0
@@ -1376,6 +1559,7 @@ patch_test_postgres_platform() {
   fi
 }
 
+# @since 0.0.1
 patch_test_compose_ephemeral_ports() {
   local file="$target/docker-compose.test.yml"
   [[ -f "$file" ]] || return 0
@@ -1396,6 +1580,7 @@ patch_test_compose_ephemeral_ports() {
   rm -f "$before"
 }
 
+# @since 0.0.1
 patch_postgres_config_baseline() {
   local file="$target/config/postgresql.conf"
   [[ -f "$file" ]] || return 0
@@ -1468,6 +1653,7 @@ insert_before_marker_or_append() {
   rm -f "$before"
 }
 
+# @since 0.0.1
 patch_agent_native_guides() {
   local agents="$target/AGENTS.md"
   if [[ -f "$agents" ]] && ! grep -Fq "agent_operating_contract.md" "$agents"; then
@@ -1587,6 +1773,7 @@ SPACE/DevEx, OpenTelemetry, SBOM, and provenance hooks.'
   fi
 }
 
+# @since 0.0.1
 sync_go_work() {
   [[ -f "$target/go.mod" ]] || return 0
 
@@ -1623,6 +1810,7 @@ sync_go_work() {
   rm -f "$tmp"
 }
 
+# @since 0.0.1
 patch_startup_dependencies_double_close_redis() {
   local file="$target/internal/startup/dependencies.go"
   [[ -f "$file" ]] || return 0
@@ -1649,6 +1837,7 @@ patch_startup_dependencies_double_close_redis() {
   rm -f "$before" "$after"
 }
 
+# @since 0.0.1
 patch_frontend_tsconfig_baseurl() {
   local file="$target/frontend/tsconfig.app.json"
   [[ -f "$file" ]] || return 0
@@ -1671,6 +1860,7 @@ patch_frontend_tsconfig_baseurl() {
   rm -f "$before"
 }
 
+# @since 0.0.1
 patch_frontend_nginx_security_headers() {
   local file="$target/frontend/nginx.conf"
   [[ -f "$file" ]] || return 0
@@ -1713,6 +1903,7 @@ patch_frontend_nginx_security_headers() {
   rm -f "$before"
 }
 
+# @since 0.0.1
 patch_env_example_hermes_warm_scopes() {
   local file="$target/.env.example"
   [[ -f "$file" ]] || return 0
@@ -1727,6 +1918,7 @@ patch_env_example_hermes_warm_scopes() {
   log_patch "env example adds HERMES_WARM_SCOPES: ${file#$target/}"
 }
 
+# @since 0.0.1
 patch_startup_projection_warming() {
   local deps="$target/internal/startup/dependencies.go"
   local cfg="$target/internal/config/config.go"
@@ -1821,6 +2013,7 @@ GOEOF
   fi
 }
 
+# @since 0.0.1
 patch_startup_envelope_fallback() {
   local deps="$target/internal/startup/dependencies.go"
   local cfg="$target/internal/config/config.go"
@@ -1945,6 +2138,7 @@ GOEOF
   fi
 }
 
+# @since 0.0.1
 patch_startup_snapshot_shadow() {
   local deps="$target/internal/startup/dependencies.go"
   local cfg="$target/internal/config/config.go"
@@ -1996,6 +2190,7 @@ patch_startup_snapshot_shadow() {
   fi
 }
 
+# @since 0.0.1
 patch_worker_engine_canonical() {
   local main="$target/cmd/worker/main.go"
   local reg="$target/internal/worker/registry.go"
@@ -2139,6 +2334,9 @@ func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeSto
 	if !registered {
 		return engine, nil, nil // insert-only: nothing to start or stop
 	}
+	if err := database.WaitForRiverTableReady(ctx, pool, 30*time.Second); err != nil {
+		return nil, nil, fmt.Errorf("wait for river_job table: %w", err)
+	}
 	if err := client.Start(ctx); err != nil {
 		return nil, nil, fmt.Errorf("start river client: %w", err)
 	}
@@ -2169,6 +2367,43 @@ GOEOF
   fi
 }
 
+# @since 0.0.1
+patch_compose_stop_grace_period() {
+  local compose="$target/docker-compose.yml"
+  [[ -f "$compose" ]] || return 0
+  if grep -Fq 'stop_grace_period:' "$compose"; then
+    return 0
+  fi
+  if grep -q 'container_name:.*-server' "$compose"; then
+    perl -0pi -e 's/(container_name:.*-server\n)/$1    stop_grace_period: 15s\n/' "$compose"
+    log_patch "Docker Compose server service added stop_grace_period: 15s: ${compose#$target/}"
+  fi
+}
+
+# @since 0.0.1
+patch_river_table_readiness_gate() {
+  local main="$target/cmd/worker/main.go"
+  if [[ -f "$main" ]] && ! grep -Fq 'WaitForRiverTableReady' "$main" && grep -Fq 'riverClient.Start(ctx)' "$main"; then
+    local logvar
+    logvar="$(perl -ne 'if (/(\w+)\.Error\("failed to start River client"/) { print $1; exit }' "$main")"
+    [[ -n "$logvar" ]] || logvar="log"
+    export LOGVAR="$logvar"
+    perl -0pi -e 's/(\t\/\/ Start River Client\n\tif err := riverClient\.Start\(ctx\); err != nil \{\n)/\t\/\/ Wait for River tables to be ready before starting queue polling\n\tif err := database.WaitForRiverTableReady(ctx, riverPool, 30*time.Second); err != nil {\n\t\t$ENV{LOGVAR}.ErrorContext(ctx, "river_job table not ready", "error", err)\n\t\tos.Exit(1)\n\t}\n\n$1/' "$main"
+    if grep -Fq 'WaitForRiverTableReady' "$main"; then
+      log_patch "worker main gates startup on river_job readiness: ${main#$target/}"
+    fi
+  fi
+
+  local deps_file="$target/internal/startup/dependencies.go"
+  if [[ -f "$deps_file" ]] && ! grep -Fq 'WaitForRiverTableReady' "$deps_file" && grep -Fq 'client.Start(ctx)' "$deps_file"; then
+    perl -0pi -e 's/(\tif err := client\.Start\(ctx\); err != nil \{\n)/\tif err := database.WaitForRiverTableReady(ctx, pool, 30*time.Second); err != nil {\n\t\treturn nil, nil, fmt.Errorf("wait for river_job table: %w", err)\n\t}\n$1/' "$deps_file"
+    if grep -Fq 'WaitForRiverTableReady' "$deps_file"; then
+      log_patch "startup dependencies gates worker engine on river_job readiness: ${deps_file#$target/}"
+    fi
+  fi
+}
+
+# @since 0.0.1
 patch_redundant_foundation_test_files() {
   local foundation_root="$target/foundation"
   [[ -d "$foundation_root" ]] || return 0
@@ -2250,6 +2485,7 @@ patch_compose_targets "$target/docker-compose.yml"
 patch_compose_targets "$target/docker-compose.dev.yml"
 patch_compose_targets "$target/docker-compose.test.yml"
 patch_compose_database_contract
+patch_compose_stop_grace_period
 patch_coolify_deploy_contract
 patch_coolify_routing_labels
 patch_reframe_frontend_dockerfile
@@ -2282,9 +2518,21 @@ patch_startup_projection_warming
 patch_startup_envelope_fallback
 patch_startup_snapshot_shadow
 patch_worker_engine_canonical
+patch_river_table_readiness_gate
 patch_redundant_foundation_test_files
 sync_go_work
 
+report_irreversible_range
+
 if [[ "$patched" -eq 0 ]]; then
   printf '[PATCH] no managed scaffold drift found\n'
+fi
+
+# Reversible drift warns and is fixed in passing; irreversible drift stops here.
+# An update that silently proceeded past an unsupported database major would be
+# the one failure this whole boundary exists to prevent.
+if [[ "$version_conflicts" -gt 0 ]]; then
+  printf '\nmanaged patches halted: %d irreversible version conflict(s)\n' "$version_conflicts" >&2
+  printf 'See tooling/versions.tsv and docs/scaffold_ownership_boundary.md\n' >&2
+  exit 1
 fi
