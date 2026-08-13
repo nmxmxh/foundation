@@ -38,30 +38,18 @@ func sharedMemorySupported(dir string) bool {
 	return true
 }
 
-// newSharedMemoryFile creates a shared region without mapping it.
+// Both regions are mapped, and that is now the whole rule.
 //
-// Two processes agree on a region either through mappings or through file I/O,
-// and mixing the two is not safe. A kernel that forbids unsafe code cannot mmap,
-// so it reads and writes its arena with pread/pwrite; if this side also holds a
-// MAP_SHARED mapping of the same file, the two views drift once the kernel
-// writes — on darwin the host's subsequent stagings become invisible to the
-// kernel, which reports a freshly published descriptor as FREE. The failure
-// looks like a protocol race and is neither, so the arena simply does not map:
-// both ends use positional file I/O and the file system keeps them coherent.
-func newSharedMemoryFile(dir string, size int) (*sharedMemorySegment, error) {
-	segment, err := newSharedMemorySegment(dir, size)
-	if err != nil {
-		return nil, err
-	}
-	if len(segment.raw) > 0 {
-		if err := syscall.Munmap(segment.raw); err != nil {
-			_ = segment.Close()
-			return nil, fmt.Errorf("unmap arena segment: %w", err)
-		}
-		segment.raw = nil
-	}
-	return segment, nil
-}
+// It was not always. Two processes agree on a region either through mappings or
+// through positional file I/O, and mixing the two is not safe: a MAP_SHARED
+// writer against a pread reader drifts, and on darwin the symptom is that a
+// freshly published descriptor reads back as FREE — a failure that looks like a
+// protocol race and is not one. The arena used to sidestep this by not mapping
+// at all, because the Rust kernel is `#![forbid(unsafe_code)]` and could not
+// mmap. It can now, through a safe wrapper in `ovrt-core`, so both ends of both
+// regions map and the mismatch has nowhere left to occur. The staging buffer,
+// the per-exchange publish copy, and the msync that made them coherent are all
+// gone with it.
 
 // newSharedMemorySegment creates and maps a shared region of the given size.
 func newSharedMemorySegment(dir string, size int) (*sharedMemorySegment, error) {
@@ -141,50 +129,7 @@ func (s *sharedMemorySegment) Close() error {
 	return firstErr
 }
 
-// Sync flushes mapped writes so a reader using ordinary file I/O sees them.
-//
-// The host writes the arena through an mmap; a kernel reads it with positional
-// reads (`pread`). POSIX guarantees those views are coherent for MAP_SHARED, but
-// only after the mapping's dirty pages are written back — without an explicit
-// msync the reader can observe a partially updated region, which surfaces as a
-// descriptor that is addressable but still reads FREE. That failure is
-// intermittent and load-dependent, which is the worst kind: it looks like a race
-// in the protocol rather than a missing flush.
-func (s *sharedMemorySegment) Sync() error {
-	if s == nil || len(s.raw) == 0 {
-		return nil
-	}
-	return unix_msync(s.raw)
-}
-
-// WriteAt publishes staged bytes through the file.
-//
-// The counterpart to ReadAt: the arena stages into an ordinary buffer and
-// publishes with one positional write, so the kernel's pread sees exactly what
-// was staged. See newSharedMemoryFile for why this is not an mmap.
-func (s *sharedMemorySegment) WriteAt(src []byte, offset int64) error {
-	if s == nil || s.file == nil {
-		return fmt.Errorf("shared memory segment is not open")
-	}
-	if len(src) == 0 {
-		return nil
-	}
-	_, err := s.file.WriteAt(src, offset)
-	return err
-}
-
-// ReadAt reads through the file rather than the mapping.
-//
-// Needed because the two ends of an exchange use different APIs: the host stages
-// through its mmap, while a kernel forbidden from unsafe code reads and writes
-// with positional file I/O. A result the kernel wrote with pwrite is not visible
-// through the host's existing mapping — the mapped pages are older and, worse, a
-// subsequent msync of that mapping would write them back over the kernel's
-// result. Reading the result through the file avoids both.
-func (s *sharedMemorySegment) ReadAt(dst []byte, offset int64) error {
-	if s == nil || s.file == nil {
-		return fmt.Errorf("shared memory segment is not open")
-	}
-	_, err := s.file.ReadAt(dst, offset)
-	return err
-}
+// Sync, WriteAt and ReadAt used to live here, to keep a mapped host and a
+// positional kernel in step. Both ends map now, so a store is visible to the
+// peer with no flush and no second copy, and the three of them had no callers
+// left. `msync_unix.go` went with them.

@@ -475,11 +475,53 @@ Each tracked change should include:
 7. The cumulative-work counters and expected complexity class when the change
    affects a loop, collection, index, codec, copy, batch, or projection scan.
 
+## Benchmark validity
+
+Rules extracted from the 2026-08-13 runtime transport work, where each of these
+produced a number that was true and wrong. Full narrative in
+`runtime_transport_optimization.md`.
+
+**Never benchmark immediately after a build.** A freshly built binary has none
+of its executable pages resident and a fresh mapping faults on first touch.
+Measured on the runtime transport: 373,888 ns/op on the first run after a
+rebuild, 22,118 ns/op on the next. A 17x penalty, reproducible, and it was
+reported internally as a 4.7x regression before anyone noticed. Warm the path,
+then measure. If a production pool cannot tolerate the cold first call, warm it
+at startup rather than letting the first caller pay.
+
+**Never benchmark a mechanism against a trivial workload.** A workload with no
+compute measures the mechanism's best case and can hide a crossover completely.
+The epoch doorbell measured 3x faster than a pipe against an echo unit and 32%
+*slower* against a kernel taking 500us per call, because it wins by spinning and
+zero compute always lands inside the spin. A benchmark harness for a mechanism
+must include a workload with tunable, realistic service time — see
+`runtime.busy` in `reference_kernel.rs`. The echo case is still worth keeping;
+it is just not the answer on its own.
+
+**Sweep the parameter before concluding a knob does not help.** "Tuning did not
+recover it" and "that was the wrong value" are indistinguishable from one
+sample. Sweeping the sleep cap at 500us of service time gave 607us / 530us /
+526us at caps of 125us / 25us / 5us — the first value alone would have
+justified abandoning the transport.
+
+**Keep the evidence where the thing lives.** Foundation had no runnable kernel,
+so every transport number it had came from an application repo, measured against
+that application's kernels. That is the wrong place for evidence about
+foundation's own transport, and it is why a bad default survived: nothing in
+foundation could have caught it.
+
+**A cost nobody measured becomes a design constraint nobody chose.** The 4 KiB
+control buffer's latency was never in scope when the arena was designed, so a
+~38us crossing became the reason a compute lane degraded into a cross-check —
+which then read, from the inside, as a deliberate architectural decision. When a
+boundary is introduced, cost it in the same change.
+
 ## Review checklist
 
 - [ ] Is the behavior specified with bounds, timeouts, payload limits, and failure semantics?
 - [ ] Are visible state, hidden state, invariants, liveness/fairness, and refinement/parity expectations named for high-risk concurrent paths?
 - [ ] Is there a baseline benchmark, profile, query plan, or load-test result?
+- [ ] Was it measured warm, and against a workload with realistic service time rather than a trivial one?
 - [ ] Does the optimization preserve tenant scope, idempotency, authorization, replay safety, and diagnostics?
 - [ ] Does it use the correct Ovasabi performance lane for the process/network boundary?
 - [ ] Are allocation, copying, locking, and goroutine growth visible in tests or telemetry?

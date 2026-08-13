@@ -16,3 +16,15 @@ loom = ["dep:loom"]
 
 [dependencies]
 loom = { version = "0.7", optional = true }
+
+# The only non-optional third-party dependency in the workspace, and it is a
+# declaration crate: extern "C" signatures and constants, no runtime layer, no
+# allocation. `mapping.rs` needs mmap/munmap and std does not expose them; a
+# higher-level mapping crate would sit between us and the syscall while pulling
+# this in anyway. Unix only, because that is where the shared-memory transport
+# runs — see runtimehost/shared_memory_unix.go for the host side.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

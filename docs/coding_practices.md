@@ -892,6 +892,150 @@ Enforcement:
 - Reviewer gate on documentation and comment changes.
 - Future: lint script for word count, contraction, and Latin abbreviation scanning.
 
+### CP-38: A safety test must be proved able to fail
+
+Level: `Mandatory` for tests that assert memory ordering, liveness, isolation,
+or any property whose violation is silent.
+
+Requirements:
+
+1. Before a safety test is accepted, break the property it guards and confirm
+   the test goes red. Record the sabotage and its result in the test comment.
+2. A test that cannot be made to fail must be rewritten, not kept as
+   reassurance.
+3. Prefer sabotages that are one edit and one line, so the check can be repeated
+   cheaply by a later reader.
+
+Rationale:
+
+A memory-ordering test written against a `syscall.Mmap` region passed under
+`go test -race` with the acquire load replaced by a plain dereference. Go's race
+detector does not instrument mapped memory, because the runtime does not know
+the region exists. The test would have sat in the suite proving nothing. Moving
+it to a heap buffer made the same assertion catch the same sabotage. Two of
+three safety tests in that change were worthless until this was applied.
+
+Enforcement:
+
+- Reviewer gate. The test comment must name the sabotage and the observed
+  failure.
+
+### CP-39: A test must model the protocol it claims to test
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Concurrency tests must reproduce the real flow-control discipline of the
+   thing under test, including request and response pairing and backpressure.
+2. If a test fails, first confirm the test models the system correctly before
+   changing the system.
+
+Rationale:
+
+A torn-read test used a free-running writer against a strictly request-response
+protocol. It failed immediately, but it was measuring overwrite rather than
+visibility: no ordering could have satisfied it. The defect was in the test.
+
+Enforcement:
+
+- Reviewer gate on concurrency and protocol tests.
+
+### CP-40: Do not let a comment claim behaviour the code does not have
+
+Level: `Mandatory`
+
+Requirements:
+
+1. A comment that describes configurability, a bound, or a guarantee must have a
+   test that pins it.
+2. When a field or option is documented as tunable, a caller must be able to
+   reach it, and a test must assert the value arrives.
+
+Rationale:
+
+A wait policy documented as "tunable per pool because call rates differ by
+orders of magnitude" had one constructor and no option reaching it. The comment
+described an intention. The values it fixed were later found to make the
+transport slower than the one it replaced for a whole class of workload, and no
+caller could correct it.
+
+Enforcement:
+
+- Reviewer gate. `TestEpochWaitTuningReachesTheExchange` is the worked example.
+
+### CP-41: A silent fallback is worse than a loud failure
+
+Level: `Mandatory`
+
+Requirements:
+
+1. When a payload, route, or identifier exceeds a fixed limit, fail with an
+   error that names the limit and the offending size.
+2. Do not truncate a routing key, an identifier, or a record stream to fit.
+3. A degraded path must be observable. If a fast lane falls back, the fallback
+   must be counted and surfaced.
+
+Rationale:
+
+Exceeding the 1 KiB control payload was not an error. Callers had a fallback for
+every kernel, so the native lane silently ceased to exist while continuing to be
+scheduled. Separately, a truncated route resolves to a different unit or to
+none, and a truncated record stream decodes as a valid shorter one — both
+surface as quietly missing data instead of a failure.
+
+Enforcement:
+
+- Reviewer gate on boundary code and any fixed-width region.
+
+### CP-42: `forbid(unsafe_code)` is a placement decision, not a prohibition
+
+Level: `Recommended`
+
+Requirements:
+
+1. When a crate that forbids unsafe code needs a primitive that requires it,
+   place the primitive in a crate that permits unsafe and expose a safe API.
+2. Do not reshape a design around the constraint before checking whether the
+   primitive can be relocated.
+3. Every unsafe block carries a `SAFETY:` comment naming the invariant the
+   caller guarantees.
+
+Rationale:
+
+A whole transport was built around positional file I/O because the Rust kernel
+crate forbids unsafe and therefore could not call `mmap`. The answer was about
+twelve lines of `mmap` in the crate that already permits unsafe. The constraint
+was real; the conclusion drawn from it was not.
+
+Enforcement:
+
+- Reviewer gate. `clippy::undocumented_unsafe_blocks` and
+  `clippy::missing_safety_doc` are already denied in `check-rust.sh`.
+
+### CP-43: Production paths must not call test-only helpers
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Helpers named or scoped for tests must be `#[cfg(test)]`, `_test.go`, or
+   otherwise unreachable from production builds.
+2. A production call to a `*_for_test` helper is a defect regardless of whether
+   the behaviour is correct.
+
+Rationale:
+
+The shared-memory serve loop called `read_frame_for_test` and
+`write_frame_for_test`. The behaviour was correct. The naming was the tell that
+the loop had never been treated as a hot path, and it was a hot path in
+production. Gating those helpers behind `#[cfg(test)]` makes the compiler
+enforce this.
+
+Enforcement:
+
+- Compiler, once the helpers are correctly gated. Reviewer gate otherwise.
+
 ## Enforcement matrix
 
 | Rule ID | Primary enforcement | Automation | Merge gate |
@@ -933,6 +1077,12 @@ Enforcement:
 | `CP-35` | Review + automated migration check | Partial | Yes |
 | `CP-36` | Agent contract check + review evidence | Partial | Yes |
 | `CP-37` | Review gate on doc and comment changes | Contextual | Contextual |
+| `CP-38` | Sabotage check + review | No | Yes (safety tests) |
+| `CP-39` | Review + concurrency tests | No | Yes |
+| `CP-40` | Review + wiring test | Partial | Yes |
+| `CP-41` | Review + boundary tests | Partial | Yes |
+| `CP-42` | Clippy unsafe-doc lints + review | Strong | Yes |
+| `CP-43` | Compiler (cfg-gated helpers) + review | Strong | Yes |
 
 ## Exception process and ADR linkage
 

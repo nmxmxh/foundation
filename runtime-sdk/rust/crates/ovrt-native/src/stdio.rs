@@ -63,6 +63,36 @@ pub fn process_runtime_buffer_in_place(
     unit_id: &str,
     raw_buffer: &mut [u8],
 ) -> Result<(), String> {
+    let outcome = process_runtime_buffer_unpublished(host, unit_id, raw_buffer)?;
+    if outcome == BufferOutcome::Completed {
+        add_epoch_raw(raw_buffer, IDX_OUTPUT_WRITTEN, 1)?;
+    }
+    Ok(())
+}
+
+/// Whether an exchange produced output that a consumer should read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BufferOutcome {
+    /// A unit ran and wrote output. The output epoch has not been bumped.
+    Completed,
+    /// The unit failed or panicked. Status and diagnostics are set; there is no
+    /// output, so publishing an output epoch would announce an empty result as
+    /// a real one.
+    Failed,
+}
+
+/// Runs a unit without announcing the result.
+///
+/// Split out of `process_runtime_buffer_in_place` for the epoch transport,
+/// where the announcement is the crossing and has to be a release store to a
+/// shared atomic — not the plain increment that suffices when a pipe write
+/// follows it and supplies the barrier. Publishing twice, once here and once
+/// atomically, would be a same-address data race on a word the peer is reading.
+pub fn process_runtime_buffer_unpublished(
+    host: &NativeRuntimeHost,
+    unit_id: &str,
+    raw_buffer: &mut [u8],
+) -> Result<BufferOutcome, String> {
     if raw_buffer.len() != BUFFER_TOTAL_BYTES as usize {
         return Err(format!(
             "runtime buffer length mismatch: {} != {}",
@@ -82,21 +112,22 @@ pub fn process_runtime_buffer_in_place(
             set_header_int_raw(raw_buffer, INT_IDX_STATUS_CODE, 0)?;
             set_diagnostics_text_raw(raw_buffer, "")?;
             write_output_bytes_raw(raw_buffer, &output)?;
-            add_epoch_raw(raw_buffer, IDX_OUTPUT_WRITTEN, 1)?;
+            Ok(BufferOutcome::Completed)
         }
         Ok(Err(error)) => {
             set_header_int_raw(raw_buffer, INT_IDX_STATUS_CODE, 1)?;
             clear_output_raw(raw_buffer)?;
             set_diagnostics_text_raw(raw_buffer, &error)?;
+            Ok(BufferOutcome::Failed)
         }
         Err(payload) => {
             set_header_int_raw(raw_buffer, INT_IDX_STATUS_CODE, 2)?;
             clear_output_raw(raw_buffer)?;
             set_diagnostics_text_raw(raw_buffer, &panic_payload_message(payload))?;
             add_epoch_raw(raw_buffer, IDX_PANIC_STATE, 1)?;
+            Ok(BufferOutcome::Failed)
         }
     }
-    Ok(())
 }
 
 fn header_int_raw(raw_buffer: &[u8], index: u32) -> Result<i32, String> {
@@ -263,7 +294,51 @@ fn write_frame<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(any(test, unix))]
+/// Reads one unit-id frame into a caller-owned buffer, or reports end of stream.
+///
+/// The shared-memory transport calls this once per exchange, so it must not
+/// allocate: `payload` is cleared and refilled rather than replaced. The bound
+/// is the unit-id bound, not the buffer's — under this transport the buffer
+/// never travels over the pipe, so a frame anywhere near `BUFFER_TOTAL_BYTES`
+/// is a protocol error and should be refused before it is read.
+///
+/// Returns `false` when the peer closed the pipe, which is an orderly shutdown
+/// rather than a failure.
+#[cfg(unix)]
+pub(crate) fn read_unit_frame_into<R: Read>(
+    reader: &mut R,
+    payload: &mut Vec<u8>,
+) -> Result<bool, String> {
+    let mut size = [0_u8; 4];
+    match reader.read_exact(&mut size) {
+        Ok(()) => {}
+        Err(error)
+            if error.kind() == io::ErrorKind::UnexpectedEof
+                || error.kind() == io::ErrorKind::BrokenPipe =>
+        {
+            return Ok(false)
+        }
+        Err(error) => return Err(format!("read unit frame: {error}")),
+    }
+
+    let length = u32::from_le_bytes(size) as usize;
+    if length > MAX_UNIT_ID_FRAME_BYTES {
+        return Err(format!("unit frame has {length} bytes; max is {MAX_UNIT_ID_FRAME_BYTES}"));
+    }
+    payload.clear();
+    payload.resize(length, 0);
+    reader.read_exact(payload).map_err(|error| format!("read unit frame body: {error}"))?;
+    Ok(true)
+}
+
+/// Writes the empty acknowledgement frame that ends a shared-memory exchange.
+#[cfg(unix)]
+pub(crate) fn write_ack_frame<W: Write>(writer: &mut W) -> Result<(), String> {
+    write_frame(writer, &[]).map_err(|error| format!("write shared memory ack: {error}"))?;
+    writer.flush().map_err(|error| format!("flush shared memory ack: {error}"))
+}
+
+#[cfg(test)]
 pub(crate) fn read_frame_for_test<R: Read>(reader: &mut R) -> io::Result<Vec<u8>> {
     match read_frame_bounded(reader, BUFFER_TOTAL_BYTES as usize) {
         Ok(payload) => Ok(payload),
@@ -274,7 +349,7 @@ pub(crate) fn read_frame_for_test<R: Read>(reader: &mut R) -> io::Result<Vec<u8>
     }
 }
 
-#[cfg(any(test, unix))]
+#[cfg(test)]
 pub(crate) fn write_frame_for_test<W: Write>(writer: &mut W, payload: &[u8]) -> io::Result<()> {
     write_frame(writer, payload)
 }

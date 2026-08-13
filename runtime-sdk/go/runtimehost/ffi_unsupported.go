@@ -28,6 +28,12 @@ func (p *FFIPool) Execute(context.Context, ProcessRequest) (ProcessResponse, err
 	return ProcessResponse{}, errors.Join(ErrFFITransportUnsupported, errors.New("ffi runtime transport is not supported on this build"))
 }
 
+// ExecuteInto mirrors the supported build's signature so a caller written
+// against the allocation-free path still compiles where FFI is unavailable.
+func (p *FFIPool) ExecuteInto(context.Context, ProcessRequest, []byte) (ProcessResponse, error) {
+	return ProcessResponse{}, errors.Join(ErrFFITransportUnsupported, errors.New("ffi runtime transport is not supported on this build"))
+}
+
 func (p *FFIPool) Close() error {
 	return nil
 }

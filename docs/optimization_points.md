@@ -289,6 +289,13 @@ This document tracks the deliberate performance and architecture carryovers fold
 - **WebSocket Routing Singleflight Coalescer**: Implemented singleflight coalescing keyed by Device ID in route registration to eliminate Redis connection lock storm bottlenecks during reconnect spikes.
 - **Columnar Projection Lane Design**: Authored specification and interface layout for Arrow-compatible Columnar Projection Lane (Structure-of-Arrays) in Hermes to optimize scan-heavy analytical telemetry queries.
 
+- **Runtime Transport Rebuild (2026-08-13)**: both ends of both shared regions now map the same file, so the `shm` exchange copies nothing. Deleted the arena staging buffer, its per-exchange publish copy, `msync`, and the mapped-writer/positional-reader coherence hazard that forced them. Control buffer body 1,903 -> 130 ns; a 64 KiB arena slab read 4,781 -> 10 ns, because `Arena::descriptor` had been issuing four separate four-byte `pread`s per table entry, making a columnar batch cost a syscall and an allocation per column. Full reasoning in `runtime_transport_optimization.md`.
+- **Epoch Doorbell Transport (`shm-epoch`, opt-in)**: the crossing is a release store to a shared epoch slot rather than a pipe frame and a blocking read. End to end 16us -> ~4us against a reference kernel; 10^6-exchange soak clean; SIGKILL detected in 0.01s against a one-hour timeout via a supervisor goroutine, since a dead kernel and a slow one write the same nothing to a slot. `ProcessTransportAuto` still resolves to `shm`; a transport that silently upgrades itself moves every pool at once.
+- **Epoch Wait Cap Correction**: `DefaultEpochMaxSleep` 200us -> 20us. A parked waiter overshoots the reply by up to its sleep cap, which made the epoch transport *slower than the pipe it replaces* for any kernel taking hundreds of microseconds — measured 32% slower at 500us of service time, and reported independently at 38% from a real workload. A pipe cannot overshoot. `ProcessPoolOptions.EpochWaitTuning` now exposes spin and cap per pool, which the field documentation had claimed for some time while nothing reached it.
+- **Pool Warm-Up**: `warmMapping` walks one byte per page of a host mapping at startup (1.499 ms cold -> 16.2 us warmed on 8 MiB) and each worker runs one throwaway exchange to fault the child process in. A cold first exchange costs about 17x its warm price and previously landed on whichever caller arrived first.
+- **FFI Allocation Removal**: `FFIPool.ExecuteInto` writes into a caller-owned destination, the ABI error buffer is pooled rather than allocated per call, and the buffer pool holds `*Buffer` rather than `*[]byte`. Steady state is zero allocations per call, asserted by `AllocsPerRun`. `ovrt_ffi::process_buffer` also catches panics at the ABI boundary, because an unwind escaping `extern "C"` aborts the entire Go host.
+- **Transport Evidence In Foundation**: `reference_kernel` (echo plus a `runtime.busy` unit with tunable service time) and `transport_evidence_test.go` keep transport benchmarks, the soak and the kill test in the repository that owns the transport. Every previous transport number came from an application repository, which is why a bad default survived unnoticed.
+
 ## Deferred behind stubs
 
 1. Native Rust render RPC for server-authoritative media execution
@@ -312,3 +319,17 @@ This document tracks the deliberate performance and architecture carryovers fold
 12. Add bounded Hermes ordered/range or bit-sliced bitmap candidate indexes for
     declared high-value numeric fields; benchmark 1K/10K/100K/1M scopes and
     preserve the current full-scan predicate path as the correctness fallback.
+13. Decide per pool whether process isolation is still worth its cost. `ffi` is
+    about 3x faster than the best process transport and its panic boundary is
+    now closed, so for a kernel that is safe Rust with `forbid(unsafe_code)` the
+    isolation buys protection against failures that are close to unreachable.
+    `internal/kernelhost`-style specs that only build process pools need an FFI
+    mode before this can be acted on.
+14. Re-measure any `shm-epoch` result taken before the sleep-cap correction.
+    Those were taken with a 200us cap and understate the transport by up to a
+    third for slow kernels.
+15. Consider a futex or `__ulock` parking primitive only if a workload appears
+    that parks often *and* is sensitive to wake latency. The sleep-cap fix
+    removed the known case; the reasoning that dismissed futexes originally was
+    wrong even though its conclusion survived, so reopen this with measurements
+    rather than argument.

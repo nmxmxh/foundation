@@ -67,20 +67,21 @@ type Arena struct {
 	allocHead uint32
 	nextID    uint32
 
-	// flush publishes the staged prefix so another process observes it. It is
-	// given the number of bytes in use, because the arena is sized for the
-	// worst case and a typical exchange stages a small fraction of it —
-	// publishing the whole region would copy megabytes that hold nothing.
-	// Nil for a plain byte slice (tests).
-	flush func(staged int) error
-
-	// readAt reads through the backing file rather than the staging buffer, for
-	// regions the consumer wrote. See ReadSlab.
+	// flush and readAt exist for a consumer that reaches the region by some
+	// route other than a mapping of it. The process pool no longer needs
+	// either: host and kernel both map the same file, so a store is already
+	// where the peer will look for it. Both are nil there, which makes Sync a
+	// no-op and ReadSlab a view. They remain because the type is exported and
+	// a caller may still be bridging a region it cannot map.
+	flush  func(staged int) error
 	readAt func(dst []byte, offset int64) error
 }
 
-// NewArenaOverMapping wraps a staging region, with a flush hook so staged writes
-// can be made visible to another process.
+// NewArenaOverMapping wraps a region whose consumer does not share the mapping,
+// with a flush hook so writes can be made visible to it.
+//
+// Prefer NewArenaOver when both ends map the region — it is the faster path and
+// the one the process pool takes, because there is no second copy to publish.
 func NewArenaOverMapping(raw []byte, flush func(staged int) error, readAt func([]byte, int64) error) (*Arena, error) {
 	arena, err := NewArenaOver(raw)
 	if err != nil {
@@ -285,12 +286,13 @@ func (a *Arena) Slab(id uint32) ([]byte, error) {
 	return a.raw[desc.Offset : desc.Offset+desc.Length], nil
 }
 
-// Sync flushes staged writes so a consumer reading the mapping through ordinary
-// file I/O observes them.
+// Sync publishes staged writes to a consumer that does not share this mapping.
 //
-// Must be called after staging and before dispatching, whenever the consumer is
-// another process. Without it the reader can see a descriptor that is
-// addressable but still reads FREE — intermittently, under load.
+// A no-op when the consumer maps the same region, which is the process pool's
+// case: the store is already in the page the consumer reads. Callers that built
+// their arena with NewArenaOverMapping must still call this after staging and
+// before dispatching, or the reader can see a descriptor that is addressable but
+// still reads FREE — intermittently, under load.
 func (a *Arena) Sync() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -300,15 +302,15 @@ func (a *Arena) Sync() error {
 	return a.flush(int(a.allocHead))
 }
 
-// ReadSlab returns a slab's bytes, reading through the backing file when one is
-// present.
+// ReadSlab returns a slab's bytes, reaching past this mapping when the consumer
+// does not share it.
 //
-// Use this for any region the *consumer* wrote. Slab returns a view of the host's
-// mapping, which is correct for data the host staged and wrong for a result a
-// kernel produced: a kernel that cannot use unsafe code writes with pwrite, and
-// those bytes never appear in an already-established mapping. Reading them back
-// through the mapping silently returns the pre-call contents — a zeroed slab that
-// decodes as an empty result rather than an error.
+// Use this for any region the *consumer* wrote. When both ends map the region it
+// is exactly Slab, and returning the view is correct. It is not correct when the
+// consumer writes by some other route: those bytes never appear in an
+// already-established mapping, so reading them back through it silently returns
+// the pre-call contents — a zeroed slab that decodes as an empty result rather
+// than an error. That was the arrangement before the kernel could mmap.
 func (a *Arena) ReadSlab(id uint32) ([]byte, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()

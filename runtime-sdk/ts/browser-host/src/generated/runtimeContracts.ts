@@ -82,6 +82,16 @@ export const runtimeContractManifest = {
           "value": "7"
         },
         {
+          "name": "OFFSET_ROUTE_BYTES",
+          "type": "UInt32",
+          "value": "64"
+        },
+        {
+          "name": "ROUTE_MAX_BYTES",
+          "type": "UInt32",
+          "value": "64"
+        },
+        {
           "name": "OFFSET_HEADER_INTS",
           "type": "UInt32",
           "value": "128"

@@ -36,12 +36,7 @@ fn read_u32(input: &[u8], at: usize) -> Result<u32, String> {
     if at + 4 > input.len() {
         return Err("arena blob request truncated".to_string());
     }
-    Ok(u32::from_le_bytes([
-        input[at],
-        input[at + 1],
-        input[at + 2],
-        input[at + 3],
-    ]))
+    Ok(u32::from_le_bytes([input[at], input[at + 1], input[at + 2], input[at + 3]]))
 }
 
 /// Decodes the control payload into (input slab, output slab).
@@ -54,9 +49,7 @@ pub fn decode_arena_blob_request(input: &[u8]) -> Result<(u32, u32), String> {
     }
     let magic = read_u32(input, 0)?;
     if magic != ARENA_BLOB_MAGIC {
-        return Err(format!(
-            "arena blob request magic {magic:#x}, want {ARENA_BLOB_MAGIC:#x}"
-        ));
+        return Err(format!("arena blob request magic {magic:#x}, want {ARENA_BLOB_MAGIC:#x}"));
     }
     Ok((read_u32(input, 4)?, read_u32(input, 8)?))
 }
@@ -75,10 +68,7 @@ impl<U: RuntimeUnit> ArenaBlobUnit<U> {
     /// changing what an existing id expects would turn every un-migrated caller
     /// into a decode error.
     pub fn new(unit_id: impl Into<String>, inner: U) -> Self {
-        Self {
-            unit_id: unit_id.into(),
-            inner,
-        }
+        Self { unit_id: unit_id.into(), inner }
     }
 }
 
@@ -107,7 +97,7 @@ impl<U: RuntimeUnit> RuntimeUnit for ArenaBlobUnit<U> {
         })?;
 
         let payload = arena.slab(input_slab)?;
-        let produced = self.inner.run(&payload)?;
+        let produced = self.inner.run(payload)?;
 
         // Refused rather than truncated. Every one of these units returns a
         // packed binary record stream, and a short one decodes as a valid,

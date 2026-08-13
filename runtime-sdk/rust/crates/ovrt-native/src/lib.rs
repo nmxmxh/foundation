@@ -3,6 +3,8 @@
 pub mod arena;
 pub mod arena_blob;
 mod buffer;
+#[cfg(unix)]
+pub mod epoch_transport;
 mod shared_memory;
 mod stdio;
 
@@ -21,7 +23,8 @@ pub use arena_blob::{ArenaBlobUnit, ARENA_BLOB_MAGIC, ARENA_BLOB_REQUEST_BYTES};
 pub use buffer::NativeBuffer;
 pub use shared_memory::serve_transport;
 pub use stdio::{
-    process_runtime_buffer, process_runtime_buffer_in_place, serve_framed_session, serve_stdio,
+    process_runtime_buffer, process_runtime_buffer_in_place, process_runtime_buffer_unpublished,
+    serve_framed_session, serve_stdio, BufferOutcome,
 };
 
 type TaskResult = Result<Vec<u8>, String>;

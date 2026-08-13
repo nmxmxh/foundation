@@ -5,6 +5,7 @@ package runtimehost
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"strings"
 	"sync"
@@ -139,9 +140,88 @@ func newTestFFIPool(backend ffiBackend) *FFIPool {
 	return &FFIPool{
 		backend: backend,
 		bufferPool: sync.Pool{New: func() any {
-			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
+			buffer, err := NewBuffer(make([]byte, generated.BUFFER_TOTAL_BYTES))
+			if err != nil {
+				return nil
+			}
+			return buffer
+		}},
+		errorPool: sync.Pool{New: func() any {
+			buffer := make([]byte, ffiErrorBufferBytes)
 			return &buffer
 		}},
+	}
+}
+
+// echoFFIBackend copies input to output straight through the raw buffer.
+//
+// Deliberately avoids NewBuffer and bytes.ToUpper. The allocation test measures
+// the pool, and anything the fake allocates would be counted against it — a
+// real cgo backend crosses into C and allocates nothing on the Go heap, so a
+// fake that does is not standing in for it.
+func echoFFIBackend() *scriptedFFIBackend {
+	word := func(raw []byte, offset uint32) []byte { return raw[offset : offset+4] }
+	return &scriptedFFIBackend{
+		process: func(_ string, raw []byte, _ []byte) (int32, string) {
+			inputLen := binary.LittleEndian.Uint32(
+				word(raw, generated.OFFSET_HEADER_INTS+generated.INT_IDX_INPUT_LENGTH*4))
+			if inputLen > generated.INPUT_MAX_BYTES {
+				return 1, "input length out of range"
+			}
+			input := raw[generated.OFFSET_INPUT_BYTES : generated.OFFSET_INPUT_BYTES+inputLen]
+			copy(raw[generated.OFFSET_OUTPUT_BYTES:], input)
+			binary.LittleEndian.PutUint32(
+				word(raw, generated.OFFSET_HEADER_INTS+generated.INT_IDX_OUTPUT_LENGTH*4), inputLen)
+
+			epoch := word(raw, generated.OFFSET_EPOCHS+generated.IDX_OUTPUT_WRITTEN*generated.EPOCH_SLOT_BYTES)
+			binary.LittleEndian.PutUint32(epoch, binary.LittleEndian.Uint32(epoch)+1)
+			return 0, ""
+		},
+	}
+}
+
+// The FFI lane's argument is that it does not copy across the boundary. A call
+// that allocates twice on the way out — an output copy and a 4 KiB error buffer
+// that is almost never written — spends most of that argument before returning.
+func TestFFIPoolExecuteIntoAllocatesNothingInSteadyState(t *testing.T) {
+	pool := newTestFFIPool(echoFFIBackend())
+	dst := make([]byte, generated.OUTPUT_MAX_BYTES)
+	req := ProcessRequest{UnitID: "runtime.echo", Input: []byte("ffi seam")}
+
+	// Prime the pools; the first call through a sync.Pool always allocates.
+	if _, err := pool.ExecuteInto(context.Background(), req, dst); err != nil {
+		t.Fatalf("ExecuteInto() error = %v", err)
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		response, err := pool.ExecuteInto(context.Background(), req, dst)
+		if err != nil || string(response.Output) != "ffi seam" {
+			t.Fatalf("ExecuteInto() output=%q err=%v", response.Output, err)
+		}
+	})
+	if allocs > 0 {
+		t.Errorf("ExecuteInto allocated %.0f times per call, want 0", allocs)
+	}
+}
+
+// A short destination must fail rather than truncate. Units return packed
+// binary records, so a short result decodes as a valid shorter one — the
+// failure would surface as quietly missing data instead of an error.
+func TestFFIPoolExecuteIntoRefusesAShortDestination(t *testing.T) {
+	pool := newTestFFIPool(echoFFIBackend())
+	_, err := pool.ExecuteInto(context.Background(), ProcessRequest{
+		UnitID: "runtime.echo",
+		Input:  []byte("more than four bytes"),
+	}, make([]byte, 4))
+	if err == nil || !strings.Contains(err.Error(), "destination holds 4") {
+		t.Fatalf("ExecuteInto() into a short destination error = %v", err)
+	}
+}
+
+func TestFFIPoolExecuteIntoRequiresADestination(t *testing.T) {
+	pool := newTestFFIPool(echoFFIBackend())
+	if _, err := pool.ExecuteInto(context.Background(), ProcessRequest{UnitID: "runtime.echo"}, nil); err == nil {
+		t.Fatal("ExecuteInto() with a nil destination must fail")
 	}
 }
 

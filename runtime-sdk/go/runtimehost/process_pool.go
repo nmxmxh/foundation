@@ -41,6 +41,16 @@ const (
 	ProcessTransportFFI          ProcessTransportMode = "ffi"
 	ProcessTransportStdio        ProcessTransportMode = "stdio"
 	ProcessTransportSharedMemory ProcessTransportMode = "shm"
+
+	// ProcessTransportSharedMemoryEpoch is shm with the pipe removed from the
+	// hot path: the crossing is a store to a shared epoch slot rather than a
+	// frame write and a blocking read.
+	//
+	// Opt-in, and never chosen by ProcessTransportAuto. It is the faster lane
+	// and the newer protocol, and a transport that silently upgrades itself
+	// would move every pool onto it at once. Ask for it per pool, soak it, then
+	// change the default deliberately.
+	ProcessTransportSharedMemoryEpoch ProcessTransportMode = "shm-epoch"
 )
 
 type ProcessPoolOptions struct {
@@ -64,6 +74,65 @@ type ProcessPoolOptions struct {
 	// Requires the shared-memory transport: the arena is a second mapping beside
 	// the control buffer, so a stdio worker has nowhere to put it.
 	ArenaBytes uint32
+
+	// WarmupUnitID names the unit invoked once per worker at startup, purely to
+	// fault the child in. Empty uses DefaultWarmupUnitID.
+	//
+	// A freshly spawned kernel has none of its executable pages resident, so the
+	// first exchange pays a page fault for every page of code it runs through —
+	// measured as a 17x penalty on the first round trip, landing on whichever
+	// caller happens to arrive first. warmMapping handles the host's own
+	// mappings, but the child is a separate address space and only an exchange
+	// reaches it.
+	//
+	// The unit does not have to exist, which is why this needs no configuration
+	// to be useful: an unknown id still carries the child through frame
+	// decoding, buffer validation, dispatch lookup and the reply, and a kernel
+	// answers it with an in-band status code rather than an error, because a
+	// client can send any id at runtime and the protocol has always required
+	// that. Naming a real unit additionally warms that unit's own code, which is
+	// worth doing for a pool that serves one hot unit.
+	WarmupUnitID string
+
+	// EpochWaitTuning shapes how a shm-epoch worker waits. Ignored by every
+	// other transport.
+	EpochWaitTuning EpochWaitTuning
+}
+
+// EpochWaitTuning sets the spin and park behaviour of the epoch doorbell.
+//
+// This is not a micro-optimisation knob; it decides whether the transport is
+// faster or slower than the pipe it replaces, and the answer depends entirely
+// on how long your kernel takes to answer.
+//
+// A waiter spins for SpinIterations, then sleeps with exponential backoff up to
+// MaxSleep. When the kernel answers inside the spin budget the reply is caught
+// immediately and there is no syscall at all — measured 3x faster than the pipe
+// for a microsecond-scale unit. When the kernel is busy for far longer, the
+// spin is wasted work and the backoff then *overshoots* the reply, so the host
+// wakes late. A pipe read blocks once and is woken by the write; it cannot
+// overshoot. Measured against a kernel taking ~570us per call, the epoch
+// doorbell was 38% *slower*.
+//
+// The defaults now cover both regimes — DefaultEpochMaxSleep was lowered to 20us
+// precisely because a loose cap made this transport slower than the pipe for a
+// slow kernel — so most pools should leave these alone. Reach for them when:
+//
+//   - the kernel answers in microseconds and the pool is latency-critical:
+//     raise SpinIterations to widen the window the spin catches.
+//   - the kernel computes for milliseconds and cores are contended: set
+//     SpinIterations to -1, since the spin will never catch that reply and is
+//     pure waste.
+//
+// Measure before and after. The crossover is a property of your kernel's
+// service time, and BenchmarkTransportServiceTimeSweep sweeps it directly.
+type EpochWaitTuning struct {
+	// SpinIterations is the busy phase before the first sleep. Zero takes the
+	// default; negative disables spinning entirely.
+	SpinIterations int
+	// MaxSleep caps the backoff ladder. Zero takes the default. Set it near the
+	// kernel's expected service time so the waiter does not overshoot.
+	MaxSleep time.Duration
 }
 
 type ProcessPool struct {
@@ -100,6 +169,22 @@ type processWorker struct {
 	arenaBytes uint32
 	arenaShm   *sharedMemorySegment
 	arena      *Arena
+
+	// warmupUnitID and warmupTimeout bound the throwaway exchange at startup.
+	warmupUnitID  string
+	warmupTimeout time.Duration
+
+	// epochTuning shapes the doorbell wait. Only the epoch transport reads it.
+	epochTuning EpochWaitTuning
+
+	// childRunning is the death detection the epoch transport cannot get from
+	// its doorbell. Under stdio and shm a dead kernel closes stdout and the
+	// blocking read fails; with no read in the hot path, a dead kernel and a
+	// slow one produce the same silent slot. A supervisor goroutine reaps the
+	// child and clears this, which is the only signal that distinguishes them
+	// for a SIGKILL — no in-band epoch can be written by a process that is
+	// already gone.
+	childRunning atomic.Bool
 
 	busy   atomic.Bool
 	health sync.RWMutex
@@ -172,6 +257,13 @@ func NewProcessPool(opts ProcessPoolOptions) (*ProcessPool, error) {
 			mode:       transportSupport.Resolved,
 			shmDir:     strings.TrimSpace(opts.SharedMemoryDir),
 			arenaBytes: normalizeArenaBytes(opts.ArenaBytes),
+
+			warmupUnitID: strings.TrimSpace(opts.WarmupUnitID),
+			// The exchange timeout, not a shorter one. A cold child is the
+			// slowest it will ever be, so a tighter bound here would time out
+			// exactly the case this exists to fix.
+			warmupTimeout: opts.ExchangeTimeout,
+			epochTuning:   opts.EpochWaitTuning,
 		}
 		if err := worker.start(); err != nil {
 			_ = pool.Close()
@@ -378,7 +470,7 @@ func (w *processWorker) startLocked() error {
 	}
 	env := append([]string(nil), w.env...)
 	env = append(env, "OVRT_RUNTIME_TRANSPORT="+string(w.mode))
-	if w.mode == ProcessTransportSharedMemory {
+	if w.mode == ProcessTransportSharedMemory || w.mode == ProcessTransportSharedMemoryEpoch {
 		if w.shm == nil {
 			segment, err := newSharedMemorySegment(w.shmDir, int(generated.BUFFER_TOTAL_BYTES))
 			if err != nil {
@@ -392,30 +484,40 @@ func (w *processWorker) startLocked() error {
 		// live here; the control buffer carries only a descriptor id.
 		if w.arenaBytes > 0 {
 			if w.arenaShm == nil {
-				segment, arenaErr := newSharedMemoryFile(w.shmDir, int(w.arenaBytes))
+				// Mapped, like the control buffer and like the kernel's view of
+				// it. The arena used to stage into a private buffer and publish
+				// with a positional write, because the kernel read it with
+				// pread and a mapped writer against a positional reader drifts.
+				// Both ends map it now, so there is no second copy of the arena
+				// to keep in step: a store lands in the page the kernel is
+				// already reading. That removes an arena-sized staging
+				// allocation per worker and a copy of everything staged on
+				// every exchange.
+				segment, arenaErr := newSharedMemorySegment(w.shmDir, int(w.arenaBytes))
 				if arenaErr != nil {
 					return fmt.Errorf("create arena segment: %w", arenaErr)
 				}
-				staging := make([]byte, int(w.arenaBytes))
-				publish := func(staged int) error {
-					if staged <= 0 || staged > len(staging) {
-						staged = len(staging)
-					}
-					return segment.WriteAt(staging[:staged], 0)
-				}
-				arena, arenaErr := NewArenaOverMapping(staging, publish, segment.ReadAt)
+				// Fault the mapping in before anyone waits on it. A fresh
+				// mapping has no resident pages, so the first exchange takes a
+				// page fault per page it touches — measured at ~374 us against
+				// a ~22 us warm round trip, a 17x penalty paid by whichever
+				// caller happens to arrive first. That is a latency spike with
+				// no reproducible cause in production, and a benchmark run
+				// straight after a build reads it as a regression. Paying it
+				// here costs the same faults at a moment when nothing is
+				// waiting. Before NewArenaOver, because the file is freshly
+				// created and therefore all zeroes: writing a zero is a no-op
+				// on its contents, and doing it afterwards would overwrite the
+				// header this then goes on to validate.
+				warmMapping(segment.raw)
+				// NewArenaOver writes the header directly into the mapping, so
+				// it is valid to any consumer the moment this returns. The old
+				// staged arena needed an explicit publish here or the file was
+				// all zeroes and a kernel opening it reported no arena at all.
+				arena, arenaErr := NewArenaOver(segment.raw)
 				if arenaErr != nil {
 					_ = segment.Close()
 					return fmt.Errorf("initialize arena: %w", arenaErr)
-				}
-				// Publish the freshly initialized header before any staging.
-				// The arena is built in the staging buffer, so until the first
-				// flush the file is all zeroes — a consumer opening it would
-				// fail header validation and report no arena at all, rather
-				// than an empty one.
-				if arenaErr := arena.Sync(); arenaErr != nil {
-					_ = segment.Close()
-					return fmt.Errorf("publish arena header: %w", arenaErr)
 				}
 				w.arenaShm = segment
 				w.arena = arena
@@ -453,8 +555,56 @@ func (w *processWorker) startLocked() error {
 	w.stdin = stdin
 	w.stdout = bufio.NewReader(stdoutPipe)
 	w.recordStarted()
+	w.childRunning.Store(true)
 	go w.logStderr(stderrPipe)
+	if w.mode == ProcessTransportSharedMemoryEpoch {
+		// Only this transport reaps here. The others learn of a dead kernel
+		// through their blocking read, and closeLocked owns Wait for them.
+		go w.superviseChild(cmd)
+
+		// Before anything is published, including the warm-up. See
+		// waitForKernelReady: publishing into a kernel that has not taken its
+		// baseline snapshot loses the exchange.
+		if err := waitForKernelReady(w.shm.raw, defaultEpochWaitPolicy(w.warmupTimeout), w.childAlive); err != nil {
+			return err
+		}
+	}
+	w.warmupLocked()
 	return nil
+}
+
+// warmupLocked runs one throwaway exchange to fault the child in.
+//
+// Never fails the start. The worker is usable either way — a warm-up that does
+// not complete has cost the caller nothing except the cold start it was meant
+// to prevent — and refusing to start a pool because a page-fault optimisation
+// did not land would trade a latency problem for an availability one.
+//
+// Routed through executeWithContext rather than the exchange directly, because
+// the exchanges themselves ignore their context: a stdio Exchange blocks in
+// readFrame until the child answers. A kernel that hangs on its first exchange
+// would otherwise hang startup with no timeout at all, which is a worse failure
+// than the one being fixed. executeWithContext bounds it and kills the child.
+func (w *processWorker) warmupLocked() {
+	unitID := w.warmupUnitID
+	if unitID == "" {
+		unitID = DefaultWarmupUnitID
+	}
+	timeout := w.warmupTimeout
+	if timeout <= 0 {
+		timeout = DefaultProcessExchangeTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	// A zeroed control buffer is a valid one: input length zero, no epochs set.
+	// The reply is discarded — an unknown unit answers with a non-zero status
+	// code, and that is a completed exchange, which is all this wants.
+	buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
+	if err := w.executeWithContext(ctx, unitID, buffer); err != nil {
+		w.logger.Debug("native runtime worker warmup exchange did not complete",
+			"unit_id", unitID, "error", err)
+	}
 }
 
 func (w *processWorker) close() error {
@@ -481,7 +631,15 @@ func (w *processWorker) closeLocked() error {
 			return killErr
 		}
 	}
-	waitErr := w.cmd.Wait()
+	// Wait exactly once. Under the epoch transport superviseChild owns the reap,
+	// and a second Wait here would race it — the loser gets "wait: no child
+	// processes", which reads like a shutdown bug rather than a double reap.
+	var waitErr error
+	if w.mode == ProcessTransportSharedMemoryEpoch {
+		waitErr = w.waitForSupervisedExit()
+	} else {
+		waitErr = w.cmd.Wait()
+	}
 
 	w.cmd = nil
 	w.stdin = nil
@@ -657,6 +815,17 @@ func (w *processWorker) exchange() workerExchange {
 	// still copied its control buffer over stdio on every exchange. The bug was
 	// invisible because stdio is correct — just slower, and unable to carry an
 	// arena handle.
+	if w.mode == ProcessTransportSharedMemoryEpoch {
+		// Deliberately not falling back either. The child was launched with
+		// OVRT_RUNTIME_TRANSPORT=shm-epoch and is watching the input slot, so a
+		// pipe frame would never be read and the caller would block until its
+		// timeout instead of failing.
+		return epochExchange{
+			shm:    w.shm,
+			policy: w.epochTuning.policy(w.warmupTimeout),
+			alive:  w.childAlive,
+		}
+	}
 	if w.mode == ProcessTransportSharedMemory {
 		// Deliberately not falling back to stdio when the segment is missing.
 		// The child was launched with OVRT_RUNTIME_TRANSPORT=shm and is waiting
@@ -730,6 +899,49 @@ func (x stdioExchange) Close() error {
 
 func (x stdioExchange) Restart() error {
 	return nil
+}
+
+// waitForSupervisedExit blocks until superviseChild has reaped the process.
+//
+// Bounded rather than open-ended: the child has already been killed by the
+// caller, so this is waiting on a goroutine that is about to return, and a
+// shutdown that could hang on it would be worse than one that gives up and
+// reports it.
+func (w *processWorker) waitForSupervisedExit() error {
+	deadline := time.Now().Add(5 * time.Second)
+	for w.childRunning.Load() {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("native runtime worker %d did not exit after kill", w.index)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return nil
+}
+
+// childAlive reports whether this worker's process is still running.
+//
+// Read on the epoch transport's parked path, so it must be cheap and must not
+// take w.mu: the exchange holds that lock for its whole duration, and a
+// liveness check that waited on it would deadlock against the wait it exists to
+// terminate.
+func (w *processWorker) childAlive() bool {
+	return w.childRunning.Load()
+}
+
+// superviseChild reaps the process and records that it is gone.
+//
+// cmd.Wait is called here and nowhere else. It must be called exactly once, and
+// calling it means closeLocked cannot: the two would race and the loser gets
+// "wait: no child processes", which reads like a bug in shutdown rather than a
+// double reap.
+func (w *processWorker) superviseChild(cmd *exec.Cmd) {
+	err := cmd.Wait()
+	w.childRunning.Store(false)
+	if err != nil {
+		// Expected on any deliberate shutdown, so this is not a failure record —
+		// it would show up as a health-degrading error on every clean Close.
+		w.logger.Debug("native runtime worker exited", "error", err)
+	}
 }
 
 func (w *processWorker) logStderr(stderr io.ReadCloser) {
@@ -843,6 +1055,8 @@ func normalizeProcessTransportMode(mode ProcessTransportMode) ProcessTransportMo
 		return ProcessTransportStdio
 	case ProcessTransportSharedMemory:
 		return ProcessTransportSharedMemory
+	case ProcessTransportSharedMemoryEpoch:
+		return ProcessTransportSharedMemoryEpoch
 	default:
 		return mode
 	}

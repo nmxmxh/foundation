@@ -107,13 +107,50 @@ pub unsafe fn process_buffer(
     // SAFETY: The caller promises `host` is a live handle returned by
     // `create_host`.
     let host = unsafe { &*(host as *mut NativeRuntimeHost) };
-    match process_runtime_buffer_in_place(host, unit_id, buffer) {
-        Ok(()) => 0,
-        Err(error) => {
+
+    // The unwind stops here, and this is what makes the FFI lane a real choice
+    // rather than a performance-only one.
+    //
+    // A panicking *unit* is already contained: `process_runtime_buffer_in_place`
+    // catches it and reports it as a status code with `IDX_PANIC_STATE` set. The
+    // gap is a panic in the buffer handling around it — a slicing bug, an
+    // arithmetic overflow in a header offset. In a separate process that is a
+    // dead child the pool restarts. Here it would unwind into `extern "C"`,
+    // where Rust has no choice but to abort, and abort takes the Go host with
+    // it: every other pool, every in-flight request.
+    //
+    // So the boundary catches too. A caught panic is reported through the same
+    // error channel as any other failure, which the caller already handles.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        process_runtime_buffer_in_place(host, unit_id, buffer)
+    }));
+    match outcome {
+        Ok(Ok(())) => 0,
+        Ok(Err(error)) => {
             write_error(err_buf, err_cap, &error);
             1
         }
+        Err(payload) => {
+            write_error(err_buf, err_cap, &panic_message(&payload));
+            1
+        }
     }
+}
+
+/// Best-effort text for a caught panic payload.
+///
+/// Panics carry `&str` or `String` in practice and anything at all in principle.
+/// A payload of some other type still has to produce a message, because the
+/// alternative is an empty error at the one boundary where the caller cannot
+/// see what happened.
+fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        return format!("ffi runtime panicked: {message}");
+    }
+    if let Some(message) = payload.downcast_ref::<String>() {
+        return format!("ffi runtime panicked: {message}");
+    }
+    "ffi runtime panicked".to_string()
 }
 
 pub fn write_error(err_buf: *mut c_char, err_cap: usize, message: &str) {
@@ -252,7 +289,93 @@ mod tests {
     fn build_host(_workers: usize) -> Result<NativeRuntimeHost, String> {
         let host = NativeRuntimeHost::new(BTreeMap::new());
         host.register_unit(Arc::new(EchoUnit))?;
+        host.register_unit(Arc::new(PanicUnit))?;
         Ok(host)
+    }
+
+    struct PanicUnit;
+
+    impl RuntimeUnit for PanicUnit {
+        fn descriptor(&self) -> RuntimeUnitDescriptor {
+            RuntimeUnitDescriptor {
+                unit_id: "ffi.panic".to_string(),
+                role: RuntimeRole::Compute,
+                input_schema: "foundation/v1/envelope.capnp".to_string(),
+                output_schema: "foundation/v1/envelope.capnp".to_string(),
+                supports_wasm: false,
+                supports_native: true,
+                requires_shared_memory: false,
+                supports_gpu: false,
+                max_concurrency: 1,
+            }
+        }
+
+        fn run(&self, _input: &[u8]) -> Result<Vec<u8>, String> {
+            panic!("unit came apart")
+        }
+    }
+
+    /// The FFI lane shares an address space with the host, so an escaping panic
+    /// is not a failed call — it unwinds into `extern "C"`, aborts, and takes
+    /// every other pool and every in-flight request with it. This asserts the
+    /// panic is reported instead. If it ever regresses, the test binary dies
+    /// rather than failing, which is exactly the production symptom.
+    #[test]
+    fn a_panicking_unit_is_reported_rather_than_unwinding_into_the_abi() {
+        let mut raw_host: *mut c_void = std::ptr::null_mut();
+        let mut error = [0_i8; 256];
+        assert_eq!(
+            // SAFETY: The test supplies valid output and error buffers.
+            unsafe { create_host(1, &mut raw_host, error.as_mut_ptr(), error.len(), build_host) },
+            0
+        );
+
+        let mut buffer = vec![0_u8; BUFFER_TOTAL_BYTES as usize];
+        let mut runtime_buffer = ovrt_native::NativeBuffer::new(buffer.clone()).expect("buffer");
+        runtime_buffer.initialize_control_plane(1).expect("init");
+        runtime_buffer.write_input_bytes(b"boom").expect("write input");
+        buffer.copy_from_slice(runtime_buffer.into_inner().as_slice());
+
+        // The unit panic is caught one level down and surfaces as a non-zero
+        // status inside the buffer, so the ABI call itself still succeeds.
+        let mut error = [0_i8; 256];
+        // SAFETY: `raw_host` came from `create_host`; the unit id and runtime
+        // buffer live for the duration of the call.
+        let status = unsafe {
+            process_buffer(
+                raw_host,
+                b"ffi.panic".as_ptr(),
+                "ffi.panic".len(),
+                buffer.as_mut_ptr(),
+                buffer.len(),
+                error.as_mut_ptr(),
+                error.len(),
+            )
+        };
+        assert_eq!(status, 0, "the ABI call must return, not abort");
+
+        let runtime_buffer = ovrt_native::NativeBuffer::new(buffer).expect("buffer");
+        let diagnostics = runtime_buffer.diagnostics_text();
+        assert!(diagnostics.contains("unit came apart"), "panic message lost: {diagnostics}");
+
+        // SAFETY: `raw_host` came from `create_host` and is destroyed once.
+        unsafe {
+            destroy_host(raw_host);
+        }
+    }
+
+    #[test]
+    fn a_panic_payload_always_produces_a_message() {
+        let str_payload: Box<dyn std::any::Any + Send> = Box::new("borrowed");
+        assert!(panic_message(&str_payload).contains("borrowed"));
+
+        let string_payload: Box<dyn std::any::Any + Send> = Box::new("owned".to_string());
+        assert!(panic_message(&string_payload).contains("owned"));
+
+        // Anything can be panicked with. An empty error at this boundary would
+        // leave the caller with a failure and no way to see what it was.
+        let odd_payload: Box<dyn std::any::Any + Send> = Box::new(42_u8);
+        assert_eq!(panic_message(&odd_payload), "ffi runtime panicked");
     }
 
     #[test]

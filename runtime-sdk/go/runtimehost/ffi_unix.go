@@ -50,11 +50,17 @@ type FFIPoolOptions struct {
 	Logger      logger.Logger
 }
 
+// ffiErrorBufferBytes sizes the out-of-band message an ABI call may return.
+// Matches the diagnostics budget: a message longer than the buffer that will
+// carry it onward is truncated either way.
+const ffiErrorBufferBytes = 4096
+
 type FFIPool struct {
 	logger logger.Logger
 
 	mu         sync.RWMutex
 	bufferPool sync.Pool
+	errorPool  sync.Pool
 	backend    ffiBackend
 }
 
@@ -86,7 +92,14 @@ func NewFFIPool(opts FFIPoolOptions) (*FFIPool, error) {
 
 	pool := &FFIPool{
 		bufferPool: sync.Pool{New: func() any {
-			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
+			buffer, err := NewBuffer(make([]byte, generated.BUFFER_TOTAL_BYTES))
+			if err != nil {
+				return nil
+			}
+			return buffer
+		}},
+		errorPool: sync.Pool{New: func() any {
+			buffer := make([]byte, ffiErrorBufferBytes)
 			return &buffer
 		}},
 		logger: opts.Logger,
@@ -99,7 +112,33 @@ func NewFFIPool(opts FFIPoolOptions) (*FFIPool, error) {
 	return pool, nil
 }
 
+// Execute runs a unit and returns a freshly allocated copy of its output.
+//
+// Prefer ExecuteInto on a hot path: the copy here exists only so the response
+// can outlive the pooled control buffer, and a caller that owns a destination
+// does not need it.
 func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessResponse, error) {
+	return p.executeInto(ctx, req, nil)
+}
+
+// ExecuteInto runs a unit and writes its output into dst.
+//
+// The FFI lane's whole argument is that it does not copy across the boundary,
+// which made it odd that every call allocated twice: once for the output copy
+// and once for a 4 KiB error buffer that is almost always untouched. Both are
+// gone here — dst receives the output and the error buffer comes from a pool —
+// so a steady-state call allocates nothing.
+//
+// dst must have room for the output; a short destination is an error rather
+// than a truncation, because a short result decodes as a valid smaller one.
+func (p *FFIPool) ExecuteInto(ctx context.Context, req ProcessRequest, dst []byte) (ProcessResponse, error) {
+	if dst == nil {
+		return ProcessResponse{}, errors.New("ffi output destination is required")
+	}
+	return p.executeInto(ctx, req, dst)
+}
+
+func (p *FFIPool) executeInto(ctx context.Context, req ProcessRequest, dst []byte) (ProcessResponse, error) {
 	if p == nil {
 		return ProcessResponse{}, errors.New("ffi runtime pool is nil")
 	}
@@ -113,16 +152,15 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 		return ProcessResponse{}, err
 	}
 
-	rawPtr := p.bufferPool.Get().(*[]byte)
-	raw := *rawPtr
-	defer func() {
-		*rawPtr = raw
-		p.bufferPool.Put(rawPtr)
-	}()
-	buffer, err := NewBuffer(raw)
-	if err != nil {
-		return ProcessResponse{}, err
+	// The pool holds Buffers, not byte slices. Wrapping a pooled slice with
+	// NewBuffer on every call put a fresh *Buffer on the heap each time — one
+	// allocation to describe memory that was already pooled.
+	buffer, _ := p.bufferPool.Get().(*Buffer)
+	if buffer == nil {
+		return ProcessResponse{}, errors.New("ffi runtime buffer pool is not initialized")
 	}
+	defer p.bufferPool.Put(buffer)
+	raw := buffer.RawBytes()
 	buffer.Reset()
 	buffer.Initialize(req.ModuleVersion)
 	if err := buffer.SetHeaderInt(generated.INT_IDX_CONTEXT_HASH, req.ContextHash); err != nil {
@@ -140,8 +178,17 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 		return ProcessResponse{}, errors.New("ffi runtime host is closed")
 	}
 
-	errBuf := make([]byte, 4096)
+	// Pooled, not per-call. This buffer only carries a message when the ABI
+	// call fails, so allocating 4 KiB on every successful call was paying the
+	// cost of the error path at the rate of the success path.
+	errPtr, _ := p.errorPool.Get().(*[]byte)
+	if errPtr == nil {
+		buf := make([]byte, ffiErrorBufferBytes)
+		errPtr = &buf
+	}
+	errBuf := *errPtr
 	clear(errBuf)
+	defer p.errorPool.Put(errPtr)
 	status, message := backend.Process(req.UnitID, raw, errBuf)
 	if status != 0 {
 		if message == "" {
@@ -159,8 +206,23 @@ func (p *FFIPool) Execute(ctx context.Context, req ProcessRequest) (ProcessRespo
 		return ProcessResponse{}, err
 	}
 
+	// The output view points into the pooled control buffer, which is returned
+	// to the pool when this call ends, so it cannot be handed to the caller as
+	// is. Either it is copied into the caller's destination or, without one,
+	// into a fresh slice.
+	if dst != nil && len(output) > len(dst) {
+		return ProcessResponse{}, fmt.Errorf(
+			"ffi output is %d bytes, destination holds %d", len(output), len(dst))
+	}
+	var owned []byte
+	if dst != nil {
+		owned = dst[:copy(dst, output)]
+	} else {
+		owned = append([]byte(nil), output...)
+	}
+
 	response := ProcessResponse{
-		Output:      append([]byte(nil), output...),
+		Output:      owned,
 		Diagnostics: stringsTrim(buffer.DiagnosticsText()),
 		StatusCode:  statusCode,
 		OutputEpoch: buffer.LoadEpoch(generated.IDX_OUTPUT_WRITTEN),

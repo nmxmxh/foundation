@@ -13,16 +13,22 @@
 //! descriptor id in the control payload; a unit reads the slab by id. Four bytes
 //! cross the control plane no matter how many megabytes the batch holds.
 //!
-//! Implementation note: this reads through positional file I/O rather than
-//! mmap. `ovrt-native` is `#![forbid(unsafe_code)]` and carries no third-party
-//! dependencies, and a memory-mapped view of a shared region cannot be produced
-//! safely without either. One positional read per exchange is a memcpy against
-//! work that is superlinear in the batch, so the copy is not the cost that
-//! matters — crossing the 1 KiB boundary at all is.
+//! Implementation note: this maps the region. It used to read it with
+//! positional file I/O, on the reasoning that `ovrt-native` is
+//! `#![forbid(unsafe_code)]` and one read per exchange is a memcpy against work
+//! superlinear in the batch. Two things were wrong with that. The copy was not
+//! one per exchange — `descriptor` alone issued four four-byte `pread`s, and
+//! reading a columnar batch cost a syscall and a heap allocation per column.
+//! And a positional reader against the host's mapped writer is the coherence
+//! mismatch that forced the host to unmap its own arena and publish through a
+//! staging buffer. `ovrt_core::SharedMapping` contains the unsafe in a crate
+//! that permits it, so this crate still forbids it and the mismatch is gone:
+//! a slab is a borrow of memory the host already wrote.
 
 use std::env;
-use std::fs::{File, OpenOptions};
 use std::sync::OnceLock;
+
+use ovrt_core::SharedMapping;
 
 use ovrt_core::generated::{
     ARENA_DESCRIPTOR_COUNT, ARENA_DESCRIPTOR_SIZE, ARENA_DESCRIPTOR_STATE_READY,
@@ -85,9 +91,9 @@ impl ColumnarBatch {
     }
 }
 
-/// Read-only view of the arena.
+/// A view of the arena the host mapped.
 pub struct Arena {
-    file: File,
+    mapping: SharedMapping,
     capacity: u32,
 }
 
@@ -120,17 +126,21 @@ impl Arena {
 
     /// Opens an arena at `path`, validating the header before use.
     pub fn open(path: &str) -> Result<Arena, String> {
-        // Read *and* write. A unit consumes an input batch and returns a result
+        // Mapped read/write. A unit consumes an input batch and returns a result
         // that is itself too large for the control buffer's 2 KiB output region,
         // so the host pre-allocates an output slab and the unit fills it. The
         // unit never allocates: Go owns the allocator, which keeps the bump
         // pointer single-writer and means a kernel crash cannot corrupt it.
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-            .map_err(|error| format!("open arena {path}: {error}"))?;
-        let arena = Arena { file, capacity: 0 };
+        //
+        // The size comes from the file, not from the header, because the header
+        // cannot be read until something is mapped. The host sizes the file
+        // before it spawns this process, so there is nothing to race with.
+        let bytes =
+            std::fs::metadata(path).map_err(|error| format!("stat arena {path}: {error}"))?.len();
+        let bytes = usize::try_from(bytes)
+            .map_err(|_| format!("arena {path} is {bytes} bytes, too large to map"))?;
+        let mapping = SharedMapping::open(std::path::Path::new(path), bytes)?;
+        let arena = Arena { mapping, capacity: 0 };
 
         let magic = arena.header_u32(ARENA_HEADER_IDX_MAGIC)?;
         if magic != ARENA_HEADER_MAGIC {
@@ -148,25 +158,28 @@ impl Arena {
         Ok(Arena { capacity, ..arena })
     }
 
-    fn read_at(&self, offset: u64, len: usize) -> Result<Vec<u8>, String> {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::FileExt;
-            let mut buf = vec![0_u8; len];
-            self.file
-                .read_exact_at(&mut buf, offset)
-                .map_err(|error| format!("read arena at {offset}+{len}: {error}"))?;
-            Ok(buf)
+    /// Borrows a region of the mapping, bounds-checked against it.
+    ///
+    /// A borrow rather than a copy: this is the whole reason the arena exists,
+    /// and it is what the previous `pread`-into-a-`Vec` gave up on every call.
+    fn bytes_at(&self, offset: u64, len: usize) -> Result<&[u8], String> {
+        let start = usize::try_from(offset)
+            .map_err(|_| format!("arena offset {offset} does not fit an address"))?;
+        let end = start
+            .checked_add(len)
+            .ok_or_else(|| format!("arena region overflow at {offset}+{len}"))?;
+        let raw = self.mapping.as_slice();
+        if end > raw.len() {
+            return Err(format!(
+                "arena region [{start}, {end}) runs past the {}-byte mapping",
+                raw.len()
+            ));
         }
-        #[cfg(not(unix))]
-        {
-            let _ = (offset, len);
-            Err("arena requires a unix platform".to_string())
-        }
+        Ok(&raw[start..end])
     }
 
     fn u32_at(&self, offset: u64) -> Result<u32, String> {
-        let bytes = self.read_at(offset, 4)?;
+        let bytes = self.bytes_at(offset, 4)?;
         Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
@@ -179,7 +192,8 @@ impl Arena {
         if id >= ARENA_DESCRIPTOR_COUNT {
             return Err(format!("arena descriptor id {id} out of range"));
         }
-        let base = u64::from(ARENA_OFFSET_DESCRIPTOR_TABLE) + u64::from(id) * u64::from(ARENA_DESCRIPTOR_SIZE);
+        let base = u64::from(ARENA_OFFSET_DESCRIPTOR_TABLE)
+            + u64::from(id) * u64::from(ARENA_DESCRIPTOR_SIZE);
         Ok(ArenaDescriptor {
             id,
             state: self.u32_at(base + FIELD_STATE)?,
@@ -195,7 +209,7 @@ impl Arena {
     /// capacity. The region is written by another process, so a descriptor is
     /// untrusted input: a corrupt or stale entry must produce an error, not a
     /// read outside the slab region.
-    pub fn slab(&self, id: u32) -> Result<Vec<u8>, String> {
+    pub fn slab(&self, id: u32) -> Result<&[u8], String> {
         let descriptor = self.descriptor(id)?;
         if descriptor.state != ARENA_DESCRIPTOR_STATE_READY {
             return Err(format!(
@@ -216,7 +230,7 @@ impl Arena {
                 descriptor.offset, self.capacity
             ));
         }
-        self.read_at(u64::from(descriptor.offset), descriptor.length as usize)
+        self.bytes_at(u64::from(descriptor.offset), descriptor.length as usize)
     }
 
     /// Decodes a columnar batch header and its field table.
@@ -234,9 +248,7 @@ impl Arena {
         };
         let magic = word(COLUMNAR_BATCH_HEADER_IDX_MAGIC);
         if magic != COLUMNAR_BATCH_MAGIC {
-            return Err(format!(
-                "columnar batch magic {magic:#x}, want {COLUMNAR_BATCH_MAGIC:#x}"
-            ));
+            return Err(format!("columnar batch magic {magic:#x}, want {COLUMNAR_BATCH_MAGIC:#x}"));
         }
         let row_count = word(COLUMNAR_BATCH_HEADER_IDX_ROW_COUNT);
         let column_count = word(COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT);
@@ -316,6 +328,41 @@ impl Arena {
     }
 }
 
+impl Arena {
+    /// Writes bytes into a slab the host pre-allocated.
+    ///
+    /// Bounds come from the descriptor table, not from the caller, and the write
+    /// is refused if it would exceed the slab. The unit is filling memory another
+    /// process owns, so overrunning a slab would silently corrupt an unrelated
+    /// batch rather than fail.
+    pub fn write_slab(&self, id: u32, payload: &[u8]) -> Result<(), String> {
+        let descriptor = self.descriptor(id)?;
+        if descriptor.offset < ARENA_OFFSET_PAGES {
+            return Err(format!(
+                "arena descriptor {id} points at {} inside the control region",
+                descriptor.offset
+            ));
+        }
+        if payload.len() > descriptor.length as usize {
+            return Err(format!(
+                "result is {} bytes, output slab {id} holds {}",
+                payload.len(),
+                descriptor.length
+            ));
+        }
+        let end = u64::from(descriptor.offset) + payload.len() as u64;
+        if self.capacity > 0 && end > u64::from(self.capacity) {
+            return Err(format!(
+                "output slab {id} write would pass the {} byte arena",
+                self.capacity
+            ));
+        }
+        let offset = usize::try_from(descriptor.offset)
+            .map_err(|_| format!("arena descriptor {id} offset does not fit an address"))?;
+        self.mapping.write_at(offset, payload)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,7 +395,7 @@ mod tests {
         let batch_offset = values_offset + values_len.div_ceil(page) * page;
         let batch_len = COLUMNAR_BATCH_HEADER_BYTES + COLUMNAR_FIELD_DESCRIPTOR_BYTES;
 
-        let mut put_descriptor = |raw: &mut Vec<u8>, id: u32, offset: u32, len: u32, kind: u32| {
+        let put_descriptor = |raw: &mut Vec<u8>, id: u32, offset: u32, len: u32, kind: u32| {
             let base = (ARENA_OFFSET_DESCRIPTOR_TABLE + id * ARENA_DESCRIPTOR_SIZE) as usize;
             put(raw, base + FIELD_STATE as usize, ARENA_DESCRIPTOR_STATE_READY);
             put(raw, base + FIELD_OFFSET as usize, offset);
@@ -369,7 +416,11 @@ mod tests {
         put(&mut raw, b + (COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT * 4) as usize, 1);
         let f = b + COLUMNAR_BATCH_HEADER_BYTES as usize;
         put(&mut raw, f + (COLUMNAR_FIELD_IDX_FIELD_ID * 4) as usize, 0);
-        put(&mut raw, f + (COLUMNAR_FIELD_IDX_LOGICAL_TYPE * 4) as usize, COLUMNAR_LOGICAL_TYPE_FLOAT);
+        put(
+            &mut raw,
+            f + (COLUMNAR_FIELD_IDX_LOGICAL_TYPE * 4) as usize,
+            COLUMNAR_LOGICAL_TYPE_FLOAT,
+        );
         put(&mut raw, f + (COLUMNAR_FIELD_IDX_LENGTH * 4) as usize, values.len() as u32);
         put(&mut raw, f + (COLUMNAR_FIELD_IDX_BYTE_WIDTH * 4) as usize, 4);
         put(&mut raw, f + (COLUMNAR_FIELD_IDX_VALUES_DESCRIPTOR_ID * 4) as usize, 0);
@@ -388,7 +439,8 @@ mod tests {
         assert!(values.len() * 4 > ovrt_core::generated::INPUT_MAX_BYTES as usize);
 
         let (file, batch_id) = write_test_arena(&values);
-        let arena = Arena::open(file.path().to_str().expect("temp path is valid utf-8")).expect("open arena");
+        let arena = Arena::open(file.path().to_str().expect("temp path is valid utf-8"))
+            .expect("open arena");
 
         let batch = arena.columnar_batch(batch_id).expect("decode batch");
         assert_eq!(batch.row_count, values.len() as u32);
@@ -411,55 +463,46 @@ mod tests {
     fn rejects_a_descriptor_pointing_into_the_control_region() {
         let values: Vec<f32> = vec![1.0, 2.0, 3.0];
         let (file, _) = write_test_arena(&values);
-        let arena = Arena::open(file.path().to_str().expect("temp path is valid utf-8")).expect("open arena");
+        let arena = Arena::open(file.path().to_str().expect("temp path is valid utf-8"))
+            .expect("open arena");
 
         // Descriptor 5 was never written, so it is FREE — a consumer must refuse
         // it rather than read whatever bytes lie at offset zero.
         assert!(arena.slab(5).is_err());
     }
-}
 
-
-impl Arena {
-    /// Writes bytes into a slab the host pre-allocated.
+    /// The property the transport now rests on, stated as a test.
     ///
-    /// Bounds come from the descriptor table, not from the caller, and the write
-    /// is refused if it would exceed the slab. The unit is filling memory another
-    /// process owns, so overrunning a slab would silently corrupt an unrelated
-    /// batch rather than fail.
-    pub fn write_slab(&self, id: u32, payload: &[u8]) -> Result<(), String> {
-        let descriptor = self.descriptor(id)?;
-        if descriptor.offset < ARENA_OFFSET_PAGES {
-            return Err(format!(
-                "arena descriptor {id} points at {} inside the control region",
-                descriptor.offset
-            ));
-        }
-        if payload.len() > descriptor.length as usize {
-            return Err(format!(
-                "result is {} bytes, output slab {id} holds {}",
-                payload.len(),
-                descriptor.length
-            ));
-        }
-        let end = u64::from(descriptor.offset) + payload.len() as u64;
-        if self.capacity > 0 && end > u64::from(self.capacity) {
-            return Err(format!(
-                "output slab {id} write would pass the {} byte arena",
-                self.capacity
-            ));
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::FileExt;
-            self.file
-                .write_all_at(payload, u64::from(descriptor.offset))
-                .map_err(|error| format!("write arena slab {id}: {error}"))
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = payload;
-            Err("arena requires a unix platform".to_string())
-        }
+    /// A result this side writes must be visible to a reader holding its own
+    /// mapping of the same arena, with no flush and no second copy. Under the
+    /// positional design it was not: the host's established mapping never saw a
+    /// `pwrite`, which is why the host unmapped its arena and read results back
+    /// through the file. If this fails, that whole apparatus has to come back.
+    #[test]
+    fn a_written_slab_is_visible_through_another_mapping_of_the_arena() {
+        let values: Vec<f32> = vec![1.0, 2.0, 3.0];
+        let (file, _) = write_test_arena(&values);
+        let path = file.path().to_str().expect("temp path is valid utf-8");
+
+        let kernel = Arena::open(path).expect("open kernel arena");
+        let host = Arena::open(path).expect("open host arena");
+
+        kernel.write_slab(0, &[0xDE, 0xAD, 0xBE, 0xEF]).expect("write slab");
+
+        let observed = host.slab(0).expect("read slab");
+        assert_eq!(&observed[..4], &[0xDE, 0xAD, 0xBE, 0xEF]);
+    }
+
+    /// A write that would overrun its slab must fail, not spill into the next.
+    #[test]
+    fn a_write_larger_than_its_slab_is_refused() {
+        let values: Vec<f32> = vec![1.0, 2.0, 3.0];
+        let (file, _) = write_test_arena(&values);
+        let arena = Arena::open(file.path().to_str().expect("temp path is valid utf-8"))
+            .expect("open arena");
+
+        // Descriptor 0 holds 3 f32s: 12 bytes.
+        let err = arena.write_slab(0, &[0_u8; 13]).expect_err("oversized write must fail");
+        assert!(err.contains("output slab 0 holds 12"), "unexpected error: {err}");
     }
 }

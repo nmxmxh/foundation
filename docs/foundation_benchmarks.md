@@ -3837,3 +3837,157 @@ allocations on the ingress path. Only four sites write into a nil-able map
 and vendored apps construct and populate it directly, so the non-nil guarantee
 is contract rather than implementation. Removing it needs a deprecation pass
 across the vendored apps, not an edit in `metadata.go`.
+
+## The shared-memory transport: what a crossing actually costs
+
+Apple M1 Pro, release build. Reproduce with:
+
+```bash
+cargo run --release -p ovrt-native --bin shm_exchange_bench --manifest-path runtime-sdk/rust/Cargo.toml
+```
+
+| Exchange body | ns/op |
+| :--- | ---: |
+| control buffer, positional: `pread` + 4 KiB alloc + process + `pwrite` | 1903 |
+| control buffer, mapped: process in place | 130 |
+| arena slab read (64 KiB), positional: 4x `pread` descriptor + slab | 4781 |
+| arena slab read (64 KiB), mapped: descriptor + slab borrow | 10 |
+
+The control-buffer rows measure the transport body only — the unit is an echo,
+so the 130 ns that remain are the epoch and header writes every exchange
+performs regardless of lane.
+
+The arena rows are the larger finding, and they were the least visible cost in
+the system. A slab read is not one `pread`: `descriptor` issued **four separate
+four-byte positional reads** to assemble one table entry, each allocating, and
+only then read the slab into a fresh `Vec`. Reading a columnar batch cost a
+syscall and an allocation *per column*. Mapped, the same read is an offset into
+memory the host already wrote — a borrow, not a copy — which is why it does not
+scale with slab size.
+
+### Why the numbers below are the ones that matter
+
+`shm` was described as zero-copy and was not, on either region. The host mapped
+its control buffer (`syscall.Mmap`, `MAP_SHARED`, in
+`runtimehost/shared_memory_unix.go`) while the Rust kernel opened the same file
+and read it with `pread`, processed a heap copy, and wrote it back with
+`pwrite`. So on the kernel side there was no shared memory at all: a file, two
+syscalls, 8 KiB of copying and one allocation per exchange.
+
+The arena was worse, and its cost was structural rather than incidental. A
+mapped writer against a positional reader **drifts** — on darwin a freshly
+published descriptor reads back as FREE, a failure that looks like a protocol
+race and is not one. The kernel was `#![forbid(unsafe_code)]` and could not
+mmap, so the host gave up its own mapping to match: the arena staged into a
+private buffer, published with a positional write of everything staged, and
+read results back through the file. That is an arena-sized allocation per
+worker, a copy of the working set on every exchange, and an `msync` to make the
+two views agree.
+
+Both ends of both regions map now, through `ovrt_core::SharedMapping` — a safe
+wrapper in the one crate that permits unsafe, so `ovrt-native` still forbids it.
+The staging buffer, the publish copy, the `msync`, and the whole
+mapped-vs-positional hazard are gone with it. `Arena.Sync()` is a no-op on this
+path and `ReadSlab` is a view, because there is no longer a second copy of the
+arena to reconcile.
+
+**This is not the dominant cost, and the measurement above should not be read
+as if it were.** A full `shm` round trip is still governed by its doorbell: the
+host writes the unit id as a stdio frame and blocks reading an acknowledgement,
+which is two context switches and four syscalls per exchange, independent of
+payload size.
+
+Measured end to end from a caller (pronto's `BenchmarkRustArenaRoundTrip`, same
+class of machine), before and after mapping both regions:
+
+| `BenchmarkRustArenaRoundTrip` | ns/op | allocs/op |
+| :--- | ---: | ---: |
+| positional | 38,537 | 14 |
+| mapped, warm | ~22,000 | 13 |
+| in-process FFI, for scale | ~1,300 | 3 |
+| the wire codec alone, for scale | ~84 | 2 |
+
+About 16.5 us came off, and the remainder did not move. That is the shape the
+body measurements predict — the doorbell is untouched by any of this — and it
+is the number that matters for deciding what to do next: **~22 us of a ~22 us
+crossing is now the pipe.** There is nothing else left to blame.
+
+The consequence is a design constraint, not a tuning note. At ~22 us a crossing
+still only pays for batches of thousands of items, so lanes with small payloads
+cannot move work into the native runtime at all — they can only run a second
+implementation and compare it, which is what a blocked offload path degrades
+into. The fix is to make the doorbell an epoch switch: the control buffer
+already carries `IDX_INPUT_WRITTEN`, `IDX_OUTPUT_WRITTEN`, `IDX_OUTPUT_CONSUMED`
+and `IDX_KERNEL_READY`, generated into both lanes, and the FFI path already uses
+them. The `shm` path writes them as bookkeeping and signals over a pipe anyway.
+
+### Cold start: a 17x penalty, and how to avoid measuring it by accident
+
+Rebuild the kernel binary and run the benchmark immediately and the same round
+trip reads **~374,000 ns**. Run it again without rebuilding and it is back to
+**~22,000 ns**. The child's executable pages and the multi-megabyte arena
+mapping are both cold, and the first exchange takes the faults for all of them.
+
+Two consequences, and neither is optional:
+
+- **A pool must warm itself.** `ProcessPool` now faults its arena in at
+  `start()` — one byte written per page, before the header is written and
+  before the child is spawned (`warmMapping`, `runtimehost/warmup.go`).
+  Measured directly on an 8 MiB segment: a first full pass costs **1.499 ms**
+  cold and **16.2 us** after warming. Otherwise the first real caller pays
+  that, and it surfaces as an unreproducible latency spike rather than as a
+  warmup. Note the write: faulting on a *read* installs a read-only entry for a
+  shared file mapping and the first write then takes a second fault, so warming
+  by reading leaves half the cost in place.
+
+  The child's executable pages are the other half, and only an exchange reaches
+  them — a separate address space. `ProcessPool` now also runs one throwaway
+  exchange per worker at startup (`warmupLocked`), carrying the child through
+  frame decoding, buffer validation, dispatch lookup and the reply. It needs no
+  configuration: an unknown unit id is answered with an in-band status code
+  rather than a transport error, because the protocol has always had to tolerate
+  a client sending any id at runtime. `WarmupUnitID` names a real unit instead,
+  which additionally warms that unit's own code and is worth setting for a pool
+  that serves one hot unit.
+
+  The warm-up never fails a start, and it is bounded by the exchange timeout and
+  routed through `executeWithContext` — the exchanges themselves ignore their
+  context, so an unbounded warm-up would let a kernel that hangs on its first
+  call hang startup instead, which is a worse failure than the one being fixed.
+- **Never benchmark immediately after a build.** A transport comparison run
+  that way is measuring page faults, not transport. The 374 us figure above is
+  what that mistake looks like, and it is large enough to invert a conclusion —
+  it reads as a 4.7x *regression* against the positional baseline it replaced.
+
+### The 4 KiB budget, and what happens when a unit exceeds it
+
+`INPUT_MAX_BYTES` is 1024 bytes — **128 `float64`s**. `OUTPUT_MAX_BYTES` is
+2048. A unit whose real payload is larger does not get an error at the boundary:
+the call fails inside the kernel and the Go caller takes its fallback, so the
+native lane silently ceases to exist while continuing to be scheduled. Anyone
+writing a unit with a batch-shaped payload should assume the control buffer is
+a control plane only and put the payload in the arena, passing a descriptor id
+through the buffer. `ArenaBlobUnit` is the worked example.
+
+### Choosing a transport
+
+| Mode | Isolation | ns/op | Use when |
+| :--- | :--- | ---: | :--- |
+| `ffi` | none (same address space) | ~1,300 | trusted safe-Rust kernels, hot units, small payloads |
+| `shm-epoch` | separate process | 3,211 – 4,472 | isolation needed and latency matters; opt-in. Faster than `shm` up to ~100us of kernel service time, level beyond — see the service-time sweep in `runtime_transport_optimization.md` |
+| `shm` | separate process | 15,623 – 16,153 | the current default |
+| `stdio` | separate process | 20,891 – 23,416 | portability, debugging, no shared filesystem |
+
+Measured in foundation against `reference_kernel`, three runs of 3,000
+exchanges, warm, M1 Pro. A cold first exchange costs roughly 17x its warm price;
+pools warm themselves at startup and benchmarks must not be run straight after a
+build. Reproduce:
+
+```bash
+cargo build --release -p ovrt-native --bin reference_kernel --manifest-path runtime-sdk/rust/Cargo.toml
+```
+
+then `OVRT_REFERENCE_KERNEL=<path> go test ./runtimehost/ -run '^$' -bench
+BenchmarkTransport -benchtime 3000x -count 3` from `runtime-sdk/go`. Full
+reasoning, the 10^6-exchange soak and the SIGKILL evidence are in
+`runtime_transport_optimization.md`.

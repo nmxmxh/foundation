@@ -46,7 +46,7 @@ func SupportedProcessTransports(sharedMemoryDir string) []ProcessTransportMode {
 		supported = append(supported, ProcessTransportFFI)
 	}
 	if sharedMemorySupported(sharedMemoryDir) {
-		supported = append(supported, ProcessTransportSharedMemory)
+		supported = append(supported, ProcessTransportSharedMemory, ProcessTransportSharedMemoryEpoch)
 	}
 	return supported
 }
@@ -76,6 +76,14 @@ func ResolveProcessTransportSupport(requested ProcessTransportMode, sharedMemory
 		return support, nil
 	case ProcessTransportStdio:
 		support.Resolved = ProcessTransportStdio
+		return support, nil
+	case ProcessTransportSharedMemoryEpoch:
+		// Never reached from Auto — see the mode's own comment. A pool asks for
+		// this one by name or does not get it.
+		if !sharedMemorySupported(sharedMemoryDir) {
+			return support, fmt.Errorf("%w: linux or darwin runtime required", ErrSharedMemoryTransportUnsupported)
+		}
+		support.Resolved = ProcessTransportSharedMemoryEpoch
 		return support, nil
 	case ProcessTransportSharedMemory:
 		if !sharedMemorySupported(sharedMemoryDir) {

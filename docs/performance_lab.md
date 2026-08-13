@@ -104,6 +104,29 @@ CUDA/Nsight:
 - CUDA Graphs, streams, async copies, pinned memory, shared memory, and tensor
   paths require a capture bundle and fallback/parity evidence.
 
+## Warm-Up and Workload Validity
+
+Two preconditions before any lane result is admissible as evidence. Both were
+learned by producing wrong numbers; see `runtime_transport_optimization.md`.
+
+**Warm the path.** A binary built in the same session has cold executable pages,
+and a fresh mapping faults on first touch. Measured: 373,888 ns/op on the first
+run after a rebuild against 22,118 ns/op warm — 17x, reproducible, and initially
+recorded as a 4.7x regression. Discard the first iterations explicitly rather
+than trusting the harness to amortise them, and state in the record that the run
+was warm.
+
+**Match the workload to the mechanism under test.** A lane result taken against
+a null workload measures the mechanism's best case. A spin-then-park doorbell
+measured 3x faster than a pipe with zero compute behind it and 32% slower with
+500us behind it, because zero compute always lands inside the spin. Any harness
+for a synchronisation or transport mechanism must carry a workload with tunable
+service time, and results must record which service time they were taken at.
+
+**Sweep before concluding a parameter does not help.** One sample cannot
+distinguish "this knob does not work" from "that was the wrong value". Record
+the sweep, not the point.
+
 ## Variance Rules
 
 1. A single benchmark run is a smoke test, not proof.
