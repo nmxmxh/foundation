@@ -185,7 +185,15 @@ mod unix {
                     self.len
                 ));
             }
-            if !offset.is_multiple_of(4) {
+            // `% 4` rather than `offset.is_multiple_of(4)`.
+            //
+            // is_multiple_of stabilised in Rust 1.87. This crate declares no
+            // rust-version and is vendored into eleven applications that each
+            // pin their own toolchain; one builds on rust:1.85-alpine, where
+            // that method is E0658 and the entire workspace fails to compile.
+            // The MSRV was raised silently, at deploy time, by a convenience
+            // method that reads no better than the remainder it replaced.
+            if offset % 4 != 0 {
                 return Err(format!("atomic offset {offset} is not 4-byte aligned"));
             }
             // SAFETY: The base address is page-aligned by `mmap` and `offset`

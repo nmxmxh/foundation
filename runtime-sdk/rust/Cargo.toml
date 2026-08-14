@@ -11,3 +11,16 @@ resolver = "2"
 
 [workspace.package]
 license-file = "../../LICENSE"
+
+# The oldest toolchain this SDK compiles on.
+#
+# Declared because these crates are vendored into applications that pin their
+# own Rust versions, and nothing else makes an accidental MSRV bump visible: a
+# call to a method stabilised after this floor compiles for whoever wrote it and
+# fails in someone else's deploy with E0658. With rust-version set, cargo
+# refuses on the old toolchain with a message naming the version, and
+# `cargo check` under it is a cheap pre-merge gate.
+#
+# 1.85 is the floor because that is what the oldest consuming Dockerfile pins.
+# Raising it is a decision to make deliberately, in step with those images.
+rust-version = "1.85"
