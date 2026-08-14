@@ -622,3 +622,261 @@ func newBenchStore(b *testing.B) *Store {
 	}
 	return store
 }
+
+// ---------------------------------------------------------------------------
+// Foundation 2026-08-14 Comparative Benchmarks
+// ---------------------------------------------------------------------------
+
+func BenchmarkAccumulatorVsScan_FacetManifest(b *testing.B) {
+	const N = 10000
+	records := make([]database.DomainRecord, N)
+	for i := range N {
+		records[i] = database.DomainRecord{
+			Domain:         "signals",
+			Collection:     "ticks",
+			OrganizationID: "org_1",
+			RecordID:       fmt.Sprintf("tick_%d", i),
+			Data: database.RecordDataFromPairs(
+				database.RecordField{Name: "country", Value: database.StringValue(fmt.Sprintf("C_%d", i%5))},
+				database.RecordField{Name: "status", Value: database.StringValue(fmt.Sprintf("S_%d", i%3))},
+				database.RecordField{Name: "domain", Value: database.StringValue(fmt.Sprintf("D_%d", i%10))},
+			),
+		}
+	}
+
+	acc := NewAccumulatorStateStore(AccumulatorConfig{
+		Dimensions: []string{"country", "status", "domain"},
+	})
+	scope := ScopeKey("signals", "ticks", "org_1")
+	for i, rec := range records {
+		acc.ApplyRecord(rec, uint64(i+1), OperationUpsert)
+	}
+
+	b.Run("Accumulator_O1", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = acc.GetFacetManifest(scope, 10)
+		}
+	})
+
+	b.Run("SequentialScan_ON", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			counts := make(map[string]map[string]int64)
+			for _, dim := range []string{"country", "status", "domain"} {
+				counts[dim] = make(map[string]int64)
+			}
+			for _, rec := range records {
+				for _, dim := range []string{"country", "status", "domain"} {
+					if val, ok := rec.Data.Get(dim); ok {
+						counts[dim][val.Text]++
+					}
+				}
+			}
+		}
+	})
+}
+
+func BenchmarkAccumulatorVsScan_MetricSummary(b *testing.B) {
+	const N = 10000
+	records := make([]database.DomainRecord, N)
+	for i := range N {
+		records[i] = database.DomainRecord{
+			Domain:         "signals",
+			Collection:     "ticks",
+			OrganizationID: "org_1",
+			RecordID:       fmt.Sprintf("tick_%d", i),
+			Data: database.RecordDataFromPairs(
+				database.RecordField{Name: "price", Value: database.FloatValue(float64(i) * 1.5)},
+			),
+		}
+	}
+
+	acc := NewAccumulatorStateStore(AccumulatorConfig{
+		NumericMetrics: []string{"price"},
+	})
+	scope := ScopeKey("signals", "ticks", "org_1")
+	for i, rec := range records {
+		acc.ApplyRecord(rec, uint64(i+1), OperationUpsert)
+	}
+
+	b.Run("Accumulator_O1", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = acc.GetMetricSummary(scope, "price")
+		}
+	})
+
+	b.Run("SequentialScan_ON", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			var sum, minVal, maxVal float64
+			var count int64
+			for _, rec := range records {
+				if val, ok := rec.Data.Get("price"); ok {
+					_, strVal, _ := val.ScalarIndex()
+					f, _ := fmt.Sscanf(strVal, "%f", &sum)
+					_ = f
+					count++
+				}
+			}
+			_ = sum + minVal + maxVal + float64(count)
+		}
+	})
+}
+
+func BenchmarkBitmapVsIterative_MultiFilter(b *testing.B) {
+	const N = 10000
+	registry := NewBitmapIndexRegistry()
+	scope := recordScope{domain: "signals", collection: "ticks", organizationID: "org_1"}
+	spec := ProjectionSpec{
+		Domain:        "signals",
+		Collection:    "ticks",
+		IndexedFields: []string{"country", "domain", "status"},
+	}
+
+	records := make([]database.DomainRecord, N)
+	for i := range N {
+		records[i] = database.DomainRecord{
+			Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: fmt.Sprintf("tick_%d", i),
+			Data: database.RecordDataFromPairs(
+				database.RecordField{Name: "country", Value: database.StringValue(fmt.Sprintf("C_%d", i%5))},
+				database.RecordField{Name: "domain", Value: database.StringValue(fmt.Sprintf("D_%d", i%10))},
+				database.RecordField{Name: "status", Value: database.StringValue("active")},
+			),
+		}
+		registry.Add(scope, records[i].RecordID, records[i], spec)
+	}
+
+	filters := []QueryFilter{
+		{Field: "country", Kind: 's', Value: "C_1"},
+		{Field: "domain", Kind: 's', Value: "D_1"},
+		{Field: "status", Kind: 's', Value: "active"},
+	}
+
+	b.Run("InvertedBitmap_AND", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			keys, _ := registry.QueryCompoundFilters(scope, filters)
+			if len(keys) == 0 {
+				b.Fatal("unexpected empty")
+			}
+		}
+	})
+
+	b.Run("IterativePredicateScan", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			var matching []string
+			// Candidate selection from first filter (C_1 -> 2000 records)
+			for _, rec := range records {
+				valC, _ := rec.Data.Get("country")
+				if valC.Text != "C_1" {
+					continue
+				}
+				// Evaluate remaining filters per record
+				valD, _ := rec.Data.Get("domain")
+				if valD.Text != "D_1" {
+					continue
+				}
+				valS, _ := rec.Data.Get("status")
+				if valS.Text != "active" {
+					continue
+				}
+				matching = append(matching, rec.RecordID)
+			}
+			if len(matching) == 0 {
+				b.Fatal("unexpected empty")
+			}
+		}
+	})
+}
+
+func BenchmarkSelectFloat64_BlockVsNaive(b *testing.B) {
+	const N = 100000
+	values := make([]float64, N)
+	for i := range values {
+		values[i] = float64(i) * 0.1
+	}
+
+	b.Run("BlockKernel", func(b *testing.B) {
+		words := make([]uint64, (N+63)/64)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			selectFloat64Kernel(words, values, CompareGt, 5000.0)
+		}
+	})
+
+	b.Run("NaiveRowByRow", func(b *testing.B) {
+		words := make([]uint64, (N+63)/64)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			for j, v := range values {
+				if v > 5000.0 {
+					words[j>>6] |= 1 << uint(j&63)
+				}
+			}
+		}
+	})
+}
+
+func BenchmarkSnapshotHydration_HCS2VsHCS1VsProto(b *testing.B) {
+	const N = 10000
+	records := make([]database.DomainRecord, N)
+	for i := range N {
+		records[i] = database.DomainRecord{
+			Domain:         "signals",
+			Collection:     "ticks",
+			OrganizationID: "org_1",
+			RecordID:       fmt.Sprintf("tick_%06d", i),
+			Data: database.RecordDataFromPairs(
+				database.RecordField{Name: "symbol", Value: database.StringValue("OVS")},
+				database.RecordField{Name: "price", Value: database.FloatValue(float64(i) * 1.5)},
+				database.RecordField{Name: "active", Value: database.BoolValue(true)},
+			),
+		}
+	}
+
+	hcs1Payload, err := encodeColumnarSnapshot(records)
+	if err != nil {
+		b.Fatalf("encode HCS1: %v", err)
+	}
+
+	chunkWriter := NewSnapshotChunkWriter(2500)
+	hcs2Payload, err := chunkWriter.Encode(records)
+	if err != nil {
+		b.Fatalf("encode HCS2: %v", err)
+	}
+
+	b.Run("HCS2_Chunked_Decode", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			count := 0
+			_ = streamSnapshotRecords(hcs2Payload, func(rec database.DomainRecord) error {
+				count++
+				return nil
+			})
+		}
+	})
+
+	b.Run("HCS1_Columnar_Decode", func(b *testing.B) {
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			count := 0
+			_ = streamSnapshotRecords(hcs1Payload, func(rec database.DomainRecord) error {
+				count++
+				return nil
+			})
+		}
+	})
+}

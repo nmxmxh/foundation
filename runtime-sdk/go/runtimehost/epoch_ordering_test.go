@@ -76,9 +76,7 @@ func TestEpochOrderingPublishesThePayloadBeforeTheEpoch(t *testing.T) {
 	policy := epochWaitPolicy{spinIterations: 20000, maxSleep: time.Millisecond, timeout: 10 * time.Second}
 
 	var writer sync.WaitGroup
-	writer.Add(1)
-	go func() {
-		defer writer.Done()
+	writer.Go(func() {
 		lastAck := observeEpoch(ackSlot)
 		for round := 1; round <= rounds; round++ {
 			generation := byte(round)
@@ -93,7 +91,7 @@ func TestEpochOrderingPublishesThePayloadBeforeTheEpoch(t *testing.T) {
 			}
 			lastAck = next
 		}
-	}()
+	})
 
 	observed := observeEpoch(inputSlot)
 	for round := 1; round <= rounds; round++ {
@@ -406,3 +404,28 @@ func TestEpochReadyHandshakeFailsFastWhenTheChildDied(t *testing.T) {
 		t.Fatalf("waitForKernelReady() took %v against a child that never started", elapsed)
 	}
 }
+
+func TestEpochSlotsAndRouteUnix(t *testing.T) {
+	raw := make([]byte, 100)
+	_, err := epochSlot(raw, 99999)
+	if err == nil {
+		t.Fatalf("expected error for out of bounds slot")
+	}
+
+	shortRaw := make([]byte, 2)
+	_, err = epochSlot(shortRaw, 0)
+	if err == nil {
+		t.Fatalf("expected error for short buffer")
+	}
+
+	if err := writeRoute(nil, "echo"); err == nil {
+		t.Fatalf("expected error on nil raw for writeRoute")
+	}
+	if err := writeRoute(make([]byte, 1000), ""); err == nil {
+		t.Fatalf("expected error on empty unit id")
+	}
+	if err := writeRoute(make([]byte, 1000), string(make([]byte, int(generated.ROUTE_MAX_BYTES)+10))); err == nil {
+		t.Fatalf("expected error on overly long unit id")
+	}
+}
+

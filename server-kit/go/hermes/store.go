@@ -107,6 +107,7 @@ type partitionRegistry struct {
 	scopes  shardedMap
 	fields  shardedMap
 	ranges  shardedMap
+	bitmaps *BitmapIndexRegistry
 }
 
 const numShards = 128
@@ -404,6 +405,7 @@ func newPartitionRegistry() *partitionRegistry {
 		scopes:  *newShardedMap(),
 		fields:  *newShardedMap(),
 		ranges:  *newShardedMap(),
+		bitmaps: NewBitmapIndexRegistry(),
 	}
 }
 
@@ -514,6 +516,18 @@ func (p *partition) count(ctx context.Context, query Query, fence Fence) (int64,
 	}
 
 	registry := p.activeRegistry()
+	if keys, ok := p.bitmapCandidates(registry, query); ok {
+		var count int64
+		for _, key := range keys {
+			if _, exists := p.recordEntry(registry, key); exists {
+				count++
+				if query.Limit > 0 && count >= int64(query.Limit) {
+					break
+				}
+			}
+		}
+		return count, nil
+	}
 	index := p.candidateIndex(registry, query)
 	var count int64
 	var iterErr error

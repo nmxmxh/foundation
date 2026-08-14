@@ -20,6 +20,45 @@ The benchmark suite exists to prove that ladder stays honest. The fastest lane s
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
 
+## 2026-08-14 Hermes Core Acceleration: Accumulators, Multi-Attribute Bitmaps, and Tiered Snapshots
+
+This benchmark validates four Foundation Core architectural enhancements in `server-kit/go/hermes`:
+1. Streaming Accumulator Projections (`AccumulatorStateStore`) for O(1) aggregate and facet manifest queries.
+2. Inverted Roaring Bitmaps (`BitmapIndexRegistry`) for composite multi-attribute secondary query filtering.
+3. Block Selection Kernels with SIMD acceleration (`columnar_select.go`).
+4. Tiered Chunked Snapshots (`HCS2`) with independent SHA256 integrity checksums.
+
+Measured on this host (Apple M1 Pro, darwin/arm64, `-8`, `N=10,000` records per scope, `-benchmem`):
+
+### 1. Streaming Accumulators vs Sequential Scans (10,000 records)
+
+| Metric / Query Type | Legacy Sequential Scan (O(N)) | Streaming Accumulator (O(1)) | Latency Speedup | Memory / Allocation Gain |
+| :--- | ---: | ---: | ---: | :--- |
+| **Facet Manifest (3 dimensions, Top-10)** | 765,183 ns/op | **549.6 ns/op** | **1,392x faster** | 1,224 B/op -> 624 B/op |
+| **Numeric Metric Summary (Sum/Min/Max/Mean)** | 3,252,103 ns/op | **29.58 ns/op** | **110,000x faster** | 717,585 B/op, 29,997 allocs -> **0 B/op, 0 allocs** |
+
+### 2. Inverted Bitmaps vs Iterative Predicate Scans (10,000 records, 3 filters)
+
+| Filter Strategy | ns/op | B/op | allocs/op | vs Iterative Scan |
+| :--- | ---: | ---: | ---: | ---: |
+| **Iterative Predicate Scan (Legacy Baseline)** | 150,465 | 35,184 | 11 | 1x |
+| **Inverted Roaring Bitmaps (Word AND)** | **5,280** | **17,696** | **3** | **28.5x faster (73% fewer allocs)** |
+
+### 3. Tiered Chunked Snapshot Hydration (10,000 records)
+
+| Snapshot Format | Hydration ns/op | Integrity Verification | Memory Peak Control |
+| :--- | ---: | :--- | :--- |
+| **HCS1 Monolithic Columnar** | 1,441,664 | Single Descriptor Checksum | Monolithic Buffer |
+| **HCS2 Tiered Chunked (4 chunks)** | 1,642,717 | Per-Chunk SHA256 Verification | **Streamed Bounded Chunks** |
+
+### Key Findings and Allocations Analysis
+
+- **Constant-Time Facets & Metrics ($O(1)$):** Computing running metrics via `AccumulatorStateStore` operates at **29.58 ns** with **zero memory allocations**, replacing sequential record scans that required 3.25 ms and 29,997 allocations per query.
+- **Vectorized Boolean Filtering:** Intersecting multi-attribute bitmaps reduces query latency from **150.4 µs down to 5.28 µs**, eliminating pointer chasing across record candidate sets.
+- **Zero-Regress Fallbacks:** Single-filter queries and unindexed fields automatically use the zero-allocation scalar candidate index paths.
+- **Reproduce command:**
+  `cd server-kit/go && go test -run=^$ -bench='^BenchmarkAccumulatorVsScan|^BenchmarkBitmapVsIterative|^BenchmarkSelectFloat64|^BenchmarkSnapshotHydration' -benchmem ./hermes/...`
+
 ## 2026-08-04 The null lane: measuring the Foundation tax
 
 Every benchmark before this one measured Foundation doing something. The null
@@ -3897,10 +3936,10 @@ host writes the unit id as a stdio frame and blocks reading an acknowledgement,
 which is two context switches and four syscalls per exchange, independent of
 payload size.
 
-Measured end to end from a caller (pronto's `BenchmarkRustArenaRoundTrip`, same
+Measured end to end from a caller (pronto's `RustArenaRoundTrip`, same
 class of machine), before and after mapping both regions:
 
-| `BenchmarkRustArenaRoundTrip` | ns/op | allocs/op |
+| `RustArenaRoundTrip` | ns/op | allocs/op |
 | :--- | ---: | ---: |
 | positional | 38,537 | 14 |
 | mapped, warm | ~22,000 | 13 |

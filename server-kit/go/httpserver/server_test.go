@@ -1298,3 +1298,69 @@ func TestVerifyRouteCoveragePassesWhenHandlerIsRegistered(t *testing.T) {
 		t.Fatalf("VerifyRouteCoverage = %v, want nil", err)
 	}
 }
+
+func TestMountPublic(t *testing.T) {
+	s := newSmokeServer(t)
+	s.MountPublic("", nil)
+	s.MountPublic("/", nil)
+
+	called := false
+	dummyHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("public-mount-ok"))
+	})
+	s.MountPublic("/v1/discover/", dummyHandler)
+
+	req := httptest.NewRequest("GET", "/v1/discover/items", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if !called || rec.Code != http.StatusOK {
+		t.Fatalf("MountPublic failed: called=%v, code=%d", called, rec.Code)
+	}
+
+	if !s.isPublicPath("/v1/discover/nested/item") {
+		t.Fatalf("expected /v1/discover/nested/item to be recognized as public path")
+	}
+}
+
+func TestIsJSONRPCResponse(t *testing.T) {
+	if !isJSONRPCResponse(nil, "json-rpc") {
+		t.Fatalf("expected true for json-rpc encoding")
+	}
+	if !isJSONRPCResponse(nil, "raw_json") {
+		t.Fatalf("expected true for raw_json encoding")
+	}
+	if !isJSONRPCResponse(map[string]any{"jsonrpc": "2.0"}, "") {
+		t.Fatalf("expected true for map with jsonrpc")
+	}
+	if !isJSONRPCResponse(extension.Object{"jsonrpc": extension.String("2.0")}, "") {
+		t.Fatalf("expected true for extension.Object with jsonrpc")
+	}
+	if isJSONRPCResponse(map[string]any{"foo": "bar"}, "") {
+		t.Fatalf("expected false for standard map")
+	}
+	if isJSONRPCResponse(nil, "") {
+		t.Fatalf("expected false for nil")
+	}
+}
+
+func TestRecentEventsEndpoint(t *testing.T) {
+	s := newSmokeServer(t)
+	req := httptest.NewRequest("GET", "/events/recent", nil)
+	rec := httptest.NewRecorder()
+	s.recentEvents(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("recentEvents failed: code=%d", rec.Code)
+	}
+
+	sNilHandler := &Server{}
+	rec2 := httptest.NewRecorder()
+	sNilHandler.recentEvents(rec2, req)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("recentEvents with nil handler failed: code=%d", rec2.Code)
+	}
+}
+
+

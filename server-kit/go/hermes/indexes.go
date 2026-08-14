@@ -43,6 +43,9 @@ func (p *partition) addIndexesLocked(publisher *indexPublisher, registry *partit
 		rangeEntry.version = version
 		publisher.rangeAdd(p.rangeCellLocked(registry, index), rangeEntry)
 	})
+	if registry != nil && registry.bitmaps != nil {
+		registry.bitmaps.Add(scope, key, rec, p.spec)
+	}
 }
 
 func (p *partition) removeIndexesLocked(publisher *indexPublisher, registry *partitionRegistry, key string, rec database.DomainRecord) {
@@ -55,6 +58,30 @@ func (p *partition) removeIndexesLocked(publisher *indexPublisher, registry *par
 	p.forEachRangeIndexedValue(rec, func(index rangeIndex, _ rangeIndexEntry) {
 		publisher.rangeRemove(p.rangeCellLocked(registry, index), key)
 	})
+	if registry != nil && registry.bitmaps != nil {
+		registry.bitmaps.Remove(scope, key, rec, p.spec)
+	}
+}
+
+func (p *partition) bitmapCandidates(registry *partitionRegistry, query Query) ([]string, bool) {
+	if registry == nil || registry.bitmaps == nil || query.Plan.count <= 1 {
+		return nil, false
+	}
+	allIndexed := true
+	filters := make([]QueryFilter, 0, query.Plan.count)
+	forEachPlannedFilter(query.Plan, func(filter QueryFilter) bool {
+		if !p.isIndexedField(filter.Field) {
+			allIndexed = false
+			return false
+		}
+		filters = append(filters, filter)
+		return true
+	})
+	if !allIndexed || len(filters) == 0 {
+		return nil, false
+	}
+	scope := scopeKey(p.spec.Domain, p.spec.Collection, query.OrganizationID)
+	return registry.bitmaps.QueryCompoundFilters(scope, filters)
 }
 
 func (p *partition) orderedCandidateIndex(registry *partitionRegistry, query Query) *indexSnapshot {

@@ -1422,3 +1422,108 @@ func ffiLibraryFileName() string {
 		return "libruntime_ffi_stub.so"
 	}
 }
+
+func TestEpochTuningAndSlotsCoverage(t *testing.T) {
+	pol := defaultEpochWaitPolicy(50 * time.Millisecond)
+	if pol.timeout != 50*time.Millisecond {
+		t.Fatalf("unexpected timeout: %v", pol.timeout)
+	}
+
+	tuning := EpochWaitTuning{
+		SpinIterations: 10,
+		MaxSleep:       time.Millisecond,
+	}
+	p2 := tuning.policy(100 * time.Millisecond)
+	if p2.spinIterations != 10 {
+		t.Fatalf("unexpected spin: %d", p2.spinIterations)
+	}
+
+	var ex epochExchange
+	if err := ex.Close(); err != nil {
+		t.Fatalf("unexpected close err: %v", err)
+	}
+	if err := ex.Restart(); err != nil {
+		t.Fatalf("unexpected restart err: %v", err)
+	}
+}
+
+func TestDescriptorCoverage(t *testing.T) {
+	var d RuntimeNativeGPUDescriptor
+	_, err := d.ContractDescriptor()
+	if err == nil {
+		t.Fatalf("expected error for empty descriptor")
+	}
+}
+
+func TestTransportSupportEdgeCases(t *testing.T) {
+	support, err := ResolveProcessTransportSupport(ProcessTransportSharedMemoryEpoch, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if support.Requested != ProcessTransportSharedMemoryEpoch {
+		t.Fatalf("unexpected requested mode: %v", support.Requested)
+	}
+
+	supportStdio, err := ResolveProcessTransportSupport(ProcessTransportStdio, t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if supportStdio.Resolved != ProcessTransportStdio {
+		t.Fatalf("unexpected mode: %v", supportStdio.Resolved)
+	}
+}
+
+func TestProcessPoolWorkerArena(t *testing.T) {
+	pool := &ProcessPool{
+		allWorkers: []*processWorker{
+			{
+				cmd:   &exec.Cmd{},
+				arena: nil,
+			},
+		},
+	}
+	if a := pool.WorkerArena(0); a != nil {
+		t.Fatalf("expected nil arena")
+	}
+	if a := pool.WorkerArena(5); a != nil {
+		t.Fatalf("expected nil arena for out of bounds")
+	}
+	var nilPool *ProcessPool
+	if a := nilPool.WorkerArena(0); a != nil {
+		t.Fatalf("expected nil arena for nil pool")
+	}
+
+	var smx sharedMemoryExchange
+	if err := smx.Close(); err != nil {
+		t.Fatalf("unexpected smx close error: %v", err)
+	}
+	if err := smx.Restart(); err != nil {
+		t.Fatalf("unexpected smx restart error: %v", err)
+	}
+
+	var sx stdioExchange
+	if err := sx.Restart(); err != nil {
+		t.Fatalf("unexpected sx restart error: %v", err)
+	}
+
+	buf, err := NewBuffer(make([]byte, generated.BUFFER_TOTAL_BYTES))
+	if err != nil {
+		t.Fatalf("unexpected NewBuffer error: %v", err)
+	}
+	_ = buf.SetHeaderInt(generated.INT_IDX_INPUT_LENGTH, -1)
+	if _, err := buf.InputBytesView(); err == nil {
+		t.Fatalf("expected error on negative input length")
+	}
+	_ = buf.SetHeaderInt(generated.INT_IDX_OUTPUT_LENGTH, -1)
+	if _, err := buf.OutputBytesView(); err == nil {
+		t.Fatalf("expected error on negative output length")
+	}
+	_ = buf.SetHeaderInt(generated.INT_IDX_INPUT_LENGTH, int32(generated.INPUT_MAX_BYTES+100))
+	if _, err := buf.InputBytesView(); err == nil {
+		t.Fatalf("expected error on overflow input length")
+	}
+	_ = buf.SetHeaderInt(generated.INT_IDX_OUTPUT_LENGTH, int32(generated.OUTPUT_MAX_BYTES+100))
+	if _, err := buf.OutputBytesView(); err == nil {
+		t.Fatalf("expected error on overflow output length")
+	}
+}

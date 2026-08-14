@@ -3,6 +3,7 @@ package database
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -958,3 +959,127 @@ func TestWaitForRiverTableReadyValidation(t *testing.T) {
 	}
 }
 
+func TestRecordValueAndDataOperations(t *testing.T) {
+	sVal := StringValue("hello")
+	if sVal.Kind != RecordValueString || sVal.Text != "hello" {
+		t.Fatalf("unexpected StringValue: %+v", sVal)
+	}
+
+	bValTrue := BoolValue(true)
+	if bValTrue.Kind != RecordValueBool || bValTrue.Text != "true" {
+		t.Fatalf("unexpected BoolValue(true): %+v", bValTrue)
+	}
+	bValFalse := BoolValue(false)
+	if bValFalse.Kind != RecordValueBool || bValFalse.Text != "false" {
+		t.Fatalf("unexpected BoolValue(false): %+v", bValFalse)
+	}
+
+	iVal := IntValue(-42)
+	if iVal.Kind != RecordValueInt || iVal.Text != "-42" {
+		t.Fatalf("unexpected IntValue: %+v", iVal)
+	}
+
+	uVal := UintValue(100)
+	if uVal.Kind != RecordValueUint || uVal.Text != "100" {
+		t.Fatalf("unexpected UintValue: %+v", uVal)
+	}
+
+	fVal := FloatValue(3.1415)
+	if fVal.Kind != RecordValueFloat {
+		t.Fatalf("unexpected FloatValue: %+v", fVal)
+	}
+
+	rawEmpty := RawValue(nil)
+	if rawEmpty.Kind != RecordValueNull {
+		t.Fatalf("expected null for empty raw value")
+	}
+	rawJSON := RawValue([]byte(`{"foo":"bar"}`))
+	if rawJSON.Kind != RecordValueRaw || string(rawJSON.Raw) != `{"foo":"bar"}` {
+		t.Fatalf("unexpected RawValue: %+v", rawJSON)
+	}
+
+	// FromAny cases
+	anyCases := []struct {
+		in   any
+		kind RecordValueKind
+	}{
+		{nil, RecordValueNull},
+		{sVal, RecordValueString},
+		{"test", RecordValueString},
+		{true, RecordValueBool},
+		{int(1), RecordValueInt},
+		{int8(2), RecordValueInt},
+		{int16(3), RecordValueInt},
+		{int32(4), RecordValueInt},
+		{int64(5), RecordValueInt},
+		{uint(6), RecordValueUint},
+		{uint8(7), RecordValueUint},
+		{uint16(8), RecordValueUint},
+		{uint32(9), RecordValueUint},
+		{uint64(10), RecordValueUint},
+		{float32(1.1), RecordValueFloat},
+		{float64(2.2), RecordValueFloat},
+		{json.RawMessage(`[1,2,3]`), RecordValueRaw},
+		{[]byte(`raw-bytes`), RecordValueRaw},
+		{map[string]int{"a": 1}, RecordValueRaw},
+	}
+	for _, tc := range anyCases {
+		rv, ok := RecordValueFromAny(tc.in)
+		if !ok || rv.Kind != tc.kind {
+			t.Fatalf("RecordValueFromAny(%v) = (%+v, %v), expected kind %v", tc.in, rv, ok, tc.kind)
+		}
+	}
+
+	// Equal & ScalarIndex
+	if !sVal.Equal(StringValue("hello")) {
+		t.Fatalf("expected sVal equal to itself")
+	}
+	if sVal.Equal(sVal.Clone()) == false {
+		t.Fatalf("expected cloned sVal to be equal")
+	}
+	if sVal.Equal(IntValue(42)) {
+		t.Fatalf("expected sVal not equal to int")
+	}
+	if !rawJSON.Equal(RawValue([]byte(`{"foo":"bar"}`))) {
+		t.Fatalf("expected rawJSON equal")
+	}
+
+	// JSON Marshal & Unmarshal
+	for _, val := range []RecordValue{sVal, bValTrue, iVal, uVal, fVal, rawJSON, rawEmpty} {
+		marshaled, err := val.MarshalJSON()
+		if err != nil {
+			t.Fatalf("failed to marshal %+v: %v", val, err)
+		}
+		var unmarshaled RecordValue
+		if err := unmarshaled.UnmarshalJSON(marshaled); err != nil {
+			t.Fatalf("failed to unmarshal %s: %v", string(marshaled), err)
+		}
+	}
+
+	// RecordData operations
+	rd := RecordDataFromPairs(
+		RecordField{Name: "org", Value: StringValue("org-1")},
+		RecordField{Name: "count", Value: IntValue(10)},
+		RecordField{Name: "", Value: StringValue("ignored")},
+	)
+	if len(rd) != 2 {
+		t.Fatalf("expected 2 fields in RecordData, got %d", len(rd))
+	}
+	if val, ok := rd.Get("org"); !ok || val.Text != "org-1" {
+		t.Fatalf("unexpected Get(org): %+v, %v", val, ok)
+	}
+	cloned := rd.Clone()
+	if len(cloned) != 2 {
+		t.Fatalf("expected 2 fields in cloned RecordData")
+	}
+	if !rd.Matches([]RecordFilter{{Field: "org", Value: StringValue("org-1")}}) {
+		t.Fatalf("expected rd to match filter")
+	}
+	if rd.Matches([]RecordFilter{{Field: "org", Value: StringValue("other")}}) {
+		t.Fatalf("expected rd not to match different filter")
+	}
+	updated := rd.With("status", StringValue("active"))
+	if len(updated) != 3 {
+		t.Fatalf("expected 3 fields after With, got %d", len(updated))
+	}
+}

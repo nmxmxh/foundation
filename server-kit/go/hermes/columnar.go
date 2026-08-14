@@ -283,6 +283,24 @@ func (s *Store) GetColumnarBatch(ctx context.Context, projection string, query Q
 // ---------------------------------------------------------------------------
 
 func (p *partition) collectRecordEntries(ctx context.Context, registry *partitionRegistry, query Query) ([]recordEntry, error) {
+	if keys, ok := p.bitmapCandidates(registry, query); ok {
+		capacity := len(keys)
+		if query.Limit > 0 && capacity > query.Limit {
+			capacity = query.Limit
+		}
+		candidates := make([]recordEntry, 0, capacity)
+		for _, key := range keys {
+			if query.Limit > 0 && len(candidates) >= query.Limit {
+				break
+			}
+			entry, exists := p.recordEntry(registry, key)
+			if exists {
+				candidates = append(candidates, entry)
+			}
+		}
+		return candidates, nil
+	}
+
 	ordered := p.orderedCandidateIndex(registry, query)
 	index := p.candidateIndex(registry, query)
 	capacity := int(p.records.Load())

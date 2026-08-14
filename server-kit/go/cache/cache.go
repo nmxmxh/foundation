@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -207,7 +208,9 @@ func (i *Invalidator) Tag(key string, tags ...string) {
 	i.tagsMu.Lock()
 	defer i.tagsMu.Unlock()
 	for _, tag := range tags {
-		i.tags[tag] = append(i.tags[tag], key)
+		if !slices.Contains(i.tags[tag], key) {
+			i.tags[tag] = append(i.tags[tag], key)
+		}
 	}
 }
 

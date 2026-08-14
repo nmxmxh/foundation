@@ -443,3 +443,44 @@ func TestExecuteOnWorkerAlwaysRunsOnTheNamedWorker(t *testing.T) {
 			second.calls, calls, first.calls)
 	}
 }
+
+func TestArenaMappingAndSlab(t *testing.T) {
+	data := make([]byte, generated.ARENA_MIN_BYTES)
+	flushed := 0
+	flush := func(staged int) error {
+		flushed = staged
+		return nil
+	}
+	readAt := func(dst []byte, off int64) error {
+		copy(dst, data[off:])
+		return nil
+	}
+
+	arena, err := NewArenaOverMapping(data, flush, readAt)
+	if err != nil {
+		t.Fatalf("failed to create arena over mapping: %v", err)
+	}
+
+	desc, slice, err := arena.Allocate(100, 1)
+	if err != nil {
+		t.Fatalf("failed to allocate: %v", err)
+	}
+	copy(slice, []byte("payload-data"))
+	arena.Commit(desc)
+
+	if err := arena.Sync(); err != nil {
+		t.Fatalf("failed to sync arena: %v", err)
+	}
+	if flushed == 0 {
+		t.Fatalf("expected flushed > 0")
+	}
+
+	readData, err := arena.ReadSlab(desc.ID)
+	if err != nil {
+		t.Fatalf("failed to read slab: %v", err)
+	}
+	if string(readData[:12]) != "payload-data" {
+		t.Fatalf("unexpected read data: %s", string(readData[:12]))
+	}
+}
+

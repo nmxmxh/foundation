@@ -38,7 +38,45 @@ func newBitmap(n int) bitmap {
 
 // set raises bit i. Callers must hold i in [0, n).
 func (b *bitmap) set(i int) {
+	if i < 0 {
+		return
+	}
+	if i >= b.n {
+		b.grow(i + 1)
+	}
 	b.words[i>>6] |= 1 << uint(i&63)
+}
+
+// clear unsets bit i.
+func (b *bitmap) clear(i int) {
+	if i < 0 || i >= b.n || len(b.words) <= (i>>6) {
+		return
+	}
+	b.words[i>>6] &= ^(1 << uint(i&63))
+}
+
+// grow resizes the bitmap to at least newN bits.
+func (b *bitmap) grow(newN int) {
+	if newN <= b.n {
+		return
+	}
+	reqWords := (newN + 63) / 64
+	if reqWords > len(b.words) {
+		newWords := make([]uint64, reqWords)
+		copy(newWords, b.words)
+		b.words = newWords
+	}
+	b.n = newN
+}
+
+// clone returns a deep copy of the bitmap.
+func (b *bitmap) clone() bitmap {
+	wordsCopy := make([]uint64, len(b.words))
+	copy(wordsCopy, b.words)
+	return bitmap{
+		words: wordsCopy,
+		n:     b.n,
+	}
 }
 
 // get reports whether bit i is set. Out-of-range bits read as zero.

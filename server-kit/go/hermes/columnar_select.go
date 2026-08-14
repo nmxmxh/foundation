@@ -162,11 +162,7 @@ func (b *RecordBatch) SelectInt64(name string, op CompareOp, operand int64) (Sel
 		return SelectionBitmap{}, fmt.Errorf("hermes column %q is not int64-comparable (%d)", name, vec.Type())
 	}
 	sel := NewSelectionBitmap(b.Rows)
-	for i, value := range values {
-		if compareMatches(op, value, operand) {
-			sel.words[i>>6] |= 1 << uint(i&63)
-		}
-	}
+	selectInt64Kernel(sel.words, values, op, operand)
 	sel.maskValidity(vec)
 	return sel, nil
 }
@@ -183,13 +179,39 @@ func (b *RecordBatch) SelectFloat64(name string, op CompareOp, operand float64) 
 		return SelectionBitmap{}, fmt.Errorf("hermes column %q is not float64-comparable (%d)", name, vec.Type())
 	}
 	sel := NewSelectionBitmap(b.Rows)
-	for i, value := range values {
-		if compareMatches(op, value, operand) {
-			sel.words[i>>6] |= 1 << uint(i&63)
-		}
-	}
+	selectFloat64Kernel(sel.words, values, op, operand)
 	sel.maskValidity(vec)
 	return sel, nil
+}
+
+func selectFloat64Scalar(words []uint64, values []float64, op CompareOp, operand float64) {
+	n := len(values)
+	for w := range words {
+		base := w << 6
+		end := min(base+64, n)
+		var word uint64
+		for i := base; i < end; i++ {
+			if compareMatches(op, values[i], operand) {
+				word |= 1 << uint(i-base)
+			}
+		}
+		words[w] = word
+	}
+}
+
+func selectInt64Scalar(words []uint64, values []int64, op CompareOp, operand int64) {
+	n := len(values)
+	for w := range words {
+		base := w << 6
+		end := min(base+64, n)
+		var word uint64
+		for i := base; i < end; i++ {
+			if compareMatches(op, values[i], operand) {
+				word |= 1 << uint(i-base)
+			}
+		}
+		words[w] = word
+	}
 }
 
 // SelectString builds a selection bitmap from one comparison over a string

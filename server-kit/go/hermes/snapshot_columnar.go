@@ -46,11 +46,14 @@ func isColumnarSnapshot(payload []byte) bool {
 	return len(payload) >= 4 && [4]byte(payload[:4]) == columnarSnapshotMagic
 }
 
-// streamSnapshotRecords decodes any snapshot artifact — columnar HCS1 by magic
+// streamSnapshotRecords decodes any snapshot artifact — chunked HCS2, columnar HCS1 by magic
 // sniff, legacy row-proto otherwise — into a record stream. Both readers
 // (WarmFromSnapshot, ShadowCompareSnapshot) go through this one seam so the
-// two formats cannot drift semantically.
+// formats cannot drift semantically.
 func streamSnapshotRecords(payload []byte, visit database.RecordVisitor) error {
+	if isChunkedSnapshot(payload) {
+		return decodeChunkedSnapshot(payload, visit)
+	}
 	if isColumnarSnapshot(payload) {
 		return decodeColumnarSnapshot(payload, visit)
 	}

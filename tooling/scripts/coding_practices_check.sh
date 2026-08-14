@@ -49,15 +49,17 @@ check_no_match() {
   local pattern="$2"
   shift 2
   if rg -n \
+    "$@" \
     --glob '!**/generated/**' \
     --glob '!**/*test*' \
+    --glob '!*_test.go' \
     --glob '!**/node_modules/**' \
     --glob '!**/dist/**' \
     --glob '!**/target/**' \
     --glob '!**/tooling/scripts/**' \
     --glob '!**/docs/**' \
     --glob '!**/data/**' \
-    "$pattern" "$@" >"$tmp_output" 2>/dev/null; then
+    "$pattern" >"$tmp_output" 2>/dev/null; then
     echo "[FAIL] $label"
     cat "$tmp_output"
     failed=1
@@ -71,15 +73,17 @@ check_no_match_multiline() {
   local pattern="$2"
   shift 2
   if rg -n -U \
+    "$@" \
     --glob '!**/generated/**' \
     --glob '!**/*test*' \
+    --glob '!*_test.go' \
     --glob '!**/node_modules/**' \
     --glob '!**/dist/**' \
     --glob '!**/target/**' \
     --glob '!**/tooling/scripts/**' \
     --glob '!**/docs/**' \
     --glob '!**/data/**' \
-    "$pattern" "$@" >"$tmp_output" 2>/dev/null; then
+    "$pattern" >"$tmp_output" 2>/dev/null; then
     echo "[FAIL] $label"
     cat "$tmp_output"
     failed=1

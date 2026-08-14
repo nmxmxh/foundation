@@ -169,3 +169,16 @@ func TestAnonymousSnapshotAndLiveDelta(t *testing.T) {
 		t.Fatalf("delta = %+v", batch.GetMutations())
 	}
 }
+
+func TestCustomPathPrefix(t *testing.T) {
+	gw := newPublicGateway(t)
+	scopes := projectiongw.ScopeAllowlist{"discover": {"chefs"}}
+	h, err := NewHandler(gw, Config{
+		PublicOrganizationID: publicOrg,
+		Scopes:               scopes,
+		PathPrefix:           "/custom/prefix/",
+	})
+	if err != nil || h == nil {
+		t.Fatalf("unexpected error for custom prefix: %v", err)
+	}
+}

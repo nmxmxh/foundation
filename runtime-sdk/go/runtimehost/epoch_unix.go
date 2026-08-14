@@ -105,7 +105,7 @@ func epochSlot(raw []byte, index uint32) (*uint32, error) {
 	if offset+4 > len(raw) {
 		return nil, fmt.Errorf("epoch slot %d runs past the %d byte mapping", index, len(raw))
 	}
-	pointer := unsafe.Pointer(&raw[offset])
+	pointer := unsafe.Pointer(&raw[offset]) // #nosec G103 -- page-aligned mmap offset conversion verified by bounds and alignment checks.
 	if uintptr(pointer)%4 != 0 {
 		return nil, fmt.Errorf("epoch slot %d is not 4-byte aligned", index)
 	}
