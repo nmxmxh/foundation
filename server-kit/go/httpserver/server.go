@@ -10,6 +10,7 @@ package httpserver
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"golang.org/x/net/http2"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/apidocs"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
@@ -40,6 +43,19 @@ type Config struct {
 	Port                        int
 	AllowedOrigins              []string
 	ProtectOperationalEndpoints bool
+
+	// TLS and transport performance
+	TLSEnabled           bool
+	CertFile             string
+	KeyFile              string
+	TLSConfig            *tls.Config
+	TLSMinVersion        uint16
+	PostQuantumMode      security.PostQuantumTLSMode
+	ReadHeaderTimeout    time.Duration
+	ReadTimeout          time.Duration
+	WriteTimeout         time.Duration
+	IdleTimeout          time.Duration
+	MaxConcurrentStreams uint32
 }
 
 // Server is the HTTP ingress for the application.
@@ -98,6 +114,14 @@ type Server struct {
 	// the mux and exempted from auth. Registration order is preserved so
 	// Handler() builds deterministically.
 	publicMounts []publicMount
+
+	// Transport and connection performance
+	tlsConfig            *tls.Config
+	readHeaderTimeout    time.Duration
+	readTimeout          time.Duration
+	writeTimeout         time.Duration
+	idleTimeout          time.Duration
+	maxConcurrentStreams uint32
 }
 
 type publicMount struct {
@@ -151,12 +175,78 @@ func New(cfg *Config, reg *registry.ServiceRegistry, handler ...*graceful.Handle
 		wsUnauthenticatedAllowset: map[string]struct{}{
 			"identity:ping:v1:requested": {},
 		},
-		protectOperational: cfg != nil && cfg.ProtectOperationalEndpoints,
-		allowedOrigins:     configuredAllowedOrigins(cfg),
-		ws:                 newWSRuntime(),
+		protectOperational:   cfg != nil && cfg.ProtectOperationalEndpoints,
+		allowedOrigins:       configuredAllowedOrigins(cfg),
+		ws:                   newWSRuntime(),
+		readHeaderTimeout:    5 * time.Second,
+		readTimeout:          15 * time.Second,
+		writeTimeout:         15 * time.Second,
+		idleTimeout:          120 * time.Second,
+		maxConcurrentStreams: 250,
+	}
+
+	if cfg != nil {
+		if cfg.ReadHeaderTimeout > 0 {
+			s.readHeaderTimeout = cfg.ReadHeaderTimeout
+		}
+		if cfg.ReadTimeout > 0 {
+			s.readTimeout = cfg.ReadTimeout
+		}
+		if cfg.WriteTimeout > 0 {
+			s.writeTimeout = cfg.WriteTimeout
+		}
+		if cfg.IdleTimeout > 0 {
+			s.idleTimeout = cfg.IdleTimeout
+		}
+		if cfg.MaxConcurrentStreams > 0 {
+			s.maxConcurrentStreams = cfg.MaxConcurrentStreams
+		}
+		if cfg.TLSConfig != nil {
+			s.tlsConfig = cfg.TLSConfig
+		} else if cfg.TLSEnabled || (cfg.CertFile != "" && cfg.KeyFile != "") {
+			tlsCfg, err := BuildTLSConfig(&TLSConfig{
+				CertFile:        cfg.CertFile,
+				KeyFile:         cfg.KeyFile,
+				MinVersion:      cfg.TLSMinVersion,
+				PostQuantumMode: cfg.PostQuantumMode,
+			})
+			if err == nil {
+				s.tlsConfig = tlsCfg
+			} else {
+				s.log.Error("failed to build TLS configuration", "error", err)
+			}
+		}
 	}
 
 	return s
+}
+
+// ConfigureTLS configures TLS settings for secure ingress and HTTP/2.
+func (s *Server) ConfigureTLS(tlsConfig *tls.Config) {
+	s.tlsConfig = tlsConfig
+}
+
+// ConfigureTimeouts sets server connection timeouts.
+func (s *Server) ConfigureTimeouts(readHeader, read, write, idle time.Duration) {
+	if readHeader > 0 {
+		s.readHeaderTimeout = readHeader
+	}
+	if read > 0 {
+		s.readTimeout = read
+	}
+	if write > 0 {
+		s.writeTimeout = write
+	}
+	if idle > 0 {
+		s.idleTimeout = idle
+	}
+}
+
+// ConfigureHTTP2 sets HTTP/2 multiplexing parameters.
+func (s *Server) ConfigureHTTP2(maxConcurrentStreams uint32) {
+	if maxConcurrentStreams > 0 {
+		s.maxConcurrentStreams = maxConcurrentStreams
+	}
 }
 
 // ConfigureAuth sets up JWT and RBAC authentication
@@ -404,27 +494,71 @@ func (s *Server) VerifyRouteCoverage() error {
 	return s.registry.VerifyRoutes(s.routes)
 }
 
-// Run starts the server and handles graceful shutdown
-func (s *Server) Run(ctx context.Context) error {
-	// Fail before listening rather than serving a surface that cannot answer.
-	// This turns a runtime 404 on a documented endpoint into a startup error
-	// naming the events that are missing handlers.
+// Serve runs the server on a provided listener with graceful shutdown.
+func (s *Server) Serve(listener net.Listener, ctx context.Context) error {
 	if err := s.VerifyRouteCoverage(); err != nil {
 		return err
 	}
 
-	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", s.cfg.Port),
-		Handler:      s.Handler(),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+	srv := s.buildHTTPServer(listener.Addr().String())
+	if s.tlsConfig != nil {
+		listener = tls.NewListener(listener, s.tlsConfig)
 	}
 
+	return s.runServer(srv, listener, ctx)
+}
+
+// Run starts the server and handles graceful shutdown.
+func (s *Server) Run(ctx context.Context) error {
+	if err := s.VerifyRouteCoverage(); err != nil {
+		return err
+	}
+
+	port := 0
+	if s.cfg != nil {
+		port = s.cfg.Port
+	}
+	addr := fmt.Sprintf(":%d", port)
+
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+
+	srv := s.buildHTTPServer(addr)
+	if s.tlsConfig != nil {
+		listener = tls.NewListener(listener, s.tlsConfig)
+	}
+
+	return s.runServer(srv, listener, ctx)
+}
+
+func (s *Server) buildHTTPServer(addr string) *http.Server {
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           s.Handler(),
+		ReadHeaderTimeout: s.readHeaderTimeout,
+		ReadTimeout:       s.readTimeout,
+		WriteTimeout:      s.writeTimeout,
+		IdleTimeout:       s.idleTimeout,
+		TLSConfig:         s.tlsConfig,
+	}
+
+	if s.tlsConfig != nil {
+		_ = http2.ConfigureServer(srv, &http2.Server{
+			MaxConcurrentStreams: s.maxConcurrentStreams,
+			IdleTimeout:          s.idleTimeout,
+		})
+	}
+
+	return srv
+}
+
+func (s *Server) runServer(srv *http.Server, listener net.Listener, ctx context.Context) error {
 	errChan := make(chan error, 1)
 	go func() {
-		s.log.Info("server listening", "addr", srv.Addr, "websocket", s.wsEnabled)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		s.log.Info("server listening", "addr", listener.Addr().String(), "tls", s.tlsConfig != nil, "websocket", s.wsEnabled)
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errChan <- err
 		}
 	}()
@@ -436,7 +570,7 @@ func (s *Server) Run(ctx context.Context) error {
 		s.log.Info("shutting down server")
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
