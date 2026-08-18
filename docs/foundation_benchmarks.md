@@ -20,6 +20,151 @@ The benchmark suite exists to prove that ladder stays honest. The fastest lane s
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
 
+## 2026-08-18 Second-moment kernel: choosing the fastest form that is still correct
+
+`Float64Vector.MomentsValid` reduces a column to the `(count, mean, M2)` triple
+that variance and standard deviation project from. Four kernels were measured
+against exact `big.Rat` arithmetic and against each other; the fastest one is not
+the one that ships, and the reason is recorded here so a future change does not
+rediscover it the expensive way.
+
+Medians of 12 runs, 65,536-row float64 column, plus relative error against the
+exact variance of data offset to 1e12:
+
+| kernel | ns/op | vs shipped | rel. error @1e12 |
+| --- | --- | --- | --- |
+| naive `(Σx, Σx²)` | 82,652 | **0.98x (faster)** | **negative variance** |
+| **blocked two-pass, 4-way MLP (shipped)** | **84,051** | 1.00x | **9.3e-08** |
+| shifted single-pass, 4-way MLP | 84,180 | 1.00x | 3.0e-07 |
+| blocked two-pass, single accumulator | 130,973 | 1.56x slower | 5.2e-06 |
+| `SumValid` first moment, for scale | 25,751 | — | — |
+
+Three things this settles.
+
+**Interleaving is worth 1.56x and also improves accuracy.** Four accumulators
+each sum a quarter of the terms, so the shorter dependency chain bounds latency
+*and* error growth: 1.56x the throughput of the single-accumulator form and 56x
+lower error on the same data. This is the same memory-level-parallelism result
+recorded for the columnar sum kernels, and the same coincidence the null algebra
+found — the correct handling and the cheap handling agree.
+
+**The naive form is genuinely faster, by 1.7%, and is still rejected.** One pass
+beats two. That 1.7% is the entire price of the correct answer, and what it buys
+is a variance of −1.42e10 where the true value is 0.50 — not an inaccurate answer
+but an impossible one. An earlier single-run measurement suggested the shipped
+kernel was faster than naive; repeated measurement with medians shows that was
+noise, and the claim is withdrawn.
+
+**The shifted single-pass variant ties on speed and loses on accuracy.** It
+removes the cancellation by subtracting a per-window origin, which works — 3.0e-07
+against naive's total failure — but is 3.2x worse than the shipped kernel at 1e12
+while being statistically indistinguishable in time. There is no axis on which it
+wins.
+
+`TestMomentsKernelAccuracyAgainstExactArithmetic` keeps all three alternatives
+measurable beside the shipped one and gates on recorded per-fixture ceilings,
+which fall and never rise. It also asserts the rejection as a property: on
+ill-conditioned fixtures the naive form must remain decisively worse, so if that
+ever stops holding the comments explaining the choice are known to be stale.
+
+Reproduce:
+
+```bash
+go test ./hermes/ -run TestMomentsKernelAccuracyAgainstExactArithmetic -v
+go test ./hermes/ -run XXX -bench BenchmarkMoments -benchtime 800x -count 12
+```
+
+## 2026-08-18 Hedged race lane: tail latency, bandwidth cost, and allocation ceiling
+
+`runtime-network` (crate `ovrt-network`) adds the first rung of the ladder where
+the two ends are separated by a network. Its claim is narrow and easy to
+overstate, so it is recorded here with the cost beside the benefit.
+
+**The claim is the tail, not the median.** Racing a frame down N independent
+paths delivers `min(L1..LN)`, so a stall must occur on *every* path to be
+observed: a per-path stall probability `p` becomes `p^N` end to end. The median
+is unchanged and a benchmark reporting only means or medians will read this as
+noise.
+
+`cargo run --release -p ovrt-network --bin network_sim` (400 iterations, 512 B
+frame, 100 us base, 3 ms stall at 10% per path, 4 ms inter-frame gap):
+
+| paths | p50 | p95 | p99 | p99.9 | stall>p | wire B | amp | allocs/op | B/op |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 177.0 us | 3926.0 us | 4032.7 us | 11123.9 us | 90.00% | 204,800 | 1.00x | 2.1 | 715 |
+| 2 | 184.8 us | 332.8 us | 2071.7 us | 4014.9 us | 99.00% | 409,600 | 2.00x | 2.2 | 896 |
+| 3 | 194.0 us | 387.8 us | 768.4 us | 4027.5 us | 99.90% | 614,400 | 3.00x | 2.2 | 1066 |
+
+`stall>p` is the percentile at and above which a stall is still expected, given
+`p^N`. It is in the table because without it a correct result reads as a failure:
+at two paths the co-stall probability is exactly 1%, so a p99 sitting inside the
+stall is the arithmetic working. Compare rows only below their own `stall>p`.
+At p95 — below every row's threshold — three paths are **10.1x** better than one,
+the median moves 0.91x, and bandwidth is 3.00x. That is the whole trade.
+
+**Instrument resolution.** Simulated paths are `thread::sleep`, so the harness
+calibrates itself and prints the floor: `sleep(100us)` actually takes ~133 us p50
+on the reference machine. The base latency in the table is that number, not
+100 us. A run whose claimed differences approach the floor is reporting the
+scheduler.
+
+**Allocation ceiling (ratchet candidate).** Measured with a counting
+`GlobalAlloc` in the harness, per race, two paths:
+
+| | allocs/op | B/op (16 B frame) | B/op (4096 B frame) | fixed overhead |
+| --- | --- | --- | --- | --- |
+| per-race channel | 9.1 | 3,227 | 7,296 | ~3,064 B |
+| reused channel | **2.2** | **396** | **4,476** | **~380 B** |
+
+The dominant cost was a fresh `mpsc` channel per race — measured independently at
+2 allocations and 1,016 B — created for a channel that lived microseconds. Reuse
+required a per-race sequence number on `Attempt`, because a losing path reports
+after its race concluded and the next race must not claim that stale success as
+its own (`a_stale_report_is_never_claimed_by_a_later_race`, mutation-verified:
+removing the sequence guard fails it). Labels moved from `String` to `Arc<str>`
+in the same pass. Latency is unchanged; the ceiling is **2.2 allocs/op and
+380 B/op fixed plus one frame copy**, and only falls from here.
+
+**Real-socket floor.** `--lane udp` drives loopback sockets through the real
+`bind_socket_to_interface` path (`probe=true, sockets bound=1/1`) and reports
+p50 = 17.2 us per send. It measures the syscall floor, not tails — loopback has
+none. It also shows the saturation behaviour: at `--gap-ms 0` about 37% of races
+run degraded because a path is still mid-send, and some are shed as
+`AllPathsBusy`. That is single-occupancy working as designed, and it means the
+racer is a latency device for bursty control traffic, not a throughput device.
+Degradation is gone by `--gap-ms 1`, under 2% duty cycle at a 17 us send.
+Note also that parked workers cost ~60 us to wake (p50 30 us at zero gap versus
+~100 us with one), the same cold-start effect `process_pool`'s `WarmupUnitID`
+exists for.
+
+**Dependency footprint.** The lane takes no new dependency, and the size of what
+was avoided was measured rather than assumed:
+
+| | transitive crates | clean release build |
+| --- | --- | --- |
+| `ovrt-network` | 1 (`libc`) | 0.33 s wall / 1.21 s CPU |
+| `quinn` 0.11 | 98 | 19.94 s wall / 52.15 s CPU |
+| `webrtc` 0.12 | 226 | not built |
+
+Stated honestly: this is not the same capability delivered more cheaply. QUIC
+buys multiplexed reliable streams, 0-RTT and migration, none of which racing or
+striping require. The measurement establishes that the cost is avoidable *for
+this capability*, not that QUIC is overpriced for its own.
+
+Reproduce:
+
+```bash
+cargo run --release -p ovrt-network --bin network_sim
+cargo run --release -p ovrt-network --bin network_sim -- --lane udp --gap-ms 1
+```
+
+**Consumer note.** `server-kit/go` and `runtime-sdk` are both vendored, so these
+land in generated applications rather than in Foundation core, which by the
+ownership manifest consumes them "through public APIs" and therefore does not
+call them itself. `TestShardedMomentsMergeToTheWholeProjection` records the
+price of the alternative on the reference fixture: averaging two shards'
+standard deviations returns 108.51 against a true 216.77, a **49.9% error**.
+
 ## 2026-08-18 Exact-arithmetic oracle for the columnar float64 reduction
 
 `TestFloat64VectorSumMatchesScalarReference` compared the 8-lane AVX2 reduction

@@ -1,0 +1,24 @@
+[package]
+name = "ovrt-network"
+version = "0.1.0"
+edition = "2021"
+license-file.workspace = true
+rust-version.workspace = true
+
+# Opt-in, and depended on by nothing. `runtime-network` is a lane that a host
+# asks for by name; nothing in the runtime reaches for it implicitly, and a
+# build that does not want a network lane does not compile one.
+#
+# The dependency list is the point of this crate, not an accident of it. The
+# workspace holds one non-optional third-party dependency and this crate does
+# not add a second: interface enumeration, socket binding, racing and
+# deduplication are syscalls, atomics and threads, all of which std and libc
+# already reach. A QUIC adapter would be the first thing to change that, which
+# is why racing and striping were built first: neither needs it, so the decision
+# to take on a second dependency can be made on its own merits rather than
+# arriving as a side effect of wanting multipath.
+
+[dependencies]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

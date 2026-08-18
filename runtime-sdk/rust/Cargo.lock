@@ -185,6 +185,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ovrt-network"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "ovrt-unit"
 version = "0.1.0"
 dependencies = [
