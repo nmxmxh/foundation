@@ -364,7 +364,6 @@ func WaitForRiverTableReady(ctx context.Context, pool *pgxpool.Pool, timeout tim
 	}
 }
 
-
 // WrapPostgresPool projects an existing pgx pool into Foundation's RuntimeStore
 // surface. This is the migration lane for scaffolded projects that still need
 // the raw pool for River, health checks, or provider-specific hooks while new

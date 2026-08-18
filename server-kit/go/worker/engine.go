@@ -404,7 +404,6 @@ func (e *Engine) EnqueueManyTx(ctx context.Context, tx pgx.Tx, jobs []Job) error
 	return nil
 }
 
-
 func (e *Engine) spawnWorkers(ctx context.Context, queue string, jobs <-chan Job, count int) {
 	indices := make([]int, 0, count)
 	e.mu.Lock()

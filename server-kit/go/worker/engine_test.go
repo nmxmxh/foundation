@@ -524,4 +524,3 @@ func TestEngine_EnqueueMany_InMemory(t *testing.T) {
 		return processor.calls.Load() >= 3
 	}, "batch job execution")
 }
-

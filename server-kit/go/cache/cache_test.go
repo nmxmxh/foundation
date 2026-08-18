@@ -448,7 +448,6 @@ func BenchmarkMemoryBackend_Set(b *testing.B) {
 	ctx := context.Background()
 	data := []byte(`{"user_id":123,"name":"benchmark_user","email":"bench@test.com"}`)
 
-	
 	b.ReportAllocs()
 	for i := 0; b.Loop(); i++ {
 		_ = backend.Set(ctx, fmt.Sprintf("key:%d", i), data, 5*time.Minute)
@@ -461,7 +460,6 @@ func BenchmarkMemoryBackend_Get(b *testing.B) {
 	data := []byte(`{"user_id":123}`)
 	_ = backend.Set(ctx, "bench-key", data, time.Hour)
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _ = backend.Get(ctx, "bench-key")
@@ -498,7 +496,6 @@ func BenchmarkGetOrSet(b *testing.B) {
 		return "cached_value", nil
 	})
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _ = GetOrSet(ctx, c, "bench-key", func() (string, error) {
@@ -546,7 +543,6 @@ func BenchmarkMemoryBackend_DeletePattern(b *testing.B) {
 	backend := NewMemoryBackend()
 	ctx := context.Background()
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		b.StopTimer()

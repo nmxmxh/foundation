@@ -130,7 +130,7 @@ func New(cfg Config) (*Connector, error) {
 		now:     now,
 		lanes:   lanes,
 		// #nosec G404 -- connector retry jitter is load spreading, not a security token or randomness boundary.
-		rng:     rand.New(rand.NewSource(now().UnixNano())),
+		rng: rand.New(rand.NewSource(now().UnixNano())),
 	}
 	c.storeStatus(Status{
 		Name:          cfg.Name,

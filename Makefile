@@ -183,7 +183,7 @@ test-bench-history:
 bench-simd:
 	@echo "Running opt-in Go SIMD columnar benchmarks (GOEXPERIMENT=simd)..."
 	@mkdir -p "$(FOUNDATION_GO_CACHE_DIR)"
-	@cd server-kit/go && GOEXPERIMENT=simd GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -run='TestFloat64VectorSumMatchesScalarReference' -bench='BenchmarkColumnarFloat64Sum' -benchmem -count=3 ./hermes
+	@cd server-kit/go && GOEXPERIMENT=simd GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -run='TestFloat64VectorSum' -bench='BenchmarkColumnarFloat64Sum' -benchmem -count=3 ./hermes
 
 test-bench-go:
 	@echo "Running bounded Foundation benchmarks..."

@@ -411,7 +411,6 @@ func BenchmarkCircuitBreaker_Execute_Closed(b *testing.B) {
 	cb := New("bench-svc", Config{FailureThreshold: 1000})
 	ctx := context.Background()
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _ = cb.Execute(ctx, func() (any, error) {
@@ -429,7 +428,6 @@ func BenchmarkCircuitBreaker_Execute_Open(b *testing.B) {
 		return nil, errFake
 	})
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _ = cb.Execute(ctx, func() (any, error) {
@@ -456,7 +454,6 @@ func BenchmarkCircuitBreaker_Execute_Parallel(b *testing.B) {
 func BenchmarkCircuitBreaker_StateRead(b *testing.B) {
 	cb := New("bench-svc", Config{})
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = cb.State()

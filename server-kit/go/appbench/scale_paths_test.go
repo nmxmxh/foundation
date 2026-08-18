@@ -90,7 +90,7 @@ func BenchmarkScale_MemoryDBTenantCount100K(b *testing.B) {
 	ctx := context.Background()
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		count, err := db.CountRecords(ctx, "experience", "state", "org-0420", database.RecordQuery{})
 		if err != nil {
@@ -108,7 +108,7 @@ func BenchmarkScale_MemoryDBTenantListFiltered100K(b *testing.B) {
 	filters := scaleRecordQuery(b, 50, "state", "active")
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		rows, err := db.ListRecords(ctx, "experience", "state", "org-0420", filters)
 		if err != nil {
@@ -125,7 +125,7 @@ func BenchmarkScale1M_MemoryDBTenantCount(b *testing.B) {
 	ctx := context.Background()
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		count, err := db.CountRecords(ctx, "experience", "state", "org-4200", database.RecordQuery{})
 		if err != nil {
@@ -143,7 +143,7 @@ func BenchmarkScale1M_MemoryDBTenantListFiltered(b *testing.B) {
 	filters := scaleRecordQuery(b, 50, "state", "active")
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		rows, err := db.ListRecords(ctx, "experience", "state", "org-4200", filters)
 		if err != nil {
@@ -161,7 +161,7 @@ func BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit(b *testing.B) {
 	filters := scaleRecordQuery(b, 50, "state", "active")
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		rows, err := db.ListRecords(ctx, "experience", "state", "org-dense", filters)
 		if err != nil {
@@ -180,7 +180,7 @@ func BenchmarkScale_WebSocketBroadcastResolveInto100K(b *testing.B) {
 	buf := make([]string, 0, 100000)
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		var err error
 		buf = buf[:0]
@@ -201,7 +201,7 @@ func BenchmarkScale_WebSocketBroadcastResolveInto1K(b *testing.B) {
 	buf := make([]string, 0, 1000)
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		var err error
 		buf = buf[:0]
@@ -221,7 +221,7 @@ func BenchmarkScale_WebSocketBroadcastBatch1K(b *testing.B) {
 	target := wsrouting.TargetedDelivery{TargetType: "broadcast"}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		batches := 0
 		count, err := router.ForEachTargetBatch(ctx, target, 0, func(ids []string) bool {
@@ -243,7 +243,7 @@ func BenchmarkScale_WebSocketBroadcastBatch100K(b *testing.B) {
 	target := wsrouting.TargetedDelivery{TargetType: "broadcast"}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		count, err := router.ForEachTargetBatch(ctx, target, 0, func(ids []string) bool {
 			return len(ids) > 0
@@ -264,7 +264,7 @@ func BenchmarkScale_WebSocketUserResolve100K(b *testing.B) {
 	buf := make([]string, 0, 10)
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		var err error
 		buf = buf[:0]
@@ -285,7 +285,7 @@ func BenchmarkScale1M_WebSocketBroadcastResolveInto(b *testing.B) {
 	buf := make([]string, 0, 1000000)
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		var err error
 		buf = buf[:0]
@@ -305,7 +305,7 @@ func BenchmarkScale1M_WebSocketBroadcastForEach(b *testing.B) {
 	target := wsrouting.TargetedDelivery{TargetType: "broadcast"}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		count, err := router.ForEachTarget(ctx, target, func(string) bool {
 			return true
@@ -325,7 +325,7 @@ func BenchmarkScale1M_WebSocketBroadcastBatch(b *testing.B) {
 	target := wsrouting.TargetedDelivery{TargetType: "broadcast"}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		count, err := router.ForEachTargetBatch(ctx, target, 0, func(ids []string) bool {
 			return len(ids) > 0
@@ -346,7 +346,7 @@ func BenchmarkScale1M_WebSocketUserResolve(b *testing.B) {
 	buf := make([]string, 0, 10)
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		var err error
 		buf = buf[:0]
@@ -462,7 +462,7 @@ func BenchmarkScale_ConfigConvergence10K(b *testing.B) {
 	cfg := scaleServerConfig()
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if err := runtimeconfig.ValidateServer(cfg); err != nil {
 			b.Fatal(err)

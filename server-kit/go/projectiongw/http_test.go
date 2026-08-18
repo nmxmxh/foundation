@@ -35,7 +35,6 @@ func TestSecurityTenantFunc(t *testing.T) {
 	})
 }
 
-
 func TestScopeAllowlistAllows(t *testing.T) {
 	var unrestricted ScopeAllowlist
 	if !unrestricted.Allows("signals", "ticks") {

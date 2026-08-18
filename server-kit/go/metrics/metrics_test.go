@@ -76,7 +76,7 @@ func TestDefaultMetricsResetAndNilRegistry(t *testing.T) {
 func BenchmarkRegistryCounterNoTags(b *testing.B) {
 	registry := NewRegistry()
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		registry.Counter("runtime.dispatch.accepted", nil)
 	}
@@ -86,7 +86,7 @@ func BenchmarkRegistryCounterTagged(b *testing.B) {
 	registry := NewRegistry()
 	tags := Tags{"tenant": "org_1", "route": "runtime_dispatch", "state": "success"}
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		registry.Counter("runtime.dispatch.accepted", tags)
 	}
@@ -96,7 +96,7 @@ func BenchmarkRegistryCounterPrecomputedKey(b *testing.B) {
 	registry := NewRegistry()
 	key := MetricKey("runtime.dispatch.accepted", Tags{"tenant": "org_1", "route": "runtime_dispatch", "state": "success"})
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		registry.CounterKey(key)
 	}
@@ -108,7 +108,7 @@ func BenchmarkRegistrySnapshotPrometheus1024(b *testing.B) {
 		registry.Counter("runtime.dispatch.accepted", Tags{"tenant": "org", "route": fmt.Sprintf("route_%04d", i)})
 	}
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if out := registry.Prometheus(); out == "" {
 			b.Fatal("empty prometheus output")

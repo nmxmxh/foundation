@@ -394,7 +394,6 @@ func BenchmarkInMemoryBus_Publish_NoSubscribers(b *testing.B) {
 	bus := NewInMemoryBus(100)
 	env := makeTestEnvelope("media:upload:requested", "bench-corr")
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = bus.Publish(context.Background(), env)
@@ -406,7 +405,6 @@ func BenchmarkInMemoryBus_Publish_1Subscriber(b *testing.B) {
 	bus.Subscribe("media:upload:requested", func(_ context.Context, _ Envelope) {})
 	env := makeTestEnvelope("media:upload:requested", "bench-corr")
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = bus.Publish(context.Background(), env)
@@ -420,7 +418,6 @@ func BenchmarkInMemoryBus_Publish_10Subscribers(b *testing.B) {
 	}
 	env := makeTestEnvelope("media:upload:requested", "bench-corr")
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = bus.Publish(context.Background(), env)

@@ -38,7 +38,6 @@ func BenchmarkEngine_Enqueue_InMemory(b *testing.B) {
 		Payload: extension.Object{"key": extension.String("value"), "id": extension.Int(123)},
 	}
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = engine.Enqueue(ctx, job)
@@ -60,7 +59,6 @@ func BenchmarkEngine_Enqueue_RawPayload(b *testing.B) {
 		RawPayload: raw,
 	}
 
-	
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = engine.Enqueue(ctx, job)

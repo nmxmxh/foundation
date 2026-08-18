@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -179,8 +178,7 @@ func TestServerHTTP2AndTLSResumption(t *testing.T) {
 	srv.ConfigureTimeouts(5*time.Second, 15*time.Second, 15*time.Second, 120*time.Second)
 	srv.ConfigureHTTP2(250)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go func() {
 		_ = srv.Serve(listener, ctx)
@@ -206,7 +204,7 @@ func TestServerHTTP2AndTLSResumption(t *testing.T) {
 
 	// Wait for server to become ready
 	var firstResp *http.Response
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		firstResp, err = client.Get(serverURL)
 		if err == nil {
 			break
@@ -226,7 +224,7 @@ func TestServerHTTP2AndTLSResumption(t *testing.T) {
 	}
 
 	// Execute consecutive requests over multiplexed HTTP/2 connection
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		resp, err := client.Get(serverURL)
 		if err != nil {
 			t.Fatalf("multiplexed request %d failed: %v", i, err)
@@ -260,8 +258,7 @@ func TestTLSSessionTicketResumption(t *testing.T) {
 	srv := New(&Config{Port: 0}, nil)
 	srv.ConfigureTLS(tlsCfg)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	go func() {
 		_ = srv.Serve(listener, ctx)
@@ -288,7 +285,7 @@ func TestTLSSessionTicketResumption(t *testing.T) {
 	}
 
 	var resp1 *http.Response
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		resp1, err = client1.Get(serverURL)
 		if err == nil {
 			break
@@ -331,8 +328,8 @@ func TestTLSSessionTicketResumption(t *testing.T) {
 
 func TestConfigureTimeoutSetters(t *testing.T) {
 	srv := New(&Config{
-		ReadHeaderTimeout: 3 * time.Second,
-		IdleTimeout:       90 * time.Second,
+		ReadHeaderTimeout:    3 * time.Second,
+		IdleTimeout:          90 * time.Second,
 		MaxConcurrentStreams: 500,
 	}, nil)
 

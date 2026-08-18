@@ -54,7 +54,7 @@ func BenchmarkManagerAcceptPartWithCacheAndEvents(b *testing.B) {
 	ctx := benchmarkContext()
 	b.SetBytes(int64(size))
 	b.ReportAllocs()
-	
+
 	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
 		mgr := newBenchmarkManager(b, redis.NewMemoryClient("bench"), events.NewInMemoryBus(256))
@@ -96,7 +96,7 @@ func BenchmarkManagerAcceptPartDuplicateReplay(b *testing.B) {
 	desc := PartDescriptor{PartNumber: receipt.PartNumber, Size: receipt.RawSize, ExpectedRawSHA256: receipt.RawSHA256}
 	b.SetBytes(int64(size))
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		replayed, err := mgr.AcceptPart(ctx, plan.TransferID, desc, errReader{})
 		if err != nil {
@@ -195,7 +195,7 @@ func BenchmarkManagerCompleteManifestSparseMissing(b *testing.B) {
 	totalSize := int64(parts) * partSize
 	b.SetBytes(totalSize)
 	b.ReportAllocs()
-	
+
 	for i := 0; b.Loop(); i++ {
 		b.StopTimer()
 		mgr := newBenchmarkManager(b, nil, nil)
@@ -226,7 +226,7 @@ func BenchmarkManagerOpenRangeIdentity(b *testing.B) {
 
 	b.SetBytes(rangeSize)
 	b.ReportAllocs()
-	
+
 	for i := 0; b.Loop(); i++ {
 		offset := int64(i) % (totalSize - rangeSize)
 		reader, _, err := mgr.OpenRange(ctx, plan.TransferID, offset, rangeSize)
@@ -247,7 +247,7 @@ func BenchmarkManagerForEachRangeIdentity(b *testing.B) {
 
 	b.SetBytes(rangeSize)
 	b.ReportAllocs()
-	
+
 	for i := 0; b.Loop(); i++ {
 		offset := int64(i) % (totalSize - rangeSize)
 		if _, err := mgr.ForEachRange(ctx, plan.TransferID, offset, rangeSize, func(part RangePart) error {

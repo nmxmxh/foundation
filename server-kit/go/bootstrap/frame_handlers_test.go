@@ -204,7 +204,7 @@ func BenchmarkTypedFrameAdapterDispatch(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if _, err := router.DispatchFrame(context.Background(), frame); err != nil {
 			b.Fatalf("DispatchFrame() error = %v", err)
@@ -240,7 +240,7 @@ func BenchmarkTypedFrameAdapterDispatchNoMetadata(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if _, err := router.DispatchFrame(context.Background(), frame); err != nil {
 			b.Fatalf("DispatchFrame() error = %v", err)
@@ -278,7 +278,7 @@ func BenchmarkTypedFrameAdapterDispatchReuse(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if _, err := router.DispatchFrame(context.Background(), frame); err != nil {
 			b.Fatalf("DispatchFrame() error = %v", err)

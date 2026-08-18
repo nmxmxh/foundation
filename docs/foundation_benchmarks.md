@@ -20,6 +20,76 @@ The benchmark suite exists to prove that ladder stays honest. The fastest lane s
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
 
+## 2026-08-18 Exact-arithmetic oracle for the columnar float64 reduction
+
+`TestFloat64VectorSumMatchesScalarReference` compared the 8-lane AVX2 reduction
+against `sumFloat64sScalar` — but that reference is itself a 4-accumulator
+reordering of a non-associative operation. Two approximations were being checked
+against each other, so the assertion bounded their *disagreement*, not the error
+of either. `columnar_sum_test.go` now carries the missing anchor:
+`exactSumFloat64` accumulates in `math/big.Rat`, where every finite `float64` is
+a dyadic rational and every partial sum is held exactly, then rounds once at the
+end. Both lanes are measured against that value.
+
+Each case asserts the classical forward error bound
+`|fl(Σx) − Σx| ≤ γ_k·Σ|x|` with `k` taken from the lane's accumulator count
+(Higham §4.2, already cited by `mathematical_practices.md` §4) — a bound that
+cannot be tuned away — plus a ULP ceiling where the input's conditioning makes
+one meaningful. `TestFloat64VectorSumNonFiniteParity` adds the NaN/±Inf coverage
+FP-4 requires for the raw reduction (the validity-aware kernels already had it in
+`columnar_reduce_test.go`).
+
+Measured on this host (Apple M1 Pro, darwin/arm64 for the scalar lane;
+`GOARCH=amd64 GOEXPERIMENT=simd` under Rosetta for the AVX2 lane, which reports
+`archsimd.X86.AVX2() == true`, so the vector path provably executed). Error is
+stated as ULP distance from the correctly-rounded exact sum:
+
+| Case | n | Scalar reference (4 acc) | AVX2 lane (8 acc) |
+| --- | ---: | ---: | ---: |
+| `ramp-exactly-representable` (the pre-existing test input) | 1,000 | **0 ULP** | **0 ULP** |
+| `well-conditioned-positive` (all terms in one octave) | 4,096 | **0 ULP** | **0 ULP** |
+| `subnormals` | 64 | **0 ULP** | **0 ULP** |
+| `big-plus-small` (1e17 followed by 4,096 ones) | 4,097 | 64 ULP | **32 ULP** |
+| `mixed-magnitude-cancellation` (17 decades, alternating sign) | 1,024 | 1.23e14 ULP | **1.78e13 ULP** |
+| `catastrophic-cancellation` (`1e16, 1, −1e16` × 333) | 999 | returns `0`, exact is `333` | returns `0`, exact is `333` |
+
+Findings:
+
+- **The old test could not fail on its main input.** Every element of the ramp is
+  a multiple of 0.5 and every partial sum stays far inside 2⁵³, so all partial
+  sums are exactly representable in *any* accumulation order. That input observes
+  nothing about reordering; `well-conditioned-positive` was added as one that can.
+- **The vectorized lane is measurably more accurate than the scalar reference**,
+  not less — the outcome `mathematical_practices.md` §4 predicts from pairwise
+  error growth, now measured rather than asserted. On `big-plus-small` the ratio
+  is exactly 2×, matching the 8-vs-4 accumulator ratio: the accumulator holding
+  1e17 (ULP 16) absorbs its share of the ones and loses all of them, so a
+  k-accumulator lane errs by 4096/k. That makes 64 ULP a derived ceiling, and a
+  regression to fewer accumulators fails the test.
+- **A correct reduction can be 100% relatively wrong.** On
+  `catastrophic-cancellation` both lanes return `0.0` against a true sum of
+  `333`, and this is *inside* the Higham bound (Σ|x| ≈ 6.7e18 admits ~2e5 of
+  absolute error). FP-1's `1e−6·|ref|` relative form would also have passed it,
+  since both lanes agree on the wrong answer. The relative tolerance is a lane
+  parity check and remains correct as one; it is not an accuracy claim, and on
+  ill-conditioned input nothing but the absolute bound is.
+
+This entry is verification evidence, not a throughput measurement: no production
+code path changed (one corrected doc comment on `Float64Vector.Sum`, which had
+described the reference as a left-to-right sum it has not been since the MLP
+kernel consolidation of 2026-08-04). `make bench-simd` now runs the whole
+`TestFloat64VectorSum` family rather than the single original parity test.
+
+Reproduce:
+
+```bash
+cd server-kit/go && go test -run 'TestFloat64VectorSum' -v ./hermes
+```
+
+```bash
+cd server-kit/go && GOARCH=amd64 GOEXPERIMENT=simd go test -run 'TestFloat64VectorSum' -v ./hermes
+```
+
 ## 2026-08-14 Hermes Core Acceleration: Accumulators, Multi-Attribute Bitmaps, and Tiered Snapshots
 
 This benchmark validates four Foundation Core architectural enhancements in `server-kit/go/hermes`:

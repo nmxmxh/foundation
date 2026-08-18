@@ -11,18 +11,18 @@ import (
 
 // TLSConfig defines parameters for secure TLS termination.
 type TLSConfig struct {
-	CertFile                string
-	KeyFile                 string
-	Certificates            []tls.Certificate
-	GetCertificate          func(*tls.ClientHelloInfo) (*tls.Certificate, error)
-	MinVersion              uint16
-	MaxVersion              uint16
-	SessionTicketsDisabled  bool
-	SessionTicketKey        *[32]byte
-	PostQuantumMode         security.PostQuantumTLSMode
-	ClientAuth              tls.ClientAuthType
-	ClientCAs               *x509.CertPool
-	NextProtos              []string
+	CertFile                 string
+	KeyFile                  string
+	Certificates             []tls.Certificate
+	GetCertificate           func(*tls.ClientHelloInfo) (*tls.Certificate, error)
+	MinVersion               uint16
+	MaxVersion               uint16
+	SessionTicketsDisabled   bool
+	SessionTicketKey         *[32]byte
+	PostQuantumMode          security.PostQuantumTLSMode
+	ClientAuth               tls.ClientAuthType
+	ClientCAs                *x509.CertPool
+	NextProtos               []string
 	PreferServerCipherSuites bool
 }
 
@@ -42,7 +42,7 @@ func DefaultSecureTLSConfig() *tls.Config {
 		MinVersion:               tls.VersionTLS13,
 		CipherSuites:             SecureCipherSuites,
 		NextProtos:               []string{"h2", "http/1.1"},
-		SessionTicketsDisabled:  false,
+		SessionTicketsDisabled:   false,
 		PreferServerCipherSuites: true,
 	}
 
@@ -71,12 +71,12 @@ func BuildTLSConfig(opts *TLSConfig) (*tls.Config, error) {
 		MinVersion:               minVer,
 		MaxVersion:               opts.MaxVersion,
 		Certificates:             opts.Certificates,
-		GetCertificate:          opts.GetCertificate,
+		GetCertificate:           opts.GetCertificate,
 		CipherSuites:             SecureCipherSuites,
 		NextProtos:               opts.NextProtos,
-		SessionTicketsDisabled:  opts.SessionTicketsDisabled,
-		ClientAuth:              opts.ClientAuth,
-		ClientCAs:               opts.ClientCAs,
+		SessionTicketsDisabled:   opts.SessionTicketsDisabled,
+		ClientAuth:               opts.ClientAuth,
+		ClientCAs:                opts.ClientCAs,
 		PreferServerCipherSuites: opts.PreferServerCipherSuites,
 	}
 

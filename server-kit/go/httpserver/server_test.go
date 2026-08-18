@@ -1362,5 +1362,3 @@ func TestRecentEventsEndpoint(t *testing.T) {
 		t.Fatalf("recentEvents with nil handler failed: code=%d", rec2.Code)
 	}
 }
-
-

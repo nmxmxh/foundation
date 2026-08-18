@@ -100,8 +100,8 @@ func (w *SnapshotChunkWriter) Encode(records []database.DomainRecord) ([]byte, e
 
 		checksum := sha256.Sum256(chunkPayload)
 		chunks[i] = ChunkDescriptor{
-			Index:         uint32(i),                // #nosec G115 -- numChunks is bounded by record slice length.
-			RecordCount:   uint32(len(subRecords)),  // #nosec G115 -- subRecords length is bounded by chunkSize.
+			Index:         uint32(i),                 // #nosec G115 -- numChunks is bounded by record slice length.
+			RecordCount:   uint32(len(subRecords)),   // #nosec G115 -- subRecords length is bounded by chunkSize.
 			PayloadLength: uint32(len(chunkPayload)), // #nosec G115 -- chunk payload length is bounded.
 			Checksum:      checksum,
 		}

@@ -446,7 +446,7 @@ func BenchmarkDecodeRequestBytesIntoCompleteReuse(b *testing.B) {
 	}
 	target := &testprotos.TestRequest{Metadata: &testprotos.Metadata{GlobalContext: &testprotos.GlobalContext{}}}
 	b.ReportAllocs()
-	
+
 	for b.Loop() {
 		if _, err := binding.DecodeRequestBytesIntoObject(target, payload, nil, DecodeRequestBytesIntoOptions{CompleteMessage: true}); err != nil {
 			b.Fatal(err)

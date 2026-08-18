@@ -12,10 +12,13 @@ package hermes
 //
 // On an amd64 build compiled with GOEXPERIMENT=simd and a CPU reporting AVX2,
 // this uses a vectorized reduction; every other build uses the scalar
-// reference. Because floating-point addition is not associative, the SIMD
-// lane's lane-wise accumulation can differ from the strict left-to-right scalar
-// sum by a few ULPs — acceptable for the analytical/telemetry lane this serves,
-// and bounded by the parity test.
+// reference. Because floating-point addition is not associative, the two lanes
+// accumulate in different orders and can differ by a few ULPs. Neither is a
+// left-to-right sum: the reference below runs four accumulators and the SIMD
+// lane eight, which makes both *more* accurate than a naive sequential sum, and
+// the 8-lane path the more accurate of the two. Both are bounded against the
+// exact sum by TestFloat64VectorSumMatchesExactOracle; measured error is
+// tabulated in docs/foundation_benchmarks.md.
 //
 // Null entries are summed as their zero value, and for a sum specifically that
 // is not a shortcut: 0 is the additive identity, so nulls provably cannot
