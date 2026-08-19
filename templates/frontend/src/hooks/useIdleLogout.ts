@@ -1,6 +1,11 @@
 import { useEffect, useRef } from 'react'
 
-import { clearSessionActivity, markSessionActivity, readSessionActivity } from '../lib/sessionActivity'
+import {
+  SESSION_ACTIVITY_STORAGE_KEY,
+  clearSessionActivity,
+  markSessionActivity,
+  readSessionActivity,
+} from '../lib/sessionActivity'
 
 const ACTIVITY_EVENTS: (keyof WindowEventMap)[] = [
   'mousemove',
@@ -39,6 +44,15 @@ export type UseIdleLogoutOptions = {
  *
  *  2. The persisted activity marker is cleared on logout (see clearSessionActivity)
  *     so a prior session's idle state cannot bleed into the next login.
+ *
+ *  3. The session ends in EVERY tab, not just the one that timed out. Activity
+ *     is shared through localStorage, so any active tab keeps the others alive —
+ *     but the reverse did not hold: a tab that idled out logged itself out while
+ *     its siblings stayed authenticated, which is precisely the state idle logout
+ *     exists to prevent (the user has walked away, and a live session remains on
+ *     screen). The `storage` event carries the cleared marker to the other tabs,
+ *     which then end their own sessions. Storage events do not fire in the tab
+ *     that wrote them, so this cannot loop.
  */
 export const useIdleLogout = ({
   enabled,
@@ -84,8 +98,19 @@ export const useIdleLogout = ({
       if (document.visibilityState === 'visible') markActivity()
     }
 
+    // Another tab ended the session: it cleared the marker (idle timeout, or an
+    // explicit logout, both of which call clearSessionActivity). `newValue` of
+    // null is the removal; a null `key` is a whole-storage clear, which ends the
+    // session for the same reason.
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== SESSION_ACTIVITY_STORAGE_KEY) return
+      if (event.newValue !== null) return
+      onIdleRef.current()
+    }
+
     ACTIVITY_EVENTS.forEach((event) => window.addEventListener(event, markActivity, { passive: true }))
     document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('storage', handleStorage)
 
     const intervalId = window.setInterval(() => {
       const persistedNow = readSessionActivity()
@@ -100,6 +125,7 @@ export const useIdleLogout = ({
       window.clearInterval(intervalId)
       ACTIVITY_EVENTS.forEach((event) => window.removeEventListener(event, markActivity))
       document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('storage', handleStorage)
     }
     // NOTE: deliberately keyed on session presence + config, NOT on the token.
   }, [enabled, idleTimeoutMs, checkIntervalMs, persistThrottleMs])

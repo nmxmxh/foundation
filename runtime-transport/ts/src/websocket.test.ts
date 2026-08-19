@@ -229,6 +229,8 @@ describe('WebSocketTransport Resilience', () => {
     const transport = createWebSocketTransport({ url: 'ws://localhost:8080', reconnect: { enabled: false }, createSocket: url => new FailedSocket(url) as any });
     await expect(transport.subscribe!('*', vi.fn())).rejects.toThrow('connection failed');
     expect(transport.getConnectionState()).toBe('closed');
+  });
+
   it('runs the authenticate handshake on every (re)connect', async () => {
     const sockets: MockWebSocket[] = [];
     const authenticate = vi.fn(async (_session: any) => {});
