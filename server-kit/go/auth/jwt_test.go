@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -162,5 +163,83 @@ func TestJWTManagerRefreshAndValidationEdges(t *testing.T) {
 		if _, err := manager.ValidateToken(invalid); err == nil {
 			t.Fatalf("expected invalid token error for %q", invalid)
 		}
+	}
+}
+
+// TestJWTManagerRejectsFutureIssuedTokens closes the other half of the
+// clock-skew problem. `iat` is minted by generateToken and was never validated,
+// so a token stamped far in the future was accepted for its whole lifetime.
+// That is not only a skew bug: an issuer under an attacker's influence could
+// post-date `iat` to extend a token's useful life past what was intended.
+func TestJWTManagerRejectsFutureIssuedTokens(t *testing.T) {
+	manager, err := NewJWTManager("a-sufficiently-long-secret-value")
+	if err != nil {
+		t.Fatalf("NewJWTManager: %v", err)
+	}
+
+	// Forge a token whose iat is well beyond the leeway, signed correctly so the
+	// only thing that can reject it is the iat check itself.
+	future := time.Now().UTC().Add(ClockSkewLeeway + 10*time.Minute)
+	forged := Claims{
+		UserID:    "usr_1",
+		TokenType: TokenTypeAccess,
+		IssuedAt:  future.Unix(),
+		ExpiresAt: future.Add(time.Hour).Unix(),
+	}
+	token, err := manager.signClaimsForTest(forged)
+	if err != nil {
+		t.Fatalf("sign forged claims: %v", err)
+	}
+
+	if _, err := manager.ValidateToken(token); !errors.Is(err, errTokenIssuedInFuture) {
+		t.Fatalf("future-issued token should be rejected, got: %v", err)
+	}
+}
+
+// TestJWTManagerToleratesFutureIssuedWithinLeeway is the counterpart: ordinary
+// drift must not be punished, or the fix trades one spurious logout for another.
+func TestJWTManagerToleratesFutureIssuedWithinLeeway(t *testing.T) {
+	manager, err := NewJWTManager("a-sufficiently-long-secret-value")
+	if err != nil {
+		t.Fatalf("NewJWTManager: %v", err)
+	}
+
+	skewed := time.Now().UTC().Add(ClockSkewLeeway / 2)
+	claims := Claims{
+		UserID:    "usr_1",
+		TokenType: TokenTypeAccess,
+		IssuedAt:  skewed.Unix(),
+		ExpiresAt: skewed.Add(time.Hour).Unix(),
+	}
+	token, err := manager.signClaimsForTest(claims)
+	if err != nil {
+		t.Fatalf("sign claims: %v", err)
+	}
+
+	if _, err := manager.ValidateToken(token); err != nil {
+		t.Fatalf("iat within leeway should validate, got: %v", err)
+	}
+}
+
+// TestJWTManagerAcceptsTokensWithoutIssuedAt keeps the check optional: a token
+// carrying no iat at all is unchanged by this validation, matching how the
+// expiry check treats a zero exp.
+func TestJWTManagerAcceptsTokensWithoutIssuedAt(t *testing.T) {
+	manager, err := NewJWTManager("a-sufficiently-long-secret-value")
+	if err != nil {
+		t.Fatalf("NewJWTManager: %v", err)
+	}
+
+	token, err := manager.signClaimsForTest(Claims{
+		UserID:    "usr_1",
+		TokenType: TokenTypeAccess,
+		ExpiresAt: time.Now().UTC().Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatalf("sign claims: %v", err)
+	}
+
+	if _, err := manager.ValidateToken(token); err != nil {
+		t.Fatalf("token without iat should validate, got: %v", err)
 	}
 }
