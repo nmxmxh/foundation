@@ -1527,3 +1527,23 @@ func TestProcessPoolWorkerArena(t *testing.T) {
 		t.Fatalf("expected error on overflow output length")
 	}
 }
+
+func TestProcessPoolWorkerArenaFailureLogging(t *testing.T) {
+	pool := &ProcessPool{
+		logger: testLogger(t),
+		allWorkers: []*processWorker{
+			{
+				command: []string{"/does/not/exist/invalid_binary"},
+				logger:  testLogger(t),
+				index:   1,
+				mode:    ProcessTransportStdio,
+			},
+		},
+	}
+	
+	// startLocked will fail because the command does not exist.
+	// We expect WorkerArena to return nil and log a warning.
+	if a := pool.WorkerArena(0); a != nil {
+		t.Fatalf("expected nil arena on start failure")
+	}
+}

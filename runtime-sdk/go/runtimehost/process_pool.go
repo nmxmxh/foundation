@@ -1144,6 +1144,10 @@ func (p *ProcessPool) WorkerArena(index int) *Arena {
 	defer worker.mu.Unlock()
 	// The arena is created when the worker process starts, so ensure it has.
 	if err := worker.startLocked(); err != nil {
+		p.logger.Warn("native runtime worker failed to start; arena unavailable",
+			"worker_index", index,
+			"error", err,
+			"transport", string(worker.mode))
 		return nil
 	}
 	return worker.arena
