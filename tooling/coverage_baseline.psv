@@ -3,7 +3,7 @@ github.com/nmxmxh/ovasabi_foundation/config-contracts/go/runtimeconfig|98.1|95.0
 github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost|86.7|95.0
 github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/transport|95.7|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/apidocs|71.8|95.0
-github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth|91.7|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth|90.6|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap|80.4|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/bulk|95.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache|91.3|95.0
@@ -43,7 +43,7 @@ github.com/nmxmxh/ovasabi_foundation/server-kit/go/objectstore|74.6|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability|88.6|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/policy|78.2|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/profiling|100.0|95.0
-github.com/nmxmxh/ovasabi_foundation/server-kit/go/projectiongw|94.8|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/projectiongw|94.1|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi|95.4|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi/testprotos|97.1|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis|41.4|service

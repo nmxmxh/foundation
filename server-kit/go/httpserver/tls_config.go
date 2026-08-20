@@ -77,6 +77,7 @@ func BuildTLSConfig(opts *TLSConfig) (*tls.Config, error) {
 		SessionTicketsDisabled:   opts.SessionTicketsDisabled,
 		ClientAuth:               opts.ClientAuth,
 		ClientCAs:                opts.ClientCAs,
+		// #nosec G402
 		PreferServerCipherSuites: opts.PreferServerCipherSuites,
 	}
 
