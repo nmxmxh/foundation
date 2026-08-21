@@ -7,6 +7,15 @@
 # - go.mod/go.sum and foundation module manifests are copied before source code.
 # - Named BuildKit caches are shared across all foundation projects by default.
 # - Source changes rebuild the binary, but do not re-download Go modules.
+#
+# Build footprint:
+# - Compiler fan-out is bounded by default (GO_BUILD_PARALLELISM, NODE_HEAP_MB)
+#   because Compose may build both images on the deployment host next to a
+#   running instance. See docs/foundation_tooling.md, "Deployment lane".
+# - Projects that add a rust-builder stage must bound it too: set
+#   ARG CARGO_BUILD_JOBS=2 / ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}. An
+#   unbounded release build of a multi-crate workspace is the largest single
+#   memory consumer in this graph.
 # =============================================================================
 
 ARG GO_VERSION=1.26
@@ -59,6 +68,12 @@ ARG CACHE_NAMESPACE
 ARG VERSION=dev
 ARG CGO_ENABLED=0
 
+# Bound compile fan-out. Compose can build this stage concurrently with the
+# frontend image on one host; an unbounded -p lets compiler workers crowd out
+# a running instance and OOM the deploy. Override per project with --build-arg.
+ARG GO_BUILD_PARALLELISM=2
+ENV GOFLAGS="-p=${GO_BUILD_PARALLELISM}"
+
 COPY --from=go-deps /tmp/deps-ready /tmp/deps-ready
 
 # Copy source code after dependency resolution so this layer is the normal
@@ -107,6 +122,12 @@ CMD ["./server"]
 FROM node:22-alpine AS frontend-builder
 
 ARG CACHE_NAMESPACE
+
+# Bound the Vite/TypeScript heap for hosts that build next to a live
+# instance. Node is the smallest of the three compilers; this alone does not
+# prevent OOM when Go or Rust builds run unbounded alongside it.
+ARG NODE_HEAP_MB=1536
+ENV NODE_OPTIONS="--max-old-space-size=${NODE_HEAP_MB}"
 
 WORKDIR /app
 

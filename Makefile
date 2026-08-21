@@ -63,7 +63,8 @@ FOUNDATION_LINT_CHECKS := \
 	check-app-security-profile \
 	check-coverage-ratchet \
 	check-transport-ladder \
-	check-benchmark-ratchet
+	check-benchmark-ratchet \
+	check-github-workflows
 
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 FOUNDATION_GO_CACHE_DIR ?= /tmp/ovasabi-foundation-go-build
@@ -367,6 +368,23 @@ check-migration-structure:
 
 check-directory-ownership:
 	@tooling/scripts/directory_ownership_check.sh .
+
+check-github-workflows:
+	@if ! command -v actionlint >/dev/null 2>&1; then \
+		echo "[OK] GitHub workflows lint skipped: actionlint not installed (brew install actionlint)"; \
+		exit 0; \
+	fi; \
+	echo "[RUN] Linting GitHub workflows"; \
+	err=0; \
+	for wf in templates/github/workflows/*.yml .github/workflows/*.yml; do \
+		[[ -f "$$wf" ]] || continue; \
+		actionlint -no-color "$$wf" || err=1; \
+	done; \
+	if [[ "$$err" -ne 0 ]]; then \
+		echo "GitHub workflows lint failed"; \
+		exit 1; \
+	fi; \
+	echo "[OK] GitHub workflows lint passed"
 
 check-enforcement-integrity:
 	@tooling/scripts/enforcement_integrity_check.sh .

@@ -2,6 +2,9 @@
 set -euo pipefail
 
 target="${1:-.}"
+# Captured at top level: zsh FUNCTION_ARGZERO replaces $0 with the
+# function name inside functions, so helpers cannot read $0 there.
+script_path="$0"
 target="$(cd "$target" && pwd)"
 failed=0
 tmp_output="$(mktemp "${TMPDIR:-/tmp}/ovasabi_rust_runtime_practices.XXXXXX")"
@@ -62,6 +65,7 @@ check_no_match_before_tests() {
       -g '!**/target/**' \
       -g '!**/node_modules/**' \
       -g '!**/src/bin/**' \
+      -g '!**/tests/**' \
       -g '!**/benches/**' \
       -g '!**/examples/**')
   done
@@ -89,6 +93,53 @@ append_existing_dirs app_roots \
   "$target/rust" \
   "$target/native/src-tauri"
 scan_roots=("${sdk_roots[@]}" "${native_roots[@]}" "${app_roots[@]}")
+
+# Two-sided regression guard for the tests/ exclusion above.
+#
+# Positive control: a Cargo integration test (tests/*.rs carries no
+# #[cfg(test)] marker) may use .expect() freely; the scan must pass it.
+# Negative control: the same construct in production src must still fail.
+run_self_test() {
+  if [[ "${RUST_RUNTIME_PRACTICES_NESTED:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  local sandbox
+  sandbox="$(mktemp -d "${TMPDIR:-/tmp}/ovasabi_rrp_selftest.XXXXXX")"
+  mkdir -p "$sandbox/rust/crates/fixture/src" "$sandbox/rust/crates/fixture/tests"
+  mkdir -p "$sandbox/runtime-sdk/rust/crates/bad/src"
+  printf 'pub fn ok() -> u8 { 1 }\n' >"$sandbox/rust/crates/fixture/src/lib.rs"
+  {
+    printf '#[test]\nfn integration_setup_may_abort_loudly() {\n'
+    printf '    let value: Result<u8, String> = Err("fixture".into());\n'
+    printf '    value.expect("a test that cannot set up should abort");\n'
+    printf '}\n'
+  } >"$sandbox/rust/crates/fixture/tests/uses_expect.rs"
+  printf 'pub fn bad() -> u8 { let v: Result<u8, String> = Err("x".into()); v.unwrap() }\n' \
+    >"$sandbox/runtime-sdk/rust/crates/bad/src/lib.rs"
+
+  local child_output child_status
+  child_output="$(RUST_RUNTIME_PRACTICES_NESTED=1 "$script_path" "$sandbox" 2>&1)" \
+    && child_status=0 || child_status=$?
+  rm -rf "$sandbox"
+
+  if [[ "$child_status" -eq 0 ]]; then
+    echo "[FAIL] rust runtime practices self-test: production unwrap was not caught"
+    failed=1
+    return 0
+  fi
+  if ! grep -q "runtime-sdk/rust/crates/bad/src/lib.rs" <<<"$child_output"; then
+    echo "[FAIL] rust runtime practices self-test: failure did not name the production file"
+    failed=1
+    return 0
+  fi
+  if grep -q "tests/uses_expect.rs" <<<"$child_output"; then
+    echo "[FAIL] rust runtime practices self-test: integration test was scanned"
+    failed=1
+    return 0
+  fi
+  echo "[OK] rust runtime practices self-test (tests/ excluded, src still guarded)"
+}
 
 run_optional_miri() {
   if [[ "${RUST_RUNTIME_MIRI:-0}" != "1" ]]; then
@@ -252,6 +303,7 @@ fi
 
 run_optional_miri
 run_optional_loom
+run_self_test
 
 if [[ "$failed" -ne 0 ]]; then
   echo "rust runtime practices check failed"

@@ -12,6 +12,10 @@ on:
 
 env:
   GO_VERSION: "1.26"
+  # Anchors Postgres version across templates (compose files, .env.example,
+  # Dockerfile.postgres) via version-consistency checks. The services block
+  # below cannot read this — the env context is unavailable there — so its
+  # image tag is pinned separately; the consistency check keeps them equal.
   POSTGRES_VERSION: "18"
   # Customize these for your project
   PROJECT_NAME: "{{PROJECT_NAME}}"
@@ -29,11 +33,14 @@ jobs:
 
     services:
       postgres:
-        image: postgres:${{ env.POSTGRES_VERSION }}
+        # The env context is unavailable inside services.* — GitHub evaluates
+        # this block before job environment exists — so versions here are
+        # pinned literally instead of referencing workflow-level env.
+        image: postgres:18
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: ${{ env.TEST_DB_NAME }}
+          POSTGRES_DB: "{{PROJECT_NAME}}_test"
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
@@ -168,25 +175,50 @@ jobs:
           path: ./bin/server
           retention-days: 7
 
-  # Docker build (optional - uncomment if using Docker)
-  # docker:
-  #   name: Docker Build
-  #   runs-on: ubuntu-latest
-  #   needs: test
-  #   if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
-  #
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-  #
-  #     - name: Set up Docker Buildx
-  #       uses: docker/setup-buildx-action@v3
-  #
-  #     - name: Build Docker image
-  #       uses: docker/build-push-action@v5
-  #       with:
-  #         context: .
-  #         push: false
-  #         tags: ${{ env.PROJECT_NAME }}:${{ github.sha }}
-  #         cache-from: type=gha
-  #         cache-to: type=gha,mode=max
+  # Publishes the service image to GHCR so deployment hosts pull a prebuilt
+  # image instead of compiling on the box that runs it. A host-side build runs
+  # Go, Rust, and Vite concurrently next to the live instance and OOM-kills
+  # deploys on small machines. See docs/foundation_tooling.md, "Deployment
+  # lane: host-build footprint".
+  docker:
+    name: Docker Build and Publish
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop')
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # metadata-action lowercases the repository path, which GHCR requires.
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=branch
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
