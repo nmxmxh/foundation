@@ -73,12 +73,25 @@ jobs:
           scanners: vuln,misconfig,secret
           severity: CRITICAL,HIGH,MEDIUM
 
+      # Code scanning ingestion requires the feature to be enabled on the
+      # repository: free on public repos, GHAS on private ones. Private repos
+      # without it reject the upload and would fail the whole job, so the step
+      # is skipped there and the SARIF ships as an artifact instead. Drop the
+      # guard if the repository has code scanning enabled.
       - name: Upload Trivy results
-        if: always() && github.actor != 'dependabot[bot]'
+        if: always() && !github.event.repository.private && github.actor != 'dependabot[bot]'
         uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
         with:
           sarif_file: trivy-results.sarif
           category: trivy-filesystem
+
+      - name: Upload Trivy SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sarif
+          path: trivy-results.sarif
 
   sbom:
     name: Software Bill of Materials
