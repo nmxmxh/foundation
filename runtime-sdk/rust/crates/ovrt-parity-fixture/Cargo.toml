@@ -1,0 +1,19 @@
+[package]
+name = "ovrt-parity-fixture"
+version = "0.1.0"
+edition = "2021"
+license-file.workspace = true
+rust-version.workspace = true
+
+# The same source compiles as a native rlib (host-side parity reference) and a
+# wasm32 cdylib (guest artifact for the wasmtime lane). This dual-target build
+# is the whole point: one implementation, two lanes, byte-identical state.
+[lib]
+name = "parity_fixture"
+path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+ovrt-core = { path = "../ovrt-core" }
+ovrt-browser = { path = "../ovrt-browser" }
+ovrt-unit = { path = "../ovrt-unit" }

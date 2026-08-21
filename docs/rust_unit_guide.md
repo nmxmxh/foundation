@@ -277,7 +277,9 @@ A unit is integrated when all of these exist (this mirrors
       measured separately — they answer different questions).
 - [ ] Parity evidence when the unit runs on more than one lane: same input,
       byte-identical output across native/WASM (`ParityHarness`; compare full
-      buffer state, not just payload bytes).
+      buffer state, not just payload bytes). Pin time-reading units through
+      `ParityOptions::fixed_now_ms` on both sides; exclude per-lane counters
+      by name, never payload regions.
 - [ ] `make check-rust` clean (fmt, Clippy with unsafe-documentation lints,
       runtime practice checks, tests).
 - [ ] Descriptor schemas declared under `api/schemas` or `api/protos`, and the
@@ -294,4 +296,5 @@ A unit is integrated when all of these exist (this mirrors
 | Fastest trusted lane | `ovrt_ffi::export_runtime_ffi!` + `runtimehost.NewFFIPool` |
 | Linux shared-memory lane | `OVRT_RUNTIME_TRANSPORT=shm` + pool transport option |
 | Browser lane | `make build-rust-wasm wasm-manifest` + `BrowserRuntimeHost.instantiate` |
+| Native↔WASM parity evidence | `ovrt_wasm_host::ParityHarness::compare_units` (`--features wasm-runtime`) |
 | The worked example | `global_value_exchange_net_v1/rust/crates/gve-financial` |

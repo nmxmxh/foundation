@@ -22,6 +22,7 @@
 **/*.dylib
 **/*.a
 **/*.o
+**/*.test
 **/*.prof
 **/coverage.txt
 **/.gocache/
