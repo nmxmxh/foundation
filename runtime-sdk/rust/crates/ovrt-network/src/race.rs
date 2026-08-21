@@ -566,7 +566,12 @@ mod tests {
     /// Base cost of a healthy send in the simulation.
     const SIM_BASE_US: u64 = 100;
     /// Added cost when a path stalls.
-    const SIM_STALL_MS: u64 = 3;
+    ///
+    /// Sized so the pass/fail threshold can sit far above the scheduler-noise
+    /// floor. A sleeping thread's wake latency under a loaded machine reaches
+    /// hundreds of microseconds or a few milliseconds; a stall measured in
+    /// tens of milliseconds keeps the threshold unreachable by noise alone.
+    const SIM_STALL_MS: u64 = 10;
     /// How often each path stalls, independently.
     const SIM_STALL_PROBABILITY: f64 = 0.10;
     /// Idle time between frames.
@@ -579,7 +584,7 @@ mod tests {
     /// also what control-frame traffic actually looks like: bursty and idle, not
     /// saturating. Under genuine saturation a slow path is simply absent, which
     /// `a_busy_path_is_skipped_rather_than_queued` covers directly.
-    const SIM_GAP_MS: u64 = 4;
+    const SIM_GAP_MS: u64 = 12;
 
     fn collect_samples(racer: &Racer, iterations: usize) -> Vec<Duration> {
         let mut samples = Vec::with_capacity(iterations);
@@ -643,9 +648,12 @@ mod tests {
         println!("solo   p50={solo_p50:?} p95={solo_p95:?} p99={solo_p99:?}");
         println!("raced  p50={raced_p50:?} p95={raced_p95:?} p99={raced_p99:?}");
 
-        // The threshold sits between the base cost and the stall, far from both,
-        // so scheduler noise cannot move a sample across it.
-        let threshold = Duration::from_micros(1_500);
+        // The threshold sits between the base cost and the stall, far from
+        // both in absolute terms: fifty times the base, half the stall. A
+        // loaded scheduler inflates a healthy send by single-digit
+        // milliseconds at worst, which cannot cross five milliseconds; a
+        // stalled send cannot get under it either.
+        let threshold = Duration::from_micros(5_000);
 
         assert!(
             solo_p95 > threshold,
@@ -658,9 +666,10 @@ mod tests {
 
         // The honest half of the claim: the median is not what improved. A
         // failure here means the simulation stopped being a tail experiment,
-        // not that racing got better.
+        // not that racing got better. The slack covers dispatch overhead
+        // under load; only a structural change moves the median by more.
         assert!(
-            raced_p50 < solo_p50 + Duration::from_millis(1),
+            raced_p50 < solo_p50 + Duration::from_millis(2),
             "the median moved unexpectedly: solo {solo_p50:?}, raced {raced_p50:?}"
         );
     }

@@ -70,6 +70,18 @@ impl RuntimeUnit for MyUnit {
 3. **Signal Execution**: Increment `IDX_INPUT_WRITTEN`.
 4. **Read Output**: Wait for `IDX_OUTPUT_WRITTEN` and read from `OFFSET_OUTPUT_BYTES`.
 
+### Parity Evidence
+
+A unit that declares `supports_wasm: true` must prove both lanes agree.
+`ovrt_wasm_host::ParityHarness::compare_units` runs the same input through
+the native lane and a wasmtime-instantiated guest build, then compares the
+full control-buffer state: header integers, every epoch slot, payload
+regions, and diagnostics. Time-reading units pin one instant through
+`ParityOptions::fixed_now_ms` and inject it into the native side; volatile
+counters are excluded by name. The reference guest lives in
+`crates/ovrt-parity-fixture`; enable the engine with
+`--features wasm-runtime`.
+
 ## RuntimeSharedArena
 
 `RuntimeSharedArena` is an optional SharedArrayBuffer data plane for large payloads. It provides page-aligned slabs, a descriptor table, a ring queue, diagnostics, and epoch counters. Main-thread code should render only; workers own WASM execution and blocking waits. If SAB or shared WebAssembly memory is unavailable, callers must fall back to transferable buffers or postMessage through `negotiateRuntimeMemory`.

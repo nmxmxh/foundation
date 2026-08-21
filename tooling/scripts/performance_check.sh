@@ -199,6 +199,9 @@ if command -v cargo >/dev/null 2>&1; then
     (
       cd "$RUNTIME_SDK_RUST"
       cargo run -p ovrt-native --bin buffer_bench --release
+      # Parity lane costs: native vs warm-wasm exchange, plus the
+      # instantiation share a long-lived host amortises away.
+      cargo bench -p ovrt-wasm-host --features wasm-runtime
     )
   else
     echo "skip runtime-sdk Rust benchmarks: runtime-sdk/rust module not found"

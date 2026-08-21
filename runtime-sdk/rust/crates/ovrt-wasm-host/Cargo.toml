@@ -5,5 +5,28 @@ edition = "2021"
 license-file.workspace = true
 rust-version.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
+# House benchmark style: a plain binary, no criterion. Dev-dependencies are
+# visible here, which the parity bench needs for the fixture unit.
+[[bench]]
+name = "parity_bench"
+harness = false
+
+[features]
+# The wasmtime-backed execution lane for real .wasm artifacts. Opt-in because
+# the engine is a large dependency and ordinary builds of consuming
+# applications must stay portable and light. Parity evidence for a unit that
+# declares supports_wasm requires this feature:
+# `cargo test -p ovrt-wasm-host --features wasm-runtime`.
+wasm-runtime = ["dep:wasmtime"]
+
 [dependencies]
 ovrt-core = { path = "../ovrt-core" }
+ovrt-unit = { path = "../ovrt-unit" }
+ovrt-native = { path = "../ovrt-native" }
+wasmtime = { version = "36", optional = true, default-features = false, features = ["cranelift", "runtime"] }
+
+[dev-dependencies]
+ovrt-parity-fixture = { path = "../ovrt-parity-fixture" }
