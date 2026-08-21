@@ -250,6 +250,21 @@ if git -C "$PROJECT_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     before_manifest="$(git -C "$PROJECT_PATH" status --porcelain=v1 | LC_ALL=C sort)"
 fi
 
+# Snapshot of the module manifests before sync. The post-sync comparison
+# decides whether `go mod tidy` runs: only a foundation update that moved the
+# module graph should tidy, never a no-op update or a fresh scaffold, both of
+# which must stay byte-stable (see tests/scaffold_idempotency_test.sh).
+module_graph_before=""
+if [[ -f "$PROJECT_PATH/go.mod" ]]; then
+    # Braced || true: a fresh scaffold may lack some manifest files, and
+    # pipefail must not turn a missing optional file into a fatal error.
+    module_graph_before="$(
+        { cat "$PROJECT_PATH/go.mod" "$PROJECT_PATH"/foundation/*/go.mod \
+            "$PROJECT_PATH"/foundation/*/go.sum 2>/dev/null || true; } \
+            | shasum -a 256 | awk '{print $1}'
+    )"
+fi
+
 foundation_write_metadata
 
 if [[ "$DOCS_ONLY" == "true" ]]; then
@@ -273,6 +288,27 @@ else
             foundation_log_info "Applying managed scaffold patches..."
             "$FOUNDATION_DIR/tooling/scripts/scaffold_managed_patches.sh" "$PROJECT_PATH"
             foundation_log_success "Managed scaffold patches applied"
+        fi
+    fi
+fi
+
+# Module sync replaces vendored go.mod/go.sum manifests, which can leave the
+# project's own module graph stale. The drift surfaces downstream as a lint
+# failure with no visible cause, so tidy here while the cause is known — but
+# only when the sync actually moved a manifest. Unconditional tidy would
+# mutate fresh scaffolds and break update idempotency.
+if [[ "$DRY_RUN" != "true" && -f "$PROJECT_PATH/go.mod" ]] && command -v go >/dev/null 2>&1; then
+    module_graph_after="$(
+        { cat "$PROJECT_PATH/go.mod" "$PROJECT_PATH"/foundation/*/go.mod \
+            "$PROJECT_PATH"/foundation/*/go.sum 2>/dev/null || true; } \
+            | shasum -a 256 | awk '{print $1}'
+    )"
+    if [[ "$module_graph_before" != "$module_graph_after" ]]; then
+        foundation_log_info "Module manifests changed; tidying Go module graph..."
+        if (cd "$PROJECT_PATH" && go mod tidy); then
+            foundation_log_success "Go module graph tidied"
+        else
+            foundation_log_warn "go mod tidy failed (network or graph issue); run it manually in $PROJECT_PATH"
         fi
     fi
 fi

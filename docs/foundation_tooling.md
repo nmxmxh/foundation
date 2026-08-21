@@ -165,6 +165,40 @@ After files are copied, the foundation update runner executes `tooling/scripts/s
 * Inserting the latest AI Agent read orders and workflow requirements into the target project's `AGENTS.md` and `README.md`.
 * Restructuring Go workspaces (`go.work`) to include or exclude active submodules.
 
+### Deployment Lane: Host-Build Footprint
+
+Building an image on the deployment host competes with the running instance
+for memory. Compose builds the `service` and `frontend` images in parallel,
+and BuildKit fans out independent stages, so up to three compilers run at
+once with no job or heap limit. On an 8 GB host that already runs the Go
+server, Postgres, Redis, and a proxy, the kernel OOM-kills the deploy. The
+stage named in the OOM log is the one that was running when the kernel
+fired, not necessarily the largest consumer.
+
+The scaffold bounds each compiler by default; every bound is overridable
+with `--build-arg`:
+
+| Stage | Variable | Default | Mechanism |
+| --- | --- | --- | --- |
+| `builder` (Go) | `GO_BUILD_PARALLELISM` | `2` | `GOFLAGS=-p=` |
+| `frontend-builder` (Node) | `NODE_HEAP_MB` | `1536` | `NODE_OPTIONS=--max-old-space-size=` |
+| `rust-builder` (project-added) | `CARGO_BUILD_JOBS` | `2` | cargo parallel jobs |
+
+A project-added `rust-builder` stage is usually the largest consumer: a
+release build of a multi-crate workspace spawns one rustc per crate per
+job, each carrying an LLVM instance. Bound it with
+`ARG CARGO_BUILD_JOBS=2` / `ENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}`.
+
+Order of preference:
+
+1. **Do not build on the deployment host.** The scaffolded `ci.yml` docker
+   job publishes a tagged image to GHCR on every push to `main` or
+   `develop`; deployment pulls it. This is the actual fix.
+2. If local builds are unavoidable, keep the default bounds.
+3. If the host still OOMs, add swap and set `vm.swappiness=10`. Without it,
+   the kernel may page out the running service instead of the build,
+   trading a failed deploy for a slow one.
+
 ---
 
 ## The Relevance of Benchmarks

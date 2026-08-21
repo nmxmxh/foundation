@@ -11,19 +11,18 @@ import (
 
 // TLSConfig defines parameters for secure TLS termination.
 type TLSConfig struct {
-	CertFile                 string
-	KeyFile                  string
-	Certificates             []tls.Certificate
-	GetCertificate           func(*tls.ClientHelloInfo) (*tls.Certificate, error)
-	MinVersion               uint16
-	MaxVersion               uint16
-	SessionTicketsDisabled   bool
-	SessionTicketKey         *[32]byte
-	PostQuantumMode          security.PostQuantumTLSMode
-	ClientAuth               tls.ClientAuthType
-	ClientCAs                *x509.CertPool
-	NextProtos               []string
-	PreferServerCipherSuites bool
+	CertFile               string
+	KeyFile                string
+	Certificates           []tls.Certificate
+	GetCertificate         func(*tls.ClientHelloInfo) (*tls.Certificate, error)
+	MinVersion             uint16
+	MaxVersion             uint16
+	SessionTicketsDisabled bool
+	SessionTicketKey       *[32]byte
+	PostQuantumMode        security.PostQuantumTLSMode
+	ClientAuth             tls.ClientAuthType
+	ClientCAs              *x509.CertPool
+	NextProtos             []string
 }
 
 // SecureCipherSuites provides modern AEAD cipher suites for TLS 1.2 fallback.
@@ -39,11 +38,10 @@ var SecureCipherSuites = []uint16{
 // DefaultSecureTLSConfig returns a hardened base TLS configuration.
 func DefaultSecureTLSConfig() *tls.Config {
 	cfg := &tls.Config{
-		MinVersion:               tls.VersionTLS13,
-		CipherSuites:             SecureCipherSuites,
-		NextProtos:               []string{"h2", "http/1.1"},
-		SessionTicketsDisabled:   false,
-		PreferServerCipherSuites: true,
+		MinVersion:             tls.VersionTLS13,
+		CipherSuites:           SecureCipherSuites,
+		NextProtos:             []string{"h2", "http/1.1"},
+		SessionTicketsDisabled: false,
 	}
 
 	pqCfg, err := security.ApplyPostQuantumTLS(cfg, security.PostQuantumTLSAuto)
@@ -68,17 +66,15 @@ func BuildTLSConfig(opts *TLSConfig) (*tls.Config, error) {
 	}
 
 	base := &tls.Config{
-		MinVersion:               minVer,
-		MaxVersion:               opts.MaxVersion,
-		Certificates:             opts.Certificates,
-		GetCertificate:           opts.GetCertificate,
-		CipherSuites:             SecureCipherSuites,
-		NextProtos:               opts.NextProtos,
-		SessionTicketsDisabled:   opts.SessionTicketsDisabled,
-		ClientAuth:               opts.ClientAuth,
-		ClientCAs:                opts.ClientCAs,
-		// #nosec G402
-		PreferServerCipherSuites: opts.PreferServerCipherSuites,
+		MinVersion:             minVer,
+		MaxVersion:             opts.MaxVersion,
+		Certificates:           opts.Certificates,
+		GetCertificate:         opts.GetCertificate,
+		CipherSuites:           SecureCipherSuites,
+		NextProtos:             opts.NextProtos,
+		SessionTicketsDisabled: opts.SessionTicketsDisabled,
+		ClientAuth:             opts.ClientAuth,
+		ClientCAs:              opts.ClientCAs,
 	}
 
 	if len(base.NextProtos) == 0 {

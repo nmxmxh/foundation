@@ -961,6 +961,40 @@ fn foundation_secure_store_delete(
 }
 
 # @since 0.0.1
+patch_dockerfile_build_bounds() {
+  local file="$target/Dockerfile"
+  [[ -f "$file" ]] || return 0
+
+  # Compose builds the service and frontend images in parallel and BuildKit
+  # fans out independent stages, so Go, Rust, and Vite compilers can run at
+  # once on a deployment host next to the running instance. Unbounded, that
+  # OOM-kills deploys on small hosts (observed: 8 GB host, zero swap, kernel
+  # killed a build mid-Vite while cargo held the real memory). The template
+  # now ships bounded by default; this patch delivers the same bounds to
+  # Dockerfiles seeded before the change. Each stage is patched only when its
+  # canonical marker exists and its bound is absent, so customized files are
+  # left alone and re-runs are no-ops.
+
+  if grep -Fq 'ARG CGO_ENABLED=0' "$file" && ! grep -Fq 'GO_BUILD_PARALLELISM' "$file"; then
+    PATCH_INSERT=$'\n# Bound compile fan-out so concurrent image builds cannot OOM the host.\nARG GO_BUILD_PARALLELISM=2\nENV GOFLAGS="-p=${GO_BUILD_PARALLELISM}"' \
+      perl -0pi -e 's/(ARG CGO_ENABLED=0\n)/$1$ENV{PATCH_INSERT}\n/' "$file"
+    log_patch "dockerfile-build-bounds-go"
+  fi
+
+  if grep -Eq 'FROM node:[^ ]+ AS frontend-builder' "$file" && ! grep -Fq 'NODE_HEAP_MB' "$file"; then
+    PATCH_INSERT=$'# Bound the Vite/TypeScript heap for hosts that build next to a live instance.\nARG NODE_HEAP_MB=1536\nENV NODE_OPTIONS="--max-old-space-size=${NODE_HEAP_MB}"' \
+      perl -0pi -e 's/(FROM node:[^ ]+ AS frontend-builder\n\nARG CACHE_NAMESPACE\n)/$1$ENV{PATCH_INSERT}\n/' "$file"
+    log_patch "dockerfile-build-bounds-node"
+  fi
+
+  if grep -Eq 'FROM rust:[^ ]+ AS rust-builder' "$file" && ! grep -Fq 'CARGO_BUILD_JOBS' "$file"; then
+    PATCH_INSERT=$'# Bound cargo parallelism: an unbounded release build of a multi-crate\n# workspace is the largest single memory consumer in the build graph.\nARG CARGO_BUILD_JOBS=2\nENV CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS}' \
+      perl -0pi -e 's/(FROM rust:[^ ]+ AS rust-builder\n)/$1\n$ENV{PATCH_INSERT}\n/' "$file"
+    log_patch "dockerfile-build-bounds-rust"
+  fi
+}
+
+# @since 0.0.1
 patch_gitignore_root_bin() {
   local file="$target/.gitignore"
   [[ -f "$file" ]] || return 0
@@ -2498,6 +2532,7 @@ patch_docgen_route_catalog
 patch_native_tauri_startup_expect
 patch_native_tauri_command_acl
 patch_gitignore_root_bin
+patch_dockerfile_build_bounds
 patch_go_mod_runtime_sdk
 patch_go_dependency_manifests
 patch_makefile_docker_redeploy

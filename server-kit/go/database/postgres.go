@@ -1022,7 +1022,6 @@ func (db *PostgresDB) EstimateCount(ctx context.Context, domain, collection, org
 	if organizationID != "" {
 		clauses = append(clauses, fmt.Sprintf("organization_id = $%d", argPos))
 		args = append(args, organizationID)
-		argPos++
 	}
 
 	query := `EXPLAIN (FORMAT JSON) SELECT 1 FROM governance_state_records WHERE ` + strings.Join(clauses, " AND ")
