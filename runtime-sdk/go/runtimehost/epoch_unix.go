@@ -142,6 +142,16 @@ func observeEpoch(slot *uint32) uint32 {
 //
 // peerAlive is consulted only while parked. During the spin the answer cannot
 // have meaningfully changed and the check would cost more than the spin does.
+// epochFallbackWake bounds how long a parked waiter can miss a peer-death
+// transition or a doorbell byte that was somehow lost.
+//
+// The wake must reuse one timer across iterations. A `time.After` inside the
+// select loop abandons an unfired ~5ms timer on every park; a kernel answering
+// in microseconds parks thousands of times per second, which turns this line
+// into a permanent timer-allocation churn paid by the GC on the hottest
+// exchange path in the runtime.
+const epochFallbackWake = 5 * time.Millisecond
+
 func waitForEpochChange(slot *uint32, previous uint32, policy epochWaitPolicy, peerAlive func() bool, doorbell <-chan struct{}) (uint32, error) {
 	for i := 0; i < policy.spinIterations; i++ {
 		if current := observeEpoch(slot); current != previous {
@@ -153,6 +163,12 @@ func waitForEpochChange(slot *uint32, previous uint32, policy epochWaitPolicy, p
 	deadline := time.Now().Add(policy.timeout)
 	timer := time.NewTimer(time.Until(deadline))
 	defer timer.Stop()
+
+	// One reusable timer for the periodic wake. Stop-and-drain before Reset:
+	// a fire racing the Reset would otherwise sit in the channel and fire the
+	// very next iteration early.
+	fallback := time.NewTimer(epochFallbackWake)
+	defer fallback.Stop()
 
 	for {
 		if current := observeEpoch(slot); current != previous {
@@ -173,7 +189,14 @@ func waitForEpochChange(slot *uint32, previous uint32, policy epochWaitPolicy, p
 			}
 		case <-timer.C:
 			return previous, errEpochTimeout
-		case <-time.After(5 * time.Millisecond):
+		case <-fallback.C:
+			if !fallback.Stop() {
+				select {
+				case <-fallback.C:
+				default:
+				}
+			}
+			fallback.Reset(epochFallbackWake)
 			// Fallback periodic wake-up to recheck peerAlive and the slot
 			// in case the doorbell byte was somehow missed.
 		}
