@@ -20,6 +20,15 @@ const (
 	DriverRedis  = "redis"
 )
 
+const (
+	// scanCount is the SCAN COUNT hint per iteration for pattern deletion.
+	scanCount = int64(512)
+	// deleteChunkSize bounds DEL fan-in per round trip during pattern deletes.
+	deleteChunkSize = 500
+	// defaultDeleteLimit bounds one DeletePattern sweep when callers pass no limit.
+	defaultDeleteLimit = int64(10000)
+)
+
 type Options struct {
 	URL          string
 	URLs         []string
@@ -78,6 +87,18 @@ type BatchClient interface {
 type StreamBatchClient interface {
 	XAddMany(ctx context.Context, stream string, entries []Values) ([]string, []error)
 	XAddManyField(ctx context.Context, stream string, field string, payloads [][]byte) ([]string, []error)
+}
+
+// KeyAdminClient is the optional cache-administration surface for existence
+// probes and bounded pattern-scoped deletion. Cache backends use it to
+// support cross-process invalidation without unbounded KEYS scans. Deleted
+// keys are returned in the caller's namespace so they can be passed back to
+// Get or Del symmetrically.
+type KeyAdminClient interface {
+	Exists(ctx context.Context, key string) (bool, error)
+	// DeletePattern deletes keys matching pattern and returns them. At most
+	// limit keys are deleted; limit <= 0 selects a driver default bound.
+	DeletePattern(ctx context.Context, pattern string, limit int64) ([]string, error)
 }
 
 // CoordinationBatchClient is the optional round-trip amortization surface for
@@ -746,6 +767,41 @@ func (c *memoryClient) Del(_ context.Context, keys ...string) error {
 		c.deleteKeyLocked(qualified)
 	}
 	return nil
+}
+
+func (c *memoryClient) Exists(_ context.Context, key string) (bool, error) {
+	qualified := c.qualify(key)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.memoryKeyExistsLocked(qualified, time.Now()), nil
+}
+
+func (c *memoryClient) DeletePattern(_ context.Context, pattern string, limit int64) ([]string, error) {
+	if limit <= 0 {
+		limit = defaultDeleteLimit
+	}
+	qualifiedPattern := c.qualify(pattern)
+
+	c.mu.Lock()
+	candidates := make([]string, 0, len(c.values))
+	for key := range c.values {
+		if redisPatternMatches(qualifiedPattern, key) {
+			candidates = append(candidates, key)
+		}
+	}
+	for _, key := range candidates {
+		c.deleteKeyLocked(key)
+	}
+	c.mu.Unlock()
+
+	deleted := make([]string, 0, len(candidates))
+	for _, key := range candidates {
+		if int64(len(deleted)) >= limit {
+			break
+		}
+		deleted = append(deleted, strings.TrimPrefix(key, c.prefix+":"))
+	}
+	return deleted, nil
 }
 
 func (c *memoryClient) PFAdd(_ context.Context, key string, els ...any) (int64, error) {
@@ -1559,6 +1615,61 @@ func (c *redisClient) Del(ctx context.Context, keys ...string) error {
 	return err
 }
 
+func (c *redisClient) Exists(ctx context.Context, key string) (bool, error) {
+	start := time.Now()
+	count, err := c.client.Exists(ctx, c.qualify(key)).Result()
+	recordRedisOperation("exists", start, err)
+	return count > 0, err
+}
+
+func (c *redisClient) DeletePattern(ctx context.Context, pattern string, limit int64) ([]string, error) {
+	if limit <= 0 {
+		limit = defaultDeleteLimit
+	}
+	qualified := c.qualify(pattern)
+	start := time.Now()
+	var (
+		collected []string
+		batch     []string
+		firstErr  error
+		cursor    uint64
+	)
+	for int64(len(collected)) < limit && firstErr == nil {
+		keys, next, err := c.client.Scan(ctx, cursor, qualified, scanCount).Result()
+		if err != nil {
+			firstErr = err
+			break
+		}
+		cursor = next
+		for _, key := range keys {
+			collected = append(collected, strings.TrimPrefix(key, c.prefix+":"))
+			batch = append(batch, key)
+			if len(batch) >= deleteChunkSize {
+				if err := c.client.Del(ctx, batch...).Err(); err != nil && firstErr == nil {
+					firstErr = err
+				}
+				batch = batch[:0]
+				if firstErr != nil {
+					break
+				}
+			}
+			if int64(len(collected)) >= limit {
+				break
+			}
+		}
+		if cursor == 0 || firstErr != nil {
+			break
+		}
+	}
+	if len(batch) > 0 && firstErr == nil {
+		if err := c.client.Del(ctx, batch...).Err(); err != nil {
+			firstErr = err
+		}
+	}
+	recordRedisOperation("delete_pattern", start, firstErr)
+	return collected, firstErr
+}
+
 func (c *redisClient) Close() error {
 	if c == nil || c.client == nil {
 		return nil
@@ -1800,6 +1911,32 @@ func (c *shardedClient) Del(ctx context.Context, keys ...string) error {
 		}
 	}
 	return firstErr
+}
+
+func (c *shardedClient) Exists(ctx context.Context, key string) (bool, error) {
+	return c.shard(key).Exists(ctx, key)
+}
+
+func (c *shardedClient) DeletePattern(ctx context.Context, pattern string, limit int64) ([]string, error) {
+	if limit <= 0 {
+		limit = defaultDeleteLimit
+	}
+	var (
+		collected []string
+		firstErr  error
+	)
+	for _, shard := range c.shards {
+		remaining := limit - int64(len(collected))
+		if remaining <= 0 {
+			break
+		}
+		keys, err := shard.DeletePattern(ctx, pattern, remaining)
+		collected = append(collected, keys...)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return collected, firstErr
 }
 
 func (c *shardedClient) Close() error {

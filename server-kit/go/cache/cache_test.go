@@ -70,8 +70,12 @@ func TestMemoryBackend_DeletePattern(t *testing.T) {
 	}
 	_ = backend.Set(ctx, "org:1", []byte("data"), time.Hour)
 
-	if err := backend.DeletePattern(ctx, "user:*"); err != nil {
+	deleted, err := backend.DeletePattern(ctx, "user:*")
+	if err != nil {
 		t.Fatalf("DeletePattern failed: %v", err)
+	}
+	if len(deleted) != 10 {
+		t.Fatalf("expected 10 deleted keys, got %d", len(deleted))
 	}
 
 	for i := range 10 {
@@ -208,9 +212,15 @@ func TestInvalidator_TagAndInvalidate(t *testing.T) {
 	_ = c.Set(ctx, "user:2", "bob")
 	_ = c.Set(ctx, "org:1", "acme")
 
-	inv.Tag("user:1", "users")
-	inv.Tag("user:2", "users")
-	inv.Tag("org:1", "orgs")
+	if err := inv.Tag(ctx, "user:1", "users"); err != nil {
+		t.Fatalf("Tag failed: %v", err)
+	}
+	if err := inv.Tag(ctx, "user:2", "users"); err != nil {
+		t.Fatalf("Tag failed: %v", err)
+	}
+	if err := inv.Tag(ctx, "org:1", "orgs"); err != nil {
+		t.Fatalf("Tag failed: %v", err)
+	}
 
 	if err := inv.InvalidateTag(ctx, "users"); err != nil {
 		t.Fatalf("InvalidateTag failed: %v", err)
@@ -247,7 +257,7 @@ func TestCacheHelpersAndPolicy(t *testing.T) {
 	if err != nil || !exists {
 		t.Fatalf("Exists user:1 = %v, %v", exists, err)
 	}
-	if err := c.DeletePattern(ctx, "user:*"); err != nil {
+	if _, err := c.DeletePattern(ctx, "user:*"); err != nil {
 		t.Fatalf("DeletePattern() error = %v", err)
 	}
 	exists, err = c.Exists(ctx, "user:1")
@@ -325,8 +335,8 @@ func (b failingBackend) Delete(context.Context, string) error {
 	return b.err
 }
 
-func (b failingBackend) DeletePattern(context.Context, string) error {
-	return b.err
+func (b failingBackend) DeletePattern(context.Context, string) ([]string, error) {
+	return nil, b.err
 }
 
 func (b failingBackend) Exists(context.Context, string) (bool, error) {
@@ -550,6 +560,6 @@ func BenchmarkMemoryBackend_DeletePattern(b *testing.B) {
 			_ = backend.Set(ctx, fmt.Sprintf("prefix:%d", j), []byte("data"), time.Hour)
 		}
 		b.StartTimer()
-		_ = backend.DeletePattern(ctx, "prefix:*")
+		_, _ = backend.DeletePattern(ctx, "prefix:*")
 	}
 }

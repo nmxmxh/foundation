@@ -27,6 +27,36 @@ In this architecture the default read order is local memory cache first, Redis s
 6. Lightweight pub/sub notifications (transient only).
 7. Transient session management.
 
+## Lane separation: bus, coordination, side cache
+
+One Redis deployment serves three lanes. Keep them separate in key design and
+in review:
+
+| Lane | Owner | Examples | Forbidden |
+| --- | --- | --- | --- |
+| Transport bus | `events.RedisBus`, hermes tailers | Streams, envelope fanout, pub/sub invalidation wakeups | Durable truth, per-read lookups |
+| Coordination | Hermes, workers | Watermarks, rebuild leases, heartbeats | Business records |
+| Side cache | `cache` package (`RedisBackend`) | Summary/result caches, idempotency fences, counters | Authorization decisions, hot-path reads |
+
+Rules that keep the lanes honest:
+
+1. Hermes projections are the read-model lane. Do not put `cache.GetOrSet` in
+   front of Hermes reads; `docs/hermes_hotplane.md` forbids per-read Redis
+   dependencies and broad wildcard scans on product hot paths.
+2. The `cache` package serves side reads only. Entries stay non-authoritative
+   per the package contract; balances, permissions, and uniqueness checks read
+   durable state.
+3. Cross-process invalidation uses shared tag markers
+   (`Invalidator.Tag`/`InvalidateTag` over `NewRedisBackend`). Markers are
+   durable intent: a subscriber that was down reconciles from markers or TTLs,
+   so a missed wakeup degrades convergence speed, never correctness.
+4. Pair shared invalidation with `cache.InvalidationBus` wakeups on the
+   transport channel so process-local memory caches drop entries immediately.
+   The broadcast is a hint; markers are truth.
+5. Tag marker keys live under `<prefix>:__tag__:<tag>:<hex(key)>`. Never read
+   them as data, never hand-format sibling namespaces, and keep pattern scans
+   out of request paths — they belong to mutation and maintenance lanes only.
+
 ## Key design
 
 Format:

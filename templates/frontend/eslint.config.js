@@ -37,6 +37,29 @@ export default tseslint.config(
       'no-restricted-syntax': [
         'warn',
         {
+          selector: "CallExpression[callee.name='lazy']",
+          message:
+            'Route chunks must load through createLazyPage(...) from @ovasabi/frontend-kit. Bare lazy() caches a pending promise forever, so a stalled chunk fetch leaves an eternal loader with no retry path.',
+        },
+        {
+          selector:
+            "CallExpression[callee.name=/^use\\w*Store$/] > ArrowFunctionExpression > ObjectExpression",
+          message:
+            'Zustand selectors must return stable references: object-building selectors re-render forever under useSyncExternalStore. Select one field per hook or compose outside.',
+        },
+        {
+          selector:
+            "CallExpression[callee.name=/^use\\w*Store$/] > ArrowFunctionExpression > ArrayExpression",
+          message:
+            'Zustand selectors must return stable references: array-building selectors re-render forever under useSyncExternalStore. Derive arrays with useMemo instead.',
+        },
+        {
+          selector:
+            "CallExpression[callee.name=/^use\\w*Store$/] ArrowFunctionExpression CallExpression[callee.property.name=/^(filter|map|slice|concat)$/]",
+          message:
+            'Zustand selectors must not derive collections inline; each call returns a fresh array. Derive with useMemo outside the store subscription.',
+        },
+        {
           selector: "NewExpression[callee.name='MutationObserver']",
           message:
             'Prefer explicit React/store flow, ResizeObserver, or IntersectionObserver. MutationObserver needs a narrow adapter with cleanup.',
