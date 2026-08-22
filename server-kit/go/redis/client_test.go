@@ -261,6 +261,77 @@ func TestMemoryClientSetGetTTLAndCopies(t *testing.T) {
 	}
 }
 
+func TestMemoryClientKeyAdminExistsAndDeletePattern(t *testing.T) {
+	memory := NewMemoryClient("app")
+	admin, ok := memory.(KeyAdminClient)
+	if !ok {
+		t.Fatal("memory client should implement KeyAdminClient")
+	}
+	client := Client(memory)
+	ctx := context.Background()
+
+	for _, key := range []string{"cache:a", "cache:b", "other:c"} {
+		if err := client.Set(ctx, key, []byte(key), 0); err != nil {
+			t.Fatalf("Set(%s) error = %v", key, err)
+		}
+	}
+	_ = client.Set(ctx, "cache:gone", []byte("x"), time.Nanosecond)
+	time.Sleep(time.Millisecond)
+
+	exists, err := admin.Exists(ctx, "cache:a")
+	if err != nil || !exists {
+		t.Fatalf("Exists(cache:a) = %v err=%v", exists, err)
+	}
+	exists, err = admin.Exists(ctx, "cache:gone")
+	if err != nil || exists {
+		t.Fatalf("expired Exists = %v err=%v", exists, err)
+	}
+
+	deleted, err := admin.DeletePattern(ctx, "app:cache:*", 10)
+	if err != nil {
+		t.Fatalf("DeletePattern() error = %v", err)
+	}
+	if len(deleted) != 2 {
+		t.Fatalf("deleted = %v, want two caller-namespace keys", deleted)
+	}
+	for _, key := range deleted {
+		if strings.HasPrefix(key, "app:") {
+			t.Fatalf("returned key %q must be in caller namespace", key)
+		}
+		if remaining, _ := client.Get(ctx, key); remaining != nil {
+			t.Fatalf("key %q still present after DeletePattern", key)
+		}
+	}
+	if _, err := client.Get(ctx, "other:c"); err != nil {
+		t.Fatalf("unmatched key should survive: %v", err)
+	}
+
+	bounded, err := admin.DeletePattern(ctx, "*", 1)
+	if err != nil || len(bounded) != 1 {
+		t.Fatalf("bounded delete = %v err=%v, want exactly one", bounded, err)
+	}
+}
+
+func TestShardedClientKeyAdminDelegation(t *testing.T) {
+	shardA := &redisClient{client: goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:1"}), prefix: "p"}
+	shardB := &redisClient{client: goredis.NewClient(&goredis.Options{Addr: "127.0.0.1:2"}), prefix: "p"}
+	defer shardA.Close()
+	defer shardB.Close()
+	var candidate any = &shardedClient{shards: []*redisClient{shardA, shardB}}
+	admin, ok := candidate.(KeyAdminClient)
+	if !ok {
+		t.Fatal("sharded client should implement KeyAdminClient")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := admin.Exists(ctx, "k"); err == nil {
+		t.Fatal("expected delegation error for unreachable shard")
+	}
+	if _, err := admin.DeletePattern(ctx, "*", 4); err == nil {
+		t.Fatal("expected delegation error for unreachable shard")
+	}
+}
+
 func TestMemoryClientSetManyGetMany(t *testing.T) {
 	client := NewMemoryClient("app")
 	batch, ok := client.(BatchClient)

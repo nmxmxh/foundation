@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/circuitbreaker"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/degradation"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/healthcheck"
+	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/retry"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing"
 	"go.opentelemetry.io/otel/trace"
@@ -32,10 +34,13 @@ type Config struct {
 	TracingSampleRate float64
 
 	// Cache configuration
-	CacheBackend    string // "memory" or "redis"
-	CacheDefaultTTL time.Duration
-	CachePrefix     string
-	RedisURL        string
+	CacheBackend string // "memory" or "redis"
+	// CacheRedisClient injects a connected transport client for the "redis"
+	// backend and takes precedence over RedisURL. Callers own its lifecycle.
+	CacheRedisClient rediskit.Client
+	CacheDefaultTTL  time.Duration
+	CachePrefix      string
+	RedisURL         string
 
 	// Health check configuration
 	HealthCheckInterval time.Duration
@@ -121,10 +126,24 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 
 	// Initialize cache
 	var cacheBackend cache.Backend
-	if cfg.CacheBackend == "memory" {
-		cacheBackend = cache.NewMemoryBackend()
-	} else {
-		// For Redis backend, caller should set it up separately
+	switch {
+	case cfg.CacheBackend == "redis" && cfg.CacheRedisClient != nil:
+		// Shared-state lane: entries and invalidation markers reach every
+		// process pointing at the same deployment.
+		cacheBackend = cache.NewRedisBackend(cfg.CacheRedisClient)
+	case cfg.CacheBackend == "redis" && strings.TrimSpace(cfg.RedisURL) != "":
+		client, connectErr := rediskit.ConnectWithOptions(rediskit.Options{
+			URL:    cfg.RedisURL,
+			Prefix: strings.TrimSuffix(cfg.CachePrefix, ":"),
+			Driver: rediskit.DriverRedis,
+		})
+		if connectErr != nil {
+			return nil, fmt.Errorf("resilience: connect redis cache backend: %w", connectErr)
+		}
+		cacheBackend = cache.NewRedisBackend(client)
+	default:
+		// Memory remains the fail-safe default. Process-local caches pair
+		// with InvalidationBus wakeups when shared state is not required.
 		cacheBackend = cache.NewMemoryBackend()
 	}
 	r.Cache = cache.New(cache.Config{

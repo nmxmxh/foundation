@@ -394,10 +394,20 @@ user, err := cache.GetOrSet(ctx, c, "user:123", func() (*User, error) {
     return db.GetUser(ctx, 123)
 }, cache.DefaultTTLPolicy().Medium)
 
-// Tag-based invalidation
+// Shared-state deployments: entries and invalidation markers live in Redis,
+// so tag invalidation reaches every process sharing the deployment.
+rdb, err := redis.ConnectWithOptions(redis.Options{URL: redisURL, Driver: redis.DriverRedis})
+rc := cache.New(cache.Config{Backend: cache.NewRedisBackend(rdb), DefaultTTL: 5 * time.Minute})
+
+// Tag-based invalidation (Tag persists membership in the backend; it is not
+// process-local). Call Tag after Set succeeds.
 invalidator := cache.NewInvalidator(c)
-invalidator.Tag("user:123", "user-data", "profile")
-invalidator.InvalidateTag(ctx, "user-data")
+if err := invalidator.Tag(ctx, "user:123", "user-data", "profile"); err != nil {
+    return err
+}
+if err := invalidator.InvalidateTag(ctx, "user-data"); err != nil {
+    return err
+}
 ```
 
 ### Graceful Degradation

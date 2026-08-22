@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/degradation"
+	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 )
 
 func TestDefaultConfigSetsBoundedProductionDefaults(t *testing.T) {
@@ -168,5 +169,59 @@ func TestRuntimeCloseIsIdempotent(t *testing.T) {
 	}
 	if err := runtime.Close(context.Background()); err != nil {
 		t.Fatalf("second Close() error = %v", err)
+	}
+}
+
+func TestRuntimeRedisCacheBackendWiring(t *testing.T) {
+	transport := rediskit.NewMemoryClient("resilience")
+	cfg := DefaultConfig("billing")
+	cfg.CacheBackend = "redis"
+	cfg.CachePrefix = "billing:"
+	cfg.CacheRedisClient = transport
+
+	runtime, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New with redis cache backend failed: %v", err)
+	}
+	ctx := context.Background()
+	if err := runtime.CacheSet(ctx, "summary:org-1", "v1", time.Minute); err != nil {
+		t.Fatalf("CacheSet failed: %v", err)
+	}
+
+	// A second runtime over the same deployment observes the entry: the
+	// backend is shared state, not process-local memory.
+	peerCfg := cfg
+	peerCfg.CacheRedisClient = transport
+	peer, err := New(ctx, peerCfg)
+	if err != nil {
+		t.Fatalf("New peer failed: %v", err)
+	}
+	var val string
+	if err := peer.CacheGet(ctx, "summary:org-1", &val); err != nil || val != "v1" {
+		t.Fatalf("peer CacheGet = %q, %v", val, err)
+	}
+}
+
+func TestRuntimeCacheBackendDefaultsToMemoryWithoutRedis(t *testing.T) {
+	cfg := DefaultConfig("legacy")
+	cfg.CacheBackend = "redis"
+
+	runtime, err := New(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if runtime.Cache == nil {
+		t.Fatal("expected fail-safe cache instance")
+	}
+}
+
+func TestRuntimeRedisURLConnectFailureFailsClosed(t *testing.T) {
+	cfg := DefaultConfig("billing")
+	cfg.CacheBackend = "redis"
+	cfg.CachePrefix = "billing:"
+	cfg.RedisURL = "redis://127.0.0.1:1"
+
+	if _, err := New(context.Background(), cfg); err == nil {
+		t.Fatal("expected connect failure to surface from New")
 	}
 }

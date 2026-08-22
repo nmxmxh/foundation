@@ -1,4 +1,6 @@
+export * from "./chunkGate";
 export * from "./indexedDBStorage";
+export * from "./lazyPage";
 export * from "./metadata";
 export * from "./projectionWorkerPipeline";
 export * from "./runtimeExternalStore";

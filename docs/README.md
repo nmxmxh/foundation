@@ -45,7 +45,7 @@ Then read only the lane-specific docs for code you are changing:
 - Backend/domain logic: `coding_practices.md`, `database_practices.md`, `security_practices.md`, `testing_practices.md`
 - Real-time/WebSocket: `websocket_scaling.md`, `hermes_read_modes.md`
 - Workers/async: `go_concurrency_bug_practices.md`, `coding_practices.md` (bounded work rules)
-- Frontend: `state_event_model.md`, `frontend_scaffold_sync.md`, `frontend_command_registry.md`, `styling_design_practices.md`
+- Frontend: `state_event_model.md`, `frontend_scaffold_sync.md`, `frontend_command_registry.md`, `frontend_resilience_practices.md`, `styling_design_practices.md`
 
 ### Architect Path — The Full Picture
 
@@ -150,6 +150,7 @@ Read in order:
 | [`state_event_model.md`](state_event_model.md) | End-to-end command → event → projection → store model (start here for state flow) |
 | `frontend_scaffold_sync.md` | Frontend package boundaries, generated types, scaffold sync contract |
 | `frontend_command_registry.md` | Generated route registry, `createAppRuntime`, dispatch path |
+| `frontend_resilience_practices.md` | Routing, selector-stability, and IndexedDB persistence failure classes with enforcement points |
 | `frontend_runtime_workbench.md` | Frontend workbench: dummy data, tenant stores, live projections |
 | `styling_design_practices.md` | UI primitive, theme, animation, visual design practice |
 | `runtime_sab_capnp_contracts.md` | SharedArrayBuffer and Cap'n Proto runtime contracts |

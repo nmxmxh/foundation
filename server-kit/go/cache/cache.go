@@ -4,12 +4,17 @@
 // Usage:
 //
 //	c := cache.New(cache.Config{
-//	    Backend: cache.NewRedisBackend(redisClient),
+//	    Backend:    cache.NewMemoryBackend(),
 //	    DefaultTTL: 5 * time.Minute,
-//	    Prefix: "myapp:",
+//	    Prefix:     "myapp:",
 //	})
 //
-//	// Get or compute
+//	// Shared-state deployments use a rediskit.Client so entries and
+//	// invalidation markers are visible to every process:
+//	rdb, _ := redis.ConnectWithOptions(redis.Options{URL: url, Driver: redis.DriverRedis})
+//	rc := cache.New(cache.Config{Backend: cache.NewRedisBackend(rdb), DefaultTTL: 5 * time.Minute})
+//
+//	// Get or compute (stampede-safe: one producer per key)
 //	user, err := cache.GetOrSet(ctx, c, "user:123", func() (*User, error) {
 //	    return db.GetUser(ctx, 123)
 //	})
@@ -17,9 +22,10 @@ package cache
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -32,7 +38,10 @@ type Backend interface {
 	Get(ctx context.Context, key string) ([]byte, error)
 	Set(ctx context.Context, key string, value []byte, ttl time.Duration) error
 	Delete(ctx context.Context, key string) error
-	DeletePattern(ctx context.Context, pattern string) error
+	// DeletePattern removes keys matching pattern and returns the removed
+	// keys in the same namespace it receives them. Returned keys are bounded
+	// by a driver default; implementations must never run unbounded scans.
+	DeletePattern(ctx context.Context, pattern string) ([]string, error)
 	Exists(ctx context.Context, key string) (bool, error)
 }
 
@@ -142,8 +151,9 @@ func (c *Cache) Delete(ctx context.Context, key string) error {
 	return c.config.Backend.Delete(ctx, c.key(key))
 }
 
-// DeletePattern removes all keys matching a pattern.
-func (c *Cache) DeletePattern(ctx context.Context, pattern string) error {
+// DeletePattern removes all keys matching a pattern and returns the removed
+// keys.
+func (c *Cache) DeletePattern(ctx context.Context, pattern string) ([]string, error) {
 	return c.config.Backend.DeletePattern(ctx, c.key(pattern))
 }
 
@@ -188,45 +198,81 @@ func GetOrSet[T any](ctx context.Context, c *Cache, key string, compute func() (
 	return val.(T), nil
 }
 
-// Invalidator provides cache invalidation helpers.
+const (
+	// tagMarkerNamespace isolates tag marker keys from entry keys.
+	tagMarkerNamespace = "__tag__:"
+	// tagMarkerTTL bounds marker lifetime when a tag is never invalidated.
+	tagMarkerTTL = 30 * 24 * time.Hour
+)
+
+var tagMarkerValue = []byte{1}
+
+// Invalidator provides cache invalidation helpers. Tag membership is stored
+// in the backend itself, so invalidation reaches every process that shares
+// the same backend — not only the one that registered the tag.
 type Invalidator struct {
-	cache  *Cache
-	tags   map[string][]string
-	tagsMu sync.RWMutex
+	cache *Cache
 }
 
 // NewInvalidator creates a new cache invalidator.
 func NewInvalidator(c *Cache) *Invalidator {
-	return &Invalidator{
-		cache: c,
-		tags:  make(map[string][]string),
-	}
+	return &Invalidator{cache: c}
 }
 
-// Tag associates a key with one or more tags.
-func (i *Invalidator) Tag(key string, tags ...string) {
-	i.tagsMu.Lock()
-	defer i.tagsMu.Unlock()
+// Tag records that key belongs to each listed tag in shared backend storage.
+// Call it after the corresponding Set succeeds; a failed Tag leaves the entry
+// readable but invisible to later InvalidateTag calls.
+func (i *Invalidator) Tag(ctx context.Context, key string, tags ...string) error {
+	if i == nil || i.cache == nil {
+		return errors.New("cache: invalidator has no cache")
+	}
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" || len(tags) == 0 {
+		return nil
+	}
+	encoded := hex.EncodeToString([]byte(trimmed))
 	for _, tag := range tags {
-		if !slices.Contains(i.tags[tag], key) {
-			i.tags[tag] = append(i.tags[tag], key)
+		name := strings.TrimSpace(tag)
+		if name == "" {
+			continue
 		}
-	}
-}
-
-// InvalidateTag invalidates all keys with the given tag.
-func (i *Invalidator) InvalidateTag(ctx context.Context, tag string) error {
-	i.tagsMu.Lock()
-	keys := i.tags[tag]
-	delete(i.tags, tag)
-	i.tagsMu.Unlock()
-
-	for _, key := range keys {
-		if err := i.cache.Delete(ctx, key); err != nil {
-			return err
+		marker := i.cache.key(tagMarkerNamespace + name + ":" + encoded)
+		if err := i.cache.config.Backend.Set(ctx, marker, tagMarkerValue, tagMarkerTTL); err != nil {
+			return fmt.Errorf("cache: register tag %q for %q: %w", name, trimmed, err)
 		}
 	}
 	return nil
+}
+
+// InvalidateTag removes every key registered under tag across all processes
+// sharing this cache's backend, then removes the markers themselves. At most
+// maxInvalidateTagKeys entries are removed per call; repeat for larger tags.
+func (i *Invalidator) InvalidateTag(ctx context.Context, tag string) error {
+	if i == nil || i.cache == nil {
+		return errors.New("cache: invalidator has no cache")
+	}
+	name := strings.TrimSpace(tag)
+	if name == "" {
+		return nil
+	}
+	markerPattern := i.cache.key(tagMarkerNamespace + name + ":*")
+	markers, err := i.cache.config.Backend.DeletePattern(ctx, markerPattern)
+	if err != nil {
+		return fmt.Errorf("cache: invalidate tag %q: %w", name, err)
+	}
+	prefix := i.cache.key(tagMarkerNamespace + name + ":")
+	var firstErr error
+	for _, marker := range markers {
+		encoded := strings.TrimPrefix(marker, prefix)
+		raw, decErr := hex.DecodeString(encoded)
+		if decErr != nil || len(raw) == 0 {
+			continue
+		}
+		if err := i.cache.config.Backend.Delete(ctx, string(raw)); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("cache: delete tagged key %q: %w", string(raw), err)
+		}
+	}
+	return firstErr
 }
 
 // ErrNotFound is returned when a key is not found in cache.
@@ -321,22 +367,24 @@ func (m *MemoryBackend) Delete(ctx context.Context, key string) error {
 	return nil
 }
 
-func (m *MemoryBackend) DeletePattern(ctx context.Context, pattern string) error {
-	// Simple prefix matching for memory backend
+func (m *MemoryBackend) DeletePattern(_ context.Context, pattern string) ([]string, error) {
+	// Simple prefix matching for memory backend.
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	matched := make([]string, 0, 16)
 	prefix := pattern
 	if len(pattern) > 0 && pattern[len(pattern)-1] == '*' {
 		prefix = pattern[:len(pattern)-1]
 	}
-
 	for k := range m.items {
 		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
-			delete(m.items, k)
+			matched = append(matched, k)
 		}
 	}
-	return nil
+	for _, k := range matched {
+		delete(m.items, k)
+	}
+	m.mu.Unlock()
+	return matched, nil
 }
 
 func (m *MemoryBackend) Exists(ctx context.Context, key string) (bool, error) {

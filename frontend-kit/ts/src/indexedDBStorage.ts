@@ -22,6 +22,24 @@ const defaultOnError = (operation: string, error: unknown) => {
   }
 };
 
+/**
+ * Browsers close IndexedDB connections without asking: eviction,
+ * backgrounding, or another tab winning a version upgrade. Those failures
+ * surface as InvalidStateError ("connection is closing") storms and are
+ * recoverable over a fresh connection. Everything else fails soft.
+ */
+const isRecoverableConnectionError = (error: unknown): boolean => {
+  if (!error) return false;
+  const name = typeof error === "object" ? String((error as { name?: unknown }).name ?? "") : "";
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    name === "InvalidStateError" ||
+    /connection is closing|database connection is closing/i.test(message)
+  );
+};
+
+type Attempt<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
 export const createIndexedDBStorage = ({
   dbName,
   storeName = "app-store",
@@ -33,6 +51,13 @@ export const createIndexedDBStorage = ({
 
   const isAvailable = () => typeof indexedDB !== "undefined";
 
+  // Stale handles must never survive a close: every later operation would
+  // fail forever instead of reopening.
+  const dropHandle = () => {
+    db = null;
+    dbPromise = null;
+  };
+
   const open = async (): Promise<IDBDatabase> => {
     if (!isAvailable()) {
       throw new Error("IndexedDB unavailable");
@@ -40,9 +65,9 @@ export const createIndexedDBStorage = ({
     if (db) return db;
     if (dbPromise) return dbPromise;
 
-    dbPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(dbName, version);
+    const request = indexedDB.open(dbName, version);
 
+    dbPromise = new Promise((resolve, reject) => {
       request.onupgradeneeded = () => {
         const next = request.result;
         if (!next.objectStoreNames.contains(storeName)) {
@@ -54,8 +79,11 @@ export const createIndexedDBStorage = ({
         db = request.result;
         db.onversionchange = () => {
           db?.close();
-          db = null;
-          dbPromise = null;
+          dropHandle();
+        };
+        // Forced closes (eviction) fire onclose, not onversionchange.
+        db.onclose = () => {
+          dropHandle();
         };
         resolve(db);
       };
@@ -64,28 +92,30 @@ export const createIndexedDBStorage = ({
       request.onblocked = () => reject(new Error(`IndexedDB open blocked for ${dbName}`));
     });
 
+    // A failed open must not poison future attempts: clear the cached
+    // promise so the next call opens a fresh connection.
+    void dbPromise.catch(dropHandle);
+
     return dbPromise;
   };
 
-  const run = async <T>(
+  const attempt = async <T>(
     mode: IDBTransactionMode,
     operation: (store: IDBObjectStore) => IDBRequest | void,
-    fallback: T
-  ): Promise<T> => {
-    if (!isAvailable()) return fallback;
-
+    resolved: T
+  ): Promise<Attempt<T>> => {
     try {
       const activeDB = await open();
-      return await new Promise<T>((resolve, reject) => {
+      const value = await new Promise<T>((resolve, reject) => {
         const transaction = activeDB.transaction(storeName, mode);
         const store = transaction.objectStore(storeName);
         const request = operation(store);
 
         transaction.oncomplete = () => {
           if (request) {
-            resolve((request.result ?? fallback) as T);
+            resolve((request.result ?? resolved) as T);
           } else {
-            resolve(fallback);
+            resolve(resolved);
           }
         };
         transaction.onerror = () => reject(transaction.error);
@@ -94,14 +124,38 @@ export const createIndexedDBStorage = ({
           request.onerror = () => reject(request.error);
         }
       });
+      return { ok: true, value };
     } catch (error) {
-      onError(mode, error);
-      return fallback;
+      return { ok: false, error };
     }
   };
 
+  // Every promise resolves: persist bursts can never emit unhandled
+  // rejections, and reads fail soft to the caller's fallback.
+  const run = async <T>(
+    mode: IDBTransactionMode,
+    operation: (store: IDBObjectStore) => IDBRequest | void,
+    fallback: T
+  ): Promise<T> => {
+    if (!isAvailable()) return fallback;
+
+    let result = await attempt<T>(mode, operation, fallback);
+    // Recoverable connection failures get exactly one retry over a fresh
+    // connection; the retry path also covers connections dropped between
+    // open() and transaction().
+    if (!result.ok && isRecoverableConnectionError(result.error)) {
+      dropHandle();
+      result = await attempt<T>(mode, operation, fallback);
+    }
+    if (!result.ok) {
+      onError(mode, result.error);
+      return fallback;
+    }
+    return result.value;
+  };
+
   return {
-    getItem: (name) => run("readonly", (store) => store.get(name), null),
+    getItem: (name) => run<string | null>("readonly", (store) => store.get(name), null),
     setItem: async (name, value) => {
       await run("readwrite", (store) => store.put(value, name), undefined);
     },
@@ -120,8 +174,7 @@ export const createIndexedDBStorage = ({
     },
     close: () => {
       db?.close();
-      db = null;
-      dbPromise = null;
+      dropHandle();
     },
   };
 };
