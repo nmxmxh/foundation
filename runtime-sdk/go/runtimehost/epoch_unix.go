@@ -142,7 +142,7 @@ func observeEpoch(slot *uint32) uint32 {
 //
 // peerAlive is consulted only while parked. During the spin the answer cannot
 // have meaningfully changed and the check would cost more than the spin does.
-func waitForEpochChange(slot *uint32, previous uint32, policy epochWaitPolicy, peerAlive func() bool) (uint32, error) {
+func waitForEpochChange(slot *uint32, previous uint32, policy epochWaitPolicy, peerAlive func() bool, doorbell <-chan struct{}) (uint32, error) {
 	for i := 0; i < policy.spinIterations; i++ {
 		if current := observeEpoch(slot); current != previous {
 			return current, nil
@@ -151,23 +151,31 @@ func waitForEpochChange(slot *uint32, previous uint32, policy epochWaitPolicy, p
 	}
 
 	deadline := time.Now().Add(policy.timeout)
-	sleep := time.Microsecond
+	timer := time.NewTimer(time.Until(deadline))
+	defer timer.Stop()
+
 	for {
 		if current := observeEpoch(slot); current != previous {
 			return current, nil
 		}
-		// Checked after the load, never before. A kernel that published a result
-		// and then exited did the work, and calling that a lost peer would throw
-		// away a completed exchange.
+
 		if peerAlive != nil && !peerAlive() {
 			return previous, errEpochPeerLost
 		}
-		if time.Now().After(deadline) {
+
+		select {
+		case _, ok := <-doorbell:
+			if !ok {
+				return previous, errEpochPeerLost
+			}
+			if current := observeEpoch(slot); current != previous {
+				return current, nil
+			}
+		case <-timer.C:
 			return previous, errEpochTimeout
-		}
-		time.Sleep(sleep)
-		if sleep < policy.maxSleep {
-			sleep *= 2
+		case <-time.After(5 * time.Millisecond):
+			// Fallback periodic wake-up to recheck peerAlive and the slot
+			// in case the doorbell byte was somehow missed.
 		}
 	}
 }
@@ -205,14 +213,14 @@ func writeRoute(raw []byte, unitID string) error {
 // or, worse, sees it as already-observed and waits for the next one. The
 // symptom is a single exchange that times out at startup and nothing wrong
 // afterwards, which is the hardest kind of intermittent to chase.
-func waitForKernelReady(raw []byte, policy epochWaitPolicy, peerAlive func() bool) error {
+func waitForKernelReady(raw []byte, policy epochWaitPolicy, peerAlive func() bool, doorbell <-chan struct{}) error {
 	slot, err := epochSlot(raw, generated.IDX_KERNEL_READY)
 	if err != nil {
 		return err
 	}
 	// Against zero rather than a snapshot: the host created this mapping zeroed,
 	// so any non-zero value is the kernel having announced itself.
-	if _, err := waitForEpochChange(slot, 0, policy, peerAlive); err != nil {
+	if _, err := waitForEpochChange(slot, 0, policy, peerAlive, doorbell); err != nil {
 		return fmt.Errorf("runtime kernel did not become ready: %w", err)
 	}
 	return nil

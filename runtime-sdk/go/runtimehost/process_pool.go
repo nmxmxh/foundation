@@ -177,6 +177,8 @@ type processWorker struct {
 	// epochTuning shapes the doorbell wait. Only the epoch transport reads it.
 	epochTuning EpochWaitTuning
 
+	doorbellCh chan struct{}
+
 	// childRunning is the death detection the epoch transport cannot get from
 	// its doorbell. Under stdio and shm a dead kernel closes stdout and the
 	// blocking read fails; with no read in the hot path, a dead kernel and a
@@ -558,6 +560,9 @@ func (w *processWorker) startLocked() error {
 	w.childRunning.Store(true)
 	go w.logStderr(stderrPipe)
 	if w.mode == ProcessTransportSharedMemoryEpoch {
+		w.doorbellCh = make(chan struct{}, 1)
+		go w.doorbellLoop(w.stdout)
+
 		// Only this transport reaps here. The others learn of a dead kernel
 		// through their blocking read, and closeLocked owns Wait for them.
 		go w.superviseChild(cmd)
@@ -565,7 +570,7 @@ func (w *processWorker) startLocked() error {
 		// Before anything is published, including the warm-up. See
 		// waitForKernelReady: publishing into a kernel that has not taken its
 		// baseline snapshot loses the exchange.
-		if err := waitForKernelReady(w.shm.raw, defaultEpochWaitPolicy(w.warmupTimeout), w.childAlive); err != nil {
+		if err := waitForKernelReady(w.shm.raw, defaultEpochWaitPolicy(w.warmupTimeout), w.childAlive, w.doorbellCh); err != nil {
 			return err
 		}
 	}
@@ -804,6 +809,25 @@ func (w *processWorker) stopExchangeLoop() {
 	<-done
 }
 
+func (w *processWorker) doorbellLoop(r *bufio.Reader) {
+	defer func() {
+		if w.doorbellCh != nil {
+			close(w.doorbellCh)
+		}
+	}()
+	buf := make([]byte, 1)
+	for {
+		_, err := r.Read(buf)
+		if err != nil {
+			return
+		}
+		select {
+		case w.doorbellCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
 func (w *processWorker) exchange() workerExchange {
 	if w.testExchange != nil {
 		return w.testExchange
@@ -821,9 +845,11 @@ func (w *processWorker) exchange() workerExchange {
 		// pipe frame would never be read and the caller would block until its
 		// timeout instead of failing.
 		return epochExchange{
-			shm:    w.shm,
-			policy: w.epochTuning.policy(w.warmupTimeout),
-			alive:  w.childAlive,
+			shm:      w.shm,
+			policy:   w.epochTuning.policy(w.warmupTimeout),
+			alive:    w.childAlive,
+			stdin:    w.stdin,
+			doorbell: w.doorbellCh,
 		}
 	}
 	if w.mode == ProcessTransportSharedMemory {

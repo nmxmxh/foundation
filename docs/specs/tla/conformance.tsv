@@ -33,3 +33,7 @@ WebSocketBackpressure	DisconnectCleansState	go-test	TestWSClientDisconnectCleans
 FrontendLiveProjection	TenantScopeStable	tlc	TenantScopeStable	docs/specs/tla/FrontendLiveProjection.tla
 FrontendLiveProjection	TenantScopeStable	ts-test	rejects cross-tenant live mutations	frontend-kit/ts/src/runtimeWorkbench.test.ts
 FrontendLiveProjection	LiveQueueBounded	ts-test	keeps old snapshots immutable	frontend-kit/ts/src/runtimeWorkbench.test.ts
+DispatchPlacement	TickMonotonic	tlc	TickMonotonic	docs/specs/tla/DispatchPlacement.tla
+DispatchPlacement	TickMonotonic	go-test	TestDispatchTickIsMonotonicAcrossAdvances	runtime-sdk/go/runtimehost/dispatch_mirror_test.go
+DispatchPlacement	JurisdictionFailClosed	go-test	TestDispatchJurisdictionFailsClosedBeforeScoring	runtime-sdk/go/runtimehost/dispatch_test.go
+DispatchPlacement	StaleLaneExcluded	go-test	TestDispatchStaleLanesAreExcludedFromSelection	runtime-sdk/go/runtimehost/dispatch_test.go

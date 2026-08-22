@@ -59,7 +59,7 @@ Read in order:
 
 Then read deeply into domains that matter for your product:
 
-- **Data**: `database_practices.md`, `redis_practices.md`, `hermes_hotplane.md`, `projection_freshness_contract.md`, `columnar_null_algebra.md`
+- **Data**: `database_practices.md`, `redis_practices.md`, `mesh_dispatch_practices.md`, `hermes_hotplane.md`, `projection_freshness_contract.md`, `columnar_null_algebra.md`
 - **Observability**: `delivery_metrics_practices.md`, `performance_practices.md`
 - **Security**: `security_practices.md`, `ai_threat_model.md`, `post_quantum_security.md`
 - **Performance**: `performance_lab.md`, `foundation_benchmarks.md`, `optimization_points.md`, `runtime_transport_optimization.md`
@@ -101,6 +101,7 @@ Read in order:
 | `database_practices.md` | PostgreSQL schema, query, pool, migration, and operational rules |
 | `migration_practices.md` | Migration structure, reversibility, safety checks |
 | `redis_practices.md` | Redis coordination, cache, stream, rate-limit rules |
+| `mesh_dispatch_practices.md` | Cross-node compute placement: node connections, hub topology, load and edge-class optimization |
 | `hermes_hotplane.md` | Hermes node-local projection contract, scaffold wrapper, consistency modes |
 | `hermes_read_modes.md` | Stable v1 read modes: `fenced`, `live`, `stale_while_revalidate`, `postgres_required` |
 | `projection_freshness_contract.md` | Freshness modes and evidence for Hermes, read models, search, views, caches |

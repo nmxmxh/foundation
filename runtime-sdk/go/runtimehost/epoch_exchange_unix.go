@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
 )
@@ -29,7 +30,15 @@ type epochExchange struct {
 	// the protocol. A nil alive means the wait can only end on timeout, which
 	// is correct but slow — it is never nil in production.
 	alive func() bool
+
+	// stdin is used as a doorbell to unpark the sleeping worker.
+	stdin io.Writer
+
+	// doorbell is used to receive a wake up signal from the worker.
+	doorbell <-chan struct{}
 }
+
+var doorbellFrame = []byte{1}
 
 func (x epochExchange) Exchange(ctx context.Context, unitID string, buffer []byte) error {
 	if x.shm == nil || len(x.shm.raw) == 0 {
@@ -71,7 +80,14 @@ func (x epochExchange) Exchange(ctx context.Context, unitID string, buffer []byt
 	// the release; nothing may be added between it and the copy.
 	publishEpoch(inputSlot)
 
-	if _, err := waitForEpochChange(outputSlot, lastOutput, x.policy, x.alive); err != nil {
+	if x.stdin != nil {
+		// Doorbell fallback: wake up the parked worker immediately.
+		if _, err := x.stdin.Write(doorbellFrame); err != nil {
+			return err
+		}
+	}
+
+	if _, err := waitForEpochChange(outputSlot, lastOutput, x.policy, x.alive, x.doorbell); err != nil {
 		return err
 	}
 

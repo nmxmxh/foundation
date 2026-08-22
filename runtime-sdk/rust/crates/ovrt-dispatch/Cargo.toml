@@ -1,0 +1,23 @@
+[package]
+name = "ovrt-dispatch"
+version = "0.1.0"
+edition = "2021"
+license-file.workspace = true
+rust-version.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+# loom enables exhaustive-interleaving model tests for the buffer-flip
+# publication protocol and the shared tick counter. Opt-in only, mirroring the
+# ovrt-core arrangement: ordinary builds never pull loom in.
+loom = ["dep:loom"]
+
+[dependencies]
+ovrt-core = { path = "../ovrt-core" }
+ovrt-unit = { path = "../ovrt-unit" }
+loom = { version = "0.7", optional = true }
+
+[dev-dependencies]
+tempfile = "3"

@@ -33,7 +33,8 @@ fn serve_shared_memory_epoch(host: &NativeRuntimeHost) -> Result<(), String> {
         }
     }
 
-    let alive = crate::epoch_transport::spawn_host_liveness_watch();
+    let worker = std::thread::current();
+    let alive = crate::epoch_transport::spawn_host_liveness_watch(worker);
     crate::epoch_transport::serve_epoch_loop(host, &mut mapping, &policy, || {
         alive.load(Ordering::Acquire)
     })

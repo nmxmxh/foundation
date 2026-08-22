@@ -491,6 +491,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ovrt-dispatch"
+version = "0.1.0"
+dependencies = [
+ "loom",
+ "ovrt-core",
+ "ovrt-unit",
+ "tempfile",
+]
+
+[[package]]
 name = "ovrt-ffi"
 version = "0.1.0"
 dependencies = [
@@ -504,6 +514,7 @@ name = "ovrt-native"
 version = "0.1.0"
 dependencies = [
  "ovrt-core",
+ "ovrt-dispatch",
  "ovrt-unit",
  "tempfile",
 ]

@@ -22,7 +22,7 @@
 //!
 //! # Why there is no futex here
 //!
-//! Parking is a spin, then a yield, then a capped sleep ladder. No `futex`, no
+//! Parking happens via `std::thread::park_timeout()`. No `futex`, no
 //! `__ulock_wait`.
 //!
 //! The reason is that parking only happens on the slow path. When the peer
@@ -130,7 +130,6 @@ pub fn wait_for_change(
     }
 
     let deadline = Instant::now() + policy.timeout;
-    let mut sleep = Duration::from_micros(1);
     loop {
         let current = observe(slot);
         if current != previous {
@@ -142,11 +141,13 @@ pub fn wait_for_change(
             // would discard work that completed.
             return Err(WaitError::PeerLost);
         }
-        if Instant::now() >= deadline {
+        let now = Instant::now();
+        if now >= deadline {
             return Err(WaitError::TimedOut);
         }
-        std::thread::sleep(sleep);
-        sleep = (sleep * 2).min(policy.max_sleep);
+
+        let remaining = deadline.saturating_duration_since(now);
+        std::thread::park_timeout(remaining);
     }
 }
 

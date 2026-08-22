@@ -294,6 +294,7 @@ For deeper context, read these files (`docs/foundation/` in generated apps, `doc
 | Database patterns | `docs/foundation/database_practices.md` or `docs/database_practices.md` |
 | Redis patterns | `docs/foundation/redis_practices.md` or `docs/redis_practices.md` |
 | Frontend resilience (routing, selectors, IndexedDB) | `docs/foundation/frontend_resilience_practices.md` or `docs/frontend_resilience_practices.md` |
+| Mesh dispatch (placement across nodes) | `docs/foundation/mesh_dispatch_practices.md` or `docs/mesh_dispatch_practices.md` |
 | Migration rules | `docs/foundation/migration_practices.md` or `docs/migration_practices.md` |
 | Performance | `docs/foundation/optimization_points.md` or `docs/optimization_points.md` |
 | Delivery metrics | `docs/foundation/delivery_metrics_practices.md` or `docs/delivery_metrics_practices.md` |

@@ -85,7 +85,7 @@ func TestEpochOrderingPublishesThePayloadBeforeTheEpoch(t *testing.T) {
 			}
 			publishEpoch(inputSlot)
 
-			next, err := waitForEpochChange(ackSlot, lastAck, policy, nil)
+			next, err := waitForEpochChange(ackSlot, lastAck, policy, nil, nil)
 			if err != nil {
 				return
 			}
@@ -95,7 +95,7 @@ func TestEpochOrderingPublishesThePayloadBeforeTheEpoch(t *testing.T) {
 
 	observed := observeEpoch(inputSlot)
 	for round := 1; round <= rounds; round++ {
-		next, err := waitForEpochChange(inputSlot, observed, policy, nil)
+		next, err := waitForEpochChange(inputSlot, observed, policy, nil, nil)
 		if err != nil {
 			t.Fatalf("round %d: waitForEpochChange() error = %v", round, err)
 		}
@@ -128,7 +128,7 @@ func TestEpochWaitEndsWhenThePeerIsGoneRatherThanOnTimeout(t *testing.T) {
 
 	policy := epochWaitPolicy{spinIterations: 4, maxSleep: 50 * time.Microsecond, timeout: time.Hour}
 	started := time.Now()
-	if _, err := waitForEpochChange(slot, observeEpoch(slot), policy, func() bool { return false }); !errors.Is(err, errEpochPeerLost) {
+	if _, err := waitForEpochChange(slot, observeEpoch(slot), policy, func() bool { return false }, nil); !errors.Is(err, errEpochPeerLost) {
 		t.Fatalf("waitForEpochChange() error = %v, want errEpochPeerLost", err)
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
@@ -150,7 +150,7 @@ func TestEpochWaitReturnsAResultPublishedBeforeThePeerDied(t *testing.T) {
 	publishEpoch(slot)
 
 	policy := epochWaitPolicy{spinIterations: 0, maxSleep: time.Millisecond, timeout: time.Second}
-	if _, err := waitForEpochChange(slot, previous, policy, func() bool { return false }); err != nil {
+	if _, err := waitForEpochChange(slot, previous, policy, func() bool { return false }, nil); err != nil {
 		t.Fatalf("waitForEpochChange() discarded a completed exchange: %v", err)
 	}
 }
@@ -162,7 +162,7 @@ func TestEpochWaitTimesOutRatherThanHanging(t *testing.T) {
 		t.Fatalf("epochSlot() error = %v", err)
 	}
 	policy := epochWaitPolicy{spinIterations: 4, maxSleep: 50 * time.Microsecond, timeout: 20 * time.Millisecond}
-	if _, err := waitForEpochChange(slot, observeEpoch(slot), policy, func() bool { return true }); !errors.Is(err, errEpochTimeout) {
+	if _, err := waitForEpochChange(slot, observeEpoch(slot), policy, func() bool { return true }, nil); !errors.Is(err, errEpochTimeout) {
 		t.Fatalf("waitForEpochChange() error = %v, want errEpochTimeout", err)
 	}
 }
@@ -180,7 +180,7 @@ func TestEpochWaitDoesNotBlockOnAChangeItAlreadyMissed(t *testing.T) {
 	publishEpoch(slot)
 
 	policy := epochWaitPolicy{spinIterations: 1, maxSleep: time.Millisecond, timeout: 50 * time.Millisecond}
-	if _, err := waitForEpochChange(slot, 0, policy, func() bool { return true }); err != nil {
+	if _, err := waitForEpochChange(slot, 0, policy, func() bool { return true }, nil); err != nil {
 		t.Fatalf("waitForEpochChange() blocked on a missed change: %v", err)
 	}
 }
@@ -239,7 +239,7 @@ func TestEpochExchangeRoundTripsThroughASharedMapping(t *testing.T) {
 	// The first version of this test skipped the handshake and hung, which is
 	// precisely the production symptom it now guards against.
 	readyPolicy := epochWaitPolicy{spinIterations: 2000, maxSleep: time.Millisecond, timeout: 5 * time.Second}
-	if err := waitForKernelReady(segment.raw, readyPolicy, func() bool { return true }); err != nil {
+	if err := waitForKernelReady(segment.raw, readyPolicy, func() bool { return true }, nil); err != nil {
 		t.Fatalf("waitForKernelReady() error = %v", err)
 	}
 
@@ -328,7 +328,7 @@ func fakeEpochKernel(t *testing.T, segment *sharedMemorySegment, stop <-chan str
 			return
 		default:
 		}
-		next, err := waitForEpochChange(inputSlot, observed, policy, func() bool { return true })
+		next, err := waitForEpochChange(inputSlot, observed, policy, func() bool { return true }, nil)
 		if err != nil {
 			continue
 		}
@@ -380,12 +380,12 @@ func TestEpochReadyHandshakePrecedesTheFirstPublish(t *testing.T) {
 	}
 
 	policy := epochWaitPolicy{spinIterations: 4, maxSleep: 50 * time.Microsecond, timeout: 50 * time.Millisecond}
-	if err := waitForKernelReady(segment.raw, policy, func() bool { return true }); err == nil {
+	if err := waitForKernelReady(segment.raw, policy, func() bool { return true }, nil); err == nil {
 		t.Fatal("waitForKernelReady() returned before any kernel announced itself")
 	}
 
 	publishEpoch(readySlot)
-	if err := waitForKernelReady(segment.raw, policy, func() bool { return true }); err != nil {
+	if err := waitForKernelReady(segment.raw, policy, func() bool { return true }, nil); err != nil {
 		t.Fatalf("waitForKernelReady() after the announcement: %v", err)
 	}
 }
@@ -396,7 +396,7 @@ func TestEpochReadyHandshakeFailsFastWhenTheChildDied(t *testing.T) {
 	policy := epochWaitPolicy{spinIterations: 4, maxSleep: 50 * time.Microsecond, timeout: time.Hour}
 
 	started := time.Now()
-	err := waitForKernelReady(segment.raw, policy, func() bool { return false })
+	err := waitForKernelReady(segment.raw, policy, func() bool { return false }, nil)
 	if !errors.Is(err, errEpochPeerLost) {
 		t.Fatalf("waitForKernelReady() error = %v, want errEpochPeerLost", err)
 	}

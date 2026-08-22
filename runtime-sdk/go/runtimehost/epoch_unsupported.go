@@ -5,6 +5,7 @@ package runtimehost
 import (
 	"context"
 	"errors"
+	"io"
 	"time"
 )
 
@@ -17,7 +18,9 @@ type epochWaitPolicy struct {
 type epochExchange struct {
 	shm    *sharedMemorySegment
 	policy epochWaitPolicy
-	alive  func() bool
+	alive    func() bool
+	stdin    io.Writer
+	doorbell <-chan struct{}
 }
 
 func (x epochExchange) Exchange(_ context.Context, _ string, _ []byte) error {
@@ -44,6 +47,6 @@ func defaultEpochWaitPolicy(timeout time.Duration) epochWaitPolicy {
 	}
 }
 
-func waitForKernelReady(_ []byte, _ epochWaitPolicy, _ func() bool) error {
+func waitForKernelReady(_ []byte, _ epochWaitPolicy, _ func() bool, _ <-chan struct{}) error {
 	return errors.New("shared memory epoch exchange requires linux or darwin")
 }

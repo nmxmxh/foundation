@@ -222,6 +222,7 @@ hardware can feed predictably.
     are eligible. Use least-in-flight or another benchmarked bounded policy with
     deterministic tie-breaking, and test that completion, timeout, removal, and
     synchronous dispatch failure all release load accounting.
+14. Idle cross-process or shared-memory workers must wait on an OS-level blocking primitive (like reading a 1-byte doorbell from a pipe or a futex wait) that drops the thread to a sleep state (`S`). Do not use polling, sleep-ladders, or spin loops for idle waits, as they consume CPU cycles without doing work.
 
 ## Network and transport performance
 

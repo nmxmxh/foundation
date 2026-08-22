@@ -24,7 +24,7 @@ mod unix {
     use std::fs::OpenOptions;
     use std::os::unix::io::AsRawFd;
     use std::path::Path;
-    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::{AtomicU32, AtomicU64};
 
     /// A writable `MAP_SHARED` view of a file, unmapped on drop.
     ///
@@ -202,6 +202,35 @@ mod unix {
             // same layout as the four bytes it covers. Sharing the reference is
             // sound precisely because every access through it is atomic.
             Ok(unsafe { &*(self.ptr.add(offset).cast::<AtomicU32>()) })
+        }
+
+        /// Borrows an 8-byte word of the mapping as an atomic.
+        ///
+        /// Same contract as [`Self::atomic_u32`], widened for the dispatch lane
+        /// table: latency samples, heartbeats, and the global tick are all u64
+        /// quantities shared across processes. The offset must be 8-byte
+        /// aligned; every generated dispatch offset is a multiple of 8.
+        pub fn atomic_u64(&self, offset: usize) -> Result<&AtomicU64, String> {
+            let end = offset
+                .checked_add(8)
+                .ok_or_else(|| format!("atomic offset overflow at {offset}"))?;
+            if end > self.len {
+                return Err(format!(
+                    "atomic word at {offset} runs past the {}-byte mapping",
+                    self.len
+                ));
+            }
+            // Remainder form rather than `is_multiple_of`; see `atomic_u32` for
+            // the MSRV rationale.
+            if offset % 8 != 0 {
+                return Err(format!("atomic offset {offset} is not 8-byte aligned"));
+            }
+            // SAFETY: The base address is page-aligned by `mmap` and `offset`
+            // is a multiple of 8, so the resulting address is aligned for
+            // `AtomicU64`. Bounds are checked above, and `AtomicU64` has the
+            // same layout as the eight bytes it covers. Sharing is sound
+            // because every access through the reference is atomic.
+            Ok(unsafe { &*(self.ptr.add(offset).cast::<AtomicU64>()) })
         }
     }
 

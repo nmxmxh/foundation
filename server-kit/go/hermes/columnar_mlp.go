@@ -22,6 +22,9 @@ import "math/bits"
 // is recognized by the Go compiler and lowers to a single POPCNT (x86) / CNT
 // (ARM) instruction per word.
 func popcountWords(words []uint64) int {
+	if count, handled := tryCount(words); handled {
+		return count
+	}
 	var c0, c1, c2, c3 int
 	i := 0
 	for ; i+4 <= len(words); i += 4 {
@@ -40,6 +43,9 @@ func popcountWords(words []uint64) int {
 // andWords computes dst[i] &= src[i] in place for every word of dst.
 func andWords(dst, src []uint64) {
 	src = src[:len(dst)] // panics loudly if src is shorter; also a BCE hint
+	if tryBinary(BitmapAnd, dst, src) {
+		return
+	}
 	i := 0
 	for ; i+4 <= len(dst); i += 4 {
 		dst[i] &= src[i]
@@ -55,6 +61,9 @@ func andWords(dst, src []uint64) {
 // orWords computes dst[i] |= src[i] in place for every word of dst.
 func orWords(dst, src []uint64) {
 	src = src[:len(dst)]
+	if tryBinary(BitmapOr, dst, src) {
+		return
+	}
 	i := 0
 	for ; i+4 <= len(dst); i += 4 {
 		dst[i] |= src[i]
@@ -70,6 +79,9 @@ func orWords(dst, src []uint64) {
 // andNotWords computes dst[i] &^= src[i] in place for every word of dst.
 func andNotWords(dst, src []uint64) {
 	src = src[:len(dst)]
+	if tryBinary(BitmapAndNot, dst, src) {
+		return
+	}
 	i := 0
 	for ; i+4 <= len(dst); i += 4 {
 		dst[i] &^= src[i]
