@@ -35,3 +35,36 @@ for expected in \
 done
 
 echo "lifecycle contract generator test passed"
+
+# Vocabulary sync guard: the mutating/read-only action sets are duplicated
+# between the two lifecycle generators (contract tests + manifest). A word
+# added to one and not the other makes generated tests treat an event as
+# mutating while the manifest calls it read-only. This failed silently once
+# (2026-08-22: 16 actions drifted); this check makes it a lint failure.
+node - "$FOUNDATION_DIR/tooling/scripts" << 'NODE'
+import fs from "node:fs";
+import path from "node:path";
+
+const dir = process.argv[2];
+const grab = (file, decl) => {
+  const src = fs.readFileSync(path.join(dir, file), "utf8");
+  const match = src.match(new RegExp(decl + "[^\\[]*\\[([\\s\\S]*?)\\]"));
+  if (!match) throw new Error(`cannot locate ${decl} in ${file}`);
+  return new Set([...match[1].matchAll(/"([a-z]+)"/g)].map((m) => m[1]));
+};
+
+const testActions = grab("generate_lifecycle_contract_tests.mjs", "mutatingActions");
+const manifestActions = grab("generate_lifecycle_manifest.mjs", "MUTATING_ACTIONS");
+const testRead = grab("generate_lifecycle_contract_tests.mjs", "readOnlyActions");
+const manifestRead = grab("generate_lifecycle_manifest.mjs", "READ_ONLY_ACTIONS");
+
+const drift = (name, a, b) => {
+  const missing = [...a].filter((word) => !b.has(word));
+  const extra = [...b].filter((word) => !a.has(word));
+  for (const word of missing) throw new Error(`${name}: "${word}" present in contract-tests generator, missing in manifest generator`);
+  for (const word of extra) throw new Error(`${name}: "${word}" present in manifest generator, missing in contract-tests generator`);
+};
+drift("mutating", testActions, manifestActions);
+drift("read-only", testRead, manifestRead);
+console.log("[OK] lifecycle action vocabularies in sync (" + testActions.size + " mutating / " + testRead.size + " read-only)");
+NODE

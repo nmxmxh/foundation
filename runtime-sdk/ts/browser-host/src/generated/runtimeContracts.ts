@@ -267,6 +267,94 @@ export const runtimeContractManifest = {
       "enums": []
     },
     {
+      "file": "runtime_dispatch.capnp",
+      "id": "0xdf5cac001d15ea01",
+      "constants": [
+        {
+          "name": "dispatchSchemaVersion",
+          "type": "UInt32",
+          "value": "1"
+        },
+        {
+          "name": "dispatchMaxLanes",
+          "type": "UInt32",
+          "value": "32"
+        },
+        {
+          "name": "dispatchLaneRowBytes",
+          "type": "UInt32",
+          "value": "64"
+        },
+        {
+          "name": "dispatchFlipIndexOffset",
+          "type": "UInt32",
+          "value": "0"
+        },
+        {
+          "name": "dispatchTickOffset",
+          "type": "UInt32",
+          "value": "8"
+        },
+        {
+          "name": "dispatchHeaderBytes",
+          "type": "UInt32",
+          "value": "64"
+        },
+        {
+          "name": "dispatchStatsOffset",
+          "type": "UInt32",
+          "value": "64"
+        },
+        {
+          "name": "dispatchBufferBytes",
+          "type": "UInt32",
+          "value": "2048"
+        },
+        {
+          "name": "dispatchBuffersOffset",
+          "type": "UInt32",
+          "value": "2112"
+        },
+        {
+          "name": "dispatchRegionBytes",
+          "type": "UInt32",
+          "value": "6208"
+        },
+        {
+          "name": "dispatchStaleTicks",
+          "type": "UInt32",
+          "value": "4"
+        },
+        {
+          "name": "dispatchEwmaAlphaNum",
+          "type": "UInt32",
+          "value": "1"
+        },
+        {
+          "name": "dispatchEwmaAlphaDen",
+          "type": "UInt32",
+          "value": "8"
+        },
+        {
+          "name": "dispatchAffinityBonusNs",
+          "type": "UInt32",
+          "value": "250000"
+        },
+        {
+          "name": "dispatchJurisdictionGlobal",
+          "type": "UInt32",
+          "value": "0"
+        }
+      ],
+      "structs": [
+        "DispatchLaneDescriptor",
+        "DispatchLaneStats"
+      ],
+      "enums": [
+        "DispatchDecision"
+      ]
+    },
+    {
       "file": "runtime_native_gpu.capnp",
       "id": "0xfafac001d15ea003",
       "constants": [
