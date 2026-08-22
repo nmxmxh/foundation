@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/ovrt-core",
+  "crates/ovrt-dispatch",
   "crates/ovrt-browser",
   "crates/ovrt-unit",
   "crates/ovrt-ffi",

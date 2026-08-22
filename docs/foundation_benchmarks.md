@@ -4245,3 +4245,39 @@ then `OVRT_REFERENCE_KERNEL=<path> go test ./runtimehost/ -run '^$' -bench
 BenchmarkTransport -benchtime 3000x -count 3` from `runtime-sdk/go`. Full
 reasoning, the 10^6-exchange soak and the SIGKILL evidence are in
 `runtime_transport_optimization.md`.
+
+## 2026-08-22 Dispatch placement lane: mirror codec, decision path, and the service-backed trust catch
+
+The compute-placement lane (`server-kit/go/placement` + `runtimehost.DispatchBlock`) carries three hot surfaces: lane-mirror frames crossing nodes on `compute:lane:v1`, the per-decision host path (tick read → descriptor snapshot → stats sweep → argmin), and remote chunk-ticket framing. Benchmarks pin all three; one evidenced optimisation landed same-day.
+
+Apple M1 Pro, darwin/arm64, `-8`, `-benchmem`, medians of 3:
+
+| Benchmark | ns/op | B/op | allocs/op | Notes |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkMirrorFrameEncode32` | ~405 | 1,792 | **1** | One frame buffer; fixed-record codec, no per-lane allocation. |
+| `BenchmarkMirrorFrameDecode32` | ~487 | 1,824 | 3 | Frame slice + lanes slice + identity strings. |
+| `BenchmarkRemoteComputeRoundTrip` | ~133 | 168 | 4 | Ticket encode → handler validate/execute → response frame, 4 KiB payload. |
+| `BenchmarkPlacementFullHostPath` (before) | ~1,105 | 1,536 | **33** | Per-row `StatRow()` handles escaped one allocation each inside the sweep. |
+| `BenchmarkPlacementFullHostPath` (after) | **~655** | 1,792 | **2** | `DispatchBlock.SnapshotStats()` batch-reads the same atomic words without materializing handles: **1.7× faster, 31 fewer allocations per decision**. The B/op rise is one 32-entry struct slice replacing scattered escapes — churn consolidated, not added. |
+
+The pure decision function is pinned separately by `TestDecideDoesNotAllocate` (exact zero via `testing.AllocsPerRun`) and by the Rust `ns_bench` gate (p50 = 42 ns cached).
+
+Allocation ceilings for all four benchmarks are registered in `tooling/benchmark_baseline.psv` and enforced by `benchmark_ratchet_check.sh`; allocs/op gate exactly, bytes with tolerance.
+
+### Service-backed catch: guard placement, not adapter placement
+
+`TestServiceBackedPlacementMirrorLane` (live Redis via `make test-service-backed`) drives three legs — valid multi-lane delivery with field fidelity, foreign-frame noise survival, and implausible-latency rejection through the listener error path. Its first run failed: the EWMA plausibility guard lived only in `runtimehost.ApplyMirrorUpdate`, so any *other* `MirrorSink` implementation silently applied lying updates. Validation moved into `ListenMirrors` as the single choke point; the adapter retains a defensive re-check. The service-backed lane caught in one run what the memory-client unit suite structurally could not — the concrete argument for TE-38.
+
+Mirror trust rules now documented in `mesh_dispatch_practices.md`: publisher ticks are discarded (local re-stamp on arrival; cross-region clicks are incomparable), sub-floor latency claims are refused loudly, and stronger attribution belongs to signed transport.
+
+Reproduce:
+
+```bash
+cd foundation/server-kit/go && go test ./placement -run='^$' \
+  -bench='BenchmarkMirrorFrame|BenchmarkRemoteCompute' -benchmem -count=3
+cd foundation/runtime-sdk/go && go test ./runtimehost -run='^$' \
+  -bench='BenchmarkPlacementFullHostPath' -benchmem -count=3
+cd foundation/runtime-sdk/go && go test ./runtimehost -run TestDecideDoesNotAllocate -v
+SERVICE_BACKED_REDIS_URL=redis://localhost:6379 SERVICE_BACKED_DATABASE_URL=unused \
+  go test -tags servicebacked -run TestServiceBackedPlacementMirrorLane -v ./servicebacked
+```

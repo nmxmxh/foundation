@@ -401,6 +401,23 @@ Enforcement:
 - Broad `go_concurrency_practices_check.sh` review output for lock/channel/select/timer/close ownership risks; use `GO_CONCURRENCY_STRICT=1` during hardening passes.
 - Reviewer gate on mixed lock/channel/wait code paths and `WaitGroup` Add/Wait ordering.
 
+### CP-44: Use OS-level blocking instead of spin-sleep ladders for IPC wait loops
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Cross-process transport waits must not use `time.Sleep` ladders or aggressive spin loops (for example, `runtime.Gosched()` inside a `for` loop) to poll for IPC events.
+2. In Rust, use `std::thread::park_timeout()` and a notification unpark mechanism instead of manual sleep ladders, ensuring the worker thread goes to OS state `S` (zero CPU) when idle.
+3. In Go, wait loops for shared-memory or piped IPC must block on an OS-level primitive, such as an `io.Reader.Read()` from a pipe (a "doorbell") or a futex wait, rather than polling an atomic slot with increasing `time.Sleep` delays.
+4. Transport backends that rely on shared memory (shm-epoch) must pair the atomic state change with a cheap OS-level wakeup (like writing a 1-byte frame to a pipe) to wake the blocking peer.
+
+Enforcement:
+
+- Reviewer gate on new IPC or worker wait loop implementations.
+- Load-test and telemetry evidence for zero-CPU idle states on wait-bound loops.
+- `make check-go-concurrency-practices` and architectural review of IPC handoff design.
+
 ### CP-12: Keep documentation and traceability current
 
 Level: `Recommended`

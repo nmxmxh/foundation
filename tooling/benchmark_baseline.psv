@@ -44,3 +44,7 @@
 ./grpcsvc|BenchmarkGeneratedProtoUnmarshalMergeReuse|5|56|290.6
 ./grpcsvc|BenchmarkGeneratedProtoUnmarshalReset|6|152|435.6
 ./grpcsvc|BenchmarkRouterDispatchFrameDirect|0|0|39.16
+./placement|BenchmarkMirrorFrameEncode32|1|1900|405
+./placement|BenchmarkMirrorFrameDecode32|3|1950|487
+./placement|BenchmarkRemoteComputeRoundTrip|4|185|133
+./runtimehost|BenchmarkPlacementFullHostPath|2|1900|654

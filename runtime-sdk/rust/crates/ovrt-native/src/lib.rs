@@ -19,6 +19,11 @@ use std::time::Duration;
 use ovrt_core::{RuntimeDiagnostics, RuntimeMode, RuntimeRole};
 use ovrt_unit::{RuntimeUnit, UnitRegistry};
 
+#[cfg(unix)]
+use ovrt_dispatch::{
+    class_mask_for_role_index, decide as decide_from_table, DispatchRequest, SampledUnit,
+};
+
 pub use arena_blob::{ArenaBlobUnit, ARENA_BLOB_MAGIC, ARENA_BLOB_REQUEST_BYTES};
 pub use buffer::NativeBuffer;
 pub use shared_memory::serve_transport;
@@ -42,6 +47,16 @@ pub struct NativeRuntimeHost {
     senders: BTreeMap<RuntimeRole, Sender<Task>>,
     in_flight: Arc<AtomicU32>,
     dispatch_timeout: Duration,
+    /// Placement table consulted ahead of the static role pools.
+    #[cfg(unix)]
+    dispatch_block: Option<Arc<ovrt_dispatch::DispatchBlock>>,
+    /// Local role pool to lane-slot mapping for placement and sampling.
+    #[cfg(unix)]
+    dispatch_lanes: BTreeMap<RuntimeRole, usize>,
+    /// Jurisdiction this host serves; 0 accepts only global lanes, matching
+    /// the fail-closed default for internal calls.
+    #[cfg(unix)]
+    dispatch_jurisdiction: u16,
 }
 
 impl NativeRuntimeHost {
@@ -105,6 +120,12 @@ impl NativeRuntimeHost {
             senders,
             in_flight,
             dispatch_timeout: DEFAULT_DISPATCH_TIMEOUT,
+            #[cfg(unix)]
+            dispatch_block: None,
+            #[cfg(unix)]
+            dispatch_lanes: BTreeMap::new(),
+            #[cfg(unix)]
+            dispatch_jurisdiction: 0,
         }
     }
 
@@ -113,7 +134,41 @@ impl NativeRuntimeHost {
         self
     }
 
+    /// Attaches a placement table that every dispatch consults before falling
+    /// back to the unit's default role pool.
+    #[cfg(unix)]
+    pub fn with_dispatch_block(
+        mut self,
+        block: Arc<ovrt_dispatch::DispatchBlock>,
+        jurisdiction: u16,
+    ) -> Self {
+        self.dispatch_block = Some(block);
+        self.dispatch_jurisdiction = jurisdiction;
+        self
+    }
+
+    /// Maps one local role pool onto a lane slot of the placement table.
+    ///
+    /// Registered units for that role start sampling completions into the
+    /// slot, and a winning selection on that slot routes work here.
+    #[cfg(unix)]
+    pub fn with_dispatch_lane(mut self, role: RuntimeRole, lane: usize) -> Self {
+        self.dispatch_lanes.insert(role, lane);
+        self
+    }
+
     pub fn register_unit(&self, unit: Arc<dyn RuntimeUnit>) -> Result<(), String> {
+        let descriptor = unit.descriptor();
+        // When a lane slot is mapped for this role, completions sample into
+        // it so placement decisions run on measured latency from here on.
+        #[cfg(unix)]
+        let unit: Arc<dyn RuntimeUnit> =
+            match (&self.dispatch_block, self.dispatch_lanes.get(&descriptor.role)) {
+                (Some(block), Some(lane)) => {
+                    Arc::new(SampledUnit::new(unit, Arc::clone(block), *lane))
+                }
+                _ => unit,
+            };
         self.registry.register(unit)?;
         let count = self.registry.descriptors()?.len() as u32;
         let mut guard = self
@@ -130,8 +185,17 @@ impl NativeRuntimeHost {
             .get(unit_id)?
             .ok_or_else(|| format!("runtime unit {unit_id} is not registered"))?;
         let descriptor = unit.descriptor();
-        let sender = self.senders.get(&descriptor.role).ok_or_else(|| {
-            format!("runtime role {} does not have a native worker pool", descriptor.role)
+        // Placement first: the table decides which mapped pool serves this
+        // call; anything it cannot answer keeps today's default routing.
+        #[cfg(unix)]
+        let target_role = match &self.dispatch_block {
+            Some(block) => self.select_role_by_placement(block, descriptor.role),
+            None => descriptor.role,
+        };
+        #[cfg(not(unix))]
+        let target_role = descriptor.role;
+        let sender = self.senders.get(&target_role).ok_or_else(|| {
+            format!("runtime role {target_role} does not have a native worker pool")
         })?;
 
         let in_flight = InFlightGuard::new(Arc::clone(&self.in_flight));
@@ -222,6 +286,55 @@ impl NativeRuntimeHost {
             guard.degraded = true;
             guard.last_error = Some(error.to_string());
             guard.last_runtime_source = source.to_string();
+        }
+    }
+
+    /// Consults the placement table and returns the local pool that should
+    /// serve this call.
+    ///
+    /// Every table-side failure degrades to the fallback role rather than
+    /// failing the dispatch: a broken or unreadable table means dumber
+    /// routing, never lost work.
+    #[cfg(unix)]
+    fn select_role_by_placement(
+        &self,
+        block: &ovrt_dispatch::DispatchBlock,
+        fallback: RuntimeRole,
+    ) -> RuntimeRole {
+        // The click advances once per real decision so freshness windows run
+        // on decisions, not wall time.
+        let Ok(now) = block.advance_tick() else {
+            return fallback;
+        };
+        let deadline_total = u128::from(self.dispatch_timeout.as_secs())
+            .saturating_mul(1_000_000_000)
+            .saturating_add(u128::from(self.dispatch_timeout.subsec_nanos()));
+        let request = DispatchRequest {
+            required_class_mask: class_mask_for_role_index(fallback as usize),
+            jurisdiction: self.dispatch_jurisdiction,
+            deadline_ns: if deadline_total > u128::from(u64::MAX) {
+                u64::MAX
+            } else {
+                deadline_total as u64
+            },
+            affinity_key: 0,
+        };
+
+        let Ok(descriptors) = block.snapshot_descriptors() else {
+            return fallback;
+        };
+        let stats: Vec<_> = (0..descriptors.len())
+            .map(|lane| block.stat_row(lane).ok().map(|row| row.snapshot()))
+            .collect();
+
+        match decide_from_table(now, &descriptors, &stats, &request) {
+            Some(lane_slot) => self
+                .dispatch_lanes
+                .iter()
+                .find(|(_, slot)| **slot == usize::from(lane_slot))
+                .map(|(role, _)| *role)
+                .unwrap_or(fallback),
+            None => fallback,
         }
     }
 }
@@ -473,5 +586,66 @@ mod tests {
         assert_eq!(output_buffer.header_int(INT_IDX_STATUS_CODE).expect("status"), 0);
         assert_eq!(output_buffer.read_output_bytes().expect("output"), b"PULSE");
         assert_eq!(output_buffer.load_epoch(IDX_OUTPUT_WRITTEN), 1);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn placement_table_routes_and_samples_completions() {
+        use ovrt_core::DISPATCH_REGION_BYTES;
+        use ovrt_dispatch::{class_mask_for_role_index, DispatchBlock, LaneDescriptor};
+
+        struct EchoCompute;
+
+        impl RuntimeUnit for EchoCompute {
+            fn descriptor(&self) -> RuntimeUnitDescriptor {
+                RuntimeUnitDescriptor {
+                    unit_id: "echo.placement".to_string(),
+                    role: RuntimeRole::Compute,
+                    input_schema: "test".to_string(),
+                    output_schema: "test".to_string(),
+                    supports_wasm: true,
+                    supports_native: true,
+                    requires_shared_memory: false,
+                    supports_gpu: false,
+                    max_concurrency: 4,
+                }
+            }
+
+            fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
+                Ok(input.to_vec())
+            }
+        }
+
+        let file = tempfile::NamedTempFile::new().expect("temp file");
+        file.as_file().set_len(u64::from(DISPATCH_REGION_BYTES)).expect("size region");
+        let block = Arc::new(DispatchBlock::open(file.path()).expect("open block"));
+
+        let compute_bit = class_mask_for_role_index(RuntimeRole::Compute as usize);
+        let lane0 = LaneDescriptor {
+            lane_id: 0,
+            jurisdiction: 0,
+            max_concurrency: 4,
+            generation: 1,
+            unit_class_mask: compute_bit,
+            affinity_bloom: 0,
+        };
+        block.publish_descriptors(&[lane0], 1).expect("publish table");
+
+        let mut role_limits = BTreeMap::new();
+        role_limits.insert(RuntimeRole::Compute, 2);
+        let host = NativeRuntimeHost::new(role_limits)
+            .with_dispatch_block(Arc::clone(&block), 0)
+            .with_dispatch_lane(RuntimeRole::Compute, 0);
+        host.register_unit(Arc::new(EchoCompute)).expect("register unit");
+
+        let output = host.dispatch("echo.placement", b"ping".to_vec()).expect("dispatch");
+        assert_eq!(output, b"ping");
+
+        // The routed completion must have sampled into the mapped lane and
+        // left the in-flight counter balanced.
+        let stats = block.stat_row(0).expect("stat row").snapshot();
+        assert!(stats.ewma_ns > 0, "completion must seed the measured estimate");
+        assert_eq!(stats.inflight, 0, "claim/release must stay balanced");
+        assert!(stats.last_tick_seen > 0, "heartbeat must carry a real click");
     }
 }

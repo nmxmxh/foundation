@@ -58,6 +58,13 @@ pub fn read_route(raw: &[u8]) -> Result<&str, String> {
     std::str::from_utf8(&region[..length]).map_err(|error| format!("route is not utf-8: {error}"))
 }
 
+fn ring_host_doorbell() {
+    use std::io::Write;
+    let mut stdout = std::io::stdout();
+    let _ = stdout.write_all(&[1]);
+    let _ = stdout.flush();
+}
+
 /// Serves exchanges over epoch slots until the host goes away.
 ///
 /// `host_alive` is polled only while parked, never during the spin. It exists
@@ -91,6 +98,7 @@ pub fn serve_epoch_loop(
     // empty kernel rather than a kernel that had not finished starting.
     let ready = mapping.atomic_u32(slot_offset(IDX_KERNEL_READY))?;
     epoch::publish_next(ready);
+    ring_host_doorbell();
 
     loop {
         let input_slot: &AtomicU32 = mapping.atomic_u32(slot_offset(IDX_INPUT_WRITTEN))?;
@@ -126,6 +134,7 @@ pub fn serve_epoch_loop(
 
         let output_slot = mapping.atomic_u32(slot_offset(IDX_OUTPUT_WRITTEN))?;
         epoch::publish_next(output_slot);
+        ring_host_doorbell();
     }
 }
 
@@ -135,7 +144,9 @@ pub fn serve_epoch_loop(
 /// never read on the hot path — a read there is the cost this whole change
 /// removes — but a host that dies still closes it, and that is the only signal
 /// a kernel gets for a `SIGKILL`, which no in-band epoch can carry.
-pub fn spawn_host_liveness_watch() -> Arc<std::sync::atomic::AtomicBool> {
+pub fn spawn_host_liveness_watch(
+    worker_thread: std::thread::Thread,
+) -> Arc<std::sync::atomic::AtomicBool> {
     use std::io::Read;
     use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -148,11 +159,16 @@ pub fn spawn_host_liveness_watch() -> Arc<std::sync::atomic::AtomicBool> {
         loop {
             match std::io::stdin().read(&mut byte) {
                 Ok(0) => break,
-                Ok(_) => continue,
+                Ok(_) => {
+                    worker_thread.unpark();
+                    continue;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
             }
         }
         flag.store(false, Ordering::Release);
+        worker_thread.unpark();
     });
     alive
 }

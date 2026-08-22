@@ -160,18 +160,19 @@ test-native-rust:
 	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo test --manifest-path runtime-native/rust/Cargo.toml --lib -j "$(FOUNDATION_CARGO_TEST_JOBS)"
 
 # test-rust-loom runs the loom exhaustive-interleaving model tests for the
-# lock-free log-ring publication protocol (ovrt-core). Loom enumerates thread
+# lock-free log-ring publication protocol (ovrt-core) and the dispatch
+# buffer-flip + global-tick protocols (ovrt-dispatch). Loom enumerates thread
 # interleavings and memory orderings to prove the Acquire/Release contract has
 # no torn-read interleaving. It is the Rust analogue of the Go -race gate and is
 # the same invocation enforced by RUST_RUNTIME_LOOM=1 in the runtime checks.
 test-rust-loom:
 	@echo "Running runtime-sdk loom interleaving model tests..."
-	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo test --manifest-path runtime-sdk/rust/Cargo.toml -p ovrt-core --features loom loom_verification -j "$(FOUNDATION_CARGO_TEST_JOBS)"
+	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo test --manifest-path runtime-sdk/rust/Cargo.toml -p ovrt-core -p ovrt-dispatch --features ovrt-core/loom,ovrt-dispatch/loom loom_verification -j "$(FOUNDATION_CARGO_TEST_JOBS)"
 
 check-rust:
 	@scripts/check-rust.sh .
 
-test-bench: test-bench-go test-bench-native-rust test-bench-frontend
+test-bench: test-bench-go test-bench-native-rust test-bench-dispatch test-bench-frontend
 
 test-bench-history:
 	@tooling/scripts/benchmark_history.sh .
@@ -194,6 +195,14 @@ test-bench-go:
 test-bench-native-rust:
 	@echo "Running native GPU/runtime Rust benchmark simulation..."
 	@cargo run --manifest-path runtime-native/rust/Cargo.toml --release --bin native_flow_sim
+
+# bench-dispatch measures the placement decision cost of the ovrt-dispatch
+# lane table: pure argmin over cached tables must stay nanosecond-class and
+# the full snapshot-plus-decide path must stay under its stated microsecond
+# budget. Breaching either gate fails the target.
+test-bench-dispatch:
+	@echo "Running dispatch decision cost benchmark..."
+	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo run --release --manifest-path runtime-sdk/rust/Cargo.toml -p ovrt-dispatch --example ns_bench
 
 test-bench-frontend:
 	@echo "Running frontend workbench benchmarks and allocation profile..."
