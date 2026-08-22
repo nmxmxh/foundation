@@ -25,7 +25,8 @@ In this architecture the default read order is local memory cache first, Redis s
 4. **Reliable Event Streaming**: Use Redis Streams (`XADD`, `XREADGROUP`) for business-critical events requiring "at-least-once" delivery.
 5. **Distributed Coordination**: Use Fenced Distributed Locks for cross-process resource protection.
 6. Lightweight pub/sub notifications (transient only).
-7. Transient session management.
+7. Bounded ranked sets (`SortedSetClient`): recent-signal feeds, leaderboards — always paired with a rank-window trim.
+8. Transient session management.
 
 ## Lane separation: bus, coordination, side cache
 

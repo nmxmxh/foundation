@@ -101,6 +101,32 @@ type KeyAdminClient interface {
 	DeletePattern(ctx context.Context, pattern string, limit int64) ([]string, error)
 }
 
+// SortedSetClient is the optional ranked-lane surface for bounded recent-item
+// buffers, feeds, and leaderboards.
+//
+// It is an optional capability, asserted at startup like the other extension
+// surfaces: consumers should degrade to their in-process fallback when the
+// connected driver does not implement it. Scores are float64 per Redis
+// semantics. Ranks ascend by score with lexicographically-ascending tie
+// breaks; ZRevRange is the exact mirror of that order, so tied members come
+// back reverse-lexicographic — identical on every driver.
+type SortedSetClient interface {
+	// ZAdd inserts or updates one member and reports whether the member was
+	// newly added (1) versus rescored (0).
+	ZAdd(ctx context.Context, key string, score float64, member string) (int64, error)
+	// ZRevRange returns members in descending score order within the
+	// inclusive [start, stop] rank window of the reversed set. Negative
+	// indices count from the end (-1 = last), matching Redis. Newest-N reads
+	// use (0, N-1).
+	ZRevRange(ctx context.Context, key string, start, stop int64) ([]string, error)
+	// ZRemRangeByRank removes members in the inclusive ascending-rank window
+	// and returns how many were removed. Bounded buffers trim with
+	// (0, -(keep+1)).
+	ZRemRangeByRank(ctx context.Context, key string, start, stop int64) (int64, error)
+	// ZCard returns the current member count.
+	ZCard(ctx context.Context, key string) (int64, error)
+}
+
 // CoordinationBatchClient is the optional round-trip amortization surface for
 // coordination keys that need counter+TTL updates and notification fanout.
 // WebSocket route registration uses this during reconnect storms so each
@@ -250,6 +276,7 @@ type memoryClient struct {
 	streamSequences    map[string]int64
 	streamGroups       map[string]map[string]*memoryStreamGroup
 	hyperLogLogs       map[string]map[string]struct{}
+	zsets              map[string]map[string]float64
 	lockSequence       int64
 }
 
@@ -283,6 +310,7 @@ func NewMemoryClient(prefix string) Client {
 		streamSequences:    map[string]int64{},
 		streamGroups:       map[string]map[string]*memoryStreamGroup{},
 		hyperLogLogs:       map[string]map[string]struct{}{},
+		zsets:              map[string]map[string]float64{},
 	}
 }
 
@@ -804,6 +832,129 @@ func (c *memoryClient) DeletePattern(_ context.Context, pattern string, limit in
 	return deleted, nil
 }
 
+func (c *memoryClient) ZAdd(_ context.Context, key string, score float64, member string) (int64, error) {
+	qualified := c.qualify(key)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return 0, fmt.Errorf("memory redis client is closed")
+	}
+	c.expireIfNeededLocked(qualified, time.Now())
+	set := c.zsets[qualified]
+	if set == nil {
+		set = map[string]float64{}
+		c.zsets[qualified] = set
+	}
+	added := int64(1)
+	if _, exists := set[member]; exists {
+		added = 0
+	}
+	set[member] = score
+	return added, nil
+}
+
+// zsetAscending orders members the way Redis ranks them: score ascending,
+// ties lexicographically ascending. Ranks and rank-window trims are defined
+// against this order.
+func zsetAscending(set map[string]float64) []string {
+	members := make([]string, 0, len(set))
+	for member := range set {
+		members = append(members, member)
+	}
+	sort.Slice(members, func(i, j int) bool {
+		if set[members[i]] != set[members[j]] {
+			return set[members[i]] < set[members[j]]
+		}
+		return members[i] < members[j]
+	})
+	return members
+}
+
+// normalizeRankWindow clamps an inclusive Redis [start, stop] window (with
+// negative indices counting from the end) onto [0, n-1]. An empty window
+// returns ok=false.
+func normalizeRankWindow(start, stop, n int64) (int64, int64, bool) {
+	length := int64(n)
+	if start < 0 {
+		start += length
+	}
+	if stop < 0 {
+		stop += length
+	}
+	if start < 0 {
+		start = 0
+	}
+	if stop >= length {
+		stop = length - 1
+	}
+	if length == 0 || start > stop {
+		return 0, 0, false
+	}
+	return start, stop, true
+}
+
+func (c *memoryClient) zrevRange(qualified string, start, stop int64) ([]string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	c.expireIfNeededLocked(qualified, time.Now())
+	set := c.zsets[qualified]
+	if len(set) == 0 {
+		return []string{}, nil
+	}
+	ascending := zsetAscending(set)
+	length := int64(len(ascending))
+	begin, end, ok := normalizeRankWindow(start, stop, length)
+	if !ok {
+		return []string{}, nil
+	}
+	// The window indexes the DESCENDING set; descending[i] mirrors to
+	// ascending[length-1-i]. Walking the ascending window backwards would
+	// shift every negative stop by one rank.
+	out := make([]string, 0, end-begin+1)
+	for index := begin; index <= end; index++ {
+		out = append(out, ascending[length-1-index])
+	}
+	return out, nil
+}
+
+func (c *memoryClient) zremRangeByRank(qualified string, start, stop int64) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.expireIfNeededLocked(qualified, time.Now())
+	set := c.zsets[qualified]
+	if len(set) == 0 {
+		return 0, nil
+	}
+	ascending := zsetAscending(set)
+	begin, end, ok := normalizeRankWindow(start, stop, int64(len(ascending)))
+	if !ok {
+		return 0, nil
+	}
+	for _, member := range ascending[begin : end+1] {
+		delete(set, member)
+	}
+	if len(set) == 0 {
+		delete(c.zsets, qualified)
+	}
+	return end - begin + 1, nil
+}
+
+func (c *memoryClient) ZRevRange(_ context.Context, key string, start, stop int64) ([]string, error) {
+	return c.zrevRange(c.qualify(key), start, stop)
+}
+
+func (c *memoryClient) ZRemRangeByRank(_ context.Context, key string, start, stop int64) (int64, error) {
+	return c.zremRangeByRank(c.qualify(key), start, stop)
+}
+
+func (c *memoryClient) ZCard(_ context.Context, key string) (int64, error) {
+	qualified := c.qualify(key)
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	c.expireIfNeededLocked(qualified, time.Now())
+	return int64(len(c.zsets[qualified])), nil
+}
+
 func (c *memoryClient) PFAdd(_ context.Context, key string, els ...any) (int64, error) {
 	qualified := c.qualify(key)
 	c.mu.Lock()
@@ -889,6 +1040,9 @@ func (c *memoryClient) memoryKeyExistsLocked(qualified string, now time.Time) bo
 	if _, ok := c.hyperLogLogs[qualified]; ok {
 		return true
 	}
+	if len(c.zsets[qualified]) > 0 {
+		return true
+	}
 	return false
 }
 
@@ -909,6 +1063,7 @@ func (c *memoryClient) deleteKeyLocked(qualified string) {
 	delete(c.streamSequences, qualified)
 	delete(c.streamGroups, qualified)
 	delete(c.hyperLogLogs, qualified)
+	delete(c.zsets, qualified)
 }
 
 func (c *memoryClient) memoryStreamGroupLocked(stream, group string) *memoryStreamGroup {
@@ -1670,6 +1825,34 @@ func (c *redisClient) DeletePattern(ctx context.Context, pattern string, limit i
 	return collected, firstErr
 }
 
+func (c *redisClient) ZAdd(ctx context.Context, key string, score float64, member string) (int64, error) {
+	start := time.Now()
+	added, err := c.client.ZAdd(ctx, c.qualify(key), goredis.Z{Score: score, Member: member}).Result()
+	recordRedisOperation("zadd", start, err)
+	return added, err
+}
+
+func (c *redisClient) ZRevRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
+	startedAt := time.Now()
+	members, err := c.client.ZRevRange(ctx, c.qualify(key), start, stop).Result()
+	recordRedisOperation("zrevrange", startedAt, err)
+	return members, err
+}
+
+func (c *redisClient) ZRemRangeByRank(ctx context.Context, key string, start, stop int64) (int64, error) {
+	startedAt := time.Now()
+	removed, err := c.client.ZRemRangeByRank(ctx, c.qualify(key), start, stop).Result()
+	recordRedisOperation("zremrangebyrank", startedAt, err)
+	return removed, err
+}
+
+func (c *redisClient) ZCard(ctx context.Context, key string) (int64, error) {
+	start := time.Now()
+	cardinality, err := c.client.ZCard(ctx, c.qualify(key)).Result()
+	recordRedisOperation("zcard", start, err)
+	return cardinality, err
+}
+
 func (c *redisClient) Close() error {
 	if c == nil || c.client == nil {
 		return nil
@@ -1937,6 +2120,22 @@ func (c *shardedClient) DeletePattern(ctx context.Context, pattern string, limit
 		}
 	}
 	return collected, firstErr
+}
+
+func (c *shardedClient) ZAdd(ctx context.Context, key string, score float64, member string) (int64, error) {
+	return c.shard(key).ZAdd(ctx, key, score, member)
+}
+
+func (c *shardedClient) ZRevRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
+	return c.shard(key).ZRevRange(ctx, key, start, stop)
+}
+
+func (c *shardedClient) ZRemRangeByRank(ctx context.Context, key string, start, stop int64) (int64, error) {
+	return c.shard(key).ZRemRangeByRank(ctx, key, start, stop)
+}
+
+func (c *shardedClient) ZCard(ctx context.Context, key string) (int64, error) {
+	return c.shard(key).ZCard(ctx, key)
 }
 
 func (c *shardedClient) Close() error {
