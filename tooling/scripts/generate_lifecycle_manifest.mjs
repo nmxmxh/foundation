@@ -38,14 +38,18 @@ import path from "node:path";
 import process from "node:process";
 
 // ── Action vocabulary (kept in sync with generate_lifecycle_contract_tests.mjs) ──
+// Enforced by tests/lifecycle_contract_generator_test.sh: any word present in
+// one file but missing from the other fails `make lint`.
 const MUTATING_ACTIONS = new Set([
-  "accept", "activate", "add", "apply", "approve", "archive", "assign",
-  "authenticate", "cancel", "close", "complete", "confirm", "create",
-  "deactivate", "delete", "disable", "enable", "execute", "generate",
-  "import", "invite", "issue", "merge", "patch", "pause", "process",
-  "publish", "reject", "remove", "restore", "resume", "revoke", "run",
-  "send", "set", "start", "stop", "submit", "sync", "update", "upsert",
-  "upload",
+  "accept", "activate", "add", "admit", "allocate", "apply", "approve",
+  "archive", "assign", "attach", "authenticate", "cancel", "close",
+  "complete", "confirm", "create", "deactivate", "delete", "disable",
+  "dispatch", "enable", "enroll", "end", "execute", "generate", "heartbeat",
+  "import", "ingest", "invite", "issue", "join", "leave", "license", "merge",
+  "open", "patch", "pause", "pledge", "process", "publish", "refer",
+  "register", "reject", "remove", "restore", "resume", "revoke", "run",
+  "send", "serve", "set", "start", "stop", "submit", "sync", "update",
+  "upsert", "upload",
 ]);
 
 const READ_ONLY_ACTIONS = new Set([
