@@ -19,7 +19,8 @@
 #[cfg(unix)]
 fn main_real() -> Result<(), String> {
     use ovrt_dispatch::{
-        decide, DispatchBlock, DispatchRequest, LaneDescriptor, LaneStats, MAX_LANES,
+        decide, DispatchBlock, DispatchLaneDescriptor, DispatchLaneStats, DispatchRequest,
+        MAX_LANES,
     };
     use std::sync::Arc;
     use std::time::Instant;
@@ -35,7 +36,7 @@ fn main_real() -> Result<(), String> {
     // remaining slots stay retired, matching a realistic table.
     let mut rows = Vec::new();
     for slot in 0..8_usize {
-        rows.push(LaneDescriptor {
+        rows.push(DispatchLaneDescriptor {
             lane_id: slot as u16,
             jurisdiction: 0,
             max_concurrency: 8,
@@ -52,7 +53,7 @@ fn main_real() -> Result<(), String> {
         block
             .apply_mirror_stats(
                 lane,
-                &LaneStats {
+                &DispatchLaneStats {
                     ewma_ns: if live { 1_000 + lane as u64 * 250 } else { 0 },
                     inflight: (lane % 3) as u32,
                     max_concurrency: 8,
@@ -69,7 +70,7 @@ fn main_real() -> Result<(), String> {
         affinity_key: 2,
     };
     let descriptors = block.snapshot_descriptors().map_err(|error| error.to_string())?;
-    let build_stats = || -> Vec<Option<LaneStats>> {
+    let build_stats = || -> Vec<Option<DispatchLaneStats>> {
         (0..MAX_LANES).map(|lane| block.stat_row(lane).ok().map(|row| row.snapshot())).collect()
     };
 

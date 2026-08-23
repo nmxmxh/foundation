@@ -106,3 +106,4 @@ TE-40|docs/testing_practices.md|performance|high|partial|script:tooling/scripts/
 TE-41|docs/testing_practices.md|agent|high|partial|script:tooling/scripts/agent_contract_check.sh;review|oracle-strength-note|yes
 TE-42|docs/testing_practices.md|testing|medium|human|review|mirror-layout-precedent|yes
 MATH-01|docs/mathematical_practices.md|formal|high|human|review|mathematical-practices-checklist|yes
+CP-44|docs/coding_practices.md|runtime|high|partial|script:tooling/scripts/go_concurrency_practices_check.sh;review|ipc-idle-cpu-evidence|yes

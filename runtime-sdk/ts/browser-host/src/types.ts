@@ -88,3 +88,21 @@ export type RuntimeDiagnostics = {
 export type RuntimeDiagnosticsSnapshot = RuntimeDiagnostics & {
   issues: RuntimeCapabilityIssue[];
 };
+
+// Canonical control-plane descriptors. Mirror runtime_dispatch.capnp
+// field-for-field; the field-drift check enforces parity against the schema.
+export type DispatchLaneDescriptor = {
+  unitClassMask: number;
+  affinityBloom: number;
+  laneId: number;
+  jurisdiction: number;
+  maxConcurrency: number;
+  generation: number;
+};
+
+export type DispatchLaneStats = {
+  ewmaNs: number;
+  inflight: number;
+  maxConcurrency: number;
+  lastTickSeen: number;
+};

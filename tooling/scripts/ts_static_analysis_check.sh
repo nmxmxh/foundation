@@ -61,7 +61,7 @@ for pkg in "${packages[@]}"; do
   checked=1
 done
 
-class_component_matches="$(rg -n 'extends[[:space:]]+(React\.)?(PureComponent|Component)' \
+class_component_matches="$(rg -n 'extends[[:space:]]+(React\.)?(PureComponent|Component)\b' \
   "$target/frontend-kit/ts/src" "$target/ui-minimal/ts/src" \
   "$target/runtime-transport/ts/src" "$target/runtime-sdk/ts/browser-host/src" \
   "$target/config-contracts/ts/src" "$target/runtime-native/ts/src" \

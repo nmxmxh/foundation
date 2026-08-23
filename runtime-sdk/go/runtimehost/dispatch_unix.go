@@ -28,6 +28,9 @@ import (
 // size. Short files fail here rather than SIGBUS later, matching the Rust
 // refusal.
 func OpenDispatchRegion(path string) (*DispatchBlock, error) {
+	// #nosec G304 -- the region path is operator-supplied configuration
+	// pointing at a pre-sized dispatch file, not request-controlled input;
+	// length is verified below before mapping.
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open dispatch region %q: %w", path, err)
@@ -168,7 +171,7 @@ func (s *DispatchStatRow) Claim() (uint32, error) {
 
 // ReleaseOne clears one in-flight unit, refusing to wrap below zero.
 func (s *DispatchStatRow) ReleaseOne() (bool, error) {
-	for attempts := 0; attempts < 8; attempts++ {
+	for range 8 {
 		slot, err := s.inflight()
 		if err != nil {
 			return false, err
@@ -325,7 +328,7 @@ func (b *DispatchBlock) PublishDescriptors(rows []DispatchLaneDescriptor, genera
 	}
 	target := 1 - active
 	base := int(generated.DISPATCH_BUFFERS_OFFSET) + int(target)*int(generated.DISPATCH_BUFFER_BYTES)
-	for slot := 0; slot < int(generated.DISPATCH_MAX_LANES); slot++ {
+	for slot := range int(generated.DISPATCH_MAX_LANES) {
 		descriptor := DispatchLaneDescriptor{
 			LaneID:       uint16(slot),
 			Jurisdiction: uint16(generated.DISPATCH_JURISDICTION_GLOBAL),

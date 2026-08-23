@@ -3,7 +3,6 @@
 package runtimehost
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -24,8 +23,7 @@ func TestDispatchBlockMirrorsRemoteLanesOverTheBus(t *testing.T) {
 	defer func() { _ = block.Close() }()
 
 	bus := rediskit.NewMemoryClient("mirror")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := placement.ListenMirrors(ctx, bus, "", block, nil); err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -215,7 +213,7 @@ func waitForMirrorApply(t *testing.T, block *DispatchBlock, wantRows int) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		applied := 0
-		for lane := 0; lane < int(generated.DISPATCH_MAX_LANES); lane++ {
+		for lane := range int(generated.DISPATCH_MAX_LANES) {
 			stats, err := block.SnapshotStatRow(lane)
 			if err == nil && stats.EwmaNs > 0 {
 				applied++

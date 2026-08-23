@@ -23,7 +23,9 @@ pub mod publisher;
 #[cfg(unix)]
 pub mod sample;
 
-pub use decide::{blend_ewma, decide, DispatchRequest, LaneDescriptor, LaneStats, MAX_LANES};
+pub use decide::{
+    blend_ewma, decide, DispatchLaneDescriptor, DispatchLaneStats, DispatchRequest, MAX_LANES,
+};
 
 #[cfg(unix)]
 pub use block::DispatchBlock;

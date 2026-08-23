@@ -44,10 +44,21 @@ func (f TicketExecutorFunc) Execute(ctx context.Context, ticket RemoteComputeTic
 	return f(ctx, ticket, payload)
 }
 
+// maxInlinePayloadBytes caps the inline chunk payload at one transport
+// frame. Chunks are sized well below this by HCS2 construction; larger work
+// must be fetched by handle instead of inlined.
+const maxInlinePayloadBytes = 2 << 20
+
 // EncodeRemoteComputeRequest packs a ticket and its inline chunk payload.
 func EncodeRemoteComputeRequest(ticket RemoteComputeTicket, payload []byte) ([]byte, error) {
 	if err := ticket.Validate(); err != nil {
 		return nil, fmt.Errorf("placement: %w", err)
+	}
+	if len(payload) > maxInlinePayloadBytes {
+		return nil, fmt.Errorf(
+			"placement: ticket %s/%d inline payload %d exceeds the %d-byte frame budget",
+			ticket.ProjectionID, ticket.ChunkIndex, len(payload), maxInlinePayloadBytes,
+		)
 	}
 	checksum, err := hex.DecodeString(ticket.ChecksumHex)
 	if err != nil || len(checksum) != 32 {
@@ -55,14 +66,17 @@ func EncodeRemoteComputeRequest(ticket RemoteComputeTicket, payload []byte) ([]b
 	}
 	proj := []byte(ticket.ProjectionID)
 	scope := []byte(ticket.ScopeKey)
-	if len(proj) == 0 || len(proj) > 255 || len(scope) > 255 {
-		return nil, fmt.Errorf("placement: projection id 1..255 bytes, scope 0..255")
+	if len(proj) == 0 || len(proj) > 255 {
+		return nil, fmt.Errorf("placement: projection id 1..255 bytes, got %d", len(proj))
+	}
+	if len(scope) > 255 {
+		return nil, fmt.Errorf("placement: scope 0..255 bytes, got %d", len(scope))
 	}
 
 	frame := make([]byte, 0, 8+len(proj)+len(scope)+len(payload))
-	frame = append(frame, remoteComputeWireVersion, byte(len(proj)))
+	frame = append(frame, remoteComputeWireVersion, byte(len(proj))) // #nosec G115 -- proj length validated 1..255 above
 	frame = append(frame, proj...)
-	frame = append(frame, byte(len(scope)))
+	frame = append(frame, byte(len(scope))) // #nosec G115 -- scope length validated <= 255 above
 	frame = append(frame, scope...)
 	frame = binary.LittleEndian.AppendUint32(frame, ticket.ChunkIndex)
 	frame = binary.LittleEndian.AppendUint32(frame, ticket.PayloadLen)
@@ -71,7 +85,7 @@ func EncodeRemoteComputeRequest(ticket RemoteComputeTicket, payload []byte) ([]b
 	frame = binary.LittleEndian.AppendUint16(frame, ticket.Jurisdiction)
 	frame = binary.LittleEndian.AppendUint64(frame, ticket.DeadlineNs)
 	frame = binary.LittleEndian.AppendUint64(frame, ticket.AffinityKey)
-	frame = binary.LittleEndian.AppendUint32(frame, uint32(len(payload)))
+	frame = binary.LittleEndian.AppendUint32(frame, uint32(len(payload))) // #nosec G115 -- capped by maxInlinePayloadBytes above
 	frame = append(frame, payload...)
 	return frame, nil
 }

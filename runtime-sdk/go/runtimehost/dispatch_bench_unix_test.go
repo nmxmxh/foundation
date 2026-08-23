@@ -35,7 +35,7 @@ func BenchmarkPlacementFullHostPath(b *testing.B) {
 	if err != nil {
 		b.Fatalf("read tick: %v", err)
 	}
-	for lane := 0; lane < 8; lane++ {
+	for lane := range 8 {
 		row, err := block.StatRow(lane)
 		if err != nil {
 			b.Fatalf("row %d: %v", lane, err)

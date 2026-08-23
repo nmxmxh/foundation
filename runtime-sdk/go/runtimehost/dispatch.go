@@ -41,13 +41,14 @@ type DispatchStatRow struct {
 }
 
 // DispatchLaneDescriptor is one row of a published descriptor table.
+// Field order mirrors runtime_dispatch.capnp.
 type DispatchLaneDescriptor struct {
+	UnitClassMask  uint64
+	AffinityBloom  uint64
 	LaneID         uint16
 	Jurisdiction   uint16
 	MaxConcurrency uint32
 	Generation     uint32
-	UnitClassMask  uint64
-	AffinityBloom  uint64
 }
 
 // Covers reports whether this lane executes every required class bit.
@@ -93,10 +94,7 @@ func (r DispatchRequest) expectedLatencyNs(stats DispatchLaneStats, descriptor D
 	if stats.EwmaNs == 0 {
 		return 0, false
 	}
-	concurrency := stats.MaxConcurrency
-	if descriptor.MaxConcurrency > concurrency {
-		concurrency = descriptor.MaxConcurrency
-	}
+	concurrency := max(descriptor.MaxConcurrency, stats.MaxConcurrency)
 	if concurrency == 0 {
 		concurrency = 1
 	}
@@ -151,14 +149,8 @@ func Decide(
 ) (laneID uint16, ok bool) {
 	bestScore := maxUint64
 	found := false
-	count := len(descriptors)
-	if len(stats) < count {
-		count = len(stats)
-	}
-	if count > int(generated.DISPATCH_MAX_LANES) {
-		count = int(generated.DISPATCH_MAX_LANES)
-	}
-	for index := 0; index < count; index++ {
+	count := min(min(len(stats), len(descriptors)), int(generated.DISPATCH_MAX_LANES))
+	for index := range count {
 		descriptor := descriptors[index]
 		laneStats := stats[index]
 		// Retired or unpublished slots carry an empty class mask and must

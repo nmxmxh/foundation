@@ -24,7 +24,7 @@ func TestMemoryClientSortedSetBoundedRecentBuffer(t *testing.T) {
 	const key = "signals:recent"
 
 	// Newest-wins insert order with sequence scores.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		added, err := client.ZAdd(ctx, key, float64(i), memberFor(i))
 		if err != nil {
 			t.Fatalf("zadd %d: %v", i, err)
@@ -93,7 +93,7 @@ func TestMemoryClientSortedSetWindowsAndTTL(t *testing.T) {
 	ctx := context.Background()
 	const key = "feed"
 
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		_, err := client.ZAdd(ctx, key, float64(i+1), memberFor(i))
 		if err != nil {
 			t.Fatalf("zadd %d: %v", i, err)

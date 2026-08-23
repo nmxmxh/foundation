@@ -57,12 +57,10 @@ func TestWaitForEpochChangeFallbackIsAllocationStable(t *testing.T) {
 	short := measureParkChurn(t, shortWindow)
 	long := measureParkChurn(t, longWindow)
 
-	delta := int64(long) - int64(short)
-	if delta < 0 {
+	delta := max(int64(long)-int64(short),
 		// Scheduler noise can flip sign at these magnitudes; only growth
 		// indicates a per-wake allocator.
-		delta = 0
-	}
+		0)
 	if delta > wakeBudgetBytes {
 		t.Fatalf(
 			"parked wait allocated %dB more over the +%v window (~%d fallback wakes); per-park allocation likely returned to waitForEpochChange",
@@ -106,5 +104,23 @@ func TestWaitForEpochChangeTimeoutFiresWithoutProgress(t *testing.T) {
 	}
 	if current != 3 {
 		t.Fatalf("current = %d want unchanged 3", current)
+	}
+}
+
+// TestWaitForEpochChangeDoorbellCloseIsPeerLost pins the closed-doorbell arm:
+// a closed channel means the peer is gone and must end the wait immediately
+// with errEpochPeerLost rather than riding the fallback ladder to timeout.
+func TestWaitForEpochChangeDoorbellCloseIsPeerLost(t *testing.T) {
+	slot := uint32(1)
+	policy := epochWaitPolicy{spinIterations: 0, maxSleep: time.Millisecond, timeout: 5 * time.Second}
+	closed := make(chan struct{})
+	close(closed)
+
+	current, err := waitForEpochChange(&slot, 1, policy, func() bool { return true }, closed)
+	if !errors.Is(err, errEpochPeerLost) {
+		t.Fatalf("err = %v want errEpochPeerLost", err)
+	}
+	if current != 1 {
+		t.Fatalf("current = %d want unchanged", current)
 	}
 }
