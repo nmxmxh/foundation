@@ -88,16 +88,24 @@ func TestProcessPoolEpochDoorbellKernel(t *testing.T) {
 			continue
 		}
 		buffer = buffer[:generated.BUFFER_TOTAL_BYTES]
-		// Stability guard: the parent may be mid-publish; re-read until two
-		// consecutive copies agree, then parse. A torn snapshot is skipped,
-		// never fatal — the next input epoch re-triggers this loop.
+		// Seqlock read: sample the input epoch before and after the payload
+		// copy. Equal (and non-zero) means the parent's publish store happened
+		// entirely before or after our copy, so payload and epoch describe one
+		// coherent generation. Anything else is torn — skip; the next input
+		// epoch re-triggers this loop. Never fatal.
 		stable := false
-		for attempt := 0; attempt < 8 && !stable; attempt++ {
+		for attempt := 0; attempt < 16 && !stable; attempt++ {
+			before := observeEpoch(inputSlot)
 			copy(buffer, raw)
+			after := observeEpoch(inputSlot)
+			if before == after && before != 0 {
+				stable = true
+			}
 			time.Sleep(time.Millisecond)
-			var second [generated.BUFFER_TOTAL_BYTES]byte
-			copy(second[:], raw)
-			stable = string(second[:]) == string(buffer)
+		}
+		if !stable {
+			fmt.Fprintf(os.Stderr, "ovrt-epoch-helper: input snapshot never stabilized\n")
+			continue
 		}
 		func() {
 			defer func() {
