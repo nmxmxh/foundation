@@ -810,19 +810,22 @@ func (w *processWorker) stopExchangeLoop() {
 }
 
 func (w *processWorker) doorbellLoop(r *bufio.Reader) {
+	// Capture the channel once: this goroutine outlives the mu-protected
+	// section that spawned it, so a restart swapping in a fresh doorbellCh
+	// must never race the close of the one this loop owns.
+	ch := w.doorbellCh
 	defer func() {
-		if w.doorbellCh != nil {
-			close(w.doorbellCh)
+		if ch != nil {
+			close(ch)
 		}
 	}()
 	buf := make([]byte, 1)
 	for {
-		_, err := r.Read(buf)
-		if err != nil {
+		if _, err := r.Read(buf); err != nil {
 			return
 		}
 		select {
-		case w.doorbellCh <- struct{}{}:
+		case ch <- struct{}{}:
 		default:
 		}
 	}
@@ -927,6 +930,11 @@ func (x stdioExchange) Restart() error {
 	return nil
 }
 
+// supervisedExitTimeout bounds how long closeLocked waits on the supervisor
+// goroutine's reap after the child has been killed. A variable rather than a
+// const purely so tests can shrink it.
+var supervisedExitTimeout = 5 * time.Second
+
 // waitForSupervisedExit blocks until superviseChild has reaped the process.
 //
 // Bounded rather than open-ended: the child has already been killed by the
@@ -934,7 +942,7 @@ func (x stdioExchange) Restart() error {
 // shutdown that could hang on it would be worse than one that gives up and
 // reports it.
 func (w *processWorker) waitForSupervisedExit() error {
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(supervisedExitTimeout)
 	for w.childRunning.Load() {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("native runtime worker %d did not exit after kill", w.index)

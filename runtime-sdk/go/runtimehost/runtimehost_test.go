@@ -1088,11 +1088,11 @@ func newRuntimeBuffer(t *testing.T, payload string) []byte {
 	return raw
 }
 
-func testLogger(t *testing.T) logger.Logger {
-	t.Helper()
+func testLogger(tb testing.TB) logger.Logger {
+	tb.Helper()
 	log, err := logger.NewDefault()
 	if err != nil {
-		t.Fatalf("NewDefault logger error = %v", err)
+		tb.Fatalf("NewDefault logger error = %v", err)
 	}
 	return log
 }

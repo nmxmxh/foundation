@@ -1,10 +1,7 @@
 # package|floor|target
 github.com/nmxmxh/ovasabi_foundation/config-contracts/go/runtimeconfig|98.1|95.0
 github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/resultauth|97.4|95.0
-# 2026-08-22 supervised exception: in-flight process_pool doorbell/supervision work
-# (doorbellLoop, superviseChild, waitForSupervisedExit) is intentionally
-# untested until its contract settles; restore >=86.7 when that lands.
-github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost|85.1|95.0
+github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost|87.5|95.0
 github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/transport|95.7|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/apidocs|71.8|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth|90.6|95.0
