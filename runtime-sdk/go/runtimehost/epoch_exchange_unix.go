@@ -87,13 +87,28 @@ func (x epochExchange) Exchange(ctx context.Context, unitID string, buffer []byt
 		}
 	}
 
-	if _, err := waitForEpochChange(outputSlot, lastOutput, x.policy, x.alive, x.doorbell); err != nil {
+	newOutput, err := waitForEpochChange(outputSlot, lastOutput, x.policy, x.alive, x.doorbell)
+	if err != nil {
 		return err
 	}
 
-	// And the acquire in waitForEpochChange is what makes this copy safe. Read
-	// the buffer before observing the epoch and it holds the previous exchange.
-	copy(buffer, x.shm.raw)
+	// The acquire in waitForEpochChange makes this copy safe against the
+	// publish that produced newOutput — but a fast kernel may already be into
+	// its NEXT write if it never blocks on the consumed ack. Validate the read
+	// seqlock-style: the output epoch must still be newOutput after the copy,
+	// otherwise the bytes are a torn mix of two generations. Bounded retries;
+	// each pass re-arms on the latest observed epoch.
+	for attempt := 0; attempt < 8; attempt++ {
+		copy(buffer, x.shm.raw)
+		if current := observeEpoch(outputSlot); current == newOutput {
+			break
+		}
+		next, waitErr := waitForEpochChange(outputSlot, observeEpoch(outputSlot), x.policy, x.alive, x.doorbell)
+		if waitErr != nil {
+			return waitErr
+		}
+		newOutput = next
+	}
 
 	consumed, err := epochSlot(x.shm.raw, generated.IDX_OUTPUT_CONSUMED)
 	if err != nil {
