@@ -136,6 +136,7 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 12. For bounded stream copies, use caller-owned buffers or exact-size bounded reads when the size is part of the contract. Avoid accidental scratch allocation in byte loops, and benchmark both the materialized API and any callback/borrowed-view API separately.
 13. For fixed-size checksum and identifier encodings, prefer stack-backed `hex.Encode`/`hex.Decode` into fixed arrays before the final string conversion. Reserve `hex.EncodeToString`/`hex.DecodeString` for cold paths or tests where the extra allocation is irrelevant.
 14. Validate offset/length arithmetic with checked addition before slicing, issuing range reads, composing manifests, or building object-store byte ranges. Integer wraparound in a hot path is both a correctness bug and a potential unbounded allocation trigger.
+14a. Wake/drain loops reading a peer's pipe must read in chunks, not single bytes. ANY bytes on a signaling pipe mean "peer is alive"; per-byte reads turn one log line from the child into thousands of loop iterations and channel operations. `bufio` already amortizes the syscall — chunk the userspace side too.
 15. Return borrowed readers or views for immutable in-memory payloads when the caller consumes them synchronously. Make a defensive copy only when storing caller-provided bytes, exposing mutable data, or allowing the view to outlive the owner.
 15c. Pooled runtime executors should offer a caller-owned destination API when
     output size is bounded. The compatibility API may return an owned copy;
@@ -375,6 +376,19 @@ performance posture is:
 13. Default-stream or implicit-queue serialization is a performance smell.
     Foundation adapters should use explicit streams/queues/events and expose
     ordering edges in diagnostics.
+
+## Shared-memory slot protocols: the baseline-arming contract
+
+Four-slot exchange protocols (input-written / output-written / consumed / ready) lose wakeups in exactly one way: a participant snapshots the epoch it waits on AFTER performing the action that makes its counterpart publish. The counterpart's store then lands inside the already-armed baseline and is never observed — both sides park healthy on different slots until their timeouts fire (production shape: paired 10s timeouts, restart storms, unexplained CPU creep).
+
+Per-exchange ordering contract:
+
+1. Snapshot waited-slot baselines (consumed, input) BEFORE any write that triggers the counterpart.
+2. Write payload, publish your own slot.
+3. Re-snapshot the input baseline immediately after publishing — the counterpart may consume and publish its next input before you loop.
+4. Wait on armed baselines only.
+
+Payload reads paired with a publishing epoch use a seqlock pattern: sample epoch, copy, re-sample epoch; retry while unequal. Never sleep inside the retry — a writer outrunning a sleeping reader livelocks the stabilization loop indefinitely (measured under benchmark-rate publication). Reference implementation: `runtime-sdk/go/runtimehost/process_pool_doorbell_test.go`; wait-loop slope guard: `epoch_wait_test.go`.
 
 ## Virtual-memory-aware profiling
 

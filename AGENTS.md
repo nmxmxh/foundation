@@ -249,6 +249,8 @@ The Foundation modules are linked through a unified "Nervous System":
 2. **Don't use MutationObserver for business state**: Use Zustand stores.
 3. **Don't store secrets in frontend**: Use environment-injected config or secure storage.
 4. **Don't skip error wrapping**: Use `errors.Wrap(err, "context")` to preserve stack traces.
+5. **Don't put regex escapes in `grep -F` patterns**: `-F` matches backslashes literally, so gates silently never fire. Enforced by `tooling/scripts/check_managed_patches.sh` (CP-38).
+6. **Don't add a cache layer without measured layering evidence**: benchmark the existing lane with `b.ReportAllocs`, pin a `testing.AllocsPerRun` budget guard, and prove the new layer is faster before placing it in front (see `docs/database_practices.md`).
 
 ## Testing Requirements
 

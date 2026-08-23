@@ -147,6 +147,17 @@ Enforcement:
 - Concurrency-focused tests where shared state exists.
 - Reviewer gate on goroutine closures and channel/context handoffs that carry mutable references.
 
+### Shell gates and managed patches (CP-38)
+
+Anchor-grepping gate scripts fail in ways unit tests do not reach. These rules are enforced by `tooling/scripts/check_managed_patches.sh` through the `check-coding-practices` target.
+
+1. Never put a regex escape inside a `grep -F` pattern. `-F` matches backslashes literally, so `\*` searches for a backslash before a star and the gate never fires. Drop the escape, switch to `grep -E`, or add a `grep-f-ok` waiver comment for intentional literal-backslash searches. `$'...'` segments are shell-interpreted and exempt.
+2. Gate multi-edit clusters behind one precondition. Partial application of a Go-source patch leaves the project uncompilable. Verify every anchor exists before applying the first edit.
+3. Order remove-before-insert when replacement text contains the search text. A global substitute would then corrupt both copies.
+4. Every managed patch carries three proofs: it applies to an old seed, it is a no-op on a current seed, and each change writes one `.foundation-patches.tsv` ledger entry. Test all three against a synthetic tree built from `templates/backend`.
+5. Finish file-writing patches with `gofmt -w`; field-alignment drift is otherwise shipped to projects.
+6. Patch functions must be invoked exactly once each. Definition without call site is dead drift; call without definition is a runtime error mid-update.
+
 ### CP-07: Apply allocation discipline in hot paths
 
 Level: `Contextual`

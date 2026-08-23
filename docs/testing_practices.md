@@ -654,6 +654,7 @@ Requirements:
 6. Service-backed Docker ports should be ephemeral by default and discovered at runtime. Fixed host ports are allowed only through explicit override environment variables.
 7. Generated app integration tests must write Docker-assigned test ports into a runtime env file and feed those resolved URLs into Go tests. This keeps manual parallel app runs from fighting over `5433`/`6380`.
 8. Catalogue-wide app test runners must use isolated Compose project names per app/run so parallel execution does not share containers, networks, volumes, or runtime env files.
+9. Service-backed lanes catch LAYERING mistakes unit suites structurally cannot: a guard placed behind an adapter instead of at a shared choke point passes every in-memory test and fails the first time real traffic bypasses the adapter (reference: placement mirror validation caught by TestServiceBackedPlacementMirrorLane). When a guard moves layers, run its service-backed leg in the same change.
 
 Enforcement:
 
@@ -715,10 +716,17 @@ Requirements:
    per-operation churn; `alloc_space` and `alloc_objects` are cumulative churn;
    `inuse_space` and `inuse_objects` are retained footprint. Do not describe
    one as another.
-9. Hot collection and scan benchmarks must report enough cardinalities to
-   expose the growth curve. When the operation filters or projects data, report
-   candidates inspected and results produced, or document why those counters
-   cannot yet be observed.
+ 9. Hot collection and scan benchmarks must report enough cardinalities to
+    expose the growth curve. When the operation filters or projects data, report
+    candidates inspected and results produced, or document why those counters
+    cannot yet be observed.
+ 9a. Allocation guards for parked/wait/daemon loops must measure the SLOPE of
+    allocations across two duration windows, not an absolute ceiling. Fixed
+    per-call costs (timers, closures, scheduler noise) are identical between
+    windows and cancel; only a per-iteration allocator survives the delta. An
+    absolute ceiling breaks whenever the runtime shifts fixed costs.
+    Reference: runtimehost/epoch_wait_test.go
+    (TestWaitForEpochChangeFallbackIsAllocationStable).
 10. A source-line profile may identify the allocator, but the before/after
     benchmark sizes the physical win. Sampled profile shares must not be
     reported as exact allocation counts.

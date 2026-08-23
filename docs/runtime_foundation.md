@@ -90,6 +90,15 @@ falls back to Postgres.
 14. Main-thread code must not call blocking `Atomics.wait`; workers own blocking waits and main-thread code uses `Atomics.waitAsync` or message fallback when needed.
 15. If DOM observation is unavoidable, keep it inside a narrow UI adapter and prefer `ResizeObserver` or `IntersectionObserver` before `MutationObserver`.
 
+## Cross-process epoch exchange ordering
+
+The Go host ↔ kernel shm-epoch transport runs a four-slot protocol (input-written / output-written / consumed / kernel-ready) with a doorbell pipe for parked waits. Two rules keep it deadlock-free under load; both were paid for with a sustained-load restart storm (2026-08-23, see `foundation_benchmarks.md`):
+
+1. **Baseline arming before triggering.** A participant must snapshot the slot it waits on BEFORE performing the write that makes the counterpart publish. Arming after the write folds the counterpart's store into an already-satisfied baseline and parks the waiter forever — while the counterpart proceeds to wait on a response nobody will produce. Both sides stalling healthy on different slots is this bug's signature.
+2. **Single-`Wait` ownership.** Exactly one goroutine calls `cmd.Wait()` per child (the supervisor under shm-epoch, `closeLocked` elsewhere). The loser of a double-Wait gets "no child processes", which reads as a shutdown bug.
+
+Supporting rules: doorbell pipes are drained in chunks (any bytes = one ring, coalescing chatty children); a ready-handshake failure inside worker start must tear down the half-started child and clear `cmd` before propagating, or the next start mistakes the corpse for a healthy worker; wait loops reuse one timer via Stop/drain/Reset (`time.After` per park is a timer-churn leak); and payload reads paired with a publishing epoch validate seqlock-style (sample/copy/re-sample) without sleeping between attempts.
+
 ## Runtime state-machine invariants
 
 The runtime ladder follows the TLA-derived rules in `foundation/docs/tla_architecture_practices.md`: each faster lane is a refinement of the same visible command/event contract.

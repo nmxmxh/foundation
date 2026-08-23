@@ -26,6 +26,8 @@ In this architecture the default read order is local memory cache first, Redis s
 5. **Distributed Coordination**: Use Fenced Distributed Locks for cross-process resource protection.
 6. Lightweight pub/sub notifications (transient only).
 7. Bounded ranked sets (`SortedSetClient`): recent-signal feeds, leaderboards — always paired with a rank-window trim.
+   - Driver parity is mandatory for ranked sets: ZRevRange mirrors the ascending order exactly, so equal scores return reverse-lexicographic — verified identical on the memory and live-server drivers by cross-driver tests (`redis/sortedset_test.go`, `servicebacked/sortedset_test.go`). A memory-client implementation that "passes alone" hides real-Redis divergence.
+   - Validate mirror/ingest stats at the LISTENER choke point, not inside individual sinks: a guard behind one adapter passes every in-memory test and silently disappears for every other consumer (caught service-backed, 2026-08-23).
 8. Transient session management.
 
 ## Lane separation: bus, coordination, side cache

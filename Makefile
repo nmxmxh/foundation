@@ -338,6 +338,7 @@ check-ts-static-analysis:
 
 check-coding-practices:
 	@tooling/scripts/coding_practices_check.sh .
+	@tooling/scripts/check_managed_patches.sh tooling/scripts
 
 check-rust-runtime-practices:
 	@tooling/scripts/rust_runtime_practices_check.sh .
