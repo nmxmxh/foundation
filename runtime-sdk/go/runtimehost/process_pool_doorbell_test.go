@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -79,7 +80,12 @@ func TestProcessPoolEpochDoorbellKernel(t *testing.T) {
 	for {
 		if _, err := waitForEpochChange(inputSlot, observeEpoch(inputSlot), policy,
 			func() bool { return true }, nil); err != nil {
-			return // parent gone
+			// Idle tick (or transient mapping hiccup): report why, then keep
+			// serving. Exiting here would manufacture a fake peer-lost on
+			// the parent side and trigger a restart storm under load.
+			fmt.Fprintf(os.Stderr, "ovrt-epoch-helper: input wait: %v; idling\n", err)
+			time.Sleep(5 * time.Millisecond)
+			continue
 		}
 		buffer = buffer[:generated.BUFFER_TOTAL_BYTES]
 		// Stability guard: the parent may be mid-publish; re-read until two
