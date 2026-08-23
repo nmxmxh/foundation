@@ -654,6 +654,14 @@ Contracts:
 - Values ride `json.RawMessage` opaquely. Integer precision above int64 range
   degrades identically on every lane today; wrap such numbers in raw bytes.
 
+Allocation budgets pin these numbers in CI. `TestAllocationBudgetCachedHit`
+fails when a warm hit exceeds 24 allocs/op, and the benchmarks report
+`B/op` alongside ns/op. Any new hot-path layer needs the same pairing: a
+`testing.AllocsPerRun` guard plus `b.ReportAllocs` benchmarks, and a measured
+comparison against existing lanes before the layer is placed in front of them.
+The comparison is what produced the layering rule above; without it the cache
+would have silently regressed warm-partition reads by roughly nine times.
+
 ## River Queue Session Lane
 
 Set `RIVER_DIRECT_URL` to give River a session-mode Postgres endpoint that

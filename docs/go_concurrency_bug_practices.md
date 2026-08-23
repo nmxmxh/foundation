@@ -97,6 +97,13 @@ Go makes goroutines cheap enough that codebases create them freely. That is usef
 3. Channels in hot paths need explicit capacity rationale. Unbuffered channels are rendezvous points, not default queues. Buffered channels are bounded queues and need overflow policy.
 4. A child goroutine that sends a result after the parent may time out must use a buffer, context-aware select, or an explicit cancellation contract so it cannot leak.
 5. Timers and tickers are hidden goroutine/channel machinery. Do not create placeholder timers such as `time.NewTimer(0)` just to fill a select case. Create timeout channels only when enabled, and stop tickers/timers on every exit path.
+6. `time.After` inside a select loop is a per-iteration timer leak. An unfired `time.After` timer lives in the runtime heap until it fires; a parked loop that wakes through another case abandons it every iteration. At park rates in the thousands per second this is a permanent allocation-and-timer-wheel tax on the hottest path (production symptom: unexplained CPU + GC creep). Use one `time.NewTimer` created before the loop with the Stop/drain/Reset idiom:
+   ```go
+   case <-fallback.C:
+       if !fallback.Stop() { select { case <-fallback.C: default: } }
+       fallback.Reset(wakeInterval)
+   ```
+   Regression guard: measure TotalAlloc SLOPE across two wait windows (short vs long); fixed costs cancel and only a per-park allocator shows. See `runtimehost/epoch_wait_test.go`.
 6. Runtime deadlock and race detectors are useful but incomplete. Deadlock detection may miss partial hangs when other goroutines keep running; race detection misses non-race order bugs, channel panics, select nondeterminism, and some races that do not manifest under the sampled interleaving.
 
 Watch points for checks and review:

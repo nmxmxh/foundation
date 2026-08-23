@@ -4281,3 +4281,26 @@ cd foundation/runtime-sdk/go && go test ./runtimehost -run TestDecideDoesNotAllo
 SERVICE_BACKED_REDIS_URL=redis://localhost:6379 SERVICE_BACKED_DATABASE_URL=unused \
   go test -tags servicebacked -run TestServiceBackedPlacementMirrorLane -v ./servicebacked
 ```
+
+
+## 2026-08-23 Epoch-exchange transport: doorbell/supervision contract proven under load
+
+The shm-epoch pooled exchange (doorbell wake → slot swap → kernel round trip → ack) reached sustained-load stability. Two findings shipped with it:
+
+1. **Baseline-arming lost wakeup (protocol).** Both exchange participants parked healthy on different slots with paired 10s timeouts: each side armed its waited-slot baseline AFTER performing the action that triggers the counterpart's publish, so the counterpart's store landed inside an already-armed baseline. Fix + contract documented in `performance_practices.md` ("baseline-arming") and `mesh_dispatch_practices.md`. Reference child implementation: `process_pool_doorbell_test.go`.
+2. **`time.After` per-park timer churn (Go).** The parked wait allocated a timer per fallback wake (~210 B/wake at benchmark park rates); replaced with a reusable Stop/drain/Reset timer. Regression guard measures TotalAlloc SLOPE across two wait windows so fixed runtime costs cancel (TE-40 9a).
+
+Sustained-load result after fixes (300×3 iterations, no restarts, no peer-lost):
+
+| Benchmark | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `BenchmarkProcessPoolEpochExchange` | ~1.24–1.32 ms | ~1,010 | 15 |
+
+The remaining cost is dominated by the kernel child's own round trip; the host-side doorbell path adds only the wake delivery.
+
+Reproduce:
+
+```bash
+cd foundation/runtime-sdk/go && go test -run='^$'   -bench='BenchmarkProcessPoolEpochExchange' -benchmem -count=3 ./runtimehost/
+go test -race -run 'EpochDoorbell|PeerLost|Doorbell' ./runtimehost/
+```
