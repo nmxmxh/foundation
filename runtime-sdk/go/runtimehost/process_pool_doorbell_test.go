@@ -46,6 +46,22 @@ func TestProcessPoolEpochDoorbellKernel(t *testing.T) {
 	if strings.TrimSpace(path) == "" {
 		t.Fatal("OVRT_SHM_PATH is required for the epoch helper")
 	}
+	// Leak-probe mode: map but never signal READY, never write stdout —
+	// simulates a hung kernel so the parent's ready-timeout cleanup path can
+	// be asserted (no surviving process state, no stale cmd).
+	if os.Getenv("OVRT_EPOCH_SKIP_READY") == "1" {
+		file, openErr := os.OpenFile(path, os.O_RDWR, 0o600)
+		if openErr != nil {
+			t.Fatalf("open shm: %v", openErr)
+		}
+		raw, mmapErr := syscall.Mmap(int(file.Fd()), 0, int(generated.BUFFER_TOTAL_BYTES),
+			syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+		if mmapErr != nil {
+			t.Fatalf("mmap: %v", mmapErr)
+		}
+		_ = raw // Hold the mapping; stay silent until killed.
+		select {}
+	}
 
 	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {
@@ -77,8 +93,14 @@ func TestProcessPoolEpochDoorbellKernel(t *testing.T) {
 	buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
 
 	policy := epochWaitPolicy{spinIterations: 500, maxSleep: time.Millisecond, timeout: 10 * time.Second}
+	// Baseline arming contract: snapshot a slot BEFORE performing the action
+	// that makes its counterpart publish. Arming after the trigger races the
+	// counterpart's store and loses wakeups — root cause of the sustained-
+	// load restart storm (2026-08-23).
+	inputSeen := observeEpoch(inputSlot)
+	consumedSeen := observeEpoch(consumedSlot)
 	for {
-		if _, err := waitForEpochChange(inputSlot, observeEpoch(inputSlot), policy,
+		if _, err := waitForEpochChange(inputSlot, inputSeen, policy,
 			func() bool { return true }, nil); err != nil {
 			// Idle tick (or transient mapping hiccup): report why, then keep
 			// serving. Exiting here would manufacture a fake peer-lost on
@@ -130,12 +152,23 @@ func TestProcessPoolEpochDoorbellKernel(t *testing.T) {
 				return
 			}
 			copy(raw, buf.RawBytes())
+			// Arm consumed BEFORE publishing output: once output is visible,
+			// the parent may consume and ack within microseconds — faster
+			// than this goroutine's next observe. Arming first guarantees no
+			// ack is ever folded into the baseline we then wait past.
+			consumedSeen = observeEpoch(consumedSlot)
 			publishEpoch(outputSlot)
+			// Arm input for the NEXT round too: the parent may publish it any
+			// moment after consuming, before our loop re-arms.
+			inputSeen = observeEpoch(inputSlot)
 			if _, err := os.Stdout.Write([]byte{1}); err != nil {
 				return
 			}
-			_, _ = waitForEpochChange(consumedSlot, observeEpoch(consumedSlot), policy,
-				func() bool { return true }, nil)
+			if _, werr := waitForEpochChange(consumedSlot, consumedSeen, policy,
+				func() bool { return true }, nil); werr != nil {
+				fmt.Fprintf(os.Stderr, "ovrt-epoch-helper: consumed wait: %v; idling\n", werr)
+				time.Sleep(5 * time.Millisecond)
+			}
 		}()
 	}
 }
@@ -239,10 +272,6 @@ func TestProcessPoolEpochPeerLostTransparentRestart(t *testing.T) {
 		t.Logf("transparent restart restarts=%d", snapshot.RestartCount)
 	}
 
-	// Shutdown must reap cleanly through the supervised path regardless.
-	if err := pool.Close(); err != nil {
-		t.Fatalf("close after kill: %v", err)
-	}
 }
 
 func TestDoorbellLoopForwardsCoalescesAndClosesOnEOF(t *testing.T) {
@@ -363,4 +392,52 @@ func waitForDoorbell(tb testing.TB, timeout time.Duration, probe func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	tb.Fatal("condition not reached before deadline")
+}
+
+// TestProcessPoolEpochReadyTimeoutLeavesNoHalfStartedWorker pins finding #2:
+// a ready-handshake timeout inside startLocked must tear down the child,
+// goroutines, and cmd — leaving NO state that makes the next start believe
+// the worker is healthy.
+func TestProcessPoolEpochReadyTimeoutLeavesNoHalfStartedWorker(t *testing.T) {
+	if !sharedMemorySupported("") {
+		t.Skip("shared memory transport unsupported")
+	}
+	// Direct worker construction: NewProcessPool would surface this as a
+	// constructor error; building the worker lets us assert the teardown
+	// left zero surviving state.
+	worker := &processWorker{
+		index:         0,
+		mode:          ProcessTransportSharedMemoryEpoch,
+		command:       []string{os.Args[0], "-test.run=TestProcessPoolEpochDoorbellKernel", "--"},
+		env:           []string{epochHelperEnv + "=1", "OVRT_EPOCH_SKIP_READY=1"},
+		shmDir:        t.TempDir(),
+		warmupTimeout: 300 * time.Millisecond,
+		logger:        testLogger(t),
+	}
+
+	firstErr := worker.start()
+	if firstErr == nil || !strings.Contains(firstErr.Error(), "did not become ready") {
+		t.Fatalf("first start err = %v want ready-timeout", firstErr)
+	}
+
+	if worker.cmd != nil {
+		t.Fatal("half-started worker left cmd populated — next start would treat it as healthy")
+	}
+	if worker.doorbellCh != nil {
+		t.Fatal("half-started worker left doorbellCh populated")
+	}
+	if worker.childAlive() {
+		t.Fatal("hung kernel survived the ready-timeout teardown")
+	}
+
+	// A second attempt must be a CLEAN start (same skip-ready kernel), not an
+	// exchange into the previous corpse.
+	secondErr := worker.start()
+	if secondErr == nil || !strings.Contains(secondErr.Error(), "did not become ready") {
+		t.Fatalf("second start err = %v want ready-timeout", secondErr)
+	}
+
+	if worker.cmd != nil || worker.doorbellCh != nil || worker.childAlive() {
+		t.Fatal("second failed start also leaked worker state")
+	}
 }

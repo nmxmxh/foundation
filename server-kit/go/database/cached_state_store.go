@@ -45,15 +45,15 @@ func (o CachedStateStoreOptions) withDefaults() CachedStateStoreOptions {
 	return o
 }
 
-// cachedRecordEnvelope is the opaque wire shape for one cached point read.
-// DataJSON holds the canonical RecordData bytes exactly as Postgres stores
-// them, so cached entries never re-round-trip dynamic JSON structures.
+// cachedRecordEnvelope is the wire shape for one cached point read. Data
+// embeds RecordData directly, so one extension-backed unmarshal produces the
+// envelope fields AND typed record data: no second parse pass, no base64.
 type cachedRecordEnvelope struct {
-	Version   int64     `json:"v"`
-	Found     bool      `json:"found"`
-	DataJSON  []byte    `json:"data,omitempty"`
-	CreatedAt time.Time `json:"created_at,omitempty"`
-	UpdatedAt time.Time `json:"updated_at,omitempty"`
+	Version   int64      `json:"v"`
+	Found     bool       `json:"found"`
+	Data      RecordData `json:"data,omitempty"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }
 
 // CachedStateStore adds a shared, stampede-safe cache-aside layer in front of
@@ -318,31 +318,24 @@ func newEnvelope(rec DomainRecord, found bool) cachedRecordEnvelope {
 	if !found {
 		return envelope
 	}
-	data, err := rec.Data.MarshalJSON()
-	if err != nil {
-		// Marshal failures leave an empty payload; the next read-through
-		// repopulates from the inner store.
-		return cachedRecordEnvelope{Version: rec.UpdatedAt.UnixNano(), Found: false}
-	}
-	envelope.DataJSON = data
+	envelope.Data = rec.Data.Normalize().Clone()
 	envelope.CreatedAt = rec.CreatedAt.UTC()
 	envelope.UpdatedAt = rec.UpdatedAt.UTC()
 	return envelope
 }
 
 func (e cachedRecordEnvelope) record(domain, collection, organizationID, recordID string) (DomainRecord, error) {
-	data, err := parseDataJSON(e.DataJSON)
-	if err != nil {
-		// Unreadable payloads must never surface as empty records. The
-		// caller degrades to a read-through and overwrites this entry.
-		return DomainRecord{}, err
+	// Data arrived through the extension-backed unmarshal already; empty
+	// payloads on found entries indicate an encode failure upstream.
+	if e.Found && e.Data == nil {
+		return DomainRecord{}, errors.New("cached envelope has no data")
 	}
 	return DomainRecord{
 		Domain:         strings.TrimSpace(domain),
 		Collection:     strings.TrimSpace(collection),
 		OrganizationID: strings.TrimSpace(organizationID),
 		RecordID:       strings.TrimSpace(recordID),
-		Data:           data,
+		Data:           e.Data.Clone(),
 		CreatedAt:      e.CreatedAt,
 		UpdatedAt:      e.UpdatedAt,
 	}, nil

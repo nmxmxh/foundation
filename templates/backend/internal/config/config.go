@@ -40,6 +40,10 @@ type Config struct {
 	DBQueryTimeout      time.Duration
 	DBHotReadTimeout    time.Duration
 	DBShardCount        int
+	// RiverDirectURL points River at a session-mode Postgres endpoint that
+	// bypasses PgBouncer transaction pooling, restoring LISTEN/NOTIFY wakes.
+	// Empty reuses DATABASE_URL for deployments without a pooling proxy.
+	RiverDirectURL      string
 	HermesMaxRecords    int
 	HermesMaxBytes      int64
 	HermesIndexedFields []string
@@ -62,6 +66,15 @@ type Config struct {
 	// fallback population path for producers that cannot share the Postgres
 	// job queue the canonical RecordWorkerProcessor uses.
 	HermesEnvelopeFallback bool
+
+	// StateStoreCacheDriver enables cache-aside point reads for direct
+	// StateStore consumers. "off" keeps every read on Postgres. "memory"
+	// scopes entries to this process; "redis" shares them cluster-wide.
+	// Warm hermes partitions stay the preferred read lane; this layer only
+	// guards callers that bypass projections.
+	StateStoreCacheDriver      string
+	StateStoreCacheTTL         time.Duration
+	StateStoreCacheNegativeTTL time.Duration
 
 	// Redis
 	RedisURL          string
@@ -122,6 +135,10 @@ func Load() (*Config, error) {
 		DBQueryTimeout:                      getEnvDuration("DB_QUERY_TIMEOUT", 250*time.Millisecond),
 		DBHotReadTimeout:                    getEnvDuration("DB_HOT_READ_TIMEOUT", 50*time.Millisecond),
 		DBShardCount:                        getEnvInt("DB_SHARD_COUNT", 1),
+		RiverDirectURL:                      getEnv("RIVER_DIRECT_URL", ""),
+		StateStoreCacheDriver:               strings.ToLower(getEnv("STATE_STORE_CACHE", "off")),
+		StateStoreCacheTTL:                  getEnvDuration("STATE_STORE_CACHE_TTL", time.Minute),
+		StateStoreCacheNegativeTTL:          getEnvDuration("STATE_STORE_CACHE_NEG_TTL", 10*time.Second),
 		HermesMaxRecords:                    getEnvInt("HERMES_MAX_RECORDS_PER_SCOPE", 10000),
 		HermesMaxBytes:                      int64(getEnvInt("HERMES_MAX_BYTES_PER_SCOPE", 16*1024*1024)),
 		HermesIndexedFields:                 splitCSV(getEnv("HERMES_INDEXED_FIELDS", "state,status,type,kind,bucket")),
@@ -233,6 +250,12 @@ func (c *Config) validateDatabase() error {
 	}
 	if c.DBMaxConns > 0 && c.DBMinConns > c.DBMaxConns {
 		return fmt.Errorf("DB_MIN_CONNS cannot exceed DB_MAX_CONNS")
+	}
+	if !oneOf(c.StateStoreCacheDriver, "off", "memory", "redis") {
+		return fmt.Errorf("STATE_STORE_CACHE must be off, memory, or redis")
+	}
+	if c.StateStoreCacheTTL <= 0 || c.StateStoreCacheNegativeTTL <= 0 {
+		return fmt.Errorf("state store cache TTL settings must be positive")
 	}
 	if c.DBHealthCheckPeriod <= 0 || c.DBConnectTimeout <= 0 || c.DBAcquireTimeout <= 0 || c.DBQueryTimeout <= 0 || c.DBHotReadTimeout <= 0 {
 		return fmt.Errorf("database timeout settings must be positive")

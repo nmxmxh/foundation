@@ -2504,6 +2504,281 @@ patch_redundant_foundation_test_files() {
   fi
 }
 
+# @since 0.0.1
+patch_config_state_store_cache() {
+  local file="$target/internal/config/config.go"
+  [[ -f "$file" ]] || return 0
+
+  # Struct fields: River session lane + state-store cache knobs.
+  if ! grep -Fq 'StateStoreCacheDriver' "$file"; then
+    replace_in_file "$file" '	DBShardCount        int
+' '	DBShardCount        int
+	// RiverDirectURL points River at a session-mode Postgres endpoint that
+	// bypasses PgBouncer transaction pooling, restoring LISTEN/NOTIFY wakes.
+	RiverDirectURL string
+	// StateStoreCacheDriver enables cache-aside point reads for direct
+	// StateStore consumers: off, memory, or redis.
+	StateStoreCacheDriver      string
+	StateStoreCacheTTL         time.Duration
+	StateStoreCacheNegativeTTL time.Duration
+' "config gains RiverDirectURL and state-store cache fields"
+  fi
+
+  if ! grep -Fq 'RIVER_DIRECT_URL' "$file"; then
+    replace_in_file "$file" '		DBShardCount:                        getEnvInt("DB_SHARD_COUNT", 1),
+' '		DBShardCount:                        getEnvInt("DB_SHARD_COUNT", 1),
+		RiverDirectURL:                      getEnv("RIVER_DIRECT_URL", ""),
+		StateStoreCacheDriver:               strings.ToLower(getEnv("STATE_STORE_CACHE", "off")),
+		StateStoreCacheTTL:                  getEnvDuration("STATE_STORE_CACHE_TTL", time.Minute),
+		StateStoreCacheNegativeTTL:          getEnvDuration("STATE_STORE_CACHE_NEG_TTL", 10*time.Second),
+' "config loads river and cache environment"
+  fi
+
+  if ! grep -Fq 'STATE_STORE_CACHE must be off, memory, or redis' "$file"; then
+    replace_in_file "$file" '	if c.DBMaxConns > 0 && c.DBMinConns > c.DBMaxConns {
+		return fmt.Errorf("DB_MIN_CONNS cannot exceed DB_MAX_CONNS")
+	}
+' '	if c.DBMaxConns > 0 && c.DBMinConns > c.DBMaxConns {
+		return fmt.Errorf("DB_MIN_CONNS cannot exceed DB_MAX_CONNS")
+	}
+	if !oneOf(c.StateStoreCacheDriver, "off", "memory", "redis") {
+		return fmt.Errorf("STATE_STORE_CACHE must be off, memory, or redis")
+	}
+	if c.StateStoreCacheTTL <= 0 || c.StateStoreCacheNegativeTTL <= 0 {
+		return fmt.Errorf("state store cache TTL settings must be positive")
+	}
+' "config validates state-store cache settings"
+  fi
+
+  if command -v gofmt >/dev/null 2>&1; then
+    gofmt -w "$file" 2>/dev/null || true
+  fi
+}
+
+# @since 0.0.1
+patch_worker_main_river_direct_lane() {
+  local main="$target/cmd/worker/main.go"
+  [[ -f "$main" ]] || return 0
+  grep -Fq 'NewRiverPool' "$main" || return 0
+  grep -Fq 'RIVER_DIRECT_URL' "$main" && return 0
+
+  if ! grep -Fq '"strings"' "$main"; then
+    replace_in_file "$main" '	"os/signal"
+	"syscall"' '	"os/signal"
+	"strings"
+	"syscall"' "worker main imports strings"
+  fi
+
+  replace_in_file "$main" '	riverPool, err := database.NewRiverPool(context.Background(), cfg.DatabaseURL, workerPoolOptions(cfg))' '	riverDSN := cfg.DatabaseURL
+	if strings.TrimSpace(cfg.RiverDirectURL) != "" {
+		riverDSN = cfg.RiverDirectURL
+	}
+	riverPool, err := database.NewRiverPool(context.Background(), riverDSN, workerPoolOptions(cfg))' "worker main routes River through RIVER_DIRECT_URL when set"
+
+  if command -v gofmt >/dev/null 2>&1; then
+    gofmt -w "$main" 2>/dev/null || true
+  fi
+}
+
+# Delivers the state-store cache seam and the River direct session lane to
+# startup. Assumes the canonical scaffold shape (post envelope-fallback,
+# snapshot-shadow, and worker-engine-canonical patches); every sub-edit is a
+# guarded no-op when its anchor is absent, so customized files are left alone.
+# @since 0.0.1
+patch_startup_state_store_cache_and_river_lane() {
+  local file="$target/internal/startup/dependencies.go"
+  [[ -f "$file" ]] || return 0
+  grep -Fq 'server-kit/go/hermes"' "$file" || return 0
+
+  if ! grep -Fq 'server-kit/go/cache"' "$file"; then
+    replace_in_file "$file" '	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"' '	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"' "startup imports cache package"
+  fi
+  if ! grep -q '^	"sync"$' "$file"; then
+    replace_in_file "$file" '	"strings"
+	"time"' '	"strings"
+	"sync"
+	"time"' "startup imports sync"
+  fi
+
+  # Move event-bus init ahead of the database so the cache can share its
+  # Redis client. Remove the later duplicate FIRST (its trailing cleanup
+  # anchor keeps the match unique), then rewrite the init order in place.
+  if grep -Fq 'initDatabase(ctx, cfg, kitLog)' "$file"; then
+    replace_in_file "$file" '	redisClient, bus, closeBus, err := initEventBus(ctx, cfg, kitLog)
+	if err != nil {
+		if cfg.IsProduction() {
+			return nil, nil, fmt.Errorf("init event bus: %w", err)
+		}
+		kitLog.WarnContext(ctx, "failed to initialize redis event bus, using in-memory bus", "error", err)
+		bus = events.NewInMemoryBus(200)
+	}
+	deps.Redis = redisClient
+	deps.Bus = bus
+	deps.closeBus = closeBus
+	if closeBus != nil {' '	if closeBus != nil {' "startup drops late event bus init block"
+
+    replace_in_file "$file" '	db, hermesStore, err := initDatabase(ctx, cfg, kitLog)
+	if err != nil {
+		return nil, nil, fmt.Errorf("init database: %w", err)
+	}' '	// The event bus initializes first so the state-store cache can share its
+	// Redis client when STATE_STORE_CACHE=redis.
+	redisClient, bus, closeBus, err := initEventBus(ctx, cfg, kitLog)
+	if err != nil {
+		if cfg.IsProduction() {
+			return nil, nil, fmt.Errorf("init event bus: %w", err)
+		}
+		kitLog.WarnContext(ctx, "failed to initialize redis event bus, using in-memory bus", "error", err)
+		bus = events.NewInMemoryBus(200)
+	}
+	deps.Redis = redisClient
+	deps.Bus = bus
+	deps.closeBus = closeBus
+
+	db, hermesStore, err := initDatabase(ctx, cfg, redisClient, kitLog)
+	if err != nil {
+		return nil, nil, fmt.Errorf("init database: %w", err)
+	}' "startup moves event bus ahead of database init"
+  fi
+
+  # initDatabase wraps the connected store with CachedStateStore.
+  if ! grep -Fq 'wrapCachedStateStore' "$file" && grep -Fq 'func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger)' "$file"; then
+    replace_in_file "$file" 'func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger) (database.RuntimeStore, *hermes.Store, error) {' 'func initDatabase(ctx context.Context, cfg *config.Config, redisClient rediskit.Client, log kitlogger.Logger) (database.RuntimeStore, *hermes.Store, error) {' "startup passes shared redis client into initDatabase"
+
+    replace_in_file "$file" 'AcquireTimeout:    cfg.DBAcquireTimeout,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	storeOpts := hermes.RuntimeStoreOptions{' 'AcquireTimeout:    cfg.DBAcquireTimeout,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	wrapped, wrapErr := wrapCachedStateStore(ctx, cfg, db, redisClient, log)
+	if wrapErr != nil {
+		db.Close()
+		return nil, nil, wrapErr
+	}
+	storeOpts := hermes.RuntimeStoreOptions{' "startup wraps state store with cache layer"
+
+    replace_in_file "$file" '			db.Close()
+			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", snapErr)' '			wrapped.Close()
+			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", snapErr)' "startup closes wrapped store on snapshot error"
+
+    replace_in_file "$file" 'projected, err := hermes.WrapRuntimeStore(db, storeOpts)
+	if err != nil {
+		db.Close()' 'projected, err := hermes.WrapRuntimeStore(wrapped, storeOpts)
+	if err != nil {
+		wrapped.Close()' "startup projects over cached store"
+  fi
+
+  if ! grep -Fq 'func wrapCachedStateStore' "$file"; then
+    cat >>"$file" <<'DEPSEOF'
+
+// wrapCachedStateStore adds a shared cache-aside layer for direct StateStore
+// point reads. Warm hermes partitions stay the preferred read lane; this
+// guards callers that bypass projections. Cache errors degrade to Postgres
+// reads and never fail requests.
+func wrapCachedStateStore(ctx context.Context, cfg *config.Config, db database.RuntimeStore, redisClient rediskit.Client, log kitlogger.Logger) (database.RuntimeStore, error) {
+	driver := strings.ToLower(strings.TrimSpace(cfg.StateStoreCacheDriver))
+	if driver == "" || driver == "off" || !strings.EqualFold(cfg.StateStore, database.DriverPostgres) {
+		return db, nil
+	}
+	var backend cache.Backend = cache.NewMemoryBackend()
+	switch driver {
+	case "redis":
+		if redisClient == nil {
+			log.WarnContext(ctx, "STATE_STORE_CACHE=redis without a redis client; using process-local memory cache")
+		} else {
+			backend = cache.NewRedisBackend(redisClient)
+		}
+	case "memory":
+	default:
+		return db, fmt.Errorf("unknown state store cache driver %q", cfg.StateStoreCacheDriver)
+	}
+	storeCache := cache.New(cache.Config{
+		Backend:    backend,
+		DefaultTTL: cfg.StateStoreCacheTTL,
+		Prefix:     strings.TrimSpace(cfg.RedisPrefix) + ":state:",
+	})
+	cached, err := database.NewCachedStateStore(db, storeCache, database.CachedStateStoreOptions{
+		TTL:         cfg.StateStoreCacheTTL,
+		NegativeTTL: cfg.StateStoreCacheNegativeTTL,
+		OnFallback:  firstCacheFallbackLogger(log),
+	})
+	if err != nil {
+		return nil, err
+	}
+	log.InfoContext(ctx, "state store cache enabled", "driver", driver,
+		"ttl", cfg.StateStoreCacheTTL, "negative_ttl", cfg.StateStoreCacheNegativeTTL)
+	return cached, nil
+}
+
+// firstCacheFallbackLogger reports the first degradation once per process so
+// sustained Redis outages stay visible without flooding logs.
+func firstCacheFallbackLogger(log kitlogger.Logger) func(op string, err error) {
+	var once sync.Once
+	return func(op string, err error) {
+		once.Do(func() {
+			log.WarnContext(context.Background(), "state store cache degraded to postgres; further occurrences suppressed",
+				"op", op, "error", err)
+		})
+	}
+}
+DEPSEOF
+    log_patch "startup adds state-store cache wrapper helpers: ${file#$target/}"
+  fi
+
+  # Worker engine: dedicated River session lane plus wrapper-aware handle.
+  if ! grep -Fq 'RIVER_DIRECT_URL' "$file" \
+    && grep -Fq 'func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeStore, log kitlogger.Logger)' "$file" \
+    && grep -Fq 'projected.Base().(*database.PostgresDB)' "$file"; then
+
+    replace_in_file "$file" '		engine, stopWorkers, engineErr := initWorkerEngine(ctx, deps.Projected, kitLog)' '		engine, stopWorkers, engineErr := initWorkerEngine(ctx, cfg, deps.Projected, kitLog)' "startup passes config into worker engine init"
+
+    replace_in_file "$file" 'func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeStore, log kitlogger.Logger) (*workerkit.Engine, func(context.Context), error) {' 'func initWorkerEngine(ctx context.Context, cfg *config.Config, projected *hermes.ProjectedRuntimeStore, log kitlogger.Logger) (*workerkit.Engine, func(context.Context), error) {' "startup worker engine takes config"
+
+    replace_in_file "$file" '	pg, ok := projected.Base().(*database.PostgresDB)' '	pg, ok := database.AsPostgresDB(projected.Base())' "startup unwraps postgres through wrapper chain"
+
+    replace_in_file "$file" '	pool := pg.Pool()
+' '	pool := pg.Pool()
+
+	// RIVER_DIRECT_URL gives River a session-mode Postgres endpoint that
+	// bypasses PgBouncer transaction pooling, so native LISTEN/NOTIFY wakes
+	// work and FetchPollInterval stays a safety net.
+	riverLane := pool
+	closeRiver := func(context.Context) {}
+	if dsn := strings.TrimSpace(cfg.RiverDirectURL); dsn != "" && dsn != cfg.DatabaseURL {
+		opts := database.DefaultPoolOptionsFor(database.RuntimeLaneBackground)
+		opts.HealthCheckPeriod = cfg.DBHealthCheckPeriod
+		opts.ConnectTimeout = cfg.DBConnectTimeout
+		direct, directErr := database.NewRiverPool(ctx, dsn, opts)
+		if directErr != nil {
+			return nil, nil, fmt.Errorf("init river session pool: %w", directErr)
+		}
+		riverLane = direct
+		closeRiver = func(context.Context) {
+			direct.Close()
+		}
+		log.InfoContext(ctx, "river using direct session lane for LISTEN/NOTIFY")
+	}' "startup opens dedicated river session lane"
+
+    replace_in_file "$file" 'client, err := river.NewClient(riverpgxv5.New(pool), riverCfg)' 'client, err := river.NewClient(riverpgxv5.New(riverLane), riverCfg)' "startup binds river client to session lane"
+
+    replace_in_file "$file" 'WaitForRiverTableReady(ctx, pool, 30*time.Second)' 'WaitForRiverTableReady(ctx, riverLane, 30*time.Second)' "startup checks river readiness on session lane"
+
+    replace_in_file "$file" '	stop := func(cleanupCtx context.Context) {
+		if err := client.Stop(cleanupCtx); err != nil {' '	stop := func(cleanupCtx context.Context) {
+		defer closeRiver(cleanupCtx)
+		if err := client.Stop(cleanupCtx); err != nil {' "startup closes river session lane after drain"
+  fi
+
+  if command -v gofmt >/dev/null 2>&1; then
+    gofmt -w "$file" 2>/dev/null || true
+  fi
+}
+
 export PATCH_SEARCH PATCH_REPLACE
 
 patch_agent_native_guides
@@ -2554,6 +2829,9 @@ patch_startup_envelope_fallback
 patch_startup_snapshot_shadow
 patch_worker_engine_canonical
 patch_river_table_readiness_gate
+patch_config_state_store_cache
+patch_worker_main_river_direct_lane
+patch_startup_state_store_cache_and_river_lane
 patch_redundant_foundation_test_files
 sync_go_work
 

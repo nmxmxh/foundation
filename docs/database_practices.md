@@ -626,3 +626,48 @@ The database (PostgreSQL) is a scarce, vertically scaled, state-oriented resourc
 3. Similar-entry logic must be source-aware. A document-import duplicate rule should not accidentally catch manual entries or legitimate recurring events.
 4. App-level duplicate checks are good UX, but important recurring commands still need DB-backed uniqueness.
 5. Query shape matters as much as indexing. A good index can still be bypassed by a bad predicate.
+
+## Cached State-Store Point Reads
+
+`database.CachedStateStore` adds cache-aside point reads over any `StateStore`.
+It composes the shared `cache` primitives: singleflight via `GetOrSet`
+semantics, tag sweeps through `Invalidator`, and bounded per-operation
+timeouts. Postgres stays the durable truth at all times.
+
+Layering rule, evidence-backed:
+
+1. Warm hermes partitions serve point reads fastest: about 630 ns and
+   3 allocations per read (`BenchmarkHermesPointReadHotPartition`).
+2. The cache layer costs about 5.6 us and 23 allocations per hit
+   (`BenchmarkCachedGetHit`). It exists for callers that bypass projections,
+   for cold scopes, and for cross-process sharing over Redis.
+3. Never stack the cache in front of warm projection reads. That ordering
+   regresses latency by roughly nine times.
+
+Contracts:
+
+- Staleness from concurrent writers is bounded by `TTL` (default one minute).
+- Version-guarded refreshes stop late commits from clobbering newer values.
+- Not-found results cache for `NegativeTTL` (default ten seconds).
+- Every cache error degrades to a Postgres read. Reads never fail on cache.
+- Bulk upserts bypass this wrapper. Call `InvalidateScope` after bulk writes.
+- Values ride `json.RawMessage` opaquely. Integer precision above int64 range
+  degrades identically on every lane today; wrap such numbers in raw bytes.
+
+## River Queue Session Lane
+
+Set `RIVER_DIRECT_URL` to give River a session-mode Postgres endpoint that
+bypasses PgBouncer transaction pooling. Native `LISTEN/NOTIFY` then delivers
+cross-node wakes, and `FetchPollInterval` returns to being a safety net.
+Keep the default interval; do not relax it below the value of lost wakes.
+
+Backlog triage uses `scripts/db_diagnostics.sh`. It reports sequential-read
+leaders, river_job state counts, per-queue backlog, and oldest job age from
+environment-supplied connection details.
+
+River core modules now pin v0.44.1 (upgraded from v0.35.0; full build and
+worker suites pass). One operator gate remains per deployment: version 0.40
+ships migration 7. Schedule a brief worker stop window, run
+`river migrate-up`, then restart. The upgrade brings PgBouncer protocol
+hardening, per-queue fetch intervals, full reindex coverage, and bounded
+backlog deletion tooling (`JobDeleteMany` filtered by queue and state).

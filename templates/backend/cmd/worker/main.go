@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -51,7 +52,13 @@ func main() {
 	// batch inserts (JobInsertFastMany) and the maintenance sweeps, surfacing as
 	// "canceling statement due to statement timeout". River bounds its own
 	// queries with context deadlines, so this pool omits that guardrail.
-	riverPool, err := database.NewRiverPool(context.Background(), cfg.DatabaseURL, workerPoolOptions(cfg))
+	// RIVER_DIRECT_URL additionally bypasses PgBouncer transaction pooling so
+	// LISTEN/NOTIFY wakes work; empty falls back to DATABASE_URL.
+	riverDSN := cfg.DatabaseURL
+	if strings.TrimSpace(cfg.RiverDirectURL) != "" {
+		riverDSN = cfg.RiverDirectURL
+	}
+	riverPool, err := database.NewRiverPool(context.Background(), riverDSN, workerPoolOptions(cfg))
 	if err != nil {
 		log.Error("unable to connect river database pool", "error", err)
 		os.Exit(1)

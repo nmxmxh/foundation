@@ -6,6 +6,18 @@ All notable changes to Foundation will be documented in this file.
 
 ### Added
 
+- **database**: `CachedStateStore` — shared, stampede-safe cache-aside point reads over any `StateStore` (Postgres included). Opaque `json.RawMessage` payloads parsed back through the extension lane preserve int64/raw-byte fidelity; version-guarded refreshes block out-of-order commit clobbering; negative caching, per-op timeout bounds, and full degradation to Postgres on any cache error. Includes allocation budget guard (`TestAllocationBudgetCachedHit`) plus hit/miss/envelope benchmarks.
+- **database**: `AsPostgresDB` unwraps bounded wrapper chains (hermes, cache) to the concrete pool-bearing store without new constructor signatures.
+- **hermes**: point-read and point-write benchmarks with allocation reporting (`BenchmarkHermesPointReadHotPartition` ~630 ns / 3 allocs), establishing the layering baseline that keeps warm partitions ahead of added cache layers.
+- **templates/backend**: `RIVER_DIRECT_URL` routes both River pools through a session-mode endpoint bypassing PgBouncer transaction pooling, restoring native LISTEN/NOTIFY wakes (Option A of the read-pressure handoff); `STATE_STORE_CACHE` (`off|memory|redis` + TTL knobs) wires `CachedStateStore` for direct StateStore consumers with first-fallback degradation logging.
+- **scripts**: `db_diagnostics.sh` — parameterized read-pressure evidence collector (pg_stat leaders, river_job state/queue backlog, oldest job age) with no hardcoded hosts or credentials.
+
+### Changed
+
+- **templates/backend**: startup now initializes the event bus before the database so the state-store cache can share its Redis client; cleanup ordering is preserved.
+- **deps**: `riverqueue/river` v0.35.0 → v0.44.1 across `server-kit/go` (direct) and `runtime-sdk/go` (indirect). Builds and worker/database suites pass unchanged — no API surface we use moved. Deployment gate: run migration 7 (`river migrate-up`) during a brief worker stop window; gains PgBouncer simple-protocol JSON hardening (#1153), per-queue `FetchCooldown`/`FetchPollInterval`, full reindexer coverage for previously bloated `river_job` indexes, jittered poll loops, and `JobDeleteMany` backlog tooling.
+- **database**: flattened cache envelope embeds `RecordData` directly — hit path drops from 23 to 20 allocs/op (−17% ns/op) by eliminating the second parse pass; single extension-backed unmarshal now produces envelope fields and typed data together.
+
 - **wsrouting**: `Router.UpdateAuthState(ctx, connID, AuthState)` to atomically rotate a connection's full security context (user, organization, role, session) — e.g. after a context switch — plus `Authenticated`/`OrganizationID`/`Role`/`SessionID` fields on `ConnectionInfo`. `UpdateAuth` is retained as a back-compat wrapper. Prevents the gateway from authorizing frames against a stale org context.
 - **auth**: `ClockSkewLeeway` (60s) applied symmetrically to JWT `exp` and `iat` validation. Skew is not directional, so tolerating it in only one direction leaves the other failing for the same reason. `iat` was previously minted and never validated at all, which also let a post-dated token extend its useful life past what the issuer intended; it is now rejected beyond the leeway (RFC 8725 §3.9).
 - **runtime-transport**: `createOfflineQueue` now strips the auth credential from queued envelopes on enqueue and re-stamps a fresh one on drain (via `resolveAuthToken`), so requests replayed after a reconnect/token rotation never carry a stale token. New `authTokenExtraKeys`/`resolveAuthToken` options.
