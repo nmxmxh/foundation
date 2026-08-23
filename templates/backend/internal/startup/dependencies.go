@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
@@ -62,7 +64,21 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	kitLog := kitlogger.Default().With("component", "startup")
 	deps.Log = kitLog
 
-	db, hermesStore, err := initDatabase(ctx, cfg, kitLog)
+	// The event bus initializes first so the state-store cache can share its
+	// Redis client when STATE_STORE_CACHE=redis.
+	redisClient, bus, closeBus, err := initEventBus(ctx, cfg, kitLog)
+	if err != nil {
+		if cfg.IsProduction() {
+			return nil, nil, fmt.Errorf("init event bus: %w", err)
+		}
+		kitLog.WarnContext(ctx, "failed to initialize redis event bus, using in-memory bus", "error", err)
+		bus = events.NewInMemoryBus(200)
+	}
+	deps.Redis = redisClient
+	deps.Bus = bus
+	deps.closeBus = closeBus
+
+	db, hermesStore, err := initDatabase(ctx, cfg, redisClient, kitLog)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init database: %w", err)
 	}
@@ -78,17 +94,6 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 		db.Close()
 	})
 
-	redisClient, bus, closeBus, err := initEventBus(ctx, cfg, kitLog)
-	if err != nil {
-		if cfg.IsProduction() {
-			return nil, nil, fmt.Errorf("init event bus: %w", err)
-		}
-		kitLog.WarnContext(ctx, "failed to initialize redis event bus, using in-memory bus", "error", err)
-		bus = events.NewInMemoryBus(200)
-	}
-	deps.Redis = redisClient
-	deps.Bus = bus
-	deps.closeBus = closeBus
 	if closeBus != nil {
 		// closeBus wraps RedisBus.Close(), which cancels the listener ctx and
 		// closes the shared redis client. Registering a separate redisClient.Close()
@@ -115,7 +120,7 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 	// the app assigns ProjectionFetcher — the in-process worker for the hermes
 	// projection queue, so hot applies fan WS deltas out of the serving process.
 	if deps.Projected != nil {
-		engine, stopWorkers, engineErr := initWorkerEngine(ctx, deps.Projected, kitLog)
+		engine, stopWorkers, engineErr := initWorkerEngine(ctx, cfg, deps.Projected, kitLog)
 		if engineErr != nil {
 			kitLog.WarnContext(ctx, "worker engine unavailable; foundation job enqueue disabled", "error", engineErr)
 		} else {
@@ -166,12 +171,32 @@ func InitDependencies(ctx context.Context, cfg *config.Config) (*Dependencies, f
 // queue (river client started; stopped via the returned cleanup). Without it,
 // the engine is insert-only: EnqueueTx works, and a separate worker binary —
 // which bridges the same processors via engine.AddToWorkers — executes jobs.
-func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeStore, log kitlogger.Logger) (*workerkit.Engine, func(context.Context), error) {
-	pg, ok := projected.Base().(*database.PostgresDB)
+func initWorkerEngine(ctx context.Context, cfg *config.Config, projected *hermes.ProjectedRuntimeStore, log kitlogger.Logger) (*workerkit.Engine, func(context.Context), error) {
+	pg, ok := database.AsPostgresDB(projected.Base())
 	if !ok || pg.Pool() == nil {
 		return nil, nil, fmt.Errorf("worker engine requires the postgres driver")
 	}
 	pool := pg.Pool()
+
+	// RIVER_DIRECT_URL gives the River client a session-mode Postgres
+	// endpoint that bypasses PgBouncer transaction pooling, so its native
+	// LISTEN/NOTIFY wakes work and FetchPollInterval stays a safety net.
+	riverLane := pool
+	closeRiver := func(context.Context) {}
+	if dsn := strings.TrimSpace(cfg.RiverDirectURL); dsn != "" && dsn != cfg.DatabaseURL {
+		opts := database.DefaultPoolOptionsFor(database.RuntimeLaneBackground)
+		opts.HealthCheckPeriod = cfg.DBHealthCheckPeriod
+		opts.ConnectTimeout = cfg.DBConnectTimeout
+		direct, err := database.NewRiverPool(ctx, dsn, opts)
+		if err != nil {
+			return nil, nil, fmt.Errorf("init river session pool: %w", err)
+		}
+		riverLane = direct
+		closeRiver = func(cleanupCtx context.Context) {
+			direct.Close()
+		}
+		log.InfoContext(ctx, "river using direct session lane for LISTEN/NOTIFY")
+	}
 
 	engine := workerkit.NewEngine(nil, log)
 	registered := false
@@ -195,7 +220,7 @@ func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeSto
 		riverCfg.Workers = workers
 		riverCfg.Queues = engine.RiverQueueConfig(nil)
 	}
-	client, err := river.NewClient(riverpgxv5.New(pool), riverCfg)
+	client, err := river.NewClient(riverpgxv5.New(riverLane), riverCfg)
 	if err != nil {
 		return nil, nil, fmt.Errorf("init river client: %w", err)
 	}
@@ -204,13 +229,14 @@ func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeSto
 	if !registered {
 		return engine, nil, nil // insert-only: nothing to start or stop
 	}
-	if err := database.WaitForRiverTableReady(ctx, pool, 30*time.Second); err != nil {
+	if err := database.WaitForRiverTableReady(ctx, riverLane, 30*time.Second); err != nil {
 		return nil, nil, fmt.Errorf("wait for river_job table: %w", err)
 	}
 	if err := client.Start(ctx); err != nil {
 		return nil, nil, fmt.Errorf("start river client: %w", err)
 	}
 	stop := func(cleanupCtx context.Context) {
+		defer closeRiver(cleanupCtx)
 		if err := client.Stop(cleanupCtx); err != nil {
 			log.ErrorContext(cleanupCtx, "failed to stop river client", "error", err)
 		}
@@ -302,7 +328,7 @@ func startProjectionEnvelopeFallback(ctx context.Context, projected *hermes.Proj
 	}
 }
 
-func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger) (database.RuntimeStore, *hermes.Store, error) {
+func initDatabase(ctx context.Context, cfg *config.Config, redisClient rediskit.Client, log kitlogger.Logger) (database.RuntimeStore, *hermes.Store, error) {
 	db, err := database.Connect(ctx, cfg.DatabaseURL, cfg.StateStore, database.PoolOptions{
 		MaxConns:          cfg.DBMaxConns,
 		MinConns:          cfg.DBMinConns,
@@ -312,6 +338,11 @@ func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger)
 		AcquireTimeout:    cfg.DBAcquireTimeout,
 	})
 	if err != nil {
+		return nil, nil, err
+	}
+	wrapped, err := wrapCachedStateStore(ctx, cfg, db, redisClient, log)
+	if err != nil {
+		db.Close()
 		return nil, nil, err
 	}
 	storeOpts := hermes.RuntimeStoreOptions{
@@ -325,18 +356,69 @@ func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger)
 	if dir := strings.TrimSpace(cfg.HermesSnapshotDir); dir != "" {
 		snaps, snapErr := hermessnapshot.NewFileStore(dir)
 		if snapErr != nil {
-			db.Close()
+			wrapped.Close()
 			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", snapErr)
 		}
 		storeOpts.SnapshotStore = snaps
 	}
-	projected, err := hermes.WrapRuntimeStore(db, storeOpts)
+	projected, err := hermes.WrapRuntimeStore(wrapped, storeOpts)
 	if err != nil {
-		db.Close()
+		wrapped.Close()
 		return nil, nil, err
 	}
 	log.InfoContext(ctx, "database connected", "driver", cfg.StateStore, "hermes", "enabled")
 	return projected, projected.Store(), nil
+}
+
+// wrapCachedStateStore adds the shared cache-aside layer for direct StateStore
+// point reads. Warm hermes partitions remain the preferred lane; this guard
+// only covers callers that bypass projections. Cache errors never fail reads:
+// they fall back to Postgres through the wrapper's degradation path.
+func wrapCachedStateStore(ctx context.Context, cfg *config.Config, db database.RuntimeStore, redisClient rediskit.Client, log kitlogger.Logger) (database.RuntimeStore, error) {
+	driver := strings.ToLower(strings.TrimSpace(cfg.StateStoreCacheDriver))
+	if driver == "" || driver == "off" || !strings.EqualFold(cfg.StateStore, database.DriverPostgres) {
+		return db, nil
+	}
+	var backend cache.Backend = cache.NewMemoryBackend()
+	switch driver {
+	case "redis":
+		if redisClient == nil {
+			log.WarnContext(ctx, "STATE_STORE_CACHE=redis without a redis client; using process-local memory cache")
+		} else {
+			backend = cache.NewRedisBackend(redisClient)
+		}
+	case "memory":
+	default:
+		return db, fmt.Errorf("unknown state store cache driver %q", cfg.StateStoreCacheDriver)
+	}
+	storeCache := cache.New(cache.Config{
+		Backend:    backend,
+		DefaultTTL: cfg.StateStoreCacheTTL,
+		Prefix:     strings.TrimSpace(cfg.RedisPrefix) + ":state:",
+	})
+	cached, err := database.NewCachedStateStore(db, storeCache, database.CachedStateStoreOptions{
+		TTL:         cfg.StateStoreCacheTTL,
+		NegativeTTL: cfg.StateStoreCacheNegativeTTL,
+		OnFallback:  firstCacheFallbackLogger(log),
+	})
+	if err != nil {
+		return nil, err
+	}
+	log.InfoContext(ctx, "state store cache enabled", "driver", driver,
+		"ttl", cfg.StateStoreCacheTTL, "negative_ttl", cfg.StateStoreCacheNegativeTTL)
+	return cached, nil
+}
+
+// firstCacheFallbackLogger reports the first degradation once per process so
+// sustained Redis outages stay visible in logs without flooding them.
+func firstCacheFallbackLogger(log kitlogger.Logger) func(op string, err error) {
+	var once sync.Once
+	return func(op string, err error) {
+		once.Do(func() {
+			log.WarnContext(context.Background(), "state store cache degraded to postgres; further occurrences suppressed",
+				"op", op, "error", err)
+		})
+	}
 }
 
 func initEventBus(ctx context.Context, cfg *config.Config, log kitlogger.Logger) (rediskit.Client, events.Bus, func() error, error) {

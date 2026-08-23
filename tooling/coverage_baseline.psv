@@ -7,7 +7,7 @@ github.com/nmxmxh/ovasabi_foundation/server-kit/go/apidocs|71.8|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth|90.6|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap|80.4|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/bulk|95.0|95.0
-github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache|92.3|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache|93.2|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/chain|82.4|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/chaos|100.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/circuitbreaker|95.8|95.0
@@ -18,7 +18,7 @@ github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector/grpcx|0.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector/httpx|0.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector/wsx|0.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/contracttest|76.0|95.0
-github.com/nmxmxh/ovasabi_foundation/server-kit/go/database|54.7|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/database|59.3|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/degradation|93.7|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/discovergw|100.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/domainerr|98.9|95.0

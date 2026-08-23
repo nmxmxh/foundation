@@ -98,7 +98,7 @@ func (x epochExchange) Exchange(ctx context.Context, unitID string, buffer []byt
 	// seqlock-style: the output epoch must still be newOutput after the copy,
 	// otherwise the bytes are a torn mix of two generations. Bounded retries;
 	// each pass re-arms on the latest observed epoch.
-	for attempt := 0; attempt < 8; attempt++ {
+	for range 8 {
 		copy(buffer, x.shm.raw)
 		if current := observeEpoch(outputSlot); current == newOutput {
 			break

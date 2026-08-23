@@ -571,6 +571,17 @@ func (w *processWorker) startLocked() error {
 		// waitForKernelReady: publishing into a kernel that has not taken its
 		// baseline snapshot loses the exchange.
 		if err := waitForKernelReady(w.shm.raw, defaultEpochWaitPolicy(w.warmupTimeout), w.childAlive, w.doorbellCh); err != nil {
+			// Half-started teardown: without this, the running child, its
+			// doorbell/supervisor goroutines, and the populated w.cmd all
+			// survive the failure — and the non-nil cmd makes the NEXT
+			// startLocked believe the worker is healthy and exchange against
+			// a kernel that never became ready. closeLocked performs exactly
+			// the reverse of what this function built (kill via supervisor,
+			// pipes, segments, loop stop) and clears cmd so the retry is a
+			// clean start rather than an exchange into a corpse.
+			if cleanupErr := w.closeLocked(); cleanupErr != nil {
+				return errors.Join(err, cleanupErr)
+			}
 			return err
 		}
 	}
@@ -662,6 +673,11 @@ func (w *processWorker) closeLocked() error {
 		}
 		w.shm = nil
 	}
+	// The doorbell loop closed its captured channel on stdout EOF (kill
+	// closes the pipe); clear the field so the next startLocked builds a
+	// fresh one instead of finding a closed channel and failing its first
+	// ready-wait.
+	w.doorbellCh = nil
 
 	if waitErr != nil {
 		var exitErr *exec.ExitError
@@ -819,10 +835,18 @@ func (w *processWorker) doorbellLoop(r *bufio.Reader) {
 			close(ch)
 		}
 	}()
-	buf := make([]byte, 1)
+	// Read in chunks, not single bytes: ANY bytes on this pipe mean "the
+	// kernel is alive and rang the doorbell". A chatty child writing a log
+	// line would otherwise wake this loop once per character; a chunked read
+	// coalesces an arbitrary burst into one ring.
+	buf := make([]byte, 512)
 	for {
-		if _, err := r.Read(buf); err != nil {
+		n, err := r.Read(buf)
+		if err != nil {
 			return
+		}
+		if n == 0 {
+			continue
 		}
 		select {
 		case ch <- struct{}{}:
