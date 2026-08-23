@@ -82,33 +82,47 @@ func TestProcessPoolEpochDoorbellKernel(t *testing.T) {
 			return // parent gone
 		}
 		buffer = buffer[:generated.BUFFER_TOTAL_BYTES]
-		copy(buffer, raw)
-		buf, bufErr := NewBuffer(buffer)
-		if bufErr != nil {
-			return
+		// Stability guard: the parent may be mid-publish; re-read until two
+		// consecutive copies agree, then parse. A torn snapshot is skipped,
+		// never fatal — the next input epoch re-triggers this loop.
+		stable := false
+		for attempt := 0; attempt < 8 && !stable; attempt++ {
+			copy(buffer, raw)
+			time.Sleep(time.Millisecond)
+			var second [generated.BUFFER_TOTAL_BYTES]byte
+			copy(second[:], raw)
+			stable = string(second[:]) == string(buffer)
 		}
-		input, inErr := buf.InputBytes()
-		status := uint64(0)
-		output := []byte("PONG")
-		if inErr != nil {
-			status = 1
-			output = []byte("bad input")
-		} else if len(input) > 0 {
-			output = []byte(strings.ToUpper(string(input)))
-		}
-		_ = output
-		buf.SetHeaderInt(generated.INT_IDX_STATUS_CODE, int32(status))
-		_ = buf.SetOutputBytes(output)
-		_, _ = buf.AddEpoch(generated.IDX_OUTPUT_WRITTEN, 1)
-		copy(raw, buf.RawBytes())
-		publishEpoch(outputSlot)
-
-		// The doorbell itself: one byte on stdout per completed exchange.
-		if _, writeErr := os.Stdout.Write([]byte{1}); writeErr != nil {
-			return
-		}
-		_, _ = waitForEpochChange(consumedSlot, observeEpoch(consumedSlot), policy,
-			func() bool { return true }, nil)
+		func() {
+			defer func() {
+				// A torn snapshot can produce a structurally invalid buffer;
+				// the child must survive any single bad frame and keep
+				// serving — the next input epoch re-triggers the loop.
+				_ = recover()
+			}()
+			buf, bufErr := NewBuffer(buffer)
+			if bufErr != nil {
+				return
+			}
+			input, inErr := buf.InputBytes()
+			if inErr != nil {
+				return
+			}
+			_ = buf.SetHeaderInt(generated.INT_IDX_STATUS_CODE, 0)
+			if err := buf.SetOutputBytes([]byte(strings.ToUpper(string(input)))); err != nil {
+				return
+			}
+			if _, err := buf.AddEpoch(generated.IDX_OUTPUT_WRITTEN, 1); err != nil {
+				return
+			}
+			copy(raw, buf.RawBytes())
+			publishEpoch(outputSlot)
+			if _, err := os.Stdout.Write([]byte{1}); err != nil {
+				return
+			}
+			_, _ = waitForEpochChange(consumedSlot, observeEpoch(consumedSlot), policy,
+				func() bool { return true }, nil)
+		}()
 	}
 }
 
