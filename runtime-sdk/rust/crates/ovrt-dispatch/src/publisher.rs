@@ -25,12 +25,12 @@ use ovrt_core::{
 #[cfg(unix)]
 use crate::block::{encode_descriptor, DispatchBlock};
 
-use crate::decide::{LaneDescriptor, LaneStats, MAX_LANES};
+use crate::decide::{DispatchLaneDescriptor, DispatchLaneStats, MAX_LANES};
 
 // Retired slots encode as ineligible: empty class mask selects nothing.
 #[cfg(unix)]
-fn retired_descriptor(slot: usize, generation: u32) -> LaneDescriptor {
-    LaneDescriptor {
+fn retired_descriptor(slot: usize, generation: u32) -> DispatchLaneDescriptor {
+    DispatchLaneDescriptor {
         lane_id: slot as u16,
         jurisdiction: DISPATCH_JURISDICTION_GLOBAL as u16,
         max_concurrency: 0,
@@ -51,7 +51,7 @@ impl DispatchBlock {
     /// no reader can observe a half-written table.
     pub fn publish_descriptors(
         &self,
-        rows: &[LaneDescriptor],
+        rows: &[DispatchLaneDescriptor],
         generation: u32,
     ) -> Result<u32, String> {
         if rows.len() > MAX_LANES {
@@ -82,7 +82,7 @@ impl DispatchBlock {
 
     /// Applies one remote lane's reported statistics into its locally owned
     /// mirror row.
-    pub fn apply_mirror_stats(&self, lane: usize, stats: &LaneStats) -> Result<(), String> {
+    pub fn apply_mirror_stats(&self, lane: usize, stats: &DispatchLaneStats) -> Result<(), String> {
         self.stat_row(lane)?.apply_mirror(stats);
         Ok(())
     }
@@ -184,8 +184,8 @@ mod tests {
         file
     }
 
-    fn lane(id: u16, jurisdiction: u16, affinity_bloom: u64) -> LaneDescriptor {
-        LaneDescriptor {
+    fn lane(id: u16, jurisdiction: u16, affinity_bloom: u64) -> DispatchLaneDescriptor {
+        DispatchLaneDescriptor {
             lane_id: id,
             jurisdiction,
             max_concurrency: 4,
@@ -195,7 +195,7 @@ mod tests {
         }
     }
 
-    fn snapshot_stats(block: &DispatchBlock) -> Vec<Option<LaneStats>> {
+    fn snapshot_stats(block: &DispatchBlock) -> Vec<Option<DispatchLaneStats>> {
         (0..MAX_LANES).map(|lane| block.stat_row(lane).ok().map(|row| row.snapshot())).collect()
     }
 
@@ -273,7 +273,7 @@ mod tests {
         block
             .apply_mirror_stats(
                 0,
-                &LaneStats {
+                &DispatchLaneStats {
                     ewma_ns: 5_000,
                     inflight: 0,
                     max_concurrency: 4,

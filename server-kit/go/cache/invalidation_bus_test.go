@@ -33,8 +33,7 @@ func newBusPair(t *testing.T) (transport rediskit.Client, busA, busB *Invalidati
 
 func TestInvalidationBus_BroadcastDropsProcessLocalEntries(t *testing.T) {
 	_, busA, busB, localCache := newBusPair(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := busA.Listen(ctx); err != nil {
 		t.Fatalf("Listen failed: %v", err)
@@ -62,8 +61,7 @@ func TestInvalidationBus_BroadcastDropsProcessLocalEntries(t *testing.T) {
 
 func TestInvalidationBus_SkipsForeignPayloads(t *testing.T) {
 	transport, busA, _, _ := newBusPair(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := busA.Listen(ctx); err != nil {
 		t.Fatalf("Listen failed: %v", err)
@@ -101,8 +99,7 @@ func TestInvalidationBus_SkipsForeignPayloads(t *testing.T) {
 func TestInvalidationBus_ListenGuards(t *testing.T) {
 	_, busA, _, _ := newBusPair(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := busA.Listen(ctx); err != nil {
 		t.Fatalf("first Listen failed: %v", err)
 	}
@@ -147,8 +144,7 @@ func TestInvalidationBus_ReportsApplyErrors(t *testing.T) {
 		reported <- tag
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := bus.Listen(ctx); err != nil {
 		t.Fatalf("Listen failed: %v", err)
 	}

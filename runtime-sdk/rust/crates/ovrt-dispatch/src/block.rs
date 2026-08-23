@@ -23,7 +23,7 @@ use ovrt_core::{
     DISPATCH_LANE_ROW_BYTES, DISPATCH_REGION_BYTES, DISPATCH_STATS_OFFSET, DISPATCH_TICK_OFFSET,
 };
 
-use crate::decide::{blend_ewma, LaneDescriptor, LaneStats, MAX_LANES};
+use crate::decide::{blend_ewma, DispatchLaneDescriptor, DispatchLaneStats, MAX_LANES};
 
 // Descriptor field offsets inside one 64-byte slot.
 const ROW_UNIT_CLASSES: usize = 0;
@@ -60,7 +60,7 @@ fn read_u64(row: &[u8], at: usize) -> u64 {
     u64::from_le_bytes(window)
 }
 
-pub(crate) fn encode_descriptor(descriptor: &LaneDescriptor) -> [u8; 64] {
+pub(crate) fn encode_descriptor(descriptor: &DispatchLaneDescriptor) -> [u8; 64] {
     let mut bytes = [0_u8; DISPATCH_LANE_ROW_BYTES as usize];
     bytes[ROW_UNIT_CLASSES..ROW_UNIT_CLASSES + 8]
         .copy_from_slice(&descriptor.unit_class_mask.to_le_bytes());
@@ -75,7 +75,7 @@ pub(crate) fn encode_descriptor(descriptor: &LaneDescriptor) -> [u8; 64] {
     bytes
 }
 
-pub(crate) fn decode_descriptor(row: &[u8]) -> Result<LaneDescriptor, String> {
+pub(crate) fn decode_descriptor(row: &[u8]) -> Result<DispatchLaneDescriptor, String> {
     if row.len() < DISPATCH_LANE_ROW_BYTES as usize {
         return Err(format!(
             "descriptor row holds {} bytes; {} required",
@@ -83,7 +83,7 @@ pub(crate) fn decode_descriptor(row: &[u8]) -> Result<LaneDescriptor, String> {
             DISPATCH_LANE_ROW_BYTES
         ));
     }
-    Ok(LaneDescriptor {
+    Ok(DispatchLaneDescriptor {
         unit_class_mask: read_u64(row, ROW_UNIT_CLASSES),
         affinity_bloom: read_u64(row, ROW_AFFINITY_BLOOM),
         lane_id: read_u16(row, ROW_LANE_ID),
@@ -136,15 +136,15 @@ impl<'a> StatRowHandle<'a> {
     }
 
     /// Host-side overwrite used to mirror a remote lane's reported stats.
-    pub(crate) fn apply_mirror(&self, stats: &LaneStats) {
+    pub(crate) fn apply_mirror(&self, stats: &DispatchLaneStats) {
         self.ewma_ns.store(stats.ewma_ns, Ordering::Release);
         self.inflight.store(stats.inflight, Ordering::Release);
         self.max_concurrency.store(stats.max_concurrency, Ordering::Release);
         self.last_tick_seen.store(stats.last_tick_seen, Ordering::Release);
     }
 
-    pub fn snapshot(&self) -> LaneStats {
-        LaneStats {
+    pub fn snapshot(&self) -> DispatchLaneStats {
+        DispatchLaneStats {
             ewma_ns: self.ewma_ns.load(Ordering::Acquire),
             inflight: self.inflight.load(Ordering::Acquire),
             max_concurrency: self.max_concurrency.load(Ordering::Acquire),
@@ -221,7 +221,7 @@ impl DispatchBlock {
     /// Rows are read as plain bytes: the publisher's Release store on the
     /// flip index happens-before this function's Acquire load, which orders
     /// every prior write into the buffer. See `publisher` for the other half.
-    pub fn snapshot_descriptors(&self) -> Result<Vec<LaneDescriptor>, String> {
+    pub fn snapshot_descriptors(&self) -> Result<Vec<DispatchLaneDescriptor>, String> {
         let active = self.active_buffer_index()?;
         let base = DISPATCH_BUFFERS_OFFSET as usize + active * DISPATCH_BUFFER_BYTES as usize;
         let bytes = self.mapping.as_slice();
@@ -254,7 +254,7 @@ mod tests {
 
     #[test]
     fn descriptor_codec_roundtrips_every_field() {
-        let original = LaneDescriptor {
+        let original = DispatchLaneDescriptor {
             lane_id: 7,
             jurisdiction: 42,
             max_concurrency: 9,
@@ -288,7 +288,7 @@ mod tests {
         let block = DispatchBlock::open(file.path()).expect("open");
 
         let stats = block.stat_row(3).expect("stats row");
-        stats.apply_mirror(&LaneStats {
+        stats.apply_mirror(&DispatchLaneStats {
             ewma_ns: 8_000,
             inflight: 0,
             max_concurrency: 4,

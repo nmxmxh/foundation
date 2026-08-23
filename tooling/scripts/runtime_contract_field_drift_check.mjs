@@ -35,7 +35,11 @@ const SCHEMA_DIRS = [
 
 // Where hand-written host mirrors live, per language.
 const MIRROR_DIRS = {
-  rust: ["runtime-sdk/rust/crates/ovrt-core/src", "runtime-native/rust/src"],
+  rust: [
+    "runtime-sdk/rust/crates/ovrt-core/src",
+    "runtime-sdk/rust/crates/ovrt-dispatch/src",
+    "runtime-native/rust/src",
+  ],
   go: ["runtime-sdk/go/runtimehost"],
   ts: ["runtime-sdk/ts/browser-host/src", "runtime-native/ts/src"],
 };

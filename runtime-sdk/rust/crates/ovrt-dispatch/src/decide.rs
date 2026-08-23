@@ -27,17 +27,18 @@ use ovrt_core::DISPATCH_STALE_TICKS;
 pub const MAX_LANES: usize = ovrt_core::DISPATCH_MAX_LANES as usize;
 
 /// Immutable membership row for one lane, decoded from a published buffer.
+/// Field order mirrors runtime_dispatch.capnp.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LaneDescriptor {
+pub struct DispatchLaneDescriptor {
+    pub unit_class_mask: u64,
+    pub affinity_bloom: u64,
     pub lane_id: u16,
     pub jurisdiction: u16,
     pub max_concurrency: u32,
     pub generation: u32,
-    pub unit_class_mask: u64,
-    pub affinity_bloom: u64,
 }
 
-impl LaneDescriptor {
+impl DispatchLaneDescriptor {
     pub fn covers(&self, required_class_mask: u64) -> bool {
         self.unit_class_mask & required_class_mask == required_class_mask
     }
@@ -54,9 +55,10 @@ impl LaneDescriptor {
     }
 }
 
-/// Live statistics for one lane, snapshotted by the caller.
+/// Live statistics for one lane, snapshotted by the caller. Field order
+/// mirrors runtime_dispatch.capnp.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LaneStats {
+pub struct DispatchLaneStats {
     pub ewma_ns: u64,
     pub inflight: u32,
     pub max_concurrency: u32,
@@ -80,8 +82,8 @@ impl DispatchRequest {
     /// not look free.
     pub fn expected_latency_ns(
         &self,
-        stats: &LaneStats,
-        descriptor: &LaneDescriptor,
+        stats: &DispatchLaneStats,
+        descriptor: &DispatchLaneDescriptor,
     ) -> Option<u64> {
         if stats.ewma_ns == 0 {
             return None;
@@ -94,7 +96,7 @@ impl DispatchRequest {
         Some(stats.ewma_ns.saturating_mul(factor))
     }
 
-    fn is_fresh(&self, tick_now: u64, stats: &LaneStats) -> bool {
+    fn is_fresh(&self, tick_now: u64, stats: &DispatchLaneStats) -> bool {
         // Heartbeat zero means the owner never checked in, which is stale by
         // definition even though wrapping arithmetic would call it fresh.
         stats.last_tick_seen != 0
@@ -118,8 +120,8 @@ pub fn blend_ewma(previous_ns: u64, sample_ns: u64) -> u64 {
 /// lanes instead of flickering between them.
 pub fn decide(
     tick_now: u64,
-    descriptors: &[LaneDescriptor],
-    stats: &[Option<LaneStats>],
+    descriptors: &[DispatchLaneDescriptor],
+    stats: &[Option<DispatchLaneStats>],
     request: &DispatchRequest,
 ) -> Option<u16> {
     let mut best: Option<(u64, u16)> = None;
@@ -165,8 +167,8 @@ mod tests {
 
     const TICK: u64 = 100;
 
-    fn lane(id: u16) -> LaneDescriptor {
-        LaneDescriptor {
+    fn lane(id: u16) -> DispatchLaneDescriptor {
+        DispatchLaneDescriptor {
             lane_id: id,
             jurisdiction: 0,
             max_concurrency: 4,
@@ -176,8 +178,8 @@ mod tests {
         }
     }
 
-    fn stats(ewma_ns: u64) -> Option<LaneStats> {
-        Some(LaneStats { ewma_ns, inflight: 0, max_concurrency: 0, last_tick_seen: TICK })
+    fn stats(ewma_ns: u64) -> Option<DispatchLaneStats> {
+        Some(DispatchLaneStats { ewma_ns, inflight: 0, max_concurrency: 0, last_tick_seen: TICK })
     }
 
     fn request(deadline_ns: u64) -> DispatchRequest {

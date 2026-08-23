@@ -94,11 +94,11 @@ func EncodeLaneMirrorFrame(nodeID, regionID string, class LaneClass, lanes []Lan
 	}
 
 	frame := make([]byte, 0, 7+len(nodeBytes)+len(regionBytes)+len(lanes)*mirrorRecordBytes)
-	frame = append(frame, MirrorWireVersion, byte(class), byte(len(nodeBytes)))
+	frame = append(frame, MirrorWireVersion, byte(class), byte(len(nodeBytes))) // #nosec G115 -- nodeBytes length validated 1..255 above
 	frame = append(frame, nodeBytes...)
-	frame = append(frame, byte(len(regionBytes)))
+	frame = append(frame, byte(len(regionBytes))) // #nosec G115 -- regionBytes length validated 1..255 above
 	frame = append(frame, regionBytes...)
-	frame = binary.LittleEndian.AppendUint16(frame, uint16(len(lanes)))
+	frame = binary.LittleEndian.AppendUint16(frame, uint16(len(lanes))) // #nosec G115 -- lane count validated <= 255 above
 
 	for _, lane := range lanes {
 		start := len(frame)
@@ -180,7 +180,7 @@ func DecodeLaneMirrorFrame(frame []byte) (DecodedMirrorFrame, error) {
 	}
 	laneCount := int(binary.LittleEndian.Uint16(countRaw))
 	decoded.Lanes = make([]LaneMirrorUpdate, 0, laneCount)
-	for i := 0; i < laneCount; i++ {
+	for range laneCount {
 		record, err := read(mirrorRecordBytes)
 		if err != nil {
 			return decoded, err

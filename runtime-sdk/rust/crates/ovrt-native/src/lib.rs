@@ -592,7 +592,7 @@ mod tests {
     #[cfg(unix)]
     fn placement_table_routes_and_samples_completions() {
         use ovrt_core::DISPATCH_REGION_BYTES;
-        use ovrt_dispatch::{class_mask_for_role_index, DispatchBlock, LaneDescriptor};
+        use ovrt_dispatch::{class_mask_for_role_index, DispatchBlock, DispatchLaneDescriptor};
 
         struct EchoCompute;
 
@@ -621,7 +621,7 @@ mod tests {
         let block = Arc::new(DispatchBlock::open(file.path()).expect("open block"));
 
         let compute_bit = class_mask_for_role_index(RuntimeRole::Compute as usize);
-        let lane0 = LaneDescriptor {
+        let lane0 = DispatchLaneDescriptor {
             lane_id: 0,
             jurisdiction: 0,
             max_concurrency: 4,

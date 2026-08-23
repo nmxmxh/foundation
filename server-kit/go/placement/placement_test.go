@@ -1,7 +1,6 @@
 package placement
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -60,8 +59,7 @@ func TestPublishAndListenMirrorsOverSharedBus(t *testing.T) {
 	sink := &collectingSink{}
 	received := make(chan error, 8)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := ListenMirrors(ctx, bus, "", sink, func(_ int, cause error) { received <- cause }); err != nil {
 		t.Fatalf("listen: %v", err)
 	}
@@ -90,8 +88,7 @@ func TestListenerSurvivesForeignFrames(t *testing.T) {
 	bus := rediskit.NewMemoryClient("placement")
 	sink := &collectingSink{}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	if err := ListenMirrors(ctx, bus, "", sink, nil); err != nil {
 		t.Fatalf("listen: %v", err)
 	}

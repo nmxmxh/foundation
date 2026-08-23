@@ -54,3 +54,4 @@ versioning	vendored
 worker	vendored	
 wsmetrics	vendored	
 wsrouting	vendored	
+placement	vendored	Cross-node compute placement: mirror frames, listener, chunk tickets

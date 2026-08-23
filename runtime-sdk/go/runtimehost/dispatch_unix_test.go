@@ -110,7 +110,7 @@ func TestDispatchStatRowSamplingAndBalance(t *testing.T) {
 		t.Fatalf("blend = %d want 9000", blended)
 	}
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		ok, err := row.ReleaseOne()
 		if err != nil || !ok {
 			t.Fatalf("release %d = %v,%v", i, ok, err)
@@ -191,7 +191,7 @@ func TestDispatchEndToEndDecisionThroughRealBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("row 0: %v", err)
 	}
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		if _, err := localRow2.Claim(); err != nil {
 			t.Fatalf("claim: %v", err)
 		}
@@ -212,7 +212,7 @@ func TestDispatchEndToEndDecisionThroughRealBytes(t *testing.T) {
 	// Age the clock past the freshness window. Both sampled heartbeats are
 	// now ancient; only the peer gets refreshed, so selection must settle on
 	// it once the table is re-read from the region.
-	for i := 0; i < int(generated.DISPATCH_STALE_TICKS)+2; i++ {
+	for range int(generated.DISPATCH_STALE_TICKS) + 2 {
 		if _, err := block.AdvanceTick(); err != nil {
 			t.Fatalf("age clock: %v", err)
 		}
