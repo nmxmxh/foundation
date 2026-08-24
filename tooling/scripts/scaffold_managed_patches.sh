@@ -1872,6 +1872,27 @@ patch_startup_dependencies_double_close_redis() {
 }
 
 # @since 0.0.1
+patch_remove_base_ui_dependency() {
+  local file="$target/frontend/package.json"
+  [[ -f "$file" ]] || return 0
+
+  # Base UI is CommonJS-only, so any @ovasabi/ui-minimal import dragged it into
+  # every module graph, SSR included. ui-minimal interaction primitives are
+  # ESM-native now, and the template manifest no longer ships the dependency.
+  # Drop it from generated apps; npm install regenerates the lockfile. Guarded
+  # on the package name so it is a no-op once applied.
+  grep -Fq '"@base-ui/react"' "$file" || return 0
+  local before
+  before="$(mktemp)"
+  cp "$file" "$before"
+  perl -0pi -e 's/[ \t]*"\@base-ui\/react":\s*"[^"]*",\r?\n//' "$file"
+  if ! cmp -s "$before" "$file"; then
+    log_patch "frontend drops CJS-only Base UI dependency: ${file#$target/}"
+  fi
+  rm -f "$before"
+}
+
+# @since 0.0.1
 patch_frontend_tsconfig_baseurl() {
   local file="$target/frontend/tsconfig.app.json"
   [[ -f "$file" ]] || return 0
@@ -2822,6 +2843,7 @@ patch_test_compose_ephemeral_ports
 patch_postgres_config_baseline
 patch_startup_dependencies_double_close_redis
 patch_frontend_tsconfig_baseurl
+patch_remove_base_ui_dependency
 patch_frontend_nginx_security_headers
 patch_env_example_hermes_warm_scopes
 patch_startup_projection_warming
