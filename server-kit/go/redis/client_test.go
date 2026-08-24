@@ -261,6 +261,62 @@ func TestMemoryClientSetGetTTLAndCopies(t *testing.T) {
 	}
 }
 
+// Absent keys obey one contract across every driver: Get yields (nil, nil),
+// Del stays silent, and existence comes only from Exists or value length.
+// The live driver enforces parity by normalizing goredis.Nil at the boundary
+// (client.go, redisClient.Get). A caller that expects a raw go-redis error
+// for missing keys will misread deletions as failures. Caught in a downstream
+// project on 2026-08-24: three debug rounds chased a phantom leak caused by
+// error-based absence checks. This test makes the contract explicit.
+func TestAbsentKeySemanticsContract(t *testing.T) {
+	client := NewMemoryClient("app")
+	ctx := context.Background()
+
+	// A never-written key produces no error and no bytes.
+	got, err := client.Get(ctx, "absent:fresh")
+	if err != nil || got != nil {
+		t.Fatalf("Get(fresh) = %q err=%v, want nil,nil", got, err)
+	}
+
+	// An expired key reads exactly like a never-written key.
+	if err := client.Set(ctx, "absent:t", "x", time.Nanosecond); err != nil {
+		t.Fatalf("Set(ttl) error = %v", err)
+	}
+	time.Sleep(time.Millisecond)
+	if got, err = client.Get(ctx, "absent:t"); err != nil || got != nil {
+		t.Fatalf("Get(expired) = %q err=%v, want nil,nil", got, err)
+	}
+
+	// Deletion of absent keys stays silent: expired and unknown alike.
+	if err := client.Del(ctx, "absent:t"); err != nil {
+		t.Fatalf("Del(expired) error = %v", err)
+	}
+	if err := client.Del(ctx, "absent:fresh"); err != nil {
+		t.Fatalf("Del(missing) error = %v", err)
+	}
+	if got, err = client.Get(ctx, "absent:t"); err != nil || len(got) != 0 {
+		t.Fatalf("post-Del Get = %q err=%v, want absent", got, err)
+	}
+
+	admin, ok := client.(KeyAdminClient)
+	if !ok {
+		t.Fatal("memory client should implement KeyAdminClient")
+	}
+	exists, err := admin.Exists(ctx, "absent:t")
+	if err != nil || exists {
+		t.Fatalf("Exists(absent) = %v err=%v, want false,nil", exists, err)
+	}
+
+	batch, ok := client.(BatchClient)
+	if !ok {
+		t.Fatal("memory client should implement BatchClient")
+	}
+	gotMany, err := batch.GetMany(ctx, "absent:fresh", "absent:t")
+	if err != nil || len(gotMany) != 0 {
+		t.Fatalf("GetMany(absent) = %v err=%v, want empty map", gotMany, err)
+	}
+}
+
 func TestMemoryClientKeyAdminExistsAndDeletePattern(t *testing.T) {
 	memory := NewMemoryClient("app")
 	admin, ok := memory.(KeyAdminClient)

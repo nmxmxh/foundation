@@ -17,6 +17,18 @@ In this architecture the default read order is local memory cache first, Redis s
 4. Redis usage must be injectable and testable.
 5. Auth/session or authorization-sensitive Redis data must fail closed. Redis must not become the only durable source for permission decisions that would fail open if keys disappear or are evicted.
 
+## Absent-key semantics
+
+All drivers share one absent-key contract: a key that was never written, expired by TTL, or already deleted reads as `(nil, nil)` from `Get`. `Del` on absent keys returns no error. This is a deliberate divergence from raw go-redis, which surfaces `redis.Nil` from `GET`. The live driver normalizes `redis.Nil` at the boundary (`server-kit/go/redis/client.go`, `redisClient.Get`) so both drivers stay identical.
+
+Rules for consumers:
+
+1. Never infer existence from a `Get` error. An absent key produces no error.
+2. Prove existence with `Exists` (`KeyAdminClient`) or decide from value length.
+3. Tests must assert absence through zero-length values, not error values.
+
+Regression guard: `TestAbsentKeySemanticsContract` pins the full contract for the memory driver; cross-driver parity is covered by the service-backed suites.
+
 ## Allowed use cases
 
 1. Short-lived caches.
