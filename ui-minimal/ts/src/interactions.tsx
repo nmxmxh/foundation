@@ -1,9 +1,4 @@
-import { Checkbox } from "@base-ui/react/checkbox";
-import { NumberField } from "@base-ui/react/number-field";
-import { Popover } from "@base-ui/react/popover";
-import { Switch } from "@base-ui/react/switch";
-import { Tabs } from "@base-ui/react/tabs";
-import { type HTMLAttributes, type ReactNode, useId, useMemo, useState } from "react";
+import { type HTMLAttributes, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { css, styled } from "styled-components";
 
 import { MinimalCalendar, MinimalDropdown, type MinimalOption } from "./primitives";
@@ -130,6 +125,23 @@ const controlReset = css`
   font: inherit;
 `;
 
+const popIn = css`
+  @media (prefers-reduced-motion: no-preference) {
+    animation: minimal-interactions-pop 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @keyframes minimal-interactions-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+`;
+
 const Style = {
   Field: styled.div`
     display: grid;
@@ -171,9 +183,40 @@ const Style = {
     font-size: ${({ theme }) => theme.typography.bodySize};
     font-weight: ${({ theme }) => theme.typography.weightMedium};
   `,
-  CheckboxRoot: styled(Checkbox.Root)`
-    ${controlReset}
-    ${focusRing}
+  ChoiceControl: styled.span`
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    width: var(--minimal-control-min-target);
+    height: var(--minimal-control-min-target);
+    margin-block: 4px;
+
+    & > input:focus-visible + span {
+      outline: 2px solid ${({ theme }) => theme.color.borderFocus};
+      outline-offset: 2px;
+    }
+
+    & > input:checked + span,
+    & > input:indeterminate + span {
+      border-color: ${({ theme }) => theme.color.brand};
+      background: ${({ theme }) => theme.color.brand};
+      color: ${({ theme }) => theme.color.textInverse};
+
+      & > span {
+        opacity: 1;
+      }
+    }
+  `,
+  ControlInput: styled.input`
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: inherit;
+  `,
+  CheckboxBox: styled.span`
     display: inline-grid;
     place-items: center;
     width: var(--minimal-control-min-target);
@@ -181,23 +224,16 @@ const Style = {
     border: 1px solid ${({ theme }) => theme.color.borderStrong};
     border-radius: ${({ theme }) => theme.radius.sm};
     background: ${({ theme }) => theme.color.bgSurface};
-    cursor: inherit;
 
-    &[data-checked],
-    &[data-indeterminate] {
-      border-color: ${({ theme }) => theme.color.brand};
-      background: ${({ theme }) => theme.color.brand};
-      color: ${({ theme }) => theme.color.textInverse};
+    & > span {
+      font-size: 1rem;
+      font-weight: ${({ theme }) => theme.typography.weightBold};
+      line-height: 1;
+      opacity: 0;
     }
   `,
-  CheckboxIndicator: styled(Checkbox.Indicator)`
-    font-size: 1rem;
-    font-weight: ${({ theme }) => theme.typography.weightBold};
-    line-height: 1;
-  `,
-  SwitchRoot: styled(Switch.Root)`
-    ${controlReset}
-    ${focusRing}
+  SwitchTrack: styled.span`
+    position: relative;
     display: inline-flex;
     align-items: center;
     flex: 0 0 auto;
@@ -208,17 +244,29 @@ const Style = {
     border: 1px solid ${({ theme }) => theme.color.borderStrong};
     border-radius: ${({ theme }) => theme.radius.pill};
     background: ${({ theme }) => theme.color.bgSurfaceAlt};
-    cursor: inherit;
     transition:
       background-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
       border-color 160ms cubic-bezier(0.22, 1, 0.36, 1);
 
-    &[data-checked] {
+    & > input:focus-visible + span {
+      outline: 2px solid ${({ theme }) => theme.color.borderFocus};
+      outline-offset: 2px;
+    }
+
+    &:has(input:checked) {
       border-color: ${({ theme }) => theme.color.brand};
       background: ${({ theme }) => theme.color.brand};
     }
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+
+      & > span {
+        transition: none;
+      }
+    }
   `,
-  SwitchThumb: styled(Switch.Thumb)`
+  SwitchThumb: styled.span`
     display: block;
     width: 20px;
     height: 20px;
@@ -228,20 +276,16 @@ const Style = {
     box-shadow: 0 1px 3px rgba(28, 28, 30, 0.24);
     transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 
-    [data-checked] & {
+    input:checked + & {
       border-color: transparent;
       transform: translateX(18px);
     }
-
-    @media (prefers-reduced-motion: reduce) {
-      transition: none;
-    }
   `,
-  NumberRoot: styled(NumberField.Root)`
+  NumberRoot: styled.div`
     display: grid;
     gap: ${({ theme }) => theme.spacing.xs};
   `,
-  NumberGroup: styled(NumberField.Group)<{ $size: MinimalSize; $invalid: boolean }>`
+  NumberGroup: styled.div<{ $size: MinimalSize; $invalid: boolean }>`
     display: grid;
     grid-template-columns: var(--minimal-control-min-target) minmax(0, 1fr) var(--minimal-control-min-target);
     min-height: ${({ $size }) => `var(--minimal-control-height-${$size})`};
@@ -269,21 +313,20 @@ const Style = {
       opacity: 0.48;
     }
   `,
-  NumberInput: styled(NumberField.Input)`
+  NumberInput: styled.input`
+    ${controlReset}
     min-width: 0;
     width: 100%;
-    border: 0;
     outline: 0;
-    background: transparent;
     color: ${({ theme }) => theme.color.textPrimary};
     padding: 0 ${({ theme }) => theme.spacing.sm};
     text-align: center;
   `,
-  TabsRoot: styled(Tabs.Root)`
+  TabsRoot: styled.div`
     display: grid;
     gap: ${({ theme }) => theme.spacing.md};
   `,
-  TabsList: styled(Tabs.List)`
+  TabsList: styled.div`
     display: flex;
     gap: ${({ theme }) => theme.spacing.xs};
     overflow-x: auto;
@@ -296,7 +339,7 @@ const Style = {
       flex-direction: column;
     }
   `,
-  Tab: styled(Tabs.Tab)`
+  Tab: styled.button`
     ${controlReset}
     ${focusRing}
     min-height: var(--minimal-control-min-target);
@@ -306,7 +349,7 @@ const Style = {
     cursor: pointer;
     white-space: nowrap;
 
-    &[data-active] {
+    &[aria-selected="true"] {
       background: ${({ theme }) => theme.color.bgSurface};
       color: ${({ theme }) => theme.color.textPrimary};
       box-shadow: ${({ theme }) => theme.shadow.subtle};
@@ -317,11 +360,16 @@ const Style = {
       opacity: 0.48;
     }
   `,
-  TabPanel: styled(Tabs.Panel)`
+  TabPanel: styled.div`
     min-width: 0;
     outline: none;
   `,
-  DateTrigger: styled(Popover.Trigger)<{ $placeholder: boolean; $invalid: boolean }>`
+  Anchor: styled.span`
+    position: relative;
+    display: grid;
+    width: 100%;
+  `,
+  DateTrigger: styled.button<{ $placeholder: boolean; $invalid: boolean }>`
     ${controlReset}
     ${focusRing}
     display: flex;
@@ -355,36 +403,25 @@ const Style = {
     flex: 0 0 auto;
     color: ${({ theme }) => theme.color.textSecondary};
   `,
-  DatePositioner: styled(Popover.Positioner)`
+  DatePanel: styled.div<{ $open: boolean }>`
+    position: absolute;
+    top: calc(100% + var(--minimal-overlay-anchored-offset));
+    left: 0;
     z-index: ${({ theme }) => theme.zIndex.dropdown};
-    outline: none;
-  `,
-  DatePopup: styled(Popover.Popup)`
     width: min(calc(100vw - (2 * var(--minimal-overlay-viewport-gutter))), 368px);
     max-height: var(--minimal-overlay-max-height);
     overflow: auto;
+    visibility: ${({ $open }) => ($open ? "visible" : "hidden")};
     border: 1px solid ${({ theme }) => theme.color.borderStrong};
     border-radius: ${({ theme }) => theme.radius.md};
     background: ${({ theme }) => theme.color.bgSurface};
     box-shadow: ${({ theme }) => theme.shadow.floating};
-    transform-origin: var(--transform-origin);
-    transition:
-      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
-      opacity 140ms ease-out;
 
-    &[data-starting-style],
-    &[data-ending-style] {
-      opacity: 0;
-      transform: scale(0.98);
-    }
+    ${({ $open }) => ($open ? popIn : "")}
 
     & [data-minimal="Calendar"] {
       border: 0;
       border-radius: inherit;
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      transition: none;
     }
   `,
   VisuallyHidden: styled.span`
@@ -434,29 +471,43 @@ export const MinimalCheckbox = ({
   name,
   value,
   ...props
-}: MinimalCheckboxProps) => (
-  <div data-minimal="Checkbox" {...props}>
-    <Style.ChoiceLabel $disabled={disabled}>
-      <Style.CheckboxRoot
-        checked={checked}
-        defaultChecked={defaultChecked}
-        onCheckedChange={(next) => onCheckedChange?.(next)}
-        indeterminate={indeterminate}
-        disabled={disabled}
-        readOnly={readOnly}
-        required={required}
-        name={name}
-        value={value}
-      >
-        <Style.CheckboxIndicator>{indeterminate ? "−" : "✓"}</Style.CheckboxIndicator>
-      </Style.CheckboxRoot>
-      <Style.ChoiceCopy>
-        <Style.ChoiceTitle>{label}</Style.ChoiceTitle>
-        <ChoiceMessage description={description} hint={hint} error={error} />
-      </Style.ChoiceCopy>
-    </Style.ChoiceLabel>
-  </div>
-);
+}: MinimalCheckboxProps) => {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = Boolean(indeterminate);
+    }
+  }, [indeterminate]);
+
+  return (
+    <div data-minimal="Checkbox" {...props}>
+      <Style.ChoiceLabel $disabled={disabled}>
+        <Style.ChoiceControl data-indeterminate={indeterminate || undefined}>
+          <Style.ControlInput
+            ref={inputRef}
+            type="checkbox"
+            checked={checked}
+            defaultChecked={defaultChecked}
+            onChange={(event) => onCheckedChange?.(event.currentTarget.checked)}
+            disabled={disabled}
+            readOnly={readOnly}
+            required={required}
+            name={name}
+            value={value}
+          />
+          <Style.CheckboxBox aria-hidden>
+            <span>{indeterminate ? "−" : "✓"}</span>
+          </Style.CheckboxBox>
+        </Style.ChoiceControl>
+        <Style.ChoiceCopy>
+          <Style.ChoiceTitle>{label}</Style.ChoiceTitle>
+          <ChoiceMessage description={description} hint={hint} error={error} />
+        </Style.ChoiceCopy>
+      </Style.ChoiceLabel>
+    </div>
+  );
+};
 
 export const MinimalSwitch = ({
   label,
@@ -475,18 +526,21 @@ export const MinimalSwitch = ({
 }: MinimalSwitchProps) => (
   <div data-minimal="Switch" {...props}>
     <Style.ChoiceLabel $disabled={disabled}>
-      <Style.SwitchRoot
-        checked={checked}
-        defaultChecked={defaultChecked}
-        onCheckedChange={(next) => onCheckedChange?.(next)}
-        disabled={disabled}
-        readOnly={readOnly}
-        required={required}
-        name={name}
-        value={value}
-      >
+      <Style.SwitchTrack>
+        <Style.ControlInput
+          type="checkbox"
+          role="switch"
+          checked={checked}
+          defaultChecked={defaultChecked}
+          onChange={(event) => onCheckedChange?.(event.currentTarget.checked)}
+          disabled={disabled}
+          readOnly={readOnly}
+          required={required}
+          name={name}
+          value={value}
+        />
         <Style.SwitchThumb />
-      </Style.SwitchRoot>
+      </Style.SwitchTrack>
       <Style.ChoiceCopy>
         <Style.ChoiceTitle>{label}</Style.ChoiceTitle>
         <ChoiceMessage description={description} hint={hint} error={error} />
@@ -494,6 +548,20 @@ export const MinimalSwitch = ({
     </Style.ChoiceLabel>
   </div>
 );
+
+const numericStep = (step: MinimalNumberFieldProps["step"], multiplier: number) =>
+  step === "any" ? multiplier : (step ?? 1) * multiplier;
+
+const clampNumber = (candidate: number, min?: number, max?: number) => {
+  let next = candidate;
+  if (min !== undefined && Number.isFinite(min)) {
+    next = Math.max(min, next);
+  }
+  if (max !== undefined && Number.isFinite(max)) {
+    next = Math.min(max, next);
+  }
+  return next;
+};
 
 export const MinimalNumberField = ({
   label,
@@ -509,8 +577,6 @@ export const MinimalNumberField = ({
   step,
   smallStep,
   largeStep,
-  format,
-  locale,
   name,
   required,
   disabled,
@@ -525,38 +591,112 @@ export const MinimalNumberField = ({
   const id = `minimal-number-${generatedId}`;
   const hintId = hint ? `${id}-hint` : undefined;
   const errorId = error ? `${id}-error` : undefined;
+  const controlled = value !== undefined;
+  const [draft, setDraft] = useState(() => String(value ?? defaultValue ?? ""));
+  const current = controlled ? value : draft === "" ? null : Number(draft);
+
+  const apply = (next: number | null, committed: boolean) => {
+    if (!controlled) {
+      setDraft(next === null ? "" : String(next));
+    }
+    onValueChange?.(next);
+    if (committed) {
+      onValueCommitted?.(next);
+    }
+  };
+
+  const stepBy = (direction: 1 | -1, event: { shiftKey?: boolean; altKey?: boolean }) => {
+    const magnitude = numericStep(step, event.shiftKey ? (largeStep ?? 10) : event.altKey ? (smallStep ?? 0.1) : 1);
+    const base = typeof current === "number" && Number.isFinite(current) ? current : (defaultValue ?? 0);
+    if (step === "any" || !Number.isInteger(magnitude)) {
+      apply(clampNumber(Number((base + direction * magnitude).toFixed(6)), min, max), true);
+      return;
+    }
+    apply(clampNumber(base + direction * magnitude, min, max), true);
+  };
 
   return (
-    <Style.NumberRoot
-      data-minimal="NumberField"
-      id={id}
-      value={value}
-      defaultValue={defaultValue}
-      onValueChange={(next) => onValueChange?.(next)}
-      onValueCommitted={(next) => onValueCommitted?.(next)}
-      min={min}
-      max={max}
-      step={step}
-      smallStep={smallStep}
-      largeStep={largeStep}
-      format={format}
-      locale={locale}
-      name={name}
-      required={required}
-      disabled={disabled}
-      readOnly={readOnly}
-      allowWheelScrub={allowWheelScrub}
-    >
+    <Style.NumberRoot data-minimal="NumberField">
       <Style.Label htmlFor={id}>{label}</Style.Label>
       {description ? <Style.Description>{description}</Style.Description> : null}
       <Style.NumberGroup $size={inputSize} $invalid={Boolean(error)}>
-        <NumberField.Decrement render={<Style.NumberButton aria-label={decrementLabel}>−</Style.NumberButton>} />
+        <Style.NumberButton
+          type="button"
+          aria-label={decrementLabel}
+          disabled={disabled || readOnly}
+          onClick={(event) => stepBy(-1, event)}
+        >
+          −
+        </Style.NumberButton>
         <Style.NumberInput
+          id={id}
+          name={name}
+          required={required}
+          disabled={disabled}
+          readOnly={readOnly}
+          role="spinbutton"
+          inputMode="decimal"
+          autoComplete="off"
           placeholder={placeholder}
+          aria-valuenow={typeof current === "number" ? current : undefined}
+          aria-valuemin={min}
+          aria-valuemax={max}
           aria-invalid={Boolean(error) || undefined}
           aria-describedby={[hintId, errorId].filter(Boolean).join(" ") || undefined}
+          value={draft}
+          onChange={(event) => {
+            if (controlled) {
+              setDraft(event.currentTarget.value);
+            } else {
+              setDraft(event.currentTarget.value);
+              const parsed = event.currentTarget.value.trim() === "" ? null : Number(event.currentTarget.value);
+              onValueChange?.(parsed !== null && Number.isNaN(parsed) ? null : parsed);
+            }
+          }}
+          onBlur={() => {
+            const trimmed = draft.trim();
+            if (trimmed === "") {
+              apply(null, true);
+              return;
+            }
+            const parsed = Number(trimmed);
+            if (Number.isNaN(parsed)) {
+              setDraft(typeof current === "number" ? String(current) : "");
+              return;
+            }
+            apply(clampNumber(parsed, min, max), true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+              return;
+            }
+            if (event.key === "ArrowUp") {
+              event.preventDefault();
+              stepBy(1, event);
+            }
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              stepBy(-1, event);
+            }
+          }}
+          onWheel={
+            allowWheelScrub && !disabled && !readOnly
+              ? (event) => {
+                  event.preventDefault();
+                  stepBy(event.deltaY < 0 ? 1 : -1, event);
+                }
+              : undefined
+          }
         />
-        <NumberField.Increment render={<Style.NumberButton aria-label={incrementLabel}>+</Style.NumberButton>} />
+        <Style.NumberButton
+          type="button"
+          aria-label={incrementLabel}
+          disabled={disabled || readOnly}
+          onClick={(event) => stepBy(1, event)}
+        >
+          +
+        </Style.NumberButton>
       </Style.NumberGroup>
       {error ? (
         <Style.Message id={errorId} $error role="alert">{error}</Style.Message>
@@ -575,29 +715,97 @@ export const MinimalTabs = <T extends string>({
   ariaLabel,
   orientation = "horizontal",
   ...props
-}: MinimalTabsProps<T>) => (
-  <Style.TabsRoot
-    data-minimal="Tabs"
-    value={value}
-    defaultValue={defaultValue}
-    orientation={orientation}
-    onValueChange={(next) => onValueChange?.(next as T)}
-    {...props}
-  >
-    <Style.TabsList aria-label={ariaLabel}>
+}: MinimalTabsProps<T>) => {
+  const generatedId = useId();
+  const [innerValue, setInnerValue] = useState<T | undefined>(defaultValue);
+  const selected = (value !== undefined ? value : innerValue) ?? tabs[0]?.value;
+  const tabRefs = useRef(new Map<T, HTMLButtonElement>());
+
+  const select = (next: T) => {
+    if (value === undefined) {
+      setInnerValue(next);
+    }
+    onValueChange?.(next);
+    tabRefs.current.get(next)?.focus();
+  };
+
+  const moveSelection = (from: T, offset: 1 | -1) => {
+    const enabled = tabs.filter((tab) => !tab.disabled);
+    if (enabled.length === 0) {
+      return;
+    }
+    const at = enabled.findIndex((tab) => tab.value === from);
+    const next = enabled[(((at === -1 ? 0 : at) + offset) % enabled.length + enabled.length) % enabled.length];
+    select(next.value);
+  };
+
+  return (
+    <Style.TabsRoot data-minimal="Tabs" {...props}>
+      <Style.TabsList role="tablist" aria-label={ariaLabel} data-orientation={orientation}>
+        {tabs.map((tab) => (
+          <Style.Tab
+            key={tab.value}
+            type="button"
+            role="tab"
+            id={`minimal-tab-${generatedId}-${tab.value}`}
+            aria-selected={tab.value === selected}
+            aria-controls={`minimal-tabpanel-${generatedId}-${tab.value}`}
+            tabIndex={tab.value === selected ? 0 : -1}
+            disabled={tab.disabled}
+            ref={(node) => {
+              if (node) {
+                tabRefs.current.set(tab.value, node);
+              } else {
+                tabRefs.current.delete(tab.value);
+              }
+            }}
+            onClick={() => select(tab.value)}
+            onKeyDown={(event) => {
+              const forward = orientation === "vertical" ? "ArrowDown" : "ArrowRight";
+              const backward = orientation === "vertical" ? "ArrowUp" : "ArrowLeft";
+              if (event.key === forward) {
+                event.preventDefault();
+                moveSelection(tab.value, 1);
+              }
+              if (event.key === backward) {
+                event.preventDefault();
+                moveSelection(tab.value, -1);
+              }
+              if (event.key === "Home") {
+                event.preventDefault();
+                const first = tabs.find((candidate) => !candidate.disabled);
+                if (first) {
+                  select(first.value);
+                }
+              }
+              if (event.key === "End") {
+                event.preventDefault();
+                const last = [...tabs].reverse().find((candidate) => !candidate.disabled);
+                if (last) {
+                  select(last.value);
+                }
+              }
+            }}
+          >
+            {tab.label}
+          </Style.Tab>
+        ))}
+      </Style.TabsList>
       {tabs.map((tab) => (
-        <Style.Tab key={tab.value} value={tab.value} disabled={tab.disabled}>
-          {tab.label}
-        </Style.Tab>
+        <Style.TabPanel
+          key={tab.value}
+          role="tabpanel"
+          id={`minimal-tabpanel-${generatedId}-${tab.value}`}
+          aria-labelledby={`minimal-tab-${generatedId}-${tab.value}`}
+          tabIndex={0}
+          hidden={tab.value !== selected}
+        >
+          {tab.content}
+        </Style.TabPanel>
       ))}
-    </Style.TabsList>
-    {tabs.map((tab) => (
-      <Style.TabPanel key={tab.value} value={tab.value}>
-        {tab.content}
-      </Style.TabPanel>
-    ))}
-  </Style.TabsRoot>
-);
+    </Style.TabsRoot>
+  );
+};
 
 const normalizeDate = (value?: Date | string | null) => {
   if (!value) return null;
@@ -641,19 +849,49 @@ export const MinimalDatePicker = ({
   const selected = normalizeDate(value);
   const formatter = useMemo(() => new Intl.DateTimeFormat(locale, dateFormat), [locale, dateFormat]);
   const [open, setOpen] = useState(false);
+  const anchorRef = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (anchorRef.current && !anchorRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
 
   return (
     <Style.Field data-minimal="DatePicker" {...props}>
       <Style.Label htmlFor={triggerId}>{label}</Style.Label>
       {description ? <Style.Description>{description}</Style.Description> : null}
-      <Popover.Root open={open} onOpenChange={setOpen}>
+      <Style.Anchor ref={anchorRef}>
         <Style.DateTrigger
+          ref={triggerRef}
           id={triggerId}
+          type="button"
           $placeholder={!selected}
           $invalid={Boolean(error)}
           disabled={disabled}
+          aria-haspopup="dialog"
+          aria-expanded={open}
           aria-invalid={Boolean(error) || undefined}
           aria-describedby={[hintId, errorId].filter(Boolean).join(" ") || undefined}
+          onClick={() => setOpen((previous) => !previous)}
         >
           <Style.DateTriggerValue>{selected ? formatter.format(selected) : placeholder}</Style.DateTriggerValue>
           <Style.DateTriggerIcon aria-hidden>
@@ -663,28 +901,32 @@ export const MinimalDatePicker = ({
             </svg>
           </Style.DateTriggerIcon>
         </Style.DateTrigger>
-        <Popover.Portal>
-          <Style.DatePositioner side="bottom" align="start" sideOffset={8} collisionPadding={16}>
-            <Style.DatePopup>
-              <Popover.Title render={<Style.VisuallyHidden />}>{label}</Popover.Title>
-              <MinimalCalendar
-                value={selected}
-                onChange={(next) => {
-                  onChange(next);
-                  setOpen(false);
-                }}
-                minDate={minDate}
-                maxDate={maxDate}
-                isDateDisabled={isDateDisabled}
-                locale={locale}
-                weekStartsOn={weekStartsOn}
-                showAdjacentDays={false}
-                aria-label={typeof label === "string" ? label : "Choose a date"}
-              />
-            </Style.DatePopup>
-          </Style.DatePositioner>
-        </Popover.Portal>
-      </Popover.Root>
+        <Style.DatePanel
+          $open={open}
+          role="dialog"
+          aria-label={typeof label === "string" ? label : "Choose a date"}
+          aria-hidden={!open}
+        >
+          <Style.VisuallyHidden>{label}</Style.VisuallyHidden>
+          {open ? (
+            <MinimalCalendar
+              value={selected}
+              onChange={(next) => {
+                onChange(next);
+                setOpen(false);
+                triggerRef.current?.focus();
+              }}
+              minDate={minDate}
+              maxDate={maxDate}
+              isDateDisabled={isDateDisabled}
+              locale={locale}
+              weekStartsOn={weekStartsOn}
+              showAdjacentDays={false}
+              aria-label={typeof label === "string" ? label : "Choose a date"}
+            />
+          ) : null}
+        </Style.DatePanel>
+      </Style.Anchor>
       {clearable && selected ? (
         <Style.ClearButton type="button" onClick={() => onChange(null)} disabled={disabled}>
           Clear date
