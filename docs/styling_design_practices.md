@@ -286,7 +286,7 @@ Before merging frontend work, verify:
 8. overlays clamp width and height to the viewport
 9. modals have explicit max-height and scroll-body behavior
 10. media/display sections declare aspect-ratio and min-height instead of depending on content accidents
-11. generated application manifests install the `@base-ui/react` peer required by the preserved local-package workflow, but application source does not import it; all Base UI composition stays behind shared `Minimal*` contracts
+11. shared packages stay ESM-clean end to end: no CJS-only transitive dependencies or peers (removed: `@base-ui/react`, 2026-08-24). Any import of a shared package must not drag non-tree-shakeable vendor code into application module graphs, SSR included
 12. date-only values use local `YYYY-MM-DD`, wall times use `HH:mm`, and scheduled instants use ISO/RFC3339 plus an explicit product timezone policy
 
 ## 10. Fluid Sizing, Proportions, and Primitive Intelligence

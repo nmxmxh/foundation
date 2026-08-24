@@ -55,11 +55,11 @@ Current canonical surfaces:
 26. `MinimalDisplaySection`
 27. `MinimalLandingSection`
 28. `MinimalInfoPanel`
-29. `MinimalCheckbox` (Base UI-backed)
-30. `MinimalSwitch` (Base UI-backed)
-31. `MinimalNumberField` (Base UI-backed)
-32. `MinimalTabs` (Base UI-backed)
-33. `MinimalDatePicker` (Base UI Popover + Foundation calendar)
+29. `MinimalCheckbox` (ESM-native)
+30. `MinimalSwitch` (ESM-native)
+31. `MinimalNumberField` (ESM-native)
+32. `MinimalTabs` (ESM-native)
+33. `MinimalDatePicker` (ESM-native anchored panel + Foundation calendar)
 34. `MinimalTimePicker`
 
 Extension model:
@@ -69,7 +69,6 @@ Extension model:
 3. motion helpers are exported separately so apps can compose page choreography without forking primitives
 4. primitive contracts stay generic; app-specific variants should be wrappers, not changes to the shared component API
 5. app shells pass app-owned navigation, auth, and status content into `MinimalAppShell`/`MinimalScrollMain`; shared primitives only own layout, focus, scroll, and motion behavior
-6. Base UI is an implementation peer of `ui-minimal`; generated app manifests install it once because Foundation packages are preserved local symlinks, while application source consumes `Minimal*` contracts and never imports `@base-ui/react` directly
 
 Implementation posture:
 
@@ -88,7 +87,7 @@ Implementation posture:
 13. **Fluid Sizing and modular Spacing**: Implement spacing and typography dynamically using the `clamp()` formula (for example, `font-size: clamp(1rem, 0.9rem + 0.5vw, 1.25rem)` and `padding: clamp(12px, 2vw + 4px, 24px)`) matching the 8px modular scale.
 14. **Z-Index Layer Hierarchy**: Enforce a strict z-index scale: overlays/dropdowns at `200`, modals/dialogs/bottom-sheets at `300`, and system alerts/toasts at `400`.
 15. **Accessibility Invariants**: Always provide custom `:focus-visible` outline rings (do not use `outline: none` globally). Maintain a minimum touch target size of `44px x 44px` for mobile interactive primitives.
-16. **Interaction Ownership**: New checkbox, switch, number-field, tabs, and popover mechanics compose Base UI subpath exports. Public props stay framework-neutral and do not expose Base UI event-detail types.
+16. **Interaction Ownership**: checkbox, switch, number-field, tabs, and date-picker primitives are ESM-native with no headless dependency. The date picker uses an anchored panel with outside-click and Escape dismissal. Public props stay framework-neutral; do not add peers that force non-ESM code into application module graphs.
 17. **Scheduling Values**: Calendar overlays may accept `Date | string` for compatibility, but app wrappers should serialize date-only values as local `YYYY-MM-DD`, wall times as `HH:mm`, and instants as ISO/RFC3339 with an explicit product timezone policy.
 18. **Calendar Navigation**: `MinimalCalendar` owns bounded day, month, and 16-year drill-down views with synchronized animated transitions. Use `showAdjacentDays={false}` for compact picker overlays and `showTodayAction={false}` only when the product intentionally removes the shortcut.
 19. **Calendar Safety**: Date-only strings are parsed and emitted as local calendar dates. Bounds, disabled-date rules, focus movement, and keyboard selection apply consistently across direct day navigation and month/year jumps.
