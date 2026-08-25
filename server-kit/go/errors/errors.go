@@ -311,7 +311,7 @@ func captureStack(skip int) string {
 	var builder strings.Builder
 	for {
 		frame, more := frames.Next()
-		builder.WriteString(fmt.Sprintf("%s\n\t%s:%d\n", frame.Function, frame.File, frame.Line))
+		fmt.Fprintf(&builder, "%s\n\t%s:%d\n", frame.Function, frame.File, frame.Line)
 		if !more {
 			break
 		}

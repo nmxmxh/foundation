@@ -133,7 +133,7 @@ func (d *Driver) Call(ctx context.Context, r connector.Request) (connector.Respo
 	if err != nil {
 		return connector.Response{}, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if dl, ok := cctx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
 	}

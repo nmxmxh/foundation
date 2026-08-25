@@ -580,7 +580,13 @@ func (binaryFrameCodec) Name() string { return BinaryCodecName }
 func (binaryFrameCodec) Marshal(v any) ([]byte, error) {
 	frame, ok := v.(Frame)
 	if !ok {
-		if framePtr, ok := v.(*Frame); ok && framePtr != nil {
+		// isPtr, not a second ok: the inner assertion used to declare its own
+		// ok, which shadowed this one. The `ok = true` that followed set the
+		// shadow and died with the if-block, so the check below still read
+		// false and every *Frame was rejected as the wrong type — the exact
+		// input gRPC hands a codec, and the one shape no test covered.
+		framePtr, isPtr := v.(*Frame)
+		if isPtr && framePtr != nil {
 			frame = *framePtr
 			ok = true
 		}

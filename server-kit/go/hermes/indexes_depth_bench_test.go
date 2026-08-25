@@ -55,8 +55,13 @@ func benchChain(keys, depth int) *indexSnapshot {
 // compaction produces; every other row is the shape the index spends the rest
 // of its life in.
 func BenchmarkIndexScanByChainDepth(b *testing.B) {
+	// The series runs well past maxIndexDeltaDepth on purpose. The bound is the
+	// only knob trading compaction frequency against read cost, and picking it
+	// needs the shape of the curve on both sides of the current value, not just
+	// a reading at it. 32768 is not a proposal — it is the far end that shows
+	// where the curve turns.
 	const keys = 100_000
-	for _, depth := range []int{0, 1, 8, 64, 512} {
+	for _, depth := range []int{0, 1, 512, 2048, 8192, 32768} {
 		b.Run(fmt.Sprintf("depth%d", depth), func(b *testing.B) {
 			snapshot := benchChain(keys, depth)
 			b.ReportAllocs()

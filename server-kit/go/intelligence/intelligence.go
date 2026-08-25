@@ -359,7 +359,7 @@ func collectEntities(payload extension.Object) []Reference {
 	refs := make([]Reference, 0, 4)
 	for key, value := range payload {
 		key = normalizeToken(key)
-		if !(strings.HasSuffix(key, "_id") || strings.HasSuffix(key, "_ref") || strings.HasSuffix(key, "public_id")) {
+		if !strings.HasSuffix(key, "_id") && !strings.HasSuffix(key, "_ref") && !strings.HasSuffix(key, "public_id") {
 			continue
 		}
 		ref, ok := value.StringValue()

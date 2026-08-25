@@ -102,7 +102,7 @@ func (s *supervisor) run(ctx context.Context) {
 func (s *supervisor) cycle(ctx context.Context) {
 	// --- Monitor: active probe of the active lane (if probing enabled). ---
 	var (
-		probed     Health = HealthUnknown
+		probed     = HealthUnknown
 		probeErr   error
 		probeStart = s.c.now()
 		caps       Capabilities
