@@ -2577,6 +2577,17 @@ patch_config_weak_jwt_denylist() {
   # Ordering matters below: the use is only injected once the declaration is
   # known to be present, so a missing anchor can leave the file unchanged but
   # never leaves it uncompilable.
+  #
+  # The use anchor is checked first and the whole patch declines without it.
+  # Three fleet projects have config shapes this cannot reach — one validates
+  # JWTSecretKey rather than JWTSecret, another has no RequireAuth validation at
+  # all — and adding a declaration nothing references would leave dead code
+  # standing in for a protection that was never installed. Declining is the
+  # honest outcome: those projects need the check written by hand, and a silent
+  # half-application is what hid the problem the first time.
+  if ! grep -Fq 'if c.RequireAuth && c.JWTSecret == ""' "$file"; then
+    return 0
+  fi
 
   if ! grep -Fq 'var knownWeakJWTSecrets' "$file"; then
     replace_in_file "$file" 'func (c *Config) validateSecurity() error {' '// knownWeakJWTSecrets are signing keys that are public knowledge: scaffold
@@ -2871,12 +2882,32 @@ DEPSEOF
     log_patch "startup adds state-store cache wrapper helpers: ${file#$target/}"
   fi
 
+  # Repair pass, before the widening below. A project can already carry the
+  # four-argument signature next to a three-argument call: the call-site rewrite
+  # used to match only the `engineErr` spelling while the injector that wrote
+  # the call originally named it `err`, so the declaration grew and the caller
+  # did not. That does not compile, and once RIVER_DIRECT_URL is present the
+  # guard below no longer fires, so nothing would ever come back to fix it. Two
+  # of eleven fleet projects were left in exactly that state.
+  if grep -Fq 'func initWorkerEngine(ctx context.Context, cfg *config.Config' "$file" \
+    && grep -Fq 'initWorkerEngine(ctx, deps.Projected' "$file"; then
+    replace_in_file "$file" 'initWorkerEngine(ctx, deps.Projected, kitLog)' 'initWorkerEngine(ctx, cfg, deps.Projected, kitLog)' "startup repairs worker engine call arity"
+  fi
+
   # Worker engine: dedicated River session lane plus wrapper-aware handle.
+  #
+  # The call site is part of the guard, not just of the body: widening the
+  # declaration is only safe if there is a call this patch knows how to widen
+  # with it. Both spellings of the error variable are handled, because both
+  # exist in the fleet.
   if ! grep -Fq 'RIVER_DIRECT_URL' "$file" \
     && grep -Fq 'func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeStore, log kitlogger.Logger)' "$file" \
-    && grep -Fq 'projected.Base().(*database.PostgresDB)' "$file"; then
+    && grep -Fq 'projected.Base().(*database.PostgresDB)' "$file" \
+    && grep -Fq 'initWorkerEngine(ctx, deps.Projected, kitLog)' "$file"; then
 
     replace_in_file "$file" '		engine, stopWorkers, engineErr := initWorkerEngine(ctx, deps.Projected, kitLog)' '		engine, stopWorkers, engineErr := initWorkerEngine(ctx, cfg, deps.Projected, kitLog)' "startup passes config into worker engine init"
+
+    replace_in_file "$file" '		engine, stopWorkers, err := initWorkerEngine(ctx, deps.Projected, kitLog)' '		engine, stopWorkers, err := initWorkerEngine(ctx, cfg, deps.Projected, kitLog)' "startup passes config into worker engine init"
 
     replace_in_file "$file" 'func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeStore, log kitlogger.Logger) (*workerkit.Engine, func(context.Context), error) {' 'func initWorkerEngine(ctx context.Context, cfg *config.Config, projected *hermes.ProjectedRuntimeStore, log kitlogger.Logger) (*workerkit.Engine, func(context.Context), error) {' "startup worker engine takes config"
 
