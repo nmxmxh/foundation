@@ -2560,9 +2560,26 @@ patch_redundant_foundation_test_files() {
 patch_config_weak_jwt_denylist() {
   local file="$target/internal/config/config.go"
   [[ -f "$file" ]] || return 0
-  grep -Fq 'knownWeakJWTSecrets' "$file" && return 0
 
-  replace_in_file "$file" 'func (c *Config) validateSecurity() error {' '// knownWeakJWTSecrets are signing keys that are public knowledge: scaffold
+  # Declaration and use are applied as separate steps, each guarded on its own
+  # presence rather than on a shared "have we run before" flag.
+  #
+  # The earlier form guarded both on `grep -Fq knownWeakJWTSecrets`, and placed
+  # the declaration by anchoring on `func (c *Config) validateSecurity()`. Most
+  # scaffolded projects keep that validation inline in Validate() and have no
+  # such function, so the declaration silently did not land while the use —
+  # anchored on the RequireAuth block, which every project does have — did. The
+  # result was a config.go referencing an undeclared symbol, which does not
+  # compile; five of eleven fleet projects were left in that state. The shared
+  # guard then made it permanent, because the injected use satisfied the very
+  # grep that decided the patch had already run.
+  #
+  # Ordering matters below: the use is only injected once the declaration is
+  # known to be present, so a missing anchor can leave the file unchanged but
+  # never leaves it uncompilable.
+
+  if ! grep -Fq 'var knownWeakJWTSecrets' "$file"; then
+    replace_in_file "$file" 'func (c *Config) validateSecurity() error {' '// knownWeakJWTSecrets are signing keys that are public knowledge: scaffold
 // placeholders and, historically, a shared "hardened" literal that shipped in
 // every generated project'"'"'s compose file. Rejecting only the empty string is
 // not enough, because a compose fallback guarantees the value is never empty —
@@ -2577,8 +2594,33 @@ var knownWeakJWTSecrets = map[string]struct{}{
 }
 
 func (c *Config) validateSecurity() error {' "config declares the weak JWT secret denylist"
+  fi
 
-  replace_in_file "$file" '	if c.RequireAuth && c.JWTSecret == "" {
+  # Fallback for the common shape that has no validateSecurity function. A
+  # package-level declaration is valid anywhere in the file, so appending is
+  # always available where anchoring is not.
+  if ! grep -Fq 'var knownWeakJWTSecrets' "$file"; then
+    cat >>"$file" <<'WEAK_JWT_DENYLIST'
+
+// knownWeakJWTSecrets are signing keys that are public knowledge: scaffold
+// placeholders and, historically, a shared "hardened" literal that shipped in
+// every generated project's compose file. Rejecting only the empty string is
+// not enough, because a compose fallback guarantees the value is never empty —
+// a deploy that forgets to set JWT_SECRET then passes validation and signs
+// tokens with a key anyone can read. Length is not the property that matters
+// here; publication is.
+var knownWeakJWTSecrets = map[string]struct{}{
+	"dev-change-me": {},
+	"change-this-to-a-secure-random-string-in-production": {},
+	"test-secret-key": {},
+	"Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn": {},
+}
+WEAK_JWT_DENYLIST
+    echo "[PATCH] config declares the weak JWT secret denylist (appended): ${file#"$target/"}"
+  fi
+
+  if grep -Fq 'var knownWeakJWTSecrets' "$file" && ! grep -Fq 'knownWeakJWTSecrets[c.JWTSecret]' "$file"; then
+    replace_in_file "$file" '	if c.RequireAuth && c.JWTSecret == "" {
 		return fmt.Errorf("JWT_SECRET is required when REQUIRE_AUTH is true")
 	}
 ' '	if c.RequireAuth && c.JWTSecret == "" {
@@ -2589,6 +2631,7 @@ func (c *Config) validateSecurity() error {' "config declares the weak JWT secre
 			"generate a fresh secret (openssl rand -base64 48) and rotate any tokens signed with the old one")
 	}
 ' "config rejects known weak JWT secrets in production"
+  fi
 
   if command -v gofmt >/dev/null 2>&1; then
     gofmt -w "$file" 2>/dev/null || true
