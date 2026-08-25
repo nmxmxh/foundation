@@ -178,6 +178,65 @@ if [[ -n "$unique_insert_files" ]]; then
   fi
 fi
 
+# A recurring producer whose uniqueness is scoped by ByPeriod or ByArgs must say
+# which states it means. rivertype.UniqueOptsByStateDefault (v0.44.1,
+# river_type.go:633) includes `completed`, so a default-scoped unique insert is
+# blocked by the *previous run of the same schedule* until that row is reaped:
+# the feed stops after one pass, with no error and no log line. Recurring args
+# must exclude `completed`, `cancelled`, and `discarded`.
+#
+# Scoped to files that construct a periodic job, because that is the class where
+# a stopped schedule is invisible. A one-shot unique insert wanting the default
+# state set is a legitimate shape and is not flagged.
+#
+# Best-effort literal scan: brace-balanced from `UniqueOpts{`, comments removed.
+# UniqueOpts built through a variable rather than a literal is not matched.
+periodic_files="$(find_code_files "NewPeriodicJob|PeriodicJob\{" "$target/internal" "$target/cmd")"
+
+if [[ -n "$periodic_files" ]]; then
+  unscoped=""
+  hits=""
+  while IFS= read -r periodic_file; do
+    [[ -n "$periodic_file" ]] || continue
+    hits="$(awk '
+      {
+        line = $0
+        sub(/[ \t]*\/\/.*/, "", line)
+        if (depth == 0) {
+          i = index(line, "UniqueOpts{")
+          if (i == 0) next
+          startline = FNR
+          hasPeriod = 0; hasArgs = 0; hasState = 0
+          line = substr(line, i + 11)
+          depth = 1
+        }
+        if (line ~ /ByPeriod[ \t]*:/) hasPeriod = 1
+        if (line ~ /ByArgs[ \t]*:/) hasArgs = 1
+        if (line ~ /ByState[ \t]*:/) hasState = 1
+        for (k = 1; k <= length(line); k++) {
+          c = substr(line, k, 1)
+          if (c == "{") depth++
+          else if (c == "}") {
+            depth--
+            if (depth == 0) {
+              if ((hasPeriod || hasArgs) && !hasState) printf "%s:%d\n", FILENAME, startline
+              break
+            }
+          }
+        }
+      }
+    ' "$periodic_file")"
+    [[ -n "$hits" ]] && unscoped+="$hits"$'\n'
+  done <<< "$periodic_files"
+
+  unscoped="$(echo "$unscoped" | grep -v '^$' || true)"
+  if [[ -z "$unscoped" ]]; then
+    pass "recurring UniqueOpts scope ByState explicitly"
+  else
+    fail "recurring UniqueOpts scope ByState explicitly" \
+      "$(echo "$unscoped" | head -3 | sed "s|^$target/||" | tr '\n' ' ')sets ByPeriod or ByArgs without ByState; the default state set includes completed, so the previous run of this schedule blocks the next insert and the job silently stops recurring. Scope to non-terminal states: available, pending, retryable, running, scheduled"
+  fi
+fi
 
 if [[ "$failed" -ne 0 ]]; then
   echo "river practices check failed"

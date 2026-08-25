@@ -35,6 +35,8 @@ Do not repeat these older patterns in new work:
 
 `ui-minimal` remains the structural baseline, but its internal implementation should continue normalizing toward the grouped `Style` pattern instead of expanding legacy declaration sprawl.
 
+Removing an exported contract from `@ovasabi/ui-minimal` requires an entry in `ui-minimal/CHANGELOG.md` naming the replacement. The package is a local file dependency, so a removal does not fail at install — it surfaces later in each consumer as a type error with no explanation attached, and every consumer independently writes a local re-implementation that then drifts from the others. A comment in a consumer saying the package "used to carry this" records the absence of a migration path, not the presence of one.
+
 Operational frontend concerns belong in `frontend-kit`, not visual primitives. Use `@ovasabi/frontend-kit` for persistence, metadata, reset handles, and runtime snapshot hooks, then compose those handles with `ui-minimal` surfaces.
 
 ## 2. Architecture Layers

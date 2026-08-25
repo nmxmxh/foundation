@@ -806,8 +806,12 @@ const Style = {
 
     &:focus-within {
       border-color: ${({ theme, $state }) => ($state === "invalid" ? theme.color.danger : theme.color.borderFocus)};
-      box-shadow: 0 0 0 ${({ theme }) => theme.focus.ringWidth}
-        ${({ theme, $state }) => ($state === "invalid" ? theme.color.dangerSoft : theme.color.brandSoft)};
+      /* Built in one interpolation rather than two. A declaration whose value
+         wraps onto a following line that begins with an interpolation is
+         unparseable to the CSS-in-JS language service, which then reports a
+         spurious "semi-colon expected" for the whole block. */
+      box-shadow: ${({ theme, $state }) =>
+        `0 0 0 ${theme.focus.ringWidth} ${$state === "invalid" ? theme.color.dangerSoft : theme.color.brandSoft}`};
     }
   `,
   InputAdornment: styled.span`
@@ -960,19 +964,23 @@ const Style = {
     letter-spacing: 0.02em;
     line-height: 1;
     min-height: ${({ $size }) => `var(--minimal-control-height-${$size})`};
-    opacity: ${({ $selected }) => ($selected ? 1 : 0.84)};
     padding: ${({ $size }) => sizePadding[$size]};
     text-transform: uppercase;
     transition:
-      opacity 240ms ${moveCurve},
       background-color 240ms ${moveCurve},
       border-color 240ms ${moveCurve},
       color 240ms ${moveCurve},
       box-shadow 240ms ${moveCurve};
 
+    /* An unselected chip is quieter by colour, not by opacity. Fading text to
+       84% multiplies whatever the theme's textSecondary is against whatever is
+       behind it, so the resulting contrast depends on the page rather than on
+       the token — and a theme that sits close to the 4.5:1 floor lands under
+       it. The selected state is already distinguished by its surface, border
+       and shadow, so the chip reads without the extra fade. */
     @media (hover: hover) and (pointer: fine) {
       &:hover {
-        opacity: 1;
+        color: ${({ theme }) => theme.color.textPrimary};
       }
     }
   `,

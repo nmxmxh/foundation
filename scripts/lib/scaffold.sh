@@ -67,25 +67,88 @@ scaffold_seed_ledger_row() {
     awk -F'\t' -v d="$dest_rel" '$1 == d { print; exit }' "$ledger"
 }
 
+# Seed tombstones: a create-mode seed is written whenever its destination is
+# absent, so deletion alone reads as "never seeded" and the next update brings
+# the file back. `.foundation-seeds.ignore` is how a project records that a
+# removal was deliberate: one project-relative destination per line, `#`
+# comments and blank lines ignored. Foundation declines to seed those paths and
+# stops tracking them in the ledger.
+scaffold_seed_tombstone_path() {
+    echo "$PROJECT_PATH/.foundation-seeds.ignore"
+}
+
+scaffold_seed_is_tombstoned() {
+    local dest_rel="$1"
+    local tombstones
+    tombstones="$(scaffold_seed_tombstone_path)"
+    [[ -f "$tombstones" ]] || return 1
+    awk -v d="$dest_rel" '
+        { sub(/^[ \t]+/, ""); sub(/[ \t\r]+$/, "") }
+        /^#/ { next }
+        $0 == "" { next }
+        $0 == d { found = 1; exit }
+        END { exit found ? 0 : 1 }
+    ' "$tombstones"
+}
+
+# Drops a destination from the seed ledger. A tombstoned path is no longer
+# Foundation-tracked, so leaving a stale row behind would make a later
+# untombstoning silently re-baseline against a template hash from before.
+scaffold_forget_seed() {
+    local dest_rel="$1"
+    [[ "${DRY_RUN:-false}" == "true" ]] && return 0
+
+    local ledger tmp
+    ledger="$(scaffold_seed_ledger_path)"
+    [[ -f "$ledger" ]] || return 0
+    [[ -n "$(scaffold_seed_ledger_row "$dest_rel")" ]] || return 0
+    tmp="${ledger}.tmp"
+    {
+        printf '# destination\\ttemplate_sha256\\tseeded_sha256\\tprovenance\\n'
+        awk -F'\t' -v d="$dest_rel" '/^#/ { next } $1 != d { print }' "$ledger" | sort
+    } >"$tmp"
+    mv "$tmp" "$ledger"
+}
+
 scaffold_record_seed() {
     local dest_rel="$1"
     local template_hash="$2"
     local seeded_hash="$3"
+    # provenance: "seeded" when Foundation wrote this file itself, "backfilled"
+    # when the row was inferred from whatever was already on disk. Only the first
+    # kind may ever be reseeded automatically — see scaffold_seed_provenance.
+    local provenance="${4:-seeded}"
     [[ "${DRY_RUN:-false}" == "true" ]] && return 0
 
     local ledger tmp
     ledger="$(scaffold_seed_ledger_path)"
     tmp="${ledger}.tmp"
     {
-        echo "# destination	template_sha256	seeded_sha256"
+        echo "# destination	template_sha256	seeded_sha256	provenance"
         {
             if [[ -f "$ledger" ]]; then
                 awk -F'\t' -v d="$dest_rel" '/^#/ { next } $1 != d { print }' "$ledger"
             fi
-            printf '%s\t%s\t%s\n' "$dest_rel" "$template_hash" "$seeded_hash"
+            printf '%s\t%s\t%s\t%s\n' "$dest_rel" "$template_hash" "$seeded_hash" "$provenance"
         } | sort
     } >"$tmp"
     mv "$tmp" "$ledger"
+}
+
+# Provenance of a ledger row.
+#
+# A three-column row predates this column and its provenance is genuinely
+# unknown, so it reports "backfilled" — the conservative answer. Guessing
+# "seeded" for a legacy row is what destroyed project code across the fleet on
+# 2026-08-25: the backfill path records whatever is on disk as the seeded hash,
+# so a heavily customized file looks byte-identical to "what Foundation wrote"
+# and auto-reseed overwrites it.
+scaffold_seed_provenance() {
+    local row="$1"
+    local value
+    value="$(echo "$row" | cut -f4)"
+    [[ -n "$value" ]] || value="backfilled"
+    echo "$value"
 }
 
 scaffold_warn_seed_drift() {
@@ -93,10 +156,13 @@ scaffold_warn_seed_drift() {
     local source_abs="$2"
     local dest_abs="$3"
     local seeded_hash="$4"
+    local provenance="${5:-seeded}"
 
     local file_now
     file_now="$(foundation_hash_file "$dest_abs")"
-    if [[ "$file_now" == "$seeded_hash" ]]; then
+    if [[ "$file_now" == "$seeded_hash" && "$provenance" != "seeded" ]]; then
+        foundation_log_warn "Seed drift: $dest_rel — Foundation template evolved. This row was backfilled, so Foundation does not know whether the file is a seed or project code and will not rewrite it. Review: diff \"$dest_abs\" \"$source_abs\""
+    elif [[ "$file_now" == "$seeded_hash" ]]; then
         foundation_log_warn "Seed drift: $dest_rel — Foundation template evolved; local copy is unmodified since seeding. Delete the file and re-run update to reseed it."
     else
         foundation_log_warn "Seed drift: $dest_rel — Foundation template evolved and the local copy is customized. Review: diff \"$dest_abs\" \"$source_abs\""
@@ -115,7 +181,7 @@ scaffold_reseed_untouched() {
     fi
     cp "$source_abs" "$dest_abs"
     foundation_render_file "$dest_abs"
-    scaffold_record_seed "$dest_rel" "$template_hash" "$(foundation_hash_file "$dest_abs")"
+    scaffold_record_seed "$dest_rel" "$template_hash" "$(foundation_hash_file "$dest_abs")" "seeded"
     foundation_log_info "Safely reseeded untouched project-owned file: $dest_rel"
 }
 
@@ -135,13 +201,17 @@ scaffold_report_seed_drift() {
         dest_rel="$(scaffold_expand_path "$dest")"
         source_abs="$FOUNDATION_DIR/$source"
         dest_abs="$PROJECT_PATH/$dest_rel"
+        scaffold_seed_is_tombstoned "$dest_rel" && continue
         [[ -f "$source_abs" && -f "$dest_abs" ]] || continue
 
         local template_now row template_rec seeded_rec
         template_now="$(foundation_hash_file "$source_abs")"
         row="$(scaffold_seed_ledger_row "$dest_rel")"
         if [[ -z "$row" ]]; then
-            scaffold_record_seed "$dest_rel" "$template_now" "$(foundation_hash_file "$dest_abs")"
+            # The file was already on disk, so its content is whatever the
+            # project made it. Recording it as "seeded" would claim Foundation
+            # wrote it, and auto-reseed would later overwrite project code.
+            scaffold_record_seed "$dest_rel" "$template_now" "$(foundation_hash_file "$dest_abs")" "backfilled"
             backfill_count=$((backfill_count + 1))
             continue
         fi
@@ -150,17 +220,23 @@ scaffold_report_seed_drift() {
 
         if [[ "${ACKNOWLEDGE_SEED_DRIFT:-false}" == "true" ]]; then
             seeded_rec="$(echo "$row" | cut -f3)"
-            scaffold_record_seed "$dest_rel" "$template_now" "$seeded_rec"
+            scaffold_record_seed "$dest_rel" "$template_now" "$seeded_rec" "$(scaffold_seed_provenance "$row")"
             foundation_log_info "Seed drift acknowledged: $dest_rel re-baselined to the current template"
             continue
         fi
 
         seeded_rec="$(echo "$row" | cut -f3)"
-        if [[ "${AUTO_RESEED_UNTOUCHED:-true}" == "true" ]] && [[ "$(foundation_hash_file "$dest_abs")" == "$seeded_rec" ]]; then
+        # Only a row Foundation wrote itself may be reseeded automatically. For a
+        # backfilled or legacy row, "hash unchanged" means "unchanged since we
+        # started watching", which says nothing about whether the file is
+        # project code. Those fall through to the warning, which never writes.
+        if [[ "${AUTO_RESEED_UNTOUCHED:-true}" == "true" ]] \
+            && [[ "$(scaffold_seed_provenance "$row")" == "seeded" ]] \
+            && [[ "$(foundation_hash_file "$dest_abs")" == "$seeded_rec" ]]; then
             scaffold_reseed_untouched "$dest_rel" "$source_abs" "$dest_abs" "$template_now"
             continue
         fi
-        scaffold_warn_seed_drift "$dest_rel" "$source_abs" "$dest_abs" "$seeded_rec"
+        scaffold_warn_seed_drift "$dest_rel" "$source_abs" "$dest_abs" "$seeded_rec" "$(scaffold_seed_provenance "$row")"
         drift_count=$((drift_count + 1))
     done < "$manifest"
 
@@ -179,6 +255,17 @@ scaffold_copy_file() {
 
     [[ -f "$source" ]] || return 0
 
+    local dest_rel="${dest#"$PROJECT_PATH"/}"
+
+    # A tombstoned create-mode seed stays deleted. Without this, `create` reads
+    # a deliberate removal as "never seeded" and writes the file back on the
+    # next update — the project cannot decline a seed at all.
+    if [[ "$mode" == "create" && ! -e "$dest" ]] && scaffold_seed_is_tombstoned "$dest_rel"; then
+        scaffold_forget_seed "$dest_rel"
+        SCAFFOLD_TOMBSTONED_COUNT=$((${SCAFFOLD_TOMBSTONED_COUNT:-0} + 1))
+        return 0
+    fi
+
     if [[ "$dest" == "$PROJECT_PATH"/migrations/000001_init.*.sql && ! -e "$dest" ]]; then
         if [[ -d "$PROJECT_PATH/migrations" ]] && [[ -n "$(find "$PROJECT_PATH/migrations" -maxdepth 1 -type f -name '*.sql' ! -name '000001_init.up.sql' ! -name '000001_init.down.sql' -print -quit 2>/dev/null)" ]]; then
             foundation_log_info "Skipping seed migration $(basename "$dest"); project already owns migrations"
@@ -195,6 +282,15 @@ scaffold_copy_file() {
 
     scaffold_should_overwrite "$mode" "$dest" || return 0
 
+    # Classify the write before performing it, so --dry-run reports a
+    # resurrection as loudly as a real update does.
+    if [[ "$mode" == "create" && -n "$(scaffold_seed_ledger_row "$dest_rel")" ]]; then
+        foundation_log_warn "Re-seeding a previously removed file: $dest_rel — if the removal was deliberate, add it to .foundation-seeds.ignore and delete it again"
+        SCAFFOLD_RESEEDED_DELETED=$((${SCAFFOLD_RESEEDED_DELETED:-0} + 1))
+    elif [[ "$mode" == "create" ]]; then
+        SCAFFOLD_SEEDED_NEW=$((${SCAFFOLD_SEEDED_NEW:-0} + 1))
+    fi
+
     if [[ "${DRY_RUN:-false}" == "true" ]]; then
         foundation_log_info "[DRY RUN] Would copy $source -> $dest"
         return 0
@@ -206,7 +302,7 @@ scaffold_copy_file() {
     [[ "$(basename "$dest")" == "start.sh" ]] && chmod +x "$dest" 2>/dev/null || true
 
     if [[ "$mode" == "create" ]]; then
-        scaffold_record_seed "${dest#$PROJECT_PATH/}" \
+        scaffold_record_seed "$dest_rel" \
             "$(foundation_hash_file "$source")" \
             "$(foundation_hash_file "$dest")"
     fi
@@ -310,6 +406,10 @@ scaffold_apply_manifest() {
         return 1
     }
 
+    SCAFFOLD_SEEDED_NEW=0
+    SCAFFOLD_RESEEDED_DELETED=0
+    SCAFFOLD_TOMBSTONED_COUNT=0
+
     while IFS=$'\t' read -r source dest profiles feature mode; do
         [[ -z "${source:-}" || "${source:0:1}" == "#" ]] && continue
         profile_matches "$profiles" || continue
@@ -320,8 +420,26 @@ scaffold_apply_manifest() {
         scaffold_copy_file "$FOUNDATION_DIR/$source" "$PROJECT_PATH/$expanded_dest" "$mode"
     done < "$manifest"
 
+    scaffold_report_seed_writes
+
     scaffold_sync_frontend_manifest_contract
     scaffold_remove_empty_pkg_dir
+}
+
+# Create-mode writes used to be invisible: a file appearing from nothing looked
+# identical to a file that had always been there. This states what the run
+# seeded, so a project can see a resurrection instead of discovering it later
+# as a failing guard.
+scaffold_report_seed_writes() {
+    if [[ "${SCAFFOLD_TOMBSTONED_COUNT:-0}" -gt 0 ]]; then
+        foundation_log_info "Seed tombstones: declined to seed ${SCAFFOLD_TOMBSTONED_COUNT} file(s) listed in .foundation-seeds.ignore"
+    fi
+    if [[ "${SCAFFOLD_SEEDED_NEW:-0}" -gt 0 ]]; then
+        foundation_log_info "Seeded ${SCAFFOLD_SEEDED_NEW} new project-owned file(s)"
+    fi
+    if [[ "${SCAFFOLD_RESEEDED_DELETED:-0}" -gt 0 ]]; then
+        foundation_log_warn "${SCAFFOLD_RESEEDED_DELETED} previously removed file(s) were seeded again; list the ones you meant to delete in .foundation-seeds.ignore"
+    fi
 }
 
 scaffold_sync_foundation_modules() {

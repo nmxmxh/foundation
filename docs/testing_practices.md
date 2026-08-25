@@ -276,11 +276,19 @@ Requirements:
 2. Job handlers must be idempotent under duplicate delivery and retry.
 3. Queue concurrency, max attempts, backoff, and timeout behavior must be tested when changed.
 4. Worker tests must verify correlation and tenant metadata propagation.
+5. A recurring producer must be guarded against silent stoppage: uniqueness
+   scoped by `ByPeriod` or `ByArgs` must set `ByState` explicitly to the
+   non-terminal states. The default set includes `completed`, so a schedule
+   blocked by its own previous run stops with no error and no log line — a
+   behavioral test never sees it, which is why this one is checked by shape.
+   See `database_practices.md`, "The Queue Is Not A Scheduler Clock".
 
 Enforcement:
 
 - Unit tests with in-memory stores.
 - Integration tests for River-backed critical workers.
+- `internal/worker/periodic_jobs_test.go` in the scaffolded baseline, and
+  `tooling/scripts/river_practices_check.sh` in `make lint`.
 
 ### TE-15: Frontend tests must exercise user-visible behavior and transport state
 
@@ -725,7 +733,7 @@ Requirements:
     per-call costs (timers, closures, scheduler noise) are identical between
     windows and cancel; only a per-iteration allocator survives the delta. An
     absolute ceiling breaks whenever the runtime shifts fixed costs.
-    Reference: runtimehost/epoch_wait_test.go
+    Reference: runtime-sdk/go/runtimehost/epoch_wait_test.go
     (TestWaitForEpochChangeFallbackIsAllocationStable).
 10. A source-line profile may identify the allocator, but the before/after
     benchmark sizes the physical win. Sampled profile shares must not be

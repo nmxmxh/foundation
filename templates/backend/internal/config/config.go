@@ -223,12 +223,30 @@ func (c *Config) validate() error {
 	return nil
 }
 
+// knownWeakJWTSecrets are signing keys that are public knowledge: scaffold
+// placeholders and, historically, a shared "hardened" literal that shipped in
+// every generated project's compose file. Rejecting only the empty string is
+// not enough, because a compose fallback guarantees the value is never empty —
+// a deploy that forgets to set JWT_SECRET then passes validation and signs
+// tokens with a key anyone can read. Length is not the property that matters
+// here; publication is.
+var knownWeakJWTSecrets = map[string]struct{}{
+	"dev-change-me": {},
+	"change-this-to-a-secure-random-string-in-production": {},
+	"test-secret-key": {},
+	"Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn": {},
+}
+
 func (c *Config) validateSecurity() error {
 	if c.JWTSecret == "" && c.Env == "production" {
 		return fmt.Errorf("JWT_SECRET is required in production")
 	}
 	if c.RequireAuth && c.JWTSecret == "" {
 		return fmt.Errorf("JWT_SECRET is required when REQUIRE_AUTH is true")
+	}
+	if _, weak := knownWeakJWTSecrets[c.JWTSecret]; weak && c.IsProduction() {
+		return fmt.Errorf("JWT_SECRET is a known placeholder or previously published value; " +
+			"generate a fresh secret (openssl rand -base64 48) and rotate any tokens signed with the old one")
 	}
 	if c.IsProduction() && len(c.AllowedOrigins) == 0 {
 		return fmt.Errorf("ALLOWED_ORIGINS must contain explicit origins in production")

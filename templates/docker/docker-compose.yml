@@ -113,8 +113,13 @@ services:
       REDIS_READ_TIMEOUT: "${REDIS_READ_TIMEOUT:-500ms}"
       REDIS_WRITE_TIMEOUT: "${REDIS_WRITE_TIMEOUT:-500ms}"
       REDIS_PREFIX: "${REDIS_PREFIX:-{{PROJECT_NAME}}}"
-      JWT_SECRET: "${JWT_SECRET:-Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn}"
-      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn}"
+      # Placeholder, deliberately. A fallback that looks like a generated
+      # secret is public in every repository that ships this file and identical
+      # across every project built from it, while announcing nothing to a human
+      # or a scanner reading a deployed config. This value is rejected outright
+      # by config.validateSecurity in production — see internal/config/config.go.
+      JWT_SECRET: "${JWT_SECRET:-dev-change-me}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-change-me}"
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       # Tracing (optional)

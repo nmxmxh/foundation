@@ -43,6 +43,47 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// baseAllowedHeaders are the headers every foundation service accepts.
+const baseAllowedHeaders = "Content-Type, Authorization, X-API-Key, X-CSRF-Token, X-Requested-With, X-Idempotency-Key, X-Trace-ID, X-Span-ID, X-Request-ID, X-Correlation-ID"
+
+// allowedRequestHeaders answers a preflight with the baseline set plus whatever
+// the caller asked for.
+//
+// The foundation cannot know a project's own headers — chowdash sends
+// X-Chow-Edition and X-Chow-Role, another service will send something else —
+// and a static list silently blocks every one of them the moment the frontend
+// and the API sit on different origins. Reflecting the requested headers keeps
+// this layer agnostic to domain concerns.
+//
+// This is not a security boundary being relaxed: these headers are only echoed
+// after isOriginAllowed has already accepted the origin, and CORS header
+// negotiation never authorises anything on its own — the origin allow-list,
+// authentication and CSRF protection do.
+func allowedRequestHeaders(requested string) string {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return baseAllowedHeaders
+	}
+	seen := make(map[string]struct{})
+	for _, name := range strings.Split(baseAllowedHeaders, ",") {
+		seen[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+	}
+	allowed := baseAllowedHeaders
+	for _, name := range strings.Split(requested, ",") {
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		key := strings.ToLower(trimmed)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		allowed += ", " + trimmed
+	}
+	return allowed
+}
+
 // CORS handles cross-origin access with robust header support.
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -57,7 +98,7 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Access-Control-Allow-Credentials", "true")
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key, X-CSRF-Token, X-Requested-With, X-Idempotency-Key, X-Trace-ID, X-Span-ID, X-Request-ID, X-Correlation-ID")
+				w.Header().Set("Access-Control-Allow-Headers", allowedRequestHeaders(r.Header.Get("Access-Control-Request-Headers")))
 				w.Header().Set("Access-Control-Max-Age", "3600")
 			}
 			if r.Method == http.MethodOptions {

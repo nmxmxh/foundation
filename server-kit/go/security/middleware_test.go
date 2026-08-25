@@ -468,3 +468,52 @@ func TestPublicPathAndOriginHelpers(t *testing.T) {
 		t.Fatalf("expected origin denial")
 	}
 }
+
+// A project's own headers must survive a preflight. The foundation cannot
+// enumerate them, so an allowed origin's requested headers are reflected back;
+// without this every cross-origin command from a project that sets its own
+// headers is blocked by the browser before it is ever sent.
+func TestCORSPreflightAllowsProjectHeaders(t *testing.T) {
+	handler := CORS([]string{"https://app.example"})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/v1/thing", nil)
+	req.Header.Set("Origin", "https://app.example")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "X-Chow-Edition, X-Chow-Role, content-type")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	allowed := rec.Header().Get("Access-Control-Allow-Headers")
+	for _, want := range []string{"X-Chow-Edition", "X-Chow-Role", "Authorization", "X-Idempotency-Key"} {
+		if !strings.Contains(allowed, want) {
+			t.Fatalf("Access-Control-Allow-Headers %q is missing %q", allowed, want)
+		}
+	}
+	// A header already in the baseline must not be echoed a second time.
+	if strings.Count(strings.ToLower(allowed), "content-type") != 1 {
+		t.Fatalf("content-type duplicated in %q", allowed)
+	}
+}
+
+// An origin that is not allowed gets no header negotiation at all.
+func TestCORSPreflightRejectsUnknownOrigin(t *testing.T) {
+	handler := CORS([]string{"https://app.example"})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/v1/thing", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "X-Chow-Edition")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Headers"); got != "" {
+		t.Fatalf("expected no allow-headers for a rejected origin, got %q", got)
+	}
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for a rejected origin, got %d", rec.Code)
+	}
+}
