@@ -580,7 +580,7 @@ func TestSubscribeHandlerSendsResyncOnDrop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws dial err=%v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	key := ScopeKey(&foundationpb.ProjectionScope{TenantId: "org_1", Domain: "signals", Collection: "ticks"})
 	deadline := time.Now().Add(time.Second)

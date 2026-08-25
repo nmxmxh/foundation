@@ -738,7 +738,7 @@ func TestAllocationBudgetCachedHit(t *testing.T) {
 
 func BenchmarkCachedGetHit(b *testing.B) {
 	backend := cache.NewMemoryBackend()
-	defer backend.Close()
+	defer func() { _ = backend.Close() }()
 	s, err := NewCachedStateStore(NewMemoryDB(), cache.New(cache.Config{Backend: backend}), CachedStateStoreOptions{})
 	if err != nil {
 		b.Fatal(err)
@@ -762,7 +762,7 @@ func BenchmarkCachedGetHit(b *testing.B) {
 func BenchmarkCachedReadThroughMiss(b *testing.B) {
 	mem := NewMemoryDB()
 	backend := cache.NewMemoryBackend()
-	defer backend.Close()
+	defer func() { _ = backend.Close() }()
 	s, err := NewCachedStateStore(mem, cache.New(cache.Config{Backend: backend}), CachedStateStoreOptions{})
 	if err != nil {
 		b.Fatal(err)

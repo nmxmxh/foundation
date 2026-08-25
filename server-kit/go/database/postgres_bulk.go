@@ -51,6 +51,17 @@ func (db *PostgresDB) CopyFromRows(ctx context.Context, tablePath []string, colu
 // SendBatch runs a pgx batch under the database query budget. Batch is best
 // when several independent statements must cross the client/server boundary
 // together, but the operation is not a true COPY workload.
+//
+// Size the choice against COPY before reaching for this. Measured on 64 rows of
+// the same upsert against Postgres 18, SendBatch cost ~62us per row where
+// CopyFromRows cost ~11us — 5.5x, at identical batch size, because a batch
+// still parses and plans every statement while COPY parses one. Both beat the
+// unbatched path by a wide margin: a single upsert measured ~524us per row, so
+// the first decision worth making is to batch at all. Use SendBatch when the
+// statements genuinely differ or results must be read back per statement; use
+// CopyFromRows or CopyFromSource whenever the work is many rows of one shape.
+// Figures are relative, not absolute — they were taken through a VM boundary
+// and every lane paid the same tax.
 func (db *PostgresDB) SendBatch(ctx context.Context, build func(*pgx.Batch), consume func(pgx.BatchResults) error) error {
 	// Definition: round-trip amortization lane. Do not use it to hide business
 	// transactions; wrap it in AtomicLane when the statements must commit as one.
@@ -74,8 +85,24 @@ func (db *PostgresDB) SendBatch(ctx context.Context, build func(*pgx.Batch), con
 		lease.release()
 	}()
 	results := conn.Conn().SendBatch(queryCtx, &batch)
-	defer results.Close()
+	// Close reports the first error from any result the consumer did not read,
+	// so it is part of the outcome rather than cleanup. Deferring it dropped
+	// that error on the floor: a batch whose consumer stopped reading early
+	// returned nil while a statement had in fact failed, and the metrics below
+	// recorded the call as a success. It is still closed on the deferred path
+	// so a panicking consumer cannot leak the results.
+	closed := false
+	defer func() {
+		if !closed {
+			_ = results.Close()
+		}
+	}()
 	err = consume(results)
+	closeErr := results.Close()
+	closed = true
+	if err == nil {
+		err = closeErr
+	}
 	err = normalizePostgresOperationError(contextErr(queryCtx), err)
 	recordDatabaseOperation("send_batch", start, err)
 	return err

@@ -78,6 +78,13 @@ scan_lock_scope() {
       ' <<<"$block"
     )"
     if text_matches "$held" 'select[[:space:]]*[{]|(^|[^A-Za-z0-9_])case[[:space:]].*<-|<-[[:space:]]*[A-Za-z0-9_.]+|[A-Za-z0-9_.]+[[:space:]]*<-[^-]|[.]Wait[[:space:]]*[(]|Cond[.]Wait'; then
+      # A "concurrency:" note is the same marker scan_select_default accepts:
+      # it means an author stated why the held region is bounded, rather than
+      # the pattern having gone unexamined. Holding a lock across a send that
+      # provably cannot block is legitimate and needs a way to say so.
+      if text_matches "$block" 'concurrency:'; then
+        continue
+      fi
       add_finding "$file" "$line" "$text"
     fi
   done < <(rg_go '[.]R?Lock[[:space:]]*[(]')
@@ -85,12 +92,21 @@ scan_lock_scope() {
 }
 
 scan_select_default() {
-  local file line text block
+  local file line text block select_indent
   : >"$tmp_findings"
   while IFS=: read -r file line text; do
     [[ -n "${file:-}" && -n "${line:-}" ]] || continue
     block="$(code_window "$file" "$line" 0 35)"
-    text_matches "$block" 'default[[:space:]]*:' || continue
+    # In gofmt'd Go, case and default sit at the same indentation as their
+    # select or switch keyword. Matching any default in the window instead
+    # picked up the default arm of an enclosing type switch and reported a
+    # select that had no default at all, so the indentation is what ties a
+    # default to the select it belongs to.
+    select_indent="$(printf '%s' "$text" | sed -n 's/^\([[:space:]]*\).*/\1/p')"
+    # grep rather than text_matches: the block is many lines and text_matches
+    # anchors ^ to the start of the whole string, so a per-line anchor silently
+    # never matches there and every select would be skipped.
+    printf '%s\n' "$block" | grep -qE "^${select_indent}default[[:space:]]*:" || continue
     if text_matches "$block" 'concurrency:|RecordConcurrency|RecordWorker|RecordQueueDepth|return[[:space:]]+(errors[.]New|fmt[.]Errorf|err|nil|ctx[.]Err|[A-Za-z0-9_.]*Err)|queue full|send_rejected_full'; then
       continue
     fi
@@ -142,6 +158,12 @@ scan_close_ownership() {
       continue
     fi
     if text_matches "$block" 'once[.]Do[[:space:]]*[(]|[A-Za-z0-9_]*Once[.]Do[[:space:]]*[(]|closed[[:space:]]*=[[:space:]]*true'; then
+      continue
+    fi
+    # Same marker the select-default and lock-scope rules accept. Not every
+    # single-owner close is expressible as sync.Once or a closed flag: a mutex
+    # plus a nil sentinel is just as sound, and there was no way to say so.
+    if text_matches "$block" 'concurrency:'; then
       continue
     fi
     if text_matches "$text" 'close[[:space:]]*[(][[:space:]]*result[[:space:]]*[)]' && text_matches "$block" 'result[[:space:]]*:=[[:space:]]*make[[:space:]]*[(][[:space:]]*chan'; then

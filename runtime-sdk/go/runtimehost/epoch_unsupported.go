@@ -16,8 +16,8 @@ type epochWaitPolicy struct {
 }
 
 type epochExchange struct {
-	shm    *sharedMemorySegment
-	policy epochWaitPolicy
+	shm      *sharedMemorySegment
+	policy   epochWaitPolicy
 	alive    func() bool
 	stdin    io.Writer
 	doorbell <-chan struct{}

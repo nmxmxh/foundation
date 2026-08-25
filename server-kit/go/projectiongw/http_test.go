@@ -107,7 +107,7 @@ func TestMultiplexHandlerEnforcesAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws dial err=%v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	subscribe := `{"type":"subscribe","scopes":[{"domain":"signals","collection":"ticks"},{"domain":"signals","collection":"quotes"}]}`
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(subscribe)); err != nil {

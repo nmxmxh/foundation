@@ -122,25 +122,34 @@ func TestRegisterTypedFrameHandlersOptInProtobufDecodeReuse(t *testing.T) {
 	const eventType = "media:process_asset:v1:requested"
 	binding := frameTestBinding()
 	binding.ProtobufDecodeReuse = protoapi.ProtobufDecodeReuseCompleteMessages
+	// Reuse is asserted across a run rather than demanded on one pair: the
+	// adapter pools messages in a sync.Pool, which does not promise Get returns
+	// a previously Put object. A GC between two dispatches drains it and the
+	// pointers legitimately differ. See the same reasoning in
+	// registry.TestTypedDispatchOptInProtobufDecodeReuse.
 	calls := 0
-	var firstRequest *testprotos.TestRequest
+	reuseSeen := false
+	seen := map[*testprotos.TestRequest]struct{}{}
 	err := RegisterTypedFrameHandlers(router, TypedServiceHandlers{
 		eventType: {
 			Binding: binding,
 			Handler: func(_ context.Context, request proto.Message) (proto.Message, error) {
 				typed := request.(*testprotos.TestRequest)
-				if calls == 0 {
-					firstRequest = typed
-					if typed.GetWorkspaceId() != "wrk_1" || typed.GetHash() != "sha256:one" {
-						t.Fatalf("first frame decode mismatch: %+v", typed)
-					}
-				} else {
-					if typed != firstRequest {
-						t.Fatalf("expected frame adapter to reuse caller-owned protobuf message")
-					}
-					if typed.GetWorkspaceId() != "wrk_2" || typed.GetHash() != "sha256:two" || typed.GetSize() != 32 {
-						t.Fatalf("second frame decode mismatch: %+v", typed)
-					}
+				if _, ok := seen[typed]; ok {
+					reuseSeen = true
+				}
+				seen[typed] = struct{}{}
+
+				// Residue from a previous decode surfaces here as the wrong
+				// workspace, hash, or size — the property that makes reuse
+				// unsafe if it breaks.
+				wantWorkspace, wantHash, wantSize := "wrk_1", "sha256:one", int64(16)
+				if calls%2 == 1 {
+					wantWorkspace, wantHash, wantSize = "wrk_2", "sha256:two", int64(32)
+				}
+				if typed.GetWorkspaceId() != wantWorkspace || typed.GetHash() != wantHash || typed.GetSize() != wantSize {
+					t.Errorf("call %d decoded %+v, want workspace=%s hash=%s size=%d",
+						calls, typed, wantWorkspace, wantHash, wantSize)
 				}
 				calls++
 				return &testprotos.TestResponse{ResourceId: typed.GetWorkspaceId(), Status: "complete"}, nil
@@ -168,14 +177,21 @@ func TestRegisterTypedFrameHandlersOptInProtobufDecodeReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal() second error = %v", err)
 	}
-	if _, err := router.DispatchFrame(context.Background(), grpcsvc.Frame{EventType: eventType, Payload: firstPayload}); err != nil {
-		t.Fatalf("first DispatchFrame() error = %v", err)
+	const dispatches = 64
+	for i := range dispatches {
+		payload := firstPayload
+		if i%2 == 1 {
+			payload = secondPayload
+		}
+		if _, err := router.DispatchFrame(context.Background(), grpcsvc.Frame{EventType: eventType, Payload: payload}); err != nil {
+			t.Fatalf("DispatchFrame() %d error = %v", i, err)
+		}
 	}
-	if _, err := router.DispatchFrame(context.Background(), grpcsvc.Frame{EventType: eventType, Payload: secondPayload}); err != nil {
-		t.Fatalf("second DispatchFrame() error = %v", err)
+	if calls != dispatches {
+		t.Fatalf("handler calls = %d, want %d", calls, dispatches)
 	}
-	if calls != 2 {
-		t.Fatalf("handler calls = %d", calls)
+	if !reuseSeen {
+		t.Fatalf("no pooled message was ever reused across %d dispatches; the frame adapter is not pooling", dispatches)
 	}
 }
 

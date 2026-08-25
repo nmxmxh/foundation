@@ -75,7 +75,7 @@ func TestSubscribeHandlerStreamsDeltaOverGorilla(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws dial err=%v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Apply after the subscription is live; the delta must arrive as a binary frame.
 	time.Sleep(50 * time.Millisecond)
@@ -131,7 +131,7 @@ func TestMultiplexHandlerStreamsTwoScopesOverOneConn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws dial err=%v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	subscribe := `{"type":"subscribe","scopes":[{"domain":"signals","collection":"ticks"},{"domain":"signals","collection":"quotes"}]}`
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(subscribe)); err != nil {
@@ -218,7 +218,7 @@ func TestMultiplexHandlerRejectsUnauthenticated(t *testing.T) {
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/projections/"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err == nil {
-		conn.Close()
+		_ = conn.Close()
 		t.Fatalf("expected unauthenticated multiplex upgrade to fail")
 	}
 	if resp == nil || resp.StatusCode != http.StatusUnauthorized {
@@ -245,7 +245,7 @@ func TestSubscribeHandlerStreamsDelta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws dial err=%v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Wait for the subscription to register so the apply's broadcast has a target.
 	key := ScopeKey(scope())
@@ -285,7 +285,7 @@ func dialMultiplex(t *testing.T, gw *Gateway) (*httptest.Server, *websocket.Conn
 		srv.Close()
 		t.Fatalf("ws dial err=%v", err)
 	}
-	t.Cleanup(func() { conn.Close(); srv.Close() })
+	t.Cleanup(func() { _ = conn.Close(); srv.Close() })
 	return srv, conn
 }
 

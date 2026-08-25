@@ -146,18 +146,27 @@ func (h *Hub) Broadcast(key string, frame Frame) {
 	// target snapshot and the send, panicking with "send on closed channel". Sends
 	// stay non-blocking (select/default), so holding RLock never stalls on a slow
 	// consumer and concurrent broadcasts still proceed in parallel.
+	//
+	// concurrency: the lock is deliberately held across the select. The sends
+	// cannot block, so the held region is bounded by the subscriber count rather
+	// than by any consumer's progress.
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for sub := range h.subs[key] {
 		select {
 		case sub.frames <- frame:
 		default:
+			// concurrency: drop when the subscriber's buffer is full; the drop is
+			// counted and signalled below so the writer emits a resync. Blocking
+			// here would stall every other subscriber on one slow consumer.
 			sub.dropped.Add(1)
 			// Wake the writer so it can emit a resync even if no further frame
 			// is ever delivered. Coalesced: a pending signal already covers it.
 			select {
 			case sub.drops <- struct{}{}:
 			default:
+				// concurrency: coalesced signal; a pending wake already covers
+				// this drop, so discarding it loses nothing.
 			}
 		}
 	}

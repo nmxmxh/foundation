@@ -31,9 +31,11 @@ func TestPlacementRefusalContracts(t *testing.T) {
 		failing := &failingSink{}
 		ctx := t.Context()
 		errs := make(chan error, 8)
-		if err := ListenMirrors(ctx, bus, "", failing, func(_ int, cause error) { errs <- cause }); err != nil {
+		stop, err := ListenMirrors(ctx, bus, "", failing, func(_ int, cause error) { errs <- cause })
+		if err != nil {
 			t.Fatalf("listen: %v", err)
 		}
+		defer stop()
 
 		want := LaneMirrorUpdate{Lane: 3, EwmaNs: 800, TickSeen: 12}
 		if err := PublishLaneMirrors(ctx, bus, "", "n", "r", LaneClassEdge, []LaneMirrorUpdate{want}); err != nil {

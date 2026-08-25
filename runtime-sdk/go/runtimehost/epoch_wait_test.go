@@ -45,6 +45,11 @@ func measureParkChurn(t *testing.T, window time.Duration) uint64 {
 // bug added roughly one timer allocation per 5ms of parking (~96 B/wake, about
 // 2.9 KB across the 150 ms delta below).
 func TestWaitForEpochChangeFallbackIsAllocationStable(t *testing.T) {
+	if raceDetectorEnabled {
+		// The detector's own allocations sit inside this budget and swamp it;
+		// the budget still guards every non-race build.
+		t.Skip("allocation budget is not meaningful under -race")
+	}
 	const (
 		shortWindow = 25 * time.Millisecond
 		longWindow  = 175 * time.Millisecond

@@ -33,7 +33,7 @@ func TestServiceBackedVariantMetadataDuplicationPatchDeleteConsistency(t *testin
 	}
 
 	redisClient := openRedis(t, env)
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 
 	orgID := uniqueName(env.prefix, "variant-org")
 	cleanupOrganization(t, ctx, state, orgID)

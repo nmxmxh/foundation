@@ -428,4 +428,3 @@ func TestEpochSlotsAndRouteUnix(t *testing.T) {
 		t.Fatalf("expected error on overly long unit id")
 	}
 }
-

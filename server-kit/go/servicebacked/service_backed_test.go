@@ -58,7 +58,7 @@ func TestServiceBackedRedisContracts(t *testing.T) {
 
 	env := requireServiceEnv(t)
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	names := newRedisContractNames(env.prefix)
 	cleanupRedisKeys(t, ctx, client, names.key, names.ttlKey, names.counterKey, names.lockKey, names.stream, names.hll)
@@ -377,7 +377,7 @@ func TestServiceBackedNervousSystemLifecycle(t *testing.T) {
 	env := requireServiceEnv(t)
 	client := openRedis(t, env)
 	bus := events.NewRedisBus(client, uniqueName(env.prefix, "events"), 32, nil)
-	defer bus.Close()
+	defer func() { _ = bus.Close() }()
 
 	recorder := contracttest.NewLifecycleRecorder()
 	wrapped := recorder.WrapBus(bus)
@@ -429,7 +429,7 @@ func TestServiceBackedNervousSystemLifecycle(t *testing.T) {
 func TestServiceBackedRedisConcurrentLoadSmoke(t *testing.T) {
 	env := requireServiceEnv(t)
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -437,11 +437,10 @@ func TestServiceBackedRedisConcurrentLoadSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("redis concurrent load failed: %v", err)
 	}
-	p95Budget := durationBudget("SERVICE_BACKED_REDIS_P95_BUDGET", 20*time.Millisecond)
-	p99Budget := durationBudget("SERVICE_BACKED_REDIS_P99_BUDGET", 50*time.Millisecond)
-	if stats.P95 > p95Budget || stats.P99 > p99Budget {
-		t.Fatalf("redis concurrent set/get latency = %+v, budgets p95=%s p99=%s", stats, p95Budget, p99Budget)
-	}
+	assertLatencyBudget(t, "redis concurrent set/get", stats,
+		durationBudget("SERVICE_BACKED_REDIS_P95_BUDGET", 20*time.Millisecond),
+		durationBudget("SERVICE_BACKED_REDIS_P99_BUDGET", 50*time.Millisecond),
+	)
 }
 
 func TestServiceBackedPostgresConcurrentLoadSmoke(t *testing.T) {
@@ -454,21 +453,28 @@ func TestServiceBackedPostgresConcurrentLoadSmoke(t *testing.T) {
 	applyStateSchema(t, ctx, store)
 	orgID := uniqueName(env.prefix, "pg-load-org")
 	cleanupOrganization(t, ctx, store, orgID)
-	stats, err := runPostgresConcurrentLoad(ctx, store, orgID, 8, 32)
+	// 8x320 rather than 8x32: summarizeDurations takes p99 by conservative
+	// nearest rank, so 256 samples put p99 at durations[253] — the third-slowest
+	// operation, which one stalled connection acquire is enough to set. 2560
+	// samples put it at durations[2534], the 26th-slowest, which no single
+	// outlier can carry. See the note in TestServiceBackedMixedWorkflowLatencyProfile.
+	stats, err := runPostgresConcurrentLoad(ctx, store, orgID, 8, 320)
 	if err != nil {
 		t.Fatalf("postgres concurrent load failed: %v", err)
 	}
-	p95Budget := durationBudget("SERVICE_BACKED_POSTGRES_P95_BUDGET", 50*time.Millisecond)
-	p99Budget := durationBudget("SERVICE_BACKED_POSTGRES_P99_BUDGET", 100*time.Millisecond)
-	if stats.P95 > p95Budget || stats.P99 > p99Budget {
-		t.Fatalf("postgres concurrent upsert latency = %+v, budgets p95=%s p99=%s", stats, p95Budget, p99Budget)
-	}
+	// Routed through assertLatencyBudget so a passing run still records what it
+	// measured. Asserting inline logged nothing unless the budget was breached,
+	// which left no trail to compare against when it later was.
+	assertLatencyBudget(t, "postgres concurrent upsert", stats,
+		durationBudget("SERVICE_BACKED_POSTGRES_P95_BUDGET", 50*time.Millisecond),
+		durationBudget("SERVICE_BACKED_POSTGRES_P99_BUDGET", 100*time.Millisecond),
+	)
 }
 
 func BenchmarkServiceBackedRedisSetGet(b *testing.B) {
 	env := requireServiceEnv(b)
 	client := openRedis(b, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	ctx := context.Background()
 	key := uniqueName(env.prefix, "bench-kv")
 	b.ReportAllocs()
@@ -486,7 +492,7 @@ func BenchmarkServiceBackedRedisSetGet(b *testing.B) {
 func BenchmarkServiceBackedRedisSet(b *testing.B) {
 	env := requireServiceEnv(b)
 	client := openRedis(b, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	ctx := context.Background()
 	key := uniqueName(env.prefix, "bench-set")
 	value := []byte("foundation")
@@ -503,7 +509,7 @@ func BenchmarkServiceBackedRedisSet(b *testing.B) {
 func BenchmarkServiceBackedRedisGet(b *testing.B) {
 	env := requireServiceEnv(b)
 	client := openRedis(b, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	ctx := context.Background()
 	key := uniqueName(env.prefix, "bench-get")
 	if err := client.Set(ctx, key, []byte("foundation"), 0); err != nil {
@@ -522,7 +528,7 @@ func BenchmarkServiceBackedRedisGet(b *testing.B) {
 func BenchmarkServiceBackedRedisSetGetParallel(b *testing.B) {
 	env := requireServiceEnv(b)
 	client := openRedis(b, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	ctx := context.Background()
 	var seq atomic.Uint64
 
@@ -544,7 +550,7 @@ func BenchmarkServiceBackedRedisSetGetParallel(b *testing.B) {
 func BenchmarkServiceBackedRedisSetManyGetMany64(b *testing.B) {
 	env := requireServiceEnv(b)
 	client := openRedis(b, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	batch := requireRedisBatch(b, client)
 	ctx := context.Background()
 	values, keys := redisBatchValues(env.prefix, 64)
@@ -566,7 +572,7 @@ func BenchmarkServiceBackedRedisSetManyGetMany64(b *testing.B) {
 func BenchmarkServiceBackedRedisSetGetMany64(b *testing.B) {
 	env := requireServiceEnv(b)
 	client := openRedis(b, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	batch := requireRedisBatch(b, client)
 	ctx := context.Background()
 	values, keys := redisBatchValues(env.prefix, 64)
@@ -585,7 +591,7 @@ func BenchmarkServiceBackedRedisSetGetMany64(b *testing.B) {
 func BenchmarkServiceBackedRedisRawPipelineSetGet64(b *testing.B) {
 	env := requireServiceEnv(b)
 	client := openRawRedis(b, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	ctx := context.Background()
 	keys := make([]string, 0, 64)
 	for _, key := range redisBatchKeys(env.prefix, 64) {

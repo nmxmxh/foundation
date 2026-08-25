@@ -338,6 +338,69 @@ func (s *indexSnapshot) forEachKey(fn func(string) bool) {
 		}
 		return
 	}
+	// The chain always bottoms out in a flat snapshot: compaction produces one
+	// with no base and no removes, and emptyIndex has the same shape. Only the
+	// delta layers above it can restate or retract a key, so only they need a
+	// dedup set — the flat base's own keys are unique by construction and can be
+	// emitted with a lookup instead of an insert.
+	//
+	// Sizing that set to the whole index rather than to the changes was the
+	// cost: one delta layer over a 100,000-key base allocated 3.5 MB on every
+	// scan and ran 6.4x slower than the flat shape, and a 512-layer chain cost
+	// barely more than a single layer. Nearly all of the read penalty was the
+	// index-sized map, not the walking.
+	terminal := s
+	touched := 0
+	for terminal.base != nil {
+		touched += len(terminal.adds) + len(terminal.removes)
+		terminal = terminal.base
+	}
+	// Two shapes reach here and they want opposite strategies. After a
+	// compaction the terminal holds the whole live set and the layers above it
+	// hold a handful of recent changes, so deduping against those changes is
+	// far cheaper than against the index. After a bulk load the chain bottoms
+	// out at emptyIndex instead, which means the bulk itself sits in a layer
+	// *above* the terminal — dedup-against-changes would then absorb every key
+	// in the index, and measured against the reconciling walk it was 14% slower
+	// and allocated twice as much. Choosing on the measured split rather than
+	// assuming the post-compaction shape is what keeps both cases fast.
+	if len(terminal.removes) != 0 || touched >= terminal.len() {
+		s.forEachKeyReconciled(fn)
+		return
+	}
+
+	// Sized to the keys touched since the last compaction, not to the index,
+	// and sized up front: growing it from empty re-hashed several times per
+	// scan, which is most of what made the unsized form lose above.
+	changed := make(map[string]struct{}, touched)
+	for current := s; current != terminal; current = current.base {
+		for key := range current.removes {
+			changed[key] = struct{}{}
+		}
+		for key := range current.adds {
+			if _, done := changed[key]; done {
+				continue
+			}
+			changed[key] = struct{}{}
+			if !fn(key) {
+				return
+			}
+		}
+	}
+	for key := range terminal.adds {
+		if _, done := changed[key]; done {
+			continue
+		}
+		if !fn(key) {
+			return
+		}
+	}
+}
+
+// forEachKeyReconciled is the general walk, kept for chains that do not bottom
+// out in a flat snapshot. It dedups against every layer including the base, so
+// it is correct for any shape and pays an index-sized set for the privilege.
+func (s *indexSnapshot) forEachKeyReconciled(fn func(string) bool) {
 	seen := make(map[string]struct{}, s.len())
 	for current := s; current != nil; current = current.base {
 		for key := range current.removes {
@@ -375,31 +438,50 @@ func compactIndexSnapshot(snapshot *indexSnapshot) *indexSnapshot {
 }
 
 func compactKeys(snapshot *indexSnapshot) map[string]struct{} {
-	states := map[string]bool{}
-	seen := map[string]struct{}{}
+	// Walk newest-to-oldest and keep the first verdict seen for each key, which
+	// is the newest one. Presence in states *is* the seen-set: every key written
+	// here is written exactly once, so a separate seen map tracked an identical
+	// key set and doubled both the allocation and the hashing on what the
+	// 2026-08-25 projection profile showed to be this package's largest single
+	// allocator.
+	//
+	// Sized up front: compaction only runs once the delta chain is deep, so the
+	// live count is a good estimate of the distinct keys about to be inserted
+	// and growing the map from empty rehashed it several times per compaction.
+	// Live keys accumulate straight into the result rather than into a verdict
+	// map that is then filtered into a second one. The filtered form allocated
+	// two maps the size of the whole index per compaction; this allocates one,
+	// plus a tombstone set that is proportional to deletions rather than to the
+	// index. Compaction walks every live key by construction, so the count of
+	// map insertions is unchanged — what goes away is the second table and the
+	// second pass over it.
+	live := make(map[string]struct{}, snapshot.len())
+	var dead map[string]struct{}
+	seen := func(key string) bool {
+		if _, ok := live[key]; ok {
+			return true
+		}
+		_, ok := dead[key]
+		return ok
+	}
 	for current := snapshot; current != nil; current = current.base {
 		for key := range current.removes {
-			if _, ok := seen[key]; ok {
+			if seen(key) {
 				continue
 			}
-			seen[key] = struct{}{}
-			states[key] = false
+			if dead == nil {
+				dead = make(map[string]struct{}, len(current.removes))
+			}
+			dead[key] = struct{}{}
 		}
 		for key := range current.adds {
-			if _, ok := seen[key]; ok {
+			if seen(key) {
 				continue
 			}
-			seen[key] = struct{}{}
-			states[key] = true
+			live[key] = struct{}{}
 		}
 	}
-	keys := make(map[string]struct{}, snapshot.len())
-	for key, live := range states {
-		if live {
-			keys[key] = struct{}{}
-		}
-	}
-	return keys
+	return live
 }
 
 func compactOrderEntries(snapshot *indexSnapshot, keys map[string]struct{}) []recordOrderEntry {

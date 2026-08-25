@@ -67,8 +67,11 @@ func (f *failingSubscribeClient) Subscribe(context.Context, string) (<-chan []by
 }
 
 func TestListenMirrorsWrapsSubscribeErrors(t *testing.T) {
-	err := ListenMirrors(context.Background(), &failingSubscribeClient{rediskit.NewMemoryClient("p")},
+	stop, err := ListenMirrors(context.Background(), &failingSubscribeClient{rediskit.NewMemoryClient("p")},
 		"", &collectingSink{}, nil)
+	if stop != nil {
+		t.Fatal("a failed subscribe must not hand back a stop function")
+	}
 	if !errors.Is(err, errSubscribe) {
 		t.Fatalf("err = %v want subscribe wrap", err)
 	}
@@ -81,9 +84,13 @@ func TestListenMirrorsLifecycleBranches(t *testing.T) {
 	bus := rediskit.NewMemoryClient("placement")
 	sink := &collectingSink{}
 	ctx, cancel := context.WithCancel(context.Background())
-	if err := ListenMirrors(ctx, bus, "", sink, nil); err != nil {
+	stop, err := ListenMirrors(ctx, bus, "", sink, nil)
+	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	// Ends the listener and waits for it, so nothing applies into the sink
+	// after the test stops looking at it.
+	defer stop()
 
 	// Invalid frame with a NIL onError must be skipped silently.
 	if err := bus.Publish(ctx, "", []byte("garbage")); err != nil {
@@ -144,9 +151,13 @@ func TestListenMirrorsDecodeErrorCallbackAndClosedExit(t *testing.T) {
 	errs := make(chan error, 8)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := ListenMirrors(ctx, client, "", sink, func(_ int, cause error) { errs <- cause }); err != nil {
+	stop, err := ListenMirrors(ctx, client, "", sink, func(_ int, cause error) { errs <- cause })
+	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	// Ends the listener and waits for it, so nothing applies into the sink
+	// after the test stops looking at it.
+	defer stop()
 
 	// Decode failure surfaces through the non-nil callback...
 	frames <- []byte("junk")
@@ -172,9 +183,13 @@ func TestListenMirrorsApplyErrorWithNilCallbackIsSilent(t *testing.T) {
 	client := &controlledChannelClient{Client: base, frames: frames}
 	sink := &collectingSink{}
 	ctx := t.Context()
-	if err := ListenMirrors(ctx, client, "", sink, nil); err != nil {
+	stop, err := ListenMirrors(ctx, client, "", sink, nil)
+	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	// Ends the listener and waits for it, so nothing applies into the sink
+	// after the test stops looking at it.
+	defer stop()
 	// Sub-floor claim with a NIL onError: skipped silently, no panic.
 	frames <- []byte{MirrorWireVersion, 0, 1, 'n', 1, 'r', 0, 1, 0, 0, 0, 0, 0, 0, 0, byte(LaneClassEdge)}
 	frames <- func() []byte {

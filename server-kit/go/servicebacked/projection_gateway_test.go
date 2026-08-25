@@ -113,7 +113,7 @@ func TestServiceBackedProjectionGatewayReadPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws dial error = %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	time.Sleep(75 * time.Millisecond) // let the subscription register before applying
 
 	envelope, err := hermes.NewProjectionEnvelope([]*foundationpb.RecordMutation{{
@@ -297,7 +297,7 @@ func TestServiceBackedWSEventForwardingViaRedis(t *testing.T) {
 	env := requireServiceEnv(t)
 	client := openRedis(t, env)
 	bus := events.NewRedisBus(client, uniqueName(env.prefix, "ws-fwd"), 32, nil)
-	defer bus.Close()
+	defer func() { _ = bus.Close() }()
 
 	log, err := logger.NewDefault()
 	if err != nil {
@@ -325,7 +325,7 @@ func TestServiceBackedWSEventForwardingViaRedis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ws dial error = %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	readResidualEnvelope(t, conn)
 

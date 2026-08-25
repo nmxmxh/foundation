@@ -1,6 +1,7 @@
 package placement
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -60,9 +61,11 @@ func TestPublishAndListenMirrorsOverSharedBus(t *testing.T) {
 	received := make(chan error, 8)
 
 	ctx := t.Context()
-	if err := ListenMirrors(ctx, bus, "", sink, func(_ int, cause error) { received <- cause }); err != nil {
+	stop, err := ListenMirrors(ctx, bus, "", sink, func(_ int, cause error) { received <- cause })
+	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	defer stop()
 
 	want := LaneMirrorUpdate{
 		Lane: 5, Jurisdiction: 2, MaxConcurrency: 6, Inflight: 2, Generation: 9,
@@ -74,7 +77,7 @@ func TestPublishAndListenMirrorsOverSharedBus(t *testing.T) {
 	}
 
 	waitFor(t, 2*time.Second, func() bool { return sink.updates() > 0 })
-	if got := sink.last; got != want {
+	if got := sink.lastUpdate(); got != want {
 		t.Fatalf("applied %+v want %+v", got, want)
 	}
 	select {
@@ -89,9 +92,11 @@ func TestListenerSurvivesForeignFrames(t *testing.T) {
 	sink := &collectingSink{}
 
 	ctx := t.Context()
-	if err := ListenMirrors(ctx, bus, "", sink, nil); err != nil {
+	stop, err := ListenMirrors(ctx, bus, "", sink, nil)
+	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	defer stop()
 
 	// Foreign traffic on the shared channel is expected, not fatal.
 	if err := bus.Publish(ctx, DefaultMirrorChannel, []byte("not-a-mirror-frame")); err != nil {
@@ -103,23 +108,39 @@ func TestListenerSurvivesForeignFrames(t *testing.T) {
 		t.Fatalf("publish: %v", err)
 	}
 	waitFor(t, 2*time.Second, func() bool { return sink.updates() == 1 })
-	if sink.last != want {
-		t.Fatalf("post-noise apply = %+v want %+v", sink.last, want)
+	if got := sink.lastUpdate(); got != want {
+		t.Fatalf("post-noise apply = %+v want %+v", got, want)
 	}
 }
 
+// collectingSink is written by the listener goroutine and read by the test
+// goroutine that polls it, so every field is guarded. Plain fields here raced
+// waitFor's polling read for as long as the helper has existed.
 type collectingSink struct {
+	mu     sync.Mutex
 	last   LaneMirrorUpdate
 	called int
 }
 
 func (c *collectingSink) ApplyMirrorUpdate(update LaneMirrorUpdate) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.last = update
 	c.called++
 	return nil
 }
 
-func (c *collectingSink) updates() int { return c.called }
+func (c *collectingSink) updates() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.called
+}
+
+func (c *collectingSink) lastUpdate() LaneMirrorUpdate {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.last
+}
 
 func waitFor(t *testing.T, timeout time.Duration, probe func() bool) {
 	t.Helper()
