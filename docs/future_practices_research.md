@@ -59,8 +59,12 @@ move it into the owning practice document and, where possible, into tooling.
      not a rearchitecture.
 8. Durable-queue scheduling boundaries (added 2026-08-23, source class 4:
    Pronto connector CPU runaway incident): a transactional queue is a
-   crash-safety mechanism. It must not become a scheduler clock. Deltas to
-   track and promote:
+   crash-safety mechanism. It must not become a scheduler clock. Promoted
+   2026-08-25 into `database_practices.md`, "The Queue Is Not A Scheduler
+   Clock"; the ByState rule is enforced by
+   `tooling/scripts/river_practices_check.sh` and by the scaffolded TE-14 guard
+   `internal/worker/periodic_jobs_test.go`. The lane stays open for the
+   remaining deltas below:
    - Cadence ownership: a recurring producer keeps due-times in cheap local
      state, for example a `nextDue` map seeded by one bulk read at startup.
      A sweep then submits only due work, and most sweeps submit zero jobs.
@@ -98,7 +102,7 @@ move it into the owning practice document and, where possible, into tooling.
 | `performance_practices.md` | Add CPU-counter taxonomy, allocator-trace posture, syscall/I/O copy-budget review, thermal/cold-start budgets, and "do not optimize" criteria. |
 | `performance_lab.md` | Track repeatable evidence bundles for CPU counters, allocator traces, syscall/I/O shape, cold/warm cache, WASM/FFI, native, WebGPU, and GPU timings. |
 | `foundation_benchmarks.md` | Convert benchmark notes into a registry with owner, machine class, variance, regression threshold, last valid SHA, replay command, and linked guard test. |
-| `database_practices.md` | Track PostgreSQL 18/19 async I/O, skip-scan caveats, virtual generated columns, `pg_stat_io`, WAL bytes/op, RLS tests, vector recall, projection-lag fences, queue-as-clock boundary rules (lane 8), and recurring-producer backlog bounds. |
+| `database_practices.md` | Track PostgreSQL 18/19 async I/O, skip-scan caveats, virtual generated columns, `pg_stat_io`, WAL bytes/op, RLS tests, vector recall, and projection-lag fences. Queue-as-clock boundary rules and recurring-producer backlog bounds promoted 2026-08-25 (lane 8). |
 | `redis_practices.md` | Track Redis 8 behavior, client-side cache invalidation, Streams pending recovery, shard policy, script safety, big-key automation, and eviction simulation. |
 | `websocket_scaling.md` | Add reconnect storm modeling, browser backpressure, slow-client fairness, auth-expiry mid-socket tests, QUIC/WebTransport research, and topic fanout complexity budgets. |
 | `runtime_foundation.md` | Add lane-selection proof tables: direct Go, Rust, WASM/SAB, FFI, shared memory, stdio, native GPU, WebGPU, WebSocket, HTTP, registry dispatch, graceful event emission, and JSON fallback. |

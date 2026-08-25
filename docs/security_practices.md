@@ -112,6 +112,48 @@ Every exposed feature should add tests for the vulnerability families it touches
 9. Preserve an inventory of exposed routes, API versions, queue topics, webhook receivers, public buckets, DNS records, and package entrypoints.
 10. Generated production scaffolds must default to authentication enabled, exact allowed origins, and protected operational endpoints. `/metricsz`, `/metricsz/trace`, and operational event views are not public production surfaces.
 
+## Advisory 2026-08-25: Shared JWT Fallback In Generated Compose
+
+**Affected:** every project whose `.foundation-patches.tsv` records
+`Docker Compose strengthens JWT_SECRET fallback` or
+`Docker Compose strengthens JWT_SECRET_KEY fallback`, and every project
+scaffolded from the compose template before 2026-08-25.
+
+**What shipped.** A managed patch replaced the compose fallback
+`${JWT_SECRET:-dev-change-me}` with a 64-character random-looking literal, and
+the literal later moved into `templates/docker/docker-compose.yml` itself. The
+patch was titled *strengthens*. It weakened: the value is public in every
+repository that received it and identical across every project built from
+Foundation, so it is a published signing key. `dev-change-me` at least announces
+itself to a human or a scanner reading a deployed config; the replacement does
+not.
+
+**Why nothing caught it.** The failure path was closed at both ends by accident.
+`config.validateSecurity` rejected an *empty* `JWT_SECRET` in production, and the
+compose fallback guaranteed the value was never empty. A deploy that forgot to
+set `JWT_SECRET` therefore passed every validation and signed tokens with the
+published key.
+
+**Fixed in Foundation.** The compose template is back to a self-announcing
+placeholder; the managed patch is now a reverse patch that restores it in
+projects that already applied the original; `patch_config_weak_jwt_denylist`
+carries a weak-secret denylist into create-mode `internal/config/config.go`; and
+`TestProductionRejectsKnownWeakJWTSecrets` ships in the forced config test
+baseline. A project that has not rotated now fails at startup in production
+instead of signing with a known key.
+
+**Operator action, which Foundation cannot perform.** Set an explicit
+`JWT_SECRET` and `JWT_SECRET_KEY` in every deployed environment
+(`openssl rand -base64 48`), then invalidate sessions and tokens issued under the
+old key. An update that quietly restores the placeholder does not rotate a key
+already in use.
+
+**The rule this leaves behind.** A secret's strength is not its length. A value
+committed to a repository is public regardless of how random it looks, and a
+default that resembles a real secret is worse than one that admits what it is,
+because only the second one gets noticed. Do not "harden" a placeholder in
+shared scaffold; remove the fallback or keep it obviously fake.
+
 ## Review Checklist
 
 - [ ] Does the change introduce a new entry point or trust boundary?
@@ -121,6 +163,9 @@ Every exposed feature should add tests for the vulnerability families it touches
 - [ ] Is object-level authorization performed after deriving tenant from authenticated context?
 - [ ] Are state changes idempotent and protected against concurrent replay?
 - [ ] Are timeouts, size caps, and retry limits explicit?
+- [ ] Does any committed default value resemble a real secret? A shared literal
+      is published, not strong — keep placeholders obviously fake and reject
+      them in production validation.
 - [ ] Do tests include at least one negative case for each touched vulnerability family?
 - [ ] Does every security-relevant rejection produce a non-secret, correlation-friendly log or error signal?
 - [ ] Are dependency, generated-code, and CI changes covered by audit/SCA or reproducible verification?

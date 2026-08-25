@@ -49,6 +49,7 @@ templates/backend/internal/worker/registry.go	internal/worker/registry.go	full,b
 templates/backend/internal/worker/registry_helpers_test.go	internal/worker/registry_helpers_test.go	full,backend	always	force
 templates/backend/internal/worker/registry_test.go	internal/worker/registry_test.go	full,backend	always	force
 templates/backend/internal/worker/periodic_jobs.go	internal/worker/periodic_jobs.go	full,backend	always	create
+templates/backend/internal/worker/periodic_jobs_test.go	internal/worker/periodic_jobs_test.go	full,backend	always	force
 templates/backend/internal/service/.gitkeep	internal/service/.gitkeep	full,backend	always	create
 templates/backend/migrations/000001_init.up.sql	migrations/000001_init.up.sql	full,backend	always	create
 templates/backend/migrations/000001_init.down.sql	migrations/000001_init.down.sql	full,backend	always	create

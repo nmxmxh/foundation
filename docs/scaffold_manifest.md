@@ -57,6 +57,37 @@ The ledger is project state and should be committed. The seed-drift contract
 is enforced by `make check-scaffold-seed-drift`
 (`tests/scaffold_seed_drift_test.sh`).
 
+## Declining a Seed: `.foundation-seeds.ignore`
+
+`create` mode writes its template whenever the destination is **absent**, so
+deleting a seeded file is indistinguishable from never having been seeded, and
+the next update writes the file back. That is correct for a project that has
+not been scaffolded yet and wrong for a project that removed the file on
+purpose.
+
+`.foundation-seeds.ignore` at the project root is the tombstone list: one
+project-relative destination per line, `#` comments and blank lines ignored.
+
+```text
+# Destinations this project deliberately removed.
+frontend/src/components/ui/Button.tsx
+frontend/src/components/ui/Input.tsx
+frontend/src/components/ui/index.ts
+```
+
+A tombstoned destination is never seeded, never drift-checked, and is dropped
+from the seed ledger — Foundation stops tracking it entirely. Remove the line
+to let the seed return on the next update.
+
+Tombstones apply to `create` mode only. `overwrite` and `force` files carry a
+Foundation-owned contract; a project that needs one of those gone should change
+the manifest, not silence it locally.
+
+Every update reports what it seeded: new seeds as a count, and any destination
+that was seeded, later removed, and has now been written back as a per-file
+warning naming `.foundation-seeds.ignore`. A resurrection is the one create-mode
+write no project asks for, so it is never silent.
+
 ## Tooling
 
 List files by profile:

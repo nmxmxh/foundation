@@ -14,6 +14,8 @@ const markdownRoots = [
 
 const failures = [];
 
+const ATTRIBUTION = /^[ \t]*(?:[-*][ \t]*|\d+\.[ \t]*)?(Sources?|References?|Origin|Adapted from|Derived from|Extracted from|Imported from)[ \t]*:[ \t]*(\S.*)$/;
+
 // Foundation's `docs/` is copied wholesale into generated projects as
 // `docs/foundation/`, so links inside that subtree must not escape it or they
 // dangle once re-rooted. In the foundation repo the subtree is `docs/`; in a
@@ -70,6 +72,7 @@ function checkMarkdownFile(file) {
   const enforceContainment = !escapesRoot(file, relocatableRoot);
   const relFile = rel(file);
   const content = stripFencedBlocks(readFileSync(file, "utf8"));
+  checkSourceAttributions(file, relFile, content);
   const linkPattern = /!?\[[^\]\n]*\]\(([^)\n]+)\)/g;
   let match;
   while ((match = linkPattern.exec(content)) !== null) {
@@ -126,6 +129,75 @@ function checkMarkdownFile(file) {
       });
     }
   }
+}
+
+// A path cited in prose is invisible to the link check above, so a source that
+// exists only on the author's machine — a sibling directory one level above the
+// repository, say — resolves for them and for nobody else. The gap is narrow
+// but load-bearing: attribution lines are exactly where such a path gets
+// written, and exactly where nobody notices it is unverified.
+//
+// Scoped to attribution lines rather than all prose. Measured against
+// Foundation's own docs, requiring every inline-code path to resolve produced
+// 234 hits, nearly all legitimate (paths relative to the citing document, and
+// paths that exist only in a generated project). Attribution lines produced one
+// hit, and it was a real broken reference. Precision is the point.
+
+function checkSourceAttributions(file, relFile, content) {
+  const lines = content.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = ATTRIBUTION.exec(lines[index]);
+    if (!match) {
+      continue;
+    }
+    // Markdown links are already verified by the link pass; drop them and look
+    // at what is left.
+    const remainder = match[2].replace(/!?\[[^\]\n]*\]\([^)\n]+\)/g, " ");
+    for (const token of pathShapedTokens(remainder)) {
+      if (resolvesFrom(file, token)) {
+        continue;
+      }
+      failures.push({
+        label: "source attribution cites an unresolvable path",
+        details: [
+          `${relFile}:${index + 1}: ${token}`,
+          "resolves from neither the citing document nor the repository root",
+          "a bare path in prose is not checked by the link pass, so it keeps resolving on the author's machine and nowhere else",
+          "cite it as a Markdown link, or correct the path",
+        ],
+      });
+    }
+  }
+}
+
+function pathShapedTokens(value) {
+  const tokens = [];
+  for (const raw of value.split(/[\s,;]+/)) {
+    const token = raw.replace(/[`'"]/g, "").replace(/[.,;:)\]]+$/, "");
+    if (!token.includes("/") || token.includes("//")) {
+      continue;
+    }
+    if (isExternal(token) || /^(and|or)\//i.test(token)) {
+      continue;
+    }
+    // A placeholder segment is a shape, not a location.
+    if (token.includes("<") || token.includes("*")) {
+      continue;
+    }
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+function resolvesFrom(file, token) {
+  const bare = token.split("#", 1)[0].split("?", 1)[0];
+  if (!bare) {
+    return true;
+  }
+  const candidates = bare.startsWith("/")
+    ? [path.join(target, bare.slice(1))]
+    : [path.resolve(path.dirname(file), bare), path.resolve(target, bare)];
+  return candidates.some((candidate) => existsSync(candidate));
 }
 
 function escapesRoot(resolved, root) {

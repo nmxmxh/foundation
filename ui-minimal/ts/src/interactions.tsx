@@ -296,8 +296,12 @@ const Style = {
 
     &:focus-within {
       border-color: ${({ theme, $invalid }) => ($invalid ? theme.color.danger : theme.color.borderFocus)};
-      box-shadow: 0 0 0 ${({ theme }) => theme.focus.ringWidth}
-        ${({ theme, $invalid }) => ($invalid ? theme.color.dangerSoft : theme.color.brandSoft)};
+      /* Built in one interpolation rather than two. A declaration whose value
+         wraps onto a following line that begins with an interpolation is
+         unparseable to the CSS-in-JS language service, which then reports a
+         spurious "semi-colon expected" for the whole block. */
+      box-shadow: ${({ theme, $invalid }) =>
+        `0 0 0 ${theme.focus.ringWidth} ${$invalid ? theme.color.dangerSoft : theme.color.brandSoft}`};
     }
   `,
   NumberButton: styled.button`
@@ -901,13 +905,21 @@ export const MinimalDatePicker = ({
             </svg>
           </Style.DateTriggerIcon>
         </Style.DateTrigger>
+        {/*
+          The field's name belongs to the trigger, which the <label htmlFor>
+          above already names. The popover is a second thing — the date chooser
+          — so it carries its own name rather than repeating the field's. It
+          used to echo `label` on the dialog, again on a visually-hidden span,
+          and a third time on the calendar inside, so assistive tech announced
+          "Delivery date" three times for one field and `getByLabelText` could
+          not identify the control.
+        */}
         <Style.DatePanel
           $open={open}
           role="dialog"
-          aria-label={typeof label === "string" ? label : "Choose a date"}
+          aria-label={typeof label === "string" ? `Choose ${label}` : "Choose a date"}
           aria-hidden={!open}
         >
-          <Style.VisuallyHidden>{label}</Style.VisuallyHidden>
           {open ? (
             <MinimalCalendar
               value={selected}
@@ -922,7 +934,6 @@ export const MinimalDatePicker = ({
               locale={locale}
               weekStartsOn={weekStartsOn}
               showAdjacentDays={false}
-              aria-label={typeof label === "string" ? label : "Choose a date"}
             />
           ) : null}
         </Style.DatePanel>

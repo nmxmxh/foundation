@@ -36,6 +36,12 @@ Options:
   --validate          Run project scaffold validation after synchronization
   --verify-idempotence  Run a dry second pass and require no managed patch drift
   --help, -h          Show this help message
+
+Seeds:
+  create-mode files are seeded when their destination is absent, so a deleted
+  seed comes back on the next update. List destinations you removed on purpose
+  in .foundation-seeds.ignore (one project-relative path per line) and they are
+  never seeded again. See docs/scaffold_manifest.md.
 EOF
 }
 

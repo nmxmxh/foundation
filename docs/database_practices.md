@@ -552,37 +552,51 @@ Columnar-read design rules:
 
 ## Compute vs Durable Truth Separation (The Runtime-Lane/Crypto Conflict)
 
-Placing CPU-bound, blocking, or non-deterministic computation inside SQL queries (the "Durable Truth Lane") violates execution lane budgets, starves pooled connection resources, breaks query duration predictability, and severely degrades horizontal scalability. 
+Placing CPU-bound, blocking, or non-deterministic computation inside SQL queries (the "Durable Truth Lane") violates execution lane budgets, starves pooled connection resources, breaks query duration predictability, and severely degrades horizontal scalability.
 
 The database (PostgreSQL) is a scarce, vertically scaled, state-oriented resource. The application layer (Go/Rust/TS) is a horizontally scaled, compute-oriented resource. Crossing these concerns is a "Wrong Lane" architectural error.
 
 ### 1. Cryptographic Hashing and Column Encryption (pgcrypto)
-- **The Conflict**: Invoking `pgcrypto` functions like `crypt('password', gen_salt('bf', 12))` directly in SQL. Bcrypt with cost factor 12 takes ~300ms of pure CPU time by design. Under a default database statement timeout of 250ms (`CP-02`), this query will reliably fail with `canceling statement due to statement timeout`, locking database connection slots for 250ms of pure CPU block time and starving other queries.
-- **The Remediation**: Perform all cryptographic hashing, salt generation, and verification at the application layer (for example, using Go's `bcrypt` package). The database should execute only a trivial, sub-1ms query to retrieve the hashed credential:
+
+* **The Conflict**: Invoking `pgcrypto` functions like `crypt('password', gen_salt('bf', 12))` directly in SQL. Bcrypt with cost factor 12 takes ~300ms of pure CPU time by design. Under a default database statement timeout of 250ms (`CP-02`), this query will reliably fail with `canceling statement due to statement timeout`, locking database connection slots for 250ms of pure CPU block time and starving other queries.
+
+* **The Remediation**: Perform all cryptographic hashing, salt generation, and verification at the application layer (for example, using Go's `bcrypt` package). The database should execute only a trivial, sub-1ms query to retrieve the hashed credential:
+
   ```sql
   SELECT hashed_password FROM users WHERE email = $1;
   ```
+
   Verify the password in the Go application (for example, `bcrypt.CompareHashAndPassword(hashedPassword, plaintextPassword)`). Go-level hashing runs on application CPUs, scales horizontally with application replicas, does not hold scarce database pool connections, and fails gracefully with clear application logs.
 
 ### 2. Complex Pattern Matching & Regex Parsing
-- **The Conflict**: Running sequential evaluations of complex regular expressions (`~`, `~*`, `regexp_like`, `regexp_matches`) over unindexed text columns in a hot database lane. Regex parsing and compilation is highly CPU-bound. Sequential regex checks over millions of rows will instantly consume database CPU cores and trip statement timeouts.
-- **The Remediation**: Use `tsvector`/GIN full-text search or trigram search (`pg_trgm`/GiST) for filtering at the database boundary. If complex regex transformation or schema extraction is required, fetch candidates using indexed SQL fields first, and perform the final regex parsing or manipulation in the Go/Rust application.
+
+* **The Conflict**: Running sequential evaluations of complex regular expressions (`~`, `~*`, `regexp_like`, `regexp_matches`) over unindexed text columns in a hot database lane. Regex parsing and compilation is highly CPU-bound. Sequential regex checks over millions of rows will instantly consume database CPU cores and trip statement timeouts.
+
+* **The Remediation**: Use `tsvector`/GIN full-text search or trigram search (`pg_trgm`/GiST) for filtering at the database boundary. If complex regex transformation or schema extraction is required, fetch candidates using indexed SQL fields first, and perform the final regex parsing or manipulation in the Go/Rust application.
 
 ### 3. JSON/XML Schema Validation & Complex Transformations
-- **The Conflict**: Implementing JSON schema validation, deep recursive JSON path traversals (`jsonb_to_recordset`), or complex XML conversions in database triggers and functions. Parsing, validating, and mutating complex document formats in the DB consumes massive amounts of database CPU and memory allocator overhead.
-- **The Remediation**: Validate, structure, and serialize document payloads in the application layer. The database should only store fully validated JSONB, or extract key queryable attributes into dedicated relational columns.
+
+* **The Conflict**: Implementing JSON schema validation, deep recursive JSON path traversals (`jsonb_to_recordset`), or complex XML conversions in database triggers and functions. Parsing, validating, and mutating complex document formats in the DB consumes massive amounts of database CPU and memory allocator overhead.
+
+* **The Remediation**: Validate, structure, and serialize document payloads in the application layer. The database should only store fully validated JSONB, or extract key queryable attributes into dedicated relational columns.
 
 ### 4. Heavy Spatial / Distance Computations
-- **The Conflict**: Calculating exact distances or intersections between complex polygons (for example, PostGIS `ST_Distance` or `ST_Contains`) over large datasets without spatial indexes or pre-filtering. Calculating spatial geometric relations on complex shapes is extremely float-compute intensive.
-- **The Remediation**: Always pair spatial operator predicates with the bounding-box overlap operator (`&&`) and ensure a spatial GiST index is defined on geometry fields. If exact, high-precision geo-computations are needed, perform coarse-grained bounding-box filtering in SQL first, then run high-fidelity geometric calculations in the application layer (for example, utilizing a fast native Rust/WASM library).
+
+* **The Conflict**: Calculating exact distances or intersections between complex polygons (for example, PostGIS `ST_Distance` or `ST_Contains`) over large datasets without spatial indexes or pre-filtering. Calculating spatial geometric relations on complex shapes is extremely float-compute intensive.
+
+* **The Remediation**: Always pair spatial operator predicates with the bounding-box overlap operator (`&&`) and ensure a spatial GiST index is defined on geometry fields. If exact, high-precision geo-computations are needed, perform coarse-grained bounding-box filtering in SQL first, then run high-fidelity geometric calculations in the application layer (for example, utilizing a fast native Rust/WASM library).
 
 ### 5. Intensive Mathematical / Financial Calculation Loops
-- **The Conflict**: Computing amortization schedules, financial forecasts, Monte Carlo simulations, or multi-step statistical projections inside database triggers or PL/pgSQL procedural code.
-- **The Remediation**: Implement state-machines and calculation loops in Go or Rust. Fetch the required inputs via simple database queries, compute the calculations in memory, and save the final values in a single database transaction.
+
+* **The Conflict**: Computing amortization schedules, financial forecasts, Monte Carlo simulations, or multi-step statistical projections inside database triggers or PL/pgSQL procedural code.
+
+* **The Remediation**: Implement state-machines and calculation loops in Go or Rust. Fetch the required inputs via simple database queries, compute the calculations in memory, and save the final values in a single database transaction.
 
 ### 6. UUID/Key Generation in High-Volume Ingest
-- **The Conflict**: Forcing PostgreSQL to generate UUIDs (`uuid_generate_v4()`) during high-frequency bulk insert paths, which introduces unnecessary DB CPU overhead and creates transaction lock contention.
-- **The Remediation**: Generate UUIDs (V4 or V7) in the Go application layer and supply them as part of the `INSERT` payload. This ensures the application knows the record identifiers prior to writing them, simplifies idempotency keys, and keeps the database focused purely on write durability.
+
+* **The Conflict**: Forcing PostgreSQL to generate UUIDs (`uuid_generate_v4()`) during high-frequency bulk insert paths, which introduces unnecessary DB CPU overhead and creates transaction lock contention.
+
+* **The Remediation**: Generate UUIDs (V4 or V7) in the Go application layer and supply them as part of the `INSERT` payload. This ensures the application knows the record identifiers prior to writing them, simplifies idempotency keys, and keeps the database focused purely on write durability.
 
 ## Security and compliance
 
@@ -646,12 +660,12 @@ Layering rule, evidence-backed:
 
 Contracts:
 
-- Staleness from concurrent writers is bounded by `TTL` (default one minute).
-- Version-guarded refreshes stop late commits from clobbering newer values.
-- Not-found results cache for `NegativeTTL` (default ten seconds).
-- Every cache error degrades to a Postgres read. Reads never fail on cache.
-- Bulk upserts bypass this wrapper. Call `InvalidateScope` after bulk writes.
-- Values ride `json.RawMessage` opaquely. Integer precision above int64 range
+* Staleness from concurrent writers is bounded by `TTL` (default one minute).
+* Version-guarded refreshes stop late commits from clobbering newer values.
+* Not-found results cache for `NegativeTTL` (default ten seconds).
+* Every cache error degrades to a Postgres read. Reads never fail on cache.
+* Bulk upserts bypass this wrapper. Call `InvalidateScope` after bulk writes.
+* Values ride `json.RawMessage` opaquely. Integer precision above int64 range
   degrades identically on every lane today; wrap such numbers in raw bytes.
 
 Allocation budgets pin these numbers in CI. `TestAllocationBudgetCachedHit`
@@ -679,3 +693,62 @@ ships migration 7. Schedule a brief worker stop window, run
 `river migrate-up`, then restart. The upgrade brings PgBouncer protocol
 hardening, per-queue fetch intervals, full reindex coverage, and bounded
 backlog deletion tooling (`JobDeleteMany` filtered by queue and state).
+
+## The Queue Is Not A Scheduler Clock
+
+Promoted 2026-08-25 from `future_practices_research.md` lane 8. Source: the
+Pronto connector CPU runaway, `pronto_v1/docs/decisions/2026-08-23-connector-scheduling-clock.md`.
+
+A durable queue is a crash-safety mechanism. When it is also asked to be the
+clock, uniqueness rejection becomes the hot path and Postgres spends its
+capacity arbitrating inserts that are thrown away. Pronto's connector scheduler
+swept its catalogue every ten seconds and attempted an insert for every curated
+endpoint and every bulk batch — roughly 445 uniqueness transactions per sweep,
+about 3.8 million per day — with `UniqueOpts{ByArgs, ByPeriod}` rejecting the
+duplicates. The remote server ran at 300% CPU.
+
+Four rules follow, and they apply to every recurring producer.
+
+1. **Cadence lives in the producer, not in the queue.** Keep due-times in cheap
+   local state — a `nextDue` map seeded by one bulk read at startup — and submit
+   only work that is actually due. A healthy sweep submits zero jobs. Uniqueness
+   then guards against a crash-window double-submit, which is what it is for.
+
+2. **Scope recurring uniqueness with an explicit `ByState`.** Verified against
+   pinned `rivertype` v0.44.1, `river_type.go:633`: `UniqueOptsByStateDefault()`
+   returns `available`, `completed`, `pending`, `retryable`, `running`,
+   `scheduled`. With `ByArgs` against that default, one *finished* job blocks
+   every future insert for the same key until it is reaped. There is no error
+   and no log line — the feed simply stops after one pass. Recurring args must
+   exclude the terminal states `completed`, `cancelled`, and `discarded`:
+
+   ```go
+   ByState: []rivertype.JobState{
+       rivertype.JobStateAvailable,
+       rivertype.JobStatePending,
+       rivertype.JobStateRetryable,
+       rivertype.JobStateRunning,
+       rivertype.JobStateScheduled,
+   },
+   ```
+
+   This is the trap under the obvious fix. Dropping `ByPeriod` and falling back
+   to the defaults reads as the conservative change and silently stops
+   ingestion. Enforced by `tooling/scripts/river_practices_check.sh`
+   ("recurring UniqueOpts scope ByState explicitly").
+
+3. **Bound the backlog: at most one in-flight job per key.** A `ByPeriod` lock
+   is a *time* window, not a depth bound. When consumers lag and rows age out of
+   the window, the next sweep no longer sees a conflicting row and refills the
+   queue instead of skipping. Backlog becomes amplification rather than a
+   plateau; one degraded window at Pronto produced 3.1 million duplicate rows.
+   A period lock is safe only when the period exceeds the worst-case time to
+   drain, which is not a property a sweep can assume.
+
+4. **Seed due-times at startup and stagger across replicas.** An empty in-memory
+   due map makes every batch due at once after a restart or failover, so
+   recovery begins with a thundering herd against the database that is still
+   recovering. Seed once from durable state and phase-shift sweeps per replica.
+
+Regression coverage for rules 2 and 3 belongs in the TE-14 worker suite; the
+scaffolded baseline ships `internal/worker/periodic_jobs_test.go`.

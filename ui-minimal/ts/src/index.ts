@@ -3,5 +3,6 @@
 export * from "./motion";
 export * from "./interactions";
 export * from "./primitives";
+export * from "./runtimeStyle";
 export * from "./theme";
 export * from "./types";

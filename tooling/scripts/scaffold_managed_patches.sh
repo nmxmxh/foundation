@@ -508,11 +508,36 @@ patch_coolify_deploy_contract() {
       - MIGRATE_PATH=/migrations' "Docker Compose exposes MIGRATE_AUTH_GRACE_SECONDS"
     fi
 
-    # Replace the 12-char `dev-change-me` JWT fallback with a strong random-looking
-    # literal so the compose default alone isn't trivially weak. Real deployments
-    # still override via env; this only hardens the fallback path.
-    replace_in_file "$compose" '      JWT_SECRET: "${JWT_SECRET:-dev-change-me}"' '      JWT_SECRET: "${JWT_SECRET:-Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn}"' "Docker Compose strengthens JWT_SECRET fallback"
-    replace_in_file "$compose" '      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-change-me}"' '      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn}"' "Docker Compose strengthens JWT_SECRET_KEY fallback"
+    # Retract a shared JWT fallback that shipped as a hardening patch.
+    #
+    # It replaced `dev-change-me` with a 64-character random-looking literal, on
+    # the reasoning that a longer default is a stronger default. It is not. The
+    # literal is public in every repository that ran the patch and identical
+    # across every project built from Foundation, so it is a published signing
+    # key, not a secret — and unlike `dev-change-me` it reads as a real secret to
+    # anyone reviewing a deployed config, so nothing flags it.
+    #
+    # The failure path was closed at both ends by accident: config validation
+    # rejected an *empty* JWT_SECRET in production, and this fallback guaranteed
+    # the value was never empty. A deploy that forgot to set JWT_SECRET passed
+    # validation and signed tokens with a key on GitHub.
+    #
+    # This reverse patch restores the placeholder in projects that already
+    # applied it. Rotating the deployed key is a separate operator action; the
+    # patch cannot do it. config.validateSecurity now rejects both literals in
+    # production, so a project that has not rotated fails at startup instead of
+    # signing with a known key.
+    # An update can restore the placeholder; it cannot rotate a key already in
+    # use. Say so where the operator will see it.
+    if grep -Fq 'Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn' "$compose"; then
+      echo "[SECURITY] $compose shipped a shared JWT fallback that is public in every Foundation project." >&2
+      echo "[SECURITY] Restoring the placeholder. Rotate JWT_SECRET/JWT_SECRET_KEY in every deployed environment" >&2
+      echo "[SECURITY] (openssl rand -base64 48) and invalidate tokens signed with the old key." >&2
+      echo "[SECURITY] See docs/foundation/security_practices.md, Advisory 2026-08-25." >&2
+    fi
+
+    replace_in_file "$compose" '      JWT_SECRET: "${JWT_SECRET:-Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn}"' '      JWT_SECRET: "${JWT_SECRET:-dev-change-me}"' "Docker Compose retracts shared JWT_SECRET fallback"
+    replace_in_file "$compose" '      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn}"' '      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-change-me}"' "Docker Compose retracts shared JWT_SECRET_KEY fallback"
   fi
 
   if [[ -f "$dev_compose" ]]; then
@@ -2526,6 +2551,51 @@ patch_redundant_foundation_test_files() {
 }
 
 # @since 0.0.1
+#
+# internal/config/config.go is create-mode, so a template fix never reaches a
+# project that has already been scaffolded. This carries the weak-secret
+# denylist across that boundary, because the gap it closes is a published
+# signing key: validation rejected an empty JWT_SECRET in production while the
+# compose fallback guaranteed the value was never empty.
+patch_config_weak_jwt_denylist() {
+  local file="$target/internal/config/config.go"
+  [[ -f "$file" ]] || return 0
+  grep -Fq 'knownWeakJWTSecrets' "$file" && return 0
+
+  replace_in_file "$file" 'func (c *Config) validateSecurity() error {' '// knownWeakJWTSecrets are signing keys that are public knowledge: scaffold
+// placeholders and, historically, a shared "hardened" literal that shipped in
+// every generated project'"'"'s compose file. Rejecting only the empty string is
+// not enough, because a compose fallback guarantees the value is never empty —
+// a deploy that forgets to set JWT_SECRET then passes validation and signs
+// tokens with a key anyone can read. Length is not the property that matters
+// here; publication is.
+var knownWeakJWTSecrets = map[string]struct{}{
+	"dev-change-me": {},
+	"change-this-to-a-secure-random-string-in-production": {},
+	"test-secret-key": {},
+	"Nx7Qk2vZpR8mYcJ4hLwT9sBdF3aVuGeHqMoI1jXnKrPyZ0AbCdEfSgUvWiOhLtMn": {},
+}
+
+func (c *Config) validateSecurity() error {' "config declares the weak JWT secret denylist"
+
+  replace_in_file "$file" '	if c.RequireAuth && c.JWTSecret == "" {
+		return fmt.Errorf("JWT_SECRET is required when REQUIRE_AUTH is true")
+	}
+' '	if c.RequireAuth && c.JWTSecret == "" {
+		return fmt.Errorf("JWT_SECRET is required when REQUIRE_AUTH is true")
+	}
+	if _, weak := knownWeakJWTSecrets[c.JWTSecret]; weak && c.IsProduction() {
+		return fmt.Errorf("JWT_SECRET is a known placeholder or previously published value; " +
+			"generate a fresh secret (openssl rand -base64 48) and rotate any tokens signed with the old one")
+	}
+' "config rejects known weak JWT secrets in production"
+
+  if command -v gofmt >/dev/null 2>&1; then
+    gofmt -w "$file" 2>/dev/null || true
+  fi
+}
+
+# @since 0.0.1
 patch_config_state_store_cache() {
   local file="$target/internal/config/config.go"
   [[ -f "$file" ]] || return 0
@@ -2662,31 +2732,38 @@ patch_startup_state_store_cache_and_river_lane() {
 	}' "startup moves event bus ahead of database init"
   fi
 
-  # initDatabase wraps the connected store with CachedStateStore.
-  if ! grep -Fq 'wrapCachedStateStore' "$file" && grep -Fq 'func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger)' "$file"; then
+  # initDatabase wraps the connected store with CachedStateStore. Each
+  # sub-edit guards its own precondition instead of chaining under one outer
+  # guard. A chained guard tore once: an app-owned seam between the connect
+  # error check and storeOpts made one anchor miss while its siblings still
+  # applied, and the file compiled a reference to a wrapper it never built.
+  # Independent guards let the next run heal a partial application.
+  if grep -Fq 'func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger)' "$file"; then
     replace_in_file "$file" 'func initDatabase(ctx context.Context, cfg *config.Config, log kitlogger.Logger) (database.RuntimeStore, *hermes.Store, error) {' 'func initDatabase(ctx context.Context, cfg *config.Config, redisClient rediskit.Client, log kitlogger.Logger) (database.RuntimeStore, *hermes.Store, error) {' "startup passes shared redis client into initDatabase"
+  fi
 
-    replace_in_file "$file" 'AcquireTimeout:    cfg.DBAcquireTimeout,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	storeOpts := hermes.RuntimeStoreOptions{' 'AcquireTimeout:    cfg.DBAcquireTimeout,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	wrapped, wrapErr := wrapCachedStateStore(ctx, cfg, db, redisClient, log)
+  if grep -Fq 'initDatabase(ctx context.Context, cfg *config.Config, redisClient rediskit.Client' "$file" \
+    && ! grep -Fq ':= wrapCachedStateStore(ctx, cfg, db, redisClient, log)' "$file"; then
+    # Anchored on the storeOpts line alone: projects may insert app seams
+    # between connect and here, so a long-range anchor silently misses exactly
+    # where the wrapper matters most.
+    replace_in_file "$file" '	storeOpts := hermes.RuntimeStoreOptions{' '	wrapped, wrapErr := wrapCachedStateStore(ctx, cfg, db, redisClient, log)
 	if wrapErr != nil {
 		db.Close()
 		return nil, nil, wrapErr
 	}
 	storeOpts := hermes.RuntimeStoreOptions{' "startup wraps state store with cache layer"
+  fi
 
-    replace_in_file "$file" '			db.Close()
+  replace_in_file "$file" '			db.Close()
 			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", snapErr)' '			wrapped.Close()
 			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", snapErr)' "startup closes wrapped store on snapshot error"
 
+  replace_in_file "$file" '			db.Close()
+			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", err)' '			wrapped.Close()
+			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", err)' "startup closes wrapped store on snapshot error"
+
+  if grep -Fq 'hermes.WrapRuntimeStore(db, storeOpts)' "$file"; then
     replace_in_file "$file" 'projected, err := hermes.WrapRuntimeStore(db, storeOpts)
 	if err != nil {
 		db.Close()' 'projected, err := hermes.WrapRuntimeStore(wrapped, storeOpts)
@@ -2852,6 +2929,7 @@ patch_startup_snapshot_shadow
 patch_worker_engine_canonical
 patch_river_table_readiness_gate
 patch_config_state_store_cache
+patch_config_weak_jwt_denylist
 patch_worker_main_river_direct_lane
 patch_startup_state_store_cache_and_river_lane
 patch_redundant_foundation_test_files
