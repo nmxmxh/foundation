@@ -483,4 +483,3 @@ func TestArenaMappingAndSlab(t *testing.T) {
 		t.Fatalf("unexpected read data: %s", string(readData[:12]))
 	}
 }
-

@@ -23,7 +23,7 @@ func TestServiceBackedHermesPostgresRedisDriftProof(t *testing.T) {
 	applyStateSchema(t, ctx, state)
 
 	redisClient := openRedis(t, env)
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 
 	orgID := uniqueName(env.prefix, "hermes-org")
 	cleanupOrganization(t, ctx, state, orgID)
@@ -130,7 +130,7 @@ func TestServiceBackedHermesRedisPendingWindowIsNotDuplicated(t *testing.T) {
 
 	env := requireServiceEnv(t)
 	redisClient := openRedis(t, env)
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 
 	stream := uniqueName(env.prefix, "hermes-pending")
 	group := uniqueName(env.prefix, "hermes-pending-group")

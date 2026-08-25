@@ -820,6 +820,9 @@ func (w *processWorker) stopExchangeLoop() {
 	w.exchangeResults = nil
 	w.exchangeStop = nil
 	w.exchangeLoopDone = nil
+	// concurrency: single owner. The nil check above runs under the same mutex
+	// and the fields are cleared before this close, so a second caller returns
+	// early and no goroutine can reach this line twice for one channel.
 	close(stop)
 	w.exchangeLoopMu.Unlock()
 	<-done
@@ -832,6 +835,9 @@ func (w *processWorker) doorbellLoop(r *bufio.Reader) {
 	ch := w.doorbellCh
 	defer func() {
 		if ch != nil {
+			// concurrency: single owner. ch is captured once above, so this
+			// loop closes the channel it started with and never one a restart
+			// has since swapped in.
 			close(ch)
 		}
 	}()
@@ -851,6 +857,9 @@ func (w *processWorker) doorbellLoop(r *bufio.Reader) {
 		select {
 		case ch <- struct{}{}:
 		default:
+			// concurrency: drop the ring when one is already pending. The
+			// doorbell is a level signal, not a queue — a waiter that has not
+			// yet woken will see this burst too, so a second token adds nothing.
 		}
 	}
 }

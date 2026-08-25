@@ -3,6 +3,7 @@ package placement
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 )
@@ -45,7 +46,26 @@ func PublishLaneMirrors(
 }
 
 // ListenMirrors applies inbound mirror frames to sink until ctx ends or the
-// subscription closes.
+// subscription closes, and returns a stop function that ends the listener and
+// waits for it to finish.
+//
+// Callers must call stop before releasing anything the sink borrows. The
+// listener runs on its own goroutine and calls sink.ApplyMirrorUpdate from
+// there; cancelling ctx only *signals* it, so a caller that cancels and
+// immediately tears down the sink races a call already in flight. Where the
+// sink is a runtimehost.DispatchBlock that race is not benign — the block hands
+// out pointers into an mmap'd region and Close munmaps it, so the in-flight
+// apply reads unmapped memory rather than merely stale memory.
+//
+// stop cancels and then waits, so it is safe in any order and cannot deadlock
+// on a caller who forgot to cancel first. Deferring it directly after the call
+// gives the correct teardown order for free, because the sink's own cleanup was
+// necessarily deferred earlier and therefore runs later:
+//
+//	block, err := OpenDispatchRegion(path)
+//	defer block.Close()
+//	stop, err := placement.ListenMirrors(ctx, bus, channel, block, nil)
+//	defer stop()
 //
 // Undecodable frames are counted and skipped, never fatal: the mirror channel
 // is shared transport and foreign payloads are expected. Apply errors surface
@@ -57,17 +77,26 @@ func ListenMirrors(
 	channel string,
 	sink MirrorSink,
 	onError func(frameIndex int, cause error),
-) error {
-	messages, stop, err := client.Subscribe(ctx, channel)
+) (func(), error) {
+	// Own the cancellation so stop can end the listener without needing the
+	// caller's cancel func; the parent ctx still ends it as before.
+	listenCtx, cancel := context.WithCancel(ctx)
+	messages, unsubscribe, err := client.Subscribe(listenCtx, channel)
 	if err != nil {
-		return fmt.Errorf("placement: subscribe mirrors: %w", err)
+		cancel()
+		return nil, fmt.Errorf("placement: subscribe mirrors: %w", err)
 	}
+	done := make(chan struct{})
 	go func() {
-		defer stop()
+		// Deferred last, so it runs first on the way out: a waiter is only
+		// released once the subscription is torn down and no further apply can
+		// be issued. Single owner — this goroutine is the only closer.
+		defer close(done)
+		defer unsubscribe()
 		index := 0
 		for {
 			select {
-			case <-ctx.Done():
+			case <-listenCtx.Done():
 				return
 			case payload, ok := <-messages:
 				if !ok {
@@ -99,5 +128,11 @@ func ListenMirrors(
 			}
 		}
 	}()
-	return nil
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
+	}, nil
 }

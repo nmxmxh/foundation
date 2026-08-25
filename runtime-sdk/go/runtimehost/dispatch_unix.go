@@ -169,13 +169,49 @@ func (s *DispatchStatRow) Claim() (uint32, error) {
 	return atomic.AddUint32(slot, 1), nil
 }
 
+// dispatchReleaseMaxAttempts bounds ReleaseOne's compare-and-swap loop.
+//
+// CP-02 requires the bound; the value is set against measurement rather than
+// taste. At six concurrent releasers driving one row the loop averages about
+// 2.4 turns, so eight clears the observed distribution with margin. Exhaustion
+// at this bound is therefore evidence that the row's single-writer discipline
+// has been broken, not evidence that eight was too small — raising it would
+// hide the signal rather than fix anything.
+const dispatchReleaseMaxAttempts = 8
+
 // ReleaseOne clears one in-flight unit, refusing to wrap below zero.
+//
+// There are three outcomes and callers must not collapse them:
+//
+//   - (true, nil): one unit was released.
+//   - (false, nil): the row was already at zero, so there was nothing to
+//     release. An unbalanced release, refused rather than wrapping the counter
+//     up to four billion.
+//   - (false, ErrDispatchLaneContended): the retry budget ran out with the row
+//     still non-zero. The unit remains counted in flight and the caller still
+//     owns it.
+//
+// The third outcome is why the second cannot simply be reused for it. A caller
+// that treats "did not release" as "nothing to release" leaks a phantom
+// in-flight unit permanently, and because MaxConcurrency gates placement, a
+// lane accumulating phantom units eventually stops being offered work at all —
+// a availability failure that presents as a scheduling mystery rather than as
+// an error.
+//
+// The Rust counterpart, StatRowHandle::release_one in ovrt-dispatch, uses
+// fetch_update and so retries without a bound: it has no third outcome. The
+// divergence is deliberate rather than an oversight — CP-02 requires the bound
+// on this side — and the two agree on every outcome reachable while the
+// single-writer discipline holds.
 func (s *DispatchStatRow) ReleaseOne() (bool, error) {
-	for range 8 {
-		slot, err := s.inflight()
-		if err != nil {
-			return false, err
-		}
+	// Resolved once: the slot address is a fixed offset into the mapping and
+	// cannot change between attempts, so re-resolving it per turn was pure work
+	// inside the contended loop.
+	slot, err := s.inflight()
+	if err != nil {
+		return false, err
+	}
+	for range dispatchReleaseMaxAttempts {
 		current := atomic.LoadUint32(slot)
 		if current == 0 {
 			return false, nil
@@ -184,7 +220,7 @@ func (s *DispatchStatRow) ReleaseOne() (bool, error) {
 			return true, nil
 		}
 	}
-	return false, nil
+	return false, ErrDispatchLaneContended
 }
 
 // RecordCompletion blends one latency sample into the EWMA and stamps the

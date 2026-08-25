@@ -15,7 +15,11 @@ import (
 func tempRegion(tb testing.TB) string {
 	tb.Helper()
 	path := filepath.Join(tb.TempDir(), "dispatch-region")
-	writeZeroedRegionSize(path, int(generated.DISPATCH_REGION_BYTES))
+	// Checked: a short or absent region makes every test in the file fail on an
+	// unrelated open error rather than on the behaviour it is asserting.
+	if err := writeZeroedRegionSize(path, int(generated.DISPATCH_REGION_BYTES)); err != nil {
+		tb.Fatalf("writeZeroedRegionSize: %v", err)
+	}
 	return path
 }
 

@@ -234,7 +234,7 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 			sub.Cancel()
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		defer sub.Cancel()
 
 		ctx, cancel := context.WithCancel(r.Context())
@@ -327,7 +327,7 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()

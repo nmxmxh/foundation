@@ -27,7 +27,7 @@ func TestServiceBackedEventLogToRedisToHermes(t *testing.T) {
 	applyEventLogSchema(t, ctx, state)
 
 	redisClient := openRedis(t, env)
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 
 	orgID := uniqueName(env.prefix, "eventlog-org")
 	cleanupOrganization(t, ctx, state, orgID)
@@ -127,7 +127,7 @@ func TestServiceBackedEventLogBatchPublishPending(t *testing.T) {
 	applyEventLogSchema(t, ctx, state)
 
 	redisClient := openRedis(t, env)
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 
 	stream := uniqueName(env.prefix, "eventlog-batch-stream")
 	t.Cleanup(func() {
@@ -176,7 +176,7 @@ func TestServiceBackedEventLogConcurrentPublishClaimsDoNotDuplicate(t *testing.T
 	applyEventLogSchema(t, ctx, state)
 
 	redisClient := openRedis(t, env)
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 
 	stream := uniqueName(env.prefix, "eventlog-claim-stream")
 	t.Cleanup(func() {
@@ -266,7 +266,7 @@ func BenchmarkServiceBackedEventLogPublishPending64(b *testing.B) {
 	applyEventLogSchema(b, ctx, state)
 
 	redisClient := openRedis(b, env)
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 	stream := uniqueName(env.prefix, "bench-eventlog-stream")
 	b.Cleanup(func() {
 		deleteCtx, deleteCancel := context.WithTimeout(context.Background(), 3*time.Second)

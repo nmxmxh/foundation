@@ -275,7 +275,7 @@ func BenchmarkWebSocketDelivery(b *testing.B) {
 		if err != nil {
 			b.Fatalf("ws dial err=%v", err)
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 
 		key := ScopeKey(&foundationpb.ProjectionScope{TenantId: "org_1", Domain: "signals", Collection: "ticks"})
 		benchAwaitSubscribers(b, gw, []string{key})
@@ -301,7 +301,7 @@ func BenchmarkWebSocketDelivery(b *testing.B) {
 			if err != nil {
 				b.Fatalf("ws dial err=%v", err)
 			}
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 
 			cmd := MultiplexCommand{Type: "subscribe"}
 			keys := make([]string, 0, scopes)

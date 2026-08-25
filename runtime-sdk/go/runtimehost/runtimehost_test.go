@@ -1540,7 +1540,7 @@ func TestProcessPoolWorkerArenaFailureLogging(t *testing.T) {
 			},
 		},
 	}
-	
+
 	// startLocked will fail because the command does not exist.
 	// We expect WorkerArena to return nil and log a warning.
 	if a := pool.WorkerArena(0); a != nil {

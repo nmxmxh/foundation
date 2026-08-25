@@ -279,7 +279,7 @@ func runServiceBackedLoadRedisSetGetMany(
 	before := serviceBackedLoadRuntimeSnapshot()
 	setupStart := time.Now()
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	batch := requireRedisBatch(t, client)
 	ttl := serviceBackedLoadDurationEnv("SERVICE_BACKED_LOAD_RESEARCH_REDIS_TTL", 2*time.Minute)
 	prefix := uniqueName(env.prefix, "load-redis-setget")
@@ -326,7 +326,7 @@ func runServiceBackedLoadRedisXAddMany(
 	before := serviceBackedLoadRuntimeSnapshot()
 	setupStart := time.Now()
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	streamBatch := requireRedisStreamBatch(t, client)
 	stream := uniqueName(env.prefix, "load-xadd")
 	defer cleanupRedisKeys(t, ctx, client, stream)
@@ -365,7 +365,7 @@ func runServiceBackedLoadRedisStreamDrain(
 	before := serviceBackedLoadRuntimeSnapshot()
 	setupStart := time.Now()
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	streamBatch := requireRedisStreamBatch(t, client)
 	stream := uniqueName(env.prefix, "load-stream-drain")
 	group := uniqueName(env.prefix, "load-stream-drain-group")
@@ -671,7 +671,7 @@ func runServiceBackedLoadHermesRedisTailer(
 	before := serviceBackedLoadRuntimeSnapshot()
 	setupStart := time.Now()
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	streamBatch := requireRedisStreamBatch(t, client)
 	stream := uniqueName(env.prefix, "load-hermes-tail")
 	group := uniqueName(env.prefix, "load-hermes-tail-group")
@@ -799,7 +799,7 @@ func runServiceBackedLoadMixed(
 	defer store.Close()
 	db := requirePostgresDB(t, store)
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	redisBatch := requireRedisBatch(t, client)
 	orgID := uniqueName(env.prefix, "load-mixed")
 	cleanupOrganization(t, ctx, store, orgID)
@@ -877,7 +877,7 @@ func runServiceBackedLoadPipeline(
 	defer store.Close()
 	db := requirePostgresDB(t, store)
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	streamBatch := requireRedisStreamBatch(t, client)
 	orgID := uniqueName(env.prefix, "load-pipeline")
 	projection := "svc_load_pipeline"
@@ -1335,7 +1335,7 @@ func runServiceBackedLoadWSRouteRegister(
 	before := serviceBackedLoadRuntimeSnapshot()
 	setupStart := time.Now()
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	router := wsrouting.NewRouter(
 		client,
 		uniqueName(env.prefix, "load-router"),
@@ -1385,7 +1385,7 @@ func runServiceBackedLoadWSRouteBroadcast(
 	before := serviceBackedLoadRuntimeSnapshot()
 	setupStart := time.Now()
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	registerBatchSize := serviceBackedLoadPositiveIntEnv(t, "SERVICE_BACKED_LOAD_RESEARCH_WS_REGISTER_BATCH", 256)
 	router := wsrouting.NewRouter(
 		client,
@@ -1678,7 +1678,9 @@ func newServiceBackedLoadRecorder(t testing.TB) *serviceBackedLoadRecorder {
 		t.Fatalf("create service-backed load research output %q: %v", output, err)
 	}
 	recorder.file = file
-	fmt.Fprintln(file, "step\tlane\ttotal_units\tbatch_size\tbatches\tworkers\tsetup_ns\ttotal_ns\tp50_batch_ns\tp95_batch_ns\tp99_batch_ns\tmax_batch_ns\tp50_unit_ns\tp95_unit_ns\tp99_unit_ns\tmax_unit_ns\tthroughput_units_sec\theap_alloc_before\theap_alloc_after\theap_alloc_delta\theap_sys_after\tgoroutines_before\tgoroutines_after\tpg_max_conns\tpg_active_conns\tpg_acquire_count\thermes_records\thermes_approx_bytes\thermes_epoch\thermes_watermark\thermes_rejected_applies\thermes_index_compactions\tnotes")
+	if _, err := fmt.Fprintln(file, "step\tlane\ttotal_units\tbatch_size\tbatches\tworkers\tsetup_ns\ttotal_ns\tp50_batch_ns\tp95_batch_ns\tp99_batch_ns\tmax_batch_ns\tp50_unit_ns\tp95_unit_ns\tp99_unit_ns\tmax_unit_ns\tthroughput_units_sec\theap_alloc_before\theap_alloc_after\theap_alloc_delta\theap_sys_after\tgoroutines_before\tgoroutines_after\tpg_max_conns\tpg_active_conns\tpg_acquire_count\thermes_records\thermes_approx_bytes\thermes_epoch\thermes_watermark\thermes_rejected_applies\thermes_index_compactions\tnotes"); err != nil {
+		t.Fatalf("write service-backed load research header: %v", err)
+	}
 	return recorder
 }
 
@@ -1745,7 +1747,9 @@ func recordServiceBackedLoadLane(t testing.TB, recorder *serviceBackedLoadRecord
 	if recorder.file == nil {
 		return
 	}
-	fmt.Fprintf(
+	// Checked: a short write leaves a truncated research row that still parses,
+	// so the numbers would look complete while being wrong.
+	if _, err := fmt.Fprintf(
 		recorder.file,
 		"%d\t%s\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%.2f\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%s\n",
 		row.Step,
@@ -1781,7 +1785,9 @@ func recordServiceBackedLoadLane(t testing.TB, recorder *serviceBackedLoadRecord
 		row.HermesStats.RejectedApplies,
 		row.HermesStats.IndexCompactions,
 		strings.ReplaceAll(row.Notes, "\t", " "),
-	)
+	); err != nil {
+		t.Errorf("write service-backed load research row: %v", err)
+	}
 }
 
 type serviceBackedLoadSnapshot struct {

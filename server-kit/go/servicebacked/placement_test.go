@@ -5,6 +5,7 @@ package servicebacked
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -28,18 +29,33 @@ import (
 // collectingSink is the local mirror receiver under test. It mirrors what
 // runtimehost.DispatchBlock.ApplyMirrorUpdate does without shared memory,
 // keeping this lane focused on live-Redis delivery semantics.
+// Written by the listener goroutine, read by the polling test goroutine, so
+// every field is guarded.
 type collectingSink struct {
+	mu     sync.Mutex
 	last   placement.LaneMirrorUpdate
 	called int
 }
 
 func (c *collectingSink) ApplyMirrorUpdate(update placement.LaneMirrorUpdate) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.last = update
 	c.called++
 	return nil
 }
 
-func (c *collectingSink) updates() int { return c.called }
+func (c *collectingSink) updates() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.called
+}
+
+func (c *collectingSink) lastUpdate() placement.LaneMirrorUpdate {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.last
+}
 
 func TestServiceBackedPlacementMirrorLane(t *testing.T) {
 	env := requireServiceEnv(t)
@@ -52,10 +68,12 @@ func TestServiceBackedPlacementMirrorLane(t *testing.T) {
 	channel := "placement-mirror-" + env.prefix
 	sink := &collectingSink{}
 	errCh := make(chan error, 16)
-	if err := placement.ListenMirrors(ctx, client, channel, sink,
-		func(_ int, cause error) { errCh <- cause }); err != nil {
+	stop, err := placement.ListenMirrors(ctx, client, channel, sink,
+		func(_ int, cause error) { errCh <- cause })
+	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	defer stop()
 
 	want := []placement.LaneMirrorUpdate{
 		{Lane: 0, Jurisdiction: 7, MaxConcurrency: 4, Inflight: 1, Generation: 1,
@@ -67,8 +85,8 @@ func TestServiceBackedPlacementMirrorLane(t *testing.T) {
 		t.Fatalf("publish valid batch: %v", err)
 	}
 	waitForCondition(t, 10*time.Second, func() bool { return sink.updates() >= 2 })
-	if sink.last != want[1] {
-		t.Fatalf("last applied = %+v want %+v", sink.last, want[1])
+	if got := sink.lastUpdate(); got != want[1] {
+		t.Fatalf("last applied = %+v want %+v", got, want[1])
 	}
 
 	// Leg 2: foreign frame noise must not blind the subscription.

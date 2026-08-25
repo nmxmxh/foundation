@@ -24,9 +24,15 @@ func TestDispatchBlockMirrorsRemoteLanesOverTheBus(t *testing.T) {
 
 	bus := rediskit.NewMemoryClient("mirror")
 	ctx := t.Context()
-	if err := placement.ListenMirrors(ctx, bus, "", block, nil); err != nil {
+	stop, err := placement.ListenMirrors(ctx, bus, "", block, nil)
+	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	// Deferred after block.Close above, so LIFO runs this first: the listener
+	// is stopped and joined before the region is unmapped. Without it the
+	// listener can be inside ApplyMirrorUpdate, holding a pointer into the
+	// mapping, when Munmap takes the pages away.
+	defer stop()
 
 	want := []placement.LaneMirrorUpdate{
 		{Lane: 4, Jurisdiction: 7, MaxConcurrency: 8, Inflight: 3,

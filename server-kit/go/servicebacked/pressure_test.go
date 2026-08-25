@@ -25,9 +25,9 @@ func TestServiceBackedRedisStreamLagAndSlowSubscriberPressure(t *testing.T) {
 
 	env := requireServiceEnv(t)
 	client := openRedis(t, env)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	raw := openRawRedis(t, env)
-	defer raw.Close()
+	defer func() { _ = raw.Close() }()
 
 	stream := uniqueName(env.prefix, "stream-pressure")
 	group := uniqueName(env.prefix, "stream-pressure-group")
@@ -119,7 +119,7 @@ func TestServiceBackedHermesProjectionLatencyProfile(t *testing.T) {
 		t.Fatalf("postgres store does not implement RawStateStore")
 	}
 	redisClient := openRedis(t, env)
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 
 	orgID := uniqueName(env.prefix, "hermes-pressure-org")
 	cleanupOrganization(t, ctx, state, orgID)
@@ -228,15 +228,29 @@ func TestServiceBackedMixedWorkflowLatencyProfile(t *testing.T) {
 		t.Fatalf("postgres store does not implement RawStateStore")
 	}
 	redisClient := openRedis(t, env)
-	defer redisClient.Close()
+	defer func() { _ = redisClient.Close() }()
 	batch := requireRedisBatch(t, redisClient)
 
 	orgID := uniqueName(env.prefix, "mixed-org")
 	cleanupOrganization(t, ctx, state, orgID)
-	store := newHermesPressureStore(t, "svc_mixed_pressure")
-
+	// Sample count is chosen from the percentile it has to support, not from
+	// how long the test may run. summarizeDurations takes p99 by conservative
+	// nearest rank, so at the previous 8x32 the p99 was durations[253] of 256 —
+	// the third-slowest operation in the run. A single stalled connection
+	// acquire or page fault therefore decided the verdict, and the assertion
+	// failed on roughly one run in four against an idle local Postgres while
+	// being almost blind to a real regression, which moves the whole
+	// distribution rather than its three worst samples. At 8x320 the p99 is
+	// durations[2534] of 2560 — the 26th-slowest — so one outlier can no longer
+	// carry it and a genuine shift in the body of the distribution now moves it.
 	const workers = 8
-	const iterations = 32
+	const iterations = 320
+
+	// The projection must hold every record this generates; the default 2048
+	// cap is below workers*iterations and fails the applies rather than the
+	// budget.
+	store := newHermesPressureStoreSized(t, "svc_mixed_pressure", workers*iterations+256)
+
 	latencies := make(chan time.Duration, workers*iterations)
 	errCh := make(chan error, workers)
 	var seq atomic.Uint64
@@ -366,13 +380,24 @@ func BenchmarkServiceBackedHermesApplyBatch512(b *testing.B) {
 
 func newHermesPressureStore(tb testing.TB, projection string) *hermes.Store {
 	tb.Helper()
+	return newHermesPressureStoreSized(tb, projection, 2048)
+}
+
+// newHermesPressureStoreSized lets a caller that generates more than the
+// default record count size its own projection. Overrunning MaxRecords fails
+// the apply with "hermes projection limit reached", which surfaces as a
+// workflow error rather than as a capacity message, so the cap is worth setting
+// deliberately whenever the sample count is raised.
+func newHermesPressureStoreSized(tb testing.TB, projection string, maxRecords int) *hermes.Store {
+	tb.Helper()
+	// Bytes scale with records at the default's ratio of 4 KB per record.
 	store, err := hermes.NewStore(hermes.ProjectionSpec{
 		Name:          projection,
 		Domain:        "signals",
 		Collection:    "pressure",
 		IndexedFields: []string{"bucket", "source"},
-		MaxRecords:    2048,
-		MaxBytes:      8 << 20,
+		MaxRecords:    maxRecords,
+		MaxBytes:      int64(maxRecords) * 4 << 10,
 	})
 	if err != nil {
 		tb.Fatalf("NewStore(%s) error = %v", projection, err)

@@ -184,6 +184,11 @@ func echoFFIBackend() *scriptedFFIBackend {
 // that allocates twice on the way out — an output copy and a 4 KiB error buffer
 // that is almost never written — spends most of that argument before returning.
 func TestFFIPoolExecuteIntoAllocatesNothingInSteadyState(t *testing.T) {
+	if raceDetectorEnabled {
+		// The detector's own allocations sit inside this budget and swamp it;
+		// the budget still guards every non-race build.
+		t.Skip("allocation budget is not meaningful under -race")
+	}
 	pool := newTestFFIPool(echoFFIBackend())
 	dst := make([]byte, generated.OUTPUT_MAX_BYTES)
 	req := ProcessRequest{UnitID: "runtime.echo", Input: []byte("ffi seam")}

@@ -527,25 +527,42 @@ func TestTypedDispatchOptInProtobufDecodeReuse(t *testing.T) {
 		},
 		ProtobufDecodeReuse: protoapi.ProtobufDecodeReuseCompleteMessages,
 	}
+	// Reuse is asserted over a run rather than demanded on one pair. The pool is
+	// a sync.Pool, which explicitly does not promise that Get returns a
+	// previously Put object: a GC between two dispatches drains it and Get
+	// builds a fresh message from New. Requiring pointer identity across
+	// exactly two calls therefore asserted something the standard library does
+	// not offer, and failed on roughly half of -race runs on clean HEAD for
+	// that reason alone.
+	//
+	// What the binding does contract is asserted on every call instead: the
+	// decode must be correct, and a reused message must carry no residue from
+	// the previous one — which is the property that actually makes reuse unsafe
+	// if it breaks. That the pool is wired at all is then established by seeing
+	// reuse happen at least once across the run.
 	calls := 0
-	var firstRequest *testprotos.TestRequest
+	reuseSeen := false
+	seen := map[*testprotos.TestRequest]struct{}{}
 	err := registry.RegisterTypedWithOptions(
 		eventType,
 		binding,
 		func(_ context.Context, request proto.Message) (proto.Message, error) {
 			typed := request.(*testprotos.TestRequest)
-			if calls == 0 {
-				firstRequest = typed
-				if typed.GetWorkspaceId() != "wrk_1" || typed.GetHash() != "sha256:one" {
-					t.Fatalf("first reused decode mismatch: %+v", typed)
-				}
-			} else {
-				if typed != firstRequest {
-					t.Fatalf("expected request pool to reuse caller-owned protobuf message")
-				}
-				if typed.GetWorkspaceId() != "wrk_2" || typed.GetHash() != "sha256:two" || typed.GetSize() != 32 {
-					t.Fatalf("second reused decode mismatch: %+v", typed)
-				}
+			if _, ok := seen[typed]; ok {
+				reuseSeen = true
+			}
+			seen[typed] = struct{}{}
+
+			// Alternating payloads: an even call carries wrk_1, an odd one
+			// wrk_2. A field left behind from the previous decode shows up here
+			// as the wrong workspace, size, or hash.
+			wantWorkspace, wantHash, wantSize := "wrk_1", "sha256:one", int64(16)
+			if calls%2 == 1 {
+				wantWorkspace, wantHash, wantSize = "wrk_2", "sha256:two", int64(32)
+			}
+			if typed.GetWorkspaceId() != wantWorkspace || typed.GetHash() != wantHash || typed.GetSize() != wantSize {
+				t.Errorf("call %d decoded %+v, want workspace=%s hash=%s size=%d",
+					calls, typed, wantWorkspace, wantHash, wantSize)
 			}
 			calls++
 			return &testprotos.TestResponse{ResourceId: typed.GetWorkspaceId(), Status: "complete"}, nil
@@ -579,14 +596,23 @@ func TestTypedDispatchOptInProtobufDecodeReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal() second error = %v", err)
 	}
-	if _, ok, err := dispatchBytes(registry, context.Background(), eventType, firstPayload, nil); err != nil || !ok {
-		t.Fatalf("first DispatchBytes() ok=%v err=%v", ok, err)
+	// Enough dispatches that a pool hit is overwhelmingly likely even if some
+	// GC cycles drain it, while staying a fast unit test.
+	const dispatches = 64
+	for i := range dispatches {
+		payload := firstPayload
+		if i%2 == 1 {
+			payload = secondPayload
+		}
+		if _, ok, err := dispatchBytes(registry, context.Background(), eventType, payload, nil); err != nil || !ok {
+			t.Fatalf("dispatch %d ok=%v err=%v", i, ok, err)
+		}
 	}
-	if _, ok, err := dispatchBytes(registry, context.Background(), eventType, secondPayload, nil); err != nil || !ok {
-		t.Fatalf("second DispatchBytes() ok=%v err=%v", ok, err)
+	if calls != dispatches {
+		t.Fatalf("handler calls = %d, want %d", calls, dispatches)
 	}
-	if calls != 2 {
-		t.Fatalf("handler calls = %d", calls)
+	if !reuseSeen {
+		t.Fatalf("no pooled message was ever reused across %d dispatches; the request pool is not being used", dispatches)
 	}
 }
 
