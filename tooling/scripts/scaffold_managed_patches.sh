@@ -2463,12 +2463,39 @@ patch_compose_stop_grace_period() {
 # @since 0.0.1
 patch_river_table_readiness_gate() {
   local main="$target/cmd/worker/main.go"
+
+  # The pool is read out of the file rather than assumed, the same way the
+  # logger variable already is.
+  #
+  # This used to inject a literal `riverPool`, which only some projects declare:
+  # the template opens a dedicated River pool, but a project scaffolded before
+  # that runs River on its single dbPool. Five of eleven fleet projects were
+  # left with a reference to an undeclared riverPool in cmd/worker/main.go, and
+  # since the guard below is "have we already injected WaitForRiverTableReady",
+  # the broken line satisfied it and nothing ever came back.
+  #
+  # riverpgxv5.New(...) names the pool River itself runs on, which is exactly
+  # the pool whose river_job table we are waiting on — so it is both the safe
+  # answer and the correct one.
+  local riverpool
+  riverpool="$(perl -ne 'if (/riverpgxv5\.New\((\w+)\)/) { print $1; exit }' "$main" 2>/dev/null)"
+  [[ -n "$riverpool" ]] || riverpool="riverPool"
+
+  # Repair pass for files already carrying the undeclared reference.
+  if [[ -f "$main" ]] \
+    && grep -Fq 'WaitForRiverTableReady(ctx, riverPool,' "$main" \
+    && ! grep -qE '(^|[^A-Za-z0-9_])riverPool[[:space:]]*(,[[:space:]]*[A-Za-z0-9_]+)?[[:space:]]*:=' "$main" \
+    && [[ "$riverpool" != "riverPool" ]]; then
+    replace_in_file "$main" 'WaitForRiverTableReady(ctx, riverPool,' "WaitForRiverTableReady(ctx, $riverpool," "worker main points river readiness at the pool River uses"
+  fi
+
   if [[ -f "$main" ]] && ! grep -Fq 'WaitForRiverTableReady' "$main" && grep -Fq 'riverClient.Start(ctx)' "$main"; then
     local logvar
     logvar="$(perl -ne 'if (/(\w+)\.Error\("failed to start River client"/) { print $1; exit }' "$main")"
     [[ -n "$logvar" ]] || logvar="log"
     export LOGVAR="$logvar"
-    perl -0pi -e 's/(\t\/\/ Start River Client\n\tif err := riverClient\.Start\(ctx\); err != nil \{\n)/\t\/\/ Wait for River tables to be ready before starting queue polling\n\tif err := database.WaitForRiverTableReady(ctx, riverPool, 30*time.Second); err != nil {\n\t\t$ENV{LOGVAR}.ErrorContext(ctx, "river_job table not ready", "error", err)\n\t\tos.Exit(1)\n\t}\n\n$1/' "$main"
+    export RIVERPOOL="$riverpool"
+    perl -0pi -e 's/(\t\/\/ Start River Client\n\tif err := riverClient\.Start\(ctx\); err != nil \{\n)/\t\/\/ Wait for River tables to be ready before starting queue polling\n\tif err := database.WaitForRiverTableReady(ctx, $ENV{RIVERPOOL}, 30*time.Second); err != nil {\n\t\t$ENV{LOGVAR}.ErrorContext(ctx, "river_job table not ready", "error", err)\n\t\tos.Exit(1)\n\t}\n\n$1/' "$main"
     if grep -Fq 'WaitForRiverTableReady' "$main"; then
       log_patch "worker main gates startup on river_job readiness: ${main#$target/}"
     fi
@@ -2550,13 +2577,13 @@ patch_redundant_foundation_test_files() {
   fi
 }
 
-# @since 0.0.1
-#
 # internal/config/config.go is create-mode, so a template fix never reaches a
 # project that has already been scaffolded. This carries the weak-secret
 # denylist across that boundary, because the gap it closes is a published
 # signing key: validation rejected an empty JWT_SECRET in production while the
 # compose fallback guaranteed the value was never empty.
+#
+# @since 0.0.1
 patch_config_weak_jwt_denylist() {
   local file="$target/internal/config/config.go"
   [[ -f "$file" ]] || return 0
@@ -2646,6 +2673,99 @@ WEAK_JWT_DENYLIST
 
   if command -v gofmt >/dev/null 2>&1; then
     gofmt -w "$file" 2>/dev/null || true
+  fi
+}
+
+# Wires the env-gated pprof surface (server-kit/go/profiling) into projects
+# created before httpserver.Config gained EnableProfiling. Three anchored,
+# individually idempotent edits; each is skipped when its marker or its anchor
+# shape is absent, so customized files are never touched.
+#
+# The cmd/server wiring additionally requires the project's vendored httpserver
+# to already carry the field. A partial update that has not synced foundation
+# modules yet therefore leaves the wiring for the next run instead of breaking
+# the build — the same self-gating posture patch_go_mod_runtime_sdk uses.
+# @since 0.0.1
+patch_server_enable_profiling() {
+  local config_file="$target/internal/config/config.go"
+  local main_file="$target/cmd/server/main.go"
+  local vendored_httpserver="$target/foundation/server-kit/go/httpserver/server.go"
+
+  # Every anchor here is a regex on the stable tokens, never a literal line.
+  #
+  # The first version matched gofmt-aligned literals copied from the template.
+  # Across the fleet those are not literals: alignment follows the longest key
+  # in each project's own struct, the production test is written as either
+  # `env == "production"` or the inlined `getEnv("APP_ENV", "development") ==
+  # "production"`, and cmd/server/main.go writes httpserver.Config either
+  # one-key-per-line or entirely on a single line. The literal form reached
+  # 4 of 9 eligible projects for the env load and 2 of 9 for the server
+  # wiring, leaving the rest holding a config field nothing ever populated —
+  # profiling permanently unswitchable, and silent about it.
+  #
+  # A project with no ProtectOperationalEndpoints at all still takes no edit:
+  # absent anchor, no patch, rather than inventing a shape.
+
+  if [[ -f "$config_file" ]]; then
+    if ! grep -qE '^[[:space:]]*EnableProfiling[[:space:]]+bool' "$config_file" \
+      && grep -qE '^[[:space:]]*ProtectOperationalEndpoints[[:space:]]+bool' "$config_file"; then
+      perl -0pi -e 's{^([ \t]*)ProtectOperationalEndpoints([ \t]+bool[ \t]*)$}{$1ProtectOperationalEndpoints$2\n\n$1// EnableProfiling exposes /debug/pprof behind operational-endpoint\n$1// protection. Keep off except during a performance investigation;\n$1// ENABLE_PPROF=true flips it on without a rebuild.\n$1EnableProfiling bool}m' "$config_file"
+      if grep -qE '^[[:space:]]*EnableProfiling[[:space:]]+bool' "$config_file"; then
+        log_patch "config gains the EnableProfiling pprof gate: ${config_file#$target/}"
+      fi
+    fi
+
+    # Guarded on the struct-literal key, not the field name: the comment
+    # injected above already contains ENABLE_PPROF, so guarding on the
+    # variable name would suppress this edit on the very same run. The tail
+    # of the matched line is whatever this project writes for its production
+    # test, and is carried through untouched.
+    if ! grep -Fq 'EnableProfiling:' "$config_file" \
+      && grep -qE 'ProtectOperationalEndpoints:[[:space:]]*getEnvBool\(' "$config_file"; then
+      perl -0pi -e 's{^([ \t]*)(ProtectOperationalEndpoints:[ \t]*getEnvBool\("PROTECT_OPERATIONAL_ENDPOINTS".*,)[ \t]*$}{$1$2\n$1EnableProfiling: getEnvBool("ENABLE_PPROF", false),}m' "$config_file"
+      if grep -Fq 'EnableProfiling:' "$config_file"; then
+        log_patch "config loads ENABLE_PPROF: ${config_file#$target/}"
+      fi
+    fi
+
+    if command -v gofmt >/dev/null 2>&1; then
+      gofmt -w "$config_file" 2>/dev/null || true
+    fi
+  fi
+
+  # The server wiring additionally requires the project's vendored httpserver
+  # to already carry the field. A partial update that has not synced
+  # foundation modules yet therefore leaves the wiring for the next run
+  # instead of breaking the build.
+  # Both declarations must already exist: the vendored httpserver's Config
+  # field, and the project's OWN config field. Wiring main.go without the
+  # latter emits cfg.EnableProfiling against a type that has no such member,
+  # which does not compile — the same way an earlier patch left five projects
+  # referencing an undeclared riverPool. A project whose config.go took no
+  # edit above therefore takes none here either.
+  if [[ -f "$main_file" && -f "$vendored_httpserver" && -f "$config_file" ]] \
+    && grep -qE '^[[:space:]]*EnableProfiling[[:space:]]+bool' "$vendored_httpserver" \
+    && grep -qE '^[[:space:]]*EnableProfiling[[:space:]]+bool' "$config_file" \
+    && ! grep -Fq 'EnableProfiling:' "$main_file" \
+    && grep -qE 'ProtectOperationalEndpoints:[[:space:]]*[A-Za-z_][A-Za-z0-9_.]*\.ProtectOperationalEndpoints' "$main_file"; then
+    # The receiver is captured from the existing line rather than assumed:
+    # projects write cfg.ProtectOperationalEndpoints or
+    # deps.Config.ProtectOperationalEndpoints, and the new key has to address
+    # the same value the neighbouring one does.
+    #
+    # Single-line literal: the key is followed directly by the closing brace.
+    perl -0pi -e 's{(ProtectOperationalEndpoints:[ \t]*([A-Za-z_][A-Za-z0-9_.]*)\.ProtectOperationalEndpoints)[ \t]*\}}{$1, EnableProfiling: $2.EnableProfiling\}}g' "$main_file"
+    # One-key-per-line literal: the key is followed by a comma and a newline.
+    if ! grep -Fq 'EnableProfiling:' "$main_file"; then
+      perl -0pi -e 's{^([ \t]*)(ProtectOperationalEndpoints:[ \t]*([A-Za-z_][A-Za-z0-9_.]*)\.ProtectOperationalEndpoints,)[ \t]*$}{$1$2\n$1EnableProfiling: $3.EnableProfiling,}m' "$main_file"
+    fi
+    if grep -Fq 'EnableProfiling:' "$main_file"; then
+      log_patch "server maps EnableProfiling into httpserver.Config: ${main_file#$target/}"
+    fi
+
+    if command -v gofmt >/dev/null 2>&1; then
+      gofmt -w "$main_file" 2>/dev/null || true
+    fi
   fi
 }
 
@@ -3006,6 +3126,7 @@ patch_config_state_store_cache
 patch_config_weak_jwt_denylist
 patch_worker_main_river_direct_lane
 patch_startup_state_store_cache_and_river_lane
+patch_server_enable_profiling
 patch_redundant_foundation_test_files
 sync_go_work
 

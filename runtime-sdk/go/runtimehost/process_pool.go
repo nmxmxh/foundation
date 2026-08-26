@@ -61,6 +61,11 @@ type ProcessPoolOptions struct {
 	Logger          logger.Logger
 	Transport       ProcessTransportMode
 	SharedMemoryDir string
+	// ExchangeTimeout bounds every exchange with an internal deadline and is
+	// the only signal that terminates a worker. Caller contexts never do:
+	// their cancellation abandons the in-flight exchange instead, because a
+	// disconnecting client must not respawn a healthy worker. Zero takes
+	// DefaultProcessExchangeTimeout.
 	ExchangeTimeout time.Duration
 
 	// ArenaBytes requests a shared data-plane arena per worker.
@@ -188,6 +193,9 @@ type processWorker struct {
 	// already gone.
 	childRunning atomic.Bool
 
+	// busy clears when the calling goroutine returns. After an abandoned
+	// exchange that can precede the kernel finishing its work; selection
+	// correctness comes from mu, never from this flag. Diagnostics only.
 	busy   atomic.Bool
 	health sync.RWMutex
 
@@ -205,18 +213,69 @@ type processWorker struct {
 
 	exchangeLoopMu   sync.Mutex
 	exchangeRequests chan exchangeRequest
-	exchangeResults  chan error
 	exchangeStop     chan struct{}
 	exchangeLoopDone chan struct{}
 }
 
 type exchangeRequest struct {
-	ctx    context.Context
-	unitID string
-	buffer []byte
+	ctx     context.Context
+	unitID  string
+	buffer  []byte
+	results chan error
 }
 
 var errWorkerBusy = errors.New("process worker busy")
+
+// ErrExchangeAbandoned reports that the caller's context ended while its
+// exchange was still in flight. The worker stays healthy and the detached
+// supervisor in superviseAbandoned settles the in-flight work; callers use
+// errors.Is to distinguish abandonment from a real exchange failure.
+var ErrExchangeAbandoned = errors.New("native runtime exchange abandoned")
+
+// abandonedError pairs ErrExchangeAbandoned with the caller's own context
+// error, so both classify through one errors.Is chain.
+type abandonedError struct{ cause error }
+
+func (e *abandonedError) Error() string {
+	if e == nil || e.cause == nil {
+		return ErrExchangeAbandoned.Error()
+	}
+	return fmt.Sprintf("%v: %v", ErrExchangeAbandoned, e.cause)
+}
+
+func (e *abandonedError) Unwrap() []error { return []error{ErrExchangeAbandoned, e.cause} }
+
+// resultChanPool recycles per-request completion channels. A channel serves
+// exactly one request: the exchange loop sends once and exactly one receiver,
+// the waiter or the abandonment supervisor, drains it before recycling. That
+// pairing is why an abandoned exchange can never hand its result to a later
+// caller, which the old shared results channel could not guarantee.
+var resultChanPool = sync.Pool{
+	New: func() any { return make(chan error, 1) },
+}
+
+func exchangeResultChan() chan error {
+	return resultChanPool.Get().(chan error)
+}
+
+// recycleResultChan returns a completion channel after draining any value the
+// receiver never claimed.
+//
+// Only capacity-one channels re-enter the pool. The pool is process-global, so
+// one foreign channel poisons every worker: an unbuffered one parks the
+// exchange loop on its send until a receiver that has already given up shows
+// up, which surfaces as a hung exchange nowhere near its cause. Dropping the
+// odd channel to the collector costs one allocation.
+func recycleResultChan(ch chan error) {
+	if ch == nil || cap(ch) != 1 {
+		return
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	resultChanPool.Put(ch)
+}
 
 func NewProcessPool(opts ProcessPoolOptions) (*ProcessPool, error) {
 	if len(opts.Command) == 0 || strings.TrimSpace(opts.Command[0]) == "" {
@@ -314,19 +373,20 @@ func (p *ProcessPool) execute(ctx context.Context, req ProcessRequest, dst []byt
 	if strings.TrimSpace(req.UnitID) == "" {
 		return ProcessResponse{}, errors.New("unit id is required")
 	}
-	execCtx := ctx
-	var cancel context.CancelFunc
-	if execCtx == nil {
-		execCtx = context.Background()
-	}
-	if _, hasDeadline := execCtx.Deadline(); !hasDeadline && p.exchangeTimeout > 0 {
-		execCtx, cancel = context.WithTimeout(execCtx, p.exchangeTimeout)
-		defer cancel()
+	// The caller's context is passed through untouched: it decides when this
+	// caller gives up, never whether the worker lives. The exchange budget is
+	// applied as an internal deadline in executeOnSelectedWorker.
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	rawPtr := p.bufferPool.Get().(*[]byte)
 	raw := *rawPtr
+	recycleBuffer := true
 	defer func() {
+		if !recycleBuffer {
+			return
+		}
 		*rawPtr = raw
 		p.bufferPool.Put(rawPtr)
 	}()
@@ -346,7 +406,13 @@ func (p *ProcessPool) execute(ctx context.Context, req ProcessRequest, dst []byt
 		return ProcessResponse{}, err
 	}
 
-	if err := p.executeOnSelectedWorker(execCtx, req, raw, pinned...); err != nil {
+	if err := p.executeOnSelectedWorker(ctx, req, raw, pinned...); err != nil {
+		// An abandoned exchange may still be writing this buffer inside the
+		// exchange loop. Recycling it would hand live memory to the next
+		// caller, so the buffer is dropped to the collector instead. One
+		// control buffer per client disconnect is cheaper than a respawned
+		// worker or a corrupted pool.
+		recycleBuffer = !errors.Is(err, ErrExchangeAbandoned)
 		return ProcessResponse{}, err
 	}
 
@@ -406,16 +472,19 @@ func (p *ProcessPool) executeOnSelectedWorker(ctx context.Context, req ProcessRe
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	// One deadline covers selection, the attempt, and any retry, so a caller
+	// never waits longer than the configured exchange budget for this call.
+	deadline := p.internalDeadline()
 	// A pinned worker bypasses selection entirely: the request references that
 	// worker's arena, so any other worker would read an empty one.
 	if len(pinned) > 0 && pinned[0] != nil {
-		return pinned[0].execute(ctx, req.UnitID, buffer)
+		return pinned[0].execute(ctx, req.UnitID, buffer, deadline)
 	}
 
 	preferredIndex := p.preferredWorkerIndex(req.ContextHash)
 	for offset := 0; offset < len(p.allWorkers); offset++ {
 		index := (preferredIndex + offset) % len(p.allWorkers)
-		err := p.allWorkers[index].tryExecute(ctx, req.UnitID, buffer)
+		err := p.allWorkers[index].tryExecute(ctx, req.UnitID, buffer, deadline)
 		switch {
 		case err == nil:
 			return nil
@@ -425,7 +494,17 @@ func (p *ProcessPool) executeOnSelectedWorker(ctx context.Context, req ProcessRe
 			return err
 		}
 	}
-	return p.allWorkers[preferredIndex].execute(ctx, req.UnitID, buffer)
+	return p.allWorkers[preferredIndex].execute(ctx, req.UnitID, buffer, deadline)
+}
+
+// internalDeadline returns when an exchange started now must terminate. Zero
+// means unbounded, which only an explicitly misconfigured pool produces; New
+// applies DefaultProcessExchangeTimeout to non-positive values.
+func (p *ProcessPool) internalDeadline() time.Time {
+	if p.exchangeTimeout <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(p.exchangeTimeout)
 }
 
 func (p *ProcessPool) preferredWorkerIndex(contextHash int32) int {
@@ -600,7 +679,8 @@ func (w *processWorker) startLocked() error {
 // the exchanges themselves ignore their context: a stdio Exchange blocks in
 // readFrame until the child answers. A kernel that hangs on its first exchange
 // would otherwise hang startup with no timeout at all, which is a worse failure
-// than the one being fixed. executeWithContext bounds it and kills the child.
+// than the one being fixed. The internal deadline bounds it and kills the
+// child.
 func (w *processWorker) warmupLocked() {
 	unitID := w.warmupUnitID
 	if unitID == "" {
@@ -610,14 +690,15 @@ func (w *processWorker) warmupLocked() {
 	if timeout <= 0 {
 		timeout = DefaultProcessExchangeTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	// Background on purpose: no caller context exists here, so termination
+	// keys purely on the internal deadline below.
+	ctx := context.Background()
 
 	// A zeroed control buffer is a valid one: input length zero, no epochs set.
 	// The reply is discarded — an unknown unit answers with a non-zero status
 	// code, and that is a completed exchange, which is all this wants.
 	buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
-	if err := w.executeWithContext(ctx, unitID, buffer); err != nil {
+	if err := w.executeWithContext(ctx, unitID, buffer, time.Now().Add(timeout)); err != nil {
 		w.logger.Debug("native runtime worker warmup exchange did not complete",
 			"unit_id", unitID, "error", err)
 	}
@@ -698,7 +779,7 @@ func (w *processWorker) restartLocked() error {
 	return w.startLocked()
 }
 
-func (w *processWorker) execute(ctx context.Context, unitID string, buffer []byte) error {
+func (w *processWorker) execute(ctx context.Context, unitID string, buffer []byte, deadline time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -708,10 +789,10 @@ func (w *processWorker) execute(ctx context.Context, unitID string, buffer []byt
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	return w.executeHeld(ctx, unitID, buffer)
+	return w.executeHeld(ctx, unitID, buffer, deadline)
 }
 
-func (w *processWorker) tryExecute(ctx context.Context, unitID string, buffer []byte) error {
+func (w *processWorker) tryExecute(ctx context.Context, unitID string, buffer []byte, deadline time.Time) error {
 	if !w.mu.TryLock() {
 		return errWorkerBusy
 	}
@@ -719,15 +800,21 @@ func (w *processWorker) tryExecute(ctx context.Context, unitID string, buffer []
 
 	w.busy.Store(true)
 	defer w.busy.Store(false)
-	return w.executeHeld(ctx, unitID, buffer)
+	return w.executeHeld(ctx, unitID, buffer, deadline)
 }
 
-func (w *processWorker) executeHeld(ctx context.Context, unitID string, buffer []byte) error {
+func (w *processWorker) executeHeld(ctx context.Context, unitID string, buffer []byte, deadline time.Time) error {
 	if err := w.startLocked(); err != nil {
 		w.recordFailure(err)
 		return err
 	}
-	if err := w.executeWithContext(ctx, unitID, buffer); err != nil {
+	err := w.executeWithContext(ctx, unitID, buffer, deadline)
+	if errors.Is(err, ErrExchangeAbandoned) {
+		// The caller left; the worker did nothing wrong and stays up. The
+		// detached supervisor owns the in-flight exchange from here.
+		return err
+	}
+	if err != nil {
 		w.recordFailure(err)
 		w.logger.WarnContext(ctx, "native runtime exchange failed; restarting worker", "error", err)
 		w.incrementRestart()
@@ -738,8 +825,10 @@ func (w *processWorker) executeHeld(ctx context.Context, unitID string, buffer [
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := w.executeWithContext(ctx, unitID, buffer); err != nil {
-			w.recordFailure(err)
+		if err := w.executeWithContext(ctx, unitID, buffer, deadline); err != nil {
+			if !errors.Is(err, ErrExchangeAbandoned) {
+				w.recordFailure(err)
+			}
 			return err
 		}
 	}
@@ -747,7 +836,18 @@ func (w *processWorker) executeHeld(ctx context.Context, unitID string, buffer [
 	return ctx.Err()
 }
 
-func (w *processWorker) executeWithContext(ctx context.Context, unitID string, buffer []byte) error {
+// executeWithContext runs one bounded exchange attempt.
+//
+// Termination keys on the internal exchange deadline, never on the caller's
+// context. The previous contract watched ctx.Done and killed the worker on any
+// caller cancellation, so a client disconnecting mid-exchange terminated a
+// healthy worker and forced a fork/exec respawn on its next user — observed in
+// production as paired "exchange timed out; terminating worker" warnings and
+// worker restarts. Now caller cancellation abandons the exchange instead: the
+// caller gets its context error promptly, superviseAbandoned settles the
+// in-flight work against the internal deadline, and only a genuine hang
+// terminates the process.
+func (w *processWorker) executeWithContext(ctx context.Context, unitID string, buffer []byte, deadline time.Time) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -755,53 +855,209 @@ func (w *processWorker) executeWithContext(ctx context.Context, unitID string, b
 		return err
 	}
 
-	requests, results := w.ensureExchangeLoop()
-	request := exchangeRequest{ctx: ctx, unitID: unitID, buffer: buffer}
+	requests, loopDone := w.ensureExchangeLoop()
+	// attemptCtx lets the kill paths unblock exchanges that observe their
+	// context, mirroring how a real kill breaks the pipe for those that do
+	// not. Captured while w.mu is held: the supervisor must never read
+	// mutable worker state after this function returns.
+	attemptCtx, attemptCancel := context.WithCancel(ctx)
+	process := w.currentProcess()
+
+	var timer *time.Timer
+	var deadlineC <-chan time.Time
+	if !deadline.IsZero() {
+		timer = acquireExchangeTimer(deadline)
+		deadlineC = timer.C
+	}
+	result := exchangeResultChan()
+	request := exchangeRequest{ctx: attemptCtx, unitID: unitID, buffer: buffer, results: result}
+
 	select {
 	case requests <- request:
-	case <-ctx.Done():
-		return ctx.Err()
+	case <-attemptCtx.Done():
+		recycleResultChan(result)
+		releaseExchangeTimer(timer)
+		attemptCancel()
+		return &abandonedError{cause: context.Cause(attemptCtx)}
+	case <-deadlineC:
+		recycleResultChan(result)
+		releaseExchangeTimer(timer)
+		attemptCancel()
+		return fmt.Errorf("native runtime exchange %q never started: %w", unitID, context.DeadlineExceeded)
 	}
 
 	select {
-	case err := <-results:
+	case err := <-result:
+		recycleResultChan(result)
+		releaseExchangeTimer(timer)
+		attemptCancel()
 		return err
-	case <-ctx.Done():
-		w.logger.WarnContext(ctx, "native runtime exchange timed out; terminating worker", "error", ctx.Err())
-		if w.cmd != nil && w.cmd.Process != nil {
-			_ = w.cmd.Process.Kill()
+	case <-attemptCtx.Done():
+		go w.superviseAbandoned(abandonedExchange{
+			results: result, timer: timer, cancel: attemptCancel,
+			process: process, loopDone: loopDone,
+		})
+		return &abandonedError{cause: context.Cause(attemptCtx)}
+	case <-deadlineC:
+		w.logger.WarnContext(ctx, "native runtime exchange timed out; terminating worker",
+			"unit_id", unitID, "error", context.DeadlineExceeded)
+		attemptCancel()
+		if process != nil {
+			_ = process.Kill()
 		}
-		err := <-results
+		err := <-result
+		recycleResultChan(result)
+		releaseExchangeTimer(timer)
+		attemptCancel()
 		if err == nil {
-			return ctx.Err()
+			return context.DeadlineExceeded
 		}
-		return errors.Join(ctx.Err(), err)
+		return errors.Join(context.DeadlineExceeded, err)
 	}
+}
+
+// abandonedExchange carries everything the detached supervisor needs to finish
+// an exchange whose caller left. Every field is captured while w.mu is held.
+type abandonedExchange struct {
+	results  chan error
+	timer    *time.Timer
+	cancel   context.CancelFunc
+	process  *os.Process
+	loopDone <-chan struct{}
+}
+
+// superviseAbandoned settles an exchange whose caller ended its context.
+//
+// It owns the completion channel and the deadline timer from here on. The
+// captured process is killed only when the internal deadline expires, which is
+// evidence of a genuinely hung kernel; a completed exchange is drained and its
+// outcome recorded without disturbing the worker otherwise. If the exchange
+// loop is torn down first (close or restart), teardown already killed the
+// child, so the supervisor stands down without draining or killing.
+//
+// No restart runs here even on the kill path: a dead child surfaces through
+// the next exchange's failed pipe and takes the normal restart path, so a
+// hung kernel costs one respawn exactly when someone needs the worker again.
+func (w *processWorker) superviseAbandoned(s abandonedExchange) {
+	defer s.cancel()
+	var err error
+	killed := false
+	select {
+	case err = <-s.results:
+		// The exchange beat the deadline; retract the pending tick.
+		releaseExchangeTimer(s.timer)
+		recycleResultChan(s.results)
+	case <-s.loopDone:
+		// Teardown closed the loop, so no send is still owed here: a request
+		// left unserviced in the queue is never answered, and one the loop
+		// did answer was sent before it returned. recycleResultChan drains
+		// either way.
+		releaseExchangeTimer(s.timer)
+		recycleResultChan(s.results)
+		return
+	case <-timerChannel(s.timer):
+		s.cancel()
+		if s.process != nil {
+			_ = s.process.Kill()
+		}
+		err = <-s.results
+		killed = true
+		releaseExchangeTimer(s.timer)
+		recycleResultChan(s.results)
+	}
+	switch {
+	case err == nil:
+		w.recordSuccess()
+	case !killed && errors.Is(err, context.Canceled):
+		// Context-aware exchanges unwind with context.Canceled when the
+		// caller left; that is the abandonment itself, not worker damage.
+		// Recording it would poison health telemetry with disconnect noise.
+		w.logger.Debug("native runtime abandoned exchange unwound with caller cancellation", "error", err)
+	default:
+		w.recordFailure(err)
+	}
+}
+
+// currentProcess snapshots the running child for kill decisions, nil for test
+// exchanges. Call it under w.mu; the result stays valid after unlock because
+// os.Process methods are safe on an already-reaped process.
+func (w *processWorker) currentProcess() *os.Process {
+	if w.testExchange != nil || w.cmd == nil {
+		return nil
+	}
+	return w.cmd.Process
+}
+
+// timerChannel exposes a deadline timer's tick channel. A nil timer yields a
+// nil channel, which blocks forever in a select — the correct behaviour for a
+// never-armed deadline.
+func timerChannel(timer *time.Timer) <-chan time.Time {
+	if timer == nil {
+		return nil
+	}
+	return timer.C
+}
+
+// exchangeTimerPool recycles deadline timers. A timer re-enters the pool only
+// through releaseExchangeTimer, which stops it, so Reset on checkout always
+// starts from a clean state.
+var exchangeTimerPool = sync.Pool{
+	New: func() any {
+		// Born stopped, so an unclaimed timer can never fire while it sits
+		// in the pool. acquireExchangeTimer arms it with the real deadline
+		// and releaseExchangeTimer owns stopping it again; the placeholder
+		// duration is never observed.
+		timer := time.NewTimer(time.Hour)
+		timer.Stop()
+		return timer
+	},
+}
+
+func acquireExchangeTimer(deadline time.Time) *time.Timer {
+	timer := exchangeTimerPool.Get().(*time.Timer)
+	timer.Reset(time.Until(deadline))
+	return timer
+}
+
+// releaseExchangeTimer stops a deadline timer and returns it to the pool.
+//
+// No drain, deliberately. Since Go 1.23 a timer channel is unbuffered and Stop
+// retracts any tick that has not been received, so after Stop returns nothing
+// can arrive on C — the classic `if !timer.Stop() { <-timer.C }` idiom has
+// nothing to receive here and would block forever rather than briefly. Reset
+// carries the same guarantee, so the next acquirer cannot observe a stale tick
+// whether or not this call chain consumed one.
+func releaseExchangeTimer(timer *time.Timer) {
+	if timer == nil {
+		return
+	}
+	timer.Stop()
+	exchangeTimerPool.Put(timer)
 }
 
 // ensureExchangeLoop starts one bounded exchange goroutine for the worker.
 // Worker execution is serialized by mu, so capacity one provides backpressure
-// without allocating request-specific goroutines or channels.
-func (w *processWorker) ensureExchangeLoop() (chan<- exchangeRequest, <-chan error) {
+// without allocating request-specific goroutines. Completion channels come
+// from resultChanPool per request, so results can never cross callers.
+func (w *processWorker) ensureExchangeLoop() (chan<- exchangeRequest, <-chan struct{}) {
 	w.exchangeLoopMu.Lock()
 	defer w.exchangeLoopMu.Unlock()
 	if w.exchangeRequests != nil {
-		return w.exchangeRequests, w.exchangeResults
+		return w.exchangeRequests, w.exchangeLoopDone
 	}
 	w.exchangeRequests = make(chan exchangeRequest, 1)
-	w.exchangeResults = make(chan error, 1)
 	w.exchangeStop = make(chan struct{})
 	w.exchangeLoopDone = make(chan struct{})
-	go w.runExchangeLoop(w.exchangeRequests, w.exchangeResults, w.exchangeStop, w.exchangeLoopDone)
-	return w.exchangeRequests, w.exchangeResults
+	go w.runExchangeLoop(w.exchangeRequests, w.exchangeStop, w.exchangeLoopDone)
+	return w.exchangeRequests, w.exchangeLoopDone
 }
 
-func (w *processWorker) runExchangeLoop(requests <-chan exchangeRequest, results chan<- error, stop <-chan struct{}, done chan<- struct{}) {
+func (w *processWorker) runExchangeLoop(requests <-chan exchangeRequest, stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
 	for {
 		select {
 		case request := <-requests:
-			results <- w.exchange().Exchange(request.ctx, request.unitID, request.buffer)
+			request.results <- w.exchange().Exchange(request.ctx, request.unitID, request.buffer)
 		case <-stop:
 			return
 		}
@@ -817,7 +1073,6 @@ func (w *processWorker) stopExchangeLoop() {
 	stop := w.exchangeStop
 	done := w.exchangeLoopDone
 	w.exchangeRequests = nil
-	w.exchangeResults = nil
 	w.exchangeStop = nil
 	w.exchangeLoopDone = nil
 	// concurrency: single owner. The nil check above runs under the same mutex

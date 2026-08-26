@@ -92,7 +92,7 @@ scan_lock_scope() {
 }
 
 scan_select_default() {
-  local file line text block select_indent
+  local file line text block select_body select_indent
   : >"$tmp_findings"
   while IFS=: read -r file line text; do
     [[ -n "${file:-}" && -n "${line:-}" ]] || continue
@@ -103,10 +103,23 @@ scan_select_default() {
     # select that had no default at all, so the indentation is what ties a
     # default to the select it belongs to.
     select_indent="$(printf '%s' "$text" | sed -n 's/^\([[:space:]]*\).*/\1/p')"
+    # Indentation alone still mis-attributes: a sibling switch that follows the
+    # select in the same function sits at the same indent, and its default arm
+    # is inside the fixed window. That reported a select with no default at all
+    # and was the last false positive of this rule. Truncating the window at the
+    # select's own closing brace ties the default to the statement it is in.
+    select_body="$(printf '%s\n' "$block" | awk -v ind="$select_indent" '
+      NR == 1 { print; next }
+      $0 == ind "}" { exit }
+      { print }')"
     # grep rather than text_matches: the block is many lines and text_matches
     # anchors ^ to the start of the whole string, so a per-line anchor silently
     # never matches there and every select would be skipped.
-    printf '%s\n' "$block" | grep -qE "^${select_indent}default[[:space:]]*:" || continue
+    #
+    # Detection reads the bounded body; the rationale below still reads the
+    # full window, because the reason a drop is safe is often stated just
+    # after the select — an error return or a metric on the next line.
+    printf '%s\n' "$select_body" | grep -qE "^${select_indent}default[[:space:]]*:" || continue
     if text_matches "$block" 'concurrency:|RecordConcurrency|RecordWorker|RecordQueueDepth|return[[:space:]]+(errors[.]New|fmt[.]Errorf|err|nil|ctx[.]Err|[A-Za-z0-9_.]*Err)|queue full|send_rejected_full'; then
       continue
     fi

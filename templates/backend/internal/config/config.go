@@ -23,6 +23,11 @@ type Config struct {
 	RequireAuth                 bool
 	ProtectOperationalEndpoints bool
 
+	// EnableProfiling exposes /debug/pprof behind operational-endpoint
+	// protection. Keep off except during a performance investigation;
+	// ENABLE_PPROF=true flips it on without a rebuild.
+	EnableProfiling bool
+
 	// Database
 	DatabaseURL         string
 	StateStore          string
@@ -119,6 +124,7 @@ func Load() (*Config, error) {
 		AllowedOrigins:                      splitCSV(getEnv("ALLOWED_ORIGINS", defaultAllowedOrigins(env))),
 		RequireAuth:                         getEnvBool("REQUIRE_AUTH", env == "production"),
 		ProtectOperationalEndpoints:         getEnvBool("PROTECT_OPERATIONAL_ENDPOINTS", env == "production"),
+		EnableProfiling:                     getEnvBool("ENABLE_PPROF", false),
 		DatabaseURL:                         getEnv("DATABASE_URL", ""),
 		StateStore:                          getEnv("STATE_STORE_DRIVER", "postgres"),
 		DBHost:                              getEnv("DB_HOST", ""),

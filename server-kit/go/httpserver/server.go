@@ -32,6 +32,7 @@ import (
 	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/profiling"
 	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
@@ -43,6 +44,21 @@ type Config struct {
 	Port                        int
 	AllowedOrigins              []string
 	ProtectOperationalEndpoints bool
+
+	// EnableProfiling mounts the pprof surface at /debug/pprof behind the
+	// operational-endpoint protection. Off by default; switch it on for the
+	// duration of a performance investigation, never as a standing default.
+	EnableProfiling bool
+
+	// ProfilingRates overrides the mutex and block sampling rates armed
+	// alongside the pprof surface. Nil takes profiling.SampledRates.
+	//
+	// Arming is part of enabling on purpose. Those two profiles report an
+	// empty result rather than an error while their rates sit at the Go
+	// default of zero, so a mounted-but-unarmed surface answers "is this
+	// lock contention?" with a successful, empty profile — the failure mode
+	// that makes a contention question look answered when it is not.
+	ProfilingRates *profiling.RuntimeRates
 
 	// TLS and transport performance
 	TLSEnabled           bool
@@ -141,6 +157,17 @@ func New(cfg *Config, reg *registry.ServiceRegistry, handler ...*graceful.Handle
 	var h *graceful.Handler
 	if len(handler) > 0 {
 		h = handler[0]
+	}
+
+	// Process-global sampling, so it is armed once and only behind the
+	// operator's explicit enablement; profiling.ApplyRates keeps the first
+	// enablement in a process authoritative.
+	if cfg != nil && cfg.EnableProfiling {
+		rates := profiling.SampledRates()
+		if cfg.ProfilingRates != nil {
+			rates = *cfg.ProfilingRates
+		}
+		profiling.ApplyRates(rates)
 	}
 
 	s := &Server{
@@ -418,6 +445,15 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/health/ready", s.readiness)
 	mux.Handle("/metricsz", s.operationalHandler(http.HandlerFunc(s.metrics)))
 	mux.Handle("/metricsz/trace", s.operationalHandler(observability.TraceHandler(observability.Default())))
+
+	// pprof surface. Mounted only when configured, and still subject to the
+	// operational gate, so enabling profiles in production never bypasses
+	// the authentication ProtectOperationalEndpoints enforces.
+	if s.cfg != nil && s.cfg.EnableProfiling {
+		pprofHandler := profiling.Handler(profiling.Config{Enabled: true})
+		mux.Handle("/debug/pprof", s.operationalHandler(pprofHandler))
+		mux.Handle("/debug/pprof/", s.operationalHandler(pprofHandler))
+	}
 
 	// Event dispatch endpoint
 	mux.HandleFunc("/v1/dispatch", s.dispatch)
