@@ -132,7 +132,7 @@ func TestWarmupFailureLeavesTheWorkerUsable(t *testing.T) {
 
 	exchange.err = nil
 	buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
-	if err := worker.executeWithContext(context.Background(), "runtime.echo", buffer); err != nil {
+	if err := worker.executeWithContext(context.Background(), "runtime.echo", buffer, time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("worker unusable after a failed warmup: %v", err)
 	}
 }

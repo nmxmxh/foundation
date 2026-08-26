@@ -57,6 +57,7 @@ func run(ctx context.Context) error {
 		Port:                        cfg.Port,
 		AllowedOrigins:              cfg.AllowedOrigins,
 		ProtectOperationalEndpoints: cfg.ProtectOperationalEndpoints,
+		EnableProfiling:             cfg.EnableProfiling,
 	}, deps.Registry, deps.Handler)
 	srv.SetHTTPRoutes((&bootstrap.Services{}).HTTPRoutes())
 

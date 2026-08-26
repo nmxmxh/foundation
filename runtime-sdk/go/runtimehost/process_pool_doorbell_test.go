@@ -148,19 +148,31 @@ func TestProcessPoolEpochDoorbellKernel(t *testing.T) {
 			if err := buf.SetOutputBytes([]byte(strings.ToUpper(string(input)))); err != nil {
 				return
 			}
-			if _, err := buf.AddEpoch(generated.IDX_OUTPUT_WRITTEN, 1); err != nil {
-				return
-			}
-			copy(raw, buf.RawBytes())
-			// Arm consumed BEFORE publishing output: once output is visible,
-			// the parent may consume and ack within microseconds — faster
-			// than this goroutine's next observe. Arming first guarantees no
-			// ack is ever folded into the baseline we then wait past.
+			// Write back everything EXCEPT the epoch region ([0,64)): those
+			// slots cross only through publishEpoch/observeEpoch. A wholesale
+			// buffer copy-back carries this snapshot's stale epoch words over
+			// live ones — it clobbers the parent's consumed ack mid-flight,
+			// resurrects already-served input epochs, and folds an extra,
+			// timing-dependent output transition into every exchange, so a
+			// reply can land exactly on the parent's waited baseline and
+			// stall both sides until their timeouts expire. The parent's own
+			// publish path has always copied from OFFSET_HEADER_INTS; this
+			// now mirrors it.
+			copy(raw[generated.OFFSET_HEADER_INTS:], buf.RawBytes()[generated.OFFSET_HEADER_INTS:])
+			// Arm BOTH follow-up baselines BEFORE publishing output. Once
+			// output is visible, the parent may ack — and stage its next
+			// exchange's input — within microseconds, faster than this
+			// goroutine's next observe. Arming consumed first guarantees no
+			// ack folds into the waited baseline; arming input here too is
+			// what closes the surviving half of the 2026-08-23 lost-wakeup
+			// class: an input arm after the publish races the parent's next
+			// input store and parked both sides into paired timeouts under
+			// -race -cover scheduling stretch. The Rust reference kernel
+			// holds its baseline from the previous wait and never re-arms
+			// post-publish; this now matches it.
 			consumedSeen = observeEpoch(consumedSlot)
-			publishEpoch(outputSlot)
-			// Arm input for the NEXT round too: the parent may publish it any
-			// moment after consuming, before our loop re-arms.
 			inputSeen = observeEpoch(inputSlot)
+			publishEpoch(outputSlot)
 			if _, err := os.Stdout.Write([]byte{1}); err != nil {
 				return
 			}
@@ -228,6 +240,28 @@ func TestProcessPoolEpochDoorbellTransport(t *testing.T) {
 	// transparent-retry contract makes it caller-invisible by design.
 	snapshot := worker.snapshot()
 	t.Logf("doorbell lane restarts=%d lastError=%v", snapshot.RestartCount, snapshot.LastError)
+
+	// Protocol bookkeeping must balance: one input consumed means exactly one
+	// reply published and exactly one ack returned. Drift between these slots
+	// means epochs are crossing outside publishEpoch/observeEpoch — the stale
+	// whole-buffer copy-back in this file's kernel helper once produced extra
+	// output transitions here, letting a reply land on the parent's waited
+	// baseline and stalling both sides into paired exchange timeouts under
+	// load. See the helper's write-back comment.
+	slotValue := func(index uint32) uint32 {
+		slot, err := epochSlot(worker.shm.raw, index)
+		if err != nil {
+			t.Fatalf("epoch slot %d: %v", index, err)
+		}
+		return observeEpoch(slot)
+	}
+	inputEpoch := slotValue(generated.IDX_INPUT_WRITTEN)
+	outputEpoch := slotValue(generated.IDX_OUTPUT_WRITTEN)
+	consumedEpoch := slotValue(generated.IDX_OUTPUT_CONSUMED)
+	if inputEpoch != outputEpoch || outputEpoch != consumedEpoch {
+		t.Fatalf("protocol epochs diverged over one quiet round trip: in=%d out=%d cons=%d",
+			inputEpoch, outputEpoch, consumedEpoch)
+	}
 	succeeded = true
 }
 

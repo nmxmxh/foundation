@@ -806,7 +806,7 @@ func TestProcessPoolWorkerSelectionBusyAndFallback(t *testing.T) {
 	}
 	worker := workerWithEchoTransport(t, ProcessTransportStdio)
 	buffer := newRuntimeBuffer(t, "direct")
-	if err := worker.execute(context.Background(), "runtime.echo", buffer); err != nil {
+	if err := worker.execute(context.Background(), "runtime.echo", buffer, time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("worker.execute() error = %v", err)
 	}
 	parsed, err := NewBuffer(buffer)
@@ -835,7 +835,7 @@ func TestProcessWorkerExchangeRestartAndClosePaths(t *testing.T) {
 		mode:         ProcessTransportStdio,
 		testExchange: exchange,
 	}
-	if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "restart")); err != nil {
+	if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "restart"), time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("execute() error = %v", err)
 	}
 	if exchange.calls != 2 || exchange.restarts != 1 || worker.snapshot().RestartCount != 1 {
@@ -853,7 +853,7 @@ func TestProcessWorkerExchangeRestartAndClosePaths(t *testing.T) {
 		logger:       testLogger(t),
 		testExchange: restartFailure,
 	}
-	if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "restart-fail")); err == nil || !strings.Contains(err.Error(), "restart native runtime worker") {
+	if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "restart-fail"), time.Now().Add(time.Minute)); err == nil || !strings.Contains(err.Error(), "restart native runtime worker") {
 		t.Fatalf("restart failure error = %v", err)
 	}
 
@@ -864,19 +864,11 @@ func TestProcessWorkerExchangeRestartAndClosePaths(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := worker.execute(ctx, "runtime.echo", newRuntimeBuffer(t, "cancel")); !errors.Is(err, context.Canceled) {
+	// A pre-cancelled context never reaches the exchange: the entry guard
+	// rejects it before a worker is selected, so this is a plain cancellation
+	// rather than an abandoned in-flight exchange.
+	if err := worker.execute(ctx, "runtime.echo", newRuntimeBuffer(t, "cancel"), time.Now().Add(time.Minute)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled execute error = %v", err)
-	}
-
-	timeoutExchange := &scriptedExchange{waitForContext: true}
-	worker = &processWorker{
-		logger:       testLogger(t),
-		testExchange: timeoutExchange,
-	}
-	timeoutCtx, timeoutCancel := context.WithTimeout(context.Background(), time.Millisecond)
-	defer timeoutCancel()
-	if err := worker.executeWithContext(timeoutCtx, "runtime.echo", newRuntimeBuffer(t, "timeout")); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("timeout exchange error = %v", err)
 	}
 }
 
@@ -884,28 +876,241 @@ func TestProcessWorkerPersistentExchangeLoopReuseAndShutdown(t *testing.T) {
 	exchange := &scriptedExchange{}
 	worker := &processWorker{logger: testLogger(t), testExchange: exchange}
 	for i := range 3 {
-		if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "loop")); err != nil {
+		if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "loop"), time.Now().Add(time.Minute)); err != nil {
 			t.Fatalf("execute %d error = %v", i, err)
 		}
 	}
 	requests := worker.exchangeRequests
-	results := worker.exchangeResults
-	if requests == nil || results == nil || exchange.calls != 3 {
-		t.Fatalf("loop requests=%p results=%p calls=%d", requests, results, exchange.calls)
+	stop := worker.exchangeStop
+	done := worker.exchangeLoopDone
+	if requests == nil || stop == nil || done == nil || exchange.calls != 3 {
+		t.Fatalf("loop requests=%p stop=%p done=%p calls=%d", requests, stop, done, exchange.calls)
 	}
-	if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "reuse")); err != nil {
+	if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "reuse"), time.Now().Add(time.Minute)); err != nil {
 		t.Fatalf("reuse execute error = %v", err)
 	}
-	if worker.exchangeRequests != requests || worker.exchangeResults != results {
+	if worker.exchangeRequests != requests || worker.exchangeStop != stop || worker.exchangeLoopDone != done {
 		t.Fatal("exchange loop channels changed between serialized calls")
 	}
 	if err := worker.close(); err != nil {
 		t.Fatalf("close error = %v", err)
 	}
-	if worker.exchangeRequests != nil || worker.exchangeResults != nil || exchange.closes != 1 {
+	if worker.exchangeRequests != nil || worker.exchangeStop != nil || worker.exchangeLoopDone != nil || exchange.closes != 1 {
 		t.Fatalf("loop not released or exchange not closed: %+v", exchange)
 	}
 	worker.stopExchangeLoop()
+}
+
+// A client disconnecting mid-exchange must return its context error without
+// terminating the worker: the production incident this regression guards was
+// 223 paired "exchange timed out; terminating worker" warnings and respawns
+// caused by caller cancellations killing healthy kernels.
+func TestProcessWorkerCallerCancelAbandonsWithoutKillingWorker(t *testing.T) {
+	exchange := newScriptedExchange()
+	exchange.waitForContext = true
+	worker := &processWorker{
+		logger:       testLogger(t),
+		mode:         ProcessTransportStdio,
+		testExchange: exchange,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		cancel()
+	}()
+	err := worker.execute(ctx, "runtime.echo", newRuntimeBuffer(t, "disconnect"), time.Now().Add(time.Minute))
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrExchangeAbandoned) {
+		t.Fatalf("execute error = %v, want abandoned cancellation", err)
+	}
+	snapshot := worker.snapshot()
+	if snapshot.RestartCount != 0 || snapshot.LastError != "" {
+		t.Fatalf("worker health degraded by abandonment: %+v", snapshot)
+	}
+	// Synchronize with the abandoned exchange before reconfiguring the fake:
+	// its goroutine may still be inside Exchange when the caller returns.
+	select {
+	case <-exchange.returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("abandoned exchange never settled")
+	}
+	// The worker must accept new work immediately. The fake stops waiting on
+	// its context first: a patient caller against a silent kernel would
+	// legitimately occupy the worker until the internal deadline.
+	exchange.waitForContext = false
+	if err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "reusable"), time.Now().Add(time.Minute)); err != nil {
+		t.Fatalf("worker unusable after abandonment: %v", err)
+	}
+	if exchange.restarts != 0 || exchange.closes != 0 {
+		t.Fatalf("worker lifecycle touched by abandonment: %+v", exchange)
+	}
+}
+
+// An exchange that finishes normally after its caller left keeps the worker
+// healthy: the detached supervisor observes success, not a spurious failure.
+func TestProcessWorkerAbandonedExchangeCompletionRecordsSuccess(t *testing.T) {
+	exchange := newScriptedExchange()
+	exchange.linger = 20 * time.Millisecond
+	worker := &processWorker{
+		logger:       testLogger(t),
+		mode:         ProcessTransportStdio,
+		testExchange: exchange,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(2 * time.Millisecond)
+		cancel()
+	}()
+	err := worker.execute(ctx, "runtime.echo", newRuntimeBuffer(t, "late"), time.Now().Add(time.Minute))
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrExchangeAbandoned) {
+		t.Fatalf("execute error = %v, want abandoned cancellation", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for worker.snapshot().LastSuccess.IsZero() {
+		if time.Now().After(deadline) {
+			t.Fatal("supervisor never recorded the completed abandoned exchange")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if worker.snapshot().RestartCount != 0 || exchange.restarts != 0 {
+		t.Fatalf("healthy completion triggered lifecycle churn: %+v %+v", worker.snapshot(), exchange)
+	}
+}
+
+// Only the internal exchange deadline terminates a worker. A hung kernel with
+// a patient caller still gets killed and restarted once; the retry then fails
+// fast at the entry guard because the exchange budget is already spent.
+func TestProcessWorkerInternalDeadlineTerminatesHungWorker(t *testing.T) {
+	exchange := newScriptedExchange()
+	exchange.waitForContext = true
+	worker := &processWorker{
+		logger:       testLogger(t),
+		mode:         ProcessTransportStdio,
+		testExchange: exchange,
+	}
+	err := worker.execute(context.Background(), "runtime.echo", newRuntimeBuffer(t, "hung"), time.Now().Add(15*time.Millisecond))
+	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrExchangeAbandoned) {
+		t.Fatalf("deadline exchange error = %v, want deadline termination", err)
+	}
+	// The retry races its spent budget: whichever of "enqueue then kill" or
+	// "never started" the scheduler picks is a correct fast failure, so only
+	// the restart bookkeeping is asserted exactly.
+	snapshot := worker.snapshot()
+	if snapshot.RestartCount != 1 || exchange.restarts != 1 || exchange.calls < 1 || exchange.calls > 2 {
+		t.Fatalf("kill-and-retry bookkeeping wrong: snapshot=%+v exchange=%+v", snapshot, exchange)
+	}
+}
+
+// An exchange still running when its caller left must be terminated by the
+// detached supervisor once the internal deadline expires, and a healthy
+// completion afterwards keeps worker health clean.
+func TestProcessWorkerSupervisorTerminatesAbandonedHungExchange(t *testing.T) {
+	exchange := newScriptedExchange()
+	exchange.linger = 200 * time.Millisecond
+	worker := &processWorker{
+		logger:       testLogger(t),
+		mode:         ProcessTransportStdio,
+		testExchange: exchange,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(2 * time.Millisecond)
+		cancel()
+	}()
+	err := worker.execute(ctx, "runtime.echo", newRuntimeBuffer(t, "supervised"), time.Now().Add(30*time.Millisecond))
+	if !errors.Is(err, ErrExchangeAbandoned) {
+		t.Fatalf("execute error = %v, want abandonment", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for worker.snapshot().LastSuccess.IsZero() {
+		if time.Now().After(deadline) {
+			t.Fatal("supervisor never settled the killed abandoned exchange")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	snapshot := worker.snapshot()
+	if snapshot.RestartCount != 0 || snapshot.LastError != "" {
+		t.Fatalf("supervision degraded worker health: %+v", snapshot)
+	}
+}
+
+// Worker teardown supersedes supervision: a supervisor whose exchange loop is
+// already gone stands down without killing, draining, or touching health.
+// Driven synchronously because reaching the branch through a live pool depends
+// on a scheduler race between loopDone and the final result send.
+func TestProcessWorkerSupervisorStandsDownWhenLoopTornDown(t *testing.T) {
+	worker := &processWorker{logger: testLogger(t)}
+	loopDone := make(chan struct{})
+	close(loopDone)
+	results := make(chan error)
+
+	worker.superviseAbandoned(abandonedExchange{
+		results: results, cancel: func() {}, loopDone: loopDone,
+	})
+
+	snapshot := worker.snapshot()
+	if snapshot.RestartCount != 0 || !snapshot.LastFailure.IsZero() || !snapshot.LastSuccess.IsZero() {
+		t.Fatalf("stand-down touched worker health: %+v", snapshot)
+	}
+}
+
+// The pre-exchange guards run when the queue slot is held by an in-flight
+// exchange: a spent budget reports "never started" once its queued probe
+// times out, and a caller whose enqueue is blocked reports abandonment. Both
+// leave worker health untouched.
+func TestProcessWorkerPreExchangeGuardsWhileQueueHeld(t *testing.T) {
+	exchange := newScriptedExchange()
+	exchange.hangUnits = map[string]bool{"occupier": true}
+	worker := &processWorker{
+		logger:       testLogger(t),
+		mode:         ProcessTransportStdio,
+		testExchange: exchange,
+	}
+
+	// Park the loop on an exchange only this test can release.
+	occCtx, releaseOccupier := context.WithCancel(context.Background())
+	requests, _ := worker.ensureExchangeLoop()
+	occupier := exchangeResultChan()
+	requests <- exchangeRequest{ctx: occCtx, unitID: "occupier", buffer: make([]byte, generated.BUFFER_TOTAL_BYTES), results: occupier}
+	defer recycleResultChan(occupier)
+	time.Sleep(2 * time.Millisecond)
+
+	// Probe with a spent budget, on its own goroutine: it queues behind the
+	// occupier, its deadline fires while queued, and its drain completes once
+	// the released occupier lets the loop reach it.
+	probeDone := make(chan error, 1)
+	go func() {
+		probeDone <- worker.executeWithContext(context.Background(), "probe", newRuntimeBuffer(t, "queued"), time.Now().Add(20*time.Millisecond))
+	}()
+	time.Sleep(5 * time.Millisecond)
+
+	// With the queue slot now held by the probe, a caller cancelled while
+	// its enqueue blocks takes the pre-send abandonment branch.
+	callersCtx, cancelCaller := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		cancelCaller()
+	}()
+	err := worker.executeWithContext(callersCtx, "late-caller", newRuntimeBuffer(t, "blocked"), time.Now().Add(time.Minute))
+	if !errors.Is(err, ErrExchangeAbandoned) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled enqueue error = %v, want abandoned cancellation", err)
+	}
+	snapshot := worker.snapshot()
+	if snapshot.RestartCount != 0 || snapshot.LastError != "" || !snapshot.LastFailure.IsZero() || !snapshot.LastSuccess.IsZero() {
+		t.Fatalf("guards touched worker health: %+v", snapshot)
+	}
+
+	// Hold the occupier past the probe's whole budget so the probe must take
+	// its deadline path rather than completing normally.
+	time.Sleep(40 * time.Millisecond)
+	releaseOccupier()
+	select {
+	case err := <-probeDone:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("probe error = %v, want DeadlineExceeded", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("parked exchange never settled")
+	}
 }
 
 func TestProcessWorkerSharedMemoryGuard(t *testing.T) {
@@ -1126,16 +1331,38 @@ type scriptedExchange struct {
 	restartErr     error
 	closeErr       error
 	waitForContext bool
-	calls          int
-	restarts       int
-	closes         int
+	// hangUnits names unit ids whose Exchange blocks on its context,
+	// letting tests park the exchange loop deterministically and release
+	// it by cancelling the request context they supplied.
+	hangUnits map[string]bool
+	// linger simulates a kernel that finishes its work after the caller
+	// stopped watching: bounded, context-blind work.
+	linger time.Duration
+	// returned receives one value per completed Exchange call, so tests can
+	// synchronize with the exchange-loop goroutine before touching fields.
+	returned chan struct{}
+	calls    int
+	restarts int
+	closes   int
 }
 
-func (x *scriptedExchange) Exchange(ctx context.Context, _ string, _ []byte) error {
+func newScriptedExchange() *scriptedExchange {
+	return &scriptedExchange{returned: make(chan struct{}, 8)}
+}
+
+func (x *scriptedExchange) Exchange(ctx context.Context, unitID string, _ []byte) error {
 	x.calls++
-	if x.waitForContext {
+	defer func() {
+		if x.returned != nil {
+			x.returned <- struct{}{}
+		}
+	}()
+	if x.waitForContext || x.hangUnits[unitID] {
 		<-ctx.Done()
 		return ctx.Err()
+	}
+	if x.linger > 0 {
+		time.Sleep(x.linger)
 	}
 	if len(x.errs) == 0 {
 		return nil

@@ -25,6 +25,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -142,6 +143,58 @@ func TestOperationalAuthNoJWTNoContextRejected(t *testing.T) {
 	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metricsz", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// The pprof surface must stay dark unless configured, and must inherit the
+// operational gate when it is lit: a production ENABLE_PPROF flip without
+// ProtectOperationalEndpoints credentials answers 404 or 401, never a profile.
+func TestProfilingEndpointGatedByConfigAndOperationalAuth(t *testing.T) {
+	log, err := logger.NewDefault()
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	gh := graceful.NewHandler(graceful.WithLogger(log), graceful.WithService("profiling-test"))
+	reg := registry.New(nil, gh, log)
+
+	disabled := New(&Config{Port: 0}, reg, gh)
+	rec := httptest.NewRecorder()
+	disabled.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("disabled profiling status = %d, want 404", rec.Code)
+	}
+
+	unprotected := New(&Config{Port: 0, EnableProfiling: true}, reg, gh)
+	rec = httptest.NewRecorder()
+	unprotected.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/pprof/", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("enabled profiling status = %d, want 200", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	unprotected.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/pprof", nil))
+	// pprof.Index canonically redirects the bare path to the subtree.
+	if rec.Code != http.StatusOK && rec.Code != http.StatusTemporaryRedirect {
+		t.Fatalf("enabled profiling index status = %d, want 200 or 307", rec.Code)
+	}
+
+	// Enabling the surface must also arm the contention profiles: mounted
+	// but unarmed, /debug/pprof/mutex answers 200 with an empty profile, so
+	// a lock-contention investigation reads as "no contention found".
+	rec = httptest.NewRecorder()
+	unprotected.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/pprof/mutex?debug=1", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("mutex profile status = %d, want 200", rec.Code)
+	}
+	if fraction := runtime.SetMutexProfileFraction(-1); fraction <= 0 {
+		t.Fatalf("mutex profile fraction = %d; enabling profiling left it unarmed", fraction)
+	}
+
+	protected := New(&Config{Port: 0, EnableProfiling: true, ProtectOperationalEndpoints: true}, reg, gh)
+	protected.ConfigureAuth(nil, security.NewAuthorizer(nil), true)
+	rec = httptest.NewRecorder()
+	protected.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/debug/pprof/profile?seconds=1", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("protected profiling status = %d, want 401", rec.Code)
 	}
 }
 
