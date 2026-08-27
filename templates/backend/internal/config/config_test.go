@@ -43,3 +43,39 @@ func TestProductionAcceptsUnknownJWTSecret(t *testing.T) {
 		t.Fatalf("production rejected a secret that is not published: %v", err)
 	}
 }
+
+// TestEnvSpellingCannotDowngradePosture guards the fail-open this file's
+// production checks all depend on. RequireAuth, ProtectOperationalEndpoints,
+// the weak-secret rejection and the CORS wildcard rejection are each decided
+// by an exact comparison against "production". Before normalization, an
+// APP_ENV of "Production" or "prod" satisfied none of them while the logger —
+// which compares with EqualFold — reported the process as production. The
+// result was a server that looked deployed and ran open.
+func TestEnvSpellingCannotDowngradePosture(t *testing.T) {
+	for _, spelling := range []string{"production", "Production", "PRODUCTION", " production ", "prod"} {
+		t.Run(spelling, func(t *testing.T) {
+			normalized, err := normalizeEnv(spelling)
+			if err != nil {
+				t.Fatalf("normalizeEnv(%q) returned error: %v", spelling, err)
+			}
+			if normalized != "production" {
+				t.Fatalf("normalizeEnv(%q) = %q, want production", spelling, normalized)
+			}
+			if !(&Config{Env: spelling}).IsProduction() {
+				t.Fatalf("Config{Env: %q}.IsProduction() = false, want true", spelling)
+			}
+		})
+	}
+}
+
+// TestUnrecognizedEnvIsRefused pins the fail-closed direction: an APP_ENV
+// nobody recognizes must stop the boot, not quietly resolve to development.
+func TestUnrecognizedEnvIsRefused(t *testing.T) {
+	for _, spelling := range []string{"prodution", "stage", "live", "PROD_1", "developement"} {
+		t.Run(spelling, func(t *testing.T) {
+			if _, err := normalizeEnv(spelling); err == nil {
+				t.Fatalf("normalizeEnv(%q) succeeded; unrecognized environments must be refused", spelling)
+			}
+		})
+	}
+}

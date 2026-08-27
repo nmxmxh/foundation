@@ -2676,6 +2676,141 @@ WEAK_JWT_DENYLIST
   fi
 }
 
+# Canonicalises APP_ENV before any deployment-posture default reads it.
+#
+# RequireAuth, ProtectOperationalEndpoints, the weak-JWT-secret rejection and
+# the CORS wildcard rejection are each decided by comparing APP_ENV against
+# "production" exactly, while the logger decides the same question with
+# EqualFold. An APP_ENV of "Production" or "prod" therefore produced a server
+# that logged as production and ran the development posture: auth optional,
+# /metricsz and /debug/pprof unauthenticated, placeholder signing keys
+# accepted, wildcard origins allowed. Nothing in the running process said so.
+#
+# Three anchored steps, each guarded on its own presence. The declaration lands
+# before anything references it, and the whole patch declines when its anchor
+# is missing rather than leaving config.go referencing an undeclared symbol —
+# the failure mode patch_config_weak_jwt_denylist records above.
+# @since 0.0.1
+patch_config_env_canonicalization() {
+  local file="$target/internal/config/config.go"
+  [[ -f "$file" ]] || return 0
+
+  # Nothing to canonicalise if the project never reads APP_ENV.
+  if ! grep -Fq 'getEnv("APP_ENV"' "$file"; then
+    return 0
+  fi
+
+  # getEnv is the anchor for the declaration. Every project derived from the
+  # template has it — it is what every line of Load calls — but a project that
+  # does not gets no edit at all rather than a helper hung on an invented shape.
+  if ! grep -Fq 'func getEnv(key, fallback string) string {' "$file"; then
+    return 0
+  fi
+
+  if ! grep -Fq 'func normalizeEnv(' "$file"; then
+    replace_in_file "$file" 'func getEnv(key, fallback string) string {' '// normalizeEnv canonicalises APP_ENV before anything reads it.
+//
+// The entire deployment posture — RequireAuth, ProtectOperationalEndpoints,
+// the weak-JWT-secret check, the CORS wildcard rejection — is decided by
+// comparing this value against "production" exactly. An APP_ENV of
+// "Production" or "prod" therefore produced a server that logged as
+// production (logger compares with EqualFold) while running the development
+// posture. Nothing in the running system announced the difference.
+//
+// Unrecognised values are refused rather than defaulted. A refused boot is a
+// bug report; a silent downgrade to development is an incident.
+func normalizeEnv(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "development", "dev":
+		return "development", nil
+	case "test", "testing":
+		return "test", nil
+	case "production", "prod":
+		return "production", nil
+	default:
+		return "", fmt.Errorf(
+			"APP_ENV %q is not a recognized environment: use development, test, or production",
+			raw,
+		)
+	}
+}
+
+func getEnv(key, fallback string) string {' "config canonicalises APP_ENV before posture defaults read it"
+  fi
+
+  # Every later step references normalizeEnv. If the declaration did not land,
+  # stop here: an unchanged file is recoverable, an uncompilable one is not.
+  if ! grep -Fq 'func normalizeEnv(' "$file"; then
+    return 0
+  fi
+
+  # Predicates and their helper are replaced as one unit, so the use can never
+  # outlive its declaration. Anchored on the template bodies; a project that
+  # has rewritten them keeps its own.
+  if ! grep -Fq 'func (c *Config) envIs(' "$file"; then
+    replace_in_file "$file" 'func (c *Config) IsDevelopment() bool {
+	return c.Env == "development"
+}
+
+func (c *Config) IsProduction() bool {
+	return c.Env == "production"
+}
+
+func (c *Config) IsTest() bool {
+	return c.Env == "test"
+}' '// The predicates below canonicalise through normalizeEnv, so a Config
+// assembled without Load — in a test, or by an embedder — cannot read as
+// development merely because its Env is spelled "Production" or "prod".
+
+func (c *Config) IsDevelopment() bool {
+	return c.envIs("development")
+}
+
+func (c *Config) IsProduction() bool {
+	return c.envIs("production")
+}
+
+func (c *Config) IsTest() bool {
+	return c.envIs("test")
+}
+
+func (c *Config) envIs(name string) bool {
+	normalized, err := normalizeEnv(c.Env)
+	if err != nil {
+		// An Env that Load would have refused names no posture at all, so it
+		// cannot answer true to any of them — least of all production.
+		return false
+	}
+	return normalized == name
+}' "config posture predicates canonicalise APP_ENV spelling"
+  fi
+
+  # The load-time rewrite. Only the local-variable shape is anchored; the
+  # inlined shape is reported below rather than rewritten, because the edit
+  # has to add an error return and there is no safe way to infer where.
+  if grep -Fq 'env := getEnv("APP_ENV", "development")' "$file" \
+    && ! grep -Fq 'normalizeEnv(getEnv("APP_ENV"' "$file"; then
+    replace_in_file "$file" '	env := getEnv("APP_ENV", "development")' '	env, err := normalizeEnv(getEnv("APP_ENV", "development"))
+	if err != nil {
+		return nil, err
+	}' "config refuses an unrecognized APP_ENV at load"
+  fi
+
+  if command -v gofmt >/dev/null 2>&1; then
+    gofmt -w "$file" 2>/dev/null || true
+  fi
+
+  # A project computing its posture defaults straight from getEnv, with no
+  # local to rewrite, still reads an uncanonicalised APP_ENV. Say so: the
+  # predicates above are hardened, but REQUIRE_AUTH and
+  # PROTECT_OPERATIONAL_ENDPOINTS still default off for APP_ENV=Production.
+  if grep -Fq 'getEnv("APP_ENV", "development") ==' "$file"; then
+    printf '[PATCH] NOTE: %s computes posture defaults from an uncanonicalised APP_ENV read;\n' "${file#$target/}" >&2
+    printf '        REQUIRE_AUTH and PROTECT_OPERATIONAL_ENDPOINTS still default off unless\n' >&2
+    printf '        APP_ENV is exactly "production". Hoist it to a local and re-run.\n' >&2
+  fi
+}
+
 # Wires the env-gated pprof surface (server-kit/go/profiling) into projects
 # created before httpserver.Config gained EnableProfiling. Three anchored,
 # individually idempotent edits; each is skipped when its marker or its anchor
@@ -3124,6 +3259,7 @@ patch_worker_engine_canonical
 patch_river_table_readiness_gate
 patch_config_state_store_cache
 patch_config_weak_jwt_denylist
+patch_config_env_canonicalization
 patch_worker_main_river_direct_lane
 patch_startup_state_store_cache_and_river_lane
 patch_server_enable_profiling

@@ -447,8 +447,24 @@ func TestRateLimiterClientIPAndFingerprintFallbacks(t *testing.T) {
 }
 
 func TestPublicPathAndOriginHelpers(t *testing.T) {
-	if !isPublicPath("/healthz/live", nil) || !isPublicPath("/custom/status", []string{"/custom"}) {
+	if !isPublicPath("/health/live", nil) || !isPublicPath("/custom/status", []string{"/custom"}) {
 		t.Fatalf("expected public path match")
+	}
+	// System paths match exactly: a prefix of a listed path is not itself
+	// public. "/metrics" used to be listed and silently opened "/metricsz".
+	if isPublicPath("/metricsz", nil) || isPublicPath("/metricsz/trace", nil) {
+		t.Fatalf("operational surface must not be public")
+	}
+	if isPublicPath("/healthz-internal", nil) {
+		t.Fatalf("system paths must not match mid-segment")
+	}
+	// Configured prefixes stay prefix-matched, but only on a segment boundary.
+	if isPublicPath("/customer/secrets", []string{"/custom"}) {
+		t.Fatalf("prefix match must land on a segment boundary")
+	}
+	// A path that does not survive cleaning is never public.
+	if isPublicPath("/custom/../v1/dispatch", []string{"/custom"}) {
+		t.Fatalf("traversal must not be public")
 	}
 	if isPublicPath("", []string{"/"}) || isPublicPath("/private", []string{"/custom"}) {
 		t.Fatalf("expected private path")

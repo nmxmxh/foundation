@@ -807,6 +807,18 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request) {
 
 	var req httpapi.DispatchRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// security.InputValidation installs the ingress ceiling on r.Body, so
+		// an oversized body surfaces here as a MaxBytesError rather than as
+		// malformed JSON. Reporting it as "invalid json" would send an
+		// operator hunting a payload bug that is really a size limit.
+		var maxBytes *http.MaxBytesError
+		if errors.As(err, &maxBytes) {
+			domainerr.WriteHTTP(w, domainerr.Validation("request_too_large", "request too large"), domainerr.ResponseOptions{
+				Status:    http.StatusRequestEntityTooLarge,
+				EventType: strings.TrimSpace(req.EventType),
+			})
+			return
+		}
 		domainerr.WriteHTTP(w, domainerr.Validation("invalid_json", "invalid json"), domainerr.ResponseOptions{
 			EventType: strings.TrimSpace(req.EventType),
 		})

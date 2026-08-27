@@ -2,9 +2,9 @@ package compress
 
 import (
 	"bytes"
-	"compress/bzip2"
 	"compress/flate"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -22,9 +22,25 @@ const (
 	EncodingDeflate  = "deflate"
 )
 
+// DefaultMaxDecodedBytes bounds a decode whose caller states no ceiling of
+// its own. Compression ratios are attacker-controlled — gzip reaches roughly
+// 1000:1 and zstd far beyond it — so a few megabytes of crafted input expands
+// to gigabytes. Measuring the result after decoding is too late: the
+// allocation has already happened. Every decode here is bounded while it runs.
+const DefaultMaxDecodedBytes int64 = 64 << 20
+
+// ErrDecodedTooLarge reports input that expands past the caller's ceiling.
+// Callers serving HTTP should answer 413 rather than 400: the payload is
+// well-formed, it is merely too large once decoded.
+var ErrDecodedTooLarge = errors.New("compressed payload exceeds decoded size limit")
+
 var (
 	zstdEncoder, _ = zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
-	zstdDecoder, _ = zstd.NewReader(nil)
+	// DecodeAll does not stream, so the decoder's own ceiling is the only
+	// bound available to it. The library default is 64 GiB — reachable by a
+	// single request — so it is pinned to the package default here and
+	// tightened per call by the length check in decompressZstd.
+	zstdDecoder, _ = zstd.NewReader(nil, zstd.WithDecoderMaxMemory(uint64(DefaultMaxDecodedBytes)))
 )
 
 // CompressZstd compresses data with Zstd at the configured level.
@@ -120,53 +136,115 @@ func CompressBest(data []byte, level int) ([]byte, string, error) {
 	return data, EncodingIdentity, nil
 }
 
-// Decompress attempts brotli first, then gzip, then flate.
+// Decompress attempts brotli first, then zstd, then gzip, then flate, under
+// DefaultMaxDecodedBytes. Use DecompressLimit to state a tighter ceiling.
 func Decompress(data []byte) ([]byte, error) {
-	if out, err := decompressBrotli(data); err == nil {
-		return out, nil
-	}
-	if out, err := decompressZstd(data); err == nil {
-		return out, nil
-	}
-	if out, err := decompressGzip(data); err == nil {
-		return out, nil
-	}
-	return decompressFlate(data)
+	return DecompressLimit(data, DefaultMaxDecodedBytes)
 }
 
+// DecompressLimit is Decompress bounded by maxDecoded.
+//
+// Sniffing tries each codec in turn, so a bomb that fails to be one format is
+// still offered to the next. The bound applies to every attempt, not to the
+// sequence: cost stays maxDecoded+1 however many codecs are tried.
+func DecompressLimit(data []byte, maxDecoded int64) ([]byte, error) {
+	maxDecoded = normalizeDecodeLimit(maxDecoded)
+	if out, err := decompressBrotli(data, maxDecoded); err == nil {
+		return out, nil
+	} else if errors.Is(err, ErrDecodedTooLarge) {
+		return nil, err
+	}
+	if out, err := decompressZstd(data, maxDecoded); err == nil {
+		return out, nil
+	} else if errors.Is(err, ErrDecodedTooLarge) {
+		return nil, err
+	}
+	if out, err := decompressGzip(data, maxDecoded); err == nil {
+		return out, nil
+	} else if errors.Is(err, ErrDecodedTooLarge) {
+		return nil, err
+	}
+	return decompressFlate(data, maxDecoded)
+}
+
+// DecompressWithEncoding decodes data under DefaultMaxDecodedBytes. Callers
+// handling untrusted input should state their own ceiling with
+// DecompressWithEncodingLimit.
 func DecompressWithEncoding(data []byte, encoding string) ([]byte, error) {
+	return DecompressWithEncodingLimit(data, encoding, DefaultMaxDecodedBytes)
+}
+
+// DecompressWithEncodingLimit decodes data, refusing to allocate beyond
+// maxDecoded. The ceiling is enforced during the decode, so a decompression
+// bomb costs maxDecoded+1 bytes instead of its full expanded size.
+func DecompressWithEncodingLimit(data []byte, encoding string, maxDecoded int64) ([]byte, error) {
+	maxDecoded = normalizeDecodeLimit(maxDecoded)
 	switch strings.ToLower(strings.TrimSpace(encoding)) {
 	case "", EncodingIdentity:
+		if int64(len(data)) > maxDecoded {
+			return nil, ErrDecodedTooLarge
+		}
 		return append([]byte(nil), data...), nil
 	case EncodingBrotli:
-		return decompressBrotli(data)
+		return decompressBrotli(data, maxDecoded)
 	case EncodingZstd:
-		return decompressZstd(data)
+		return decompressZstd(data, maxDecoded)
 	case EncodingGzip:
-		return decompressGzip(data)
+		return decompressGzip(data, maxDecoded)
 	case EncodingDeflate:
-		return decompressFlate(data)
-	case "bzip2":
-		return io.ReadAll(bzip2.NewReader(bytes.NewReader(data)))
+		return decompressFlate(data, maxDecoded)
 	default:
 		return nil, fmt.Errorf("unsupported content encoding: %s", encoding)
 	}
 }
 
-func decompressBrotli(data []byte) ([]byte, error) {
-	return io.ReadAll(brotli.NewReader(bytes.NewReader(data)))
+func normalizeDecodeLimit(maxDecoded int64) int64 {
+	if maxDecoded <= 0 {
+		return DefaultMaxDecodedBytes
+	}
+	return maxDecoded
 }
 
-func decompressZstd(data []byte) ([]byte, error) {
-	return zstdDecoder.DecodeAll(data, nil)
+// readLimited drains r one byte past the ceiling. Reading maxDecoded+1 is what
+// distinguishes "exactly at the limit" from "over it" without trusting any
+// length the payload declares about itself.
+func readLimited(r io.Reader, maxDecoded int64) ([]byte, error) {
+	out, err := io.ReadAll(io.LimitReader(r, maxDecoded+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(out)) > maxDecoded {
+		return nil, ErrDecodedTooLarge
+	}
+	return out, nil
 }
 
-func decompressGzip(data []byte) ([]byte, error) {
+func decompressBrotli(data []byte, maxDecoded int64) ([]byte, error) {
+	return readLimited(brotli.NewReader(bytes.NewReader(data)), maxDecoded)
+}
+
+func decompressZstd(data []byte, maxDecoded int64) ([]byte, error) {
+	out, err := zstdDecoder.DecodeAll(data, nil)
+	if err != nil {
+		// The decoder's own ceiling is DefaultMaxDecodedBytes; report a
+		// breach of it in the same terms as a breach of the caller's.
+		if errors.Is(err, zstd.ErrDecoderSizeExceeded) {
+			return nil, ErrDecodedTooLarge
+		}
+		return nil, err
+	}
+	if int64(len(out)) > maxDecoded {
+		return nil, ErrDecodedTooLarge
+	}
+	return out, nil
+}
+
+func decompressGzip(data []byte, maxDecoded int64) ([]byte, error) {
 	zr, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
-	out, readErr := io.ReadAll(zr)
+	out, readErr := readLimited(zr, maxDecoded)
 	closeErr := zr.Close()
 	if readErr != nil {
 		return nil, readErr
@@ -177,9 +255,9 @@ func decompressGzip(data []byte) ([]byte, error) {
 	return out, nil
 }
 
-func decompressFlate(data []byte) ([]byte, error) {
+func decompressFlate(data []byte, maxDecoded int64) ([]byte, error) {
 	zr := flate.NewReader(bytes.NewReader(data))
-	out, readErr := io.ReadAll(zr)
+	out, readErr := readLimited(zr, maxDecoded)
 	closeErr := zr.Close()
 	if readErr != nil {
 		return nil, readErr

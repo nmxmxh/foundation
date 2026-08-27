@@ -42,6 +42,11 @@ type wsRuntime struct {
 	startedAt     time.Time
 }
 
+// wsDecompressionRatioCeiling caps how far an inbound frame may expand past
+// the read limit. Real envelopes compress well under 8:1; a payload claiming
+// more is a bomb, not a message.
+const wsDecompressionRatioCeiling = 8
+
 // wsRawConn is the subset of *websocket.Conn the connection goroutines drive.
 // Holding the field as an interface lets tests inject a socket whose writes fail
 // on demand, so the writer's disconnect branch is covered deterministically
@@ -297,6 +302,25 @@ func (s *Server) unregisterWSConnection(ctx context.Context, conn *wsConnection)
 	}
 }
 
+// runWSReader drains one connection's frames and dispatches each in turn.
+//
+// There is deliberately no per-message rate limit here. The HTTP limiter sees
+// only the handshake, so this loop is unmetered by construction — that is the
+// point of a stream-native transport, not a gap in it. Throttling per message
+// would price ordinary traffic (a live projection tail is thousands of small
+// frames) to bound an abuse the surrounding limits already contain:
+//
+//   - SetReadLimit caps each frame, and wsMaxDecodedBytes caps what it may
+//     expand to, so no single message can be made expensive.
+//   - reserveWSConnectionSlot caps concurrent connections, and guestLimiter
+//     rate-limits handshakes per IP, so connections cannot be farmed.
+//   - An unauthenticated connection may only send guest-allowed event types
+//     and expires at wsGuestIdleTimeout.
+//
+// What remains unbounded is message *rate* on an established connection. If
+// that ever needs an answer, the answer is an extreme-case ceiling — a circuit
+// breaker on egregious volume — not a per-message budget.
+//
 //nolint:gocognit // Reader loop keeps protocol validation, auth gating, dispatch, and metrics in one ordered hot path.
 func (s *Server) runWSReader(ctx context.Context, conn *wsConnection) {
 	for {
@@ -855,6 +879,15 @@ func (c *wsConnection) prefersBinaryFormat() bool {
 	return c.binaryFormat
 }
 
+// wsMaxDecodedBytes is the ceiling for decompressing an inbound frame.
+// Derived from the read limit so a deployment that raises one raises both.
+func (s *Server) wsMaxDecodedBytes() int64 {
+	if s.wsReadLimitBytes <= 0 {
+		return kitcompress.DefaultMaxDecodedBytes
+	}
+	return s.wsReadLimitBytes * wsDecompressionRatioCeiling
+}
+
 func (s *Server) decodeWSEnvelope(messageType int, payload []byte) (events.Envelope, bool, error) {
 	switch messageType {
 	case websocket.BinaryMessage:
@@ -862,7 +895,11 @@ func (s *Server) decodeWSEnvelope(messageType int, payload []byte) (events.Envel
 			return env, true, nil
 		}
 		if s.wsCompressionEnabled {
-			if decompressed, err := kitcompress.Decompress(payload); err == nil {
+			// SetReadLimit bounds the frame on the wire, not what it expands
+			// to. Compression exists so a payload can exceed its frame, so the
+			// decoded ceiling is a multiple of the read limit rather than equal
+			// to it — generous for real traffic, finite for a bomb.
+			if decompressed, err := kitcompress.DecompressLimit(payload, s.wsMaxDecodedBytes()); err == nil {
 				if env, decodeErr := events.Decode(decompressed); decodeErr == nil {
 					return env, true, nil
 				}
