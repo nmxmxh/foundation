@@ -13,6 +13,10 @@ Do not use these requirements to slow down ordinary product work. Use them when
 the change claims a performance win, changes a hot path, or introduces a new
 runtime lane.
 
+The system lane — perf sampling, hardware counters, syscall attribution, and
+the build flags that make a binary symbolizable at all — is owned by
+`system_profiling_practices.md`.
+
 ## Measurement Lanes
 
 | Lane | Minimum evidence |

@@ -1,0 +1,10 @@
+# Symbol-stripping build sites and how a capture against them gets symbolized.
+# PERFLAB-05 (docs/system_profiling_practices.md): a build that drops the
+# symbol table is correct for a shipped artifact and useless for a profile.
+# Every site below must name the path back to symbols for the same build SHA.
+# path	artifact	symbolization
+templates/docker/Dockerfile	server image	rebuild the same SHA without -ldflags="-s -w", or retain the unstripped ./bin/server from the builder stage as a build artifact
+templates/Makefile.cicd	CI server binary	profiling builds use the plain `go build` target in templates/Makefile, which does not strip
+templates/Makefile	main.wasm	not perf-symbolizable in any build; WASM claims use the browser workbench profile lane (docs/frontend_runtime_workbench.md)
+templates/github/workflows/ci.yml	CI server binary	CI does not profile; profiling runs rebuild locally without -ldflags="-s -w"
+tooling/scripts/scaffold_managed_patches.sh	managed patch text	propagates the templates/docker/Dockerfile flag; symbolization follows that row

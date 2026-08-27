@@ -62,7 +62,7 @@ Then read deeply into domains that matter for your product:
 - **Data**: `database_practices.md`, `redis_practices.md`, `mesh_dispatch_practices.md`, `hermes_hotplane.md`, `projection_freshness_contract.md`, `columnar_null_algebra.md`
 - **Observability**: `delivery_metrics_practices.md`, `performance_practices.md`
 - **Security**: `security_practices.md`, `ai_threat_model.md`, `post_quantum_security.md`
-- **Performance**: `performance_lab.md`, `foundation_benchmarks.md`, `optimization_points.md`, `runtime_transport_optimization.md`
+- **Performance**: `performance_lab.md`, `foundation_benchmarks.md`, `optimization_points.md`, `runtime_transport_optimization.md`, `system_profiling_practices.md`
 
 ### Working With AI Agents or Partners
 
@@ -130,6 +130,7 @@ Read in order:
 | --- | --- |
 | `performance_practices.md` | Cross-cutting Go, networking, PostgreSQL, Rust benchmarking rules |
 | `performance_lab.md` | Low-level evidence contract for CPU, allocator, syscall, I/O, WASM, FFI, GPU lanes |
+| `system_profiling_practices.md` | perf/system lane: symbols, sampling vs event tracing, counters, and the build and design rules profiling implies |
 | `foundation_benchmarks.md` | Benchmark commands, reference runs, interpretation, performance ladder |
 | `runtime_transport_optimization.md` | Why the ffi/shm/stdio lanes cost what they cost, per-transport decision table, cold-start trap |
 | `rust_runtime_practices.md` | Rust/WASM/native runtime coding, async, performance, error-handling |

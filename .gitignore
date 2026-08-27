@@ -63,3 +63,10 @@ agent_memory/
 **/states/
 **/*_TTrace_*.tla
 .tla-scratch/
+
+# Profiling captures are artifacts, not source (PERFLAB-08,
+# docs/system_profiling_practices.md).
+perf.data
+perf.data.old
+**/*.folded
+**/*.pprof

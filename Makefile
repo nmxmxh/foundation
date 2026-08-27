@@ -3,7 +3,7 @@
 	check-core-validation-contract check-contract-drift check-runtime-contract-field-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
 	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-package-licenses check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux \
-	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet check-benchmark-ratchet check-transport-ladder lifecycle-manifest
+	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet check-benchmark-ratchet check-transport-ladder check-system-profiling lifecycle-manifest
 
 .DEFAULT_GOAL := help
 
@@ -63,6 +63,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-app-security-profile \
 	check-coverage-ratchet \
 	check-transport-ladder \
+	check-system-profiling \
 	check-benchmark-ratchet \
 	check-github-workflows
 
@@ -450,6 +451,9 @@ check-benchmark-ratchet:
 
 check-transport-ladder:
 	@tooling/scripts/transport_ladder_check.sh .
+
+check-system-profiling:
+	@tooling/scripts/system_profiling_check.sh .
 
 lifecycle-manifest:
 	@proto_root=api/protos; \
