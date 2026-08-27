@@ -35,14 +35,14 @@ func BenchmarkDecompressLargeBatch(b *testing.B) {
 	b.Run("Brotli", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			_, _ = decompressBrotli(brData)
+			_, _ = decompressBrotli(brData, DefaultMaxDecodedBytes)
 		}
 	})
 
 	b.Run("Zstd", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			_, _ = decompressZstd(zstdData)
+			_, _ = decompressZstd(zstdData, DefaultMaxDecodedBytes)
 		}
 	})
 }

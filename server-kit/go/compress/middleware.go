@@ -2,6 +2,7 @@ package compress
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -90,13 +91,12 @@ func HTTPRequestDecompressionMiddleware(enabled bool, maxDecodedBytes int64) fun
 				http.Error(w, "invalid request body", http.StatusBadRequest)
 				return
 			}
-			decoded, err := DecompressWithEncoding(payload, encoding)
+			// Bounded during the decode, not after it: the previous form
+			// measured decoded once it was already resident, which a bomb
+			// reaching gigabytes never survives to answer.
+			decoded, err := DecompressWithEncodingLimit(payload, encoding, maxDecodedBytes)
 			if err != nil {
-				http.Error(w, "invalid compressed request body", http.StatusBadRequest)
-				return
-			}
-			if int64(len(decoded)) > maxDecodedBytes {
-				http.Error(w, "request body too large after decompression", http.StatusRequestEntityTooLarge)
+				writeDecodeError(w, err)
 				return
 			}
 			r.Body = io.NopCloser(bytes.NewReader(decoded))
@@ -106,6 +106,16 @@ func HTTPRequestDecompressionMiddleware(enabled bool, maxDecodedBytes int64) fun
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// writeDecodeError separates "too big" from "malformed": both are refusals,
+// but only one tells the client that a smaller body would have worked.
+func writeDecodeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrDecodedTooLarge) {
+		http.Error(w, "request body too large after decompression", http.StatusRequestEntityTooLarge)
+		return
+	}
+	http.Error(w, "invalid compressed request body", http.StatusBadRequest)
 }
 
 // isUpgradeRequest reports whether the request negotiates a protocol upgrade

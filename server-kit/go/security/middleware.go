@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"net/http"
+	stdpath "path"
 	"strings"
 	"sync"
 	"time"
@@ -153,14 +154,27 @@ func isOriginAllowed(origin string, allowed []string) bool {
 	return false
 }
 
+// MaxRequestBytes is the ingress ceiling on a request body, measured on the
+// wire. A compressed body is additionally bounded by its decoded size in the
+// decompression middleware.
+const MaxRequestBytes int64 = 15 * 1024 * 1024
+
 // InputValidation applies generic payload safety checks and content-type enforcement.
 func InputValidation(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.ContentLength > 15*1024*1024 { // 15MB limit
+		// Declared length is a fast reject, not the enforcement: ContentLength
+		// is -1 under Transfer-Encoding: chunked, which passed this test
+		// trivially and left the body unbounded all the way to the handler.
+		if r.ContentLength > MaxRequestBytes {
 			domainerr.WriteHTTP(w, domainerr.Validation("request_too_large", "request too large"), domainerr.ResponseOptions{
 				Status: http.StatusRequestEntityTooLarge,
 			})
 			return
+		}
+		// The ceiling every downstream reader inherits, whatever the request
+		// claimed about its own size.
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, MaxRequestBytes)
 		}
 
 		if r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch {
@@ -291,6 +305,15 @@ func isPublicPath(path string, publicPaths []string) bool {
 		return false
 	}
 
+	// A path that does not survive cleaning is never public. Go's ServeMux
+	// redirects unclean paths rather than serving them, so traversal cannot
+	// reach a handler today — but that makes the mux the thing standing
+	// between "/healthz/../v1/dispatch" and an unauthenticated dispatch. This
+	// check keeps the auth decision from depending on routing behaviour.
+	if cleaned := stdpath.Clean(path); cleaned != path {
+		return false
+	}
+
 	// The server root serves API docs (see apidocs.ServeIndex); expose it
 	// publicly by exact match. "/" must never be added to a prefix-matched
 	// public list — every path starts with "/", which would make the whole
@@ -299,10 +322,19 @@ func isPublicPath(path string, publicPaths []string) bool {
 		return true
 	}
 
-	// Hardcoded system public paths
+	// System public paths are matched exactly. Prefix-matching them was a
+	// silent widening: "/metrics" is not a route, but it is a prefix of
+	// "/metricsz" and "/metricsz/trace", which quietly classified the
+	// operational surface as public.
 	systemPublic := []string{
+		// The whole health family, named exactly. Under prefix matching only
+		// "/healthz" was listed, so "/health/live" and "/health/ready" — the
+		// routes an orchestrator actually probes — were never public and
+		// answered 401 wherever auth was required.
 		"/healthz",
-		"/metrics",
+		"/health",
+		"/health/live",
+		"/health/ready",
 		"/ws",
 		"/api/auth/login",
 		"/api/auth/register",
@@ -315,17 +347,38 @@ func isPublicPath(path string, publicPaths []string) bool {
 	}
 
 	for _, p := range systemPublic {
-		if strings.HasPrefix(path, p) {
+		if path == p {
 			return true
 		}
 	}
 
+	// Configured public paths stay prefix-matched: registerPublicRoutePaths
+	// truncates route templates at their first "{" precisely so the static
+	// prefix covers every concrete parameter value. The match must land on a
+	// segment boundary, so "/v1/media/objects" cannot also open
+	// "/v1/media/objectstore-admin".
 	for _, publicPath := range publicPaths {
-		if strings.HasPrefix(path, publicPath) {
+		if matchesPathPrefix(path, publicPath) {
 			return true
 		}
 	}
 	return false
+}
+
+// matchesPathPrefix reports whether path is prefix itself or sits beneath it,
+// requiring the prefix to end on a "/" boundary rather than mid-segment.
+func matchesPathPrefix(path, prefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" || prefix == "/" {
+		return false
+	}
+	if path == prefix {
+		return true
+	}
+	if strings.HasSuffix(prefix, "/") {
+		return strings.HasPrefix(path, prefix)
+	}
+	return strings.HasPrefix(path, prefix) && path[len(prefix)] == '/'
 }
 
 func requestFingerprint(r *http.Request) string {

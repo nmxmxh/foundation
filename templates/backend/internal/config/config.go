@@ -116,7 +116,10 @@ type Config struct {
 
 // Load loads configuration from environment variables
 func Load() (*Config, error) {
-	env := getEnv("APP_ENV", "development")
+	env, err := normalizeEnv(getEnv("APP_ENV", "development"))
+	if err != nil {
+		return nil, err
+	}
 	cfg := &Config{
 		Env:                                 env,
 		Port:                                getEnvInt("PORT", 8080),
@@ -244,7 +247,7 @@ var knownWeakJWTSecrets = map[string]struct{}{
 }
 
 func (c *Config) validateSecurity() error {
-	if c.JWTSecret == "" && c.Env == "production" {
+	if c.JWTSecret == "" && c.IsProduction() {
 		return fmt.Errorf("JWT_SECRET is required in production")
 	}
 	if c.RequireAuth && c.JWTSecret == "" {
@@ -313,16 +316,61 @@ func (c *Config) validateRuntime() error {
 	return nil
 }
 
+// The predicates below canonicalise through normalizeEnv, so a Config
+// assembled without Load — in a test, or by an embedder — cannot read as
+// development merely because its Env is spelled "Production" or "prod". Load
+// canonicalises Env already, making this redundant on that path and
+// load-bearing on every other.
+
 func (c *Config) IsDevelopment() bool {
-	return c.Env == "development"
+	return c.envIs("development")
 }
 
 func (c *Config) IsProduction() bool {
-	return c.Env == "production"
+	return c.envIs("production")
 }
 
 func (c *Config) IsTest() bool {
-	return c.Env == "test"
+	return c.envIs("test")
+}
+
+func (c *Config) envIs(name string) bool {
+	normalized, err := normalizeEnv(c.Env)
+	if err != nil {
+		// An Env that Load would have refused names no posture at all, so it
+		// cannot answer true to any of them — least of all production.
+		return false
+	}
+	return normalized == name
+}
+
+// normalizeEnv canonicalises APP_ENV before anything reads it.
+//
+// The entire deployment posture — RequireAuth, ProtectOperationalEndpoints,
+// the weak-JWT-secret check, the CORS wildcard rejection — is decided by
+// comparing this value against "production" exactly. An APP_ENV of
+// "Production" or "prod" therefore produced a server that logged as
+// production (logger compares with EqualFold) while running the development
+// posture: auth optional, operational endpoints unauthenticated, placeholder
+// signing keys accepted, wildcard origins allowed. Nothing in the running
+// system announced the difference.
+//
+// Unrecognised values are refused rather than defaulted. A refused boot is a
+// bug report; a silent downgrade to development is an incident.
+func normalizeEnv(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "development", "dev":
+		return "development", nil
+	case "test", "testing":
+		return "test", nil
+	case "production", "prod":
+		return "production", nil
+	default:
+		return "", fmt.Errorf(
+			"APP_ENV %q is not a recognized environment: use development, test, or production",
+			raw,
+		)
+	}
 }
 
 func getEnv(key, fallback string) string {

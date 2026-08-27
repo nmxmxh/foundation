@@ -2,9 +2,11 @@ package compress
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -390,4 +392,64 @@ func TestHTTPMiddlewareSkipsUpgradeRequests(t *testing.T) {
 
 type markerResponseWriter struct {
 	http.ResponseWriter
+}
+
+// TestDecompressionBombIsBoundedDuringDecode pins the property that makes the
+// ceiling meaningful: it must stop the decode, not measure its result.
+//
+// The earlier form decoded fully and then compared len(decoded) against the
+// limit, so a payload that expands to gigabytes was already resident by the
+// time it was judged too large. Ten megabytes of crafted gzip reaches roughly
+// ten gigabytes; zstd, whose decoder defaulted to a 64 GiB ceiling, reaches
+// further. Both are an OOM a single unauthenticated request can trigger.
+//
+// The assertion is on cost, not just on the error: a bound that rejects the
+// payload only after allocating it has not bounded anything.
+func TestDecompressionBombIsBoundedDuringDecode(t *testing.T) {
+	const (
+		bombSize = 256 << 20 // 256MB of zeroes: compresses to a few hundred KB.
+		ceiling  = 1 << 20   // 1MB caller ceiling.
+	)
+
+	for _, tc := range []struct {
+		encoding string
+		compress func([]byte) ([]byte, error)
+	}{
+		{EncodingGzip, func(b []byte) ([]byte, error) { return CompressGzip(b, 9) }},
+		{EncodingZstd, CompressZstd},
+		{EncodingBrotli, func(b []byte) ([]byte, error) { return CompressBrotli(b, 4) }},
+		{EncodingDeflate, func(b []byte) ([]byte, error) { return CompressFlate(b, 9) }},
+	} {
+		t.Run(tc.encoding, func(t *testing.T) {
+			bomb, err := tc.compress(make([]byte, bombSize))
+			if err != nil {
+				t.Fatalf("building %s bomb: %v", tc.encoding, err)
+			}
+			if int64(len(bomb)) > ceiling {
+				t.Fatalf("%s bomb is %d bytes compressed; it must fit under the "+
+					"ceiling it defeats, or the test proves nothing", tc.encoding, len(bomb))
+			}
+
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+
+			out, err := DecompressWithEncodingLimit(bomb, tc.encoding, ceiling)
+
+			runtime.ReadMemStats(&after)
+
+			if !errors.Is(err, ErrDecodedTooLarge) {
+				t.Fatalf("%s bomb: err = %v, want ErrDecodedTooLarge (decoded %d bytes)",
+					tc.encoding, err, len(out))
+			}
+			// Allow generous slack for decoder scratch space while still
+			// failing loudly if the full expansion was materialised.
+			const allowed = 16 * ceiling
+			if grew := after.TotalAlloc - before.TotalAlloc; grew > allowed {
+				t.Fatalf("%s bomb allocated %d bytes against a %d ceiling; the limit "+
+					"is being applied after the decode, not during it",
+					tc.encoding, grew, ceiling)
+			}
+		})
+	}
 }
