@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev run-local dev-local build build-server build-frontend build-runtime test-go-race test-rust-loom communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime frontend-commands runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-redeploy docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-markdown-frontmatter check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-sql-prepare check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+.PHONY: all setup deps install-tools dev run-local dev-local build build-server build-profiling build-frontend build-runtime test-go-race test-rust-loom communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime frontend-commands runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-redeploy docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-markdown-frontmatter check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-sql-prepare check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-system-profiling check-project-scaffold
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -271,6 +271,19 @@ build-server:
 		$(GOBUILD) -o bin/server ./cmd/server; \
 	else \
 		echo "No Go module; skipping server build"; \
+	fi
+
+build-profiling:
+	@# PERFLAB-05 (docs/foundation/system_profiling_practices.md): the shipped
+	@# image strips symbols, which is correct for shipping and useless for a
+	@# profile. This builds the symbolizable counterpart of the same SHA.
+	@if [ -f go.mod ]; then \
+		mkdir -p bin; \
+		$(GOBUILD) -o bin/server-profiling ./cmd/server; \
+		echo "unstripped Go server: bin/server-profiling"; \
+	fi
+	@if [ -f Cargo.toml ] || [ -f runtime/rust/Cargo.toml ]; then \
+		echo "rust profiling build: RUSTFLAGS=\"-C force-frame-pointers=yes -C debuginfo=1\" cargo build --release"; \
 	fi
 
 docgen:
@@ -770,7 +783,7 @@ lint-frontend: frontend-prototype-runtime
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-FOUNDATION_LINT_CHECKS := check-doc-references check-markdown-frontmatter check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-project-scaffold
+FOUNDATION_LINT_CHECKS := check-doc-references check-markdown-frontmatter check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-server-kit-module-contract check-server-kit-usage check-system-profiling check-project-scaffold
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 
 lint-foundation:
@@ -791,6 +804,9 @@ lint-foundation:
 
 check-go-fix:
 	@zsh ./scripts/checks/go_fix_check.sh .
+
+check-system-profiling:
+	@zsh ./scripts/checks/system_profiling_check.sh .
 
 check-go-static-analysis:
 	@zsh ./scripts/checks/go_static_analysis_check.sh .

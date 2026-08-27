@@ -12,6 +12,10 @@ PERFLAB-01|docs/performance_lab.md|performance|high|contextual|script:tooling/sc
 PERFLAB-02|docs/foundation_benchmarks.md|performance|medium|strong|script:tooling/scripts/benchmark_evidence_check.sh|benchmark-evidence|yes
 PERFLAB-03|docs/performance_practices.md|performance|high|strong|script:tooling/scripts/benchmark_ratchet_check.sh|allocation-ceiling|yes
 PERFLAB-04|docs/performance_practices.md|performance|high|strong|script:tooling/scripts/transport_ladder_check.sh|transport-ladder|yes
+PERFLAB-05|docs/system_profiling_practices.md|performance|medium|strong|script:tooling/scripts/system_profiling_check.sh|profiling-symbol-site|yes
+PERFLAB-06|docs/system_profiling_practices.md|performance|medium|strong|script:tooling/scripts/system_profiling_check.sh|bounded-perf-capture|yes
+PERFLAB-07|docs/system_profiling_practices.md|performance|medium|partial|script:tooling/scripts/system_profiling_check.sh;review|observer-overhead-ack|yes
+PERFLAB-08|docs/system_profiling_practices.md|performance|low|strong|script:tooling/scripts/system_profiling_check.sh|profile-artifact-ignore|yes
 RUNTIME-01|docs/performance_lab.md|performance|high|partial|script:tooling/scripts/runtime_performance_contract_check.sh;script:tooling/scripts/performance_check.sh;review|profile-trace-benchmark|yes
 FORMAL-01|docs/tla_architecture_practices.md|formal|high|partial|script:tooling/scripts/formal_methods_check.sh;review|spec-template|yes
 OPS-01|docs/delivery_metrics_practices.md|operations|high|partial|script:tooling/scripts/operational_excellence_check.sh;review|delivery-event|yes

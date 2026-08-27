@@ -20,6 +20,7 @@ Related docs:
 - `foundation/docs/performance_lab.md`
 - `foundation/docs/runtime_foundation.md`
 - `foundation/docs/rust_runtime_practices.md`
+- `foundation/docs/system_profiling_practices.md`
 - `foundation/docs/tla_architecture_practices.md`
 - `foundation/docs/websocket_scaling.md`
 
