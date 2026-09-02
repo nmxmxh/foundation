@@ -146,6 +146,40 @@ func TestColumnarSnapshotRoundTripParity(t *testing.T) {
 	}
 }
 
+func TestColumnarSnapshotUsesFixedWidthVectorFormatOnlyForUniformVectors(t *testing.T) {
+	uniform := []database.DomainRecord{
+		{Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "a", Vector: []float32{1, 2}},
+		{Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "b", Vector: []float32{3, 4}},
+	}
+	payload, err := encodeColumnarSnapshot(uniform)
+	if err != nil {
+		t.Fatalf("encodeColumnarSnapshot() error = %v", err)
+	}
+	if got := [4]byte(payload[:4]); got != fixedWidthVectorSnapshotMagic {
+		t.Fatalf("uniform snapshot magic = %q, want %q", got, fixedWidthVectorSnapshotMagic)
+	}
+	var decoded []database.DomainRecord
+	if err := streamSnapshotRecords(payload, func(record database.DomainRecord) error {
+		decoded = append(decoded, record)
+		return nil
+	}); err != nil {
+		t.Fatalf("streamSnapshotRecords(HCS3) error = %v", err)
+	}
+	if len(decoded) != len(uniform) || len(decoded[1].Vector) != 2 || decoded[1].Vector[1] != 4 {
+		t.Fatalf("HCS3 round trip = %+v, want uniform vectors", decoded)
+	}
+
+	mixed := append([]database.DomainRecord(nil), uniform...)
+	mixed[1].Vector = []float32{3}
+	payload, err = encodeColumnarSnapshot(mixed)
+	if err != nil {
+		t.Fatalf("encodeColumnarSnapshot(mixed) error = %v", err)
+	}
+	if got := [4]byte(payload[:4]); got != columnarSnapshotMagic {
+		t.Fatalf("mixed snapshot magic = %q, want %q", got, columnarSnapshotMagic)
+	}
+}
+
 // BenchmarkHermesWarmFromSnapshotFormats compares cold-warm cost per artifact
 // format on the same 10K-record partition. artifact_bytes reports payload
 // size; the columnar row exists to prove the decode-bound insight from the

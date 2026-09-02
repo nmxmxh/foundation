@@ -39,11 +39,20 @@ import (
 // payload returns ErrSnapshotCorrupt instead of panicking.
 var columnarSnapshotMagic = [4]byte{'H', 'C', 'S', '1'}
 
+// fixedWidthVectorSnapshotMagic is HCS3. It stores one declared dimension and
+// a contiguous row-major F32 matrix. HCS1 remains the fallback for mixed or
+// absent vectors.
+var fixedWidthVectorSnapshotMagic = [4]byte{'H', 'C', 'S', '3'}
+
 // isColumnarSnapshot sniffs the artifact format so readers stay compatible
 // with row-proto artifacts already in stores (FallbackRefinement: format is an
 // implementation detail hidden behind the same warm/compare semantics).
 func isColumnarSnapshot(payload []byte) bool {
-	return len(payload) >= 4 && [4]byte(payload[:4]) == columnarSnapshotMagic
+	if len(payload) < 4 {
+		return false
+	}
+	magic := [4]byte(payload[:4])
+	return magic == columnarSnapshotMagic || magic == fixedWidthVectorSnapshotMagic
 }
 
 // streamSnapshotRecords decodes any snapshot artifact — chunked HCS2, columnar HCS1 by magic
@@ -80,7 +89,12 @@ func encodeColumnarSnapshot(records []database.DomainRecord) ([]byte, error) {
 		return nil, errors.New("hermes columnar snapshot exceeds u32 record count")
 	}
 	buf := make([]byte, 0, 64+n*32)
-	buf = append(buf, columnarSnapshotMagic[:]...)
+	vectorDimensions, fixedVectors := fixedVectorDimensions(records)
+	if fixedVectors {
+		buf = append(buf, fixedWidthVectorSnapshotMagic[:]...)
+	} else {
+		buf = append(buf, columnarSnapshotMagic[:]...)
+	}
 	// n <= MaxUint32, validated above.
 	buf = appendU32(buf, uint32(n)) // #nosec G115 -- guarded by the record-count check above.
 
@@ -115,14 +129,23 @@ func encodeColumnarSnapshot(records []database.DomainRecord) ([]byte, error) {
 	}
 	if hasVectors {
 		buf = append(buf, 1)
-		for _, rec := range records {
-			floats, err := u32Len(len(rec.Vector), "vector")
-			if err != nil {
-				return nil, err
+		if fixedVectors {
+			buf = appendU32(buf, vectorDimensions)
+			for _, rec := range records {
+				for _, f := range rec.Vector {
+					buf = binary.LittleEndian.AppendUint32(buf, math.Float32bits(f))
+				}
 			}
-			buf = appendU32(buf, floats)
-			for _, f := range rec.Vector {
-				buf = binary.LittleEndian.AppendUint32(buf, math.Float32bits(f))
+		} else {
+			for _, rec := range records {
+				floats, err := u32Len(len(rec.Vector), "vector")
+				if err != nil {
+					return nil, err
+				}
+				buf = appendU32(buf, floats)
+				for _, f := range rec.Vector {
+					buf = binary.LittleEndian.AppendUint32(buf, math.Float32bits(f))
+				}
 			}
 		}
 	} else {
@@ -176,12 +199,30 @@ func encodeColumnarSnapshot(records []database.DomainRecord) ([]byte, error) {
 	return buf, nil
 }
 
+func fixedVectorDimensions(records []database.DomainRecord) (uint32, bool) {
+	if len(records) == 0 || len(records[0].Vector) == 0 {
+		return 0, false
+	}
+	dimensions, err := u32Len(len(records[0].Vector), "vector dimensions")
+	if err != nil {
+		return 0, false
+	}
+	for _, record := range records[1:] {
+		if len(record.Vector) != int(dimensions) {
+			return 0, false
+		}
+	}
+	return dimensions, true
+}
+
 // decodeColumnarSnapshot streams records out of an HCS1 payload. Every text
 // value is a substring of one shared blob string, so decode cost scales with
 // columns, not records×fields.
 func decodeColumnarSnapshot(payload []byte, visit database.RecordVisitor) error {
 	c := &columnarCursor{buf: payload}
-	if magic := c.bytes(4); c.err != nil || [4]byte(magic) != columnarSnapshotMagic {
+	magic := [4]byte(c.bytes(4))
+	fixedVectors := magic == fixedWidthVectorSnapshotMagic
+	if c.err != nil || (!fixedVectors && magic != columnarSnapshotMagic) {
 		return fmt.Errorf("%w: bad columnar snapshot magic", ErrSnapshotCorrupt)
 	}
 	n := int(c.u32())
@@ -195,20 +236,32 @@ func decodeColumnarSnapshot(payload []byte, visit database.RecordVisitor) error 
 	var vectors [][]float32
 	if flag := c.bytes(1); c.err == nil && len(flag) == 1 && flag[0] == 1 {
 		vectors = make([][]float32, n)
-		for i := 0; i < n && c.err == nil; i++ {
-			floats := int(c.u32())
-			if floats == 0 {
-				continue
+		if fixedVectors {
+			dimensions := int(c.u32())
+			for i := 0; i < n && c.err == nil; i++ {
+				raw := c.bytes(dimensions * 4)
+				vec := make([]float32, dimensions)
+				for j := range vec {
+					vec[j] = math.Float32frombits(binary.LittleEndian.Uint32(raw[j*4:]))
+				}
+				vectors[i] = vec
 			}
-			raw := c.bytes(floats * 4)
-			if c.err != nil {
-				break
+		} else {
+			for i := 0; i < n && c.err == nil; i++ {
+				floats := int(c.u32())
+				if floats == 0 {
+					continue
+				}
+				raw := c.bytes(floats * 4)
+				if c.err != nil {
+					break
+				}
+				vec := make([]float32, floats)
+				for j := range vec {
+					vec[j] = math.Float32frombits(binary.LittleEndian.Uint32(raw[j*4:]))
+				}
+				vectors[i] = vec
 			}
-			vec := make([]float32, floats)
-			for j := range vec {
-				vec[j] = math.Float32frombits(binary.LittleEndian.Uint32(raw[j*4:]))
-			}
-			vectors[i] = vec
 		}
 	}
 

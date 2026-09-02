@@ -202,6 +202,15 @@ export type RuntimeColumnarBatchDescriptor = {
   fields: RuntimeColumnarFieldDescriptor[];
 };
 
+// RuntimeFloat32MatrixDescriptor names the shape of one dense arena column.
+// Model identity and encoding remain application contracts until Foundation
+// promotes the cross-language model-generation contract.
+export type RuntimeFloat32MatrixDescriptor = {
+  field: RuntimeColumnarFieldDescriptor;
+  rows: number;
+  dimensions: number;
+};
+
 const descriptorOffset = (id: number): number =>
   ARENA_OFFSET_DESCRIPTOR_TABLE + id * ARENA_DESCRIPTOR_SIZE;
 
@@ -978,6 +987,36 @@ export const decodeRuntimeColumnarBatchDescriptor = (
     dictionaryDescriptorId: view.getUint32(COLUMNAR_BATCH_HEADER_IDX_DICTIONARY_DESCRIPTOR_ID * 4, true),
     fields,
   };
+};
+
+// MAX_FLOAT32_MATRIX_ELEMENTS bounds rows*dimensions so the 4-byte-wide slab
+// stays addressable as a uint32 byte length, mirroring the Go host's
+// maxFixedWidth4Elements (math.MaxUint32 / 4).
+const MAX_FLOAT32_MATRIX_ELEMENTS = Math.floor(0xffffffff / 4);
+
+// describeFloat32Matrix validates a dense F32 column's shape and returns its
+// descriptor. It is the descriptor-plane analogue of the Go host's
+// runtimehost.WriteFloat32Matrix: it rejects an empty shape and any field
+// whose length does not equal rows*dimensions, so a matrix descriptor never
+// disagrees with the column it names.
+export const describeFloat32Matrix = (
+  field: RuntimeColumnarFieldDescriptor,
+  rows: number,
+  dimensions: number
+): RuntimeFloat32MatrixDescriptor => {
+  assertUint32("rows", rows);
+  assertUint32("dimensions", dimensions);
+  if (rows === 0 || dimensions === 0) {
+    throw new Error(`float32 matrix ${field.fieldId} requires positive rows and dimensions`);
+  }
+  const want = rows * dimensions;
+  if (want > MAX_FLOAT32_MATRIX_ELEMENTS) {
+    throw new Error(`float32 matrix ${field.fieldId} has ${want} values, exceeds ${MAX_FLOAT32_MATRIX_ELEMENTS}`);
+  }
+  if (field.length !== want) {
+    throw new Error(`float32 matrix ${field.fieldId} has ${field.length} values, want ${want}`);
+  }
+  return { field, rows, dimensions };
 };
 
 const writeColumnarField = (

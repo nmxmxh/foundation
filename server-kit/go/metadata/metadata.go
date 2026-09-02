@@ -43,6 +43,11 @@ var unsafeMetadataTagFragments = []string{
 }
 
 type GlobalContext struct {
+	// UserID is the authenticated JWT subject (the token's external subject id,
+	// e.g. "user_<hash>"), not a database primary key. It must never be cast to
+	// a persistence id (a ::uuid column, a foreign key) directly: resolve it to
+	// the domain profile row through the application's own identity mapping
+	// first. Feeding the subject into a UUID cast is a recurring source of 500s.
 	UserID         string `json:"user_id,omitempty"`
 	SessionID      string `json:"session_id,omitempty"`
 	Source         string `json:"source,omitempty"`

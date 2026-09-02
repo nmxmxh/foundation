@@ -420,8 +420,8 @@ func (s *indexSnapshot) forEachKeyReconciled(fn func(string) bool) {
 
 func (s *indexSnapshot) forEachOrderDesc(fn func(recordOrderEntry) bool) {
 	for current := s; current != nil; current = current.base {
-		for i := len(current.order) - 1; i >= 0; i-- {
-			if !fn(current.order[i]) {
+		for _, v := range slices.Backward(current.order) {
+			if !fn(v) {
 				return
 			}
 		}
@@ -488,8 +488,8 @@ func compactOrderEntries(snapshot *indexSnapshot, keys map[string]struct{}) []re
 	desc := make([]recordOrderEntry, 0, len(keys))
 	seen := map[string]struct{}{}
 	for current := snapshot; current != nil; current = current.base {
-		for i := len(current.order) - 1; i >= 0; i-- {
-			entry := current.order[i]
+		for _, entry := range slices.Backward(current.order) {
+
 			if _, live := keys[entry.key]; !live {
 				continue
 			}

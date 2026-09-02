@@ -178,6 +178,16 @@ Enforcement:
 - Contract tests for lifecycle envelopes.
 - Reviewer gate on mutating command tests.
 
+Foundation behavior:
+
+- `metadata.RequiresIdempotency(method)` is the authoritative read/mutate
+  split: it returns true only for mutating HTTP methods. Foundation ingress
+  applies it by default — a read that arrives without a client idempotency key
+  is given a deterministic server-side key (`read:<correlationID>`), so a pure
+  read (a GET menu, wallet balance, favourites list) never needs the caller to
+  fabricate a key and is never rejected with `idempotency_required`. Only
+  mutations require a client-supplied key.
+
 ### TE-09: Tenant isolation tests must be negative as well as positive
 
 Level: `Mandatory`
@@ -374,6 +384,17 @@ Requirements:
 Enforcement:
 
 - Security middleware, policy, auth, objectstore, and frontend guard tests.
+
+Foundation behavior:
+
+- `security.RequireSubject(publicPaths)` is installed in the default middleware
+  stack whenever a JWT manager is configured, running after authentication.
+  A non-public path reached without an authenticated subject is rejected with
+  `401 authentication_required` — independent of `REQUIRE_AUTH`, so an
+  unauthenticated request is closed cleanly at the boundary in dev and under
+  enforced auth alike, rather than falling through anonymously to a confusing
+  downstream error about a missing organization or tenant. Genuinely public
+  routes must be registered as public paths to stay reachable.
 
 ### TE-20: Regression tests are mandatory for repaired defects
 
@@ -603,6 +624,15 @@ Requirements:
 Enforcement:
 
 - Reviewer gate on low-signal assertions and swallowed errors.
+
+Foundation helper:
+
+- `database.Classify` maps Postgres SQLSTATE integrity violations (and pgx's
+  no-rows sentinel) to a typed `domainerr` class, preserving the original as
+  the diagnostic cause: `23505` → Conflict (409), `23503`/`23P01` → Conflict,
+  `23502`/`23514` → Validation (400), no-rows → NotFound (404). Services
+  should classify repo errors through it instead of collapsing distinct causes
+  (a duplicate insert, a missing reference) into one generic class.
 
 ### TE-35: Test automation must be reproducible locally
 

@@ -141,6 +141,68 @@ func BenchmarkEncodeFrame(b *testing.B) {
 	}
 }
 
+// BenchmarkVectorProjectionModes measures the complete gateway read shape for
+// dense projections. It reports the full-vector and record-only response cost
+// at the corpus sizes and widths used by embedding models. Fixture setup stays
+// outside the timed loop; run one sub-benchmark at a time on constrained hosts.
+func BenchmarkVectorProjectionModes(b *testing.B) {
+	for _, rows := range []int{1_000, 10_000, 100_000} {
+		for _, dimensions := range []int{384, 768, 1536} {
+			name := fmt.Sprintf("rows=%d/dimensions=%d", rows, dimensions)
+			b.Run(name, func(b *testing.B) {
+				store, err := hermes.NewStore(hermes.ProjectionSpec{
+					Name: "vectors", Domain: "vectors", Collection: "items",
+					MaxRecords: rows + 1, MaxBytes: int64(rows) * int64(dimensions) * 8,
+				})
+				if err != nil {
+					b.Fatalf("NewStore() error = %v", err)
+				}
+				vector := make([]float32, dimensions)
+				for index := range vector {
+					vector[index] = float32(index) / float32(dimensions)
+				}
+				ctx := context.Background()
+				for row := range rows {
+					record := database.DomainRecord{
+						Domain: "vectors", Collection: "items", OrganizationID: "org_1",
+						RecordID: fmt.Sprintf("item_%d", row), Vector: append([]float32(nil), vector...),
+					}
+					if _, err := store.Apply(ctx, "vectors", hermes.Event{Operation: hermes.OperationUpsert, SourceID: record.RecordID, Version: uint64(row + 1), Record: record}); err != nil {
+						b.Fatalf("Apply(%d) error = %v", row, err)
+					}
+				}
+				gw, err := NewGateway(store, 1, WithResolver(func(scope *foundationpb.ProjectionScope) (string, hermes.Query, error) {
+					return "vectors", hermes.QueryWithFilters(scope.GetTenantId(), rows), nil
+				}))
+				if err != nil {
+					b.Fatalf("NewGateway() error = %v", err)
+				}
+				gw.maxLimit = rows
+				defer gw.Close()
+				scope := &foundationpb.ProjectionScope{TenantId: "org_1", Domain: "vectors", Collection: "items"}
+				for _, mode := range []struct {
+					name string
+					mode foundationpb.ProjectionVectorMode
+				}{
+					{name: "include", mode: foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_INCLUDE},
+					{name: "exclude", mode: foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_EXCLUDE},
+				} {
+					b.Run(mode.name, func(b *testing.B) {
+						b.SetBytes(int64(rows) * int64(dimensions) * 4)
+						b.ReportAllocs()
+						for b.Loop() {
+							snapshot, err := gw.Snapshot(ctx, &foundationpb.ProjectionSnapshotRequest{Scope: scope, Limit: uint32(rows), VectorMode: mode.mode})
+							if err != nil || len(snapshot.GetBatch().GetMutations()) != rows {
+								b.Fatalf("Snapshot() rows=%d error=%v", len(snapshot.GetBatch().GetMutations()), err)
+							}
+						}
+					})
+				}
+			})
+		}
+	}
+}
+
 // BenchmarkHubBroadcast measures fan-out of one pre-encoded frame to N
 // subscribers (the borrowed broadcast shape).
 func BenchmarkHubBroadcast(b *testing.B) {

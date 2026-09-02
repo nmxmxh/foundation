@@ -8,6 +8,7 @@ import (
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes"
+	"google.golang.org/protobuf/proto"
 )
 
 // DefaultSnapshotLimit bounds a snapshot when the caller does not specify a
@@ -156,11 +157,12 @@ func (g *Gateway) Hub() *Hub { return g.hub }
 func (g *Gateway) onApplied(projection string, mutations []hermes.AppliedMutation) {
 	epoch, _ := g.store.Epoch(projection)
 	for key, group := range groupAccepted(mutations) {
-		if g.hub.SubscriberCount(key) == 0 {
+		withVectors, withoutVectors := g.hub.VectorSubscriberCounts(key)
+		if withVectors == 0 && withoutVectors == 0 {
 			continue
 		}
 		watermark := watermarkFromMutations(group.mutations)
-		frame, err := encodeFrame(group.mutations, epoch, watermark, "projectiongw")
+		frame, err := encodeFrameVariants(group.mutations, epoch, watermark, "projectiongw", withVectors > 0, withoutVectors > 0)
 		if err != nil {
 			continue
 		}
@@ -196,14 +198,21 @@ func (g *Gateway) Snapshot(ctx context.Context, req *foundationpb.ProjectionSnap
 	// the limit pages older records via the cursor. Each request stays O(limit).
 	sinceVersion := hermes.ParseWatermark(req.GetSinceWatermark())
 	beforeVersion := hermes.ParseWatermark(req.GetCursor())
-	snapshot, err := g.store.SnapshotPage(ctx, projection, query, hermes.Fence{}, sinceVersion, beforeVersion)
+	includeVectors := req.GetVectorMode() != foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_EXCLUDE
+	readSnapshot := func() (hermes.Snapshot, error) {
+		if includeVectors {
+			return g.store.SnapshotPage(ctx, projection, query, hermes.Fence{}, sinceVersion, beforeVersion)
+		}
+		return g.store.SnapshotPageWithoutVectors(ctx, projection, query, hermes.Fence{}, sinceVersion, beforeVersion)
+	}
+	snapshot, err := readSnapshot()
 	if errors.Is(err, hermes.ErrProjectionNotFound) && g.warmScope != nil {
 		// Lazy warm: resolve the cold scope through the projected store (which
 		// registers the partition, rebuilds from the mirror, and self-backfills
 		// an empty mirror), then retry once. Warm failure preserves the
 		// original not-found so the HTTP mapping stays stable.
 		if warmErr := g.warmScope(ctx, scope); warmErr == nil {
-			snapshot, err = g.store.SnapshotPage(ctx, projection, query, hermes.Fence{}, sinceVersion, beforeVersion)
+			snapshot, err = readSnapshot()
 		}
 	}
 	if err != nil {
@@ -224,10 +233,16 @@ func (g *Gateway) Snapshot(ctx context.Context, req *foundationpb.ProjectionSnap
 // take a snapshot first and present that snapshot's watermark to reconcile any
 // gap; the Hub itself does not replay history.
 func (g *Gateway) Subscribe(scope *foundationpb.ProjectionScope) (*Subscription, error) {
+	return g.SubscribeWithVectorMode(scope, foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_UNSPECIFIED)
+}
+
+// SubscribeWithVectorMode opens a scoped live feed. Unspecified and INCLUDE
+// preserve v1 frames; EXCLUDE removes dense vectors before socket delivery.
+func (g *Gateway) SubscribeWithVectorMode(scope *foundationpb.ProjectionScope, mode foundationpb.ProjectionVectorMode) (*Subscription, error) {
 	if err := validateScope(scope); err != nil {
 		return nil, err
 	}
-	return g.hub.Subscribe(scope), nil
+	return g.hub.SubscribeWithVectors(scope, mode != foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_EXCLUDE), nil
 }
 
 // ApplyEnvelopes applies projection envelopes to the store. Broadcasting happens
@@ -281,19 +296,62 @@ func watermarkFromMutations(mutations []*foundationpb.RecordMutation) string {
 // wraps it as a fan-out Frame. The envelope reuses the canonical hermes
 // projection envelope shape (protobuf payload, terminal event type).
 func encodeFrame(mutations []*foundationpb.RecordMutation, epoch uint64, watermark, correlationID string) (Frame, error) {
+	return encodeFrameVariants(mutations, epoch, watermark, correlationID, true, true)
+}
+
+// encodeFrameVariants builds only the variants an active subscriber needs.
+// Dense vectors are the expensive payload, so record-only subscribers never
+// cause the vector-bearing protobuf frame to be allocated or serialized.
+func encodeFrameVariants(mutations []*foundationpb.RecordMutation, epoch uint64, watermark, correlationID string, includeVectors, excludeVectors bool) (Frame, error) {
 	correlationID = strings.TrimSpace(correlationID)
 	if correlationID == "" {
 		correlationID = "projectiongw"
 	}
-	envelope, err := hermes.NewProjectionEnvelope(mutations, correlationID)
-	if err != nil {
-		return Frame{}, err
+	frame := Frame{Watermark: watermark, Epoch: epoch}
+	if includeVectors {
+		envelope, err := hermes.NewProjectionEnvelope(mutations, correlationID)
+		if err != nil {
+			return Frame{}, err
+		}
+		frame.Envelope, err = envelope.ToBinary()
+		if err != nil {
+			return Frame{}, err
+		}
 	}
-	raw, err := envelope.ToBinary()
-	if err != nil {
-		return Frame{}, err
+	if excludeVectors {
+		envelope, err := hermes.NewProjectionEnvelope(withoutVectors(mutations), correlationID)
+		if err != nil {
+			return Frame{}, err
+		}
+		frame.EnvelopeWithoutVectors, err = envelope.ToBinary()
+		if err != nil {
+			return Frame{}, err
+		}
+		if !includeVectors {
+			frame.Envelope = frame.EnvelopeWithoutVectors
+		}
 	}
-	return Frame{Envelope: raw, Watermark: watermark, Epoch: epoch}, nil
+	return frame, nil
+}
+
+// withoutVectors copies only mutations that carry dense vectors. Unchanged
+// entries retain their immutable protobuf object and avoid needless allocation.
+func withoutVectors(mutations []*foundationpb.RecordMutation) []*foundationpb.RecordMutation {
+	var filtered []*foundationpb.RecordMutation
+	for index, mutation := range mutations {
+		if len(mutation.GetVector()) == 0 {
+			continue
+		}
+		if filtered == nil {
+			filtered = append([]*foundationpb.RecordMutation(nil), mutations...)
+		}
+		filtered[index] = proto.Clone(mutation).(*foundationpb.RecordMutation)
+		filtered[index].Vector = nil
+	}
+	if filtered == nil {
+		return mutations
+	}
+	return filtered
 }
 
 // filterScope keeps only mutations whose domain/collection/tenant match the

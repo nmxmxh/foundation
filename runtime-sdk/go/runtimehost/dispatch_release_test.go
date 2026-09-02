@@ -122,9 +122,7 @@ func TestReleaseOneUnderContentionConservesUnits(t *testing.T) {
 	var released, contended, refusedAtZero atomic.Uint64
 	var wg sync.WaitGroup
 	for range releasers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for range perGoroutine {
 				ok, err := row.ReleaseOne()
 				switch {
@@ -139,7 +137,7 @@ func TestReleaseOneUnderContentionConservesUnits(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

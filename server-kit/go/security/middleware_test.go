@@ -11,6 +11,68 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
 )
 
+func TestRequireSubjectRejectsAnonymousRequestWith401(t *testing.T) {
+	served := false
+	handler := RequireSubject(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		served = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "https://api.example.com/v1/marketplace/reservations", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	if served {
+		t.Fatal("RequireSubject admitted an anonymous request to the handler")
+	}
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+	if !strings.Contains(recorder.Body.String(), "authentication_required") {
+		t.Fatalf("body = %q, want an authentication_required code", recorder.Body.String())
+	}
+}
+
+func TestRequireSubjectAdmitsAuthenticatedRequestAndPreflight(t *testing.T) {
+	handler := RequireSubject(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "https://api.example.com/v1/marketplace/reservations", nil)
+	req = req.WithContext(ContextWithUserID(req.Context(), "user_abc"))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("authenticated status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	// A CORS preflight carries no credential and must pass through to be
+	// answered downstream rather than being rejected as unauthenticated.
+	preflight := httptest.NewRequest(http.MethodOptions, "https://api.example.com/v1/marketplace/reservations", nil)
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, preflight)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("preflight status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+}
+
+func TestRequireSubjectExemptsPublicPaths(t *testing.T) {
+	handler := RequireSubject([]string{"/v1/menu/"})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// A configured public prefix and a system public path (login) are reachable
+	// anonymously — the guard only closes the boundary for protected routes.
+	for _, path := range []string{"https://api.example.com/v1/menu/menus", "https://api.example.com/api/auth/login"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("public path %s status = %d, want %d", path, recorder.Code, http.StatusOK)
+		}
+	}
+}
+
 func TestSecurityHeadersAddsCrossOriginIsolationHeaders(t *testing.T) {
 	handler := SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)

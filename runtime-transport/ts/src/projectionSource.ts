@@ -41,6 +41,9 @@ export type ProjectionLoadRequest = {
   sinceWatermark?: string;
   limit?: number;
   signal?: AbortSignal;
+  // Dense vectors are excluded by default. Request them only for a compute
+  // consumer that receives and retains the values intentionally.
+  includeVectors?: boolean;
 };
 
 export type { ProjectionProtoCodec };
@@ -214,6 +217,7 @@ export const createHttpProjectionSource = (
     if (request.sinceWatermark) url.searchParams.set("since", request.sinceWatermark);
     if (request.limit) url.searchParams.set("limit", String(request.limit));
     if (cursor) url.searchParams.set("cursor", cursor);
+    if (request.includeVectors) url.searchParams.set("vectors", "include");
 
     const headers = (await config.headers?.()) ?? {};
     const response = await fetchImpl(url.toString(), {

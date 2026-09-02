@@ -32,6 +32,9 @@ type Frame struct {
 	// Envelope is the binary events.Envelope (protobuf RecordMutationBatch
 	// payload) ready to write to a socket.
 	Envelope []byte
+	// EnvelopeWithoutVectors carries the same delta without dense vector data.
+	// It lets record-only subscribers avoid a decode and re-encode per frame.
+	EnvelopeWithoutVectors []byte
 	// Watermark is the resume token a client should present to continue after
 	// this frame.
 	Watermark string
@@ -79,6 +82,7 @@ type subscriber struct {
 	frames  chan Frame
 	dropped *atomic.Uint64
 	drops   chan struct{}
+	vectors bool
 }
 
 // Hub fans encoded delta frames out to subscribers keyed by exact scope. It uses
@@ -101,11 +105,18 @@ func NewHub(queueSize int) *Hub {
 // Subscribe registers a feed for an exact scope. The returned Subscription must
 // be cancelled to release resources.
 func (h *Hub) Subscribe(scope *foundationpb.ProjectionScope) *Subscription {
+	return h.SubscribeWithVectors(scope, true)
+}
+
+// SubscribeWithVectors registers a feed with an explicit dense-vector policy.
+// Legacy callers use Subscribe and keep the v1 vector-bearing frame behavior.
+func (h *Hub) SubscribeWithVectors(scope *foundationpb.ProjectionScope, vectors bool) *Subscription {
 	key := ScopeKey(scope)
 	sub := &subscriber{
 		frames:  make(chan Frame, h.queueSize),
 		dropped: &atomic.Uint64{},
 		drops:   make(chan struct{}, 1),
+		vectors: vectors,
 	}
 
 	h.mu.Lock()
@@ -153,8 +164,12 @@ func (h *Hub) Broadcast(key string, frame Frame) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for sub := range h.subs[key] {
+		deliver := frame
+		if !sub.vectors && len(frame.EnvelopeWithoutVectors) > 0 {
+			deliver.Envelope = frame.EnvelopeWithoutVectors
+		}
 		select {
-		case sub.frames <- frame:
+		case sub.frames <- deliver:
 		default:
 			// concurrency: drop when the subscriber's buffer is full; the drop is
 			// counted and signalled below so the writer emits a resync. Blocking
@@ -177,4 +192,20 @@ func (h *Hub) SubscriberCount(key string) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.subs[key])
+}
+
+// VectorSubscriberCounts reports the demand for each encoded delta variant.
+// The gateway uses this before encoding so the common record-only path never
+// serializes dense vectors merely to discard them at socket delivery.
+func (h *Hub) VectorSubscriberCounts(key string) (withVectors, withoutVectors int) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for sub := range h.subs[key] {
+		if sub.vectors {
+			withVectors++
+		} else {
+			withoutVectors++
+		}
+	}
+	return withVectors, withoutVectors
 }

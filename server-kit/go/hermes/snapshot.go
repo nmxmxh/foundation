@@ -50,8 +50,22 @@ func MutationFromView(view RecordView, operation Operation) *foundationpb.Record
 // hermes actually accepted, stamping the version hermes assigned, so the live
 // stream reflects the source of truth rather than the client's submission.
 func MutationFromRecord(rec database.DomainRecord, operation Operation, version uint64) *foundationpb.RecordMutation {
+	return mutationFromRecord(rec, operation, version, true)
+}
+
+// MutationFromRecordWithoutVector builds a record-only projection mutation.
+// It avoids cloning dense values for consumers that cannot observe them.
+func MutationFromRecordWithoutVector(rec database.DomainRecord, operation Operation, version uint64) *foundationpb.RecordMutation {
+	return mutationFromRecord(rec, operation, version, false)
+}
+
+func mutationFromRecord(rec database.DomainRecord, operation Operation, version uint64, includeVector bool) *foundationpb.RecordMutation {
+	vector := rec.Vector
+	if !includeVector {
+		vector = nil
+	}
 	return mutationFromParts(operation, version, rec.Domain, rec.Collection,
-		rec.OrganizationID, rec.RecordID, rec.Data, rec.Vector, rec.CreatedAt, rec.UpdatedAt)
+		rec.OrganizationID, rec.RecordID, rec.Data, vector, rec.CreatedAt, rec.UpdatedAt)
 }
 
 func mutationFromParts(operation Operation, version uint64, domain, collection, organizationID, recordID string, data database.RecordData, vector []float32, createdAt, updatedAt time.Time) *foundationpb.RecordMutation {
@@ -169,6 +183,16 @@ func (s *Store) SnapshotProjection(ctx context.Context, projection string, query
 // no unbounded scan — by walking hermes's version-descending ordered index with
 // early termination.
 func (s *Store) SnapshotPage(ctx context.Context, projection string, query Query, fence Fence, sinceVersion, beforeVersion uint64) (Snapshot, error) {
+	return s.snapshotPage(ctx, projection, query, fence, sinceVersion, beforeVersion, true)
+}
+
+// SnapshotPageWithoutVectors reads record-only projection mutations. It is a
+// refinement of SnapshotPage for consumers that do not request dense values.
+func (s *Store) SnapshotPageWithoutVectors(ctx context.Context, projection string, query Query, fence Fence, sinceVersion, beforeVersion uint64) (Snapshot, error) {
+	return s.snapshotPage(ctx, projection, query, fence, sinceVersion, beforeVersion, false)
+}
+
+func (s *Store) snapshotPage(ctx context.Context, projection string, query Query, fence Fence, sinceVersion, beforeVersion uint64, includeVectors bool) (Snapshot, error) {
 	if err := ctxErr(ctx); err != nil {
 		return Snapshot{}, err
 	}
@@ -176,10 +200,10 @@ func (s *Store) SnapshotPage(ctx context.Context, projection string, query Query
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return part.pageMutations(ctx, query, fence, sinceVersion, beforeVersion)
+	return part.pageMutations(ctx, query, fence, sinceVersion, beforeVersion, includeVectors)
 }
 
-func (p *partition) pageMutations(ctx context.Context, query Query, fence Fence, sinceVersion, beforeVersion uint64) (Snapshot, error) {
+func (p *partition) pageMutations(ctx context.Context, query Query, fence Fence, sinceVersion, beforeVersion uint64, includeVectors bool) (Snapshot, error) {
 	if err := p.waitForStable(ctx); err != nil {
 		return Snapshot{}, err
 	}
@@ -221,7 +245,7 @@ func (p *partition) pageMutations(ctx context.Context, query Query, fence Fence,
 			loopErr = err
 			return false
 		}
-		mutations = append(mutations, MutationFromRecord(entry.record, OperationUpsert, entry.version))
+		mutations = append(mutations, mutationFromRecord(entry.record, OperationUpsert, entry.version, includeVectors))
 		snapshot.NextCursor = entry.version
 		if limit > 0 && len(mutations) >= limit {
 			snapshot.HasMore = true

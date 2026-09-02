@@ -43,6 +43,32 @@ type ColumnarField struct {
 	ValuesDescriptorID uint32
 }
 
+// Float32Matrix describes a row-major dense matrix in one arena column.
+// Values remain contiguous as rows*dimensions float32 values. The shape stays
+// outside generic projection records and belongs only to a compute consumer.
+type Float32Matrix struct {
+	Field      ColumnarField
+	Rows       uint32
+	Dimensions uint32
+}
+
+// WriteFloat32Matrix writes a fixed-width matrix into one aligned arena slab.
+// It rejects an invalid shape before allocation or copy.
+func WriteFloat32Matrix(arena *Arena, fieldID uint32, rows, dimensions uint32, values []float32) (Float32Matrix, error) {
+	if rows == 0 || dimensions == 0 {
+		return Float32Matrix{}, fmt.Errorf("float32 matrix %d requires positive rows and dimensions", fieldID)
+	}
+	want := uint64(rows) * uint64(dimensions)
+	if want > uint64(maxFixedWidth4Elements) || uint64(len(values)) != want {
+		return Float32Matrix{}, fmt.Errorf("float32 matrix %d has %d values, want %d", fieldID, len(values), want)
+	}
+	field, err := WriteFloat32Column(arena, fieldID, values)
+	if err != nil {
+		return Float32Matrix{}, err
+	}
+	return Float32Matrix{Field: field, Rows: rows, Dimensions: dimensions}, nil
+}
+
 // WriteFloat32Column copies a float32 column into its own slab and returns the
 // field descriptor for it.
 //

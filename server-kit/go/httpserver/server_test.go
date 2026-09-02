@@ -942,10 +942,12 @@ func TestIsPublicRouteWithPathParamsBypassesAuth(t *testing.T) {
 	}
 }
 
-// TestOptionalAuthEstablishesIdentityWithoutRequiringIt covers the development
-// posture: auth not required, but a presented bearer token must still populate
-// the security context — command metadata and projection tenancy depend on it.
-func TestOptionalAuthEstablishesIdentityWithoutRequiringIt(t *testing.T) {
+// TestOptionalAuthEstablishesIdentityAndClosesTheBoundary covers the
+// development posture: auth "not required" still establishes identity from a
+// presented bearer token (command metadata and projection tenancy depend on
+// it), and the exposed boundary is still closed — an anonymous request to a
+// protected route is rejected with 401 rather than falling through anonymously.
+func TestOptionalAuthEstablishesIdentityAndClosesTheBoundary(t *testing.T) {
 	s := serverWithDispatch(t, func(context.Context, extension.Object) (any, error) { return nil, nil })
 	manager, err := auth.NewJWTManager("this-is-a-very-secure-secret")
 	if err != nil {
@@ -981,11 +983,15 @@ func TestOptionalAuthEstablishesIdentityWithoutRequiringIt(t *testing.T) {
 		t.Fatalf("optional auth with token: status = %d, org = %q; want 200/org_1", rec.Code, gotOrg)
 	}
 
+	// Without a token the protected route is now closed at the boundary: the
+	// request is rejected with 401 before the handler runs, independent of the
+	// require-auth knob, so an unauthenticated caller never reaches a handler
+	// that needs an identity.
 	gotOrg = "unset"
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/whoami", nil))
-	if rec.Code != http.StatusOK || gotOrg != "" {
-		t.Fatalf("optional auth without token: status = %d, org = %q; want 200/anonymous", rec.Code, gotOrg)
+	if rec.Code != http.StatusUnauthorized || gotOrg != "unset" {
+		t.Fatalf("optional auth without token: status = %d, org = %q; want 401/handler-not-reached", rec.Code, gotOrg)
 	}
 }
 

@@ -115,6 +115,15 @@ func (c HandlerConfig) prefix() string {
 	return "/v1/projections/"
 }
 
+// vectorModeFromRequest keeps the public record-view path compact by default.
+// An explicit include request retains the legacy vector-bearing wire shape.
+func vectorModeFromRequest(r *http.Request) foundationpb.ProjectionVectorMode {
+	if strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("vectors")), "include") {
+		return foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_INCLUDE
+	}
+	return foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_EXCLUDE
+}
+
 // scopeFromRequest builds an authenticated scope: tenant from auth context,
 // domain/collection from the trailing path segments after the prefix.
 func (c HandlerConfig) scopeFromRequest(r *http.Request) (*foundationpb.ProjectionScope, error) {
@@ -179,6 +188,7 @@ func (g *Gateway) SnapshotHandler(config HandlerConfig) http.Handler {
 		req := &foundationpb.ProjectionSnapshotRequest{
 			Scope:          scope,
 			SinceWatermark: strings.TrimSpace(r.URL.Query().Get("since")),
+			VectorMode:     vectorModeFromRequest(r),
 		}
 		if limit, err := strconv.ParseUint(strings.TrimSpace(r.URL.Query().Get("limit")), 10, 32); err == nil {
 			req.Limit = uint32(limit)
@@ -224,7 +234,7 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 			writeError(w, err)
 			return
 		}
-		sub, err := g.Subscribe(scope)
+		sub, err := g.SubscribeWithVectorMode(scope, vectorModeFromRequest(r))
 		if err != nil {
 			writeError(w, err)
 			return
@@ -375,7 +385,7 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 			// g.Subscribe validates the scope; a bad scope (e.g. an empty
 			// collection) is answered with a scoped ControlError rather than
 			// tearing the connection down.
-			sub, err := g.Subscribe(scope)
+			sub, err := g.SubscribeWithVectorMode(scope, vectorModeFromRequest(r))
 			if err != nil {
 				subsMu.Unlock()
 				_ = writeControl(ControlFrame{Type: ControlError, Reason: err.Error(), Domain: domain, Collection: collection})
