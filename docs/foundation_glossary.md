@@ -86,6 +86,7 @@ pre-answered questions without scanning multiple files.
 | **Tracing** | `server-kit/go/tracing` — OpenTelemetry integration with correlation ID bridging and HTTP middleware for automatic span creation. | `foundation_guide.md` |
 | **Transfer lane** | `server-kit/go/transfer` — progress-bearing operation lifecycle: monotonic byte progress on an ephemeral lane, bracketed by durable bookend events. | `transfer_lane.md` |
 | **UI-minimal** | `@ovasabi/ui-minimal` — shared structural UI primitives, semantic theme tokens, and motion helpers. App components should be thin wrappers. | `styling_design_practices.md` |
+| **Vector projection** | Hermes dense-vector delivery policy. Record views exclude vectors unless compute consumers request them. | `vector_projection_practices.md` |
 | **WASM control buffer** | The 4KB fixed shared buffer in `runtime-sdk` guaranteeing cache affinity and zero-copy pointer exchanges with zero allocation pressure. | `foundation_guide.md` |
 | **Worker** | `server-kit/go/worker` — River-based background job handling with bounded queues, retry policies, and correlation metadata propagation. | `foundation_guide.md` |
 

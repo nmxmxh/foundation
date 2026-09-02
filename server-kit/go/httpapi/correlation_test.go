@@ -66,6 +66,32 @@ func TestMetadataFromRequestUsesRequestIDFallback(t *testing.T) {
 	}
 }
 
+func TestMetadataFromRequestDerivesReadIdempotencyKey(t *testing.T) {
+	// A read without a client key gets a deterministic server-side key, so no
+	// consumer must fabricate one to satisfy the command-metadata contract.
+	read := httptest.NewRequest(http.MethodGet, "/v1/menu/menus", nil)
+	read.Header.Set("X-Correlation-ID", "corr_read")
+	md := MetadataFromRequest(read)
+	if md.IdempotencyKey != "read:corr_read" {
+		t.Fatalf("read idempotency key = %q, want %q", md.IdempotencyKey, "read:corr_read")
+	}
+
+	// A mutation without a client key is left untouched: the client must supply
+	// its own idempotency key for a retryable mutation.
+	mutation := httptest.NewRequest(http.MethodPost, "/v1/marketplace/orders", nil)
+	mutation.Header.Set("X-Correlation-ID", "corr_write")
+	if md := MetadataFromRequest(mutation); md.IdempotencyKey != "" {
+		t.Fatalf("mutation idempotency key = %q, want empty", md.IdempotencyKey)
+	}
+
+	// An explicit client key on a read wins over the derived one.
+	explicit := httptest.NewRequest(http.MethodGet, "/v1/menu/menus", nil)
+	explicit.Header.Set("X-Idempotency-Key", "idem_client")
+	if md := MetadataFromRequest(explicit); md.IdempotencyKey != "idem_client" {
+		t.Fatalf("explicit read idempotency key = %q, want %q", md.IdempotencyKey, "idem_client")
+	}
+}
+
 func TestMetadataFromRequestPreservesCommunicationHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/test", nil)
 	req.Header.Set("X-Correlation-ID", "corr_keep")

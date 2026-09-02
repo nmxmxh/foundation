@@ -231,7 +231,7 @@ func blockProfileEvents(t *testing.T) int {
 		t.Fatalf("render block profile: %v", err)
 	}
 	total := 0
-	for _, line := range strings.Split(rendered.String(), "\n") {
+	for line := range strings.SplitSeq(rendered.String(), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 3 || fields[2] != "@" {
 			continue

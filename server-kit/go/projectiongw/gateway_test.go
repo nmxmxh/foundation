@@ -83,6 +83,80 @@ func TestGatewaySnapshotAfterApply(t *testing.T) {
 	}
 }
 
+func TestGatewaySnapshotExcludesVectorsOnlyWhenRequested(t *testing.T) {
+	gw := newTestGateway(t)
+	mutation := tickMutation("tick_1", 1, "OVS")
+	mutation.Vector = []float32{0.25, -0.5}
+	envelope, err := hermes.NewProjectionEnvelope([]*foundationpb.RecordMutation{mutation}, "corr-1")
+	if err != nil {
+		t.Fatalf("NewProjectionEnvelope() err=%v", err)
+	}
+	if _, err := gw.ApplyEnvelopes(t.Context(), "signals", []events.Envelope{envelope}); err != nil {
+		t.Fatalf("ApplyEnvelopes() err=%v", err)
+	}
+
+	legacy, err := gw.Snapshot(t.Context(), &foundationpb.ProjectionSnapshotRequest{Scope: scope()})
+	if err != nil {
+		t.Fatalf("legacy Snapshot() err=%v", err)
+	}
+	if got := legacy.GetBatch().GetMutations()[0].GetVector(); len(got) != 2 {
+		t.Fatalf("legacy vector length = %d, want 2", len(got))
+	}
+	excluded, err := gw.Snapshot(t.Context(), &foundationpb.ProjectionSnapshotRequest{
+		Scope:      scope(),
+		VectorMode: foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_EXCLUDE,
+	})
+	if err != nil {
+		t.Fatalf("excluded Snapshot() err=%v", err)
+	}
+	if got := excluded.GetBatch().GetMutations()[0].GetVector(); len(got) != 0 {
+		t.Fatalf("excluded vector length = %d, want 0", len(got))
+	}
+}
+
+func TestGatewayVectorModeSelectsTheMatchingDelta(t *testing.T) {
+	gw := newTestGateway(t)
+	withVectors, err := gw.SubscribeWithVectorMode(scope(), foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_INCLUDE)
+	if err != nil {
+		t.Fatalf("SubscribeWithVectorMode(include) err=%v", err)
+	}
+	defer withVectors.Cancel()
+	withoutVectors, err := gw.SubscribeWithVectorMode(scope(), foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_EXCLUDE)
+	if err != nil {
+		t.Fatalf("SubscribeWithVectorMode(exclude) err=%v", err)
+	}
+	defer withoutVectors.Cancel()
+
+	mutation := tickMutation("tick_1", 1, "OVS")
+	mutation.Vector = []float32{0.25, -0.5}
+	envelope, err := hermes.NewProjectionEnvelope([]*foundationpb.RecordMutation{mutation}, "corr-1")
+	if err != nil {
+		t.Fatalf("NewProjectionEnvelope() err=%v", err)
+	}
+	if _, err := gw.ApplyEnvelopes(t.Context(), "signals", []events.Envelope{envelope}); err != nil {
+		t.Fatalf("ApplyEnvelopes() err=%v", err)
+	}
+
+	decode := func(frame Frame) *foundationpb.RecordMutation {
+		t.Helper()
+		decoded, err := events.FromBinary(frame.Envelope)
+		if err != nil {
+			t.Fatalf("frame envelope decode err=%v", err)
+		}
+		var batch foundationpb.RecordMutationBatch
+		if err := proto.Unmarshal(decoded.PayloadBytes, &batch); err != nil {
+			t.Fatalf("batch unmarshal err=%v", err)
+		}
+		return batch.GetMutations()[0]
+	}
+	if got := decode(<-withVectors.Frames).GetVector(); len(got) != 2 {
+		t.Fatalf("include vector length = %d, want 2", len(got))
+	}
+	if got := decode(<-withoutVectors.Frames).GetVector(); len(got) != 0 {
+		t.Fatalf("exclude vector length = %d, want 0", len(got))
+	}
+}
+
 func TestGatewayBroadcastsDeltaOnApply(t *testing.T) {
 	gw := newTestGateway(t)
 	ctx := t.Context()

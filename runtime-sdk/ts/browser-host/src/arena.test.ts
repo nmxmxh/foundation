@@ -3,9 +3,11 @@ import {
   RuntimeSharedArena,
   clampRuntimeArenaBytes,
   decodeRuntimeColumnarBatchDescriptor,
+  describeFloat32Matrix,
   encodeRuntimeColumnarBatchDescriptor,
   negotiateRuntimeMemory,
   type RuntimeArenaQueueEntry,
+  type RuntimeColumnarFieldDescriptor,
 } from "./arena";
 import {
   ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH,
@@ -70,6 +72,23 @@ describe("RuntimeSharedArena", () => {
     expect(() => arena.writeSlabReady(descriptor.id, new Uint8Array(1))).toThrow("is free");
     expect(() => arena.readDescriptorBytesView(arena.readDescriptor(descriptor.id), 0)).toThrow("is free");
     expect(() => arena.readDescriptor(-1)).toThrow("invalid runtime arena descriptor id");
+  });
+
+  it("describes a float32 matrix only when its shape matches the column", () => {
+    const matrixField = (length: number): RuntimeColumnarFieldDescriptor => ({
+      fieldId: 7,
+      logicalType: COLUMNAR_LOGICAL_TYPE_INT,
+      physicalType: COLUMNAR_PHYSICAL_TYPE_FIXED_WIDTH,
+      length,
+      valuesDescriptorId: 1,
+      byteWidth: 4,
+    });
+    const matrix = describeFloat32Matrix(matrixField(6), 2, 3);
+    expect(matrix.rows).toBe(2);
+    expect(matrix.dimensions).toBe(3);
+    expect(matrix.field.length).toBe(6);
+    expect(() => describeFloat32Matrix(matrixField(6), 0, 3)).toThrow("positive rows and dimensions");
+    expect(() => describeFloat32Matrix(matrixField(1), 2, 3)).toThrow("want 6");
   });
 
   it("rejects malformed columnar headers and identifiers", () => {

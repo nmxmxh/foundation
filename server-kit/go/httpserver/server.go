@@ -499,6 +499,13 @@ func (s *Server) Handler() http.Handler {
 	// this split, development (auth not required) silently ignores valid
 	// tokens and every identity-scoped surface breaks.
 	if s.jwt != nil {
+		// RequireSubject is the inner layer: it runs after the auth middleware
+		// has populated (or failed to populate) the subject, and closes the
+		// exposed boundary for non-public paths. Installed independently of
+		// requireAuthForDispatch so an unauthenticated request to a protected
+		// command route is rejected with 401 authentication_required in dev too,
+		// rather than falling through anonymously to a confusing downstream error.
+		handler = security.RequireSubject(s.publicPaths)(handler)
 		if s.requireAuthForDispatch {
 			handler = security.JWTAuth(s.jwt, s.publicPaths)(handler)
 		} else {

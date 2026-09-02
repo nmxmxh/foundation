@@ -121,6 +121,13 @@ func enrichMetadataFromHeaders(md *metadata.EnvelopeMetadata, r *http.Request) {
 	}
 	if idempotencyKey := strings.TrimSpace(r.Header.Get(idempotencyKeyHeader)); idempotencyKey != "" {
 		md.IdempotencyKey = idempotencyKey
+	} else if strings.TrimSpace(md.IdempotencyKey) == "" && !metadata.RequiresIdempotency(r.Method) {
+		// Reads are naturally idempotent, so Foundation mints a deterministic
+		// server-side key for them rather than requiring the caller to supply
+		// one. This is what keeps a plain GET (a curl, an integration test, a
+		// partner) from having to fabricate an idempotency key to satisfy the
+		// command-metadata contract — only mutations require a client key.
+		md.IdempotencyKey = deriveReadIdempotencyKey(md.CorrelationID)
 	}
 	if traceID := strings.TrimSpace(r.Header.Get(traceIDHeader)); traceID != "" {
 		md.TraceID = traceID
@@ -155,6 +162,19 @@ func enrichMetadataFromHeaders(md *metadata.EnvelopeMetadata, r *http.Request) {
 	if md.GlobalContext.IPAddress == "" {
 		md.GlobalContext.IPAddress = clientIP(r)
 	}
+}
+
+// deriveReadIdempotencyKey mints the server-side idempotency key for a read.
+// It is derived from the correlation ID so a retried read (same correlation)
+// resolves to the same key, and namespaced so it never collides with a
+// client-supplied mutation key. A read that somehow lacks a correlation still
+// gets a fresh unique key rather than an empty one.
+func deriveReadIdempotencyKey(correlationID string) string {
+	correlationID = strings.TrimSpace(correlationID)
+	if correlationID == "" {
+		correlationID = metadata.NewCorrelationID()
+	}
+	return "read:" + correlationID
 }
 
 func clientIP(r *http.Request) string {

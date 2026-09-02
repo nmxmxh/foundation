@@ -14,6 +14,14 @@ enum ProjectionOperation {
   PROJECTION_OPERATION_PATCH = 3;
 }
 
+// ProjectionVectorMode controls whether a projection response carries dense
+// vectors. Unspecified preserves the v1 include behavior for older clients.
+enum ProjectionVectorMode {
+  PROJECTION_VECTOR_MODE_UNSPECIFIED = 0;
+  PROJECTION_VECTOR_MODE_INCLUDE = 1;
+  PROJECTION_VECTOR_MODE_EXCLUDE = 2;
+}
+
 message ScalarValue {
   oneof kind {
     string string_value = 1;
@@ -79,6 +87,9 @@ message ProjectionSnapshotRequest {
   // next_cursor. Used to backfill scopes larger than the limit without an
   // unbounded scan: each request stays O(limit). Empty means the first page.
   string cursor = 4;
+  // Exclude vectors for record-only views. Clients that need dense data must
+  // request INCLUDE explicitly after the legacy migration period.
+  ProjectionVectorMode vector_mode = 5;
 }
 
 // ProjectionSnapshot is the materialized read model at a consistent epoch. The
@@ -106,4 +117,5 @@ message ProjectionSnapshot {
 message ProjectionSubscribeRequest {
   ProjectionScope scope = 1;
   string resume_watermark = 2;
+  ProjectionVectorMode vector_mode = 3;
 }

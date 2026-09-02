@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	stdpath "path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -66,11 +67,12 @@ func allowedRequestHeaders(requested string) string {
 		return baseAllowedHeaders
 	}
 	seen := make(map[string]struct{})
-	for _, name := range strings.Split(baseAllowedHeaders, ",") {
+	for name := range strings.SplitSeq(baseAllowedHeaders, ",") {
 		seen[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
 	}
-	allowed := baseAllowedHeaders
-	for _, name := range strings.Split(requested, ",") {
+	var allowed strings.Builder
+	allowed.WriteString(baseAllowedHeaders)
+	for name := range strings.SplitSeq(requested, ",") {
 		trimmed := strings.TrimSpace(name)
 		if trimmed == "" {
 			continue
@@ -80,9 +82,9 @@ func allowedRequestHeaders(requested string) string {
 			continue
 		}
 		seen[key] = struct{}{}
-		allowed += ", " + trimmed
+		allowed.WriteString(", " + trimmed)
 	}
-	return allowed
+	return allowed.String()
 }
 
 // CORS handles cross-origin access with robust header support.
@@ -283,6 +285,40 @@ func isWebSocketUpgrade(r *http.Request) bool {
 	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Upgrade")), "websocket")
 }
 
+// RequireSubject rejects a request that reaches a non-public path without an
+// authenticated subject with a clean 401 at the security boundary, before it
+// reaches a handler that needs an identity. It is the guard that closes the
+// dev-mode fall-through: an unauthenticated write to a protected command route
+// fails as authentication_required (401) rather than continuing anonymously and
+// producing a confusing downstream error about a missing organization or tenant.
+//
+// It is installed in the default middleware stack regardless of REQUIRE_AUTH.
+// Under the development posture (OptionalJWTAuth) a request without a credential
+// is admitted anonymously and GetUserIDFromContext is empty; this guard still
+// returns 401 for non-public paths there, so the exposed boundary behaves the
+// same in dev and under enforced auth. A valid token populates the subject
+// upstream, so an authenticated request passes through.
+//
+// publicPaths and the system public set (health, ws, auth issuance) are exempt,
+// matched with the same rules JWTAuth uses so the two never disagree about what
+// is public. Preflight requests carry no credential and are answered by the
+// CORS middleware, so they are not gated here.
+func RequireSubject(publicPaths []string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodOptions || isPublicPath(r.URL.Path, publicPaths) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if strings.TrimSpace(GetUserIDFromContext(r.Context())) == "" {
+				domainerr.WriteHTTP(w, domainerr.Unauthorized("authentication_required", "authentication required"), domainerr.ResponseOptions{})
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 // RequireCapabilities enforces RBAC capability checks for downstream handlers.
 func RequireCapabilities(authorizer *Authorizer, capabilities ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -346,10 +382,8 @@ func isPublicPath(path string, publicPaths []string) bool {
 		"/api/v1/user/refresh",
 	}
 
-	for _, p := range systemPublic {
-		if path == p {
-			return true
-		}
+	if slices.Contains(systemPublic, path) {
+		return true
 	}
 
 	// Configured public paths stay prefix-matched: registerPublicRoutePaths

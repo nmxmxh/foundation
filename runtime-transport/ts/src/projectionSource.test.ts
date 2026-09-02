@@ -145,6 +145,21 @@ describe("createHttpProjectionSource", () => {
     expect(seen[0].searchParams.get("since")).toBe("wm");
     expect(seen[0].searchParams.get("limit")).toBe("20");
   });
+
+  it("requests dense vectors only when a compute caller opts in", async () => {
+    const seen: URL[] = [];
+    const fetchImpl = vi.fn(async (input: string | URL) => {
+      seen.push(new URL(String(input)));
+      return new Response(new Uint8Array([1]), { status: 200 });
+    }) as unknown as typeof fetch;
+    const source = createHttpProjectionSource({ baseUrl: "https://host/v1/projections", codec, fetch: fetchImpl });
+
+    await source.loadProjection(scope, { scope });
+    await source.loadProjection(scope, { scope, includeVectors: true });
+
+    expect(seen[0].searchParams.has("vectors")).toBe(false);
+    expect(seen[1].searchParams.get("vectors")).toBe("include");
+  });
 });
 
 class FakeSocket {
