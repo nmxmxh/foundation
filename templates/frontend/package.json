@@ -28,6 +28,7 @@
     "zod": "^3.24.0",
     "@hookform/resolvers": "^3.9.0",
     "@ovasabi/runtime-transport": "file:../foundation/runtime-transport/ts",
+    "@ovasabi/runtime-browser": "file:../foundation/runtime-sdk/ts/browser-host",
     "@ovasabi/frontend-kit": "file:../foundation/frontend-kit/ts",
     "@ovasabi/ui-minimal": "file:../foundation/ui-minimal/ts"
   },

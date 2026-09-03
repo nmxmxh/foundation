@@ -303,6 +303,7 @@ For deeper context, read these files (`docs/foundation/` in generated apps, `doc
 | Styling and motion | `docs/foundation/styling_design_practices.md` or `docs/styling_design_practices.md` |
 | Animation references | `docs/foundation/references/README.md` or `docs/references/README.md` |
 | Transfer lane | `docs/foundation/transfer_lane.md` or `docs/transfer_lane.md` |
+| Render surface lane | `docs/foundation/render_surface_lane.md` or `docs/render_surface_lane.md` |
 | Adding a Rust performance unit | `docs/foundation/rust_unit_guide.md` or `docs/rust_unit_guide.md` |
 | Frontend command registry | `docs/foundation/frontend_command_registry.md` or `docs/frontend_command_registry.md` |
 | STE documentation standard | `docs/foundation/ste_documentation_practices.md` or `docs/ste_documentation_practices.md` |

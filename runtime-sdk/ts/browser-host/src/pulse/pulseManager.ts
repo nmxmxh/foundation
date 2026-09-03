@@ -22,6 +22,21 @@ type PulseMessage =
   | { type: "WATCH_INDICES"; payload: { indices: number[] } }
   | { type: "UNWATCH_INDICES"; payload: { indices: number[] } };
 
+/**
+ * The built-in worker factory, which only works inside this package.
+ *
+ * `new URL("./pulse.worker.ts", import.meta.url)` is resolved by the consuming
+ * bundler against wherever this module ended up — and when the SDK is consumed
+ * as a dependency, that is somewhere inside a pre-bundled dependency chunk,
+ * where the source file is not served. The request 404s or is blocked and the
+ * manager degrades to its main-thread lane, silently and correctly, which is
+ * the worst kind of silently: the pulse works, just not the way it says.
+ *
+ * So consumers should pass `createWorker`. A one-line module in the app that
+ * imports "@ovasabi/runtime-browser/pulse.worker" for its side effects gives
+ * the bundler a URL it owns and can emit. This default is kept for use inside
+ * the package and for tests.
+ */
 const defaultWorkerFactory = () => new Worker(new URL("./pulse.worker.ts", import.meta.url), { type: "module" });
 
 export type PulseManager = ReturnType<typeof createPulseManager>;
@@ -209,6 +224,15 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
           payload: { buffer: nextBuffer },
         };
         worker.postMessage(initMessage);
+
+        const watchedIndices = Array.from(handlers.keys());
+        if (watchedIndices.length > 0) {
+          const watchMessage: PulseMessage = {
+            type: "WATCH_INDICES",
+            payload: { indices: watchedIndices },
+          };
+          worker.postMessage(watchMessage);
+        }
       }
 
       setVisibility(visible);

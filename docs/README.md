@@ -138,6 +138,7 @@ Read in order:
 | `runtime_foundation.md` | Runtime ladder, WASM/native lanes, binary transport, control-buffer discipline |
 | `runtime_native.md` | Tauri/native shell device access, native byte lanes, secure storage, GPU policy |
 | `gpu_practices.md` | WebGPU/native GPU batching, memory, verification |
+| `render_surface_lane.md` | Worker-owned WebGPU raster passes, 2D canvas stages, and frame clock scheduling |
 | `game_runtime_practices.md` | Frame-budgeted runtime practices for visual and interactive loops |
 | `columnar_null_algebra.md` | Null representation, identity-substitution reductions, and the cross-lane bitmap contract |
 | `mathematical_practices.md` | Numerical analysis, floating-point, probability, statistics, CRDT convergence |
