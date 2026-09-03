@@ -136,6 +136,14 @@ export class RuntimeBridge {
     return this.size;
   }
 
+  getFlagOffset(): number {
+    return this.flagOffset;
+  }
+
+  getFlagCount(): number {
+    return this.flagCount;
+  }
+
   getDataView(): DataView | null {
     return this.dataView;
   }
