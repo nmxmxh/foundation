@@ -55,7 +55,8 @@ first-use hitch prevention.
    requirements before GPU is selected.
 5. Browser GPU work must run off the React render path. Workers own WebGPU
    device setup, pipeline creation, command encoding, dispatch, readback, and
-   fallback coordination.
+   fallback coordination. For visual canvas rasterization and offscreen render
+   surfaces, see `render_surface_lane.md`.
 
 ## Workload fit
 

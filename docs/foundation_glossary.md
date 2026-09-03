@@ -141,6 +141,7 @@ pre-answered questions without scanning multiple files.
 | Package | What | Why | Key Exports |
 | :--- | :--- | :--- | :--- |
 | `@ovasabi/runtime-transport` | Client wire | Command bus, envelopes, WS/HTTP, route registry | `createCommandBus`, `createAppRuntime`, `createRouteRegistry` |
+| `@ovasabi/runtime-browser` | Browser runtime SDK | WebGPU compute, render surface lane, canvas stage, pulse clock | `createRenderSurfaceHost`, `serveRenderSurface`, `createCanvasStage`, `onFrame`, `createPulseManager` |
 | `@ovasabi/frontend-kit` | Operational utilities | IndexedDB, metadata, stores, transfer progress | `useTransfer`, `createTenantProjectionStore` |
 | `@ovasabi/ui-minimal` | UI primitives | Theme, components, motion | `MinimalButton`, `MinimalAppShell`, `useMinimalMotion` |
 | `@ovasabi/runtime-native` | Native shell bridge | Tauri IPC, secure storage, capability detection | `dispatchNativeFrame` |
@@ -357,7 +358,8 @@ The recommended facade that wires the generated route registry, HTTP/WS transpor
 | Frontend transport | `frontend_command_registry.md`, `frontend_scaffold_sync.md` |
 | Runtime / WASM / Rust | `runtime_foundation.md`, `rust_runtime_practices.md`, `rust_unit_guide.md`, `performance_lab.md` |
 | Native / Tauri | `runtime_native.md`, `rust_runtime_practices.md` |
-| GPU / WebGPU | `gpu_practices.md`, `game_runtime_practices.md` |
+| GPU / WebGPU | `gpu_practices.md`, `game_runtime_practices.md`, `render_surface_lane.md` |
+| Canvas / Render Surface | `render_surface_lane.md`, `game_runtime_practices.md`, `styling_design_practices.md` |
 | Security / auth | `security_practices.md`, `coding_practices.md` (CP-18, CP-20, CP-29), `ai_threat_model.md` |
 | Performance optimization | `performance_practices.md`, `performance_lab.md`, `foundation_benchmarks.md` |
 | Scaffold / template | `scaffold_manifest.md`, `foundation_architecture_contract.md` |

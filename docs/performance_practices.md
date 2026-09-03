@@ -356,7 +356,8 @@ performance posture is:
    whether GPU promotion stays.
 7. Browser WebGPU remains optional and worker-owned. React render paths receive
    state and results; they do not create devices, compile pipelines, dispatch
-   workgroups, or map readback buffers.
+   workgroups, or map readback buffers. For offscreen canvas raster passes,
+   see `render_surface_lane.md`.
 8. GPU optimization must preserve Foundation invariants: metadata, tenant
    scope, result semantics, bounded work, fallback refinement, and controlled
    error classes.

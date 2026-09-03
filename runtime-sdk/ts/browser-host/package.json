@@ -5,7 +5,13 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./pulse.worker": "./src/pulse/pulse.worker.ts",
+    "./renderSurface": "./src/renderSurface.ts",
+    "./renderSurfaceClient": "./src/renderSurfaceClient.ts",
+    "./canvasStage": "./src/canvasStage.ts",
+    "./frameClock": "./src/frameClock.ts",
+    "./renderMarks": "./src/renderMarks.ts"
   },
   "types": "./src/index.ts",
   "scripts": {
