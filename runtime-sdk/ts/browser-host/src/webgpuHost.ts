@@ -246,7 +246,7 @@ export class RuntimeWebGpuHost {
     if (!adapter) {
       throw new Error("WebGPU adapter is unavailable");
     }
-    return new RuntimeWebGpuHost(await adapter.requestDevice(), options);
+    return new RuntimeWebGpuHost((await adapter.requestDevice()) as RuntimeGpuDevice, options);
   }
 
   async prewarmKernel(kernel: RuntimeWebGpuKernel): Promise<void> {
@@ -744,24 +744,24 @@ export const measureRuntimeWebGpuDeviceRoundTrip = async (
   let device = options.device;
 
   if (!device) {
-    let adapter: RuntimeGpuAdapter | null | undefined = options.adapter;
+    let adapter: RuntimeGpuAdapter | any = options.adapter;
     if (!adapter) {
       const gpu = (globalThis.navigator as RuntimeGpuNavigator | undefined)?.gpu;
       if (!gpu) {
         return { available: false, reason: "WebGPU is unavailable in this runtime" };
       }
       const adapterStarted = nowMs();
-      adapter = await gpu.requestAdapter({
+      adapter = (await gpu.requestAdapter({
         powerPreference: options.powerPreference ?? "high-performance",
         forceFallbackAdapter: options.forceFallbackAdapter,
-      });
+      })) as RuntimeGpuAdapter | null;
       adapterNs = msToNs(nowMs() - adapterStarted);
     }
     if (!adapter) {
       return { available: false, reason: "WebGPU adapter is unavailable" };
     }
     const deviceStarted = nowMs();
-    device = await adapter.requestDevice();
+    device = (await adapter.requestDevice()) as RuntimeGpuDevice;
     deviceNs = msToNs(nowMs() - deviceStarted);
   }
 
