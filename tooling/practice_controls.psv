@@ -111,3 +111,15 @@ TE-41|docs/testing_practices.md|agent|high|partial|script:tooling/scripts/agent_
 TE-42|docs/testing_practices.md|testing|medium|human|review|mirror-layout-precedent|yes
 MATH-01|docs/mathematical_practices.md|formal|high|human|review|mathematical-practices-checklist|yes
 CP-44|docs/coding_practices.md|runtime|high|partial|script:tooling/scripts/go_concurrency_practices_check.sh;review|ipc-idle-cpu-evidence|yes
+GPU-10|docs/gpu_practices.md|frontend|high|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|render-surface-device-prior|yes
+GPU-11|docs/gpu_practices.md|frontend|high|strong|script:tooling/scripts/frontend_surface_practices_check.mjs;script:tooling/scripts/ts_static_analysis_check.sh|quality-ladder-demotion-bench|yes
+GPU-12|docs/gpu_practices.md|frontend|medium|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|decorative-pass-power-preference|yes
+SD-01|docs/styling_design_practices.md|frontend|medium|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|spacing-scale-ratio|yes
+SD-02|docs/styling_design_practices.md|frontend|medium|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|named-breakpoint-tokens|yes
+SD-03|docs/styling_design_practices.md|frontend|medium|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|flow-stack-not-flex-column-gap|yes
+SD-04|docs/styling_design_practices.md|frontend|medium|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|mobile-viewport-units|yes
+GPU-13|docs/gpu_practices.md|frontend|high|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|render-pass-disposal-contract|yes
+GPU-14|docs/gpu_practices.md|frontend|high|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|gpu-host-teardown-and-device-ownership|yes
+GPU-15|docs/gpu_practices.md|frontend|medium|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|shared-state-channel-wiring|yes
+GPU-16|docs/gpu_practices.md|frontend|medium|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|render-surface-prewarm-contract|yes
+GPU-17|docs/gpu_practices.md|frontend|high|strong|script:tooling/scripts/frontend_surface_practices_check.mjs|shared-worker-single-device|yes

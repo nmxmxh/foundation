@@ -29,8 +29,18 @@ import { createPortal } from "react-dom";
 import { css, keyframes, styled } from "styled-components";
 
 import { useMinimalMotion } from "./motion";
-import { useMinimalTheme } from "./theme";
-import type { MinimalDensity, MinimalEmphasis, MinimalSize, MinimalTheme, MinimalTone } from "./types";
+import { from, until, useMinimalTheme } from "./theme";
+import type {
+  MinimalDensity,
+  MinimalEmphasis,
+  MinimalSize,
+  MinimalSpaceTheme,
+  MinimalTheme,
+  MinimalTone,
+} from "./types";
+
+/** A rung of the spacing scale, by name. */
+export type MinimalSpaceStep = keyof MinimalSpaceTheme;
 
 type SurfaceVariant = "default" | "muted" | "raised" | "outlined";
 type HeaderAlign = "start" | "center";
@@ -211,6 +221,60 @@ export interface MinimalFieldGridProps extends HTMLAttributes<HTMLDivElement> {
 export interface MinimalActionRowProps extends HTMLAttributes<HTMLDivElement> {
   children: ReactNode;
   align?: ActionAlign;
+}
+
+/**
+ * A vertical stack whose spacing an element can claim for itself.
+ *
+ * ## Why this is not a flex column with a `gap`
+ *
+ * `gap` is a property of the container; `margin` is a property of the child,
+ * and that single difference is the whole reason this exists. `gap: 16px` says
+ * *every child of this box is 16px from its neighbour* — a statement about a
+ * set. It cannot say "more air before a section heading than after it", because
+ * it does not know which child is a heading. Expressing hierarchy underneath it
+ * means nesting another container for every distinct spacing, or overriding
+ * with margins anyway and maintaining two spacing systems that fight.
+ *
+ * `margin-block-start: 40px` on a heading says *a heading claims 40px above
+ * it*, and the claim travels with the element: move the heading and its rhythm
+ * moves too; add another and it is already spaced. That is how typesetting has
+ * worked since metal type, and it is why editorial CSS still reads better than
+ * component CSS — the rhythm is a property of the content model rather than of
+ * wherever the content was placed.
+ *
+ * ## Why flow layout, specifically
+ *
+ * Margins **do not collapse inside flex or grid**, and collapsing is the
+ * mechanism that makes claims compose. In flow, a section claiming `xl` above
+ * itself that contains a heading claiming `lg` above resolves to `xl` — not to
+ * the sum. Each element states its requirement, the larger one wins, and
+ * nothing needs to know about anything else. Swapping `gap` for margins while
+ * keeping `flex-direction: column` gets none of that: the margins add instead
+ * of resolving, a trailing margin starts pushing the container, and the result
+ * is additive uniformity with more code — strictly worse than the `gap` it
+ * replaced. That trap is the single most important thing to know before
+ * reaching for this.
+ *
+ * ## What it does not replace
+ *
+ * Grids, wrapping rows, and genuinely uniform peer sets keep `gap`. A toolbar
+ * of equal buttons *is* uniform; uniformity is the truth there and `gap` states
+ * it once instead of N times. A margin on a wrapped item is applied at the wrap
+ * point too, so the second row starts inset — `gap` is the only correct tool
+ * for a row that reflows.
+ */
+export interface MinimalStackProps extends HTMLAttributes<HTMLDivElement> {
+  children: ReactNode;
+  /**
+   * The space every child claims above itself unless it says otherwise.
+   *
+   * A uniform default is honest for a stack that *is* uniform; hierarchy comes
+   * from children that claim more. Defaults to `sm`.
+   */
+  rhythm?: MinimalSpaceStep;
+  /** Render as something other than a `div` — `section`, `article`, `ul`. */
+  as?: "div" | "section" | "article" | "ul" | "ol" | "nav" | "aside";
 }
 
 export interface MinimalTableColumn<T> {
@@ -533,7 +597,7 @@ const clickableReset = css`
 const Style = {
   HeaderShell: styled(motion.header)<{ $align: HeaderAlign }>`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     justify-items: ${({ $align }) => ($align === "center" ? "center" : "stretch")};
     text-align: ${({ $align }) => ($align === "center" ? "center" : "left")};
   `,
@@ -541,12 +605,12 @@ const Style = {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: ${({ theme }) => theme.spacing.md};
+    gap: ${({ theme }) => theme.space.sm};
     width: 100%;
   `,
   HeaderCopy: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
     min-width: 0;
   `,
   HeaderKicker: styled.p`
@@ -629,7 +693,7 @@ const Style = {
     border-radius: ${({ theme }) => theme.radius.sm};
     cursor: pointer;
     display: inline-flex;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     justify-content: center;
     letter-spacing: 0.02em;
     line-height: 1;
@@ -728,7 +792,7 @@ const Style = {
     }}
     border-radius: ${({ theme }) => theme.radius.md};
     display: grid;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     overflow: hidden;
     padding: ${({ $padding }) => cardPadding[$padding]};
     transition:
@@ -762,7 +826,7 @@ const Style = {
   `,
   FieldShell: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
     width: 100%;
   `,
   FieldLabel: styled.label`
@@ -796,7 +860,7 @@ const Style = {
     align-items: center;
     border-radius: ${({ theme }) => theme.radius.sm};
     display: flex;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     min-height: ${({ $size }) => ($size === "sm" ? "36px" : $size === "lg" ? "48px" : "44px")};
     padding: ${({ $size }) => inputPadding[$size]};
     transition:
@@ -863,7 +927,7 @@ const Style = {
     align-items: center;
     border-radius: ${({ theme }) => theme.radius.sm};
     display: inline-flex;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
     justify-content: center;
     letter-spacing: 0.04em;
     line-height: 1;
@@ -887,7 +951,7 @@ const Style = {
     border-radius: ${({ theme }) => theme.radius.sm};
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    gap: 9px;
+    gap: ${({ theme }) => theme.space.xs};
     padding: 10px 12px;
     font-size: 0.75rem;
   `,
@@ -899,7 +963,7 @@ const Style = {
   `,
   AlertBody: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
   `,
   AlertTitle: styled.strong`
     font-size: ${({ theme }) => theme.typography.captionSize};
@@ -912,9 +976,9 @@ const Style = {
     border: 1px dashed ${({ theme }) => theme.color.borderStrong};
     border-radius: ${({ theme }) => theme.radius.md};
     display: grid;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     justify-items: ${({ $align }) => ($align === "center" ? "center" : "stretch")};
-    padding: ${({ theme }) => theme.spacing.xl};
+    padding: ${({ theme }) => theme.space.lg};
     text-align: ${({ $align }) => ($align === "center" ? "center" : "left")};
   `,
   EmptyIcon: styled.div`
@@ -939,7 +1003,7 @@ const Style = {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
   `,
   FilterChip: styled.button<{ $selected: boolean; $size: MinimalSize }>`
     ${clickableReset}
@@ -991,7 +1055,7 @@ const Style = {
     background: ${({ theme }) => theme.color.bgSurface};
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
     border-radius: ${({ theme }) => theme.radius.sm};
-    gap: 4px;
+    gap: ${({ theme }) => theme.space["2xs"]};
     padding: 4px;
     min-height: ${({ $size }) => ($size === "sm" ? "34px" : $size === "lg" ? "44px" : "38px")};
   `,
@@ -1044,32 +1108,32 @@ const Style = {
     color: ${({ theme }) => theme.color.textPrimary};
     display: flex;
     align-items: center;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     justify-content: space-between;
-    padding: ${({ theme }) => theme.spacing.md};
+    padding: ${({ theme }) => theme.space.sm};
     cursor: pointer;
   `,
   ExplainerCopy: styled.div`
     display: flex;
     align-items: center;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     min-width: 0;
   `,
   ExplainerText: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
     text-align: left;
   `,
   ExplainerActions: styled.div`
     display: flex;
     align-items: center;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
   `,
   ExplainerPanel: styled(motion.div)`
     overflow: hidden;
   `,
   ExplainerPanelBody: styled.div`
-    padding: 0 ${({ theme }) => theme.spacing.md} ${({ theme }) => theme.spacing.md};
+    padding: 0 ${({ theme }) => theme.space.sm} ${({ theme }) => theme.space.sm};
   `,
   StatShell: styled.article<{ $tone: MinimalTone }>`
     ${({ theme, $tone }) => {
@@ -1084,14 +1148,14 @@ const Style = {
     }}
     border-radius: ${({ theme }) => theme.radius.md};
     display: grid;
-    gap: 4px;
+    gap: ${({ theme }) => theme.space["2xs"]};
     min-height: 0;
     padding: 20px;
   `,
   StatMeta: styled.div`
     display: flex;
     align-items: center;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
   `,
   StatIcon: styled.div`
     width: 36px;
@@ -1131,17 +1195,17 @@ const Style = {
   `,
   FormSectionShell: styled.section`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.md};
+    gap: ${({ theme }) => theme.space.sm};
   `,
   FormSectionHeader: styled.div`
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: ${({ theme }) => theme.spacing.md};
+    gap: ${({ theme }) => theme.space.sm};
   `,
   FormSectionCopy: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
   `,
   FormSectionTitle: styled.h3`
     margin: 0;
@@ -1153,18 +1217,55 @@ const Style = {
   `,
   FieldGridShell: styled.div<{ $columns: 1 | 2 | 3 }>`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.md};
-    grid-template-columns: repeat(${({ $columns }) => $columns}, minmax(0, 1fr));
+    gap: ${({ theme }) => theme.space.sm};
+    /* Mobile-first: one column is the base state, columns are what a wider
+       viewport adds. The rule it replaces read the other way round and
+       switched at a hand-typed 800px, a number no other rule in the system
+       shared. */
+    grid-template-columns: 1fr;
 
-    @media (max-width: 800px) {
-      grid-template-columns: 1fr;
+    ${from("page")} {
+      grid-template-columns: repeat(${({ $columns }) => $columns}, minmax(0, 1fr));
+    }
+  `,
+  StackShell: styled.div<{ $rhythm: MinimalSpaceStep }>`
+    /* Flow layout, deliberately. Not \`display: flex; flex-direction: column\`
+       — margins do not collapse in flex, and collapsing is what lets a nested
+       claim resolve against its parent's instead of adding to it. A column that
+       genuinely needs \`align-items\`, \`order\` or \`flex\` on a child is not
+       document-shaped and should keep its gap. */
+    display: block;
+
+    /* One direction only. Exactly one element owns each vertical space, so
+       there is never a trailing margin pushing the container and never a
+       \`:last-child\` reset to remember. */
+    > * + * {
+      margin-block-start: ${({ theme, $rhythm }) => theme.space[$rhythm]};
+    }
+
+    /* How a child claims more than the default. This is the part \`gap\` cannot
+       express: the claim is written on the element that needs it, so it travels
+       when the element moves and applies the moment another one is added. */
+    ${({ theme }) =>
+      (Object.keys(theme.space) as MinimalSpaceStep[]).map(
+        (step) => css`
+          > [data-space="${step}"] {
+            margin-block-start: ${theme.space[step]};
+          }
+        `,
+      )}
+
+    /* Nothing claims space above the first child; the container's own padding
+       owns that edge. */
+    > :first-child {
+      margin-block-start: 0;
     }
   `,
   ActionRowShell: styled.div<{ $align: ActionAlign }>`
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     justify-content: ${({ $align }) => actionJustify[$align]};
   `,
   TableShell: styled.div`
@@ -1181,7 +1282,7 @@ const Style = {
 
     caption {
       caption-side: top;
-      padding: ${({ theme }) => theme.spacing.md};
+      padding: ${({ theme }) => theme.space.sm};
       text-align: left;
       color: ${({ theme }) => theme.color.textSecondary};
       font-size: ${({ theme }) => theme.typography.captionSize};
@@ -1224,20 +1325,20 @@ const Style = {
   `,
   CalendarShell: styled.section`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.md};
+    gap: ${({ theme }) => theme.space.sm};
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
     border-radius: ${({ theme }) => theme.radius.md};
     background: ${({ theme }) => theme.color.bgSurface};
-    padding: ${({ theme }) => theme.spacing.md};
+    padding: ${({ theme }) => theme.space.sm};
   `,
   CalendarHeader: styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
   `,
   CalendarTitleButton: styled.button`
     ${clickableReset}
@@ -1246,7 +1347,7 @@ const Style = {
     min-height: var(--minimal-control-min-target);
     display: inline-flex;
     align-items: center;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
     padding: 4px 8px;
     border-radius: ${({ theme }) => theme.radius.sm};
     color: ${({ theme }) => theme.color.textPrimary};
@@ -1266,7 +1367,7 @@ const Style = {
   CalendarNavGroup: styled.div`
     display: inline-flex;
     align-items: center;
-    gap: 2px;
+    gap: ${({ theme }) => theme.space["3xs"]};
   `,
   CalendarNavButton: styled.button`
     ${clickableReset}
@@ -1307,7 +1408,7 @@ const Style = {
   CalendarGrid: styled.div`
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 3px;
+    gap: ${({ theme }) => theme.space["3xs"]};
   `,
   CalendarWeekday: styled.div`
     color: ${({ theme }) => theme.color.textTertiary};
@@ -1315,7 +1416,7 @@ const Style = {
     font-family: ${({ theme }) => theme.typography.monoFamily};
     text-align: center;
     text-transform: uppercase;
-    padding: 4px 0 ${({ theme }) => theme.spacing.xs};
+    padding: 4px 0 ${({ theme }) => theme.space["2xs"]};
   `,
   CalendarBlank: styled.span`
     min-height: 40px;
@@ -1347,11 +1448,11 @@ const Style = {
     min-height: ${({ $hasContent }) => ($hasContent ? "52px" : "40px")};
     aspect-ratio: ${({ $hasContent }) => ($hasContent ? "auto" : "1")};
     border-radius: ${({ theme }) => theme.radius.sm};
-    padding: ${({ theme, $hasContent }) => ($hasContent ? theme.spacing.sm : theme.spacing.xs)};
+    padding: ${({ theme, $hasContent }) => ($hasContent ? theme.space.xs : theme.space["2xs"])};
     display: grid;
     place-items: center;
     align-content: ${({ $hasContent }) => ($hasContent ? "start" : "center")};
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
     cursor: pointer;
     transition:
       border-color 160ms ${enterCurve},
@@ -1390,8 +1491,8 @@ const Style = {
   CalendarSelectorGrid: styled.div<{ $columns: number }>`
     display: grid;
     grid-template-columns: repeat(${({ $columns }) => $columns}, minmax(0, 1fr));
-    gap: ${({ theme }) => theme.spacing.xs};
-    padding-top: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
+    padding-top: ${({ theme }) => theme.space["2xs"]};
   `,
   CalendarOption: styled.button<{ $active: boolean }>`
     ${clickableReset}
@@ -1422,7 +1523,7 @@ const Style = {
   CalendarFooter: styled.div`
     display: flex;
     justify-content: flex-start;
-    padding-top: ${({ theme }) => theme.spacing.xs};
+    padding-top: ${({ theme }) => theme.space["2xs"]};
     border-top: 1px solid ${({ theme }) => theme.color.borderSubtle};
   `,
   CalendarTodayButton: styled.button`
@@ -1477,7 +1578,7 @@ const Style = {
     align-items: center;
     color: ${({ theme, $placeholder }) => ($placeholder ? theme.color.textTertiary : theme.color.textPrimary)};
     display: inline-flex;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     justify-content: space-between;
     min-height: 0;
     padding: 0;
@@ -1495,11 +1596,11 @@ const Style = {
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: ${({ theme }) => theme.spacing.xs};
+    padding: ${({ theme }) => theme.space["2xs"]};
   `,
   DropdownSearchWrap: styled.div`
     flex: 0 0 auto;
-    padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.xs};
+    padding: ${({ theme }) => theme.space.xs} ${({ theme }) => theme.space.xs} ${({ theme }) => theme.space["2xs"]};
     border-bottom: 1px solid ${({ theme }) => theme.color.borderSubtle};
   `,
   DropdownSearch: styled.input`
@@ -1532,7 +1633,7 @@ const Style = {
     width: 100%;
     text-align: left;
     display: grid;
-    gap: 2px;
+    gap: ${({ theme }) => theme.space["3xs"]};
     padding: 10px 12px;
     border-radius: ${({ theme }) => theme.radius.sm};
     cursor: pointer;
@@ -1554,7 +1655,7 @@ const Style = {
   DropdownOptionRow: styled.div`
     display: flex;
     justify-content: space-between;
-    gap: ${({ theme }) => theme.spacing.md};
+    gap: ${({ theme }) => theme.space.sm};
   `,
   TooltipAnchor: styled.span`
     display: inline-flex;
@@ -1598,20 +1699,20 @@ const Style = {
     border: 1px solid ${({ theme }) => theme.color.borderStrong};
     border-radius: ${({ theme }) => theme.radius.md};
     box-shadow: ${({ theme }) => theme.shadow.floating};
-    padding: ${({ theme }) => theme.spacing.lg};
+    padding: ${({ theme }) => theme.space.md};
     z-index: ${({ theme }) => theme.zIndex.modal};
     display: grid;
-    gap: ${({ theme }) => theme.spacing.md};
+    gap: ${({ theme }) => theme.space.sm};
     overflow: hidden;
 
-    @media (max-width: 720px) {
+    ${until("page")} {
       inset: ${({ $mobileSheet }) => ($mobileSheet ? "auto 0 0 0" : "50% auto auto 50%")};
       transform: ${({ $mobileSheet }) => ($mobileSheet ? "none" : "translate(-50%, -50%)")};
       width: ${({ $mobileSheet }) => ($mobileSheet ? "100%" : "min(92vw, var(--minimal-modal-max-width, 520px))")};
       max-height: min(90dvh, var(--minimal-modal-max-height, 90dvh));
       border-radius: ${({ theme, $mobileSheet }) =>
         $mobileSheet ? `${theme.radius.lg} ${theme.radius.lg} 0 0` : theme.radius.md};
-      padding: ${({ theme }) => `${theme.spacing.lg} ${theme.spacing.md}`};
+      padding: ${({ theme }) => `${theme.space.md} ${theme.space.sm}`};
 
       ${({ $mobileSheet }) =>
         $mobileSheet
@@ -1625,7 +1726,7 @@ const Style = {
   `,
   ModalHeader: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
   `,
   ModalTitle: styled.h2`
     margin: 0;
@@ -1638,7 +1739,7 @@ const Style = {
   ModalActions: styled.div`
     display: flex;
     justify-content: flex-end;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     flex-wrap: wrap;
   `,
   ModalBody: styled.div<{ $scrollable: boolean }>`
@@ -1669,7 +1770,7 @@ const Style = {
       ${({ $backgroundImage }) => ($backgroundImage ? `url(${$backgroundImage}) center / cover` : "transparent")};
     box-shadow: ${({ theme, $intensity }) => ($intensity === "statement" ? theme.shadow.medium : theme.shadow.subtle)};
     padding: ${({ theme, $intensity }) =>
-      $intensity === "statement" ? theme.spacing.xl : $intensity === "calm" ? theme.spacing.lg : theme.spacing.xl};
+      $intensity === "statement" ? theme.space.lg : $intensity === "calm" ? theme.space.md : theme.space.lg};
 
     ${({ theme, $visualMode, $anchor }) =>
       $visualMode === "background" || $visualMode === "canvas"
@@ -1682,21 +1783,21 @@ const Style = {
                 ? "minmax(0, 0.9fr) minmax(320px, 1.1fr)"
                 : "minmax(320px, 1.1fr) minmax(0, 0.9fr)"
               : "minmax(0, 1fr)"};
-            gap: ${theme.spacing.xl};
+            gap: ${theme.space.lg};
             background-color: ${theme.color.bgSurface};
           `}
 
-    @media (max-width: 860px) {
+    ${until("page")} {
       grid-template-columns: 1fr;
       min-height: min(760px, max(520px, 76dvh));
-      padding: ${({ theme }) => theme.spacing.lg};
+      padding: ${({ theme }) => theme.space.md};
     }
   `,
   DisplayCopy: styled.div<{ $anchor: LandingAnchor; $intensity: LandingIntensity }>`
     position: relative;
     z-index: 1;
     display: grid;
-    gap: ${({ theme }) => theme.spacing.md};
+    gap: ${({ theme }) => theme.space.sm};
     max-width: ${({ $intensity }) => ($intensity === "statement" ? "760px" : "620px")};
     justify-self: ${({ $anchor }) =>
       $anchor === "center" || $anchor === "stacked"
@@ -1733,16 +1834,16 @@ const Style = {
       height: 100%;
     }
 
-    @media (max-width: 860px) {
+    ${until("page")} {
       order: 0;
       max-height: 360px;
     }
   `,
   LandingSection: styled.section<{ $anchor: LandingAnchor; $intensity: LandingIntensity }>`
     display: grid;
-    gap: ${({ theme, $intensity }) => ($intensity === "calm" ? theme.spacing.md : theme.spacing.lg)};
+    gap: ${({ theme, $intensity }) => ($intensity === "calm" ? theme.space.sm : theme.space.md)};
     padding: ${({ theme, $intensity }) =>
-      $intensity === "statement" ? `${theme.spacing["2xl"]} 0` : `${theme.spacing.xl} 0`};
+      $intensity === "statement" ? `${theme.space.xl} 0` : `${theme.space.lg} 0`};
     align-items: center;
     grid-template-columns: ${({ $anchor }) =>
       $anchor === "left-visual"
@@ -1751,14 +1852,14 @@ const Style = {
           ? "minmax(0, 0.9fr) minmax(320px, 1fr)"
           : "minmax(0, 1fr)"};
 
-    @media (max-width: 860px) {
+    ${until("page")} {
       grid-template-columns: 1fr;
-      padding: ${({ theme }) => `${theme.spacing.xl} 0`};
+      padding: ${({ theme }) => `${theme.space.lg} 0`};
     }
   `,
   LandingCopy: styled.div<{ $anchor: LandingAnchor }>`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     max-width: 680px;
     justify-self: ${({ $anchor }) => ($anchor === "center" || $anchor === "stacked" ? "center" : "start")};
     text-align: ${({ $anchor }) => ($anchor === "center" || $anchor === "stacked" ? "center" : "left")};
@@ -1789,16 +1890,16 @@ const Style = {
     display: grid;
     grid-template-columns: ${({ $layout }) =>
       $layout === "row" ? "auto minmax(0, 1fr) auto" : $layout === "split" ? "minmax(0, 1fr) auto" : "1fr"};
-    gap: ${({ theme }) => theme.spacing.md};
+    gap: ${({ theme }) => theme.space.sm};
     align-items: start;
     min-width: 0;
-    padding: ${({ theme }) => theme.spacing.md};
+    padding: ${({ theme }) => theme.space.sm};
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
     border-left: 2px solid var(--minimal-info-accent);
     border-radius: ${({ theme }) => theme.radius.sm};
     background: ${({ theme }) => theme.color.bgSurface};
 
-    @media (max-width: 640px) {
+    ${until("page")} {
       grid-template-columns: 1fr;
     }
   `,
@@ -1814,7 +1915,7 @@ const Style = {
   `,
   InfoCopy: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
     min-width: 0;
   `,
   InfoTitle: styled.h3`
@@ -1899,6 +2000,7 @@ const {
   FormSectionCopy,
   FormSectionTitle,
   FieldGridShell,
+  StackShell,
   ActionRowShell,
   TableShell,
   StyledTable,
@@ -2281,9 +2383,9 @@ const ShellStyle = {
   SkipLink: styled.a`
     position: absolute;
     top: -44px;
-    left: ${({ theme }) => theme.spacing.md};
+    left: ${({ theme }) => theme.space.sm};
     z-index: ${({ theme }) => theme.zIndex.tooltip + 1};
-    padding: ${({ theme }) => `${theme.spacing.sm} ${theme.spacing.md}`};
+    padding: ${({ theme }) => `${theme.space.xs} ${theme.space.sm}`};
     border-radius: ${({ theme }) => theme.radius.md};
     background: ${({ theme }) => theme.color.brand};
     color: ${({ theme }) => theme.color.textInverse};
@@ -2293,7 +2395,7 @@ const ShellStyle = {
     transition: top 160ms ${enterCurve};
 
     &:focus {
-      top: ${({ theme }) => theme.spacing.sm};
+      top: ${({ theme }) => theme.space.xs};
       outline: 2px solid ${({ theme }) => theme.color.borderFocus};
       outline-offset: 2px;
     }
@@ -2304,8 +2406,12 @@ const ShellStyle = {
     width: ${({ $width }) => $width};
     display: flex;
     flex-direction: column;
-    gap: ${({ theme }) => theme.spacing.md};
-    padding: ${({ theme, $bannerOffset }) => `calc(${$bannerOffset} + ${theme.spacing.xl}) ${theme.spacing.md} ${theme.spacing.lg}`};
+    /* Deliberate gap on a column — see styling_design_practices.md §11. A
+       sidebar is a scrolling flex column of uniform navigation peers: it needs
+       flex for the scroll region to size against the fixed inset, and the
+       spacing between its items genuinely is uniform. Rule 3, not rule 4. */
+    gap: ${({ theme }) => theme.space.sm};
+    padding: ${({ theme, $bannerOffset }) => `calc(${$bannerOffset} + ${theme.space.lg}) ${theme.space.sm} ${theme.space.md}`};
     overflow-y: auto;
     overscroll-behavior: contain;
     background: linear-gradient(180deg, ${({ theme }) => theme.color.bgSurface} 0%, ${({ theme }) => theme.color.bgSurfaceAlt} 100%);
@@ -2322,11 +2428,11 @@ const ShellStyle = {
     max-width: ${({ $mobile, $sidebarWidth }) => ($mobile ? "100%" : `calc(100% - ${$sidebarWidth})`)};
     margin-left: ${({ $mobile, $sidebarWidth }) => ($mobile ? "0" : $sidebarWidth)};
     padding-top: ${({ theme, $mobile, $bannerOffset }) =>
-      $mobile ? `calc(${$bannerOffset} + env(safe-area-inset-top, 0px))` : `calc(${$bannerOffset} + ${theme.spacing.xl})`};
-    padding-right: ${({ theme, $mobile, $compact }) => ($mobile && $compact ? theme.spacing.sm : theme.spacing.lg)};
+      $mobile ? `calc(${$bannerOffset} + env(safe-area-inset-top, 0px))` : `calc(${$bannerOffset} + ${theme.space.lg})`};
+    padding-right: ${({ theme, $mobile, $compact }) => ($mobile && $compact ? theme.space.xs : theme.space.md)};
     padding-bottom: ${({ theme, $mobile, $compact }) =>
-      $mobile ? `calc(${$compact ? "64px" : "72px"} + env(safe-area-inset-bottom, 0px))` : theme.spacing.xl};
-    padding-left: ${({ theme, $mobile, $compact }) => ($mobile && $compact ? theme.spacing.sm : theme.spacing.lg)};
+      $mobile ? `calc(${$compact ? "64px" : "72px"} + env(safe-area-inset-bottom, 0px))` : theme.space.lg};
+    padding-left: ${({ theme, $mobile, $compact }) => ($mobile && $compact ? theme.space.xs : theme.space.md)};
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
@@ -3287,6 +3393,16 @@ export const MinimalFieldGrid = ({
   <FieldGridShell data-minimal="FieldGrid" $columns={columns} {...props}>
     {children}
   </FieldGridShell>
+);
+
+export const MinimalStack = ({
+  children,
+  rhythm = "sm",
+  ...props
+}: MinimalStackProps) => (
+  <StackShell data-minimal="Stack" $rhythm={rhythm} {...props}>
+    {children}
+  </StackShell>
 );
 
 export const MinimalActionRow = ({

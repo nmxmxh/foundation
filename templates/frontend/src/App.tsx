@@ -4,34 +4,34 @@ import { styled } from 'styled-components'
 import { offlinePrototypeRuntime } from './stores/prototype'
 
 const Container = styled.div`
-  min-height: 100vh;
+  min-height: 100svh;
   display: flex;
   flex-direction: column;
 `
 
 const Main = styled.main`
   flex: 1;
-  padding: ${({ theme }) => theme.spacing.lg};
+  padding: ${({ theme }) => theme.space.md};
 `
 
 const Header = styled.header`
   display: grid;
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: ${({ theme }) => theme.space.xs};
   max-width: 960px;
 `
 
 const RuntimeGrid = styled.section`
   display: grid;
-  gap: ${({ theme }) => theme.spacing.md};
+  gap: ${({ theme }) => theme.space.sm};
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  margin-top: ${({ theme }) => theme.spacing.lg};
+  margin-top: ${({ theme }) => theme.space.md};
   max-width: 960px;
 `
 
 const RuntimePanel = styled.article`
   border: 1px solid ${({ theme }) => theme.color.borderSubtle};
   border-radius: ${({ theme }) => theme.radius.sm};
-  padding: ${({ theme }) => theme.spacing.md};
+  padding: ${({ theme }) => theme.space.sm};
 `
 
 const Metric = styled.p`
@@ -42,7 +42,7 @@ const Metric = styled.p`
 
 const Label = styled.p`
   color: ${({ theme }) => theme.color.textSecondary};
-  margin: 0 0 ${({ theme }) => theme.spacing.xs};
+  margin: 0 0 ${({ theme }) => theme.space["2xs"]};
 `
 
 const EMPTY_SNAPSHOT = {

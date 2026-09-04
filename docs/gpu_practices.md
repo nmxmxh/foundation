@@ -262,6 +262,273 @@ boundary cost and fallback parity are part of the visible runtime contract.
    workgroup only.
 6. Pipeline creation must be async or prewarmed outside latency-sensitive UI.
    Render paths should receive readiness state, not create GPU resources.
+7. A pass that is not the subject of the page requests
+   `powerPreference: "low-power"`. `"high-performance"` is a request for the
+   discrete adapter, and on macOS it forces a GPU switch for the whole browser
+   process; on a phone it biases the driver toward its highest-power operating
+   point, which on a thermally constrained device means faster throttling and
+   *worse* sustained frame times than the low-power path would have given. A
+   background texture behind a headline does not get to make that trade for the
+   rest of the browser. Reserve `"high-performance"` for a compute lane or a
+   figure the page exists to show.
+8. One `GPUDevice` per worker, not one per pass. A device per pass means an
+   adapter, a pipeline set, and a lot of driver state per pass; three decorative
+   figures on one page become three of each. Negotiate the device once where the
+   worker starts and hand it to every pass it serves.
+
+## Device profile and starting tier
+
+A quality ladder only ever descends from where it opens. A surface that opens
+every device at its best rung has therefore made every phone discover that it
+is a phone by janking — drawing at full resolution, missing cadence, and
+stuttering through the demotion count on first paint, which is the one moment
+somebody is definitely looking.
+
+The fix is not a better measurement. It is not measuring at all.
+
+1. **A render surface must choose its opening rung from a device prior before
+   the first frame, and may only climb from there.** The prior is synchronous
+   and costs no GPU work. `@ovasabi/runtime-browser`'s `readDeviceProfile()` and
+   `startingTier()` implement this, and `createRenderSurfaceHost` applies them
+   by default; `startingTier` on the host options overrides it.
+2. **Read the prior on the main thread.** `matchMedia` does not exist in a
+   worker, so pointer, viewport and reduced-motion are unreadable there. The
+   host chooses the rung and sends it with the canvas.
+3. **Signals, all free:**
+
+   | Signal | Meaning |
+   | :--- | :--- |
+   | `navigator.hardwareConcurrency` | ≤ 4 → phone or low-end laptop |
+   | `navigator.deviceMemory` | ≤ 4 → constrained (Chromium only) |
+   | `matchMedia("(pointer: coarse)")` | touch-first |
+   | `matchMedia("(max-width: 48rem)")` | small viewport |
+   | `devicePixelRatio >= 2.5` | phone-class panel, disproportionate fill cost |
+   | `prefers-reduced-motion` | a stated preference, not an inference |
+
+4. **Weigh display constraints separately from compute constraints.** Pointer,
+   viewport and pixel ratio describe the *panel*; a current phone trips all
+   three and outruns a laptop. They may cost at most half the ladder's span.
+   Only core count and memory — the signals that say the device is actually
+   slow — push past the midpoint.
+5. **An unreadable signal is unknown, not unconstrained.** `deviceMemory` is
+   Chromium-only. Scoring its absence as "plenty of memory" makes every Safari
+   user look fast, which is a browser-sniff wearing a heuristic's clothes.
+   Exclude an absent signal from its group's numerator *and* denominator.
+6. **The ladder's miss threshold is proportional to the rung's cadence, never a
+   flat number of milliseconds.** A flat slack means something different on
+   every rung: `cadence + 1000/30` on a 40 Hz rung puts the miss line at
+   58.3 ms — 17.1 fps — so a device holding the surface at 20 fps records no
+   misses at all and never demotes. Foundation uses `cadenceMs * 1.35`.
+7. **Demote on a short run of misses; promote only after a long clean one.**
+   Descent that needs two dozen misses per rung spends seconds of visible jank
+   getting somewhere the device can hold.
+8. **Misses accumulate within a burst and are forgiven by a sustained clean
+   run.** Decaying one-for-one lets a device alternating hit and miss fail
+   forever without reaching the demote count. Never clearing is the opposite
+   bug: a healthy surface pinned at the best rung has no better rung to promote
+   to, so nothing resets the tally and unrelated hiccups eventually demote
+   hardware that held cadence throughout.
+9. **Report the rung a surface actually opened on.** A diagnostic that reports
+   tier 0 on `READY` regardless makes every sink believe every device started at
+   the top, which is exactly the claim the prior exists to stop being true.
+10. **Cap `devicePixelRatio` per surface, and justify the cap for a decorative
+    one.** A cap of 2 on a DPR-3 phone still renders 1.24× the panel's logical
+    resolution, at the best rung, for something sitting behind text. There is no
+    universally right number; a decorative surface that has never asked the
+    question is probably paying more fill than it meant to.
+
+## One worker, several surfaces, one device
+
+`renderSurface.ts` has recommended this since it was written — *"a device per
+worker means a device per surface, and three devices to draw three things on one
+page is three adapters, three sets of pipelines and three lots of driver
+state"* — and the SDK's support for it was `ownsWorker: false`, which only stops
+a host terminating a worker somebody else is using. That is the easy half. The
+hard half is that every surface's `build` reached for its own adapter and its own
+device, so three surfaces in one worker got you one thread and still three
+devices: the exact thing the arrangement exists to avoid.
+
+`createRenderSurfaceWorker` owns the shared half.
+
+| Surfaces | devices, unshared | devices, shared | listeners, unshared | listeners, shared |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 1 | 1 | 1 | 1 |
+| 3 | 3 | **1** | 3 | **1** |
+| 8 | 8 | **1** | 8 | **1** |
+
+1. **`acquire` runs once per worker, and nothing else may request a device.**
+   That is the rule; the module is how it is kept.
+2. **Hold the in-flight acquisition, not a flag.** Three surfaces on one page
+   mount in the same tick and their `INIT`s arrive back to back. A flag-guarded
+   acquisition is found unset three times and requests three devices — the bug,
+   reintroduced by the code meant to fix it. The second and third callers must
+   await the first one's device.
+3. **Acquire lazily.** A page that renders no surface should not have negotiated
+   a GPU device. Nothing is acquired until a surface is actually initialised or
+   warmed.
+4. **Reference-count the release.** A single-surface worker can be terminated
+   and the browser reclaims; a shared worker outlives every surface in it, so
+   something has to notice when the last one goes. This is the case where a
+   leaked device is never reclaimed at all.
+5. **Release an acquisition that lands after the last surface left.** Dropping
+   the in-flight promise loses a device that is about to arrive and that nothing
+   else references. It is the one path where a shared device can leak with no
+   way to observe it.
+6. **Dispatch by lookup, not by scan.** N servers filtering by name on one scope
+   means every message wakes N listeners and N-1 decide it was not for them —
+   O(N) per message, paid by every `RESIZE`, `STATE`, `VISIBILITY` and
+   `TIER_FLOOR`. Measured, unshared dispatch grows with surface count (16 ns at
+   one, 40 at three, 71 at eight) while shared dispatch stays flat. At a single
+   surface the map lookup makes sharing marginally *slower*; the arrangement is
+   for pages with several.
+7. **A surface built without being warmed still lands on the shared device.**
+   Warming is optional; sharing is not.
+
+## Prewarming a surface
+
+Standing a WebGPU surface up is a chain: spawn the worker, load its module,
+request an adapter, request a device, compile shader modules, create pipelines,
+configure the context, draw. **Only the last two need a canvas** —
+`getPreferredCanvasFormat()` returns the format without one — and yet the whole
+chain used to run after the transfer, which means after a DOM element existed,
+which means after the component owning it had mounted. Every millisecond of it
+sat on the critical path to first paint because of where it was called from, not
+because anything required it to be there.
+
+Measured on the protocol, with the canvas-independent phase at 100 units and the
+canvas-dependent phase at 10: first frame lands **110 units after the canvas
+cold, 10 units warmed — 91% of the startup chain removed from the critical
+path.** The fraction is what transfers to real hardware; the units are a
+parameter.
+
+1. **A definition splits its build.** `warm()` does everything that does not
+   need a canvas; `build(canvas, warmed)` does the rest and receives the result.
+   `gpu_practices` has asked for this since it was written — *"pipeline creation
+   must be async or prewarmed outside latency-sensitive UI"* — and the compute
+   lane has had `prewarmKernel` all along. This is the raster half.
+2. **Prewarm as early as the page knows a surface is coming.** A route's module
+   loading, an idle callback, a hover on the link that leads there.
+   `prewarmRenderSurface` spawns the worker and starts the warm; the host adopts
+   it with `warmed`.
+3. **Asking to warm must be free, or nobody will do it speculatively.**
+   Measured at **16 ns** per repeat request, and warming is idempotent — a
+   second request does not build a second device.
+4. **A late `INIT` waits for an in-flight warm; it never restarts it.** Prewarm
+   and mount in the same tick is the ordinary case, and a protocol that started
+   the work again would make a fast mount *slower* than not warming at all.
+   Measured: warming with zero lead costs nothing against a cold start.
+5. **A build must stay correct cold.** Prewarming is the caller's choice, so
+   `warmed` is `undefined` whenever it was not made, and `build` handles that.
+6. **A failed warm is a warning, not a failure.** It costs the latency it was
+   meant to save and nothing else; the build runs cold and the surface draws.
+   Reporting it as `FAILED` would show an error for a surface that is working,
+   one frame later than it might have.
+7. **Adopting a warmed worker transfers ownership.** Two references to one
+   worker, and only one of them may terminate it — otherwise a caller that
+   prewarms, mounts, then tidies up its handle kills a surface that is drawing.
+
+## Releasing what you allocated
+
+GPU resources are the ones no profiler will tell you about. A texture, a buffer,
+a compiled pipeline and the device itself live in driver memory, outside the JS
+heap — so a leak shows nothing in a heap snapshot, nothing in an allocation
+profile, and nothing in any retained-byte figure. It is invisible until the tab
+is using a gigabyte, and then it is invisible *why*.
+
+That is the whole reason these are rules rather than hygiene.
+
+1. **Every pass declares a `dispose`, and it is not optional.** A pass with
+   genuinely nothing to release writes an empty body, which is a claim that it
+   has nothing to release rather than an oversight. Optional disposal is a
+   contract that reads as "release if convenient", and the leak it permits is
+   the one that cannot be measured.
+2. **Every host that acquires a device offers a public teardown.** Releasing on
+   device *loss* is not teardown: loss is the one case where the driver has
+   already taken the memory back. The case that matters is ordinary — a
+   single-page app mounts a workbench, the viewer navigates away — and it must
+   release the tracked resources, the pooled buffers, the pipeline cache, and
+   the device.
+3. **Destroy a device you requested; never destroy one you were handed.** One
+   device per worker rather than one per pass is the rule elsewhere in this
+   document, so a device will routinely be shared between a compute host and a
+   render surface. Destroying somebody else's device out from under them is
+   worse than leaking one, so ownership is tracked and only an owned device is
+   destroyed.
+4. **Disposal is idempotent.** A double unmount is ordinary — React does it in
+   development on every mount — and it must not double-free.
+5. **A superseded build still disposes.** A pass that compiled a pipeline before
+   learning it had been replaced is holding GPU memory that nothing else
+   references. The stale build releases it rather than dropping it on the floor.
+6. **Terminating a worker is not a disposal strategy.** It works for a worker
+   the host owns, because the thread dies and the browser reclaims — which is
+   exactly why this is easy to get away with in development. On a shared worker
+   the worker outlives the pass and nothing is reclaimed at all.
+7. **Verify disposal by counting calls, not by measuring bytes.** There are no
+   bytes to measure. The test is that every teardown path calls `dispose`
+   exactly once, and every buffer created is destroyed.
+
+## Getting state to a surface
+
+A worker-owned surface has to be told what to draw, and how that crosses is a
+performance decision the lane used to make for you.
+
+1. **`postMessage` is a copy, and it is two of them.** A posted message is a
+   structured clone: the runtime walks the object and allocates a copy, and the
+   worker allocates another on the way out. For a pointer position this is
+   free. Measured, a 16KB `Float32Array` — per-entity transforms, a particle
+   field, audio levels — costs **3.0 µs and 16.3KB of garbage per frame** on the
+   main thread, before the worker has paid for its own copy.
+2. **A flat run of numbers that changes every frame belongs in shared memory.**
+   `stateChannelElements` on the host options negotiates a `SharedArrayBuffer`,
+   and `writeState` publishes a generation. Measured against the clone it
+   replaces: **3.0–5.1x faster, 0 bytes allocated**, and the full round trip
+   including the worker's take is **3.0–4.4x faster**. `setState` remains
+   correct and remains the right tool for anything that is not a flat run of
+   numbers.
+3. **Shared memory is negotiated, never required.** `SharedArrayBuffer` needs
+   cross-origin isolation; a render surface does not. A lane that refused to
+   draw without COOP/COEP headers would have forced every consumer to adopt them
+   to render a background texture. Where isolation is absent the channel is
+   simply absent and the surface behaves exactly as before.
+4. **Keep more versions than there are participants.** This is MVCC, and it is
+   the rule that makes the reading side free.
+
+   Two buffers selected by `epoch % 2` — the INOS pattern — is safe only while
+   the writer and reader run at the same rate. A render surface breaks that on
+   purpose: the host writes on `requestAnimationFrame` at up to 120 Hz and a
+   paper texture reads at its rung's 4 Hz cadence, so the writer laps the reader
+   thirty times between reads and two laps land back on the slot being read.
+
+   A sequence lock repairs the correctness and costs a full copy of the payload
+   on every read to do it — the reader has to copy into private memory for the
+   check to mean anything. Measured, that was 750 ns per frame at 16KB and
+   10.5 µs at 256KB.
+
+   Three slots removes the copy entirely. The writer owns one, the reader owns
+   one, and the third is a handoff swapped by a single compare-and-exchange, so
+   neither side ever waits and neither ever touches memory the other owns.
+   **Taking a generation becomes an index lookup: 36–65 ns, flat across a
+   4,096x range of payload sizes**, against a cost that previously grew linearly
+   with the payload. The price is one extra slot of memory.
+5. **Hand the reader the slot, not a copy of it.** Under two buffers a live view
+   is a torn read waiting to happen; under three it is simply correct, because
+   the writer cannot reach the slot the reader holds. Cache one view per slot
+   and rebuild it only when that slot's length changes, so a surface drawing at
+   40 Hz allocates nothing.
+6. **Let the caller write into the slot.** `fill` receives the destination
+   directly, so a pass that *computes* its state — transforms, a particle field,
+   audio levels — writes it once, into its final location. Measured against
+   computing into a staging array and copying: **657 ns saved per frame at 16KB,
+   7.9 µs at 256KB**, for the same work.
+7. **Cross-boundary work is bulk or it is nothing.** Never read or write shared
+   memory an element at a time from the other side of a language or thread
+   boundary. INOS records three orders of magnitude between the per-float form
+   and the bulk form of the same transfer.
+8. **Expose the generation so a pass can skip.** A surface reading state that
+   only changes on pointer input spends most of its frames with nothing new; a
+   take that finds no new generation does no work at all, not even an exchange —
+   **29 ns**. A pass whose work depends only on that state should skip it too,
+   which it can only do if the lane tells it.
 
 ## Native GPU rules
 

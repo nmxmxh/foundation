@@ -1,3 +1,5 @@
+import { startingTierForDevice } from "./deviceProfile";
+import { createRenderStateChannel, type RenderStateChannel } from "./renderStateChannel";
 import { getRuntimeCapabilities } from "./pulse/runtimeCaps";
 import type { RenderSurfaceDiagnostics, RenderSurfaceMode, RenderSurfaceQualityTier } from "./types";
 
@@ -69,6 +71,15 @@ export type RenderSurfaceHostOptions<TState> = {
    */
   ownsWorker?: boolean;
   /**
+   * A worker already spawned and warming, from `prewarmRenderSurface`.
+   *
+   * When given, `createWorker` is not called: this worker is adopted, along
+   * with whatever its `warm` has already finished. Adopting also takes
+   * ownership, so the handle's own `dispose` becomes a no-op and the host's
+   * disposal is the one that counts.
+   */
+  warmed?: RenderSurfaceWarmHandle;
+  /**
    * Stable, low-cardinality surface name — `game_runtime_practices.md` §121.
    * It is the marker name in traces and the key a multi-surface worker
    * dispatches on.
@@ -76,8 +87,28 @@ export type RenderSurfaceHostOptions<TState> = {
   surface: string;
   /** The quality ladder, best rung first. The worker picks a rung from it. */
   tiers: readonly RenderSurfaceQualityTier[];
-  /** Cap on `devicePixelRatio`. Defaults to 2. */
+  /**
+   * Cap on `devicePixelRatio`. Defaults to 2.
+   *
+   * Two is right for a figure the page is *about*. For decorative full-screen
+   * passes it is worth a thought: on a DPR-3 phone a cap of 2 still renders
+   * 1.24x the CSS pixels of the panel's own logical resolution, at the top of
+   * the ladder, for something sitting behind text. There is no universally
+   * correct number here — it is a per-surface judgement that a trace should
+   * settle — but a decorative surface that has never asked the question is
+   * probably paying more fill than it meant to.
+   */
   maxRatio?: number;
+  /**
+   * Opening rung, overriding the device prior.
+   *
+   * Left unset, the host reads a cheap synchronous device profile — pointer,
+   * viewport, pixel ratio, cores, memory, reduced-motion — and opens the ladder
+   * where that profile says the device can hold. Set this only when the caller
+   * knows something the browser does not, such as a surface the user has
+   * already pinned to a quality in settings. `0` forces the best rung.
+   */
+  startingTier?: number;
   /**
    * Whether the surface should be paused when it leaves the viewport.
    *
@@ -97,8 +128,33 @@ export type RenderSurfaceHostOptions<TState> = {
    * failed pass becomes an unexplained blank rectangle.
    */
   onFailed?: (reason: string) => void;
+  /**
+   * A degradation the surface survived — a prewarm that failed, so the build
+   * ran cold. Distinct from `onFailed`, which is a dead lane.
+   */
+  onWarning?: (reason: string) => void;
   /** The first state, sent with the transfer so the first frame is not blank. */
   initialState?: TState;
+  /**
+   * Elements of a shared-memory state channel, in `float32`s. Off by default.
+   *
+   * `setState` posts a message, and a posted message is a structured clone: the
+   * runtime walks the object and allocates a copy, then the worker allocates
+   * another. For a pointer position that is free. For per-entity transforms, a
+   * particle field, or audio levels it is the frame's dominant cost, paid twice
+   * on the main thread, every frame.
+   *
+   * Setting this allocates a `SharedArrayBuffer` alongside the canvas and gives
+   * the host `writeState`, which publishes a generation with three atomics and
+   * one bulk copy and no allocation at all. `setState` keeps working and stays
+   * the right tool for anything that is not a flat run of numbers.
+   *
+   * Requires cross-origin isolation. Where that is unavailable the channel is
+   * simply absent — `stateChannel` is `null`, `writeState` returns `false`, and
+   * the surface runs exactly as it does today. A lane that *required* COOP/COEP
+   * headers to draw a background texture would not be a lane anybody adopted.
+   */
+  stateChannelElements?: number;
 };
 
 export type RenderSurfaceHost<TState> = {
@@ -117,6 +173,20 @@ export type RenderSurfaceHost<TState> = {
   setVisible: (visible: boolean) => void;
   /** Move the ladder floor — e.g. a surface that has scrolled behind text. */
   setTierFloor: (tier: number) => void;
+  /**
+   * Publish a generation of shared state, without a clone.
+   *
+   * `fill` writes into the channel's slot and returns the element count. It is
+   * called synchronously, must not retain the view, and must not allocate —
+   * this runs on whatever cadence the page updates at, which on a ProMotion
+   * panel is 120 times a second.
+   *
+   * Returns `false` when no channel was negotiated, so a caller can fall back
+   * to `setState` on the same branch that checks it.
+   */
+  writeState: (fill: (slot: Float32Array) => number) => boolean;
+  /** The channel, when one was negotiated. `null` otherwise. */
+  readonly stateChannel: RenderStateChannel | null;
   /** Stop the lane and release the worker. Idempotent. */
   dispose: () => void;
 };
@@ -149,11 +219,26 @@ export type RenderSurfaceCommand<TState> =
       surface: string;
       canvas: OffscreenCanvas;
       tiers: readonly RenderSurfaceQualityTier[];
+      /**
+       * Which rung to open on. Chosen by the host, because the signals it is
+       * chosen from — `matchMedia` in particular — do not exist in a worker.
+       * Optional so a hand-built command still initialises at the best rung.
+       */
+      tier?: number;
+      /**
+       * The shared state channel, when one was negotiated.
+       *
+       * Sent, never transferred: a `SharedArrayBuffer` is shared by being
+       * referenced from both sides, and putting it in the transfer list would
+       * detach it from the host that has to keep writing to it.
+       */
+      stateBuffer?: SharedArrayBuffer;
       ratio: number;
       width: number;
       height: number;
       state?: TState;
     }
+  | { kind: "WARM"; surface: string }
   | { kind: "RESIZE"; surface: string; width: number; height: number; ratio: number }
   | { kind: "STATE"; surface: string; state: TState }
   | { kind: "VISIBILITY"; surface: string; visible: boolean }
@@ -163,8 +248,87 @@ export type RenderSurfaceCommand<TState> =
 /** Messages the worker sends back. Diagnostics only; no pixels come this way. */
 export type RenderSurfaceEvent =
   | { kind: "READY"; surface: string; lane: string }
+  /**
+   * Something degraded without the surface dying — a failed prewarm, say, which
+   * costs the latency the warm was for and nothing else. Separate from `FAILED`
+   * because a caller that treats the two alike will show an error for a surface
+   * that is drawing perfectly well, one frame later than it might have.
+   */
+  | { kind: "WARNING"; surface: string; reason: string }
   | { kind: "DIAGNOSTICS"; surface: string; diagnostics: RenderSurfaceDiagnostics }
   | { kind: "FAILED"; surface: string; reason: string };
+
+/* ── prewarming ─────────────────────────────────────────────────────── */
+
+/** A worker already spawned and warming, waiting for a canvas. */
+export type RenderSurfaceWarmHandle = {
+  readonly surface: string;
+  readonly worker: Worker;
+  /**
+   * Hand ownership to a host. Called by `createRenderSurfaceHost`.
+   *
+   * After this the handle's own `dispose` is a no-op, because there are now two
+   * references to one worker and only one of them should be able to terminate
+   * it. A caller that prewarms, mounts, and then tidies up its handle would
+   * otherwise kill a surface that is drawing.
+   */
+  adopt: () => void;
+  /**
+   * Release the worker if no host ever adopted it — a route the viewer never
+   * visited, a hover that went nowhere. Safe to call always.
+   */
+  dispose: () => void;
+};
+
+/**
+ * Spawn the worker and start the canvas-independent half of the build.
+ *
+ * Standing a surface up is a chain — spawn the worker, load its module, request
+ * an adapter, request a device, compile shaders, create pipelines, configure
+ * the context, draw — and only the last two steps need a canvas. Everything
+ * before them used to run *after* the transfer, which meant after a DOM element
+ * existed, which meant after the component owning it had mounted. All of it sat
+ * on the critical path to first paint for no reason other than where it was
+ * called from.
+ *
+ * Call this as early as the page knows a surface is coming: a route's module
+ * loading, an idle callback, a hover on the link that leads to it. Then pass
+ * the handle to `createRenderSurfaceHost` as `warmed`, and the only work left
+ * at mount is the transfer itself.
+ *
+ * Returns `null` where a worker lane is unavailable, so a caller can prewarm
+ * unconditionally and let the host degrade on its own terms.
+ */
+export const prewarmRenderSurface = (options: {
+  surface: string;
+  createWorker: () => Worker;
+}): RenderSurfaceWarmHandle | null => {
+  const probe = probeRenderSurface();
+  if (!probe.worker || !probe.offscreenCanvas || !probe.transferControl) return null;
+
+  let worker: Worker;
+  try {
+    worker = options.createWorker();
+  } catch {
+    return null;
+  }
+
+  worker.postMessage({ kind: "WARM", surface: options.surface } satisfies RenderSurfaceCommand<never>);
+
+  let released = false;
+  return {
+    surface: options.surface,
+    worker,
+    adopt() {
+      released = true;
+    },
+    dispose() {
+      if (released) return;
+      released = true;
+      worker.terminate();
+    },
+  };
+};
 
 /* ── the host ───────────────────────────────────────────────────────── */
 
@@ -188,12 +352,35 @@ export const createRenderSurfaceHost = <TState,>(
       setState: () => undefined,
       setVisible: () => undefined,
       setTierFloor: () => undefined,
+      writeState: () => false,
+      stateChannel: null,
       dispose: () => undefined,
     };
   }
 
   const { canvas, surface, tiers } = options;
   const maxRatio = options.maxRatio ?? 2;
+  /*
+   * Read the device once, here, before anything is transferred.
+   *
+   * A ladder only descends from where it opens, so opening every device at the
+   * best rung means every phone finds out it is a phone by janking through the
+   * demotion count on first paint. The prior costs a handful of `matchMedia`
+   * calls and removes that window entirely.
+   */
+  const openingTier = Math.min(
+    Math.max(Math.trunc(options.startingTier ?? startingTierForDevice(tiers.length)), 0),
+    Math.max(0, tiers.length - 1),
+  );
+  /*
+   * Negotiated once, before the transfer. Absent where cross-origin isolation
+   * is not in force, which is a supported configuration rather than a failure —
+   * see `stateChannelElements`.
+   */
+  const stateChannel =
+    options.stateChannelElements && options.stateChannelElements > 0
+      ? createRenderStateChannel(options.stateChannelElements)
+      : null;
   let worker: Worker | null = null;
   let stopped = false;
   let pending: TState | undefined;
@@ -210,7 +397,10 @@ export const createRenderSurfaceHost = <TState,>(
   };
 
   try {
-    worker = options.createWorker();
+    // Adopt, or spawn. A warmed worker has been compiling pipelines since
+    // before this component existed.
+    worker = options.warmed?.worker ?? options.createWorker();
+    options.warmed?.adopt();
   } catch {
     return {
       mode: "main-thread",
@@ -218,6 +408,8 @@ export const createRenderSurfaceHost = <TState,>(
       setState: () => undefined,
       setVisible: () => undefined,
       setTierFloor: () => undefined,
+      writeState: () => false,
+      stateChannel: null,
       dispose: () => undefined,
     };
   }
@@ -230,14 +422,20 @@ export const createRenderSurfaceHost = <TState,>(
     if (!message || message.surface !== surface) return;
     if (message.kind === "DIAGNOSTICS") options.onDiagnostics?.(message.diagnostics);
     if (message.kind === "FAILED") options.onFailed?.(message.reason);
+    if (message.kind === "WARNING") options.onWarning?.(message.reason);
     if (message.kind === "READY") {
+      // The rung the surface actually opened on, not rung zero: reporting a
+      // constant here made every diagnostic sink believe every device started
+      // at the top, which is precisely the claim the device prior exists to
+      // stop being true.
+      const opened = tiers[openingTier] ?? tiers[0];
       options.onDiagnostics?.({
         surface,
         mode: "worker",
         lane: message.lane,
-        tier: 0,
-        cadenceMs: tiers[0]?.cadenceMs ?? 0,
-        scale: tiers[0]?.scale ?? 1,
+        tier: openingTier,
+        cadenceMs: opened?.cadenceMs ?? 0,
+        scale: opened?.scale ?? 1,
         visible: true,
         issues: runtime.issues.map((issue) => issue.capability),
       });
@@ -258,6 +456,8 @@ export const createRenderSurfaceHost = <TState,>(
       setState: () => undefined,
       setVisible: () => undefined,
       setTierFloor: () => undefined,
+      writeState: () => false,
+      stateChannel: null,
       dispose: () => undefined,
     };
   }
@@ -268,6 +468,8 @@ export const createRenderSurfaceHost = <TState,>(
       surface,
       canvas: offscreen,
       tiers,
+      tier: openingTier,
+      stateBuffer: stateChannel?.buffer,
       ratio: ratio(),
       width,
       height,
@@ -351,6 +553,20 @@ export const createRenderSurfaceHost = <TState,>(
 
     setTierFloor(tier) {
       post({ kind: "TIER_FLOOR", surface, tier });
+    },
+
+    stateChannel,
+
+    writeState(fill) {
+      /*
+       * No coalescing, on purpose. `setState` coalesces to one clone per frame
+       * because a clone is expensive and the surface has no use for the 120
+       * pointer positions since its last draw. A channel write is three atomics
+       * and one bulk copy into memory the worker already maps, so deferring it
+       * to `requestAnimationFrame` would add a frame of latency to save nothing.
+       */
+      if (stopped || !stateChannel) return false;
+      return stateChannel.write(fill);
     },
 
     dispose() {

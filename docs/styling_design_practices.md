@@ -290,6 +290,13 @@ Before merging frontend work, verify:
 10. media/display sections declare aspect-ratio and min-height instead of depending on content accidents
 11. shared packages stay ESM-clean end to end: no CJS-only transitive dependencies or peers (removed: `@base-ui/react`, 2026-08-24). Any import of a shared package must not drag non-tree-shakeable vendor code into application module graphs, SSR included
 12. date-only values use local `YYYY-MM-DD`, wall times use `HH:mm`, and scheduled instants use ISO/RFC3339 plus an explicit product timezone policy
+13. spacing values come from `theme.space`; vertical rhythm in document-shaped content is margin, not gap (§11)
+14. media queries use `from()` / `until()` on named breakpoints, never a hand-typed pixel literal, and read `min-width` unless the rule is genuinely phone-only chrome
+15. full-screen fixed surfaces use `svh` (never `vh`, which resolves to the *large* viewport on mobile and allocates a backing store taller than the screen); `dvh` only where the layout should follow the URL bar
+16. fixed chrome pads with `env(safe-area-inset-*)`, and `index.html` carries `viewport-fit=cover` so those insets resolve to something other than `0px`
+17. `<meta name="theme-color">` matches the page ground, so mobile browser chrome does not render a contrasting band around it
+18. the page has at most one full-viewport `position: fixed` decorative layer. Each one is a full-screen compositor texture — 5.3 MB on a 390x844 phone at DPR 2 — composited under every pixel of every route
+19. animated properties are `transform` and `opacity`. A `text-shadow` with a blur radius is neither: changing it invalidates paint for the element's whole ink-overflow rect, and the blur is rasterised on the CPU
 
 ## 10. Fluid Sizing, Proportions, and Primitive Intelligence
 
@@ -323,12 +330,79 @@ Spacing and typography must scale dynamically with the viewport width without br
 
 ### 3. Sizing and Spacing Proportions (Modular Scale)
 
-All margins, paddings, and sizing increments must adhere to a modular scale (based on the 8px grid or the Golden Ratio $1.618$):
+All margins, paddings, and sizing increments come from `theme.space`, which is
+a static modular scale on the 8px grid at a ratio near 1.6:
 
-* **Spacing Increments**: `4px (xs)`, `8px (sm)`, `16px (md)`, `24px (lg)`, `40px (xl)`, `64px (xxl)`.
+| Token | Value | Ratio to the rung below |
+| :--- | ---: | ---: |
+| `3xs` | 2px | — |
+| `2xs` | 4px | 2.00 |
+| `xs` | 8px | 2.00 |
+| `sm` | 16px | 2.00 |
+| `md` | 24px | 1.50 |
+| `lg` | 40px | 1.67 |
+| `xl` | 64px | 1.60 |
+| `2xl` | 104px | 1.63 |
+| `3xl` | 168px | 1.62 |
+
 * Avoid arbitrary numbers (for example, `13px`, `19px`).
+* **Spacing does not use `clamp()`.** The scale this replaced was six fluid
+  ranges, and fluid spacing turns out to be a no-op where anyone actually is:
+  every token pinned to its floor below ~400px and to its ceiling above
+  ~1000px, so a phone at 390px and a desktop at 2560px each got a *static*
+  scale and the `vw` term only did anything in the band between. What the
+  ranges did accomplish was to compress the steps — `md` and `lg` resolved to
+  12px and 18px on a phone, a ratio of 1.5 — and two spacings six pixels apart
+  do not read as two categories of relationship. They read as inconsistency.
+  Six tokens producing four distinguishable values is why layouts built from
+  them looked uniform however they were spaced.
+* **A step must be far enough from its neighbours to read as a decision.** A
+  reader parses a step as deliberate somewhere around 1.6; below about 1.5 it
+  reads as drift. Every adjacent pair above is at least 1.5.
+* **A small screen needs fewer steps, not smaller ones.** A phone renders a
+  section boundary at `lg` where a desktop renders `xl` — a rung down the same
+  scale. It does not render `xl` at 64% of itself. Scaling every token by a
+  proportion preserves the ratios and destroys the *distinctions*, which is
+  precisely the uniformity the scale exists to end; selecting a different rung
+  preserves the distinctions and loses only the largest, which is the right
+  thing to lose at 390px.
+* `clamp()` stays for **typography**, where the scaling is genuinely continuous
+  and no reader can perceive a step boundary.
+* `theme.spacing` is the previous scale's six names, resolved onto these steps
+  by size rather than by name (`spacing.md` is `space.sm`). It is deprecated;
+  new work reads `theme.space`.
 
-### 4. Z-Index Layering Scale
+### 4. Breakpoints
+
+Breakpoints are named for what the layout does, never for a device — there is
+no "tablet" width and there never was.
+
+| Token | Value | What changes |
+| :--- | ---: | :--- |
+| `hand` | 30rem / 480px | one column; everything within thumb reach |
+| `page` | 48rem / 768px | a second column becomes possible |
+| `desk` | 64rem / 1024px | full measure plus margins |
+| `wide` | 90rem / 1440px | content stops growing; gutters absorb the rest |
+
+* **Use `from()`.** It emits `min-width`, so a layout is built *up* from the
+  small screen. Every media query in the system before these tokens existed was
+  `max-width`, which means each layout was defined by subtraction — the desktop
+  arrangement with values removed — and combined with a spacing scale that
+  floored on small screens, that is why the phone view read as cramped rather
+  than as composed.
+* **`until()` is the exception, not the mirror.** Reach for it only where the
+  small screen needs something the large one must not have — phone-only chrome,
+  a dock that becomes a sidebar — never to undo a desktop rule.
+* **Never hand-type a pixel literal in a media query.** Nine independent
+  literals is what the system had, and the cost was a dead band: a grid that
+  collapsed at 900px inside a container that kept its wide padding until 640px,
+  so every tablet in portrait and every large phone in landscape rendered a
+  stacked layout inside desktop margins. Nobody chose that. It is what
+  independent literals produce.
+* The tokens are `rem`, so a viewer who has set a larger default font gets the
+  wider layout at the point their text actually needs the room.
+
+### 5. Z-Index Layering Scale
 
 To prevent overlapping bugs between alerts, headers, docks, and modals, enforce a strict, semantic z-index hierarchy:
 
@@ -340,13 +414,100 @@ To prevent overlapping bugs between alerts, headers, docks, and modals, enforce 
 * `z-index: 300` — Modals, sheets, dialog boxes
 * `z-index: 400` — Toasts, alerts, high-priority system notices
 
-### 5. Positioning & Accessibility Invariants
+### 6. Positioning & Accessibility Invariants
 
 * **Focus Indicators**: Never disable focus rings (`outline: none`) without providing a visible, custom `:focus-visible` ring.
 * **Text Reflow**: Ensure container widths allow for text magnification up to 200% without overlapping text or hiding overflow actions.
 * **Click Targets**: Interactive components (buttons, links, check-boxes) must provide a minimum tap target size of `44px x 44px` for mobile accessibility.
 
-## 11. Reference Notes
+## 11. The Spacing Model — Margin, Padding, and the Limits of `gap`
+
+`gap` is a property of the container. `margin` is a property of the child. That
+one sentence contains the whole difference, and it determines where each
+belongs.
+
+`gap: 16px` says *every child of this box is 16px from its neighbour*. It is a
+statement about a set, and it cannot say "more air before a section heading
+than after it" — it does not know which child is a heading. Expressing
+hierarchy underneath it means nesting another container for every distinct
+spacing, or overriding with margins anyway and then maintaining two spacing
+systems that fight each other.
+
+`margin-block-start: 40px` on a heading says *a heading claims 40px above it*,
+and the claim travels with the element. Move the heading and its rhythm moves
+with it; add another and it is already spaced correctly. This is how
+typesetting has worked since metal type, and it is why editorial CSS still
+reads better than component CSS: the vertical rhythm is a property of the
+content model rather than of wherever the content happened to be placed.
+
+**Margin collapsing is the mechanism that makes claims compose,** and it exists
+only in flow layout. A section claiming `xl` above itself containing a heading
+claiming `lg` above resolves to `xl`, not to their sum. Each element states its
+requirement, the larger one wins, and nothing needs to know about anything
+else. `gap` has no equivalent, because it has only one number.
+
+### The rules
+
+1. **`padding` is a container's claim on its own inside edge.** It is never
+   used to separate siblings.
+2. **`margin` is an element's claim on the space around it.** It is the default
+   tool for vertical rhythm in document-shaped content.
+3. **`gap` is a statement that a set of peers is uniform.** Use it where that
+   is true — grids, wrapping rows, equal toolbars — and only there.
+4. **Document-shaped stacks use flow layout, not `flex-direction: column`.**
+   This is the trap, and it is the most important line here. Swapping `gap` for
+   margins while keeping the column *flex* gets none of the benefit: margins do
+   not collapse in flex or grid, so they add instead of resolving; a trailing
+   margin starts pushing the container; and the result is additive uniformity
+   with more code — strictly worse than the `gap` it replaced. A column that
+   genuinely needs `align-items`, `order`, or `flex` on a child is not
+   document-shaped and keeps its `gap`. Fighting the layout mode to satisfy a
+   spacing preference is how a codebase acquires `margin-top: -1px`.
+5. **Margins run in one direction: `margin-block-start`.** Exactly one element
+   owns each vertical space, so there is never a trailing margin pushing the
+   container and never a `:last-child` reset to remember.
+6. **Every value comes from `theme.space`.** No literals, and no `calc()` on a
+   token to invent an intermediate step. A layout that needs a step which does
+   not exist is a finding about the scale, not a licence for a one-off.
+
+### Where `gap` stays
+
+* **Grids.** Two axes. Margins produce edge overhang on both, and the fix —
+  negative margins on the container — is a worse artefact than the one being
+  avoided.
+* **Wrapping rows.** Tag lists, chip rows, button clusters that reflow. A
+  margin on a wrapped item is applied at the wrap point too, so the second row
+  starts inset. `gap` is the only correct tool.
+* **Genuinely uniform peer sets.** A toolbar of equal buttons *is* uniform.
+  Uniformity is the truth there, and `gap` states it in one place instead of N.
+* **Fixed, small clusters inside a primitive.** A field's label / input /
+  message, an alert's title / body, a stat's label / value / hint. These are
+  two- and three-element sets at one spacing, and a consumer does not want
+  hierarchy introduced inside them. `gap` in `ui-minimal/primitives.tsx` is
+  deliberate for this reason — the hierarchy problem lives in page
+  composition, not in primitive internals.
+
+### `MinimalStack`
+
+`ui-minimal` ships the margin-based stack so the rule above has a tool behind
+it. It is flow layout with a default rhythm, and a child claims more with
+`data-space`:
+
+```tsx
+<MinimalStack rhythm="sm">
+  <p>…</p>
+  <h2 data-space="lg">A heading claims its own air</h2>
+  <p>…</p>
+</MinimalStack>
+```
+
+A note on the "owl" pattern (`.stack > * + * { margin-block-start: … }`): it is
+`gap` wearing margin's clothes — one number, applied uniformly, owned by the
+container. It is a fine implementation of rule 3 for a uniform stack. It is
+**not** an implementation of rule 2 and it does not produce hierarchy;
+`data-space` is the part that does.
+
+## 12. Reference Notes
 
 Use the animation reference notes in `docs/references/`:
 

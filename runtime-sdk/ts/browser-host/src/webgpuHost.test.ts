@@ -367,3 +367,122 @@ describe("runtime WebGPU host helpers", () => {
     expect(device.stats.queueDrains).toBe(1);
   });
 });
+
+/**
+ * Disposal, verified by counting calls.
+ *
+ * There is no other way to verify it. Buffers, pipelines and the device live in
+ * GPU memory, outside the JS heap, so none of them appear in a heap snapshot, an
+ * allocation profile, or the retained-byte figures this package measures. A leak
+ * here is a missed call, not a missed byte, and a missed call is what these
+ * assertions are for.
+ */
+describe("releasing what the host holds", () => {
+  const withPooledBuffers = async () => {
+    const arena = RuntimeSharedArena.create({ arenaBytes: 1024 * 1024 });
+    const descriptor = arena.allocate(4);
+    arena.writeSlabReady(descriptor.id, new Uint8Array([1, 2, 3, 4]));
+    const device = createFakeGpuDevice();
+    const host = await RuntimeWebGpuHost.create({ device: device as any });
+    await host.dispatchArenaBatch(arena, [descriptor.id], { shader: PASSTHROUGH_U32_SHADER });
+    return { device, host };
+  };
+
+  it("destroys every buffer it created and drops every pipeline it compiled", async () => {
+    const { device, host } = await withPooledBuffers();
+    const createdBefore = device.stats.buffersCreated;
+    const destroyedBefore = device.stats.buffersDestroyed;
+    expect(createdBefore).toBeGreaterThan(0);
+
+    const report = host.dispose();
+
+    expect(report.pooledBuffersDropped + report.resourcesDropped).toBeGreaterThan(0);
+    expect(device.stats.buffersDestroyed).toBeGreaterThan(destroyedBefore);
+    // Everything the host made, released.
+    expect(device.stats.buffersDestroyed).toBe(createdBefore);
+    expect(host.isDisposed).toBe(true);
+  });
+
+  it("is idempotent, so a double unmount does not double-free", async () => {
+    const { device, host } = await withPooledBuffers();
+    host.dispose();
+    const destroyed = device.stats.buffersDestroyed;
+
+    const second = host.dispose();
+    expect(second).toEqual({
+      resourcesDropped: 0,
+      pooledBuffersDropped: 0,
+      pipelinesDropped: 0,
+      deviceDestroyed: false,
+    });
+    expect(device.stats.buffersDestroyed).toBe(destroyed);
+  });
+
+  /*
+   * The device a caller supplied is borrowed. One device per worker rather than
+   * one per pass is what this package recommends, so it will routinely be shared
+   * with a render surface or another host — and destroying somebody else's
+   * device out from under them is worse than leaking one.
+   */
+  it("never destroys a device it was handed", async () => {
+    let destroyed = 0;
+    const device = createFakeGpuDevice() as any;
+    device.destroy = () => {
+      destroyed += 1;
+    };
+    const host = await RuntimeWebGpuHost.create({ device });
+
+    const report = host.dispose();
+    expect(report.deviceDestroyed).toBe(false);
+    expect(destroyed).toBe(0);
+  });
+
+  it("destroys a device it requested itself", async () => {
+    let destroyed = 0;
+    const device = createFakeGpuDevice() as any;
+    device.destroy = () => {
+      destroyed += 1;
+    };
+    const originalNavigator = globalThis.navigator;
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { gpu: { requestAdapter: async () => ({ requestDevice: async () => device }) } },
+    });
+
+    try {
+      const host = await RuntimeWebGpuHost.create();
+      const report = host.dispose();
+      expect(report.deviceDestroyed).toBe(true);
+      expect(destroyed).toBe(1);
+    } finally {
+      Object.defineProperty(globalThis, "navigator", {
+        configurable: true,
+        value: originalNavigator,
+      });
+    }
+  });
+
+  it("survives a device that throws on destroy because it was already lost", async () => {
+    const device = createFakeGpuDevice() as any;
+    device.destroy = () => {
+      throw new Error("device already lost");
+    };
+    const originalNavigator = globalThis.navigator;
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { gpu: { requestAdapter: async () => ({ requestDevice: async () => device }) } },
+    });
+
+    try {
+      const host = await RuntimeWebGpuHost.create();
+      // The memory is gone either way, which is the outcome we wanted.
+      expect(() => host.dispose()).not.toThrow();
+      expect(host.isDisposed).toBe(true);
+    } finally {
+      Object.defineProperty(globalThis, "navigator", {
+        configurable: true,
+        value: originalNavigator,
+      });
+    }
+  });
+});

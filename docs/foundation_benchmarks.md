@@ -20,6 +20,279 @@ The benchmark suite exists to prove that ladder stays honest. The fastest lane s
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
 
+## 2026-09-04 One worker, several surfaces, one device
+
+`renderSurface.ts` has recommended sharing a worker since it was written, and the SDK's
+support for it was `ownsWorker: false` — which only stops a host terminating a worker
+somebody else is using. Every surface's `build` still reached for its own adapter and its own
+device, so three surfaces in one worker got you one thread and still three devices: the exact
+thing the arrangement exists to avoid. `gpu_practices.md` states *one `GPUDevice` per worker,
+not one per pass* as a rule; nothing enforced it.
+
+### Devices and listeners, by surface count
+
+| Surfaces | devices, unshared | devices, shared | listeners, unshared | listeners, shared |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 1 | 1 | 1 | 1 |
+| 3 | 3 | **1** | 3 | **1** |
+| 8 | 8 | **1** | 8 | **1** |
+
+Structural and exact. Each avoided device is an adapter, a pipeline set and a lot of driver
+state that a page asked for by accident.
+
+### Dispatch, which nobody counts
+
+`serveRenderSurface` filters by surface name, so N servers on one scope means every message
+wakes N listeners and N-1 decide it was not for them — O(N) per message, paid by every
+`RESIZE`, `STATE`, `VISIBILITY` and `TIER_FLOOR`.
+
+| Surfaces | unshared | shared |
+| ---: | ---: | ---: |
+| 1 | 16 ns | 21 ns |
+| 3 | 40 ns | 37 ns |
+| 8 | **71 ns** | **27 ns** |
+
+The trend is the result: unshared grows with surface count, shared stays flat within the noise
+of a twenty-nanosecond measurement. At a single surface the map lookup makes sharing
+marginally *slower*, which is the honest shape of it — the arrangement is for pages with
+several figures, and it is exactly those pages that were paying three devices.
+
+### The leak nobody could have seen
+
+A shared worker outlives every surface in it, so the release is reference-counted. The path
+worth naming is the last surface leaving while acquisition is still in flight: dropping that
+promise loses a device which is about to arrive and which nothing else references. It is the
+one way a shared device can leak with no way to observe it — not in a heap profile, not in a
+device count, not in a test that only checks the ordinary order. The release is chained onto
+the acquisition instead, and there is a test that resolves the device *after* the last surface
+has gone.
+
+## 2026-09-04 Prewarming the render surface: 91% of the startup chain was on the critical path for no reason
+
+`gpu_practices.md` has said *"pipeline creation must be async or prewarmed outside
+latency-sensitive UI"* since it was written, and `webgpuHost` has had `prewarmKernel` all
+along. The raster lane had no equivalent, so every surface did the whole of its setup after
+the canvas transfer.
+
+### The chain, and how much of it needed a canvas
+
+Spawn the worker → load its module → request an adapter → request a device → compile shader
+modules → create pipelines → configure the context → draw.
+
+**Only the last two need a canvas.** `getPreferredCanvasFormat()` returns the format without
+one. Everything before them ran after the transfer — which is after a DOM element exists,
+which is after the component owning it has mounted — because of where it was called from, not
+because anything required it.
+
+### Measured
+
+Protocol measurement on a fake clock, so the numbers are exact rather than sampled. The
+canvas-independent phase is 100 units, the canvas-dependent phase 10 — a weighting that
+reflects which of the two lists above takes hundreds of milliseconds on real hardware. The
+*fraction* is what transfers; the units are a parameter.
+
+| Warm lead before mount | first frame, after canvas |
+| :--- | ---: |
+| none (cold) | 110 |
+| warmed, zero lead | 110 |
+| warmed, half lead | 60 |
+| warmed, full lead | **10** |
+
+**91% of the startup chain removed from the critical path.** The half-lead row is exactly
+proportional, which is the check that the warm is doing real work rather than being skipped.
+
+The zero-lead row is the one that matters for correctness. Prewarm-and-mount in the same tick
+is the ordinary case for a host that warms on route entry, and a protocol where `INIT`
+restarted the work instead of awaiting it would make a fast mount *slower* than not warming.
+It costs nothing.
+
+### Asking to warm
+
+**16 ns** per repeat request, and warming is idempotent — a second request does not build a
+second device. That is the number that decides whether a page can afford to prewarm
+speculatively on a hover, and it can.
+
+### What it does not do
+
+A failed warm is a `WARNING`, not a `FAILED`: it costs the latency it was meant to save and
+nothing else, the build runs cold, and the surface draws. Reporting it as a failure would show
+an error for a surface that is working, one frame later than it might have.
+
+## 2026-09-04 Shared state channel: the clone the render lane was paying, and the pattern INOS could not have used
+
+Foundation has owned zero-copy machinery since `arena.ts` landed and its own render lane
+never touched it — `grep -n "arena|SharedArrayBuffer|Atomics"` across `renderSurface.ts` and
+`renderSurfaceClient.ts` returned nothing. Every `setState` crossed as a structured clone.
+Read against `inos_v1`, whose organising principle is *"we never send data, we only signal"*.
+
+Captured by `make profile-render-surface`; artifacts under
+`benchmark-results/render_surface_profile_*.tsv`.
+
+### Measured against the path it replaces
+
+`structuredClone` is what `postMessage` does, and a `Float32Array` is the shape it handles
+fastest — so this is the incumbent's best case. The real `setState` clones a state object,
+which is slower, and the worker then allocates the result again, a second copy not charged
+here at all.
+
+| Payload | clone | channel write | write + take | take, nothing new |
+| :--- | ---: | ---: | ---: | ---: |
+| 16 floats (64 B) | 958 ns | **186 ns** | 231 ns | 64 ns |
+| 256 floats (1 KB) | 902 ns | **254 ns** | 205 ns | 37 ns |
+| 4,096 floats (16 KB) | 2,429 ns | **755 ns** | 804 ns | **29 ns** |
+| 65,536 floats (256 KB) | 36,655 ns | **11,059 ns** | 10,502 ns | 34 ns |
+
+### The protocol is O(1), and that is the whole result
+
+Isolating the exchange from the payload — an empty `fill` publishes a generation without
+touching the data, so what remains between the two loops is the protocol and nothing else:
+
+| Payload | publish | take |
+| :--- | ---: | ---: |
+| 16 floats | 92 ns | 65 ns |
+| 256 floats | 75 ns | 52 ns |
+| 4,096 floats | 65 ns | 48 ns |
+| 65,536 floats | 78 ns | **36 ns** |
+
+**Flat across a 4,096x range of payload sizes.** The first version of this channel was a
+sequence lock over two slots, and its take was a memcpy — 750 ns at 16 KB, 10.5 µs at 256 KB,
+growing linearly forever. Three slots make the take an index lookup.
+
+### Letting the caller write into the slot
+
+Both sides compute the identical data; the staged one copies it into the slot afterwards.
+Timing "a scalar loop into the slot" against "memcpy from a ready array" would have priced the
+loop rather than the API — and would have reported the zero-copy path as four times *slower*
+than the one it removes work from.
+
+| Payload | compute then copy | compute in place | copy avoided |
+| :--- | ---: | ---: | ---: |
+| 256 floats | 450 ns | 264 ns | 183 ns |
+| 4,096 floats | 3,637 ns | 2,978 ns | **657 ns** |
+| 65,536 floats | 59,752 ns | 46,123 ns | **7,879 ns** |
+
+### Allocation
+
+| Path | bytes/call |
+| :--- | ---: |
+| `structuredClone` of 4,096 floats | **16,551** |
+| `channel.write` | **0** |
+| `channel.read` | **0** |
+
+The read reached zero by caching one view per slot and rebuilding it only when that slot's
+length changes; the seqlock version returned a fresh `subarray` every frame, 104 bytes of it.
+
+### The instrument was wrong again, in a new way
+
+`heapUsed` does not see typed-array payloads: V8 keeps `ArrayBuffer` backing stores outside
+the JS heap, so a 16 KB clone first measured **200 bytes** — the wrapper — and the payload the
+measurement existed to charge for was invisible. Anything profiling graphics data is profiling
+typed arrays, which makes `arrayBuffers` the term that matters. The harness now sums both.
+
+The gated-loop guard from the previous entry also fired correctly on its author: a
+publish-into-shared-memory call returns nothing to retain, and the guard refused to report a
+figure for it until told that was the point.
+
+### Why not INOS's ping-pong as written
+
+INOS selects a buffer with `epoch % 2`: physics writes A while rendering reads B, lock-free.
+That is safe **because its writer and reader both run at 60 Hz**, so the writer can never lap
+the reader — an assumption the document does not state and the code depends on.
+
+A render surface breaks it deliberately, and the fix came from the other end of INOS's own
+documentation: `coding_magic.md` §10 on MVCC, *"many readers observe stable versions while
+writes continue"*. Keep more versions than there are participants and the reader stops needing
+a copy to get a consistent one. Three slots is the smallest number that achieves it for one
+writer and one reader, and it turns the reading side from O(n) into O(1).
+
+## 2026-09-04 Render surface lane: the ladder that could not demote, and a benchmark that could not measure
+
+Two source-level audits produced the render-surface and spacing work, and neither carried a
+measurement — every figure in them was arithmetic from source. This is the part that can be
+measured without a GPU. Captured by `make profile-render-surface`
+(`tooling/scripts/render_surface_profile.sh` → `runtime-sdk/ts/browser-host/src/renderSurface.profile.test.ts`),
+artifacts under `benchmark-results/render_surface_profile_*.tsv`.
+
+### The measuring instruments were broken first
+
+Two of them, and both failed silently in the direction of good news.
+
+`renderSurface.bench.ts` compared a reused frame descriptor against a fresh object literal
+and reported the **allocating variant as 1.06x faster**. Neither value escaped its callback,
+so V8 stack-allocated the literal and both compiled to the same arithmetic: the benchmark had
+arranged to be unable to observe the property it was named for. It is now labelled a
+throughput benchmark, which is what it always was.
+
+`--expose-gc` never reached the test workers. `run_vitest.sh` added it to the Node process it
+launches, but Vitest builds its pool's `execArgv` from scratch, so `globalThis.gc` was
+`undefined` inside every `.profile.test.ts` in the repository. `heapUsed()` returned a figure
+no collection preceded — an allocation high-water mark reported as retained heap. At the
+megabyte scale of `runtimeWorkbench.profile.test.ts` that still points the right way; at
+bytes-per-call it is noise with units. Fixed by carrying the flag through `NODE_OPTIONS`,
+which the pool does inherit.
+
+### Allocation, measured differentially against a retained sink
+
+| Path | bytes/call |
+| :--- | ---: |
+| worker loop frame descriptor (reused) | **0** |
+| the same descriptor if it were a literal | 88 |
+| `canvasStage.frame()` — before | 80 |
+| `canvasStage.frame()` — after | **0** |
+
+The worker half had always reused its descriptor. The main-thread stage allocated one object
+per drawn frame and nobody had measured it: 80 bytes × 3 apparatuses × 30 Hz = **7.2 KB/s of
+garbage on the main thread**, to describe a rectangle that changes only when the window does.
+`StageFrame` is now reused, and documented as reused.
+
+### Forced layout, counted rather than timed
+
+A rect read inside a frame is a forced synchronous layout, and its cost is the browser's
+layout tree — which Node does not have. So the honest metric is how many happen at all.
+
+| | reads |
+| :--- | ---: |
+| inside `frame()`, per drawn frame | **0** (was 1) |
+| at construction, once | 1 |
+| eliminated, 3 stages at 30 Hz | **90 reads/second** |
+
+### The device prior costs 129 ns, once
+
+`readDeviceProfile()` + `startingTier()`, run on the main thread before the canvas is
+transferred: **129 ns**, or 0.0005% of a 25 ms frame. It buys the removal of the entire
+opening-jank window, which is the trade the whole prior exists to make.
+
+### The ladder, in frames rather than milliseconds
+
+Frames-to-demote is exact and machine-independent; a wall-clock figure off one laptop is
+neither. Top rung of the black hole's ladder: `cadenceMs = 25` (40 Hz).
+
+| Device holds | before | after | time to demote (after) |
+| :--- | ---: | ---: | ---: |
+| 40 fps (on target) | never | never | — |
+| 30 fps | never | never | — |
+| 25 fps | **never** | 6 | 240 ms |
+| 20 fps | **never** | 6 | 300 ms |
+| 15 fps | 24 | 6 | 400 ms |
+| 7 fps | 24 | 6 | 858 ms |
+
+The reported symptom is the 20 fps row. A phone holding a 40 Hz surface at 20 fps was failing
+its budget by 125% and recorded **zero** misses, because the old threshold was `cadence + 1000/30`
+— a miss line at 58.3 ms, or 17.1 fps. It pinned to the best rung, at full resolution, with the
+GPU saturated, for as long as the page was open.
+
+The new threshold is proportional: `cadenceMs * 1.35`. Note what that means precisely — it
+tolerates down to **29.6 fps on a 40 Hz rung** and demotes below it. 30 fps is deliberately
+inside the budget; 25 fps is not.
+
+### Why misses are forgiven rather than never cleared
+
+The incoming handover proposed "no decay — misses are cumulative". Cumulative-and-never-cleared
+is unbounded: a surface already at the best rung has no better rung to promote to, so nothing
+ever resets the tally. Measured, **6 stray late frames — one per minute — demote a machine that
+held cadence for six minutes**. `FORGIVE_AFTER = 48` clears the count after a sustained clean
+run, making it the burst detector it was meant to be.
+
 ## 2026-08-18 Second-moment kernel: choosing the fastest form that is still correct
 
 `Float64Vector.MomentsValid` reduces a column to the `(count, mean, M2)` triple

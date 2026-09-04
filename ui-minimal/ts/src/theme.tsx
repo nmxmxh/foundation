@@ -1,10 +1,53 @@
 import { type CSSProperties, type HTMLAttributes, PropsWithChildren, useMemo } from "react";
 import { ThemeProvider, createGlobalStyle, useTheme as useStyledTheme, type DefaultTheme } from "styled-components";
 
-import type { DeepPartial, MinimalTheme, ResolvedMinimalTheme } from "./types";
+import type {
+  DeepPartial,
+  MinimalBreakpointTheme,
+  MinimalSpaceTheme,
+  MinimalTheme,
+  ResolvedMinimalTheme,
+} from "./types";
 
 const isPlainObject = (value: unknown): value is object =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * The spacing steps. Static, on the 8px grid, at a ratio near 1.6.
+ *
+ * Ratios, rung to rung: 2.0, 2.0, 2.0, 1.5, 1.67, 1.6, 1.63, 1.62. A reader
+ * parses a step as *deliberate* somewhere around 1.6; below about 1.5 it reads
+ * as drift. The scale this replaces had `md` and `lg` at 1.4-1.5 apart, which
+ * is why six tokens only ever produced four distinguishable spacings.
+ *
+ * Declared separately from the theme so the deprecated `spacing` names can be
+ * resolved from it rather than restated beside it. See `MinimalSpaceTheme`.
+ */
+const space: MinimalSpaceTheme = {
+  "3xs": "2px",
+  "2xs": "4px",
+  xs: "8px",
+  sm: "16px",
+  md: "24px",
+  lg: "40px",
+  xl: "64px",
+  "2xl": "104px",
+  "3xl": "168px",
+};
+
+/**
+ * Named layout thresholds, in `rem` so they follow the user's own text size.
+ *
+ * A viewer who has set a larger default font gets the wider layout later, at
+ * the point their text actually needs the room — which is what a breakpoint in
+ * `px` silently refuses to do.
+ */
+const breakpoint: MinimalBreakpointTheme = {
+  hand: "30rem",
+  page: "48rem",
+  desk: "64rem",
+  wide: "90rem",
+};
 
 export const minimalBaseTheme: ResolvedMinimalTheme = {
   name: "ovasabi-minimal",
@@ -34,13 +77,22 @@ export const minimalBaseTheme: ResolvedMinimalTheme = {
     info: "#3b82f6",
     infoSoft: "rgba(59, 130, 246, 0.12)",
   },
+  space,
+  breakpoint,
+  /*
+   * Deprecated. Each old name resolves to the step nearest the size it used to
+   * produce, not to the step of the same name: matching by name would have put
+   * `spacing.md` at 24px where it used to render 12-20px, roughly doubling the
+   * air in every layout already written against it. Matching by size keeps
+   * those layouts recognisable while moving them onto the real scale.
+   */
   spacing: {
-    xs: "clamp(2px, 0.5vw, 4px)",
-    sm: "clamp(6px, 1vw, 10px)",
-    md: "clamp(12px, 2vw, 20px)",
-    lg: "clamp(18px, 3vw, 28px)",
-    xl: "clamp(32px, 5vw, 48px)",
-    "2xl": "clamp(48px, 8vw, 80px)",
+    xs: space["2xs"],
+    sm: space.xs,
+    md: space.sm,
+    lg: space.md,
+    xl: space.lg,
+    "2xl": space.xl,
   },
   radius: {
     sm: "6px",
@@ -139,7 +191,14 @@ const mergeRecord = <T extends object>(base: T, override?: DeepPartial<T>): T =>
 export const createMinimalTheme = (overrides?: DeepPartial<MinimalTheme>): ResolvedMinimalTheme =>
   mergeRecord(minimalBaseTheme, overrides as DeepPartial<ResolvedMinimalTheme>);
 
-export const minimalThemeToCSSVariables = (theme: ResolvedMinimalTheme): Record<string, string | number> => ({
+export const minimalThemeToCSSVariables = (theme: ResolvedMinimalTheme): Record<string, string | number> => {
+  // Defensive: an application that builds its own theme literal against the
+  // pre-`space` interface reaches this function through the global styles, and
+  // a crash inside `createGlobalStyle` takes the whole page rather than one
+  // token. Same reason `control` and `overlay` were made optional.
+  const steps = theme.space ?? space;
+  const stops = theme.breakpoint ?? breakpoint;
+  return {
   "--minimal-bg-app": theme.color.bgApp,
   "--minimal-bg-surface": theme.color.bgSurface,
   "--minimal-bg-surface-alt": theme.color.bgSurfaceAlt,
@@ -163,12 +222,34 @@ export const minimalThemeToCSSVariables = (theme: ResolvedMinimalTheme): Record<
   "--minimal-color-danger-soft": theme.color.dangerSoft,
   "--minimal-color-info": theme.color.info,
   "--minimal-color-info-soft": theme.color.infoSoft,
-  "--minimal-space-xs": theme.spacing.xs,
-  "--minimal-space-sm": theme.spacing.sm,
-  "--minimal-space-md": theme.spacing.md,
-  "--minimal-space-lg": theme.spacing.lg,
-  "--minimal-space-xl": theme.spacing.xl,
-  "--minimal-space-2xl": theme.spacing["2xl"],
+  "--minimal-space-3xs": steps["3xs"],
+  "--minimal-space-2xs": steps["2xs"],
+  "--minimal-space-xs": steps.xs,
+  "--minimal-space-sm": steps.sm,
+  "--minimal-space-md": steps.md,
+  "--minimal-space-lg": steps.lg,
+  "--minimal-space-xl": steps.xl,
+  "--minimal-space-2xl": steps["2xl"],
+  "--minimal-space-3xl": steps["3xl"],
+  /*
+   * The deprecated names, under their own prefix.
+   *
+   * They cannot share `--minimal-space-*` with the scale above: the old names
+   * are offset by one rung from the new ones, so `--minimal-space-md` would
+   * have had to mean 24px to a stylesheet and 16px to TypeScript. A separate
+   * prefix says which system a declaration belongs to, and makes the remaining
+   * uses greppable when they are ready to be retired.
+   */
+  "--minimal-spacing-xs": theme.spacing.xs,
+  "--minimal-spacing-sm": theme.spacing.sm,
+  "--minimal-spacing-md": theme.spacing.md,
+  "--minimal-spacing-lg": theme.spacing.lg,
+  "--minimal-spacing-xl": theme.spacing.xl,
+  "--minimal-spacing-2xl": theme.spacing["2xl"],
+  "--minimal-bp-hand": stops.hand,
+  "--minimal-bp-page": stops.page,
+  "--minimal-bp-desk": stops.desk,
+  "--minimal-bp-wide": stops.wide,
   "--minimal-radius-sm": theme.radius.sm,
   "--minimal-radius-md": theme.radius.md,
   "--minimal-radius-lg": theme.radius.lg,
@@ -212,7 +293,40 @@ export const minimalThemeToCSSVariables = (theme: ResolvedMinimalTheme): Record<
   "--minimal-z-overlay": theme.zIndex.overlay,
   "--minimal-z-modal": theme.zIndex.modal,
   "--minimal-z-tooltip": theme.zIndex.tooltip,
-});
+  };
+};
+
+/**
+ * A mobile-first media query at a named threshold.
+ *
+ * `min-width`, always. Every media query in the system before this was
+ * `max-width`, which means each layout was defined by *subtraction* — the
+ * desktop arrangement with values taken away — and combined with a spacing
+ * scale that floored on small screens, that is exactly why the phone view read
+ * as cramped rather than as composed. Building up from the small screen states
+ * the small screen's design first and adds to it.
+ *
+ * ```ts
+ * const Grid = styled.div`
+ *   display: grid;
+ *   ${from("page")} { grid-template-columns: 1fr 1fr; }
+ * `;
+ * ```
+ */
+export const from = (stop: keyof MinimalBreakpointTheme, theme?: ResolvedMinimalTheme): string =>
+  `@media (min-width: ${(theme?.breakpoint ?? breakpoint)[stop]})`;
+
+/**
+ * The exception: a rule that applies *below* a threshold.
+ *
+ * Reach for it only where the small screen genuinely needs something the large
+ * one must not have — phone-only chrome, a dock that becomes a sidebar — never
+ * to undo a desktop rule. The `calc()` is not decoration: `max-width: 48rem`
+ * and `min-width: 48rem` both match at exactly 48rem, so a pair written the
+ * obvious way applies both rules on that one width.
+ */
+export const until = (stop: keyof MinimalBreakpointTheme, theme?: ResolvedMinimalTheme): string =>
+  `@media (max-width: calc(${(theme?.breakpoint ?? breakpoint)[stop]} - 0.02px))`;
 
 const GlobalStyles = createGlobalStyle`
   :root {
