@@ -82,7 +82,8 @@ func allowedRequestHeaders(requested string) string {
 			continue
 		}
 		seen[key] = struct{}{}
-		allowed.WriteString(", " + trimmed)
+		allowed.WriteString(", ")
+		allowed.WriteString(trimmed)
 	}
 	return allowed.String()
 }
@@ -346,7 +347,9 @@ func isPublicPath(path string, publicPaths []string) bool {
 	// reach a handler today — but that makes the mux the thing standing
 	// between "/healthz/../v1/dispatch" and an unauthenticated dispatch. This
 	// check keeps the auth decision from depending on routing behaviour.
-	if cleaned := stdpath.Clean(path); cleaned != path {
+	// A single trailing slash on an otherwise clean directory path is permitted
+	// because path.Clean strips trailing slashes.
+	if cleaned := stdpath.Clean(path); cleaned != path && (cleaned == "/" || cleaned+"/" != path) {
 		return false
 	}
 

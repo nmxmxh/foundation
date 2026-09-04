@@ -28,6 +28,8 @@ type RuntimeGpuDevice = {
     maxComputeWorkgroupsPerDimension?: number;
   };
   lost?: Promise<RuntimeGpuDeviceLostInfo>;
+  /** Optional because the shape is structural and test doubles omit it. */
+  destroy?: () => void;
   queue: {
     writeBuffer(
       buffer: any,
@@ -202,6 +204,22 @@ export type RuntimeWebGpuDeviceLossState = {
   pipelinesDropped: number;
 };
 
+export type RuntimeWebGpuDisposalReport = {
+  /** Tracked buffer resources released. */
+  resourcesDropped: number;
+  /** Pooled buffers released. */
+  pooledBuffersDropped: number;
+  /** Compiled pipelines dropped from the cache. */
+  pipelinesDropped: number;
+  /**
+   * Whether the `GPUDevice` itself was destroyed.
+   *
+   * False for a device the caller supplied, which this host borrows rather than
+   * owns, and false where the implementation exposes no `destroy`.
+   */
+  deviceDestroyed: boolean;
+};
+
 export type RuntimeWebGpuHostOptions = {
   adapter?: RuntimeGpuAdapter;
   device?: RuntimeGpuDevice;
@@ -224,16 +242,74 @@ export class RuntimeWebGpuHost {
   };
   private nextResourceId = 1;
   private pooledBufferCount = 0;
+  private disposed = false;
+  /**
+   * Whether disposing this host destroys the device.
+   *
+   * False when the caller passed a device in: it may be shared with a render
+   * surface or another host in the same worker — which is the arrangement this
+   * package recommends, since a device per pass means an adapter and a pipeline
+   * set per pass — and destroying somebody else's device out from under them is
+   * worse than leaking one.
+   */
+  private readonly ownsDevice: boolean;
 
-  private constructor(device: RuntimeGpuDevice, options: Pick<RuntimeWebGpuHostOptions, "maxPooledBuffers"> = {}) {
+  private constructor(
+    device: RuntimeGpuDevice,
+    options: Pick<RuntimeWebGpuHostOptions, "maxPooledBuffers"> = {},
+    ownsDevice = true,
+  ) {
     this.device = device;
     this.maxPooledBuffers = normalizePooledBufferLimit(options.maxPooledBuffers);
+    this.ownsDevice = ownsDevice;
     this.observeDeviceLoss(device);
+  }
+
+  /**
+   * Release every GPU resource this host holds. Idempotent.
+   *
+   * **This is not optional housekeeping.** Buffers, pipelines and the device
+   * live in GPU memory, outside the JS heap, so a host that is dropped without
+   * being disposed leaks all of it and shows nothing in a heap snapshot, an
+   * allocation profile, or any of the retained-byte figures this package
+   * measures. The leak is invisible right up until the tab is using a gigabyte.
+   *
+   * Until now the only path that released anything was device *loss* — the
+   * one case where the driver had already taken the memory back. The ordinary
+   * case, a single-page app mounting a workbench and navigating away, released
+   * nothing: not the pooled buffers, not the tracked resources, not the
+   * pipeline cache, and never the device.
+   */
+  dispose(): RuntimeWebGpuDisposalReport {
+    if (this.disposed) {
+      return { resourcesDropped: 0, pooledBuffersDropped: 0, pipelinesDropped: 0, deviceDestroyed: false };
+    }
+    this.disposed = true;
+    const dropped = this.dropDeviceResources();
+    let deviceDestroyed = false;
+    if (this.ownsDevice) {
+      try {
+        this.device.destroy?.();
+        deviceDestroyed = typeof this.device.destroy === "function";
+      } catch {
+        // A device already lost throws on destroy in some implementations. The
+        // memory is gone either way, which is the outcome we wanted.
+        deviceDestroyed = false;
+      }
+    }
+    return { ...dropped, deviceDestroyed };
+  }
+
+  /** Whether `dispose` has run. A disposed host must not be used again. */
+  get isDisposed(): boolean {
+    return this.disposed;
   }
 
   static async create(options: RuntimeWebGpuHostOptions = {}): Promise<RuntimeWebGpuHost> {
     if (options.device) {
-      return new RuntimeWebGpuHost(options.device, options);
+      // Borrowed: the caller may be sharing it with a render surface or another
+      // host in the same worker, so disposing this one must not destroy it.
+      return new RuntimeWebGpuHost(options.device, options, false);
     }
     const gpu = (globalThis.navigator as RuntimeGpuNavigator | undefined)?.gpu;
     if (!gpu) {

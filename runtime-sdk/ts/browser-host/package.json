@@ -8,7 +8,10 @@
     ".": "./src/index.ts",
     "./pulse.worker": "./src/pulse/pulse.worker.ts",
     "./renderSurface": "./src/renderSurface.ts",
+    "./deviceProfile": "./src/deviceProfile.ts",
     "./renderSurfaceClient": "./src/renderSurfaceClient.ts",
+    "./renderStateChannel": "./src/renderStateChannel.ts",
+    "./renderSurfaceWorker": "./src/renderSurfaceWorker.ts",
     "./canvasStage": "./src/canvasStage.ts",
     "./frameClock": "./src/frameClock.ts",
     "./renderMarks": "./src/renderMarks.ts"

@@ -126,7 +126,18 @@ fi
   printf '[RUN] vitest %s %s\n' "$package_dir" "${args[*]}"
   node_args=()
   if [[ "${FOUNDATION_VITEST_EXPOSE_GC:-0}" == "1" ]]; then
+    # Both, and for different reasons. The flag on the runner process is what
+    # lets the CLI itself collect; NODE_OPTIONS is what carries it into the
+    # test workers, which is where profiles actually run. Vitest builds its
+    # pool's execArgv from scratch — `--experimental-import-meta-resolve`,
+    # `--require suppress-warnings.cjs`, `--conditions` — so a flag added only
+    # to the runner is dropped on the way in. The failure is silent:
+    # `globalThis.gc` is undefined in the test, `heapUsed()` returns a figure
+    # that no collection preceded, and the profile reports an allocation
+    # high-water mark while calling it retained heap. Megabyte-scale profiles
+    # still point the right way; a bytes-per-call profile is noise with units.
     node_args+=("--expose-gc")
+    export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--expose-gc"
   fi
   "$node_bin" "${node_args[@]}" "$vitest_cli" "${args[@]}"
   printf '[OK] vitest %s\n' "$package_dir"

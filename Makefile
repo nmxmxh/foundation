@@ -1,4 +1,4 @@
-.PHONY: all generate-contracts build install-ts-deps audit-ts-deps frontend-build delivery-metrics test test-go test-go-race test-ts test-rust test-rust-sdk test-native-rust test-rust-loom check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history bench-simd lint verify docker-up docker-down migrate-up help \
+.PHONY: all generate-contracts build install-ts-deps audit-ts-deps frontend-build delivery-metrics test test-go test-go-race test-ts test-rust test-rust-sdk test-native-rust test-rust-loom check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history profile-render-surface bench-simd lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-scaffold-idempotency check-scaffold-seed-drift check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator check-agent-change \
 	check-core-validation-contract check-contract-drift check-runtime-contract-field-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
@@ -32,6 +32,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-practice-controls \
 	check-runtime-performance-contracts \
 	check-frontend-runtime-workbench \
+	check-frontend-surface-practices \
 	check-formal-methods \
 	check-spec-conformance \
 	check-operational-excellence \
@@ -175,6 +176,9 @@ check-rust:
 
 test-bench: test-bench-go test-bench-native-rust test-bench-dispatch test-bench-frontend
 
+profile-render-surface:
+	@tooling/scripts/render_surface_profile.sh .
+
 test-bench-history:
 	@tooling/scripts/benchmark_history.sh .
 
@@ -309,6 +313,9 @@ check-runtime-performance-contracts:
 
 check-frontend-runtime-workbench:
 	@tooling/scripts/frontend_runtime_workbench_check.sh .
+
+check-frontend-surface-practices:
+	@node tooling/scripts/frontend_surface_practices_check.mjs .
 
 check-formal-methods:
 	@tooling/scripts/formal_methods_check.sh .

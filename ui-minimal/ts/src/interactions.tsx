@@ -145,7 +145,7 @@ const popIn = css`
 const Style = {
   Field: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
     width: 100%;
   `,
   Label: styled.label`
@@ -167,14 +167,14 @@ const Style = {
   ChoiceLabel: styled.label<{ $disabled: boolean }>`
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     align-items: start;
     cursor: ${({ $disabled }) => ($disabled ? "not-allowed" : "pointer")};
     opacity: ${({ $disabled }) => ($disabled ? 0.56 : 1)};
   `,
   ChoiceCopy: styled.span`
     display: grid;
-    gap: 2px;
+    gap: ${({ theme }) => theme.space["3xs"]};
     min-width: 0;
     padding-block: 4px;
   `,
@@ -283,7 +283,7 @@ const Style = {
   `,
   NumberRoot: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
   `,
   NumberGroup: styled.div<{ $size: MinimalSize; $invalid: boolean }>`
     display: grid;
@@ -323,18 +323,18 @@ const Style = {
     width: 100%;
     outline: 0;
     color: ${({ theme }) => theme.color.textPrimary};
-    padding: 0 ${({ theme }) => theme.spacing.sm};
+    padding: 0 ${({ theme }) => theme.space.xs};
     text-align: center;
   `,
   TabsRoot: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.md};
+    gap: ${({ theme }) => theme.space.sm};
   `,
   TabsList: styled.div`
     display: flex;
-    gap: ${({ theme }) => theme.spacing.xs};
+    gap: ${({ theme }) => theme.space["2xs"]};
     overflow-x: auto;
-    padding: ${({ theme }) => theme.spacing.xs};
+    padding: ${({ theme }) => theme.space["2xs"]};
     border: 1px solid ${({ theme }) => theme.color.borderSubtle};
     border-radius: ${({ theme }) => theme.radius.md};
     background: ${({ theme }) => theme.color.bgSurfaceAlt};
@@ -379,7 +379,7 @@ const Style = {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: ${({ theme }) => theme.spacing.sm};
+    gap: ${({ theme }) => theme.space.xs};
     width: 100%;
     min-height: var(--minimal-control-height-md);
     padding: 10px 14px;
