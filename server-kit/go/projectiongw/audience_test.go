@@ -108,26 +108,30 @@ func decodeFrame(t *testing.T, frame Frame) []*foundationpb.RecordMutation {
 	return batch.GetMutations()
 }
 
-// drainRecordIDs collects every record id delivered to a subscription within a
+// drainMutations collects every mutation delivered to a subscription within a
 // short settle window. The window has to be a wait rather than a single read:
 // the assertion is about what did NOT arrive.
-func drainRecordIDs(t *testing.T, sub *Subscription) []string {
+func drainMutations(t *testing.T, sub *Subscription) []*foundationpb.RecordMutation {
 	t.Helper()
-	var ids []string
+	var mutations []*foundationpb.RecordMutation
 	deadline := time.After(250 * time.Millisecond)
 	for {
 		select {
 		case frame, ok := <-sub.Frames:
 			if !ok {
-				return ids
+				return mutations
 			}
-			for _, mutation := range decodeFrame(t, frame) {
-				ids = append(ids, mutation.GetRecordId())
-			}
+			mutations = append(mutations, decodeFrame(t, frame)...)
 		case <-deadline:
-			return ids
+			return mutations
 		}
 	}
+}
+
+// drainRecordIDs is drainMutations reduced to the record ids it delivered.
+func drainRecordIDs(t *testing.T, sub *Subscription) []string {
+	t.Helper()
+	return recordIDs(drainMutations(t, sub))
 }
 
 func recordIDs(mutations []*foundationpb.RecordMutation) []string {

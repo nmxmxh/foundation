@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -262,4 +263,100 @@ func (db *PostgresDB) UpsertRecordsBatch(ctx context.Context, records []DomainRe
 		out[i].UpdatedAt = updatedAt[rowFor[i]]
 	}
 	return out, nil
+}
+
+// deleteRecordsUnnestSQL is the set-based batch form of the single-row delete:
+// one statement, one parse/plan, all identities via unnest arrays. The join
+// predicate is the same four-column identity the single delete matches on, so
+// the rows removed are exactly the rows the sequential lane would remove.
+const deleteRecordsUnnestSQL = `
+	DELETE FROM governance_state_records g
+	USING unnest($1::text[], $2::text[], $3::text[], $4::text[])
+		AS t(domain, collection_name, organization_id, record_id)
+	WHERE g.domain = t.domain
+	  AND g.collection_name = t.collection_name
+	  AND g.organization_id = t.organization_id
+	  AND g.record_id = t.record_id`
+
+// batchDeleteInput is the trimmed, deduplicated identity array form of a delete
+// batch, ready for deleteRecordsUnnestSQL.
+type batchDeleteInput struct {
+	domains       []string
+	collections   []string
+	organizations []string
+	recordIDs     []string
+}
+
+// buildBatchDeleteInput trims every identity and drops duplicates.
+//
+// It deliberately does NOT reject an empty identity component. The single-row
+// DeleteRecord trims its arguments and matches nothing when a component is
+// empty, returning no error, so rejecting here would make the batch stricter
+// than the lane it refines. An empty component matches no row in the batch
+// either, which is the same silent no-op.
+func buildBatchDeleteInput(records []DomainRecord) batchDeleteInput {
+	input := batchDeleteInput{
+		domains:       make([]string, 0, len(records)),
+		collections:   make([]string, 0, len(records)),
+		organizations: make([]string, 0, len(records)),
+		recordIDs:     make([]string, 0, len(records)),
+	}
+	type identity struct{ domain, collection, organization, record string }
+	seen := make(map[identity]struct{}, len(records))
+	for _, rec := range records {
+		id := identity{
+			domain:       strings.TrimSpace(rec.Domain),
+			collection:   strings.TrimSpace(rec.Collection),
+			organization: strings.TrimSpace(rec.OrganizationID),
+			record:       strings.TrimSpace(rec.RecordID),
+		}
+		if _, duplicate := seen[id]; duplicate {
+			continue
+		}
+		seen[id] = struct{}{}
+		input.domains = append(input.domains, id.domain)
+		input.collections = append(input.collections, id.collection)
+		input.organizations = append(input.organizations, id.organization)
+		input.recordIDs = append(input.recordIDs, id.record)
+	}
+	return input
+}
+
+// DeleteRecordsBatch removes many domain records in ONE SQL statement (unnest
+// arrays), so a high-rate projection mirror pays one round trip and one
+// parse/plan per batch instead of per record. It is the delete counterpart of
+// UpsertRecordsBatch, and hermes reaches it through an optional capability
+// interface, so a base store without it falls back to sequential deletes.
+//
+// Refinement contract (vs sequential DeleteRecord per record, proven by the
+// service-backed parity test): the same rows are removed, deleting an absent
+// row is not an error, and a duplicate identity inside one batch is removed
+// once. Duplicates are dropped client-side because a DELETE cannot match one
+// row twice, which is also the sequential outcome — the second delete of an
+// identity is a no-op either way. The statement is individually atomic and
+// idempotent, so a failed batch replays safely.
+func (db *PostgresDB) DeleteRecordsBatch(ctx context.Context, records []DomainRecord) error {
+	if db == nil || db.pool == nil {
+		return errors.New("postgres pool is nil")
+	}
+	if len(records) == 0 {
+		return nil
+	}
+
+	input := buildBatchDeleteInput(records)
+
+	conn, queryCtx, lease, start, err := db.acquireConn(ctx, "delete_records_batch")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		conn.Release()
+		lease.release()
+	}()
+
+	_, err = conn.Exec(queryCtx, deleteRecordsUnnestSQL,
+		input.domains, input.collections, input.organizations, input.recordIDs)
+	err = normalizePostgresOperationError(contextErr(queryCtx), err)
+	recordDatabaseOperation("delete_records_batch", start, err)
+	return err
 }

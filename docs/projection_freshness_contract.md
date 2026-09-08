@@ -60,6 +60,17 @@ organization may read any record in the scope. If the product's own access
 rules say otherwise for that data (an order's parties, a message's
 participants, a person's profile), the scope is `per-record` and needs a policy.
 
+### Control PROJFRESH-02
+
+`tooling/scripts/projection_audience_check.sh` reports a project that uses the
+projection gateway without declaring audience policies. Generated projects run
+it as `make check-projection-audience`, and `lint-foundation` includes it.
+
+The check warns rather than fails when no policy is declared, because
+tenant-wide delivery is a legitimate posture for a business-to-business
+deployment. It fails on wiring that cannot work: an `AudiencePerRecord` scope
+with no `HandlerConfig.Audience` resolver answers 403 to every read.
+
 ### Enforcement point
 
 Name where the audience is actually enforced, and prefer the one place that
@@ -108,4 +119,6 @@ Use the lightest algorithm that proves the required property:
       tenant scope?
 - [ ] Do deletes in a `per-record` scope carry the audience fields, so a
       deletion converges live instead of waiting for the next snapshot?
+      (`DeleteRecordWithFields` / `AddDeleteRecordSource`, not `DeleteRecord` /
+      `AddDeleteSource` — and the audience fields only, never a copy of the row.)
 - [ ] Does the projection materialize only the fields its consumers render?

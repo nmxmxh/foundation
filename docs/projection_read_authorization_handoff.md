@@ -232,6 +232,9 @@ and counted in `Gateway.AudienceDrops()`, and the client reconciles the deletion
 on its next snapshot. Because the gap is counted rather than silent, a
 deployment can alarm on it. **A per-record scope should emit deletes carrying
 its audience fields**; then deletions converge live like any other mutation.
+(Foundation shipped the means to do that on the same day — see "Follow-up
+shipped" below; at the time this decision was written there was no API that
+could attach them.)
 
 ### What a consuming project does
 
@@ -243,7 +246,13 @@ its audience fields**; then deletions converge live like any other mutation.
 2. Supply `HandlerConfig.Audience` — the caller's profile ids from verified
    claims. `SecuritySubjectAudienceFunc` is the default for records that name
    the authenticated subject directly.
-3. Make deletes carry the audience fields.
+3. Make deletes carry the audience fields:
+   `ProjectedRuntimeStore.DeleteRecordWithFields` in place of `DeleteRecord`,
+   and `MirrorSweeper.AddDeleteRecordSource` in place of `AddDeleteSource`.
+   Attach the audience fields and nothing else. Skipping this is not a
+   disclosure — the gateway still fails closed — but every deletion in the scope
+   then waits for the reader's next snapshot, and `Gateway.AudienceDrops()`
+   climbs with ordinary delete traffic instead of flagging a real gap.
 4. Set `AudienceConfig.Strict` once every scope is declared.
 5. Independently, cut the projections' field lists down to what consumers
    render. Audience decides who; the field list decides what. `to_jsonb(t)`
@@ -263,3 +272,35 @@ remains right for data with no safe audience partition.
    a later optimization, see Decision 3.
 4. ~~Should the tombstone carry the pre-deletion audience?~~ Yes, and the
    project must emit it; the gateway fails closed and counts, see Decision 4.
+   Foundation now provides the means (`DeleteRecordWithFields`,
+   `AddDeleteRecordSource`) — see "Follow-up shipped".
+
+## Follow-up shipped (2026-09-08): deletes can now be addressed
+
+Decision 4 left the burden on the project ("emit deletes carrying the audience
+fields") without a way to do it: `ProjectedRuntimeStore.DeleteRecord` took an
+identity, and `DeletedSince` streamed four strings, so no caller could attach
+the fields the gateway derives an audience from. Every deletion in a per-record
+scope therefore failed closed — correct, but permanently, which made "fail
+closed and count it" a standing condition rather than an edge.
+
+Added, both additive:
+
+- `hermes.ProjectedRuntimeStore.DeleteRecordWithFields(ctx, rec)` — deletes by
+  identity and projects the delete carrying `rec.Data`. The hot apply already
+  hands the event's record to the gateway's observer, so the audience derivation
+  works unchanged. `DeleteRecord` delegates with empty data and behaves exactly
+  as before.
+- `hermes.MirrorSweeper.AddDeleteRecordSource(name, DeletedRecordsSince)` — a
+  delete source that streams a `database.DomainRecord` instead of four strings,
+  so a project can attach the audience ids it captured for the deleted row.
+  `AddDeleteSource` is unchanged.
+
+The consuming project's side of it (for reference): a tombstone table column
+capturing only the id-bearing columns of the deleted row via its AFTER DELETE
+trigger, and delete sources that select them. Carrying only the audience keeps a
+tombstone from becoming a second place the deleted data lives.
+
+`Gateway.AudienceDrops()` remains the right signal — it should now sit flat, and
+movement means a record is missing an audience field rather than "deletes are
+happening".

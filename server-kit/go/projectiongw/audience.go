@@ -122,8 +122,10 @@ type AudiencePolicy struct {
 	// this scope do not carry the audience fields, Record (and the field
 	// derivation) returns nothing for them and the delete reaches nobody —
 	// fail-closed, counted by Gateway.AudienceDrops, and reconciled by the
-	// client's next snapshot. Emit deletes carrying the audience fields to
-	// converge deletions live.
+	// client's next snapshot. To converge deletions live, write them through
+	// hermes.ProjectedRuntimeStore.DeleteRecordWithFields (or stream them from
+	// a hermes.MirrorSweeper delete source registered with
+	// AddDeleteRecordSource) carrying these fields and nothing else.
 	Record RecordAudienceFunc
 }
 

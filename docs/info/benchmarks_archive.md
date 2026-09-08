@@ -1,0 +1,4651 @@
+# Foundation Benchmarks Archive
+
+Status: archive, superseded by `../foundation_benchmarks.md`
+Archived: 2026-09-08
+Owner: Platform Architecture
+
+This file holds the full benchmark ledger as it stood on 2026-09-08, before
+`docs/foundation_benchmarks.md` became a focused current-results document.
+
+Read this file when you need the reasoning behind a result, a superseded run, or
+a rejected approach. The numbers here were correct on the date of each entry.
+Some entries describe code that changed after they were written, so do not treat
+an entry as a statement about current behavior. For current numbers, read
+`../foundation_benchmarks.md`.
+
+Nothing was deleted. Every section below is the original text.
+
+---
+
+# Foundation Benchmarks
+
+Status: active reference
+Date: 2026-07-02
+Owner: Platform Architecture
+
+## Purpose
+
+Foundation performance work is not a single transport bet. The architecture uses a ladder:
+
+1. same-process direct typed/frame dispatch
+2. fixed binary frame codecs and borrowed frame views
+3. generated protobuf for typed network payloads
+4. gRPC for cross-host or polyglot process boundaries
+5. JSON envelopes only as compatibility adapters
+6. native runtime `ffi` or `shm` for trusted same-host hot units
+7. browser worker + WASM + `SharedArrayBuffer` where the browser can support it
+
+The benchmark suite exists to prove that ladder stays honest. The fastest lane should not pay network-stack or JSON costs, and the compatibility lane should remain visibly more expensive than the binary paths.
+
+The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
+
+## 2026-09-08 The delete lane was the only unbatched sweep
+
+The mirror sweeper batched changed rows through `UpsertRecords` from the day it
+was written, and deleted rows one at a time. Nobody noticed because the two
+lanes read alike — a callback per row — but underneath, every deletion took the
+partition lock, ran a full apply cycle, published indexes and notified
+observers on its own. A sweep of N deletions paid N of each, and the projection
+gateway encoded N fan-out frames where one would have carried the same batch.
+
+`ProjectedRuntimeStore.DeleteRecords` is the symmetric shape of
+`UpsertRecords`: base deletes per record (no base store batches them yet — the
+`batchRecordDeleter` seam is there for when one does), then ONE `ApplyBatch` per
+scope group. Both sweeper delete lanes share one `deleteBatcher` that flushes at
+`BatchSize`, so identity-only and audience-bearing sources batch identically.
+
+### Measured (M1 Pro, `BenchmarkDeleteRecords*`, 256 records in one scope)
+
+| Lane | ns/op | B/op | allocs/op | fan-out frames |
+| --- | ---: | ---: | ---: | ---: |
+| per-record (before) | 618,899 | 233,330 | 2,823 | 256 |
+| batched (after) | 400,742 | 238,261 | 2,060 | 1 |
+
+−35% time, −27% allocations, and the frame count is the result that matters:
+one encode per scope per batch instead of one per deletion, which is cost the
+gateway pays on every subscriber. The +2% bytes is the materialized batch
+slice, which is what batching *is*; it cannot be avoided while the apply takes
+a slice.
+
+### The first attempt cost 33% MORE bytes
+
+Grouping into `map[string][]Event` by plain append regressed bytes from 233KB
+to 311KB while improving everything else. `Event` embeds a whole
+`DomainRecord`, so growing a group slice copies a large value log(n) times —
+`projectDeleteBatch` was the single largest flat node in the allocation
+profile. Two fixes, in order of payoff: size each group exactly (resolve and
+count first), and take a fast path when every record shares a scope, which a
+sweeper source almost always does — that one skips the counting pass, the
+per-record scope resolution, and the bookkeeping slice entirely.
+
+The lesson generalizes to any "just group them into a map" batching change in
+this codebase: if the element embeds a record, append growth is the cost, and a
+batch that spans one scope should never pay for the machinery that handles many.
+
+### Not done
+
+No base store batches its deletes yet, so the round trips are unchanged — for
+Postgres this is the dominant cost at scale, and `DeleteRecordsBatch` (unnest,
+mirroring `UpsertRecordsBatch`) is the follow-up. It needs a service-backed
+parity test, so it was not landed blind alongside this.
+
+## 2026-09-04 One worker, several surfaces, one device
+
+`renderSurface.ts` has recommended sharing a worker since it was written, and the SDK's
+support for it was `ownsWorker: false` — which only stops a host terminating a worker
+somebody else is using. Every surface's `build` still reached for its own adapter and its own
+device, so three surfaces in one worker got you one thread and still three devices: the exact
+thing the arrangement exists to avoid. `gpu_practices.md` states *one `GPUDevice` per worker,
+not one per pass* as a rule; nothing enforced it.
+
+### Devices and listeners, by surface count
+
+| Surfaces | devices, unshared | devices, shared | listeners, unshared | listeners, shared |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 1 | 1 | 1 | 1 |
+| 3 | 3 | **1** | 3 | **1** |
+| 8 | 8 | **1** | 8 | **1** |
+
+Structural and exact. Each avoided device is an adapter, a pipeline set and a lot of driver
+state that a page asked for by accident.
+
+### Dispatch, which nobody counts
+
+`serveRenderSurface` filters by surface name, so N servers on one scope means every message
+wakes N listeners and N-1 decide it was not for them — O(N) per message, paid by every
+`RESIZE`, `STATE`, `VISIBILITY` and `TIER_FLOOR`.
+
+| Surfaces | unshared | shared |
+| ---: | ---: | ---: |
+| 1 | 16 ns | 21 ns |
+| 3 | 40 ns | 37 ns |
+| 8 | **71 ns** | **27 ns** |
+
+The trend is the result: unshared grows with surface count, shared stays flat within the noise
+of a twenty-nanosecond measurement. At a single surface the map lookup makes sharing
+marginally *slower*, which is the honest shape of it — the arrangement is for pages with
+several figures, and it is exactly those pages that were paying three devices.
+
+### The leak nobody could have seen
+
+A shared worker outlives every surface in it, so the release is reference-counted. The path
+worth naming is the last surface leaving while acquisition is still in flight: dropping that
+promise loses a device which is about to arrive and which nothing else references. It is the
+one way a shared device can leak with no way to observe it — not in a heap profile, not in a
+device count, not in a test that only checks the ordinary order. The release is chained onto
+the acquisition instead, and there is a test that resolves the device *after* the last surface
+has gone.
+
+## 2026-09-04 Prewarming the render surface: 91% of the startup chain was on the critical path for no reason
+
+`gpu_practices.md` has said *"pipeline creation must be async or prewarmed outside
+latency-sensitive UI"* since it was written, and `webgpuHost` has had `prewarmKernel` all
+along. The raster lane had no equivalent, so every surface did the whole of its setup after
+the canvas transfer.
+
+### The chain, and how much of it needed a canvas
+
+Spawn the worker → load its module → request an adapter → request a device → compile shader
+modules → create pipelines → configure the context → draw.
+
+**Only the last two need a canvas.** `getPreferredCanvasFormat()` returns the format without
+one. Everything before them ran after the transfer — which is after a DOM element exists,
+which is after the component owning it has mounted — because of where it was called from, not
+because anything required it.
+
+### Measured
+
+Protocol measurement on a fake clock, so the numbers are exact rather than sampled. The
+canvas-independent phase is 100 units, the canvas-dependent phase 10 — a weighting that
+reflects which of the two lists above takes hundreds of milliseconds on real hardware. The
+*fraction* is what transfers; the units are a parameter.
+
+| Warm lead before mount | first frame, after canvas |
+| :--- | ---: |
+| none (cold) | 110 |
+| warmed, zero lead | 110 |
+| warmed, half lead | 60 |
+| warmed, full lead | **10** |
+
+**91% of the startup chain removed from the critical path.** The half-lead row is exactly
+proportional, which is the check that the warm is doing real work rather than being skipped.
+
+The zero-lead row is the one that matters for correctness. Prewarm-and-mount in the same tick
+is the ordinary case for a host that warms on route entry, and a protocol where `INIT`
+restarted the work instead of awaiting it would make a fast mount *slower* than not warming.
+It costs nothing.
+
+### Asking to warm
+
+**16 ns** per repeat request, and warming is idempotent — a second request does not build a
+second device. That is the number that decides whether a page can afford to prewarm
+speculatively on a hover, and it can.
+
+### What it does not do
+
+A failed warm is a `WARNING`, not a `FAILED`: it costs the latency it was meant to save and
+nothing else, the build runs cold, and the surface draws. Reporting it as a failure would show
+an error for a surface that is working, one frame later than it might have.
+
+## 2026-09-04 Shared state channel: the clone the render lane was paying, and the pattern INOS could not have used
+
+Foundation has owned zero-copy machinery since `arena.ts` landed and its own render lane
+never touched it — `grep -n "arena|SharedArrayBuffer|Atomics"` across `renderSurface.ts` and
+`renderSurfaceClient.ts` returned nothing. Every `setState` crossed as a structured clone.
+Read against `inos_v1`, whose organising principle is *"we never send data, we only signal"*.
+
+Captured by `make profile-render-surface`; artifacts under
+`benchmark-results/render_surface_profile_*.tsv`.
+
+### Measured against the path it replaces
+
+`structuredClone` is what `postMessage` does, and a `Float32Array` is the shape it handles
+fastest — so this is the incumbent's best case. The real `setState` clones a state object,
+which is slower, and the worker then allocates the result again, a second copy not charged
+here at all.
+
+| Payload | clone | channel write | write + take | take, nothing new |
+| :--- | ---: | ---: | ---: | ---: |
+| 16 floats (64 B) | 958 ns | **186 ns** | 231 ns | 64 ns |
+| 256 floats (1 KB) | 902 ns | **254 ns** | 205 ns | 37 ns |
+| 4,096 floats (16 KB) | 2,429 ns | **755 ns** | 804 ns | **29 ns** |
+| 65,536 floats (256 KB) | 36,655 ns | **11,059 ns** | 10,502 ns | 34 ns |
+
+### The protocol is O(1), and that is the whole result
+
+Isolating the exchange from the payload — an empty `fill` publishes a generation without
+touching the data, so what remains between the two loops is the protocol and nothing else:
+
+| Payload | publish | take |
+| :--- | ---: | ---: |
+| 16 floats | 92 ns | 65 ns |
+| 256 floats | 75 ns | 52 ns |
+| 4,096 floats | 65 ns | 48 ns |
+| 65,536 floats | 78 ns | **36 ns** |
+
+**Flat across a 4,096x range of payload sizes.** The first version of this channel was a
+sequence lock over two slots, and its take was a memcpy — 750 ns at 16 KB, 10.5 µs at 256 KB,
+growing linearly forever. Three slots make the take an index lookup.
+
+### Letting the caller write into the slot
+
+Both sides compute the identical data; the staged one copies it into the slot afterwards.
+Timing "a scalar loop into the slot" against "memcpy from a ready array" would have priced the
+loop rather than the API — and would have reported the zero-copy path as four times *slower*
+than the one it removes work from.
+
+| Payload | compute then copy | compute in place | copy avoided |
+| :--- | ---: | ---: | ---: |
+| 256 floats | 450 ns | 264 ns | 183 ns |
+| 4,096 floats | 3,637 ns | 2,978 ns | **657 ns** |
+| 65,536 floats | 59,752 ns | 46,123 ns | **7,879 ns** |
+
+### Allocation
+
+| Path | bytes/call |
+| :--- | ---: |
+| `structuredClone` of 4,096 floats | **16,551** |
+| `channel.write` | **0** |
+| `channel.read` | **0** |
+
+The read reached zero by caching one view per slot and rebuilding it only when that slot's
+length changes; the seqlock version returned a fresh `subarray` every frame, 104 bytes of it.
+
+### The instrument was wrong again, in a new way
+
+`heapUsed` does not see typed-array payloads: V8 keeps `ArrayBuffer` backing stores outside
+the JS heap, so a 16 KB clone first measured **200 bytes** — the wrapper — and the payload the
+measurement existed to charge for was invisible. Anything profiling graphics data is profiling
+typed arrays, which makes `arrayBuffers` the term that matters. The harness now sums both.
+
+The gated-loop guard from the previous entry also fired correctly on its author: a
+publish-into-shared-memory call returns nothing to retain, and the guard refused to report a
+figure for it until told that was the point.
+
+### Why not INOS's ping-pong as written
+
+INOS selects a buffer with `epoch % 2`: physics writes A while rendering reads B, lock-free.
+That is safe **because its writer and reader both run at 60 Hz**, so the writer can never lap
+the reader — an assumption the document does not state and the code depends on.
+
+A render surface breaks it deliberately, and the fix came from the other end of INOS's own
+documentation: `coding_magic.md` §10 on MVCC, *"many readers observe stable versions while
+writes continue"*. Keep more versions than there are participants and the reader stops needing
+a copy to get a consistent one. Three slots is the smallest number that achieves it for one
+writer and one reader, and it turns the reading side from O(n) into O(1).
+
+## 2026-09-04 Render surface lane: the ladder that could not demote, and a benchmark that could not measure
+
+Two source-level audits produced the render-surface and spacing work, and neither carried a
+measurement — every figure in them was arithmetic from source. This is the part that can be
+measured without a GPU. Captured by `make profile-render-surface`
+(`tooling/scripts/render_surface_profile.sh` → `runtime-sdk/ts/browser-host/src/renderSurface.profile.test.ts`),
+artifacts under `benchmark-results/render_surface_profile_*.tsv`.
+
+### The measuring instruments were broken first
+
+Two of them, and both failed silently in the direction of good news.
+
+`renderSurface.bench.ts` compared a reused frame descriptor against a fresh object literal
+and reported the **allocating variant as 1.06x faster**. Neither value escaped its callback,
+so V8 stack-allocated the literal and both compiled to the same arithmetic: the benchmark had
+arranged to be unable to observe the property it was named for. It is now labelled a
+throughput benchmark, which is what it always was.
+
+`--expose-gc` never reached the test workers. `run_vitest.sh` added it to the Node process it
+launches, but Vitest builds its pool's `execArgv` from scratch, so `globalThis.gc` was
+`undefined` inside every `.profile.test.ts` in the repository. `heapUsed()` returned a figure
+no collection preceded — an allocation high-water mark reported as retained heap. At the
+megabyte scale of `runtimeWorkbench.profile.test.ts` that still points the right way; at
+bytes-per-call it is noise with units. Fixed by carrying the flag through `NODE_OPTIONS`,
+which the pool does inherit.
+
+### Allocation, measured differentially against a retained sink
+
+| Path | bytes/call |
+| :--- | ---: |
+| worker loop frame descriptor (reused) | **0** |
+| the same descriptor if it were a literal | 88 |
+| `canvasStage.frame()` — before | 80 |
+| `canvasStage.frame()` — after | **0** |
+
+The worker half had always reused its descriptor. The main-thread stage allocated one object
+per drawn frame and nobody had measured it: 80 bytes × 3 apparatuses × 30 Hz = **7.2 KB/s of
+garbage on the main thread**, to describe a rectangle that changes only when the window does.
+`StageFrame` is now reused, and documented as reused.
+
+### Forced layout, counted rather than timed
+
+A rect read inside a frame is a forced synchronous layout, and its cost is the browser's
+layout tree — which Node does not have. So the honest metric is how many happen at all.
+
+| | reads |
+| :--- | ---: |
+| inside `frame()`, per drawn frame | **0** (was 1) |
+| at construction, once | 1 |
+| eliminated, 3 stages at 30 Hz | **90 reads/second** |
+
+### The device prior costs 129 ns, once
+
+`readDeviceProfile()` + `startingTier()`, run on the main thread before the canvas is
+transferred: **129 ns**, or 0.0005% of a 25 ms frame. It buys the removal of the entire
+opening-jank window, which is the trade the whole prior exists to make.
+
+### The ladder, in frames rather than milliseconds
+
+Frames-to-demote is exact and machine-independent; a wall-clock figure off one laptop is
+neither. Top rung of the black hole's ladder: `cadenceMs = 25` (40 Hz).
+
+| Device holds | before | after | time to demote (after) |
+| :--- | ---: | ---: | ---: |
+| 40 fps (on target) | never | never | — |
+| 30 fps | never | never | — |
+| 25 fps | **never** | 6 | 240 ms |
+| 20 fps | **never** | 6 | 300 ms |
+| 15 fps | 24 | 6 | 400 ms |
+| 7 fps | 24 | 6 | 858 ms |
+
+The reported symptom is the 20 fps row. A phone holding a 40 Hz surface at 20 fps was failing
+its budget by 125% and recorded **zero** misses, because the old threshold was `cadence + 1000/30`
+— a miss line at 58.3 ms, or 17.1 fps. It pinned to the best rung, at full resolution, with the
+GPU saturated, for as long as the page was open.
+
+The new threshold is proportional: `cadenceMs * 1.35`. Note what that means precisely — it
+tolerates down to **29.6 fps on a 40 Hz rung** and demotes below it. 30 fps is deliberately
+inside the budget; 25 fps is not.
+
+### Why misses are forgiven rather than never cleared
+
+The incoming handover proposed "no decay — misses are cumulative". Cumulative-and-never-cleared
+is unbounded: a surface already at the best rung has no better rung to promote to, so nothing
+ever resets the tally. Measured, **6 stray late frames — one per minute — demote a machine that
+held cadence for six minutes**. `FORGIVE_AFTER = 48` clears the count after a sustained clean
+run, making it the burst detector it was meant to be.
+
+## 2026-08-18 Second-moment kernel: choosing the fastest form that is still correct
+
+`Float64Vector.MomentsValid` reduces a column to the `(count, mean, M2)` triple
+that variance and standard deviation project from. Four kernels were measured
+against exact `big.Rat` arithmetic and against each other; the fastest one is not
+the one that ships, and the reason is recorded here so a future change does not
+rediscover it the expensive way.
+
+Medians of 12 runs, 65,536-row float64 column, plus relative error against the
+exact variance of data offset to 1e12:
+
+| kernel | ns/op | vs shipped | rel. error @1e12 |
+| --- | --- | --- | --- |
+| naive `(Σx, Σx²)` | 82,652 | **0.98x (faster)** | **negative variance** |
+| **blocked two-pass, 4-way MLP (shipped)** | **84,051** | 1.00x | **9.3e-08** |
+| shifted single-pass, 4-way MLP | 84,180 | 1.00x | 3.0e-07 |
+| blocked two-pass, single accumulator | 130,973 | 1.56x slower | 5.2e-06 |
+| `SumValid` first moment, for scale | 25,751 | — | — |
+
+Three things this settles.
+
+**Interleaving is worth 1.56x and also improves accuracy.** Four accumulators
+each sum a quarter of the terms, so the shorter dependency chain bounds latency
+*and* error growth: 1.56x the throughput of the single-accumulator form and 56x
+lower error on the same data. This is the same memory-level-parallelism result
+recorded for the columnar sum kernels, and the same coincidence the null algebra
+found — the correct handling and the cheap handling agree.
+
+**The naive form is genuinely faster, by 1.7%, and is still rejected.** One pass
+beats two. That 1.7% is the entire price of the correct answer, and what it buys
+is a variance of −1.42e10 where the true value is 0.50 — not an inaccurate answer
+but an impossible one. An earlier single-run measurement suggested the shipped
+kernel was faster than naive; repeated measurement with medians shows that was
+noise, and the claim is withdrawn.
+
+**The shifted single-pass variant ties on speed and loses on accuracy.** It
+removes the cancellation by subtracting a per-window origin, which works — 3.0e-07
+against naive's total failure — but is 3.2x worse than the shipped kernel at 1e12
+while being statistically indistinguishable in time. There is no axis on which it
+wins.
+
+`TestMomentsKernelAccuracyAgainstExactArithmetic` keeps all three alternatives
+measurable beside the shipped one and gates on recorded per-fixture ceilings,
+which fall and never rise. It also asserts the rejection as a property: on
+ill-conditioned fixtures the naive form must remain decisively worse, so if that
+ever stops holding the comments explaining the choice are known to be stale.
+
+Reproduce:
+
+```bash
+go test ./hermes/ -run TestMomentsKernelAccuracyAgainstExactArithmetic -v
+go test ./hermes/ -run XXX -bench BenchmarkMoments -benchtime 800x -count 12
+```
+
+## 2026-08-18 Hedged race lane: tail latency, bandwidth cost, and allocation ceiling
+
+`runtime-network` (crate `ovrt-network`) adds the first rung of the ladder where
+the two ends are separated by a network. Its claim is narrow and easy to
+overstate, so it is recorded here with the cost beside the benefit.
+
+**The claim is the tail, not the median.** Racing a frame down N independent
+paths delivers `min(L1..LN)`, so a stall must occur on *every* path to be
+observed: a per-path stall probability `p` becomes `p^N` end to end. The median
+is unchanged and a benchmark reporting only means or medians will read this as
+noise.
+
+`cargo run --release -p ovrt-network --bin network_sim` (400 iterations, 512 B
+frame, 100 us base, 3 ms stall at 10% per path, 4 ms inter-frame gap):
+
+| paths | p50 | p95 | p99 | p99.9 | stall>p | wire B | amp | allocs/op | B/op |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 177.0 us | 3926.0 us | 4032.7 us | 11123.9 us | 90.00% | 204,800 | 1.00x | 2.1 | 715 |
+| 2 | 184.8 us | 332.8 us | 2071.7 us | 4014.9 us | 99.00% | 409,600 | 2.00x | 2.2 | 896 |
+| 3 | 194.0 us | 387.8 us | 768.4 us | 4027.5 us | 99.90% | 614,400 | 3.00x | 2.2 | 1066 |
+
+`stall>p` is the percentile at and above which a stall is still expected, given
+`p^N`. It is in the table because without it a correct result reads as a failure:
+at two paths the co-stall probability is exactly 1%, so a p99 sitting inside the
+stall is the arithmetic working. Compare rows only below their own `stall>p`.
+At p95 — below every row's threshold — three paths are **10.1x** better than one,
+the median moves 0.91x, and bandwidth is 3.00x. That is the whole trade.
+
+**Instrument resolution.** Simulated paths are `thread::sleep`, so the harness
+calibrates itself and prints the floor: `sleep(100us)` actually takes ~133 us p50
+on the reference machine. The base latency in the table is that number, not
+100 us. A run whose claimed differences approach the floor is reporting the
+scheduler.
+
+**Allocation ceiling (ratchet candidate).** Measured with a counting
+`GlobalAlloc` in the harness, per race, two paths:
+
+| | allocs/op | B/op (16 B frame) | B/op (4096 B frame) | fixed overhead |
+| --- | --- | --- | --- | --- |
+| per-race channel | 9.1 | 3,227 | 7,296 | ~3,064 B |
+| reused channel | **2.2** | **396** | **4,476** | **~380 B** |
+
+The dominant cost was a fresh `mpsc` channel per race — measured independently at
+2 allocations and 1,016 B — created for a channel that lived microseconds. Reuse
+required a per-race sequence number on `Attempt`, because a losing path reports
+after its race concluded and the next race must not claim that stale success as
+its own (`a_stale_report_is_never_claimed_by_a_later_race`, mutation-verified:
+removing the sequence guard fails it). Labels moved from `String` to `Arc<str>`
+in the same pass. Latency is unchanged; the ceiling is **2.2 allocs/op and
+380 B/op fixed plus one frame copy**, and only falls from here.
+
+**Real-socket floor.** `--lane udp` drives loopback sockets through the real
+`bind_socket_to_interface` path (`probe=true, sockets bound=1/1`) and reports
+p50 = 17.2 us per send. It measures the syscall floor, not tails — loopback has
+none. It also shows the saturation behaviour: at `--gap-ms 0` about 37% of races
+run degraded because a path is still mid-send, and some are shed as
+`AllPathsBusy`. That is single-occupancy working as designed, and it means the
+racer is a latency device for bursty control traffic, not a throughput device.
+Degradation is gone by `--gap-ms 1`, under 2% duty cycle at a 17 us send.
+Note also that parked workers cost ~60 us to wake (p50 30 us at zero gap versus
+~100 us with one), the same cold-start effect `process_pool`'s `WarmupUnitID`
+exists for.
+
+**Dependency footprint.** The lane takes no new dependency, and the size of what
+was avoided was measured rather than assumed:
+
+| | transitive crates | clean release build |
+| --- | --- | --- |
+| `ovrt-network` | 1 (`libc`) | 0.33 s wall / 1.21 s CPU |
+| `quinn` 0.11 | 98 | 19.94 s wall / 52.15 s CPU |
+| `webrtc` 0.12 | 226 | not built |
+
+Stated honestly: this is not the same capability delivered more cheaply. QUIC
+buys multiplexed reliable streams, 0-RTT and migration, none of which racing or
+striping require. The measurement establishes that the cost is avoidable *for
+this capability*, not that QUIC is overpriced for its own.
+
+Reproduce:
+
+```bash
+cargo run --release -p ovrt-network --bin network_sim
+cargo run --release -p ovrt-network --bin network_sim -- --lane udp --gap-ms 1
+```
+
+**Consumer note.** `server-kit/go` and `runtime-sdk` are both vendored, so these
+land in generated applications rather than in Foundation core, which by the
+ownership manifest consumes them "through public APIs" and therefore does not
+call them itself. `TestShardedMomentsMergeToTheWholeProjection` records the
+price of the alternative on the reference fixture: averaging two shards'
+standard deviations returns 108.51 against a true 216.77, a **49.9% error**.
+
+## 2026-08-18 Exact-arithmetic oracle for the columnar float64 reduction
+
+`TestFloat64VectorSumMatchesScalarReference` compared the 8-lane AVX2 reduction
+against `sumFloat64sScalar` — but that reference is itself a 4-accumulator
+reordering of a non-associative operation. Two approximations were being checked
+against each other, so the assertion bounded their *disagreement*, not the error
+of either. `columnar_sum_test.go` now carries the missing anchor:
+`exactSumFloat64` accumulates in `math/big.Rat`, where every finite `float64` is
+a dyadic rational and every partial sum is held exactly, then rounds once at the
+end. Both lanes are measured against that value.
+
+Each case asserts the classical forward error bound
+`|fl(Σx) − Σx| ≤ γ_k·Σ|x|` with `k` taken from the lane's accumulator count
+(Higham §4.2, already cited by `mathematical_practices.md` §4) — a bound that
+cannot be tuned away — plus a ULP ceiling where the input's conditioning makes
+one meaningful. `TestFloat64VectorSumNonFiniteParity` adds the NaN/±Inf coverage
+FP-4 requires for the raw reduction (the validity-aware kernels already had it in
+`columnar_reduce_test.go`).
+
+Measured on this host (Apple M1 Pro, darwin/arm64 for the scalar lane;
+`GOARCH=amd64 GOEXPERIMENT=simd` under Rosetta for the AVX2 lane, which reports
+`archsimd.X86.AVX2() == true`, so the vector path provably executed). Error is
+stated as ULP distance from the correctly-rounded exact sum:
+
+| Case | n | Scalar reference (4 acc) | AVX2 lane (8 acc) |
+| --- | ---: | ---: | ---: |
+| `ramp-exactly-representable` (the pre-existing test input) | 1,000 | **0 ULP** | **0 ULP** |
+| `well-conditioned-positive` (all terms in one octave) | 4,096 | **0 ULP** | **0 ULP** |
+| `subnormals` | 64 | **0 ULP** | **0 ULP** |
+| `big-plus-small` (1e17 followed by 4,096 ones) | 4,097 | 64 ULP | **32 ULP** |
+| `mixed-magnitude-cancellation` (17 decades, alternating sign) | 1,024 | 1.23e14 ULP | **1.78e13 ULP** |
+| `catastrophic-cancellation` (`1e16, 1, −1e16` × 333) | 999 | returns `0`, exact is `333` | returns `0`, exact is `333` |
+
+Findings:
+
+- **The old test could not fail on its main input.** Every element of the ramp is
+  a multiple of 0.5 and every partial sum stays far inside 2⁵³, so all partial
+  sums are exactly representable in *any* accumulation order. That input observes
+  nothing about reordering; `well-conditioned-positive` was added as one that can.
+- **The vectorized lane is measurably more accurate than the scalar reference**,
+  not less — the outcome `mathematical_practices.md` §4 predicts from pairwise
+  error growth, now measured rather than asserted. On `big-plus-small` the ratio
+  is exactly 2×, matching the 8-vs-4 accumulator ratio: the accumulator holding
+  1e17 (ULP 16) absorbs its share of the ones and loses all of them, so a
+  k-accumulator lane errs by 4096/k. That makes 64 ULP a derived ceiling, and a
+  regression to fewer accumulators fails the test.
+- **A correct reduction can be 100% relatively wrong.** On
+  `catastrophic-cancellation` both lanes return `0.0` against a true sum of
+  `333`, and this is *inside* the Higham bound (Σ|x| ≈ 6.7e18 admits ~2e5 of
+  absolute error). FP-1's `1e−6·|ref|` relative form would also have passed it,
+  since both lanes agree on the wrong answer. The relative tolerance is a lane
+  parity check and remains correct as one; it is not an accuracy claim, and on
+  ill-conditioned input nothing but the absolute bound is.
+
+This entry is verification evidence, not a throughput measurement: no production
+code path changed (one corrected doc comment on `Float64Vector.Sum`, which had
+described the reference as a left-to-right sum it has not been since the MLP
+kernel consolidation of 2026-08-04). `make bench-simd` now runs the whole
+`TestFloat64VectorSum` family rather than the single original parity test.
+
+Reproduce:
+
+```bash
+cd server-kit/go && go test -run 'TestFloat64VectorSum' -v ./hermes
+```
+
+```bash
+cd server-kit/go && GOARCH=amd64 GOEXPERIMENT=simd go test -run 'TestFloat64VectorSum' -v ./hermes
+```
+
+## 2026-08-14 Hermes Core Acceleration: Accumulators, Multi-Attribute Bitmaps, and Tiered Snapshots
+
+This benchmark validates four Foundation Core architectural enhancements in `server-kit/go/hermes`:
+1. Streaming Accumulator Projections (`AccumulatorStateStore`) for O(1) aggregate and facet manifest queries.
+2. Inverted Roaring Bitmaps (`BitmapIndexRegistry`) for composite multi-attribute secondary query filtering.
+3. Block Selection Kernels with SIMD acceleration (`columnar_select.go`).
+4. Tiered Chunked Snapshots (`HCS2`) with independent SHA256 integrity checksums.
+
+Measured on this host (Apple M1 Pro, darwin/arm64, `-8`, `N=10,000` records per scope, `-benchmem`):
+
+### 1. Streaming Accumulators vs Sequential Scans (10,000 records)
+
+| Metric / Query Type | Legacy Sequential Scan (O(N)) | Streaming Accumulator (O(1)) | Latency Speedup | Memory / Allocation Gain |
+| :--- | ---: | ---: | ---: | :--- |
+| **Facet Manifest (3 dimensions, Top-10)** | 765,183 ns/op | **549.6 ns/op** | **1,392x faster** | 1,224 B/op -> 624 B/op |
+| **Numeric Metric Summary (Sum/Min/Max/Mean)** | 3,252,103 ns/op | **29.58 ns/op** | **110,000x faster** | 717,585 B/op, 29,997 allocs -> **0 B/op, 0 allocs** |
+
+### 2. Inverted Bitmaps vs Iterative Predicate Scans (10,000 records, 3 filters)
+
+| Filter Strategy | ns/op | B/op | allocs/op | vs Iterative Scan |
+| :--- | ---: | ---: | ---: | ---: |
+| **Iterative Predicate Scan (Legacy Baseline)** | 150,465 | 35,184 | 11 | 1x |
+| **Inverted Roaring Bitmaps (Word AND)** | **5,280** | **17,696** | **3** | **28.5x faster (73% fewer allocs)** |
+
+### 3. Tiered Chunked Snapshot Hydration (10,000 records)
+
+| Snapshot Format | Hydration ns/op | Integrity Verification | Memory Peak Control |
+| :--- | ---: | :--- | :--- |
+| **HCS1 Monolithic Columnar** | 1,441,664 | Single Descriptor Checksum | Monolithic Buffer |
+| **HCS2 Tiered Chunked (4 chunks)** | 1,642,717 | Per-Chunk SHA256 Verification | **Streamed Bounded Chunks** |
+
+### Key Findings and Allocations Analysis
+
+- **Constant-Time Facets & Metrics ($O(1)$):** Computing running metrics via `AccumulatorStateStore` operates at **29.58 ns** with **zero memory allocations**, replacing sequential record scans that required 3.25 ms and 29,997 allocations per query.
+- **Vectorized Boolean Filtering:** Intersecting multi-attribute bitmaps reduces query latency from **150.4 µs down to 5.28 µs**, eliminating pointer chasing across record candidate sets.
+- **Zero-Regress Fallbacks:** Single-filter queries and unindexed fields automatically use the zero-allocation scalar candidate index paths.
+- **Reproduce command:**
+  `cd server-kit/go && go test -run=^$ -bench='^BenchmarkAccumulatorVsScan|^BenchmarkBitmapVsIterative|^BenchmarkSelectFloat64|^BenchmarkSnapshotHydration' -benchmem ./hermes/...`
+
+## 2026-08-04 The null lane: measuring the Foundation tax
+
+Every benchmark before this one measured Foundation doing something. The null
+lane measures Foundation doing **nothing** — the same empty handler run at each
+rung of the transport ladder, so the framework's own cost is separated from the
+product's. It is the "empty program that only forwards packets" measurement:
+if the floor already consumes the latency budget, no domain-level optimization
+can recover it, and the correct response is to remove a layer rather than tune
+one.
+
+Measured on this host (Apple M1 Pro, darwin/arm64, `-8`, `-benchtime=1s`,
+median of 5 runs). Requests, response writers, and bodies are constructed once
+and reset per iteration, so the numbers attribute cost to Foundation rather
+than to `net/http` and `httptest` scaffolding — this is a floor, not a model of
+production traffic.
+
+| Rung | Lane | ns/op | B/op | allocs/op | vs rung 00 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 00 | bare Go call (floor) | 2.18 | 0 | 0 | 1x |
+| 01 | router frame dispatch | 10.29 | 0 | 0 | 4.7x |
+| 02 | direct frame client (validated) | 18.60 | 0 | 0 | 8.5x |
+| 03 | HTTP ingress -> DispatchRequest | 3353 | 7080 | 28 | 1538x |
+| 04 | HTTP route handler + empty executor | 3381 | 7080 | 28 | 1551x |
+| 05 | + correlation middleware | 4310 | 8072 | 44 | 1977x |
+| 06 | + security headers, validation, JWT, RBAC | 9539 | 11136 | 97 | 4376x |
+| 07 | JSON object materialization (`{}`) | 35.26 | 48 | 1 | 16x |
+
+Three findings.
+
+**The same-process frame lane delivers on its promise.** Rungs 01 and 02 are
+genuinely zero-allocation: a validated dispatch costs 18.6 ns and allocates
+nothing. The top of the transport ladder is not aspirational, and rung 07 shows
+why rule 1 forbids JSON there — materializing an *empty* object already costs
+twice a full validated frame dispatch.
+
+**The HTTP ingress cliff is the framework's dominant cost.** Rung 02 to rung 04
+is a single step down the ladder and it costs 180x the time, 28 allocations,
+and 7 KB — for an empty `{}` body. The wrapper itself is free (rung 03 and 04
+are within noise of each other); the cost is entirely in ingress translation.
+`buildDispatchRequest` materializes an `extension.Object`, an envelope metadata
+map, and an RFC3339 timestamp string on every request regardless of payload.
+
+**The floor for an authenticated route is 9.5 us, 97 allocations, and 11 KB**
+before a single line of product code runs. Roughly 55% of that is the security
+chain (rung 05 to 06: +5.2 us, +53 allocs) and 22% is correlation (rung 04 to
+05: +0.9 us, +16 allocs for ID propagation).
+
+No optimization is proposed here. Per the Do-Not-Optimize Gate, this entry is
+the measurement that must exist before any of it is touched; the ingress
+allocation shape is now the best-evidenced first target in the Core lane.
+
+Allocation ceilings for all eight rungs are recorded in
+`tooling/benchmark_baseline.psv` and gated by
+`tooling/scripts/benchmark_ratchet_check.sh`, so the frame lane cannot silently
+stop being zero-allocation. Source: `server-kit/go/appbench/null_lane_test.go`.
+Reproduce with
+`cd server-kit/go && go test ./appbench/ -run '^$' -bench '^BenchmarkNullLane_' -benchmem -count=5`.
+
+## 2026-08-04 Columnar MLP kernels consolidated (propagation of item 60)
+
+The 4-way interleaved ("Memory-Level Parallelism") loop kernels introduced for
+`sumFloat64sScalar`, `validityBitmap.nullCount`, and the selection bitmap
+bitwise ops were extracted into shared, individually benchmarked helpers in
+`server-kit/go/hermes/columnar_mlp.go` (`popcountWords`, `andWords`, `orWords`,
+`andNotWords`, `notWords`). All six former call sites now route through them —
+removing ~6 hand-rolled copies — and `SelectionBitmap.maskValidity` was fixed to
+use the same kernel: its per-word `if i < len(words)` branch is hoisted into a
+bulk `andWords` region plus a zeroed tail, so the filter hot path is branch-free.
+
+Correctness is guarded by scalar-reference parity tests across every tail length
+around the 4-word stride (`0,1,2,3,4,5,7,8,9,15,16,17,63,64,65`) plus a
+fail-closed panic test for the `len(src) < len(dst)` contract violation
+(`columnar_mlp_test.go`).
+
+Measured on this host (Apple Silicon, `-8`, `benchWords=4096` ≈ 256 Ki bitmap
+rows, best of 3, 0 B/op 0 allocs/op):
+
+| Kernel | Naive (single stream) | Interleaved (MLP) | Speedup |
+| --- | ---: | ---: | ---: |
+| `andWords` (element-wise `&=`) | 2091–2125 ns/op | 1271–1374 ns/op | ~1.65x |
+| `popcountWords` (POPCNT reduce) | 1758–1772 ns/op | 1597–1618 ns/op | ~1.10x |
+
+The element-wise store stream (used by `And`/`Or`/`AndNot`/`maskValidity`) gains
+most, since the naive form serializes on a single destination stream. Popcount
+gains little: `bits.OnesCount64` already pipelines, so only the single reduction
+accumulator is freed — an honest, smaller win than the 4.13x reported for the
+pure-latency scalar float-sum microbench in item 60. Reproduce with
+`go test ./hermes/ -run '^$' -bench 'PopcountWords|AndWords' -benchmem -count=3`.
+
+## 2026-07-11 Cumulative-work profiling and Hermes count traversal
+
+Foundation now distinguishes cumulative allocation (`alloc_space`,
+`alloc_objects`) from retained memory (`inuse_space`, `inuse_objects`) and
+records algorithmic work counters for collection/scan lanes. A representative
+Core sweep covered HTTP ingress, envelopes/frames, workers, cache/Redis,
+database adapters, Hermes reads/writes/columnar scans, projection snapshots,
+bulk transfer, and object storage. CPU and memory profiles were then captured
+for the suspicious or dominant shapes.
+
+### Profiles: cumulative churn is not retained footprint
+
+Apple M1 Pro, 3-second benchmark profiles:
+
+| Lane | Timed result | Cumulative allocation | Retained profile | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| HTTP JSON ingress → dispatch request | ~6.1 µs, 16.6 KB/op, 56 allocs/op | ~9.24 GB | ~4.6 MB | Fixture/request buffering, metadata object construction, and cloning dominate churn; CPU samples are scheduler/network-poller heavy, so allocation work remains an ownership/adapter target rather than proof of equivalent latency gain. |
+| Worker processing | ~4.65 µs, 1.17 KB/op, 25 allocs/op | ~803 MB | ~3.0 MB | Health-key/health-record formatting and deadline timers dominate churn. Optimize only with worker-health contract parity and concurrent throughput/p99 evidence. |
+| Hermes indexed count (after change) | ~101 µs at 625 selected candidates | timed path: 0 B/op, 0 allocs/op | fixture/runtime only | Count no longer materializes candidate/vector batches; profile allocation is setup outside the timed region. |
+| Projection snapshot, 10K records | ~5.12 ms, 7.28 MB/op, 100,001 allocs/op | ~4.9 GB | ~2.5 MB | ~97% of churn is owned per-record protobuf mutation/field/timestamp construction. The architectural improvement is a streaming/columnar snapshot wire, not unsafe pooling of returned mutable protos. |
+
+These profiles demonstrate why live heap alone is insufficient: every measured
+lane retained only a few megabytes while some generated gigabytes of short-lived
+objects during the run.
+
+### Compact index traversal and count-only execution
+
+Two measured changes landed in Hermes:
+
+1. `indexSnapshot.forEachKey` now directly iterates an already-compact live key
+   set instead of allocating a `seen` map proportional to the index. Delta-chain
+   and removal reconciliation retain the general path.
+2. `Store.Count` validates live indexed candidates and residual predicates
+   directly instead of building a columnar `record_id` batch just to read
+   `batch.Rows`.
+
+Before/after, 10K-record fixture with `bucket = 7` (625 selected candidates):
+
+| Benchmark | Before | After | Result |
+| --- | ---: | ---: | --- |
+| `BenchmarkHermesCountTypedFilterIndexed` | ~261 µs, 187,584 B/op, 15 allocs/op | **~102 µs, 0 B/op, 0 allocs/op** | ~61% lower latency; candidate validation remains `O(K)` with no materialization. |
+| `BenchmarkHermesColumnarPushdownFilterSum` | ~5.5 ms, 2.62 MB/op, 42 allocs/op | **~4.9 ms, 2.18 MB/op, 9 allocs/op** | Compact-index traversal removes the per-query reconciliation map before predicate pushdown. |
+
+Scale evidence for equality-index count (medians of 3):
+
+| Records | Selected candidates | ns/op | B/op | allocs/op |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 63 | ~11,041 | 0 | 0 |
+| 4,000 | 250 | ~50,890 | 0 | 0 |
+| 16,000 | 1,000 | ~222,738 | 0 | 0 |
+| 64,000 | 4,000 | ~1,262,435 | 0 | 0 |
+
+The growth curve is intentionally proportional to selected candidates because
+each candidate is checked for current version, expiry, tenant/scope, and
+residual predicates. An allocation guard (`TestCountIndexedDoesNotAllocate`)
+and the existing compaction/removal correctness tests preserve both paths.
+
+### Remaining algorithmic bottleneck: range candidate selection
+
+The service-backed 100K pushdown result (~137 ms p50 in the 2026-07-02 record)
+still begins with a full-scope candidate traversal for predicates such as
+`bucket <= 7 AND ordinal >= N`. Predicate pushdown avoids sorting and
+materializing rejected rows, but equality-key indexes cannot select range
+predicates. The next legitimate lane is a bounded, declared ordered/range or
+bit-sliced bitmap index with:
+
+- candidates-inspected and rows-selected counters
+- equality/range/bitmap planner selectivity
+- index memory and mutation/write-amplification budgets
+- multi-tenant scope isolation
+- parity against the current full-scan oracle
+- 1K/10K/100K/1M scale and concurrent read/write evidence
+
+This entry originally identified the missing lane; the same-day follow-up below
+records its implementation and measured trade-offs. Undeclared fields still use
+pushdown as materialization avoidance rather than indexed range execution.
+
+### Ordered numeric candidate indexes (same-day follow-up)
+
+The declared ordered lane now exists. `ProjectionSpec.RangeIndexedFields` and
+`MaxRangeIndexes` opt numeric fields into tenant-scoped immutable sorted
+snapshots. `GetColumnarBatchWhere` chooses the smallest eligible
+`Eq/Lt/Le/Gt/Ge` interval by binary search, validates live version/TTL/scope,
+then applies every residual predicate. Unsupported field/kind/operator shapes
+retain the full-scope scan as the parity oracle. `RuntimeStoreOptions` exposes
+the same declaration; `Stats.RangeIndexEntries` and `RangeIndexBytes` make the
+footprint visible.
+
+Apple M1 Pro, medians of 3; predicates select the upper 20% by `price`, then
+apply `bucket <= 7` as a residual predicate:
+
+| Records | Full-scan candidates | Ordered candidates | Full scan | Ordered | Speedup | Read bytes/op |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 1,000 | 200 | ~306 µs | ~69.8 µs | ~4.4× | 222,522 → 50,488 |
+| 10,000 | 10,000 | 2,000 | ~4.39 ms | ~649 µs | ~6.8× | 2.17 MB → 443 KB |
+| 100,000 | 100,000 | 20,000 | ~81.8 ms | ~8.96 ms | **~9.1×** | 21.69 MB → 4.41 MB |
+
+Both paths remain at nine fixed allocations; the allocation reduction is
+candidate-slice size, not pooling. Write/build cost is explicit:
+
+| 10K projection build | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| Equality index only | ~17.29 ms | ~13.15 MB | ~75,230 |
+| Equality + one ordered index | ~23.83 ms | ~16.70 MB | ~75,351 |
+
+One ordered index therefore costs about 38% more build time and 27% more
+allocated bytes on this fixture. Eager full-snapshot rebuilding was rejected:
+it made a single 10K update cost ~4.9 ms and 2.84 MB. The shipped immutable
+delta chain reduces that update to **~211 µs and ~133 KB** (~23× faster, ~95%
+fewer bytes), with a hard depth-32 compaction bound. A fresh 100K ordered read
+remains ~9.9 ms, 4.41 MB, and nine allocations versus ~81.8 ms/21.69 MB for the
+scan.
+
+This remains an opt-in read/write trade, not a new default. Evidence:
+bitmap-oracle parity, WHERE-before-LIMIT, mutation reindex, delta-compaction
+parity, tenant isolation, range-index bound/normalization, package race tests,
+and `BenchmarkHermesColumnarRangeIndexScale`,
+`BenchmarkHermesRangeIndexBuild10K`, and
+`BenchmarkHermesRangeIndexUpdate10K`.
+
+## 2026-07-15 Sharded Redis key-router hot path (and a "measure, do not assume" lesson)
+
+Prompted by external sharding write-ups (PlanetScale/Neki, Vitess), Foundation's
+own sharded Redis client was examined under the router lens. `shardedClient.shard`
+is the router's key-routing function — the "vindex" in Vitess terms: it maps a
+routing key to a shard index, and every sharded `Get/Set/Incr/XAdd/Del` passes
+through it. It previously built a `fnv.New32a()` hasher and converted
+`[]byte(key)` per call; it now computes FNV-1a inline over the string
+(`shardIndex(key, n)`).
+
+The hypothesis was "this removes a hot-path allocation." The benchmark
+disproved it, which is the point of having the benchmark:
+
+Apple M1 Pro, medians of 5, 16 shards:
+
+| Routing key | Inline FNV-1a | Stdlib `fnv.New32a()` | allocs/op (both) | Delta |
+| --- | ---: | ---: | ---: | ---: |
+| short (`tenant:123`) | ~4.84 ns/op | ~6.09 ns/op | 0 | **~21% faster** |
+| long (84-byte object key) | ~63.6 ns/op | ~64.7–68.3 ns/op | 0 | converges (within run noise) |
+
+Both paths are already zero-allocation on Go 1.26 — escape analysis inlines the
+stdlib hasher and elides the `[]byte(key)` copy. So the measured value is not an
+allocation win; it is:
+
+1. **~23% lower latency on short keys** (the common shard-key shape: tenant IDs,
+   key prefixes), where the fixed hasher-setup cost is a larger fraction. Long
+   keys converge because both do the same per-byte FNV work.
+2. **Zero-allocation made structural.** The stdlib form's zero-alloc property
+   silently depends on the compiler continuing to inline `New32a` on a hot path;
+   the inline form pins it with `TestShardIndexDoesNotAllocate` (mirrors
+   `hermes` `TestCountIndexedDoesNotAllocate`).
+3. **A parity oracle where none existed.** `TestShardIndexMatchesStdlibFNVOracle`
+   proves the inline router is bit-identical to `int(fnv.New32a().Sum32()) % n`
+   across a 520-key corpus and shard counts 1…768 — that is, the change moves no
+   key to a different shard. A routing-hash change is a silent data-remap bug;
+   the oracle is the guard that makes future hash edits safe to attempt.
+
+Service-backed proof (`TestShardedClientPlacesKeysServiceBacked`, gated on
+`FOUNDATION_SHARD_REDIS_URLS`): against a real two-shard Redis cluster, a key
+written through the sharded client is retrievable on exactly the shard
+`shardIndex` predicts and absent from every other shard — confirming the
+physical clients are indexed in the order the router assumes, which the pure
+parity test cannot.
+
+The wider lesson for the ledger's own philosophy: the sharded router had no
+parity/distribution/allocation coverage at all, so an "optimization" of its hash
+would have silently corrupted key placement with nothing to catch it. The test
+suite is the larger win here; the ~23% is the smaller one.
+
+Commands:
+
+```bash
+cd foundation/server-kit/go
+go test -run '^$' -bench BenchmarkShardRouting -benchmem -count=5 ./redis
+go test -run 'TestShardIndex|TestShardedClient' ./redis
+# service-backed (throwaway two-shard cluster):
+docker run -d --rm -p 6390:6379 redis:8-alpine; docker run -d --rm -p 6391:6379 redis:8-alpine
+FOUNDATION_SHARD_REDIS_URLS=redis://localhost:6390,redis://localhost:6391 \
+  go test -run TestShardedClientPlacesKeysServiceBacked ./redis
+```
+
+## 2026-07-09 Canonical record-projection bridge (normalized tables → Hermes)
+
+The projection subsystem consolidation landed a single canonical path from
+normalized-SQL truth to the Hermes hotplane: write repos enqueue a
+`hermes.NewRecordProjectionJob(domain, collection, org, record_id, mutationTag)`
+via `Engine.EnqueueTx` in the same transaction as the domain write; one generic
+`hermes.RecordProjectionProcessor` (registered once, keyed by job args)
+resolves the committed row — inline `RawPayload` JSON or read-back through the
+app's `RecordFetcher` — and writes it through `ProjectedRuntimeStore`, buying
+the durable `governance_state_records` mirror, hot-partition apply, live
+gateway fan-out, and cold-start rebuildability (`WarmScope`) in one call. The
+mutation tag lives in the idempotency key so the engine's dedup
+(kind + IdempotencyKey) can never swallow a successive update to the same
+record.
+
+```bash
+cd foundation/server-kit/go
+SERVICE_BACKED_DATABASE_URL=... SERVICE_BACKED_REDIS_URL=... \
+go test -tags servicebacked ./servicebacked \
+  -run TestServiceBackedRecordProjectionCanonicalPath -v
+SERVICE_BACKED_DATABASE_URL=... SERVICE_BACKED_REDIS_URL=... \
+go test -tags servicebacked ./servicebacked -run='^$' \
+  -bench BenchmarkServiceBackedRecordProjectionHandle -benchmem -count=3
+```
+
+Apple M1 Pro (ARM64), live Postgres 16 in Docker on localhost (medians of 3):
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkServiceBackedRecordProjectionHandle-8` | ~932,488 | 12,871 | 147 | One projection job end-to-end: read-back `SELECT` from the normalized table + `UpsertRecord` (durable mirror write + hot apply + fan-out). ~0.93 ms is the full per-mutation projection cost a write repo adds by enqueueing one job — two Postgres round-trips dominate; the hermes apply itself is microseconds (see the 2026-07-02 columnar tables). Inline `RawPayload` producers skip the read-back round-trip. |
+
+### Gateway lazy-warm: cold scopes resolve on first read (2026-07-11)
+
+The last configuration dependency in the projection read path is gone. The
+gateway (`projectiongw`) now catches `ErrProjectionNotFound` on a snapshot,
+resolves the scope through `ProjectedRuntimeStore.WarmScope` (idempotent,
+singleflighted — a read stampede on a cold scope collapses to one rebuild, and
+an empty mirror self-backfills via `ScopeBackfill`), and retries once.
+`NewGatewayForProjectedStore` wires this automatically (`WithScopeWarmer` for
+custom stores). Consequences: SQL-seeded data serves on the FIRST request with
+zero configuration; a scope with genuinely no data serves an EMPTY snapshot
+instead of a wiring error; and `HERMES_WARM_SCOPES` is demoted from
+correctness requirement to optional first-request-latency optimization (it
+also still names the envelope-fallback tailer scopes, which is why the knob
+survives). Warm failure preserves the original not-found (FallbackRefinement);
+invalid scopes still fail fast without warming.
+
+Evidence: `TestGatewayLazyWarmsColdScopeOnRead` — three legs against the real
+gateway: base-only seed resolves on first snapshot, empty mirror + backfiller
+serves backfilled rows on first snapshot, and a truly empty scope returns an
+empty snapshot, not an error.
+
+### Mirror sweep: the one-place projection seam (2026-07-11, follow-up)
+
+Per-repository projection hooks (enqueue a job after every mutating command)
+were reviewed and rejected as an anti-pattern for this architecture: N call
+sites for one concern, and blind to writers that bypass repositories (seeds,
+admin SQL, future services). `hermes.MirrorSweeper` replaces them with one
+bounded poller per process: each registered source streams rows with
+`updated_at > cursor` (ascending, LIMIT-bounded), the sweeper pushes batches
+through `ProjectedRuntimeStore.UpsertRecords` (durable mirror + hot apply +
+live fan-out in one write), and cursors only advance on success so errors
+retry without skipping. The first pass from a zero cursor is a full sync
+(idempotent — unchanged rows are DISTINCT-FROM no-ops), so the sweeper doubles
+as startup reconciliation. Steady-state staleness is bounded by the sweep
+interval (default 2s) — comparable to River's own job poll interval, so the
+sweep is not a latency regression versus enqueue-after-commit hooks.
+
+Hard deletes get the symmetric treatment (same day, follow-up): AFTER DELETE
+triggers on every projected table write an identity tombstone
+(`projection_tombstones`), and a `DeletedSince` source sweeps them back
+through the projected store (mirror removal + hot tombstone + live fan-out),
+with opportunistic retention pruning keeping the tombstone table bounded.
+(Since 2026-09-08 the delete lanes batch like the changed lane — see the
+2026-09-08 entry — and a scope under a per-record audience uses
+`DeletedRecordsSince`, which carries the fields the deletion is addressed by.) Schema
+requirements, both enforced app-side by migration: every swept table needs the
+updated_at bump trigger (the scaffold's `update_updated_at_column`) AND the
+tombstone delete trigger — upserts and deletes are announced by the schema,
+never by call sites.
+
+Evidence: `TestMirrorSweeperPushesChangedRows` — full sync from zero cursor,
+cursor-advanced idle pass reads nothing, incremental change picked up, and a
+failing source is counted and retried while healthy sources keep sweeping —
+and `TestMirrorSweeperConvergesHardDeletes` — a tombstoned identity is removed
+from mirror and hot partition, the cursor advances, and consumed tombstones
+are not re-swept.
+
+### Columnar snapshot artifacts — HCS1 (same day, follow-up)
+
+The 2026-07-01 entry named this "the highest-value follow-up": warm was
+decode-bound (proto decode builds N×F `RecordMutation` messages, then
+`recordFromMutation` converts every field). The HCS1 columnar artifact
+(`server-kit/go/hermes/snapshot_columnar.go`) stores each column once — field
+names appear once, all text lives in one blob decoded as a single shared
+string whose substrings back every value, identity columns are
+dictionary-encoded, and the bounds-checked cursor turns any corruption into
+`ErrSnapshotCorrupt`. `SaveSnapshot` now writes HCS1; both readers
+(`WarmFromSnapshot`, `ShadowCompareSnapshot`) sniff the magic through one
+shared `streamSnapshotRecords` seam, so row-proto artifacts already in stores
+keep loading unchanged (FallbackRefinement — format is hidden state).
+
+```bash
+cd foundation/server-kit/go
+go test ./hermes -run='^$' \
+  -bench='BenchmarkHermesWarmFromSnapshotFormats' -benchmem -count=3
+```
+
+Apple M1 Pro (ARM64), same 10K-record partition, cold warm per iteration
+(medians of 3):
+
+| Format | ns/op | artifact bytes | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `proto_rows` (legacy) | ~31.6 ms | 1,279,873 | 29.3 MB | 325,133 | Decode dominates: ~250K of the allocations are proto messages and per-field conversions. |
+| `columnar` (HCS1) | **~18.1 ms** | **677,637** | **18.5 MB** | **75,142** | **43% faster, 47% smaller, 77% fewer allocations** — and 75.1K allocs is exactly the partition/index-construction floor the streaming-rebuild benchmark reports (75,127–75,136), that is, decode allocation is eliminated; warm is now pure partition construction. |
+
+Honesty note: the ledger's earlier ">10× compression" speculation assumed wide
+analytical scans; this 3-field fixture yields 1.9×. The structural win — the
+predicted decode-allocation collapse — landed exactly as forecast.
+
+Evidence: `TestColumnarSnapshotRoundTripParity` locks the refinement — both
+formats stream byte-identical record sets (canonical-JSON bodies, timestamps,
+vectors) from the same partition, a cold store warmed from HCS1 serves the
+same reads, the shadow comparator matches across formats, and a truncated
+HCS1 payload fails with `ErrSnapshotCorrupt` instead of panicking.
+
+### Shadow-mode snapshot warm wire (same day, follow-up)
+
+The 2026-07-01 snapshot-tier entry left one item explicitly "not yet built":
+the shadow-mode wire into `ProjectedRuntimeStore.ensureWarm` (dual-load + diff
+before ever preferring the snapshot over `Rebuild`). It now exists:
+`RuntimeStoreOptions.SnapshotStore` arms a strictly best-effort lane that runs
+after every successful source rebuild — `Store.ShadowCompareSnapshot` diffs the
+newest durable artifact against the freshly rebuilt partition (the rebuild is
+the oracle: counts, per-record canonical-JSON bodies, missing/extra/mismatch
+classification), the outcome lands in
+`HermesRuntimeStats.SnapshotShadow{Matches,Mismatches,Errors}`, and the
+artifact is refreshed (`SnapshotSaves`) so the next cold process compares
+against current evidence. The served warm path is byte-for-byte unchanged
+(`FallbackRefinement`): snapshots are compared and produced, never yet
+preferred — flipping preference is a later, evidence-gated change once fleets
+show sustained clean matches. Scaffolded apps arm it with one env var
+(`HERMES_SNAPSHOT_DIR` → `hermessnapshot.FileStore`).
+
+Evidence: `TestSnapshotShadowEvidenceCycle` drives four simulated process
+generations over one base + one snapshot store — first warm produces the
+artifact, second records a clean match, an out-of-band base mutation makes the
+third record a mismatch, and the refreshed artifact matches again on the
+fourth. `TestApplyRecordsSkipsEventLevelRejections` extends the batch-tolerance
+contract to the trusted-records lane the batch upserts use. Race run clean.
+
+### Batch projection writes: round-trip amortization (same day, follow-up)
+
+The single-record path pays the durable boundary (two Postgres round trips)
+per mutation. The batch shape pays it per batch: new
+`PostgresDB.UpsertRecordsBatch` (pipelined `pgx.Batch` over the identical
+upsert SQL — same validation, DISTINCT-FROM change detection, and returned
+timestamps; each row individually atomic and idempotent, so mid-batch failure
+replays safely) plus `ProjectedRuntimeStore.UpsertRecords` (one base round
+trip, then one hot `ApplyRecords` per scope group, versions reserved from the
+same counter so LWW and the "state" watermark stay coherent with single-record
+upserts). `RecordWorkerProcessor.Handle` now routes decoded records through
+the batch path, so a job carrying N records amortizes automatically.
+
+| Benchmark | ns/op | per-record | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkServiceBackedRecordProjectionHandle-8` (1 record, read-back) | ~954,371 | ~954 µs | 139 | The per-record shape: two round trips per mutation. |
+| `BenchmarkServiceBackedRecordProjectionBatch64-8` (64 records, inline, pipelined `pgx.Batch`) | ~4,971,414 | ~78 µs | 3,563 (~56/rec) | First batch rung: one pipelined round trip carrying 64 statements. Superseded same-day by the unnest lane below. |
+| `BenchmarkServiceBackedRecordProjectionBatch64-8` (64 records, inline, single-statement `unnest`) | ~3,822,648 | **~60 µs** | 2,502 (~39/rec) | `UpsertRecordsBatch` rewritten as ONE set-based statement (`unnest` arrays → upsert CTE → ordinal-joined timestamps): one parse/plan, one commit. **~16× cheaper per mutation than the single-record path**; the residual is per-row heap/index/WAL work and the commit flush on the server, no longer the wire or statement count. |
+
+The unnest lane carries an explicit refinement contract (per
+`tla_architecture_practices.md`): one statement must refine "sequential
+`UpsertRecord` per record" — same final rows, same `IS DISTINCT FROM` change
+detection (an unchanged replay never bumps `updated_at`; a change bumps it
+without touching `created_at`), and last-write-wins for duplicate identities
+inside one batch (deduplicated client-side keeping the last occurrence, since
+`ON CONFLICT DO UPDATE` cannot touch one row twice in a statement — exactly
+the sequential outcome). `TestServiceBackedUpsertRecordsBatchParity` proves
+each clause against live Postgres. CopyFrom was evaluated and rejected for
+this lane: COPY cannot express `ON CONFLICT` change detection without a
+temp-table dance that breaks the one-statement atomicity contract; it remains
+the right tool for pure append ingest.
+
+Evidence: `TestUpsertRecordsBatchGroupsScopesAndStaysCoherent` pins the batch
+contract (multi-scope grouping, base + hot landing, observer fan-out, and a
+later single-record upsert winning LWW over the batch via the shared version
+counter, including the per-record fallback lane for base stores without batch
+support). The same pass repaired
+`TestConformanceServiceBackedHermesProjectionMonotonic`, which had been
+reusing one SourceID across six versions — SourceID is per-event idempotency
+identity, so every apply after the first was an exact-tier duplicate and the
+watermark invariant could never hold; per-event IDs restore the intended
+TLA-refinement check and it now passes against live Postgres.
+
+### Allocation cuts on the shared DB/hermes hot path (same day, follow-up)
+
+Profiling the projection benchmark attributed the per-op allocations and drove
+three cuts in shared infrastructure (paid by every DB operation and every
+hermes apply fleet-wide, not just the projection path):
+
+1. **`database.acquireConn` closure → by-value `connLease`** — the returned
+   `cancel` capture closure (and the `conn.Release` method value stored in
+   `budgetedRow`/`budgetedRows`) heap-allocated on every operation. A lease
+   struct returned and stored by value carries the same release semantics with
+   zero allocation.
+2. **`observability` op/state counters → struct keys** — `RecordDatabaseOperation`
+   and `RecordRedisOperation` allocated an `"operation|state"` string per call.
+   Internal maps now key on a two-string struct (zero-alloc increment, gated by
+   `TestRecordOpStateDoesNotAllocate`); the exported snapshot builds the string
+   keys only at read time, so the `/metricsz` contract is unchanged.
+3. **`hermes.indexPublisher.publish` ownership transfer** — the per-cell order
+   re-slice and remove-set clone copied maps/slices the per-batch publisher was
+   about to discard; the COW snapshot now takes ownership (in-place filter, no
+   clones).
+
+Measured effect (medians of 3): the live projection Handle drops 147 → 139
+allocs/op (12,871 → 12,701 B/op, latency neutral — the op stays
+round-trip-bound); local `BenchmarkHermesApplyEventUpsert` drops 47 → 45
+allocs/op and `BenchmarkHermesApplyBatch64` ~1,096 → ~1,080 allocs
+(−12 KB/op). Full hermes/database/observability/projectiongw suites plus a
+hermes race run stay green.
+
+Method note for future passes: `pprof -sample_index=alloc_objects` extrapolates
+object counts from sampled bytes, so tiny allocations (closures, small strings)
+show inflated *shares* — the closure read as ~21% of objects but was physically
+2 allocs/op. Attribute with the profile, but size the win with `-benchmem`
+physical counts before and after. The remaining ~139 allocs/op are dominated by
+pgx query encode/scan, JSONB materialization, and per-query budget contexts —
+the next meaningful lever is not allocation trimming but round-trip removal
+(inline `RawPayload` producers already skip the read-back SELECT).
+
+Evidence: `TestServiceBackedRecordProjectionCanonicalPath`
+(`servicebacked/record_projection_test.go`) drives the full seam against live
+Postgres in four legs — (1) transactional write (`BeginTx` → normalized
+`INSERT` → job built in tx scope → commit) then `Handle` lands the record in
+the durable mirror **and** the identity-scoped projection gateway HTTP
+snapshot; (2) an update flows through the same seam and the mirror reflects
+the new value; (3) cold restart: a fresh `ProjectedRuntimeStore` over the same
+Postgres warms the projection back via `WarmScope` (the restart-survival
+property the memory-only projector paths lack); (4) delete-converge: the
+normalized row is deleted, a stale upsert job replays, and the processor
+converges by removing the record from mirror and snapshot. Unit-level
+contracts (job validation, idempotency-key mutation tags, inline payload,
+poison-drop, retryable fetcher errors) are pinned in
+`hermes/projection_job_test.go`; batch tolerance, tailer quarantine, and the
+canonical `RecordWorkerProcessor` durability split are pinned in
+`hermes/consolidation_test.go`.
+
+## 2026-07-02 Bitmap-predicate merges in Hermes columnar reads
+
+Promoted from `future_practices_research.md` lane 7 (the processing-using-memory
+lineage: evaluate multi-filter queries as bulk bitwise operations over packed
+bitmaps first; touch record memory only for surviving rows). The implementation
+adds `SelectionBitmap` (`server-kit/go/hermes/columnar_select.go`): typed
+predicate constructors (`SelectInt64`, `SelectFloat64`, `SelectString` with
+`CompareOp`), validity-aware null semantics (a null cell never matches),
+word-at-a-time `And`/`Or`/`AndNot`/`Not` merges with tail-word hygiene,
+POPCNT-lowered `Count`, bit-scan `ForEachSelected` iteration, and a masked
+`SumFloat64Selected` reduction.
+
+```bash
+cd foundation/server-kit/go
+go test ./hermes -run='^$' \
+  -bench='BenchmarkHermesColumnarBitmapFilter|BenchmarkHermesListRecordsFilterSum|BenchmarkHermesSelectionBitmapMerge10K' \
+  -benchmem -count=3
+```
+
+Apple M1 Pro (ARM64), 10K-row fixture (float price with real nulls, int bucket,
+string symbol), predicates `price > 7500 AND bucket <= 7` (medians of 3):
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesColumnarBitmapFilterCachedBatch-8` | ~34,302 | 2,560 | 2 | **The new lane isolated**: two predicate scans + AND merge + masked sum over a resident batch. This is the repeated-filter (dashboard/analytics) pattern. |
+| `BenchmarkHermesListRecordsFilterSum-8` | ~7,865,649 | 8,244,525 | 10,043 | Record-path equivalent: list copied records, chase `RecordData` per row, parse, filter. ~229× slower and 5,000× more allocations than the cached-batch bitmap lane. |
+| `BenchmarkHermesColumnarBitmapFilterSum-8` | ~6,961,410 | 2,769,035 | 47 | Cold path including `GetColumnarBatch` per iteration: batch construction dominates; the filter machinery adds ~5 allocs and ~0.2 ms over `BenchmarkHermesColumnarSumPrice` (~7.2 ms / 42 allocs). Still 12% faster and 66% less memory than the record path while doing strictly more work (two predicates vs none). |
+| `BenchmarkHermesSelectionBitmapMerge10K-8` | ~408 | 1,280 | 1 | One 10K-row AND + POPCNT count; the single alloc is the defensive clone. The merge itself is 157 words of uint64 arithmetic — per-row boolean logic replaced by memory-bandwidth word ops. |
+
+The bitmap benchmarks also report a deterministic `bytes_touched/op` metric
+(two column scans + bitmap words + selected reads ≈ 180 KB at 10K rows). The
+record-path baseline has no computable equivalent — its per-record pointer
+graph is exactly the untracked movement the columnar layout removes. This is
+the first step of the bytes-moved budget from research lane 7; extending the
+metric to other lanes remains open.
+
+Evidence: `TestSelectionBitmap*` cover all six compare ops, null exclusion
+under `Ne`/`Le` (zero-valued null cells must not leak through), tail-word
+hygiene at n ∈ {1, 63, 64, 65} including double-`Not`, shape-mismatch and
+type-mismatch errors, and early-stop iteration. Hermes package coverage rose
+from the 81.9% floor to 82.4% with the change. Race detector clean.
+
+### Predicate pushdown into batch construction (same day, follow-up)
+
+`GetColumnarBatchWhere` (`server-kit/go/hermes/columnar_pushdown.go`) moves the
+same predicates upstream: `ColumnPredicate` values (int64/float64/string
+constructors, AND semantics, SelectionBitmap-identical null rules) are
+evaluated per candidate entry after collection but **before sorting, before
+the query limit, and before any vector is built** — so unselected rows never
+pay sort comparisons or column materialization, and the limit applies to
+filtered rows (WHERE-then-LIMIT; the correct "top N matching" API, which a
+post-hoc bitmap over a limited batch cannot provide). Parity with the bitmap
+oracle is locked by `TestGetColumnarBatchWherePushdownParity`.
+
+Local cold-path comparison (same 10K fixture and predicates, medians of 3):
+
+| Benchmark | ns/op | allocs/op | Interpretation |
+| --- | ---: | ---: | --- |
+| `BenchmarkHermesColumnarPushdownFilterSum-8` | ~5,054,770 | 42 | Predicates during construction: only ~44% of rows sorted and materialized. |
+| `BenchmarkHermesColumnarBitmapFilterSum-8` | ~7,002,509 | 47 | Post-hoc: full batch built, then bitmap filter. Pushdown is **28% faster**. |
+| `BenchmarkHermesListRecordsFilterSum-8` | ~7,865,649 | 10,043 | Record path. Pushdown is **36% faster** with 239× fewer allocations. |
+
+### Service-backed confirmation (live Postgres-rebuilt hotplane)
+
+New load-research lanes `hermes_columnar_pushdown_filter` and
+`hermes_columnar_record_filter` seed Postgres, rebuild the hotplane from the
+live scope, sanity-fence both paths to the identical selected row set, then
+measure repeated filtered reads (`bucket <= "07" AND ordinal >= step/2`,
+~25% selectivity, 32 ops, single worker).
+`benchmark-results/service_backed_load_research_20260702T160004Z.tsv`:
+
+| Step | Lane | p50/read | p95/read | Throughput | Rows selected |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1,000 | pushdown filter | 383 µs | 972 µs | 2,156 reads/s | 252 |
+| 1,000 | record filter | 680 µs | 1,014 µs | 1,383 reads/s | 252 |
+| 100,000 | pushdown filter | 136.9 ms | 166.3 ms | 7.11 reads/s | 25,000 |
+| 100,000 | record filter | 161.5 ms | 192.0 ms | 6.12 reads/s | 25,000 |
+
+Pushdown wins **44% at 1K** and **15% at 100K** on p50 against the record
+path, with identical result sets (the lane fails loudly on any divergence).
+The 100K per-read cost on both lanes is dominated by unindexed candidate
+collection over the full scope — consistent with hermes_hotplane.md watch
+point 4: production list paths at large scope should declare an indexed
+filter field, which composes with pushdown rather than replacing it. One
+integration note discovered by the lane's selectivity fence: jsonb integer
+literals normalize to `RecordValueInt` (kind `'i'`), so pushdown predicates
+against seeded JSON numbers must use `PredicateInt64`, not `PredicateFloat64`.
+
+### Kernel zero-copy artifact lanes (same day, follow-up) — correctness-proven, performance-pending real disk
+
+`hermessnapshot.FileStore` (`server-kit/go/hermessnapshot/filestore.go`) is a
+local-filesystem `hermes.SnapshotStore`: atomic temp+rename artifact/pointer
+publication, checksum verification at the storage boundary, newest-wins saves —
+plus the lane-7 kernel primitives:
+
+1. **`PromoteLatest`** clones the newest artifact between stores through a
+   fastest-first lane chain (`clone_linux.go`, build-tagged):
+   reflink (`FICLONE`, O(1) copy-on-write) → `copy_file_range` (kernel moves
+   bytes without a userspace round trip) → portable userspace `io.Copy`
+   (`clone_fallback.go`, the only lane on non-Linux). The lane actually used is
+   returned for diagnostics; every lane is checksum-equivalent
+   (`FallbackRefinement`).
+2. **`OpenArtifact`** exposes the artifact as an `*os.File` so `io.Copy` to a
+   `*net.TCPConn` engages the stdlib sendfile/splice fast path when serving.
+
+Correctness evidence (all in `filestore_test.go`): round-trip, newest-wins,
+tamper detection (`ErrSnapshotCorrupt`), pointer-traversal rejection, promote
+skip on equal snapshots, and the full integration —
+`hermes.Store.SaveSnapshot → FileStore → PromoteLatest → cold
+hermes.Store.WarmFromSnapshot` with re-verified checksum. Run on macOS
+(userspace lane) and in a Linux container on container-native overlayfs via
+`make bench-zerocopy-linux`, where the suite passed with lane
+`copy_file_range` — and overlayfs refusing `FICLONE` exercised the fallback
+chain as a real code path, not a mock.
+
+Measured shape (8 MB artifact promotion, medians of 3):
+
+| Environment | Lane | ns/op | Throughput | B/op | Interpretation |
+| --- | --- | ---: | ---: | ---: | --- |
+| macOS APFS (native) | `userspace` | ~7,397,107 | ~1,134 MB/s | 40,135 | Portable baseline; the 32 KB copy buffer and file handling dominate allocations. |
+| Linux container, overlayfs (Docker VM) | `copy_file_range` | ~6,674,549 | ~1,257 MB/s | **6,103** | Artifact bytes never enter userspace — the **6.6× allocation drop is the kernel lane's signature** and is valid evidence regardless of storage virtualization. |
+
+**The asterisk, stated plainly:** wall-clock and MB/s from a Docker Desktop VM
+describe virtualized storage, not production disks, so they are *not*
+ledger-grade performance claims (CP-07b: page-cache and mount effects must be
+stated). What this run proves is correctness of all three lanes, the fallback
+chain firing on a real unsupported filesystem, and the allocation shape. The
+pending half is one command on any Linux host with ext4/XFS —
+`make bench-zerocopy-linux` — which runs natively there and should be recorded
+here (reflink is expected to go O(1) on XFS/Btrfs, where this table's
+copy_file_range row becomes the *slow* kernel lane).
+
+## 2026-07-01 Durable snapshot tier: warm-from-snapshot vs Postgres rebuild
+
+A new Hermes capability (`server-kit/go/hermes/snapshot_tier.go`) lets a cold
+partition warm from a durable, versioned snapshot artifact plus a bounded tail
+replay, instead of re-scanning the source database on every warm. A snapshot is
+serialized as a canonical `RecordMutationBatch` (the same wire the projection
+gateway uses), carries a source-watermark cursor and a sha256 checksum, and is
+loaded through the existing atomic `bulkLoadFrom` swap. It is **not** a source of
+truth: a missing/corrupt/scope-mismatched artifact falls back to the existing
+`Rebuild` path, so warm is a refinement of today's behavior, never worse.
+
+### Local unit benchmark
+
+```bash
+cd foundation/server-kit/go
+go test ./hermes -run='^$' -bench='BenchmarkHermesWarmFromSnapshot' -benchmem -count=3
+```
+
+Apple M1 Pro (ARM64), 10K-record artifact:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesWarmFromSnapshot-8` | ~40.7 ms | ~30.4 MB | ~345K | Cold `NewStore` + `WarmFromSnapshot` (proto decode + `recordFromMutation` + atomic bulk load). Streaming each mutation into `bulkLoadFrom` (rather than materializing a `[]DomainRecord` first) saves ~1.6 MB/op, matching the streaming-rebuild delta. |
+
+**Caveat on the local number.** Against the in-memory
+`BenchmarkHermesRebuildNormalizedSnapshot` (~22 ms), local warm looks *slower* —
+but that is not the comparison the tier is for. That rebuild bench replays an
+in-memory normalized source with no decode; warm pays proto-decode cost the
+rebuild bench never incurs, and neither touches Postgres. The tier's value only
+shows against a **real source** (service-backed) and across **multiple warming
+nodes**. The local bench exists as an allocation-shape regression guard on the
+warm path, not as the win.
+
+### Service-backed comparison (the real oracle)
+
+A `hermes_warm_from_snapshot` lane was added alongside
+`hermes_rebuild_postgres_snapshot` in the service-backed load harness. Both seed
+the same Postgres scope; the rebuild lane then scans it into a hotplane, while
+the warm lane builds one durable artifact and measures warming a **cold**
+partition from that artifact (which issues zero Postgres queries).
+
+```bash
+SERVICE_BACKED_LOAD_RESEARCH_STEPS=1000,100000 \
+SERVICE_BACKED_LOAD_RESEARCH_LANES=hermes_rebuild_postgres_snapshot,hermes_warm_from_snapshot \
+make test-service-backed-load
+```
+
+Apple M1 Pro, Docker Compose (Postgres 18 / Redis 8),
+`benchmark-results/service_backed_load_research_20260701T141638Z.tsv`:
+
+| Step | Lane | Measured warm | Throughput | PG acquires during measured warm | Artifact bytes |
+| ---: | --- | ---: | ---: | ---: | ---: |
+| 1,000 | `hermes_rebuild_postgres_snapshot` | 8.20 ms | 121.9K/s | scans full scope from pool | — |
+| 1,000 | `hermes_warm_from_snapshot` | 5.83 ms | 171.6K/s | **0** | ~281 KB |
+| 100,000 | `hermes_rebuild_postgres_snapshot` | 658.1 ms | 152.0K/s | scans full scope from pool | — |
+| 100,000 | `hermes_warm_from_snapshot` | 617.6 ms | 161.9K/s | **0** | ~27.6 MB |
+
+### Insight (and where the next optimization is)
+
+1. **The win is source-load isolation, not raw latency.** During the measured
+   warm the snapshot lane issues **0 Postgres pool acquires** (delta captured in
+   the row note), while rebuild scans the entire scope from the connection pool.
+   The artifact is built **once** and any number of nodes — or a branch, or a
+   PITR replica — warm from it. The economic shape is `1 source scan + N cheap
+   artifact reads`, not `N full scans`, exactly the "read replica ≠ physical
+   clone" move.
+
+2. **Wall-clock advantage shrinks as scope grows** (≈29% faster at 1K → ≈6% at
+   100K). At small scope the Postgres round-trip dominates rebuild, so warm wins
+   clearly. At 100K the CPU-bound partition/index construction dominates *both*
+   paths and they converge — warm is still ahead, but marginally.
+
+3. **Warm is decode-bound, and that points at the next lane.** The artifact is a
+   proto `RecordMutationBatch` (~27.6 MB / 100K records), and warm's ~345K
+   allocs/op at 10K is dominated by `proto.Unmarshal` + `recordFromMutation`.
+   Serializing the artifact in the existing Hermes **columnar** layout
+   (`columnar.go`) instead of row-wise protos should cut both artifact bytes
+   (columnar compresses >10× on wide scans) and decode allocations, and it makes
+   the artifact directly scannable for the analytical read path. That is the
+   highest-value follow-up, ahead of the objectstore backend.
+
+4. **Built alongside the tier** (same change, unit-tested, not yet separately
+   benchmarked): the background snapshot writer
+   (`server-kit/go/hermes/snapshot_writer.go`), which makes
+   `snapshotDeltaThreshold`/interval concrete — it bounds the tail a later warm
+   must replay by re-snapshotting once the source watermark has advanced far
+   enough or enough time has passed — and the objectstore-backed
+   `SnapshotStore` (`server-kit/go/hermessnapshot`), which keeps the AWS SDK
+   dependency out of core `hermes` and makes `Latest` a two-object read
+   (LATEST pointer + artifact) with checksum verification at the storage
+   boundary.
+
+5. **Not yet built:** the columnar artifact lane from insight 3, and the
+   shadow-mode wire into `ProjectedRuntimeStore.ensureWarm` (dual-load + diff
+   before preferring the snapshot over `Rebuild`).
+
+## 2026-06-25 full baseline validation benchmarks
+
+On 2026-06-25, we performed a full, unified baseline validation run on Apple M1 Pro (ARM64) macOS to evaluate the performance impact of concurrency fixes (specifically, `ensureWarm` cache-warming singleflight synchronization), strict database parser error propagation, index delta compaction threshold adjustments, and the scoped watermark fixes for concurrent pipelines.
+
+### 2026-06-29 Hermes Streaming Normalized Rebuild
+
+The MegaTrain paper pass was applied to Hermes as a memory-orchestration
+pattern: keep the canonical source authoritative, stream the active rebuild
+working set through a bounded staging path, and avoid materializing broad hot
+state before the replacement partition can consume it. The implementation adds
+`database.StreamingNormalizedSnapshotStore`, which Hermes prefers over the older
+slice-returning `database.NormalizedSnapshotStore` when rebuilding from
+already-normalized records.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test ./hermes -run='^$' -bench='BenchmarkHermesRebuildNormalizedSnapshot' -benchmem -count=5
+```
+
+Apple M1 Pro (ARM64), 10K normalized records:
+
+| Benchmark | ns/op range | B/op range | allocs/op range | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesRebuildNormalizedSnapshot/materialized-8` | 17.59-17.68 ms | 18,479,014-18,480,120 | 75,128-75,135 | Compatibility lane: source returns a full normalized `[]DomainRecord` before Hermes applies. |
+| `BenchmarkHermesRebuildNormalizedSnapshot/streaming-8` | 17.32-18.80 ms | 16,873,297-16,874,765 | 75,127-75,136 | Streaming lane: source emits normalized records one at a time; saves ~1.6 MB heap per 10K-record rebuild while runtime remains dominated by replacement partition/index construction and run-to-run scheduler variance. |
+
+Contract result: no public Hermes read semantics changed. The optimization
+preserves `HermesFallbackRefinement`, `HermesBoundedMemory`, and
+`HermesReplayable`; sources that do not implement the streaming normalized
+interface continue to use the existing materialized normalized or canonical
+`ForEachRecord` fallback paths.
+
+### Local Go CPU & Alloc Baseline
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -run='^$' -bench=. -benchmem ./hermes ./transfer ./httpapi ./extension ./objectstore ./bulk ./projectiongw
+```
+
+| Package / Benchmark | ns/op | B/op | allocs/op | Notes / Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| **`hermes`** | | | | |
+| `BenchmarkHermesConcurrentReadWrite-8` | 166.4 ns | 224 B | 4 | Lock-free registry reads under concurrent writes. |
+| `BenchmarkHermesGetRecordCopied-8` | 280.9 ns | 224 B | 2 | Point lookup with data copy. |
+| `BenchmarkHermesForEachViewLimit50-8` | 12,731 ns | 20,024 B | 12 | Borrowed view iteration avoids materialization allocations. |
+| `BenchmarkHermesCountIndexed-8` | 263,021 ns | 187,584 B | 15 | Count with index scan. |
+| `BenchmarkHermesApplyEventUpsert-8` | 77,539 ns | 80,330 B | 48 | Single mutation upsert including index update. |
+| `BenchmarkHermesApplyEventPatchIndexedFields-8` | 9,443 ns | 11,857 B | 46 | Atomic partial record patching is ~8x faster than full upsert. |
+| `BenchmarkHermesApplyBatch64-8` | 352,886 ns | 277,995 B | 1,097 | Batch upsert of 64 prebuilt events. |
+| `BenchmarkHermesApplyRecords64-8` | 43,992 ns | 36,714 B | 396 | Apply prebuilt record structures directly. |
+| `BenchmarkHermesProjectedRuntimeStoreHotGet-8` | 384.4 ns | 224 B | 2 | Projection store read bypassing underlying SQL. |
+| `BenchmarkHermesGetColumnarBatch-8` | 7,693,984 ns | 3,346,825 B | 57 | Columnar vector conversion with bitmap validity. |
+| `BenchmarkHermesListRecordsComparison-8` | 8,091,987 ns | 8,372,523 B | 10,043 | Baseline pointer-chase list. |
+| `BenchmarkHermesColumnarSumPrice-8` | 7,104,192 ns | 2,683,179 B | 42 | Columnar sequential scan aggregation (~12% faster scan than `ListRecords`). |
+| `BenchmarkHermesListRecordsSumPrice-8` | 8,638,129 ns | 8,372,523 B | 10,043 | Aggregation via pointer-chase list. |
+| **`transfer`** | | | | |
+| `BenchmarkTrackerAdvance/subs=0-8` | 38.9 ns | 0 B | 0 | Progress advance without subscribers. |
+| `BenchmarkTrackerAdvance/subs=1-8` | 68.27 ns | 0 B | 0 | Single subscriber path (zero-alloc). |
+| `BenchmarkTrackerAdvance/subs=8-8` | 113.8 ns | 64 B | 1 | Multi-subscriber pay slice. |
+| **`httpapi`** | | | | |
+| `BenchmarkProgressReader-8` | 15.56 ns | 0 B | 0 | Progress reader overhead (zero-alloc). |
+| **`extension`** | | | | |
+| `BenchmarkExtensionMarshalJSON-8` | 908.4 ns | 304 B | 3 | Marshal JSON with key sorting (down from 16 allocs). |
+| `BenchmarkExtensionMarshalJSONFast-8` | 703.7 ns | 160 B | 1 | Marshal JSON without key sorting (down from 14 allocs). |
+| **`objectstore`** | | | | |
+| `BenchmarkMemoryStorePutBytes/1024KB-8` | 32,529 ns | 1,048,769 B | 6 | Memory store put overhead. |
+| **`bulk`** | | | | |
+| `BenchmarkManagerAcceptPartIdentity/1024KB-8` | 521,552 ns | 1,051,473 B | 27 | Large-part write latency. |
+| **`projectiongw`** | | | | |
+| `BenchmarkSnapshotProjection/records=10000-8` | 5.01 ms | 7,281,924 B | 100,001 | Ordered index snapshot read. |
+| `BenchmarkSnapshotIncrementalLimited-8` | 5.24 µs | 16,672 B | 101 | Watermarked incremental read (90,000x cheaper than full scans). |
+| `BenchmarkHubBroadcast/subs=1000-8` | 364,802 ns | 0 B | 0 | Fan-out to 1K subscribers (zero-alloc at unit). |
+
+### Service-Backed Saturation Baseline
+
+Command:
+
+```bash
+SERVICE_BACKED_LOAD_RESEARCH_STEPS=1000,10000 make test-service-backed-load
+```
+
+Measured throughput and latency distribution (Apple M1 Pro, Docker Compose with Postgres 18 and Redis 8):
+
+| Step | Lane | Throughput (units/s) | p99 Unit Latency | Notes / Interpretation |
+| --- | --- | ---: | ---: | --- |
+| **1,000** | `postgres_send_batch64` | 23.9K/s | 1,019.09 µs | Batched upsert concurrency. |
+| | `postgres_copy_from1024` | 162.5K/s | 6.14 µs | Bypasses semantic index update. |
+| | `redis_set_get_many64` | 161.3K/s | 146.72 µs | Pipeline key cache hydration. |
+| | `redis_xadd_many64` | 206.6K/s | 115.95 µs | Streams append pressure. |
+| | `redis_stream_drain64` | 74.6K/s | 22.02 µs | Stream drain + ack. |
+| | `hermes_rebuild_postgres_snapshot` | 148.9K/s | 6.71 µs | Streaming StateStore rebuild. |
+| | `hermes_redis_tailer64` | 40.0K/s | 33.44 µs | Tailer apply/ack sequence. |
+| | `hermes_hot_count` | 83.3K/s | 46.61 µs | Indexed hot projection read. |
+| | `mixed_pg_redis_hermes64` | 33.6K/s | 535.17 µs | Durable write + cache + apply. |
+| | `pipeline_pg_redis_hermes` | 31.0K/s | 32.21 µs | Fully concurrent active pipeline. |
+| | `wsroute_register_redis` | 138.0K/s | 31.04 µs | Live Redis route registration. |
+| | `wsroute_broadcast_after_register` | 134.0M/s | 0.00 µs | Local fanout planning budget. |
+| **10,000** | `postgres_send_batch64` | 32.1K/s | 4,826.91 µs | Pool saturation point. |
+| | `postgres_copy_from1024` | 397.0K/s | 28.49 µs | Large bulk COPY throughput. |
+| | `redis_set_get_many64` | 288.5K/s | 362.05 µs | Pipelining amortizes network overhead. |
+| | `redis_xadd_many64` | 368.1K/s | 268.53 µs | Streams append throughput. |
+| | `redis_stream_drain64` | 77.1K/s | 39.09 µs | Bounded stream processing. |
+| | `hermes_rebuild_postgres_snapshot` | 200.7K/s | 4.98 µs | Rebuild from PG scales linearly. |
+| | `hermes_redis_tailer64` | 36.9K/s | 44.54 µs | Steady tailer consumption. |
+| | `hermes_hot_count` | 10.7K/s | 17,926.70 µs | Read throughput on large dataset. |
+| | `mixed_pg_redis_hermes64` | 40.0K/s | 3,622.63 µs | Mixed transaction limits. |
+| | `pipeline_pg_redis_hermes` | 60.4K/s | 16.55 µs | Pipeline with watermark fixes scales to 60.4K units/sec. |
+| | `wsroute_register_redis` | 194.4K/s | 2,692.53 µs | Batched Redis coordination. |
+| | `wsroute_broadcast_after_register` | 885.5M/s | 0.00 µs | Fanout planning scales. |
+
+## 2026-06-24 transfer lane (progress + streaming route) benchmarks
+
+The `transfer` progress lane and the streaming upload route sit on the per-byte
+upload hot path, so they are held to the same allocation-shape rule as the
+fan-out lanes: the steady-state path must be allocation-free at the unit
+boundary.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test ./transfer -run='^$' -bench=. -benchmem
+go test ./httpapi -run='^$' -bench=ProgressReader -benchmem
+```
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkTrackerAdvance/subs=0` | ~38 ns | 0 | 0 | Progress advance with no subscriber — pure lock + monotonic seq bump, zero alloc. |
+| `BenchmarkTrackerAdvance/subs=1` | ~65 ns | 0 | 0 | One live subscriber (the common WS bridge): the single-subscriber fast path dispatches without building a slice — still zero alloc. |
+| `BenchmarkTrackerAdvance/subs=8` | ~113 ns | 64 | 1 | Multi-subscriber fan-out pays one target-slice allocation, matching the accepted `HubBroadcast` shape; callbacks run off-lock for safety. |
+| `BenchmarkTrackerSnapshot` | ~17 ns | 0 | 0 | Read path for HEAD/status — borrowed value copy, zero alloc. |
+| `BenchmarkManagerBeginComplete` | ~810 ns | 320 | 5 | Full bracketed lifecycle (2 bookend envelopes + registry churn). Not on the per-byte path — 2–3 events per whole transfer. |
+| `BenchmarkProgressReader` (httpapi) | ~16 ns/read | 0 | 0 | The route's per-read wrapper. The 256 KiB report threshold keeps the tracker untouched in steady state, so the streaming overhead over a raw body copy is allocation-free. |
+
+Takeaway: the design was allocation-conscious from the start — the per-byte
+progress path is zero-alloc for 0 and 1 subscribers (the dominant cases), and the
+streaming route adds no steady-state allocations. The only allocating cases are
+multi-subscriber fan-out (one slice, the documented broadcast shape) and the
+bookend lifecycle, neither of which is per-byte. No optimization was required;
+the benchmarks exist as regression guards on that shape.
+
+## 2026-06-22 projection read-path (projectiongw) benchmarks
+
+The Hermes projection transport gateway (`server-kit/go/projectiongw`) is the
+read-path bridge: scoped snapshots + a live delta stream over the canonical
+`RecordMutationBatch`/`events.Envelope` wire. These benchmarks gate the new lane.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test ./projectiongw -run='^$' -bench=. -benchmem
+```
+
+Snapshot read (10K-record scope), comparing the unbounded full scan against the
+gateway's actual bounded/incremental paths after the version-keyset rewrite:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkSnapshotProjection/records=10000` | ~5.5 ms | 7,281,923 | 100,001 | Full snapshot via the ordered-version index. The earlier `ForEachView` path was ~200 ms here; walking the version-descending ordered index is ~36× faster and the cost is the 100K mutation builds, not the scan. |
+| `BenchmarkSnapshotLimited` (limit 1024) | ~0.49 ms | 746,752 | 10,241 | The gateway's real full-load query. A positive limit engages early-stop, so the read is O(limit), not O(scope). |
+| `BenchmarkSnapshotIncrementalLimited` (since watermark) | ~5.4 µs | 16,672 | 101 | Reconnect/poll path: early-terminates at the watermark, so only the changed tail is built. ~90,000× cheaper than the unbounded incremental scan it replaced. |
+| `BenchmarkSnapshotPageDeep/cursor=5000` | ~0.50 ms | 746,752 | 10,241 | Keyset pagination stays bounded at any depth — skips are O(1) version compares (no map load), only the returned window builds mutations. |
+
+Delta fan-out and the apply-path observer:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkEncodeFrame` | ~3.0 µs | 3,793 | 16 | Encode one delta frame (binary envelope + `RecordMutationBatch`) once; fan-out reuses the bytes. |
+| `BenchmarkHubBroadcast/subs=1` | ~92 ns | 0 | 0 | Borrowed broadcast to one subscriber — zero allocation. |
+| `BenchmarkHubBroadcast/subs=1000` | ~0.27 ms | 8,192 | 1 | Fan-out to 1K subscribers: one target-slice allocation, non-blocking sends with slow-client drop. |
+| `BenchmarkApplyWithObserver` (bare vs observer) | 79 ns vs 79 ns | 0 | 0 | The store apply observer adds no measurable cost and **zero allocations** to the hot apply path; broadcast work happens after the partition lock releases. |
+
+Takeaways: the version-keyset read (one ordered-index traversal with early
+termination) made snapshots both bounded and incremental — the gateway never
+issues an unbounded scan, and a reconnecting client pays only for what changed.
+The fan-out and observer lanes are allocation-free at the unit boundary, matching
+the foundation rule that the hot read/route paths stay on indexed, borrowed, or
+batch-shaped lanes. Enforced static analysis (`go vet`, `staticcheck`) is clean;
+`projectiongw` is at 78% statement coverage including end-to-end HTTP-snapshot and
+gorilla-WebSocket delta tests.
+
+## 2026-05-11 cohesive substrate synthesis
+
+The current direction is to make Foundation a small, coherent substrate rather than a broad collection of optional helpers. The sources reviewed point to the same rule from different angles:
+
+1. Cerebras CS-2: large gains come from system-level co-design. For Foundation, the co-designed path is contract -> metadata -> dispatch -> event -> worker/cache/Redis -> realtime projection -> frontend store, with no layer inventing its own lifecycle.
+2. Go concurrency: useful parallelism starts by partitioning work, doing local computation, and merging with bounded synchronization. For Foundation, this means tenant/key partitioning, exact fanout indexes, bounded worker queues, and channel/select timeouts rather than unbounded goroutines or sleeps.
+3. Rust performance engineering: benchmark first, profile the actual hot path, optimize locality/allocation shape, then prove the delta. For Foundation, this means every new substrate claim gets a local test, a benchmark, and a doc entry before becoming a default.
+4. The referenced Redis implementation: the useful shape is not the toy parser itself, but the command boundary, per-connection state, blocking waits via channels, TTLs, locks, and monotonic stream IDs. Foundation keeps Redis as ephemeral speed/coordination, but the local Redis memory driver must be real enough to test those contracts without external services.
+
+Minimal plan:
+
+1. Keep the canonical substrate narrow: typed/binary envelopes, correlation metadata, tenant scope, event lifecycle, bounded queues, Redis coordination, and realtime routing.
+2. Prefer strengthening existing primitives over adding new packages. A generated app should inherit the correct lifecycle by default.
+3. Use local proof harnesses before service-backed load tests. Memory Redis, in-memory event bus, MemoryDB, WebSocket routing, and worker queues should catch shape regressions quickly.
+4. Promote external-service benchmarks only after the local shape is correct: real Redis Streams/pubsub lag, Postgres query plans, WebSocket slow-client pressure, and p95/p99 request budgets.
+5. Treat generic wildcard/pattern matching as compatibility/observability unless a benchmark proves it is safe for product hot paths. Exact and colon-prefix routes remain the hot fanout shape.
+
+## Measurement taxonomy
+
+1. Correctness properties: invariants, allowed transitions, terminal states, metadata preservation, tenant isolation, and refinement/parity.
+2. Worst-case operational properties: deadlines, queue caps, retry caps, acquire timeouts, payload limits, and overload behavior.
+3. Statistical performance properties: ns/op, B/op, allocs/op, RPS, p50/p95/p99 latency, CPU profiles, heap profiles, and cache-hit ratios.
+
+Benchmarks primarily cover the third category. Performance PRs that alter the runtime ladder must also include tests or contract checks for the first two categories.
+
+Metric meanings:
+
+1. `ns/op`: average nanoseconds per operation in Go/Rust benchmark output. Lower means less CPU time, less waiting, or both.
+2. `B/op`: heap bytes allocated per operation. Lower means less allocator and GC pressure.
+3. `allocs/op`: heap allocation count per operation. Lower usually improves tail latency and cache locality.
+4. `hz`: operations per second in Vitest benchmark output. Higher means more throughput.
+5. `mean`, `p75`, `p99`, `p995`, `p999`: Vitest latency distribution converted to nanoseconds in this ledger. Lower tail values matter more for realtime/runtime paths than a tiny mean-only win.
+6. `rme`: relative margin of error. Large values mean the result is noisy and should not be over-interpreted.
+7. `samples`: number of benchmark samples collected. More samples usually gives a steadier distribution, but only for the same machine/load shape.
+
+### Statistical rules (see `mathematical_practices.md`)
+
+The numbers above are only sound under the constraints in
+`foundation/docs/mathematical_practices.md` (control `MATH-01`):
+
+1. **Percentile definition.** All p95/p99/p999 use the nearest-rank (ceiling)
+   method — rank `⌈p/100 · n⌉` — matching `server-kit/go/wsmetrics`. Do not mix
+   nearest-rank and linear-interpolation percentiles in one ledger; their
+   deltas are not comparable (§3.1).
+2. **Minimum sample size.** p95 requires `n ≥ 100`, p99 requires `n ≥ 1000`,
+   p999 requires `n ≥ 10000`. Below the floor the tail value is the max in
+   disguise; report it but mark it under-sampled and never gate on it (§3.2).
+3. **Margin of error.** `rme` and run-to-run variance are part of the result.
+   A gating tail metric needs a confidence/variance band (binomial rank
+   interval is sufficient); compare distributions, not single tail points
+   (§3.3).
+4. **Float tolerances.** SIMD/GPU/parallel reductions (for example,
+   `server-kit/go/hermes` `sumFloat64s`) are validated against the scalar
+   reference with an absolute+relative tolerance scaled with `n` — never
+   bit-equality — because float addition is non-associative (§4).
+
+## Go concurrency silver-lining metrics
+
+The Go concurrency study in `docs/go_concurrency_bug_practices.md` gives Foundation a positive measurement checklist, not only a bug checklist.
+
+Study signals to preserve:
+
+1. Goroutines are shorter-lived and created more frequently than traditional threads. Use them for finite, owned work; measure active goroutines, start/stop counts, and shutdown drain time.
+2. Mutexes are still the most common primitive in production Go, and channels are also heavily used. Benchmark the actual primitive boundary instead of assuming one is faster or safer.
+3. Message passing caused more blocking bugs, while shared-memory misuse caused most non-blocking bugs. Measure both liveness and race/order safety.
+4. Most blocking fixes were small synchronization changes. Keep code structured so the sync boundary is visible enough for review, tests, and future static checks.
+5. Built-in detector coverage was incomplete. Race/deadlock runs are evidence, but leak tests, block/mutex profiles, queue metrics, and shutdown metrics are the performance guardrails.
+
+Recommended benchmark and load-test additions for goroutine-owning code:
+
+1. `steady`: active goroutines and queue depth stay bounded under target load.
+2. `burst`: buffered channel or queue saturation produces measured reject/drop behavior, not unbounded heap growth.
+3. `cancel`: request/job cancellation unblocks result goroutines and records cancellation propagation duration.
+4. `shutdown`: long-lived listeners and workers drain or stop within the documented bound.
+5. `profile`: goroutine, block, and mutex profiles are captured for hot fanout paths.
+6. `race`: shared-memory packages run with `go test -race`, plus explicit tests for order/select/channel behavior that the race detector cannot see.
+
+## How to run
+
+From the repository root:
+
+```bash
+make test-bench-history
+make test-bench
+FOUNDATION_NATIVE_SKIP_BASELINE=1 tooling/scripts/native_benchmark.sh .
+make test-service-backed
+make test-load-research
+make test-service-backed-load
+```
+
+For the Go-only server-kit slice:
+
+```bash
+cd foundation/server-kit/go
+go test -tags=perf ./grpcsvc ./chain
+go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|DirectFrameClientDispatch|RouterDispatchFrameDirect|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$|BenchmarkRunParallel$' -benchmem ./grpcsvc ./chain
+```
+
+Set `PROFILE=1` when you need CPU and heap profiles under `/tmp/ovasabi-foundation-profiles`.
+
+## 2026-06-13 Hermes Arrow-layout columnar rewrite
+
+This pass corrected three structural problems in the columnar layer that were
+identified against the Arrow binary specification:
+
+1. `valid []bool` per-vector validity — replaced with a bit-packed `validityBitmap`
+   (`[]uint64`, 64 rows per word). `NullCount()` now uses `bits.OnesCount64`,
+   which the Go compiler maps to a single `POPCNT` / `CNT` instruction on ARM
+   and x86. This is a guaranteed single-instruction path, not an aspirational
+   claim.
+
+2. `StringVector` stored `[]string` — a slice of Go string headers pointing to
+   existing in-memory strings. This made `StringValues()` cheap to return but
+   meant no columnar layout existed for scan workloads. Replaced with the Arrow
+   binary specification layout: a contiguous `buf []byte` plus `offsets []int32`
+   (length n+1). Individual string access via `ValueAt(i)` returns a safe,
+   independently owned `string`; on transient hot-scan use (length, hashing) Go
+   escape analysis elides the copy, so it costs nothing there. `StringValues()`
+   materialises an owned `[]string` for compatibility callers. `Offsets()` and
+   `Bytes()` expose the raw layout as the explicit zero-copy lane for columnar
+   scan and Arrow interop, with documented buffer-lifetime caveats. The accessor
+   stays out of `unsafe` because Hermes carries tenant projection data and the
+   CP "no unsafe in handwritten Go" control applies here.
+
+3. All vector construction helpers (`newInt64Vector`, `newFloat64Vector`,
+   `newTimestampVector`, `newStringVectorFromSlice`) replace scattered
+   `make([]bool, n)` patterns with the shared `validityBitmap` type.
+
+Commands:
+
+```bash
+cd foundation/server-kit/go
+go test -bench='BenchmarkHermesColumnar|BenchmarkHermesListRecords' -benchmem -count=3 ./hermes
+```
+
+Construction trade-off (10K records, mixed column types):
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesGetColumnarBatch-8` (before) | 6,767,805 | 2,895,083 | 51 | Previous: `[]bool` validity + `[]string` headers pointing to existing memory. |
+| `BenchmarkHermesGetColumnarBatch-8` (after) | ~7,205,158 | 3,109,225 | 57 | Arrow layout: string bytes copied into contiguous `buf`; bitmap words smaller than `[]bool`. |
+| `BenchmarkHermesListRecordsComparison-8` | ~8,387,194 | 8,134,923 | 10,043 | Unchanged — baseline `ListRecords` pointer-chase path. |
+
+Construction cost increases slightly because `newStringVectorFromSlice` copies
+string bytes into the contiguous buffer. This is the correct Arrow trade-off:
+pay once at construction for better sequential scan locality.
+
+Scan proof (fetch + aggregate over 10K records):
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesColumnarSumPrice-8` | ~6,369,607 | 2,445,578 | 42 | Fetch price column + sum: tight sequential `[]float64` scan, no pointer chasing. |
+| `BenchmarkHermesListRecordsSumPrice-8` | ~8,427,534 | 8,134,923 | 10,043 | Equivalent via `ListRecords`: pointer-chase per record into `RecordData`, parse float. |
+
+Columnar scan is **24% faster**, uses **70% less memory**, and **99.6% fewer
+allocations** than the equivalent `ListRecords` pointer-chase path. The CPU
+prefetcher can stride the contiguous `[]float64` in cache; the `RecordData`
+path cannot.
+
+Per-element string scan:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesColumnarStringValueAt-8` | ~6,170,000 | 2,693,418 | 45 | `ValueAt(i)` returning safe `string(b)` — escape analysis elides the copy on transient use, so allocs/B match the prior `unsafe.String` build exactly. |
+| `BenchmarkHermesColumnarStringValuesSlice-8` | ~6,310,000 | 3,017,258 | 10,046 | `StringValues()` materialises an owned `[]string` — one real copy per element, as its docstring promises. |
+
+The safe accessor carries **zero hot-path cost**: the `ValueAt` scan shows the
+same 2,693,418 B/op and 45 allocs/op as the previous `unsafe.String` build,
+because the value is consumed transiently and never escapes. The added
+allocations land only in `StringValues()`, which now returns genuinely
+independent strings instead of a slice of `unsafe` aliases into `buf` — closing
+a latent use-after-free if the buffer were reused or GC'd. Callers that need
+true zero-copy use `Offsets()`+`Bytes()` directly and honour the buffer
+lifetime there.
+
+## 2026-06-14 extension JSON encoder append-down
+
+The 2026-06-03 pass gave the JSON *decode* side a token parser but left the
+*encode* side allocating one intermediate `[]byte` per node. `Value.MarshalJSON`
+and `Object.MarshalJSON` now write through a single growing buffer via internal
+`appendJSON`/`appendJSONFast` methods; the public methods are thin pre-sized
+wrappers. Canonical output is byte-identical (verified by the exact-byte and
+round-trip oracles in `extension`); only the allocation shape changed.
+
+Command:
+
+```bash
+cd server-kit/go
+go test -run='^$' -bench='BenchmarkExtensionMarshalJSON' -benchmem -count=3 ./extension
+```
+
+Representative nested object (6 scalar/list fields + two nested objects):
+
+| Benchmark | Before | After | Interpretation |
+| --- | --- | --- | --- |
+| `BenchmarkExtensionMarshalJSON` (canonical) | 1,200 ns, 528 B, 16 allocs | ~920 ns, 304 B, **3 allocs** | One backing buffer + per-object sorted `Keys()` slices; −81% allocs, −23% time. |
+| `BenchmarkExtensionMarshalJSONFast` | 937 ns, 380 B, 14 allocs | ~715 ns, 160 B, **1 alloc** | No key sort, so a single backing allocation; −93% allocs, −24% time. |
+
+Hot callers benefiting: `events` payload encode, `database/record_data` encode.
+The remaining canonical allocations are the sorted-key slices required for
+deterministic output; pooling them is a possible follow-up.
+
+## 2026-06-14 Go SIMD columnar reduction lane (experimental)
+
+The first Foundation Go SIMD lane: a vectorized `float64` column reduction over
+the Arrow structure-of-arrays buffer (`Float64Vector.Sum`). It is the bounded,
+benchmark-gated numeric loop the Go SIMD posture sanctions (AGENTS.md,
+optimization_points #51/#55). The public API is portable and never exposes
+archsimd vector types; the AVX2 path lives behind `amd64 && goexperiment.simd`
+build tags with a scalar reference as the always-present fallback and a runtime
+`archsimd.X86.AVX2()` feature check. Ordinary `make build`/`make test` stay
+portable; the lane is opt-in via `make bench-simd`.
+
+Parity: lane-wise accumulation reorders non-associative float additions, so
+`TestFloat64VectorSumMatchesScalarReference` asserts the SIMD result stays within
+floating-point tolerance of the scalar reference rather than bit-exactness.
+
+Command:
+
+```bash
+make bench-simd   # GOEXPERIMENT=simd; SIMD on amd64+AVX2, scalar fallback elsewhere
+```
+
+10,000-element `float64` reduction, amd64 (measured under Rosetta 2 emulation on
+Apple Silicon — absolute ns are emulated, the relative delta is indicative; a
+native AVX2 host typically shows a larger margin):
+
+| Lane | ns/op | allocs/op | Interpretation |
+| --- | ---: | ---: | --- |
+| amd64 scalar | ~9,600 | 0 | Idiomatic accumulator loop. |
+| amd64 SIMD (AVX2) | ~6,460 | 0 | Two 4-wide `Float64x4` accumulators + scalar tail; **~33% faster**. |
+
+The SIMD path provably executed (a feature-check fallback would have matched the
+scalar number). On a non-amd64 host `make bench-simd` measures the scalar
+fallback (the vector file is build-tag excluded), so the true SIMD delta must be
+captured on an AVX2 amd64 host/CI. Null entries are summed as zero today;
+validity-masked SIMD reduction is the natural next lane.
+
+## 2026-06-03 staged local load research
+
+Foundation now includes an opt-in staged local load harness for the cardinality
+ramp:
+
+```bash
+make test-load-research
+```
+
+Default steps:
+
+```text
+1k -> 10k -> 50k -> 100k -> 250k -> 500k -> 1M
+```
+
+The harness writes a TSV under `benchmark-results/load_research_*.tsv` and logs
+per-lane setup time, p50/p95/p99/max, sample count, operations per sample,
+heap allocation delta, heap after setup, and goroutine count. It is deliberately
+opt-in because it creates large local fixtures and is a research/pressure tool,
+not a routine unit test.
+
+Latest artifact:
+
+| Artifact | Contents |
+| --- | --- |
+| `benchmark-results/load_research_20260603T190357Z.tsv` | Full local staged ramp from 1K through 1M, 3 samples per lane. |
+| `benchmark-results/load_research_20260603T190357Z.log` | Raw verbose Go test output for the same run. |
+
+Selected 1M results from the 2026-06-03 run:
+
+| Lane | Setup | p50 | p99 | Heap after | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `memorydb_count` | 3.09 s | 5.29 us | 5.54 us | 1.09 GB | Indexed tenant count stays microsecond-scale at 1M local records. |
+| `memorydb_list_limit50` | 3.21 s | 11.66 us | 13.07 us | 1.23 GB | Defensive copied filtered list remains bounded by tenant/filter/limit, not total rows. |
+| `hermes_count` | 4.42 s | 113 ns | 143 ns | 2.02 GB | Hermes indexed hotplane count is effectively flat through 1M records. |
+| `hermes_get` | 4.12 s | 305 ns | 507 ns | 2.31 GB | Copied point reads stay sub-microsecond after a 1M-record projection. |
+| `hermes_foreach_limit50` | 4.05 s | 6.95 us | 9.37 us | 2.20 GB | Borrowed view iteration avoids response-copy pressure and stays bounded by the limit. |
+| `hermes_apply_records64_prebuilt` | 4.07 s | 158.54 us | 167.88 us | 2.06 GB | Applying a caller-prebuilt 64-record pure-upsert batch costs about 2.5 us/record in this staged harness. |
+| `hermes_build_apply_records64` | 4.45 s | 278.50 us | 378.63 us | 1.98 GB | Building record structs inside the hot lane is visibly more expensive than applying prebuilt records. |
+| `event_exact_dispatch` | 439 ms | 353 ns | 392 ns | 193 MB | Exact event dispatch at 1M subscriptions remains nanosecond-scale. |
+| `router_broadcast_batch` | 1.17 s | 731 ns | 793 ns | 498 MB | Borrowed broadcast batch routing stays sub-microsecond before actual socket writes. |
+| `router_broadcast_materialize` | 1.21 s | 486.55 us | 520.38 us | 567 MB | Owning/materializing one million targets costs about half a millisecond before network I/O. |
+
+This result supports the architectural bet: the local hotplane and exact-indexed
+communication paths scale by keeping hot reads and routing on indexed, borrowed,
+or batch-shaped lanes. The expensive part is not the lookup itself; it is setup
+memory, owned materialization, record construction, and eventually real network
+or storage I/O.
+
+The result also clarifies the difference between one-million cardinality and
+one-million live clients. The harness proves local structures can hold and
+route million-scale state. A true one-million live HTTP/WebSocket test must use
+a distributed load lab with kernel/socket tuning, multiple load generators,
+connection lifecycle metrics, and explicit failure criteria. The next useful
+step is to connect this local ramp to service-backed Redis/Postgres pressure
+with the same staged summary format.
+
+## 2026-06-03 staged service-backed load research
+
+Foundation now also includes an opt-in live Postgres/Redis saturation harness:
+
+```bash
+make test-service-backed-load
+```
+
+Default steps match the local cardinality harness:
+
+```text
+1k -> 10k -> 50k -> 100k -> 250k -> 500k -> 1M
+```
+
+The service-backed harness is Foundation-only. Generated applications inherit
+the APIs, runtime knobs, and checks, but not this Docker-backed pressure lab.
+It writes `benchmark-results/service_backed_load_research_*.tsv` with:
+
+1. step, lane, total units, batch size, batch count, and workers
+2. setup time separated from measured operation time
+3. p50/p95/p99/max for both batch latency and per-unit latency
+4. throughput in units/second
+5. heap/goroutine deltas
+6. Postgres pool stats when the lane uses the live pool
+7. Hermes records, bytes, epoch, source watermark, rejected applies, and index
+   compactions when the lane uses a projection
+
+Default service-backed lanes:
+
+| Lane | What it proves |
+| --- | --- |
+| `postgres_send_batch64` | Batched semantic upsert pressure under bounded pgxpool acquire/query budgets. |
+| `postgres_copy_from1024` | Append/import bulk lane where COPY is the correct primitive. |
+| `redis_set_get_many64` | Hot multi-key cache hydration/write-through with round-trip amortization. |
+| `redis_xadd_many64` | Durable Redis Stream append pressure for event/projector relay. |
+| `redis_stream_drain64` | Redis Stream read-group drain plus ack lag. |
+| `hermes_rebuild_postgres_snapshot` | Hermes control-plane warmup/repair from live Postgres. |
+| `hermes_redis_tailer64` | Hermes projector tail from live Redis Streams, apply before ack. |
+| `hermes_hot_count` | Indexed Hermes reads after live Postgres rebuild. |
+| `mixed_pg_redis_hermes64` | A realistic bounded batch: Postgres SendBatch + Redis SetGetMany + Hermes ApplyRecords. |
+| `pipeline_pg_redis_hermes` | Concurrent durable Postgres writes, Redis projection relay, Hermes tail/apply, and hot reads with lag backpressure. |
+| `wsroute_register_redis` | WebSocket routing registration with live Redis coordination. |
+| `wsroute_broadcast_after_register` | Borrowed broadcast fanout batches after Redis-backed registration. |
+
+Useful controls:
+
+```bash
+SERVICE_BACKED_LOAD_RESEARCH_STEPS=1000,10000
+SERVICE_BACKED_LOAD_RESEARCH_LANES=postgres_send_batch64,redis_set_get_many64
+SERVICE_BACKED_POSTGRES_TMPFS_SIZE=8g
+SERVICE_BACKED_POSTGRES_MAX_CONNECTIONS=120
+SERVICE_BACKED_POSTGRES_MAX_WAL_SIZE=4GB
+SERVICE_BACKED_POSTGRES_MIN_WAL_SIZE=1GB
+SERVICE_BACKED_LOAD_RESEARCH_DB_RESERVED_CONNS=24
+SERVICE_BACKED_LOAD_RESEARCH_DB_ACQUIRE_TIMEOUT=2s
+SERVICE_BACKED_LOAD_RESEARCH_DB_QUERY_TIMEOUT=10s
+SERVICE_BACKED_REDIS_MAXMEMORY=4gb
+make test-service-backed-load
+```
+
+The 1M default is a serious local pressure test, not a routine CI lane. For
+future 10M research, increase `SERVICE_BACKED_POSTGRES_TMPFS_SIZE`,
+`SERVICE_BACKED_REDIS_MAXMEMORY`, Docker memory, and OS file/socket limits, then
+run focused lanes first. The correct question is not "can every lane hold 10M
+full records?" It is "which lane should own this workload, with what batch size,
+pool budget, projection cap, and fallback?"
+
+2026-06-04 adaptive harness note:
+
+The full all-lane 1M run exposed three benchmark-resource problems before it
+produced a clean baseline. A 2GB Postgres tmpfs ran out of space at 250K, a
+fixed 1GB WAL budget triggered checkpoint pressure during the 1M write ramp,
+and using the database hard cap as the application pool budget caused
+acquire/query timeouts at 500K. The service-backed load runner now adapts its
+default tmpfs and WAL budgets to the largest requested step, and reserves
+database headroom. With the local Postgres service at 120 max connections, the
+default application pool budget is 96, leaving 24 control connections. The
+cooperative
+`pipeline_pg_redis_hermes` lane also defaults to the measured better shape:
+512-record durable batches, 256-record tailer batches, and a conservative DB
+writer count of `min(cpu-2, 6)` rather than inheriting broad dispatch
+concurrency.
+
+If a service-backed run logs "consider increasing max_wal_size", tune WAL and
+checkpoint headroom before increasing workers. If it logs an autovacuum
+cancellation, keep the event visible and inspect bloat, dead tuples, vacuum lag,
+and index churn before changing the table/index shape. Autovacuum pressure is
+part of the write-lane truth the benchmark is meant to reveal.
+
+The clean 2026-06-04 full all-lane pass used
+`benchmark-results/service_backed_load_research_20260604T015349Z.tsv`. At 1M,
+the pipeline wrote, published, and applied all records with zero rejected
+Hermes applies. The all-lane pipeline baseline was `45.4K/s`; the earlier
+focused tuned pipeline remained faster at `62.8K/s`, confirming the important
+lesson: the architecture scales when each lane is tuned for its job, and the
+all-lane lab is a saturation profile, not the optimal product profile.
+
+Hermes partial update note:
+
+`PATCH` is now a projection operation alongside `UPSERT` and `DELETE`. It
+merges supplied fields into an existing hot record, preserves unchanged fields,
+moves indexes atomically, and does not resurrect missing/deleted records. In a
+focused local benchmark, indexed-field patching measured about `6.0 us/op`
+versus `16.4 us/op` for full event upsert. The important point is not only raw
+speed: active/archive/status changes can now move the hot index with a compact
+projection mutation instead of resending the entire hot record.
+
+Smoke artifact:
+
+| Artifact | Contents |
+| --- | --- |
+| `benchmark-results/service_backed_load_research_20260603T193114Z.tsv` | 1K live Postgres/Redis/Hermes/WebSocket-routing smoke with the default lane set. |
+| `benchmark-results/service_backed_load_research_20260603T194116Z.tsv` | 10K full-lane baseline before WebSocket route-registration batching. |
+| `benchmark-results/service_backed_load_research_20260603T194647Z.tsv` | Focused 10K WebSocket route-registration rerun after Redis coordination batching. |
+| `benchmark-results/service_backed_load_research_20260603T194721Z.tsv` | 100K full-lane run after adding route-registration batching. |
+| `benchmark-results/service_backed_load_research_20260603T195219Z.tsv` | Focused 100K route-registration rerun with tuned default batch size 256. |
+| `benchmark-results/service_backed_load_research_20260603T200758Z.tsv` | 1M WebSocket route-registration and broadcast planning with live Redis coordination. |
+| `benchmark-results/service_backed_load_research_20260603T202605Z.tsv` | 1M Postgres/Redis diagnostic run after dynamic DB pool sizing. |
+| `benchmark-results/service_backed_load_research_20260603T204357Z.tsv` | 1M Hermes/Postgres/Redis focused run after streaming StateStore rebuild became the default contract. |
+| `benchmark-results/service_backed_load_research_20260603T210735Z.tsv` | Corrected 10K/100K concurrent Postgres -> Redis -> Hermes pipeline run with stage pressure notes. |
+| `benchmark-results/service_backed_load_research_20260603T211633Z.tsv` | Tuned 1M concurrent pipeline run: 512-record durable batches, 6 DB workers, Redis batch envelopes, Hermes watermark backpressure. |
+
+Smoke results:
+
+| Lane | Units | Workers | p99 batch | p99 unit | Throughput | Interpretation |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `postgres_send_batch64` | 1,000 | 8 | 23.97 ms | 374 us | 39.6K/s | Semantic Postgres write pressure is bounded and visible through pool stats. |
+| `postgres_copy_from1024` | 1,000 | 1 | 6.06 ms | 6.06 us | 164.7K/s | COPY is excellent for append/import, but it is not the normal command path. |
+| `redis_set_get_many64` | 1,000 | 8 | 6.48 ms | 101 us | 138.5K/s | Hot multi-key cache lanes should batch across the Redis network boundary. |
+| `redis_xadd_many64` | 1,000 | 8 | 5.71 ms | 89.2 us | 172.2K/s | Stream append batching is a viable projector/event relay path. |
+| `redis_stream_drain64` | 1,000 | 1 | 1.56 ms | 25.7 us | 65.6K/s | Stream read-group drain+ack lag is low at 1K. |
+| `hermes_rebuild_postgres_snapshot` | 1,000 | 1 | 6.61 ms | 6.61 us | 151.3K/s | Hermes warmup/repair from live Postgres is fast at this scope. |
+| `hermes_redis_tailer64` | 1,000 | 1 | 2.59 ms | 40.5 us | 33.2K/s | Redis Stream tailing plus Hermes apply/ack is healthy and bounded. |
+| `hermes_hot_count` | 1,000 | 4 | 93.3 us | 402 ns | 6.2M/s | Once warm, indexed Hermes reads are the right live dashboard/fanout read lane. |
+| `mixed_pg_redis_hermes64` | 1,000 | 8 | 26.58 ms | 415 us | 28.7K/s | The combined substrate path stays bounded; Postgres dominates. |
+| `wsroute_register_redis` | 1,000 | 8 | 168.7 ms | 2.73 ms | 3.0K/s | Live registration currently pays several Redis operations per connection; reconnect storms need batching/pipelining or admission control. |
+| `wsroute_broadcast_after_register` | 1,000 | 1 | 26.8 us | 26 ns | 25.7M/s | Borrowed broadcast planning is cheap once local routing state exists. |
+
+The service-backed result is intentionally slower than local Hermes/router
+numbers because it pays real network, database, Redis, and Docker scheduling
+costs. That is the point: local benchmarks prove the shape; service-backed
+ramps prove the substrate under live I/O.
+
+10K/100K route-registration tuning:
+
+| Lane / experiment | Units | Batch | p99 unit | Throughput | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `wsroute_register_redis`, pre-batch baseline | 10,000 | 64 | 5.40 ms | 3.1K/s | One live Redis coordination path per connection was the dominant reconnect-storm bottleneck. |
+| `wsroute_register_redis`, `RegisterMany` + Redis pipeline | 10,000 | 64 | 233 us | 112.4K/s | Batching registration keys and notifications improved the lane by about 36x in throughput and about 23x in p99 unit latency. |
+| `wsroute_register_redis`, 100K full run | 100,000 | 64 | 486 us | 128.1K/s | The batched API held at 100K, but the default batch still left throughput on the table. |
+| `wsroute_register_redis`, tuned default | 100,000 | 256 | 223 us | 180.6K/s | Batch 256 is the best local default from this run shape. |
+
+Focused 100K batch experiments:
+
+| Batch | p99 unit | Throughput | Result |
+| ---: | ---: | ---: | --- |
+| 128 | 320 us | 166.9K/s | Better than 64, worse than 256. |
+| 256 | 209-223 us | 180.6K-196.0K/s | Best local range across repeated focused runs. |
+| 512 | 292 us | 145.0K/s | Too large for this local Redis/Docker shape; pipeline size increased tail cost. |
+
+Implementation follow-up:
+
+1. `wsrouting.Router.RegisterMany` is now the preferred route-registration API
+   for reconnect bursts, resume storms, and startup hydration.
+2. `server-kit/go/redis.CoordinationBatchClient` exposes the narrow
+   `IncrExpireMany` and `PublishMany` pipeline surface needed by routing
+   coordination without leaking raw go-redis into applications.
+3. Single `Register` remains valid for ordinary one-connection lifecycle work,
+   but large callers should batch and let the router preserve the same local
+   indexes, TTL counters, and registration notifications.
+4. Broadcast planning stayed effectively free after registration; the measured
+   bottleneck was coordination writes, not borrowed fanout lookup.
+
+1M service-backed results:
+
+| Lane | Units | Batch | p99 unit | Throughput | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `postgres_send_batch64` | 1,000,000 | 64 | 2.27 ms | 75.7K/s | Semantic write throughput remains bounded by Postgres pool/WAL/index work. |
+| `postgres_copy_from1024` | 1,000,000 | 1024 | 227 us | 459.9K/s | COPY/import is the correct bulk append lane and remains far ahead of semantic upsert. |
+| `redis_set_get_many64` | 1,000,000 | 64 | 408 us | 256.7K/s | Redis batch cache lanes stay healthy through 1M key operations. |
+| `redis_xadd_many64` | 1,000,000 | 64 | 313 us | 358.2K/s | Stream append pressure is viable for projector/event relay, with tailer drain as the slower side. |
+| `redis_stream_drain64` | 1,000,000 | 64 | 25.7 us | 73.6K/s | Read-group drain+ack remains bounded; setup is the million XADD pressure. |
+| `wsroute_register_redis` | 1,000,000 | 256 | 670 us | 171.6K/s | Bounded registration batches scale to million-route hydration on one local Redis service. |
+| `wsroute_broadcast_after_register` | 1,000,000 | 4096 | ~1 ns/unit | 3.36B/s planning | Borrowed broadcast planning is not the bottleneck once local route indexes exist; socket writes and slow-client queues are the real live-client problem. |
+| `hermes_rebuild_postgres_snapshot` | 1,000,000 | snapshot | 6.23 us | 160.6K/s | Streaming StateStore rebuild avoids pre-materializing a million-record slice and swaps the rebuilt projection at the end. |
+| `hermes_redis_tailer64` | 1,000,000 | 64 | 132 us | 28.7K/s | Redis Stream tailing plus Hermes apply/ack is correct but slower than direct rebuild; batch/tailer tuning is the next hotplane bridge target. |
+| `hermes_hot_count` | 100,000 reads over 1M projection | 256 | 8.16 us | 6.85M/s | Once warm, indexed Hermes reads are millions/sec even when the projection holds 1M records. |
+| `mixed_pg_redis_hermes64` | 1,000,000 | 64 | 10.7 ms | 39.9K/s | Combined durable write + Redis cache + Hermes apply is Postgres/tail-latency dominated and proves why lanes should stay separated and batched. |
+| `pipeline_pg_redis_hermes` | 1,000,000 | 512 | 15.9 us end-to-end unit | 62.8K/s | Concurrent durable writes, batched Redis projection envelopes, Hermes tail/apply, and live hot reads completed with watermark `1,000,000`, zero rejected applies, max Redis lag `4,096`, and max Hermes lag `3,072`. |
+
+Pipeline tuning observations:
+
+| Units | Batch | DB workers | Throughput | Postgres p99 unit | Redis p99 unit | Hermes tail p99 unit | Max Redis lag | Interpretation |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 100,000 | 256 | 64 | 48.2K/s | 2.07 ms | 62.8 us | 67.0 us | 7,072 | Too much DB concurrency; Postgres p99 dominates while Redis/Hermes wait cleanly. |
+| 100,000 | 512 | 32 | 58.4K/s | 796 us | 37.6 us | 26.7 us | 8,192 | Larger durable batches help, but 32 DB workers still overdrives the write lane. |
+| 100,000 | 1024 | 32 | 48.0K/s | 856 us | 66.7 us | 25.9 us | 17,408 | Batch 1024 is too large locally; Redis and tailer batch latency rise. |
+| 100,000 | 512 | 16 | 58.1K/s | 458 us | 37.6 us | 51.5 us | 5,632 | Lower DB concurrency improves p99 without materially changing throughput. |
+| 100,000 | 512 | 8 | 64.6K/s | 276 us | 34.1 us | 25.9 us | 3,072 | Best low-lag 100K shape before the final middle-point check. |
+| 100,000 | 512 | 6 | 67.4K/s | 257 us | 31.9 us | 48.1 us | 2,560 | Best 100K throughput on this local Docker host. |
+| 1,000,000 | 512 | 6 | 62.8K/s | 284 us | 95.7 us | 55.0 us | 4,096 | Tuned 1M pipeline stayed coherent: Postgres remained the pressure point, Redis/Hermes lag stayed bounded, and hot reads held sub-microsecond p99. |
+
+Runtime changes from the 1M pass:
+
+1. `database.StateStore` now requires `ForEachRecord`; streaming record
+   iteration is the default store contract, not an optional optimization.
+2. `PostgresDB.ListRecords` is now a materializing wrapper over
+   `ForEachRecordWithOptions`; repositories can consume the streaming default
+   when they do not need a full slice.
+3. `Hermes.Rebuild` streams canonical records into a replacement partition and
+   atomically swaps the rebuilt registry. Existing hotplane state remains
+   readable while the control-plane rebuild is prepared.
+4. The load harness now sizes Postgres pool workers with the actual pool budget.
+   The first 1M diagnostic exposed this directly: 64 workers against a 40-conn
+   pool caused acquire pressure; the corrected run used `pg_max=64`.
+5. Hermes rebuild has a separate control-plane query/acquire budget in the
+   service-backed harness. This keeps normal hot-path query budgets strict while
+   allowing million-row repair/warmup work to be measured honestly.
+6. `redis.StreamBatchClient` now exposes `XAddManyField` as a first-class
+   field/payload pipeline API. Hermes projection relay can append ordered binary
+   envelope payloads without rebuilding per-entry maps.
+7. The service-backed pipeline lane uses batch projection envelopes: one Redis
+   Stream entry can carry hundreds of record mutations, while Hermes still
+   applies and acks only after the projection update succeeds.
+8. Backpressure is expressed as projected-record lag. Redis relay pauses when
+   published projection records get too far ahead of Hermes applied watermark,
+   which keeps the hotplane fresh without collapsing durable writes, relay, and
+   reads into one serial path.
+
+The surprising part is not that one lane is universally fast. The surprising
+part is that the ladder behaves coherently at 1M: Postgres owns durable truth,
+Redis owns ephemeral coordination and stream relay, Hermes owns the warm indexed
+read plane, and WebSocket routing owns borrowed local fanout planning. The
+system performs well because each substrate is doing the work it is built for,
+not because one component is asked to solve every workload.
+
+## 2026-06-03 focused hot-lane cleanup
+
+This pass targeted the remaining measured costs after the typed payload refactor:
+EventLog Redis Stream append allocation, HTTP JSON request body retention,
+binary envelope payload copying, and the suspected binary append/view frame
+regression.
+
+Commands:
+
+```bash
+cd foundation/server-kit/go
+go test ./...
+go test -run='^$' -bench='BenchmarkBinaryFrame(AppendViewRoundTrip|AppendOnly|ViewReadOnly|ReadFieldOnly)$' -benchmem -count=5 ./grpcsvc
+go test -run='^$' -bench='Benchmark(PayloadFromRequestJSONBody|BuildDispatchRequestJSONBody|PlannedDispatchRequestJSONBody)$' -benchmem -count=5 ./httpapi
+go test -run='^$' -bench='BenchmarkEnvelope_(FromBinary|FromJSON)$' -benchmem -count=5 ./events
+make test-service-backed
+```
+
+Artifacts:
+
+| Artifact | Contents |
+| --- | --- |
+| `benchmark-results/service_backed_20260603T034518Z.tsv` | Service-backed Postgres/Redis run after Redis Stream field-batch append. |
+| `benchmark-results/service_backed_20260603T034518Z.log` | Raw service-backed benchmark output and race-test evidence. |
+
+Focused comparison:
+
+| Benchmark | Before | After | Interpretation |
+| --- | ---: | ---: | --- |
+| `BenchmarkServiceBackedEventLogPublishPending64-8` | 5816571 ns/op, 184562 B/op, 2102 allocs/op | 4709855 ns/op, 164662 B/op, 2038 allocs/op | Removing per-entry Redis Stream map adapters recovered about 1.1 ms, 19.9 KB, and 64 allocations per 64-event batch. |
+| `BenchmarkEnvelope_FromBinary-8` | 2734-2801 ns/op, 6224 B/op, 28 allocs/op | 2583-2622 ns/op, 6200 B/op, 27 allocs/op | Protobuf unmarshal already owns payload bytes; `FromBinary` no longer copies them a second time. |
+| `BenchmarkPlannedDispatchRequestJSONBody-8` | 6050-6275 ns/op, 16582-16583 B/op, 54 allocs/op | 5858-6310 ns/op, 16582-16583 B/op, 54 allocs/op | JSON raw-body retention is now explicit through `IncludeRawBody`; allocation shape is unchanged because the current decoder still reads the body into bytes before parsing. |
+| `BenchmarkBinaryFrameAppendViewRoundTrip-8` | noisy 31 ns/op outlier | 19.5-24.3 ns/op, 0 B/op, 0 allocs/op | The suspected regression did not reproduce when split and rerun. Append-only is about 13 ns; view-read-only is about 12 ns. Keep the split guard benches. |
+
+The EventLog result confirms that the live regression was not caused by
+`eventlog.PublishPending` logging directly. The hot allocation was the generic
+Redis Stream boundary building a `map[string]any` for every pending event. The
+new field-batch path preserves the generic fallback for multi-field stream
+entries while keeping the durable envelope relay on an ordered field/value lane.
+
+The HTTP result confirms the next real win still requires streaming/direct JSON
+decode or metadata object slimming. Dropping retained JSON body bytes is the
+right contract shape, but it cannot remove the `io.ReadAll` allocation by
+itself.
+
+## 2026-05-31 full benchmark pass
+
+This run is the current local reference for Foundation's performance story. It
+combines the broad performance ladder, targeted objectstore/bulk checks, native
+runtime flow simulation, runtime-native TypeScript frame benches, and live
+Postgres/Redis service-backed benches.
+
+Artifacts:
+
+| Artifact | Contents |
+| --- | --- |
+| `benchmark-results/foundation_bench_20260531T223701Z.tsv` | Broad Go/Rust/TypeScript benchmark summary: 221 rows, with `benchmark`, `ns_per_op`, `bytes_per_op`, `allocs_per_op`, and `source`. |
+| `benchmark-results/foundation_bench_20260531T223701Z.log` | Raw broad benchmark output, including Vitest `hz`, `mean`, p75/p99/p995/p999, RME, and sample counts. |
+| `test_bench_20260531T224419.log` (artifact pruned) | Targeted objectstore, bulk manager, and native flow simulation output from `make test-bench`. The raw log was pruned from `benchmark-results/`; the readings survive in the tables below. |
+| `native_bench_20260531T224409.log` (artifact pruned) | Runtime-native Rust report-only benches, native flow simulation, and runtime-native TypeScript frame benches. The raw log was pruned from `benchmark-results/`; the readings survive in the tables below. |
+| `benchmark-results/service_backed_20260531T235252Z.tsv` | Live eventlog/Postgres/Redis service-backed summary after eventlog claim leases: 15 rows, with `unit_per_op` for batch rows. |
+| `benchmark-results/service_backed_20260531T235252Z.log` | Raw service-backed benchmark output after Docker-backed race tests, including concurrent multi-drainer eventlog publication coverage. |
+
+The TSV files are the exhaustive machine-readable ledgers. The tables below are
+the architectural read of those ledgers: which Foundation lane is being measured,
+what cost it represents, and where generated applications should inherit the
+practice.
+
+### Runtime ladder
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkBoundFrameClientDispatchTrusted-8` | 10.67 | 0 | 0 | Bound trusted same-process handler, effectively the control-call floor. |
+| `BenchmarkRouterDispatchFrameDirect-8` | 10.79 | 0 | 0 | Generic same-process frame router path. |
+| `BenchmarkBinaryFrameAppendViewRoundTrip-8` | 19.75 | 0 | 0 | Binary append plus borrowed frame view; the preferred synchronous hot parser. |
+| `BenchmarkBinaryFrameAppendRoundTrip-8` | 41.00 | 0 | 0 | Binary append plus owned frame decode. |
+| `BenchmarkBinaryFrameCodecRoundTrip-8` | 81.71 | 144 | 2 | Codec-compatible binary owned path. |
+| `BenchmarkGeneratedProtoMarshalAppendRoundTrip-8` | 371.5 | 152 | 6 | Generated protobuf contract path. |
+| `BenchmarkClientDispatchFrameOverBufconn-8` | 20585 | 10991 | 181 | Binary frame through local gRPC client/server machinery. |
+| `BenchmarkDispatchFrameOverBufconn-8` | 25372 | 10916 | 178 | Server-side binary frame over local gRPC. |
+| `BenchmarkDispatchOverBufconn-8` | 30175 | 12624 | 213 | JSON envelope compatibility lane over local gRPC. |
+
+Foundation's rule is visible: internal hot work should stay on same-process frame
+dispatch or borrowed binary views. Protobuf and gRPC remain correct for typed
+cross-process boundaries. JSON is a compatibility adapter, not a hot product
+lane. Industry-wise, zero-allocation 10-80 ns in-process control paths are
+strong local numbers; tens of microseconds for a gRPC boundary is normal because
+it pays client/server call machinery, codecs, metadata, and framing even through
+`bufconn`.
+
+### App, safety, and orchestration lanes
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkAppLane_DirectFrame_DomainCall-8` | 32.02 | 32 | 1 | App-shaped same-process domain call. |
+| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest-8` | 5399 | 9219 | 71 | HTTP JSON ingress and dispatch request shaping. |
+| `BenchmarkAppLane_Auth_ValidateToken-8` | 3288 | 2104 | 27 | JWT validation only. |
+| `BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8` | 7203 | 11284 | 81 | Auth, security headers, validation, and RBAC middleware. |
+| `BenchmarkAppLane_Cache_GetHit_JSONValue-8` | 54.03 | 0 | 0 | In-memory cache hit. |
+| `BenchmarkAppLane_Retry_NoRetrySuccess-8` | 3.697 | 0 | 0 | No-retry success fast path. |
+| `BenchmarkAppLane_CircuitBreaker_ClosedSuccess-8` | 68.35 | 0 | 0 | Healthy dependency circuit-breaker wrapper. |
+| `BenchmarkAppLane_Worker_EnqueueWithBackpressureAndDrain-8` | 5500 | 1167 | 26 | Accepted bounded worker enqueue and drain. |
+| `BenchmarkAppLane_Worker_RejectFullQueue-8` | 1523 | 738 | 17 | Explicit full-queue rejection. |
+| `BenchmarkAppLane_Worker_DropNoProcessor-8` | 1291 | 706 | 14 | Explicit no-processor rejection. |
+| `BenchmarkAppLane_Retry_CanceledWait-8` | 95.83 | 96 | 2 | Canceled retry wait path. |
+
+These are the costs generated apps inherit when they use Foundation's safety
+boundaries correctly. HTTP/auth/RBAC and worker enqueue are thousands of
+nanoseconds because they do real safety work; the cache, retry, circuit breaker,
+and direct domain path remain nanosecond-scale. The practice is to put expensive
+safety boundaries at ingress and async edges, then keep already-authorized
+same-process work on direct/binary lanes.
+
+### Scale and fanout lanes
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale_MemoryDBTenantCount100K-8` | 5173 | 0 | 0 | 100K tenant-scoped count. |
+| `BenchmarkScale_MemoryDBTenantListFiltered100K-8` | 21586 | 33400 | 105 | 100K tenant/filter list with defensive response copies. |
+| `BenchmarkScale1M_MemoryDBTenantCount-8` | 5079 | 0 | 0 | 1M tenant-scoped count remains indexed. |
+| `BenchmarkScale1M_MemoryDBTenantListFiltered-8` | 21598 | 33400 | 105 | 1M tenant/filter list. |
+| `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit-8` | 16836 | 33400 | 105 | 1M dense-tenant indexed `LIMIT 50` path. |
+| `BenchmarkScale_WebSocketBroadcastResolveInto100K-8` | 34464 | 0 | 0 | 100K owned broadcast target materialization. |
+| `BenchmarkScale1M_WebSocketBroadcastResolveInto-8` | 489633 | 0 | 0 | 1M owned target materialization. |
+| `BenchmarkScale1M_WebSocketBroadcastForEach-8` | 2400135 | 0 | 0 | 1M callback-per-target route. |
+| `BenchmarkScale1M_WebSocketBroadcastBatch-8` | 747.9 | 0 | 0 | 1M adaptive borrowed batch route. |
+| `BenchmarkScale_EventExactDispatch100KSubscriptions-8` | 405.8 | 0 | 0 | Exact event dispatch at 100K subscriptions. |
+| `BenchmarkScale1M_EventExactDispatchSubscriptions-8` | 423.8 | 0 | 0 | Exact event dispatch at 1M subscriptions. |
+| `BenchmarkScale_EventWildcardDispatch1KSubscriptions-8` | 544.2 | 64 | 1 | Generic wildcard compatibility fanout. |
+| `BenchmarkScale_EventPrefixWildcardDispatch100KSubscriptions-8` | 530.8 | 64 | 1 | Colon-prefix wildcard fanout. |
+| `BenchmarkScale_ConfigConvergence10K-8` | 173.8 | 0 | 0 | Runtime config validation/convergence. |
+
+The scale story is data shape, not heroics. Tenant counts are indexed. Dense
+tenant lists stop at indexed limits instead of sorting broad state. Exact event
+fanout is stable at 100K and 1M subscription cardinality. WebSocket broadcast is
+where API choice matters: owning a 1M target slice costs about 0.49 ms, a
+per-target callback loop costs about 2.4 ms, while borrowed adaptive batches keep
+routing below 1 microsecond before actual socket writes begin.
+
+### Objectstore and bulk range gains
+
+| Benchmark | Before | 2026-05-31 | Gain | Allocation gain | Practice |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `BenchmarkMemoryStoreGetRange/64KB-8` | 3596 ns/op, 65696 B/op | 213.3 ns/op, 160 B/op | 16.9x faster | 410.6x fewer bytes | Borrow immutable range readers instead of copying the selected range. |
+| `BenchmarkMemoryStoreGetRange/1024KB-8` | 36024 ns/op, 1048736 B/op | 210.3 ns/op, 160 B/op | 171.3x faster | 6554.6x fewer bytes | Keep range metadata small and payload bytes shared. |
+| `BenchmarkManagerOpenRangeIdentity-8` | 46324 ns/op, 531474 B/op | 12044 ns/op, 5205 B/op | 3.85x faster | 102.1x fewer bytes | Compose bounded range readers instead of rebuilding the complete object. |
+| `BenchmarkManagerForEachRangeIdentity-8` | 35882 ns/op, 530938 B/op | 2648 ns/op, 5072 B/op | 13.6x faster | 104.7x fewer bytes | Stream subranges through callbacks and keep offsets checked. |
+
+This is the clearest recent Foundation gain. The old shape treated range access
+like "copy a payload and then read it." The new shape treats range access as
+"validate checked offsets, borrow immutable slices/readers, and stream only the
+requested span." That is the same principle Rust, Go, and TypeScript should all
+propagate into scaffolded apps: views for hot synchronous reads, ownership only
+when data must outlive the source, and checked arithmetic at every length/offset
+boundary.
+
+### Runtime SDK, browser, and native payload lanes
+
+| Benchmark | Result | Meaning |
+| --- | ---: | --- |
+| `BenchmarkBufferInputBytesView1KB-8` | 3.109 ns/op, 0 B/op, 0 allocs/op | Go runtime buffer borrowed input view. |
+| `BenchmarkBufferInputBytesOwned1KB-8` | 143.4 ns/op, 1024 B/op, 1 alloc/op | Owned input copy. |
+| `BenchmarkBufferOutputBytesView2KB-8` | 3.214 ns/op, 0 B/op, 0 allocs/op | Go runtime buffer borrowed output view. |
+| `BenchmarkBufferOutputBytesOwned2KB-8` | 276.2 ns/op, 2048 B/op, 1 alloc/op | Owned output copy. |
+| `BenchmarkBufferReadFrameInto4KB-8` | 73.68 ns/op, 4 B/op, 1 alloc/op | Read framed data into caller-provided storage. |
+| `BenchmarkBufferReadFrameAllocCopy4KB-8` | 693.6 ns/op, 4100 B/op, 2 allocs/op | Allocating framed read. |
+| `native output_bytes_view borrowed` | 3.93 ns/op | Rust SDK borrowed output view. |
+| `native read_output_bytes_into reused Vec` | 20.06 ns/op | Rust SDK reused output buffer. |
+| `native read_output_bytes owned Vec` | 63.34 ns/op | Rust SDK owned output copy. |
+| `runtime-native TS decode native dispatch response` | 3,296,719 ops/sec | JS/native response frame decode. |
+| `runtime-native TS encode native dispatch frame` | 1,087,686 ops/sec | JS/native request frame encode. |
+| `runtime-transport TS decode identity binary frame` | 4,988,681 ops/sec | Browser/Node identity binary frame decode. |
+
+The runtime lesson is consistent across Go, Rust, and TypeScript: borrowed views
+are the hot path, caller-provided buffers are the next-best path, owned copies
+are the compatibility path. Scaffolded apps should inherit these checks through
+runtime docs and scripts: no unbounded frame lengths, no unchecked offset math,
+no accidental payload cloning in loops, and explicit caps before JS/Rust/Go
+cross-runtime handoff.
+
+### Native descriptor vs full-payload control
+
+| Lane | Payload represented | Mean | p50 | p95 | p99 | Copy model |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `runtime-native dispatch frame` | 4KB | 517.51 ns | 500 ns | 583 ns | 666 ns | Report-only Rust frame encode/decode/echo. |
+| `runtime-native dispatch frame` | 64KB | 6349.09 ns | 6625 ns | 7166 ns | 7625 ns | Linear with payload movement. |
+| `runtime-native dispatch frame` | 1MB | 117019.64 ns | 115708 ns | 134000 ns | 169250 ns | Linear full-payload frame cost. |
+| `descriptor-control` | 4KB external | 332.50-347.03 ns | ~333 ns | ~375 ns | ~417 ns | 96-byte descriptor, zero hot-payload copy. |
+| `descriptor-control` | 64KB external | 326.37-340.00 ns | ~333 ns | ~375 ns | ~417 ns | Constant with represented payload size. |
+| `descriptor-control` | 1MB external | 324.36-340.34 ns | ~333 ns | ~375 ns | ~417 ns | Constant with represented payload size. |
+| `runtime-buffer-in-place` | 1KB input | 137.13-138.91 ns | 125 ns | 167 ns | 209-250 ns | Fixed buffer input view plus bounded output work. |
+
+Native frame dispatch is a useful desktop/mobile control boundary, but it is not
+the highest-performance payload lane. Full-payload native frames copy roughly
+five payload-equivalents in the current simulation, so 1MB frames land in the
+117-189 microsecond range depending on the exact run. Descriptor control remains
+around 325-347 ns because only the control descriptor moves. The Foundation
+runtime principle is therefore strict: camera/audio/GPU/market-data style
+payloads move through descriptors, arenas, packet rings, shared memory, or fixed
+runtime buffers; control frames carry ownership, epoch, schema, and bounds.
+
+### Service-backed live substrate
+
+| Benchmark | ns/op | B/op | allocs/op | Unit | Meaning |
+| --- | ---: | ---: | ---: | --- | --- |
+| `BenchmarkServiceBackedEventLogPublishPending64-8` | 4910472 | 178327 | 1975 | 64 events/op | Claim 64 durable eventlog rows with `FOR UPDATE SKIP LOCKED`, append them to Redis Streams with one pipeline, and mark them published with one token-checked Postgres batch update. |
+| `BenchmarkServiceBackedHermesRebuild512-8` | 3206715 | 1703672 | 19202 | 512 records/op | Rebuild 512 Hermes records from live substrate state. |
+| `BenchmarkServiceBackedHermesApplyBatch512-8` | 899371 | 956955 | 4836 | 512 records/op | Apply 512-record Hermes batch. |
+| `BenchmarkServiceBackedRedisSetGet-8` | 454364 | 888 | 26 | | Two live Redis round trips. |
+| `BenchmarkServiceBackedRedisSet-8` | 223987 | 464 | 13 | | One live Redis `SET`. |
+| `BenchmarkServiceBackedRedisGet-8` | 248782 | 408 | 12 | | One live Redis `GET`. |
+| `BenchmarkServiceBackedRedisSetGetParallel-8` | 117197 | 1006 | 29 | | Parallel Redis set/get under pool concurrency. |
+| `BenchmarkServiceBackedRedisSetManyGetMany64-8` | 766354 | 51521 | 1053 | 64 keys/op | Two 64-key Redis batch phases. |
+| `BenchmarkServiceBackedRedisSetGetMany64-8` | 561730 | 49482 | 793 | 64 keys/op | Combined 64-key pipelined cache lane. |
+| `BenchmarkServiceBackedRedisRawPipelineSetGet64-8` | 636014 | 31768 | 657 | 64 keys/op | Raw go-redis pipeline baseline. |
+| `BenchmarkServiceBackedPostgresUpsert-8` | 286893 | 3063 | 49 | | Full state-store tenant-scoped JSONB upsert. |
+| `BenchmarkServiceBackedPostgresUpsertRawJSON-8` | 309598 | 2201 | 40 | | Byte-preserving raw JSONB upsert path. |
+| `BenchmarkServiceBackedPostgresUpsertParallel-8` | 76576 | 3085 | 49 | | Parallel independent tenant-scoped upserts. |
+| `BenchmarkServiceBackedPostgresSendBatchUpsert64-8` | 3061392 | 73374 | 937 | 64 rows/op | Batched upsert with per-row semantics. |
+| `BenchmarkServiceBackedPostgresCopyFrom64-8` | 698505 | 36700 | 378 | 64 rows/op | `COPY` ingest lane for append/import workloads. |
+
+Live eventlog, Redis, and Postgres rows are in the hundreds of microseconds to
+low milliseconds locally because they cross Docker, socket, and database
+boundaries. That is expected and industry-normal for localhost service-backed
+tests. The Foundation rule is not to wish these into nanoseconds; it is to
+batch, pipeline, pool, cap acquire waits, keep query budgets explicit, and use
+local memory harnesses for fast contract regression before paying
+service-backed costs. The eventlog row is the durable fact-lane expression of
+that rule: claim pending Postgres bytea envelopes with a lease, pipeline Redis
+`XADD`, then batch the token-checked published-state update instead of doing
+one full Postgres/Redis/Postgres cycle per event. The claim lease moved the
+64-event local service-backed benchmark from 2.97ms to 4.91ms per batch
+(roughly 46us/event to 77us/event) while keeping allocation shape essentially
+flat. That is an intentional safety trade: multi-drainer duplicate prevention
+is now part of the measured live substrate contract.
+
+### Delta from the prior history run
+
+Compared with `benchmark-results/foundation_bench_20260529T130319Z.tsv`, the
+largest architectural improvements in the broad ledger were:
+
+| Benchmark | Previous | Current | Gain | Note |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit-8` | 35861 ns/op | 16836 ns/op | 2.13x | Dense tenant read path benefits from the indexed/limited shape. |
+| `can dispatch write via admin fallback` | ~200 ns | ~100 ns | 2.00x | TypeScript capability fallback check got cheaper in this run. |
+| `webgpu fake dispatch resident-to-resident 4KB x1` | ~1700 ns | ~1100 ns | 1.55x | CPU-side WebGPU helper path improved/noise-favored. |
+| `decode protobuf envelope bytes` | ~1900 ns | ~1600 ns | 1.19x | Runtime-transport TS protobuf decode improved. |
+| `packet-ring enqueue/dequeue/complete/release x128` | ~51400 ns | ~43900 ns | 1.17x | Browser packet-ring batch lifecycle improved. |
+
+Several service-backed rows moved slower by 5-20% against the prior Docker run,
+while allocations stayed effectively unchanged. Treat those as environment and
+service jitter unless they repeat across multiple runs. The important current
+signal is that structural allocation shape stayed stable, `COPY` remains much
+cheaper than semantic batch upsert per row, raw/pipelined Redis remains the
+right multi-key lane, and the local in-process/runtime improvements are orders
+of magnitude below networked service boundaries.
+
+## Historical reference run (2026-05-01)
+
+Environment:
+
+- Date: 2026-05-01
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Command: server-kit Go benchmark command above
+
+| Benchmark | ns/op | B/op | allocs/op | Role |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkRouterDispatchFrameDirect` | 16.18 | 0 | 0 | Same-process router dispatch |
+| `BenchmarkDirectFrameClientDispatch` | 24.62 | 0 | 0 | Same-process client facade with validation |
+| `BenchmarkBinaryFrameAppendViewRoundTrip` | 24.16 | 0 | 0 | Append encode + borrowed decode view |
+| `BenchmarkBinaryFrameAppendRoundTrip` | 63.54 | 34 | 3 | Append encode + owned frame decode |
+| `BenchmarkBinaryFrameCodecRoundTrip` | 104.4 | 178 | 5 | gRPC codec-compatible owned round trip |
+| `BenchmarkGeneratedProtoMarshalAppendRoundTrip` | 360.2 | 152 | 6 | Generated protobuf marshal/unmarshal |
+| `BenchmarkRunParallel` | 1197 | 592 | 8 | Bounded parallel operation chain |
+| `BenchmarkDispatchFrameOverBufconn` | 22227 | 11034 | 183 | Binary frame over in-memory gRPC |
+| `BenchmarkDispatchOverBufconn` | 27218 | 12690 | 213 | JSON envelope over in-memory gRPC |
+
+## Historical local check (2026-05-05)
+
+Environment:
+
+- Date: 2026-05-05
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Command: targeted server-kit Go benchmark commands from this document
+
+| Benchmark | ns/op | B/op | allocs/op | Delta vs 2026-05-01 | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `BenchmarkRouterDispatchFrameDirect` | 18.59 | 0 | 0 | slower/noisy | Still same-process, zero-allocation routing |
+| `BenchmarkDirectFrameClientDispatch` | 25.68 | 0 | 0 | stable/slower | Validation facade remains zero-allocation |
+| `BenchmarkBinaryFrameAppendViewRoundTrip` | 22.70 | 0 | 0 | faster | Borrowed frame view remains the fastest codec lane |
+| `BenchmarkBinaryFrameAppendRoundTrip` | 62.25 | 34 | 3 | stable/faster | Owned binary frame path is stable |
+| `BenchmarkBinaryFrameCodecRoundTrip` | 113.4 | 178 | 5 | slower/noisy | Codec-compatible owned path remains below protobuf |
+| `BenchmarkGeneratedProtoMarshalAppendRoundTrip` | 386.9 | 152 | 6 | slower/noisy | Typed network payload lane remains below 1000 ns |
+| `BenchmarkRunParallel` | 1712 | 592 | 8 | slower/noisy | Orchestration overhead sits in the low-thousands-of-ns range |
+| `BenchmarkDispatchFrameOverBufconn` | 31645 | 10969 | 181 | slower/noisy | Binary gRPC boundary stays much cheaper than external network I/O |
+| `BenchmarkDispatchOverBufconn` | 39989 | 12653 | 212 | slower/noisy | JSON compatibility lane remains most expensive |
+
+The important signal is unchanged: same-process and borrowed binary lanes are nanosecond paths, while gRPC/JSON lanes are tens-of-thousands-of-ns boundary paths. Use benchmark deltas here as local evidence only; laptops, battery state, scheduler noise, and dependency versions can move these numbers by double-digit percentages.
+
+### 2026-05-11 Redis memory substrate check
+
+This pass replaced placeholder behavior in the local Redis memory driver with deterministic semantics for `Set`/`Get`/`Del`, TTL expiry, token-checked locks, pattern pub/sub, exact HyperLogLog-style cardinality, and basic stream group read/ack. The goal is not to emulate every Redis edge; it is to make local Foundation tests catch coordination and ephemeral-state drift before real Redis enters the loop.
+
+Correctness tests added:
+
+1. Pattern subscriptions match qualified channels and reject unrelated channels.
+2. `Set`/`Get` returns copies and honors TTL expiry.
+3. Locks reject concurrent holders, require matching unlock tokens, and expire.
+4. Streams produce unique monotonic IDs, advance per consumer group, and accept ack calls.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -run=^$ -bench='BenchmarkMemoryClient' -benchmem ./redis
+```
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkMemoryClientGetHit` | 179.7 | 56 | 4 | Local copied `Get` stays below 1000 ns; allocation is intentional ownership protection. |
+| `BenchmarkMemoryClientSetManyGetMany64` | 21319 | 12637 | 516 | Separate set-many/get-many batches still pay per-key/value ownership costs. |
+| `BenchmarkMemoryClientSetGetMany64` | 12570 | 9563 | 324 | Combined set/get-many reduces round-trip orchestration but still copies returned values. |
+| `BenchmarkMemoryClientPublish1KSubscribers` | 56012 | 47689 | 991 | Exact pub/sub fanout to 1k local subscribers is allocation-heavy; use budgeted fanout and slow-consumer controls. |
+| `BenchmarkMemoryClientPSubscribePrefix1K` | 28848 | 111 | 4 | Generic Redis-style pattern fanout scans patterns; use Foundation exact/prefix event routing for hot product fanout. |
+| `BenchmarkMemoryClientStreamXAddReadAck` | 1108 | 1015 | 17 | Local stream add/read/ack is now measurable and useful for contract tests, not a replacement for real Redis Streams load tests. |
+| `BenchmarkMemoryClientLockUnlock` | 449.4 | 120 | 8 | Token lock/unlock is cheap locally; real Redis lock budgets still need network timeout and fencing-token checks. |
+
+Follow-up benchmark gap: add service-backed Redis checks for stream group lag, pub/sub fanout loss under slow consumers, lock contention with TTL expiry, and pipeline chunk sizing once the dev stack is available. The first Docker-backed lane was added on 2026-05-11; keep this local memory harness as the fast regression net before running it.
+
+### 2026-05-11 Lifecycle generator check
+
+This pass makes proto definitions a compiler input for the Foundation nervous system. `tooling/scripts/generate_lifecycle_contract_tests.mjs` scans mutating request/response pairs and emits `tests/contract/generated_lifecycle_test.go` cases that call `VerifyCommandLifecycle`.
+
+The scaffold example proto is now the reference fixture:
+
+1. `CreateExampleRequest`/`CreateExampleResponse`
+2. `UpdateExampleRequest`/`UpdateExampleResponse`
+3. `DeleteExampleRequest`/`DeleteExampleResponse`
+
+Each pair generates `:requested -> :success` and `:requested -> :failed` contract vectors with preserved correlation ID, idempotency key, tenant metadata, and worker job metadata.
+
+Correctness checks:
+
+```bash
+node --check tooling/scripts/generate_lifecycle_contract_tests.mjs
+tests/lifecycle_contract_generator_test.sh
+tooling/scripts/contract_drift_check.sh .
+tests/init_project_test.sh
+cd server-kit/go && go test ./...
+cd server-kit/go && go test -race ./contracttest ./observability ./redis
+```
+
+Result: generator syntax passed, the example proto generated six lifecycle vectors, contract drift checks passed, scaffold init generated the lifecycle test file in a fresh project, and server-kit tests/race checks passed.
+
+### 2026-05-11 observed lifecycle and pressure substrate
+
+This pass adds the implementation-test half of the lifecycle compiler path:
+
+1. `contracttest.LifecycleRecorder` wraps a real `events.Bus`, records real worker jobs, and produces `LifecycleObservation` for `VerifyCommandLifecycle`.
+2. Generated lifecycle tests now expose `verifyGeneratedLifecycleObservation` so app tests can bind observed handler output to proto-derived contracts.
+3. `observability.Collector` records event trace entries, worker enqueue/process trace entries, Redis operation latency/error counts, database operation latency, pgx pool pressure, and queue depth.
+4. The scaffold exposes a local correlation trace endpoint at `/metricsz/trace?correlation_id=<id>`.
+5. Redis and worker startup now use inherited pool/timeout budgets instead of silently ignoring shard and timeout config.
+
+Scaffold boundary: no new service-backed benchmark compose files, daemons, or test processes were added to generated projects. Service-backed Redis/Postgres benchmark assets now live under root `tests/` only, with a scaffold manifest guard preventing accidental inheritance.
+
+Trace-retention guardrail benchmark:
+
+```bash
+cd foundation/server-kit/go
+GOCACHE=/private/tmp/ovasabi-go-build-cache go test -run=^$ -bench='BenchmarkInMemoryBus_Publish_(NoSubscribers|1Subscriber|10Subscribers)$' -benchmem ./events
+```
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkInMemoryBus_Publish_NoSubscribers` | 307.0 | 0 | 0 | Context-free publish now skips empty metadata map construction and remains allocation-free. |
+| `BenchmarkInMemoryBus_Publish_1Subscriber` | 309.1 | 0 | 0 | One exact subscriber adds little over trace/event validation. |
+| `BenchmarkInMemoryBus_Publish_10Subscribers` | 340.7 | 0 | 0 | Synchronous local fanout remains below 1000 ns for small exact sets. |
+
+2026-05-21 propagation note: the bulk checksum/copy audit exposed that
+`Publish(context.Background(), normalizedEnvelope)` was constructing empty
+metadata maps before discovering there was no context metadata to merge.
+`metadata.FromContextOK` now lets event publish stay zero-allocation on the
+context-free hot path while preserving metadata injection when the context
+actually carries Foundation metadata.
+
+### 2026-05-11 service-backed Docker substrate check
+
+This pass adds `tests/service_backed_foundation_test.sh`, a Foundation-only live harness that starts isolated Redis 8 and Postgres 18 containers, waits for bounded health checks, runs tagged Go race tests against real services, then runs live benchmarks and tears the stack down.
+
+The harness deliberately stays outside `templates/` and `tooling/scripts` so scaffolded projects do not inherit core benchmark processes or compose files. `tests/scaffold_manifest_test.sh` now fails if service-backed assets appear in the scaffold manifest, template tree, or scaffold-copied tooling script directory.
+
+Live correctness covered:
+
+1. Redis `Set`/`Get` ownership, TTL expiry, `Incr`/`Expire`, token locks, exact pub/sub, pattern pub/sub, stream group read/ack, HyperLogLog cardinality, and Redis operation metrics.
+2. Postgres 18 state-store schema compatibility, scoped upsert/get/list/count, query-budget enforcement with `pg_sleep`, transaction rollback, `ExecResult`, pgx pool pressure, and database operation metrics.
+3. Postgres pool saturation with `MaxConns=1` and eight concurrent callers, verifying bounded acquire wait, `ErrPoolAcquireTimeout`, pgx pool pressure visibility, and no unbounded queueing.
+4. Postgres raw JSON state-store writes, verifying byte preservation at the handler boundary and server-side tenant stamping in stored JSONB.
+5. Redis-backed `events.Bus` lifecycle flow using `LifecycleRecorder` and `VerifyCommandLifecycle`, including correlation ID, tenant metadata, idempotency key, worker job metadata, and trace capture.
+
+Commands:
+
+```bash
+bash tests/service_backed_foundation_test.sh
+cd foundation/server-kit/go
+go test -tags=servicebacked -race -count=1 -timeout 5m ./servicebacked
+go test -tags=servicebacked -run '^$' -bench=BenchmarkServiceBacked -benchmem -benchtime 1s -count 1 ./servicebacked
+```
+
+Research alignment:
+
+1. Redis pipelining exists to amortize request/response RTT and socket syscall overhead. A sequential `SET` followed by `GET` is intentionally the slow comparison point; use `BatchClient.SetMany`, `GetMany`, or `SetGetMany` for multi-key cache hydration/write-through lanes.
+2. PostgreSQL bulk guidance favors one transaction, prepared/batched statements, and `COPY` over repeated independent inserts. Foundation exposes those lanes through `PostgresDB.SendBatch` and `CopyFromRows`.
+3. Docker volumes/tmpfs avoid the writable-layer penalty for database-like state. The service-backed harness uses tmpfs for Postgres and disables Redis persistence because Redis is not Foundation's durable recovery lane.
+
+Local result:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkServiceBackedRedisSetGet` | 512362 | 888 | 26 | Two sequential host-to-container round trips; this is the pessimistic baseline, not the target hot lane. |
+| `BenchmarkServiceBackedRedisSet` | 230824 | 464 | 13 | One Redis round trip on Docker Desktop/localhost. |
+| `BenchmarkServiceBackedRedisGet` | 319656 | 408 | 12 | One Redis round trip plus copied ownership boundary. |
+| `BenchmarkServiceBackedRedisSetGetParallel` | 135454 | 1022 | 29 | Pool/concurrency hides some RTT; still one command pair per operation. |
+| `BenchmarkServiceBackedRedisSetManyGetMany64` | 933156 | 51521 | 1053 | Two batch round trips for 64 keys, about 14600 ns/key. |
+| `BenchmarkServiceBackedRedisSetGetMany64` | 685292 | 49479 | 793 | One pipelined write/read batch for 64 keys, about 10700 ns/key. |
+| `BenchmarkServiceBackedRedisRawPipelineSetGet64` | 619035 | 31768 | 657 | Raw go-redis pipeline baseline, about 9700 ns/key in this Docker run. |
+| `BenchmarkServiceBackedPostgresUpsert` | 250843 | 3149 | 51 | Full `StateStore` semantics: JSONB payload, unique identity, timestamps, acquire budget, query budget, pool pressure. |
+| `BenchmarkServiceBackedPostgresUpsertRawJSON` | 250273 | 2188 | 40 | Byte-preserving JSON write path for handlers that do not need map mutation; tenant key is stamped in JSONB by SQL. |
+| `BenchmarkServiceBackedPostgresUpsertParallel` | 67960 | 3184 | 51 | Pool concurrency amortizes latency for independent tenant-scoped writes. |
+| `BenchmarkServiceBackedPostgresSendBatchUpsert64` | 2639219 | 73451 | 938 | Batched upsert is about 41200 ns/row. Keep diagnostics per row when using this lane. |
+| `BenchmarkServiceBackedPostgresCopyFrom64` | 630576 | 39487 | 378 | COPY ingest is about 9900 ns/row for append/import workloads. |
+
+Implementation delta from live parity:
+
+- Real Redis `GET` now returns `(nil, nil)` for missing keys to match the memory driver contract.
+- Real Redis stream group reads now auto-create missing groups with `XGROUP CREATE ... MKSTREAM` and retry once on `NOGROUP`.
+- The Postgres 18 service-backed compose file mounts tmpfs at `/var/lib/postgresql`, matching the official image layout for major-version-specific data directories.
+- Redis `BatchClient` adds `SetMany`, `GetMany`, and `SetGetMany` so Foundation projects can use pipelined/cache-batch lanes without importing raw go-redis.
+- Postgres `UpsertRecord` no longer round-trips and reparses the JSONB payload it just wrote; it returns timestamps only and keeps the normalized in-memory payload.
+- Postgres state-store and bulk lanes now acquire explicit connections under `AcquireTimeout`, so `MaxConns` saturation produces bounded `ErrPoolAcquireTimeout` failures instead of silent pgxpool queueing.
+- `RawStateStore.UpsertRecordJSON` adds a byte-preserving JSON path for handlers that already own canonical JSON. In this run it reduced state-store write allocation from 3149 B/51 allocs to 2188 B/40 allocs while keeping tenant stamping server-side in JSONB.
+- Service-backed concurrent smoke tests now enforce p95 and p99 latency budgets for Redis and Postgres instead of p95 alone.
+- Scaffold Redis now defaults to Redis 8 and disables RDB/AOF persistence because Redis is an ephemeral speed/coordination substrate; durable recovery belongs to Postgres/River/outbox.
+
+### 2026-05-09 Core Tuning Check
+
+This pass added an opt-in bound frame client for same-process hot routes. The default router and direct client behavior remains unchanged; the bound client resolves the frame handler once at startup and avoids the per-dispatch route-map lookup. Use it only for stable internal lanes where the route is known and registered during initialization.
+
+The follow-up data-shape change keeps the binary frame wire format unchanged but interns low-cardinality control strings during owned decode. `EventType` and `SchemaVersion` are treated as bounded vocabularies; `CorrelationID` remains owned per message because it is high-cardinality. Borrowed `FrameView` remains the zero-copy lane for synchronous hot paths.
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkRouterDispatchFrameDirect` | 17.44 | 0 | 0 | Generic same-process router remains map lookup + handler call |
+| `BenchmarkDirectFrameClientDispatch` | 22.49 | 0 | 0 | Validated client facade is modestly faster |
+| `BenchmarkBoundFrameClientDispatch` | 11.11 | 0 | 0 | Bound same-process route nearly halves the direct-client facade |
+| `BenchmarkBoundFrameClientDispatchTrusted` | 10.80 | 0 | 0 | Remaining cost is mostly the handler function call |
+| `BenchmarkBinaryFrameAppendViewRoundTrip` | 22.10 | 0 | 0 | Borrowed binary view remains stable |
+| `BenchmarkBinaryFrameAppendRoundTrip` | 51.41 | 8 | 1 | Owned decode now only owns the high-cardinality correlation string on warm control vocabularies |
+| `BenchmarkBinaryFrameCodecRoundTrip` | 102.4 | 152 | 3 | Codec-compatible owned path keeps marshal allocation but avoids repeated control-string ownership |
+| `BenchmarkDispatchFrameOverBufconn` | 22751 | 10932 | 178 | gRPC boundary remains tens-of-thousands-of-ns; binary codec saves allocations but not the gRPC stack cost |
+| `BenchmarkDispatchOverBufconn` | 28187 | 12688 | 213 | JSON envelope remains compatibility lane |
+
+The practical performance target is not to force every lane under the same nanosecond budget. The route-bound path is the right tool for trusted in-process hot dispatch. Borrowed frame views are the right shape when data does not escape the source buffer; owned decode is now cheaper for compatibility paths that need durable strings. gRPC, JSON, queue, DB, and external Redis/Postgres lanes must be optimized with batching, pooling, backpressure, and tail-latency controls instead of pretending they are equivalent to a direct function call.
+
+### 2026-05-09 Local Scale Pressure Check
+
+This pass added `server-kit/go/appbench/scale_paths_test.go`, a no-external-service pressure harness for the scale questions that local nanosecond dispatch benchmarks cannot answer by themselves. It pushes tenant predicates, cache stampede coalescing, in-memory Redis fanout, WebSocket churn/routing, worker queue saturation, exact/wildcard event fanout, config convergence, and mixed p50/p95/p99 latency with local substitutes.
+
+Environment:
+
+- Date: 2026-05-09
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Command: `cd foundation/server-kit/go && go test -run=^$ -bench='BenchmarkScale_' -benchmem ./appbench`
+
+| Benchmark | First pressure run | Tuned run | Allocation change | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale_MemoryDBTenantCount100K` | 5191 ns | 5177 ns | 0 -> 0 | Tenant count is index-shaped and stable |
+| `BenchmarkScale_MemoryDBTenantListFiltered100K` | 36164 ns | 29708 ns | 41592 B / 105 allocs -> 33400 B / 105 allocs | Scalar `Data` filter index narrows candidates before defensive record copies |
+| `BenchmarkScale_WebSocketBroadcastResolveInto100K` | 2495856 ns | 27382 ns | 0 -> 0 | Broadcast routing now copies from a contiguous connection index instead of walking the connection map |
+| `BenchmarkScale_WebSocketUserResolve100K` | 231.4 ns | 227.8 ns | 0 -> 0 | User routing remains direct indexed lookup |
+| `BenchmarkScale_EventExactDispatch100KSubscriptions` | 2179 ns | 194.1 ns | 1811 B / 13 allocs -> 0 B / 0 allocs | Exact event fanout is now map lookup + ring-buffer record + callback |
+| `BenchmarkScale_EventWildcardDispatch1KSubscriptions` | 26050 ns | 23209 ns | 1790 B / 13 allocs -> 64 B / 1 alloc | Wildcard fanout still scans wildcard patterns; use exact tenant topics for hot paths |
+| `BenchmarkScale_ConfigConvergence10K` | 159.3 ns | 158.2 ns | 0 -> 0 | Runtime config validation is not a deploy-time bottleneck in-process |
+| `BenchmarkScale_LocalOperationMixLatency` | 10183 ns mean, 24084 ns p99 | 7874 ns mean, 15959 ns p99 | 3794 B / 34 allocs -> 1984 B / 21 allocs | Mixed local DB count + WS user route + cache hit + event publish + config validation stays below 20000 ns p99 locally |
+
+Correctness pressure covered by the local test:
+
+- 100 tenants x 100 records with tenant predicates and filtered list checks.
+- 1000 users x 10 WebSocket connections with unregister/register churn and broadcast resolution.
+- 512 concurrent cache misses coalesced to one computation.
+- 1000 exact subscribers per tenant with no cross-tenant delivery.
+- 1024 in-memory Redis subscribers receiving one fanout payload.
+- Worker queue fills to the bounded 1024 capacity and rejects overflow.
+- 2048 concurrent runtime config validations converge without mutation.
+
+What this proves: the foundation's local data structures are now shaped correctly for the distributed bottlenecks. Exact topics avoid broad fanout scans, WebSocket broadcast has a contiguous local index, user/device routes are indexed, cache stampedes coalesce, queue overflow is explicit, config validation is cheap, and p99 for the mixed local lane is tracked.
+
+What this does not prove: real Postgres query plans, real Redis cluster fanout behavior, TLS/network jitter, kernel socket buffers, browser slow-client write queues, cross-region routing, or deploy orchestration behavior. Those need service-backed load tests with `EXPLAIN (ANALYZE, BUFFERS)`, Redis/pubsub metrics, WebSocket slow-consumer injection, and p95/p99 dashboards. The local harness is the fast regression net before those external proofs.
+
+### 2026-05-09 1M Local Scale Check
+
+This pass extends the local proof to 1 million records/connections/subscriptions and reconciles the in-memory store with the Postgres state-store contract. The scaffold migration now creates `governance_state_records` with the same identity key the adapter uses, scoped/order indexes for tenant queries, and a JSONB GIN index for app-specific containment queries. The Postgres adapter now pushes scalar JSONB filters into SQL before `LIMIT`, applies query budgets to state-store methods, and still rechecks filters in Go to preserve MemoryDB semantics.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -run=^$ -bench='BenchmarkScale1M_' -benchmem -benchtime=100x ./appbench
+```
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale1M_MemoryDBTenantCount` | 5544 | 0 | 0 | Tenant count stays indexed at 1M records |
+| `BenchmarkScale1M_MemoryDBTenantListFiltered` | 18360 | 33400 | 105 | Filtered list uses scoped/filter indexes, then pays intentional response-copy cost |
+| `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit` | 19051 | 33400 | 105 | Dense single-tenant filtered list uses order-aware field indexes and stops at `LIMIT 50` |
+| `BenchmarkScale1M_WebSocketBroadcastResolveInto` | 556400 | 0 | 0 | Materializing 1M local connection IDs is a contiguous 16 MB string-header slice copy |
+| `BenchmarkScale1M_WebSocketBroadcastForEach` | 2096710 | 0 | 0 | Per-connection streaming avoids materialization but costs one callback per connection |
+| `BenchmarkScale1M_WebSocketBroadcastBatch` | 753.8 | 0 | 0 | Adaptive chunked broadcast routing uses borrowed slices and scales with batch count |
+| `BenchmarkScale1M_WebSocketUserResolve` | 271.7 | 0 | 0 | User routing remains direct indexed lookup even with 1M local connections |
+| `BenchmarkScale1M_EventExactDispatchSubscriptions` | 244.2 | 0 | 0 | Exact event dispatch remains constant-time at 1M subscription cardinality |
+
+Data-shape check:
+
+| Benchmark | Before | After | Allocation change | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit` | 603816285 ns | 19051 ns | 72032888 B / 105 allocs -> 33400 B / 105 allocs | Dense tenant reads must use order-aware scoped/filter indexes; sorting/materializing all candidates is the wrong shape for `LIMIT` |
+| `BenchmarkScale_EventWildcardDispatch1KSubscriptions` | 23209 ns | 286.7 ns | 64 B / 1 alloc -> 64 B / 1 alloc | Colon-prefix wildcard subscriptions now route by prefix bucket instead of scanning all wildcard patterns |
+| `BenchmarkScale_EventPrefixWildcardDispatch100KSubscriptions` | 2542881 ns | 333.8 ns | 64 B / 1 alloc -> 64 B / 1 alloc | Tenant prefix fanout scales by event depth and matching bucket, not total wildcard subscriptions |
+
+Broadcast strategy check:
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkScale_WebSocketBroadcastResolveInto1K` | 327.5 | 0 | 0 | Materializing 1k IDs is cheap when a stable slice is needed |
+| `BenchmarkScale_WebSocketBroadcastBatch1K` | 32.08 | 0 | 0 | 1k broadcast routes as one borrowed batch |
+| `BenchmarkScale_WebSocketBroadcastResolveInto100K` | 39578 | 0 | 0 | 100k materialization is still below 100000 ns, but copies target IDs |
+| `BenchmarkScale_WebSocketBroadcastBatch100K` | 336.2 | 0 | 0 | 100k broadcast routes as adaptive borrowed batches |
+| `BenchmarkScale1M_WebSocketBroadcastResolveInto` | 556400 | 0 | 0 | 1M materialization is dominated by copying the target slice |
+| `BenchmarkScale1M_WebSocketBroadcastForEach` | 2096710 | 0 | 0 | 1M per-connection callbacks are too expensive for routing alone |
+| `BenchmarkScale1M_WebSocketBroadcastBatch` | 753.8 | 0 | 0 | 1M adaptive batches keep routing overhead below 1000 ns in this run |
+
+Interpretation: 1M local scale is not breaking the foundation data structures, but the API and container choice matters. Use `ResolveTargetsInto` only when the caller needs an owned/stable target list. Use adaptive `ForEachTargetBatch` for broadcast fanout so the router hands write queues borrowed chunks instead of copying a huge slice or invoking a million callbacks. Event wildcards should be exact or colon-prefix shaped for product traffic; complex wildcard patterns remain compatibility/observability tools. Returning 50 DB records allocates because public records are defensive copies. Dense tenant reads must stop at indexed `LIMIT`, not sort broad state. Broadcast to 1M live sockets is still a product-level write-pressure problem: it requires bounded per-connection queues, slow-client shedding, and node-level fanout budgets.
+
+### Historical app-lane check
+
+| Benchmark | ns/op | B/op | allocs/op | Role |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkAppLane_DirectFrame_DomainCall` | 36.18 | 32 | 1 | App-shaped direct frame domain call |
+| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | 5329 | 9219 | 71 | HTTP JSON ingress to dispatch request |
+| `BenchmarkAppLane_Auth_ValidateToken` | 3415 | 2104 | 27 | JWT validation only |
+| `BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC` | 7751 | 11284 | 81 | HTTP middleware with auth, headers, validation, RBAC |
+| `BenchmarkAppLane_Cache_GetHit_JSONValue` | 53.34 | 0 | 0 | In-memory cache hit |
+| `BenchmarkAppLane_Retry_NoRetrySuccess` | 3.231 | 0 | 0 | No-retry success fast path |
+| `BenchmarkAppLane_CircuitBreaker_ClosedSuccess` | 61.66 | 0 | 0 | Healthy dependency safety wrapper |
+| `BenchmarkAppLane_Worker_EnqueueWithBackpressureAndDrain` | 4499 | 1267 | 24 | Accepted worker enqueue and drain |
+| `BenchmarkAppLane_Worker_RejectFullQueue` | 1566 | 734 | 17 | Bounded queue rejection path |
+| `BenchmarkAppLane_Worker_DropNoProcessor` | 1316 | 707 | 14 | Missing processor rejection path |
+| `BenchmarkAppLane_Retry_CanceledWait` | 94.77 | 96 | 2 | Canceled retry wait path |
+
+These app-lane results explain the practical architecture boundary: the foundation communication core remains far cheaper than real HTTP auth, route building, worker rejection, or domain persistence logic. Optimize product code by keeping hot internal calls on direct/binary lanes, then budgeting auth, DB, worker, and cache costs explicitly.
+
+### Historical foundation hardening pass
+
+After reducing avoidable allocations in JWT bearer parsing, HTTP path parameter extraction, and worker job normalization:
+
+| Benchmark | Before | After | Allocation change | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | 5570 ns | 5141 ns | 74 -> 71 | Path extraction no longer uses regex match allocation |
+| `BenchmarkAppLane_Auth_ValidateToken` | 3380 ns | 3312 ns | 28 -> 27 | Token parsing avoids split allocation |
+| `BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC` | 7600 ns | 7455 ns | 83 -> 81 | Auth + middleware path inherits parsing improvement |
+| `BenchmarkAppLane_Worker_EnqueueWithBackpressureAndDrain` | 5373 ns | 5294 ns | 26 -> 24 | Metadata-free raw jobs avoid empty map allocation |
+| `BenchmarkAppLane_Worker_RejectFullQueue` | 1734 ns | 1647 ns | 19 -> 17 | Bounded rejection path is cheaper |
+| `BenchmarkAppLane_Worker_DropNoProcessor` | 1543 ns | 1479 ns | 17 -> 15 | Missing processor rejection path is cheaper |
+
+These are small but useful foundation-wide improvements because every scaffold inherits them. The bigger lesson is unchanged: auth, HTTP shaping, and worker queues are thousands-of-ns safety boundaries. They are appropriate at ingress and async boundaries, but same-process hot domain calls should stay on direct frame or typed call lanes.
+
+### Post-Quantum TLS Check
+
+Local TLS 1.3 handshake benchmark:
+
+| Benchmark | ns/op | B/op | allocs/op | Role |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkTLSHandshake_ClassicalX25519` | 420556 | 72599 | 817 | Classical TLS 1.3 local handshake |
+| `BenchmarkTLSHandshake_HybridX25519MLKEM768` | 576051 | 116436 | 838 | Hybrid post-quantum TLS 1.3 local handshake |
+| `BenchmarkApplyPostQuantumTLSAuto` | 217.6 | 964 | 3 | Config posture application |
+
+Hybrid post-quantum TLS adds about 155000 ns in this local handshake benchmark. That cost belongs at connection/session establishment or the edge terminator, not inside per-request JWT validation, render loops, domain handlers, or worker hot loops. The foundation posture remains: use standardized hybrid TLS where supported, keep signatures for durable artifacts and compliance workflows, and benchmark before moving post-quantum signatures into any request path.
+
+### Phase 2 Core Utilities (Server-Kit)
+
+| Benchmark | ns/op | B/op | allocs/op | Role |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkMemoryBackend_Get` | 53.71 | 0 | 0 | Ultra-low latency cache read |
+| `BenchmarkJob_Normalize` | 4.850 | 0 | 0 | Minimum worker job normalization overhead |
+| `BenchmarkCircuitBreaker_Execute_Closed` | 61.24 | 0 | 0 | Safety overhead per healthy call |
+| `BenchmarkInMemoryBus_Publish_10Subscribers` | 289.2 | 0 | 0 | Trace-enabled in-process delivery latency |
+
+These numbers are local references, not universal budgets. CI and developer laptops vary. The important signal is the ordering and allocation shape.
+
+## Comparative interpretation
+
+Direct frame dispatch is the baseline for same-process hot communication. It validates the frame and calls the registered handler without gRPC, Redis, HTTP, JSON, or heap allocation. This is the lane to use when caller and handler share a process and lifecycle.
+
+Borrowed binary frame views are the right parser shape for synchronous hot paths. `UnmarshalFrameView` returns slices into the original frame bytes, so routing and validation can inspect event type, correlation ID, schema version, and payload without copying. Owned decode remains available when data needs to escape the input buffer lifetime.
+
+Generated protobuf remains the default for typed cross-process contracts. It is not zero-allocation in this benchmark, but it preserves schema discipline and avoids `map[string]any` materialization. Use it for service-to-service contracts where the payload semantics are stable and versioned.
+
+gRPC is a boundary tool, not the default internal hot path. Even with `bufconn`, it is orders of magnitude slower than direct dispatch because it exercises client/server call machinery, interceptors, metadata, codec invocation, and message framing. That cost is acceptable for cross-host/polyglot boundaries and unacceptable for same-process routing.
+
+JSON envelopes are compatibility-only. In the current run, binary gRPC frames use fewer allocations and fewer bytes than JSON envelopes over the same in-memory gRPC path. New hot communication APIs must provide typed or binary paths first and keep JSON as an explicit fallback.
+
+The operation chain benchmark measures orchestration overhead, not external I/O speed. `chain.RunParallel` is intended for independent I/O-bound work where latency is dominated by storage, network, or service calls. It must preserve cancellation semantics: critical failures cancel the chain, non-critical failures are reported without blocking unrelated work.
+
+### Phase 2 Performance Multipliers
+
+**Singleflight Coalescing**: By integrating `singleflight` into the `cache` package, we eliminate the 100x latency spike typically seen during cache stampedes. Concurrent requests for the same missing key now wait for a single computation, converting a potential system-wide slowdown into a predictable sub-millisecond wait.
+
+**Vectorized Batching**: Bulk processing of `EventBatch` envelopes reduces the frequency of JS event loop ticks and Go scheduler wakeups. For high-throughput streams (8kHz+), batching provides a 30-50% reduction in total system CPU consumption compared to single-event dispatch.
+
+**Adaptive Worker Pools**: The worker engine's ability to scale based on queue depth ensures that throughput (hz) remains high even under sudden pressure, while keeping idle memory overhead near zero on quiet nodes.
+
+## Runtime SDK comparison
+
+The runtime SDK has a separate performance shape:
+
+- `ffi`: trusted in-process mutation of the fixed 4KB runtime control buffer.
+- `shm`: same-host process isolation with shared-file runtime buffer under `/dev/shm`.
+- `stdio`: portable framed buffer exchange.
+- browser worker/WASM: worker-owned execution with `SharedArrayBuffer` when cross-origin isolation allows it.
+
+Do not reduce runtime parity to a single Wasm-host implementation strategy. The correct parity question is whether a unit produces identical buffer state across the lanes the product actually uses: status code, output bytes, diagnostics, and epoch transitions.
+
+The next runtime benchmark target should compare:
+
+1. native direct unit dispatch
+2. FFI `process_buffer`
+3. stdio framed runtime buffer
+4. shared-memory transport on Linux
+5. browser worker/WASM where available
+6. Tauri-backed `runtime-native` IPC frame dispatch as a measured control boundary
+
+Each run should report latency, bytes copied at transport boundaries, allocations where the language runtime exposes them, and failure-path behavior.
+
+`runtime-native` benchmark entrypoint:
+
+```bash
+foundation/tooling/scripts/native_benchmark.sh .
+```
+
+The native benchmark is report-only until at least three stable local baselines exist. Its result must be compared against the existing same-process, FFI, shared-memory, WASM/SAB, WebSocket, and HTTP ladder before any native IPC path becomes a default.
+
+The same script also runs `native_flow_sim`, which models communication-flow
+copy budgets without requiring Tauri, Android, or iOS SDKs. It compares:
+
+1. full-payload native control frames,
+2. descriptor-only control frames that represent external native payloads,
+3. the `runtime-sdk` fixed-buffer in-place path.
+
+This simulation is part of the Foundation communication contract. It proves the
+shape before platform SDKs enter the loop: control messages may copy small
+binary frames, but hot payloads must stay in native buffers, shared arenas,
+packet rings, or fixed runtime buffers.
+
+2026-05-12 local Apple M1 Pro run:
+
+| Lane slice | Payload | Mean | p50 | p95 | p99 | Notes |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `runtime-native` dispatch frame | 4KB | 639.73 ns | 583 ns | 625 ns | 667 ns | In-process Rust bridge benchmark; Tauri IPC not included |
+| `runtime-native` dispatch frame | 64KB | 10180 ns | 8040 ns | 12830 ns | 91670 ns | One tail outlier in this run; still report-only |
+| `runtime-native` dispatch frame | 1MB | 111990 ns | 114380 ns | 134830 ns | 171920 ns | Copies payload through frame encode/decode and echo unit |
+| native TS frame encode | ~1KB envelope | 1,000,386 ops/s | 1000 ns mean | 3500 ns p99 | 4100 ns p99.5 | Browser/JS frame construction cost |
+| native TS response decode | ~1KB envelope | 3,248,841 ops/s | 300 ns mean | 400 ns p99 | 900 ns p99.5 | Header validation and payload view |
+| runtime-sdk Rust buffer output borrowed view | 2KB | 3.65 ns/op | n/a | n/a | n/a | Hot lane reference: no owned output copy |
+| runtime-sdk Rust buffer fast output write | 2KB | 16.33 ns/op | n/a | n/a | n/a | Hot lane reference: trusted copy-only write |
+| direct Go frame dispatch | control frame | 17.49-22.07 ns/op | n/a | n/a | n/a | Hot same-process control reference |
+| bufconn dispatch | control frame | 20330-24830 ns/op | n/a | n/a | n/a | Local RPC-style boundary reference |
+
+Interpretation: `runtime-native` frame dispatch is viable as a local native control lane when the shell needs device access, platform lifecycle, secure storage, or mobile/desktop packaging. It is not the top of the performance ladder. Direct same-process frame dispatch, `runtime-sdk` fixed-buffer views, FFI, shared memory, and WASM/SAB remain the hot compute lanes when payloads are frequent or latency budgets are below 1000 ns.
+
+2026-05-13 communication-flow simulation:
+
+| Simulated lane | Represented payload | Mean | p50 | p95 | p99 | Modeled copy budget |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| full-payload native frame | 4KB | 659.63 ns | 625 ns | 750 ns | 833 ns | ~20KB/call, 5x payload |
+| full-payload native frame | 64KB | 15420 ns | 15040 ns | 19580 ns | 28330 ns | ~320KB/call, 5x payload |
+| full-payload native frame | 1MB | 149200 ns | 144540 ns | 174170 ns | 253290 ns | ~5MB/call, 5x payload |
+| descriptor control frame | 4KB external | 381.21 ns | 333 ns | 375 ns | 458 ns | 0 hot-payload bytes; ~480B control |
+| descriptor control frame | 64KB external | 323.30 ns | 292 ns | 334 ns | 416 ns | 0 hot-payload bytes; ~480B control |
+| descriptor control frame | 1MB external | 323.16 ns | 292 ns | 334 ns | 375 ns | 0 hot-payload bytes; ~480B control |
+| runtime buffer in-place | 1KB input | 144.52 ns | 125 ns | 167 ns | 167 ns | input view is zero-copy; current echo copies output and clears output region |
+
+Interpretation: full-payload native control frames are linear in payload size and
+should stay out of device hot streams. Descriptor control frames are effectively
+constant with respect to represented payload size, which is the desired
+Foundation shape for camera frames, microphone PCM chunks, sensor samples,
+market ticks, and other packet-like streams. The control plane moves ownership,
+schema, epoch, and buffer descriptors; the data plane stays in fixed buffers,
+arena slabs, shared memory, WASM/SAB, or native packet rings.
+
+Runtime lane planning now has explicit scheduling inputs: payload size, workload class, trust, locality, batch size, deadline, unit capabilities, and available hardware/runtime features. The planner must preserve the runtime contract while selecting the cheapest physical lane:
+
+1. direct/same-process for trusted control payloads,
+2. Rust FFI or CPU SIMD for trusted vector-sized work,
+3. shared-memory or WASM/SAB for bounded same-host/browser payloads,
+4. WebGPU for wide data-parallel batches large enough to amortize dispatch,
+5. transfer or stream fallbacks when SAB/GPU lanes are unavailable.
+
+Go SIMD note: Go 1.26 exposes experimental `simd/archsimd` behind
+`GOEXPERIMENT=simd`. Treat Foundation Go SIMD benchmarks as opt-in architecture
+lane checks. They should report scalar Go, Go SIMD, Rust FFI/native, and
+WASM/SAB comparisons for the same input contract before a Go SIMD path becomes
+eligible for default lane planning.
+
+For financial applications, Rust is the deterministic math lane, not the database orchestration lane. Use Rust for exact minor-unit conversion, checked integer arithmetic, fee/basis-point kernels, route scoring, settlement simulation, canonical payload hashing, and proof-adjacent state machines. Keep provider calls, Postgres transactions, policy lookups, audit writes, and request orchestration in Go/server-kit. A Rust boundary is justified when it removes floating-point ambiguity, batch-computes enough work to amortize the call, or needs parity across native/WASM/browser lanes.
+
+GPU batch layouts should be benchmarked separately from descriptor-ring traffic. The browser-host helper packs batch regions on 256-byte boundaries by default so storage-buffer style workloads can move through the arena without per-item ad hoc layout decisions.
+
+`RuntimeWebGpuHost` is intentionally split into testable pieces:
+
+1. pack arena descriptors into aligned GPU input buffers,
+2. create/cache compute pipelines asynchronously,
+3. dispatch workgroups,
+4. copy GPU output to a readback buffer,
+5. write output slices back to the source arena descriptors.
+
+Node tests validate the deterministic packing/writeback helpers without requiring a physical GPU. Browser/device benchmarks should add real `GPUDevice` dispatch metrics separately because adapter choice, driver, browser, and power state dominate those numbers.
+
+## Browser shared-arena reference
+
+The browser-host benchmark measures payload movement inside `RuntimeSharedArena`. Current local reference:
+
+| Benchmark | hz | mean ns | p99 ns | Role |
+| --- | ---: | ---: | ---: | --- |
+| 4KB slab write/read | 736596.92 | 1400 | 4400 | Control-plane-sized payload movement |
+| 64KB slab write/read | 102084.09 | 9800 | 46200 | Medium slab payload movement |
+| 1024KB slab write/read | 8422.95 | 118700 | 681500 | Large slab payload movement |
+| sustained descriptor-ready ring traffic | 922.79 | 1083700 | 1270200 | Descriptor queue pressure path |
+
+The 4KB control-plane-sized path is roughly 7.22x faster than the 64KB slab path and 87.45x faster than the 1024KB slab path in this run. That supports the current design split: keep the hot control plane fixed and small, move larger payloads through arena descriptors or explicit streams, and benchmark descriptor-ring pressure separately from raw slab copies.
+
+### Browser Shared-Arena Hardening Run
+
+Environment:
+
+- Date: 2026-05-07
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Command: `cd foundation/runtime-sdk/ts/browser-host && npm run bench -- --reporter=verbose`
+
+| Benchmark | mean ns | p99 ns | Interpretation |
+| --- | ---: | ---: | --- |
+| 4KB slab write/read | 1500 | 4000 | Owned read copy path |
+| 4KB slab write/read view | 500 | 600 | Borrowed view avoids output copy |
+| 4KB slab fast write/read view | 400 | 500 | Thin hot path for prevalidated descriptor use |
+| 64KB slab write/read | 10700 | 55500 | Owned read cost grows with payload size |
+| 64KB slab write/read view | 3000 | 3200 | View path stays near memory-copy cost |
+| 64KB slab fast write/read view | 2900 | 3200 | Fast path is limited by slab copy |
+| 1024KB slab write/read | 121400 | 762200 | Large owned copy path |
+| 1024KB slab write/read view | 43100 | 62200 | Large view path avoids the second copy |
+| 1024KB slab fast write/read view | 43100 | 60700 | Same limit: moving 1MB dominates |
+| sustained descriptor-ready ring traffic | 1079900 | 1255700 | Single-entry queue CAS loop baseline |
+| descriptor-ready batch traffic x128 | 1090900 | 1243800 | Old batched API still pays per-entry queue work |
+| descriptor-ready fast batch traffic x128 | 487800 | 607600 | One tail CAS plus one head CAS per batch |
+| preallocated write/enqueue/dequeue batch x128 | 57200 | 80600 | Best full hot lane when descriptors are already owned |
+| descriptor release/reallocate free-list x1 | 313 | 400 | Reuse path is sub-4KB-copy cost |
+| descriptor release/reallocate free-list x128 | 35100 | 55700 | Lifecycle churn stays below preallocated write/enqueue/dequeue x128 |
+
+The major improvement is descriptor orchestration, not raw memory bandwidth. `descriptor-ready fast batch traffic x128` is about 2.24x faster than the old x128 batch path in this run. The new release/reallocate path also proves long-running processes can recycle descriptor IDs and their page-aligned slab regions without advancing the arena allocation head when the next request fits.
+
+Operational rule: allocate descriptors for stable flows, reuse them aggressively, and use fast queue reservations only for batches. For x1, the old single-entry path remains competitive because the fast batch path has extra setup without amortization.
+
+### 2026-05-23 WebGPU CPU-Side Helper Run
+
+This pass added a focused `RuntimeWebGpuHost` benchmark for the CPU-side work
+around WebGPU dispatch: strict layout planning, arena descriptor packing into a
+contiguous upload buffer, and readback writeback into arena descriptors. It does
+not measure physical GPU kernel time; browser/device WebGPU measurements must
+add adapter acquisition, pipeline warmup, queue submit, dispatch, and readback.
+
+Command:
+
+```bash
+cd foundation/runtime-sdk/ts/browser-host
+npm run bench -- src/webgpuHost.bench.ts --run --reporter=verbose
+```
+
+Tuning changed the dispatch helper to avoid duplicate internal validation after
+the layout has already been checked, and `writeGpuOutputToArena` now writes
+slices directly to arena descriptors instead of building a transient writes
+array.
+
+The follow-up nanosecond pass added caller-owned layout and pack targets plus
+descriptor-snapshot arena copy/write helpers. This keeps checked public
+semantics available while giving hot paths an explicit reuse lane.
+
+The second follow-up applied the WebGPU host-interaction rule from
+`gpu_practices.md`: direct arena uploads now use `GPUQueue.writeBuffer` with
+data offsets and sizes against the stable arena typed-array view when all
+regions satisfy WebGPU's 4-byte write validation. Unaligned regions fall back to
+packed upload. `RuntimeWebGpuHost` also gained a bounded GPU buffer pool keyed
+by size and usage, so transient input/readback buffers and explicitly destroyed
+resource receipts can be reused without unbounded device allocation churn.
+
+| Benchmark | First tuned mean | Reuse-path mean | Meaning |
+| --- | ---: | ---: | --- |
+| `gpu layout strict u32 4KB x1` | `100 ns` | `100 ns` | Layout planning is already nanosecond-class for single-region batches. |
+| `gpu layout strict u32 into 1KB x128` | not tracked | `1100 ns` | Caller-owned layout storage trims multi-region planning churn. |
+| `gpu pack arena descriptors 4KB x1` | `1100 ns` | `1000 ns` | Owned pack still pays output allocation. |
+| `gpu pack arena descriptors into 4KB x1` | not tracked | `300 ns` | Caller-owned target avoids pack allocation; about 3.3x faster than owned pack. |
+| `gpu writeback arena descriptors 4KB x1` | `300 ns` | `300 ns` | Descriptor-snapshot writeback remains nanosecond-class. |
+| `gpu pack arena descriptors 64KB x1` | `8000 ns` | `6800 ns` | Owned medium pack improved modestly from descriptor-snapshot reads. |
+| `gpu pack arena descriptors into 64KB x1` | not tracked | `2800 ns` | Caller-owned medium pack is near the arena writeback cost. |
+| `gpu writeback arena descriptors 64KB x1` | `2900 ns` | `2800 ns` | Medium writeback is now mostly copy bandwidth. |
+| `gpu pack arena descriptors 1024KB x1` | `77800 ns` | `76500 ns` | Owned large pack is still dominated by allocation plus 1MB movement. |
+| `gpu pack arena descriptors into 1024KB x1` | not tracked | `42700 ns` | Caller-owned large pack cuts the allocation side, leaving memory movement. |
+| `gpu writeback arena descriptors 1024KB x1` | `43200 ns` | `42700 ns` | Large writeback is memory bandwidth shaped. |
+| `gpu pack arena descriptors 1KB x128` | `26200 ns` | `22500 ns` | Many-region owned pack improved, but still allocates the packed buffer. |
+| `gpu pack arena descriptors into 1KB x128` | not tracked | `15400 ns` | Caller-owned target still reduces many-region pack overhead versus owned pack. |
+| `gpu writeback arena descriptors 1KB x128` | `21300 ns` | `21700 ns` | Many-region writeback is mostly per-descriptor state updates and copies; this run is scheduler-noisy. |
+
+Interpretation: the browser GPU CPU-side helper overhead is nanosecond-recorded
+and ranges from hundreds of ns for tiny control-sized helpers to tens of
+thousands of ns for 1MB or 128-region
+batches. That is cheap enough for GPU candidates that already need wide
+data-parallel work, but still too expensive for scalar control, auth, routing,
+or UI deadlines below 1,000,000 ns. The next GPU benchmark gap is a real
+browser/device run that separates pipeline warmup, upload, dispatch, readback,
+and arena writeback using the timing fields returned from `dispatchArenaBatch`.
+
+Resident-lane correction: `RuntimeWebGpuHost` now defaults dispatch output to a
+GPU-resident resource receipt. Arena materialization is explicit through
+`materializeResourceToArena`, and resident resources can feed subsequent GPU
+passes through `dispatchResidentBatch` without re-uploading arena bytes.
+
+The policy benchmark uses a fake WebGPU device, so it measures host-side JS
+dispatch/resource bookkeeping rather than physical GPU work:
+
+| Benchmark | Mean | Meaning |
+| --- | ---: | --- |
+| `webgpu fake dispatch gpu-resident 4KB x1` | `1900 ns` | Arena input is uploaded once through direct offset write and output remains GPU-resident. |
+| `webgpu fake dispatch materialize-readback 4KB x1` | `3700 ns` | Compatibility mode pays explicit readback/writeback. |
+| `webgpu fake dispatch resident-to-resident 4KB x1` | `1100 ns` | No arena upload and no readback; output stays GPU-resident for the next pass. |
+
+Interpretation: resident-to-resident dispatch is about 1.65x faster than
+arena-to-resident and about 3.27x faster than materialize-readback in this
+host-side benchmark. This is the Foundation GPU target shape: Cap'n Proto and
+arena descriptors carry canonical contract metadata, while GPU buffers/textures
+remain resident across GPU pass graphs until a CPU-visible boundary explicitly
+requests materialization.
+
+`runRuntimeWebGpuPhysicalProbe` is now the browser probe wrapper for physical
+adapter runs. It calls `measureRuntimeWebGpuDeviceRoundTrip` and reports
+adapter acquisition, device acquisition, pipeline warmup, dispatch,
+queue-drain, materialization, and total wall time in nanoseconds. Node on this
+machine reports no `navigator.gpu`, so no physical browser/device adapter run
+is recorded in this ledger yet.
+
+### 2026-05-24 Native GPU Descriptor Contract Run
+
+This pass added the canonical native GPU descriptor receipt contract:
+`runtime-sdk/protocols/system/v1/runtime_native_gpu.capnp`. TypeScript, Go, and
+Rust expose typed validators and map public descriptor receipts into the Cap'n
+Proto numeric contract. `runtime-native` reuses the `runtime-sdk` TypeScript
+contract and adds native command names; raw platform handles remain in
+plugin-owned side tables.
+
+Commands:
+
+```bash
+cd foundation/runtime-sdk/ts/browser-host
+npm run bench -- src/nativeGpu.bench.ts --run --reporter=verbose
+
+cd foundation/runtime-native/ts
+npm run bench -- src/nativeTransport.bench.ts --run --reporter=verbose
+
+cd foundation/runtime-sdk/go
+go test ./runtimehost -bench=RuntimeNativeGPUDescriptorValidate -benchmem
+
+cd foundation/runtime-native/rust
+cargo run --release --bin native_flow_sim
+```
+
+| Benchmark | Mean | Notes |
+| --- | ---: | --- |
+| `validate native GPU descriptor` | `500 ns` mean, `1400 ns` p99 | TypeScript public receipt validation and raw-handle field rejection after removing transient `TextEncoder`, `Object.keys`, and lowercase-string allocation. |
+| `plan native GPU lane` | `700 ns` mean, `1500 ns` p99 | TypeScript planner with descriptor validation and platform capability check. |
+| `validate native GPU descriptor receipt` | `500 ns` mean, `600 ns` p99 | `runtime-native` TS command-side receipt validation through the shared `runtime-sdk` contract. |
+| `BenchmarkRuntimeNativeGPUDescriptorValidate` | `26.28 ns/op`, `0 B/op`, `0 allocs/op` | Go descriptor validation and enum contract path. |
+| `native-gpu-descriptor-contract` | `26.17 ns` mean, `41 ns` p50, `42 ns` p99 | Rust validation plus borrowed Cap'n Proto contract mapping in the native flow simulation. |
+| `native-gpu-registry-lifecycle` | `992.62 ns` mean, `709 ns` p50, `3750 ns` p99 | Rust private registry register + acquire + release + final release with a bounded side table and no hot payload copy. |
+| `native-gpu-plugin-opaque-lifecycle` | `546.45 ns` mean, `542 ns` p50, `625 ns` p99 | Rust private registry register + release for an opaque plugin-owned IOSurface/AHB/CUDA/Vulkan-style handle. |
+| `native-gpu-unix-fd-lifecycle` | `8639.15 ns` mean, `8000 ns` p50, `26542 ns` p99 | Unix owned-fd register + release path, including `/dev/null` fd open cost in this portability simulation. |
+
+Allocation evidence: Go reports `0 B/op` and `0 allocs/op` with `-benchmem`.
+Rust contract mapping returns borrowed string fields instead of cloning descriptor
+text. TypeScript benchmarks do not expose `B/op` or `allocs/op`, so the
+validator avoids allocation-prone helpers such as `TextEncoder`,
+`Object.keys`, and lowercasing transient strings in the hot path.
+
+Native flow simulation also shows why the descriptor lane matters:
+
+| Flow | 4KB mean | 64KB mean | 1MB mean | p99 range | Modeled hot payload copy |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| full-payload native frame | `728.49 ns` | `12452.88 ns` | `171911.47 ns` | `833-405416 ns` | `5x payload` |
+| descriptor-control frame | `357.20 ns` | `332.24 ns` | `333.21 ns` | `417-459 ns` | `0B` |
+
+Interpretation: the contract itself is not the expensive part. Descriptor
+validation is nanosecond-class across Go, Rust, and TypeScript in these local
+runs. The real win is architectural: native GPU/device producers pass a
+small Cap'n Proto receipt while the platform handle and payload stay resident in
+the native plugin/device side table. Browser WebGPU can still copy from that
+receipt when required, but the serious native path avoids full payload frame
+movement by default.
+
+### Rust Native Buffer Hardening Run
+
+Environment:
+
+- Date: 2026-05-07
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Command: `cd foundation/runtime-sdk/rust && cargo run --release -p ovrt-native --bin buffer_bench`
+
+| Benchmark | ns/op | Interpretation |
+| --- | ---: | --- |
+| native read_output_bytes owned Vec | 68.58 | Copies output into a new owned allocation |
+| native output_bytes_view borrowed | 4.05 | Borrows from the fixed control buffer |
+| native write_output_bytes clear+copy | 55.37 | Clears the full output region, then copies payload |
+| native write_output_bytes_fast copy only | 33.98 | Copies payload and updates length only |
+
+The Rust-side optimization space is real but specific: prefer borrowed views when bytes do not need to outlive the control buffer, and use the explicit fast write path only when all readers honor the length field. The default clearing write remains available for defensive hygiene when stale bytes outside the active length must be erased.
+
+Research notes:
+
+- Rust `copy_nonoverlapping` is the `memcpy`-equivalent primitive for proven non-overlapping regions, but it is unsafe and requires strict validity/alignment guarantees. Safe `copy_from_slice` remains the default until a benchmark proves the unsafe path matters.
+- Rust `std::hint::black_box` is appropriate for this local benchmark because it asks the compiler to avoid optimizing away the measured operation, but the standard library documents it as best-effort rather than a correctness mechanism.
+- Crates such as `bytes` and `zerocopy` are relevant future options for cross-boundary owned/shared byte views, but the current 4KB control buffer is already simpler and faster with direct borrowed slices.
+
+### Cross-Runtime Benchmark Expansion Run
+
+Environment:
+
+- Date: 2026-05-08
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Commands:
+  - `cd foundation/runtime-sdk/go && go test -bench='BenchmarkBuffer' -benchmem -run='^$' ./runtimehost`
+  - `cd foundation/runtime-sdk/ts/browser-host && npm run bench -- --run`
+  - `cd foundation/runtime-sdk/rust && cargo run -p ovrt-native --bin buffer_bench --release`
+  - `cd foundation/server-kit/go && go test ./wsrouting -run 'TestResolveTargets|TestNilClient' -bench 'BenchmarkRouter' -benchmem`
+
+Go runtimehost fixed-buffer results:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkBufferSetInputBytes1KB` | 31.45 | 0 | 0 | Full input-region clear + copy remains allocation-free |
+| `BenchmarkBufferInputBytesOwned1KB` | 184.6 | 1024 | 1 | Owned read cost is exactly the output copy |
+| `BenchmarkBufferSetOutputBytes2KB` | 79.81 | 0 | 0 | Full output-region clear + copy remains allocation-free |
+| `BenchmarkBufferOutputBytesOwned2KB` | 326.8 | 2048 | 1 | Owned output read allocates one copied payload |
+| `BenchmarkBufferEpochAdd` | 7.165 | 0 | 0 | Atomic epoch movement is nanosecond-class |
+| `BenchmarkBufferDiagnosticsText` | 345.9 | 768 | 1 | Current diagnostics read materializes a bounded string |
+
+2026-05-09 follow-up: `BenchmarkBufferDiagnosticsText` is now 267.2 ns/op and 48 B/op after trimming the diagnostic byte region before string materialization. Borrowed input/output views remain about 3 ns/op and allocation-free; owned reads still allocate exactly the copied payload size.
+
+The Go runtimehost hot write paths now clear fixed regions with `clear(...)` instead of allocating temporary zero slices. That preserves the security hygiene of clearing stale bytes while restoring the intended allocation-free control-plane write behavior.
+
+2026-05-17 microarchitecture follow-up: Go runtimehost now exposes explicit
+fast input/output setters for trusted pre-cleared buffers, and `ProcessPool` /
+`FFIPool` use borrowed output views so pooled-buffer responses copy active bytes
+only once. The stdio process transport now reads the returned 4KB control frame
+directly into the pooled buffer instead of allocating a temporary frame and
+copying it back.
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkBufferSetInputBytes1KB` | 29.46 | 0 | 0 | Defensive clear + copy input path |
+| `BenchmarkBufferSetInputBytesFast1KB` | 16.62 | 0 | 0 | Trusted pre-cleared input path, about 1.8x faster |
+| `BenchmarkBufferSetOutputBytes2KB` | 61.41 | 0 | 0 | Defensive clear + copy output path |
+| `BenchmarkBufferSetOutputBytesFast2KB` | 30.66 | 0 | 0 | Trusted output path, about 2.0x faster |
+| `BenchmarkBufferReadFrameAllocCopy4KB` | 712.6 | 4100 | 2 | Old stdio return shape: allocate frame, then copy |
+| `BenchmarkBufferReadFrameInto4KB` | 74.07 | 4 | 1 | New stdio return shape: read directly into pooled buffer |
+
+Browser shared-arena update:
+
+| Benchmark | mean ns | p99 ns | Interpretation |
+| --- | ---: | ---: | --- |
+| 4KB slab write/read | 1400 | 4400 | Owned read copy path remains around control-plane scale |
+| 4KB slab write/read view | 500 | 600 | Borrowed view stays below 1000 ns |
+| 4KB slab fast write/read view | 400 | 500 | Fast prevalidated path remains the browser hot lane |
+| 64KB slab write/read view | 3000 | 3700 | Medium borrowed payloads stay near memory-copy cost |
+| 1024KB slab write/read view | 43200 | 64400 | Large borrowed payloads avoid a second copy |
+| descriptor-ready fast batch traffic x128 | 484000 | 665000 | Fast batch queueing remains about 2.26x faster than old x128 batch |
+| preallocated write/enqueue/dequeue batch x128 | 61600 | 95500 | Best full arena lane when descriptors are pre-owned |
+| packet-ring enqueue/dequeue/complete/release x128 | 43900 | 66200 | Packet-like lifecycle is cheaper than general arena descriptor orchestration |
+
+Rust native buffer update:
+
+| Benchmark | ns/op | Interpretation |
+| --- | ---: | --- |
+| native read_output_bytes owned Vec | 75.67 | Owned read copy pays allocation and payload copy |
+| native read_output_bytes_into reused Vec | 17.71 | Caller-owned `Vec` reuse removes repeated allocation |
+| native output_bytes_view borrowed | 3.74 | Borrowed native view remains the fastest runtime lane |
+| native write_output_bytes clear+copy | 39.86 | Defensive clear + copy remains allocation-free |
+| native write_output_bytes_fast copy only | 16.96 | Fast write is the trusted hot path when stale bytes outside length are irrelevant |
+| native process_runtime_buffer_in_place | 132.65 | Native in-place 4KB control-plane processing avoids cloned buffer traffic |
+
+2026-05-09 follow-up: `process_runtime_buffer_in_place` now operates directly on the caller-provided 4KB buffer instead of cloning the entire control plane into a temporary `Vec` and copying it back. The release benchmark reports `native process_runtime_buffer_in_place` at 143.44 ns/op for a 1KB echo unit on this machine. Public Go `ProcessResponse.Output` remains owned; FFI/process pools copy the active output before returning so pooled buffers cannot leak into caller-owned responses.
+
+WebSocket routing local-load results:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkRouterRegisterLocalOnly` | 534.9 | 228 | 4 | Local connection registration stays below 1000 ns |
+| `BenchmarkRouterResolveTargetsUserLocal` | 18758 | 59760 | 12 | Resolves 1024 local user targets without per-connection copy allocation |
+| `BenchmarkRouterForEachLocal1024` | 37044 | 98304 | 1024 | Public copy-safe iterator intentionally allocates per connection |
+
+2026-05-17 microarchitecture follow-up: `ForEachLocalValue` adds a value-copy
+iterator over the router's contiguous local order for read-only hot scans. The
+existing pointer iterator remains for compatibility and still returns isolated
+copies.
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkRouterForEachLocal1024` | 38738 | 98304 | 1024 | Pointer-copy compatibility iterator; each callback pointer escapes |
+| `BenchmarkRouterForEachLocalValue1024` | 17573 | 0 | 0 | Value-copy hot iterator; about 2.2x faster with zero allocation |
+
+The WebSocket routing improvement is behavioral-neutral: public read helpers still return copies, but `ResolveTargets` now resolves local user/broadcast targets under the router read lock and appends connection IDs directly. That keeps tenant/session safety semantics while removing avoidable per-connection object copies from realtime fanout.
+
+### 2026-05-17 Forced Microarchitecture Refinement Pass
+
+TLA-style refinement note:
+
+1. Visible state preserved: runtime `ProcessResponse`, arena queue progress,
+   transport allow/deny decisions, MemoryDB query results, and WebSocket
+   connection snapshots.
+2. Hidden state changed: fewer temporary frame buffers, fewer escaped
+   connection copies, direct arena descriptor-ID drains, reused Rust output
+   vectors, tighter capability scans, and no retained read-filter copies.
+3. Invariants preserved: `FrameSizeBound`, `OutputAfterInput`,
+   `OwnedDecodeLifetime`, `QueryBounded`, `ConnectionOwned`, and
+   `FallbackRefinement`.
+4. Liveness/bounds preserved: existing runtime exchange timeout, queue drain,
+   DB context checks, and router callback-stop behavior are unchanged.
+5. Test mapping: Go runtimehost, Go database, Go/TS transport, Rust native, and
+   TS arena tests cover the refined paths before benchmarks are accepted.
+
+Forced comparison summary:
+
+| Lane | Baseline metric | Refined metric | Meaning |
+| --- | ---: | ---: | --- |
+| Go runtime input write | `29.46 ns/op`, `0 B/op`, `0 allocs/op` | `16.62 ns/op`, `0 B/op`, `0 allocs/op` | Fast setter skips a redundant full-region clear after buffer reset; about 1.8x faster with the same declared-length contract. |
+| Go runtime output write | `61.41 ns/op`, `0 B/op`, `0 allocs/op` | `30.66 ns/op`, `0 B/op`, `0 allocs/op` | Trusted output setter preserves length semantics while avoiding defensive tail clearing; about 2.0x faster. |
+| Go stdio runtime return | `712.6 ns/op`, `4100 B/op`, `2 allocs/op` | `74.07 ns/op`, `4 B/op`, `1 alloc/op` | Reads the 4KB control frame directly into the pooled buffer instead of allocating a temporary frame and copying it back. |
+| WebSocket local scan | `38738 ns/op`, `98304 B/op`, `1024 allocs/op` | `17573 ns/op`, `0 B/op`, `0 allocs/op` | Value-copy iterator keeps copy safety while preventing one pointer escape per connection. |
+| Event publish tracing | `294.7 ns/op`, `48 B/op`, `1 alloc/op` | `253.5 ns/op`, `0 B/op`, `0 allocs/op` | Terminal-state extraction no longer splits the event type while recording traces; publish semantics and trace visibility are unchanged. |
+| Rust native output read | `75.67 ns/op` owned `Vec` | `17.71 ns/op` reused `Vec` | Caller-owned reuse avoids repeated allocation while still returning owned bytes. |
+| TS arena drain x8 | `514500 ns mean`, `650900 ns p99` | `497400 ns mean`, `611500 ns p99` | Descriptor-ID-only drain avoids queue-entry object construction when only IDs are needed. |
+| TS arena drain x32 | `466900 ns mean`, `586900 ns p99` | `428700 ns mean`, `537800 ns p99` | ID-only drain improves larger batch locality and object churn. |
+| TS arena drain x128 | `448300 ns mean`, `574100 ns p99` | `409300 ns mean`, `511300 ns p99` | ID-only drain is about 9% faster on the 128-descriptor batch path. |
+| TS transport admin fallback | `~5.39M hz` previous local run | `6.64M hz` | Capability check avoids transient array/callback paths; throughput improved while exact allow/deny semantics are unchanged. |
+| MemoryDB 100K filtered list | `29708 ns/op`, `33400 B/op`, `105 allocs/op` | `20598 ns/op`, `33400 B/op`, `105 allocs/op` | Read filters are no longer defensively copied and same-type scalar comparisons avoid formatting; response-copy cost remains intentional. |
+
+Expanded one-command coverage:
+
+`tooling/scripts/performance_check.sh` now includes the previously separate
+scale benchmarks, in-memory cache/circuit/compress/events/metrics/redis/retry
+and worker benchmarks, TLS/PQ handshake benchmarks, and service-backed
+Redis/Postgres benchmarks when `SERVICE_BACKED_DATABASE_URL` and
+`SERVICE_BACKED_REDIS_URL` are set. The 2026-05-17 run skipped only the
+service-backed Redis/Postgres lane because those URLs were not set.
+
+Final expanded-script highlights:
+
+| Area | Benchmark | Metric | Meaning |
+| --- | --- | ---: | --- |
+| Same-process dispatch | `BenchmarkBoundFrameClientDispatchTrusted` | `10.89 ns/op`, `0 B/op`, `0 allocs/op` | Lower bound for trusted in-process frame dispatch. |
+| gRPC boundary | `BenchmarkDispatchFrameOverBufconn` | `21645 ns/op`, `10933 B/op`, `179 allocs/op` | Binary frame saves work versus JSON but still pays gRPC stack cost. |
+| HTTP ingress | `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | `5329 ns/op`, `9219 B/op`, `71 allocs/op` | JSON compatibility ingress is thousands-of-ns and allocation-heavy relative to frame lanes. |
+| Auth middleware | `BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC` | `7751 ns/op`, `11284 B/op`, `81 allocs/op` | Full auth/security/RBAC middleware is a request-boundary cost, not a runtime hot-loop cost. |
+| Scale DB count | `BenchmarkScale_MemoryDBTenantCount100K` | `4899 ns/op`, `0 B/op`, `0 allocs/op` | Tenant count stays index-shaped. |
+| Scale DB list | `BenchmarkScale_MemoryDBTenantListFiltered100K` | `20598 ns/op`, `33400 B/op`, `105 allocs/op` | Filtered list now pays mostly intentional defensive record copies. |
+| Scale DB dense 1M | `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit` | `18380 ns/op`, `33400 B/op`, `105 allocs/op` | Dense tenant list stops at indexed `LIMIT`; no broad sort/materialization. |
+| WebSocket broadcast copy | `BenchmarkScale1M_WebSocketBroadcastResolveInto` | `509151 ns/op`, `0 B/op`, `0 allocs/op` | Materializing 1M IDs is dominated by slice header copy. |
+| WebSocket broadcast batch | `BenchmarkScale1M_WebSocketBroadcastBatch` | `772.1 ns/op`, `0 B/op`, `0 allocs/op` | Borrowed batch routing keeps broadcast routing effectively constant by batch count. |
+| Event exact fanout | `BenchmarkScale_EventExactDispatch100KSubscriptions` | `357.5 ns/op`, `0 B/op`, `0 allocs/op` | Exact fanout remains allocation-free after trace terminal-state fix. |
+| Event wildcard fanout | `BenchmarkScale_EventPrefixWildcardDispatch100KSubscriptions` | `472.9 ns/op`, `64 B/op`, `1 alloc/op` | Prefix wildcard is bucketed; remaining allocation is the matching subscriber slice. |
+| Local operation mix | `BenchmarkScale_LocalOperationMixLatency` | `8399 ns/op`, `p99 12750 ns/op`, `1986 B/op`, `21 allocs/op` | Mixed local DB count, WS route, cache hit, event publish, and config validation stays below 13000 ns p99 locally. |
+| Cache hit | `BenchmarkMemoryBackend_Get` | `53.71 ns/op`, `0 B/op`, `0 allocs/op` | In-memory cache hit is not a bottleneck. |
+| Cache pattern delete | `BenchmarkMemoryBackend_DeletePattern` | `3705 ns/op`, `0 B/op`, `0 allocs/op` | Pattern deletion is scan-shaped but still allocation-free in this fixture. |
+| Circuit breaker | `BenchmarkCircuitBreaker_Execute_Closed` | `61.24 ns/op`, `0 B/op`, `0 allocs/op` | Closed-circuit guard is negligible next to network or DB work. |
+| Compression | `BenchmarkCompressLargeBatch/Brotli-Q4` | `6247026 ns/op`, `16246706 B/op`, `25 allocs/op` | Brotli is a batch/offline lane, not a realtime hot path. |
+| Compression | `BenchmarkCompressLargeBatch/Zstd-Fastest` | `186545 ns/op`, `1048576 B/op`, `1 alloc/op` | Zstd-fastest is the practical large-payload realtime candidate. |
+| Event bus | `BenchmarkInMemoryBus_Publish_1Subscriber` | `253.5 ns/op`, `0 B/op`, `0 allocs/op` | Trace-enabled exact publish is now allocation-free. |
+| Event envelope JSON | `BenchmarkEnvelope_ToJSON` | `3345 ns/op`, `2681 B/op`, `49 allocs/op` | JSON envelope conversion is compatibility, not hot internal dispatch. |
+| Event envelope binary | `BenchmarkEnvelope_ToBinary` | `2437 ns/op`, `2208 B/op`, `20 allocs/op` | Binary envelope is materially cheaper than JSON but still owned. |
+| Metrics counter | `BenchmarkRegistryCounterPrecomputedKey` | `21.04 ns/op`, `0 B/op`, `0 allocs/op` | Hot metrics should use precomputed keys. |
+| Metrics snapshot | `BenchmarkRegistrySnapshotPrometheus1024` | `171318 ns/op`, `230080 B/op`, `19 allocs/op` | Prometheus export is scrape-path work; do not put it in hot request loops. |
+| Redis memory batch | `BenchmarkMemoryClientSetGetMany64` | `12570 ns/op`, `9563 B/op`, `324 allocs/op` | Current in-memory batch API still allocates per-key/value ownership. |
+| Redis memory pubsub | `BenchmarkMemoryClientPublish1KSubscribers` | `56012 ns/op`, `47689 B/op`, `991 allocs/op` | Per-subscriber fanout remains allocation-heavy and should stay behind budgets. |
+| Retry success | `BenchmarkPolicy_Do_Success` | `3.554 ns/op`, `0 B/op`, `0 allocs/op` | No-retry success path is effectively free. |
+| Retry with retry | `BenchmarkPolicy_Do_Retry` | `298.6 ns/op`, `264 B/op`, `4 allocs/op` | Retry path pays timer/error bookkeeping and must stay bounded. |
+| Worker enqueue | `BenchmarkEngine_Enqueue_InMemory` | `2311 ns/op`, `940 B/op`, `19 allocs/op` | Worker enqueue remains a thousands-of-ns boundary with explicit ownership copies. |
+| TLS classical | `BenchmarkTLSHandshake_ClassicalX25519` | `420556 ns/op`, `72599 B/op`, `817 allocs/op` | Local TLS handshakes are hundreds-of-thousands-of-ns; connection reuse matters. |
+| TLS hybrid PQ | `BenchmarkTLSHandshake_HybridX25519MLKEM768` | `576051 ns/op`, `116436 B/op`, `838 allocs/op` | Hybrid KEM is about 1.37x slower in this run; use it deliberately at ingress boundaries. |
+| Runtime buffer read | `BenchmarkBufferInputBytesView1KB` | `3.060 ns/op`, `0 B/op`, `0 allocs/op` | Borrowed views are the correct internal runtime read lane. |
+| Runtime stdio frame | `BenchmarkBufferReadFrameInto4KB` | `74.07 ns/op`, `4 B/op`, `1 alloc/op` | Direct frame read into pooled control buffer removes the temporary 4KB allocation. |
+| Transport route index | `BenchmarkRouteIndexResolve1024` | `8.053 ns/op`, `0 B/op`, `0 allocs/op` | Generated/indexed route tables are the hot path for large route sets. |
+| Transport fallback | `BenchmarkCanDispatchWriteViaAdminFallback` | `65.34 ns/op`, `0 B/op`, `0 allocs/op` | Admin fallback is allocation-free but still slower than exact capability match. |
+
+Current database guard metrics after this pass:
+
+| Benchmark | ns/op | B/op | allocs/op | Meaning |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkMemoryDBCountRecordsTenantScoped` | 12528 | 0 | 0 | Count remains index-shaped and allocation-free. |
+| `BenchmarkMemoryDBListRecordsTenantScopedFiltered` | 13713 | 25304 | 69 | Small filtered list pays only typed response-copy cost. |
+| `BenchmarkMemoryDBUpsertTenantScopedParallel` | 3360 | 2030 | 12 | Parallel upsert still pays record/key/map ownership costs. |
+| `BenchmarkQueryAllFakeRows100` | 3376 | 4512 | 210 | Retained typed slice path; use streaming for broad reads. |
+| `BenchmarkExecCommandMemoryDB` | 32.37 | 24 | 1 | Command executor overhead is tiny relative to DB work. |
+| `BenchmarkExecRowsAffectedFake` | 32.69 | 24 | 1 | Rows-affected wrapper is a small typed-result cost. |
+| `BenchmarkQueryEachFakeRows100` | 2731 | 2472 | 202 | Streaming helper avoids retained result slice. |
+
+### 2026-05-25 Hermes hotplane substrate baseline
+
+This first pass captured the local substrate that Hermes would refine: current
+`MemoryDB` read/index behavior, websocket borrowed-batch routing, exact event
+dispatch, worker enqueue, and bounded parallel orchestration. The result
+supports the Hermes API split proposed in `docs/hermes_hotplane.md`: internal
+borrowed/descriptor reads for local hotplane consumers, and copied public reads
+at service boundaries.
+
+Environment:
+
+- Date: 2026-05-25
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Command:
+
+```bash
+cd foundation/server-kit/go
+go test -run=^$ -bench='Benchmark(MemoryDB|Scale_|Scale1M_|ExecCommandMemoryDB|Engine_Enqueue|Job_Normalize|RunParallel)' -benchmem ./database ./appbench ./worker ./chain
+```
+
+| Area | Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | --- | ---: | ---: | ---: | --- |
+| MemoryDB small count | `BenchmarkMemoryDBCountRecordsTenantScoped` | 12561 | 0 | 0 | Small tenant count is index-shaped and allocation-free. |
+| MemoryDB small list | `BenchmarkMemoryDBListRecordsTenantScopedFiltered` | 13300 | 25304 | 69 | Copy-safe public list pays defensive record-copy cost. |
+| MemoryDB parallel upsert | `BenchmarkMemoryDBUpsertTenantScopedParallel` | 3248 | 1990 | 12 | Upsert still owns record/key/map state; Hermes should consume committed batches, not act as a write authority. |
+| Executor command | `BenchmarkExecCommandMemoryDB` | 31.71 | 24 | 1 | Executor helper overhead is tiny compared with real storage and projection work. |
+| Scale DB count 100K | `BenchmarkScale_MemoryDBTenantCount100K` | 4731 | 0 | 0 | Tenant count remains local-index work. |
+| Scale DB list 100K | `BenchmarkScale_MemoryDBTenantListFiltered100K` | 20860 | 33400 | 105 | Limit/filter shape is good; copied public output dominates allocations. |
+| Scale DB count 1M | `BenchmarkScale1M_MemoryDBTenantCount` | 4794 | 0 | 0 | Count is stable at 1M records because it is index-shaped. |
+| Scale DB list 1M | `BenchmarkScale1M_MemoryDBTenantListFiltered` | 30891 | 33400 | 105 | 1M filtered list still stays bounded, but public copies remain visible. |
+| Scale DB dense 1M | `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit` | 22913 | 33400 | 105 | Dense tenant list stops at indexed `LIMIT`; no broad sort/materialization. |
+| WebSocket route 100K | `BenchmarkScale_WebSocketBroadcastResolveInto100K` | 25670 | 0 | 0 | Materializing 100K IDs is a copy cost but allocation-free. |
+| WebSocket batch 1K | `BenchmarkScale_WebSocketBroadcastBatch1K` | 29.08 | 0 | 0 | Borrowed batch routing is the model for Hermes internal consumers. |
+| WebSocket batch 100K | `BenchmarkScale_WebSocketBroadcastBatch100K` | 313.5 | 0 | 0 | Batch routing scales by batch count, not target count. |
+| WebSocket batch 1M | `BenchmarkScale1M_WebSocketBroadcastBatch` | 740.3 | 0 | 0 | Borrowed batches keep 1M route resolution below 1000 ns locally. |
+| Event exact fanout | `BenchmarkScale_EventExactDispatch100KSubscriptions` | 351.6 | 0 | 0 | Exact event dispatch remains suitable as the local projection notification shape. |
+| Event exact fanout 1M | `BenchmarkScale1M_EventExactDispatchSubscriptions` | 354.6 | 0 | 0 | Exact dispatch remains stable at 1M subscriptions. |
+| Event prefix wildcard | `BenchmarkScale_EventPrefixWildcardDispatch100KSubscriptions` | 441.8 | 64 | 1 | Prefix buckets are acceptable; complex wildcard scans remain off hot product paths. |
+| Local operation mix | `BenchmarkScale_LocalOperationMixLatency` | 7688 | 1984 | 21 | Mixed local DB count, websocket route, cache hit, event publish, and config validation reports p99 `17084 ns`. |
+| Worker enqueue | `BenchmarkEngine_Enqueue_InMemory` | 2404 | 957 | 19 | Worker enqueue is a bounded ownership boundary, not a nanosecond hot read. |
+| Worker raw payload enqueue | `BenchmarkEngine_Enqueue_RawPayload` | 2324 | 939 | 19 | Raw payload path is similar; River/Postgres path remains the production durability lane. |
+| Job normalize | `BenchmarkJob_Normalize` | 4.849 | 0 | 0 | Job metadata normalization is not a bottleneck. |
+| Chain orchestration | `BenchmarkRunParallel` | 1173 | 576 | 7 | Parallel orchestration is useful for independent I/O but not for local hot reads. |
+| Chain orchestration into | `BenchmarkRunParallelInto` | 1084 | 448 | 6 | Caller-owned result storage reduces allocation modestly. |
+
+Hermes implication:
+
+1. Current `MemoryDB` indexes are already shaped well for scoped reads.
+2. The next improvement is API shape: borrowed internal views and caller-owned
+   result buffers for websocket/realtime/runtime consumers.
+3. Public APIs should keep copy safety, so Hermes benchmarks must report
+   borrowed/internal and copied/public lanes separately.
+4. Projection apply must be batched and idempotent; per-command direct writes
+   into Hermes before Postgres commit are explicitly out of scope.
+5. Epoch publication and borrowed batch routing should use the same
+   no-allocation discipline as websocket batch routing and event exact dispatch.
+
+### 2026-05-26 Hermes mandatory runtime-store baseline
+
+The `server-kit/go/hermes` implementation now adds bounded projection specs,
+tenant-scoped partitions, segmented snapshot indexes, idempotent source-event
+apply, tombstones, atomic epoch publication, `database.StateStore` rebuild,
+typed record batch ingestion, generated `foundation.v1.RecordMutationBatch`
+envelope ingestion, binary payload batch ingestion, a `worker.Processor` bridge,
+Redis Stream source/tailer abstractions, and a mandatory
+`hermes.ProjectedRuntimeStore` wrapper for scaffolded `database.RuntimeStore`
+reads. Public reads return copied `DomainRecord` values; internal reads use
+callback-lifetime borrowed `RecordView` values. JSON is not a Hermes transport
+lane.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -run=^$ -bench='BenchmarkHermes' -benchmem ./hermes
+```
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesGetRecordCopied` | 333.9 | 368 | 3 | Single copied hot record read is sub-microsecond; allocation is defensive ownership. |
+| `BenchmarkHermesForEachViewLimit50` | 7469 | 0 | 0 | Borrowed internal filtered reads remain allocation-free after segmented snapshot publication. |
+| `BenchmarkHermesCountIndexed` | 143.2 | 0 | 0 | Exact single-index count reads from projection cardinality instead of scanning records. |
+| `BenchmarkHermesListRecordsCopiedLimit50` | 21426 | 33400 | 105 | Copy-safe public list still pays the known defensive-copy shape. |
+| `BenchmarkHermesApplyEventUpsert` | 18362 | 15817 | 44 | Single-event RCU publication is slower than direct mutable-map apply; projectors should batch. |
+| `BenchmarkHermesApplyBatch64` | 212200 | 146845 | 1148 | Event batch apply amortizes index publication to about 3.32 us per record. |
+| `BenchmarkHermesApplyRecords64` | 29757 | 29809 | 358 | Typed record batch ingestion avoids per-event construction and is the preferred projector path after decode. |
+| `BenchmarkHermesApplyRecordPayloads64` | 249655 | 199750 | 1243 | Compatibility binary payload ingestion with per-payload decoder calls. |
+| `BenchmarkHermesApplyRecordPayloadEvents64` | 247463 | 195413 | 1242 | Generated batch decoder hook builds ready-to-apply events directly; larger wins require schema-specific typed/columnar record construction. |
+| `BenchmarkHermesProjectedRuntimeStoreHotGet` | 429.2 | 368 | 3 | Mandatory scaffold wrapper caches registered projection scopes while preserving copied-record ownership. |
+| `BenchmarkHermesProjectedRuntimeStoreWarmCount` | 297.2 | 48 | 1 | Warm StateStore counts use cached projection names and Hermes indexes. |
+| `BenchmarkHermesDriftCheckMerkle` | 17448326 | 12619680 | 24939 | Bounded 10K-record production safety check; Hermes side uses borrowed views and witnesses are emitted only for sampled records. |
+
+Implementation implication:
+
+1. Hermes improves the internal read lane immediately: borrowed filtered reads
+   avoid the `33 KB / 105 allocs` public copy shape.
+2. Public safety remains intentionally expensive enough to be visible in
+   benchmarks.
+3. Exact count now exploits declared indexes; multi-filter counts still scan the
+   smallest candidate set until intersection counters are justified.
+4. Apply performance is now shape-dependent: single-event updates pay for RCU
+   publication, while typed record batches are already below 500 ns per record.
+5. Segmented snapshot indexes remove the reader/writer lock boundary. A bounded
+   atomic publish gate prevents readers from observing partial record/index
+   publication.
+6. Generated typed decoders now have a batch event hook:
+   `ApplyRecordPayloadEvents`. It avoids per-payload decoder callbacks and lets
+   app-generated Cap'n Proto/protobuf decoders preserve operation/source/version
+   metadata directly. The measured improvement is modest with the synthetic map
+   decoder; bigger wins require generated decoders to avoid generic maps or feed
+   `ApplyRecords` when the mutation set is pure upsert.
+7. Scaffolded apps now wrap `database.RuntimeStore` with
+   `hermes.ProjectedRuntimeStore` by default. Oversized scopes fall back to
+   Postgres instead of serving partial hot state, and health/resilience checks
+   expose degraded projection scopes.
+8. Drift checks are deliberately outside the hot read path. The 10K-record
+   Merkle run improved from about 56 ms and 1.62M allocs to about 17 ms and
+   25K allocs by hashing borrowed Hermes views and avoiding per-record hex
+   strings. It is suitable for scheduled parity checks and promotion gates, not
+   per-request validation.
+9. The service-backed Redis/Postgres run caught a real Redis stream edge case:
+   empty `XREADGROUP` reads must omit `BLOCK`; `BLOCK 0` waits forever in Redis
+   even though the memory client returned immediately.
+10. Hermes Redis stream sources now drain pending entries for the same consumer
+   before reading `>` messages. This preserves apply-before-ack safety after an
+   ack failure or restart with the same consumer identity.
+
+### 2026-05-29 Hermes bulk-load and byte-estimator refinement
+
+Follow-up review of the Hermes hotplane showed that full rebuild was paying
+event-path costs that belong to durable mutation replay, not trusted snapshot
+replacement. The implementation now exposes `Store.BulkLoad` and routes
+`Rebuild` through that snapshot path. `BulkLoad` still normalizes records,
+validates projection scope, enforces record/byte bounds, builds indexes, and
+publishes a new epoch atomically, but it skips per-event source de-duplication,
+tombstone checks, delete semantics, and synthetic rebuild event bookkeeping.
+
+The record byte estimator was also changed from `fmt.Sprintf("%v", value)` per
+field to typed approximate sizing. `Stats.ApproxBytes` remains a guardrail, not
+an exact heap meter; the important property is that every apply path enforces a
+bounded byte budget without formatting arbitrary values in the hot loop.
+
+Commands:
+
+```bash
+cd foundation/server-kit/go
+go test -run='^$' -bench='BenchmarkHermes' -benchmem ./hermes
+cd ../..
+SERVICE_BACKED_BENCHTIME=1s tests/service_backed_foundation_test.sh
+```
+
+Artifacts:
+
+- `benchmark-results/hermes_bench_20260529T0141_after_bulkload.log`
+- `benchmark-results/service_backed_20260529T014205Z.log`
+- `benchmark-results/service_backed_20260529T014205Z.tsv`
+
+| Benchmark | ns/op | B/op | allocs/op | Per record | Interpretation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| `BenchmarkHermesApplyBatch64` | 222475 | 153467 | 993 | 3476 ns | Durable event path for mixed operations, source IDs, deletes, and idempotency. |
+| `BenchmarkHermesApplyRecords64` | 28482 | 29646 | 351 | 445 ns | Preferred incremental projector path when records are already materialized pure upserts. |
+| `BenchmarkHermesBulkLoad512` | 857575 | 850629 | 4805 | 1675 ns | Trusted snapshot replacement path; faster and simpler than synthetic event rebuild. |
+| `BenchmarkServiceBackedHermesRebuild512` | 2776989 | 1711877 | 19202 | 5424 ns | Live Postgres snapshot plus Hermes bulk-load. Still a control-plane repair path because source reads dominate. |
+| `BenchmarkServiceBackedHermesApplyBatch512` | 928888 | 956837 | 4835 | 1814 ns | Live in-memory hotplane apply after mutation events have already reached the process. |
+
+Practice update:
+
+1. Use `ApplyRecords` for changelog/projector batches that are already decoded
+   into `database.DomainRecord` and contain only upserts.
+2. Use `BulkLoad` for trusted initial seeding, rebuild, and repair snapshots.
+3. Use `ApplyBatch` when the batch carries durable event semantics: deletes,
+   source/correlation IDs, idempotency, or mixed operations.
+4. Do not use `Rebuild` as a routine refresh loop if a bounded changelog can
+   feed `ApplyRecords`; full rebuild is a parity/control-plane tool.
+
+Runtime-transport Go results:
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkCreateEnvelopeJSON` | 304.5 | 96 | 2 | Creates correlation/request/idempotency metadata with crypto randomness |
+| `BenchmarkResolveRouteLinear16` | 33.03 | 0 | 0 | Small generated route tables are cheap even with linear lookup |
+| `BenchmarkResolveRouteLinear1024` | 454.0 | 0 | 0 | Linear route lookup scales with route count; use `RouteIndex` for hot route tables |
+| `BenchmarkRouteIndexResolve1024` | 8.053 | 0 | 0 | Indexed route lookup is the hot generated route-table lane |
+| `BenchmarkCanDispatchExactCapability` | 4.849 | 0 | 0 | Capability guard is effectively free on exact match |
+| `BenchmarkCanDispatchWriteViaAdminFallback` | 65.34 | 0 | 0 | Admin fallback is allocation-free after the tightened scan |
+| `BenchmarkSchemaRegistryNegotiate` | 31.73 | 0 | 0 | Schema negotiation is allocation-free for small accepted-version sets |
+
+Runtime-transport TypeScript binary-envelope results:
+
+| Benchmark | mean ns | p99 ns | Interpretation |
+| --- | ---: | ---: | --- |
+| encode JSON envelope to protobuf bytes | 7100 | 14400 | JSON payload materialization dominates binary envelope encode |
+| decode JSON envelope from protobuf bytes | 2900 | 5600 | JSON payload decode is still thousands-of-ns |
+| encode protobuf envelope bytes | 3900 | 9400 | Typed/binary payloads avoid JSON payload stringify |
+| decode protobuf envelope bytes | 1700 | 2200 | Typed/binary decode is about 1.7x faster than JSON decode |
+| encode JSON compatibility envelope | 1400 | 2400 | Compatibility JSON string path is fast for already-object payloads, but less typed |
+| decode identity binary frame | 200 | 300 | Identity frame detection is effectively a header check |
+
+Runtime-transport TypeScript routing results:
+
+| Benchmark | mean ns | p99 ns | Interpretation |
+| --- | ---: | ---: | --- |
+| parse event type | 200 | 300 | Event contract validation is below 1000 ns |
+| create JSON envelope | 700 | 800 | Browser envelope creation is cheap when IDs are provided |
+| resolve route by event type | 100 | 100 | Precomputed route map lookup is effectively free |
+| resolve route by path | 200 | 200 | Method normalization + path map lookup remains below 1000 ns |
+| can dispatch exact capability | <100 | <100 | Exact capability fast path is extremely cheap |
+| can dispatch write via admin fallback | 100 | 200 | Admin fallback remains below 1000 ns after removing transient arrays |
+
+Transport improvement notes:
+
+- Runtime binary frame decode now uses `subarray` for framed compressed payloads, avoiding a copy before decompression.
+- Runtime metadata extras encoding reuses a constant `{}` byte sequence for empty extras and strips reserved JSON metadata keys lazily, avoiding unnecessary object copies for normal envelopes.
+- Go correlation ID construction now uses a stack buffer before the final string conversion, reducing `CreateEnvelope` from 3 allocations to 2 in the local run.
+- TypeScript event parsing now reuses precompiled regex objects, and capability fallback checks avoid transient arrays.
+- Malformed binary frames now have explicit tests for unsupported version, unsupported encoding id, and truncated payload. These are security-relevant parser boundaries, not just benchmark fixtures.
+
+### Packet-Ring Exploration
+
+Foundation now carries a DPDK-shaped browser-host primitive for optional packet-like lanes: fixed descriptor slots, burst enqueue/dequeue, explicit ownership states, monotonic timestamps, and drop/high-water counters. This is not a DPDK dependency. It is the contract a future native packet adapter must refine.
+
+Research alignment:
+
+- DPDK ring guidance emphasizes fixed-size FIFO rings, lockless producer/consumer modes, and bulk/burst enqueue/dequeue. Foundation mirrors those mechanics at the runtime contract level.
+- Linux timestamping separates ordinary software timestamps from hardware/NIC timestamps. Foundation treats timestamp precision as diagnostics and keeps domain-visible behavior independent of timestamp source.
+- Solarflare/Onload-style acceleration is valuable because it can preserve socket-shaped application code while moving packet handling closer to hardware. Foundation follows the same compatibility principle: app code keeps server-kit/runtime contracts, while optional adapters can use lower-level lanes underneath.
+
+Packet-ring benchmarks should be compared against descriptor-ring and preallocated arena paths, not against HTTP. HTTP pays for identity, middleware, routing, and compatibility; packet rings measure low-level lane mechanics.
+
+Local exploratory run:
+
+- Date: 2026-05-07
+- Command: `cd foundation/runtime-sdk/ts/browser-host && npm run bench -- --reporter=verbose`
+
+| Benchmark | mean ns | p99 ns | Comparison |
+| --- | ---: | ---: | --- |
+| packet-ring enqueue/dequeue/complete/release x1 | 400 | 500 | Similar class as 4KB fast arena view, with lifecycle timestamps |
+| packet-ring enqueue/dequeue/complete/release x8 | 2800 | 3500 | Faster than preallocated arena x8 in this run |
+| packet-ring enqueue/dequeue/complete/release x32 | 10900 | 20200 | Lower than preallocated arena x32, but with p99 noise from timestamp/lifecycle work |
+| packet-ring enqueue/dequeue/complete/release x128 | 47900 | 109700 | Faster mean than preallocated arena x128, noisier tail |
+| descriptor-ready fast batch traffic x128 | 495200 | 610800 | Packet ring is roughly 10.3x cheaper for packet-like local lifecycle work |
+| descriptor-ready batch traffic x128 | 1097500 | 1289900 | Packet ring is roughly 22.9x cheaper than old descriptor queue orchestration |
+
+Interpretation: packet-ring mechanics are useful for packet-like streams where descriptors are owned by a tight worker/runtime lane. They are not a replacement for the shared arena descriptor ring, which carries larger cross-lane payload ownership and WebGPU/WASM interop semantics. The current packet-ring tail is dominated by JavaScript object/lifecycle/timestamp work; a native/Rust version should use structure-of-arrays descriptor storage and monotonic timestamp sampling only at configured boundaries.
+
+## Guardrails
+
+1. Same-process hot dispatch must stay allocation-free.
+2. Binary frame paths must allocate less than JSON compatibility paths.
+3. Borrowed views must not retain data beyond the source frame lifetime.
+4. Any new high-volume ingestion path must benchmark batch primitives against per-record writes.
+5. Any benchmark improvement that changes behavior must land with correctness tests for malformed input, cancellation, oversized frames, and diagnostics.
+6. Any optimized lane must prove refinement against the higher-level lane it bypasses or replaces: same canonical metadata, same accepted payload semantics, same terminal event, and same controlled error class.
+7. Hard bounds such as queue depth, acquire timeout, write deadline, retry cap, and frame size are not benchmark targets; they are behavioral contracts and must have direct tests.
+8. Key/shard routing functions (the "vindex" mapping a key to a shard/partition) must stay allocation-free — they sit on every routed operation — and any change to the routing hash must ship with a parity oracle proving no key changes shard, because a routing-hash change is a silent data-remap, not a perf tweak.
+
+## 2026-05-17 Server-Kit Table Refresh
+
+This section refreshes the older 2026-05-05 "Latest Local Check" server-kit
+table without rewriting its historical values. The old table remains useful as
+a baseline, but current update runs must append the new evidence here or in a
+new dated section after running the relevant benchmark lane.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|ClientDispatchFrameOverBufconn|RouterDispatchFrameDirect|DirectFrameClientDispatch|BoundFrameClientDispatch|BoundFrameClientDispatchTrusted|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$|BenchmarkRunParallel$' -benchmem -run='^$' ./grpcsvc ./chain
+```
+
+Current comparison against the 2026-05-05 table:
+
+| Benchmark | 2026-05-05 | 2026-05-17 | Allocation delta | Status | Meaning |
+| --- | ---: | ---: | ---: | --- | --- |
+| `BenchmarkRouterDispatchFrameDirect` | `18.59 ns/op`, `0 B/op`, `0 allocs/op` | `14.44 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | improved | Same-process router dispatch remains zero-allocation and is about 22% faster in this run. |
+| `BenchmarkDirectFrameClientDispatch` | `25.68 ns/op`, `0 B/op`, `0 allocs/op` | `22.35 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | improved | Validation facade remains zero-allocation; direct hot paths should use it instead of gRPC when process-local. |
+| `BenchmarkBoundFrameClientDispatch` | not tracked | `11.97 ns/op`, `0 B/op`, `0 allocs/op` | new row | best safe direct lane | Binding the route once removes map lookup from the hot call while preserving event-type validation. |
+| `BenchmarkBoundFrameClientDispatchTrusted` | not tracked | `10.78 ns/op`, `0 B/op`, `0 allocs/op` | new row | lower bound | Trusted bound dispatch is the minimum handler-call lane; use only after the caller has already validated the frame boundary. |
+| `BenchmarkBinaryFrameAppendViewRoundTrip` | `22.70 ns/op`, `0 B/op`, `0 allocs/op` | `19.55 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | improved | Borrowed frame views are still the right parser shape for synchronous routing and validation. |
+| `BenchmarkBinaryFrameAppendRoundTrip` | `62.25 ns/op`, `34 B/op`, `3 allocs/op` | `50.34 ns/op`, `8 B/op`, `1 alloc/op` | `-26 B/op`, `-2 allocs/op` | improved | Append marshal plus bounded control-string interning reduced owned binary decode cost. |
+| `BenchmarkBinaryFrameCodecRoundTrip` | `113.4 ns/op`, `178 B/op`, `5 allocs/op` | `100.0 ns/op`, `152 B/op`, `3 allocs/op` | `-26 B/op`, `-2 allocs/op` | improved | Codec-compatible owned path improved, but borrowed views remain the preferred hot lane. |
+| `BenchmarkGeneratedProtoMarshalAppendRoundTrip` | `386.9 ns/op`, `152 B/op`, `6 allocs/op` | `392.7 ns/op`, `152 B/op`, `6 allocs/op` | unchanged | noisy/slight regression | Generated protobuf is stable but owned; no action without a targeted protobuf decode change and parity tests. |
+| `BenchmarkRunParallel` | `1712 ns/op`, `592 B/op`, `8 allocs/op` | `1207 ns/op`, `640 B/op`, `11 allocs/op` | `+48 B/op`, `+3 allocs/op` | mixed | Faster wall time, but allocation count is higher than the older table. Current perf guard allows `<=12` allocs; optimize only with a new API shape such as caller-owned result storage. |
+| `BenchmarkDispatchFrameOverBufconn` | `31645 ns/op`, `10969 B/op`, `181 allocs/op` | `21482 ns/op`, `10937 B/op`, `179 allocs/op` | `-32 B/op`, `-2 allocs/op` | improved | Binary gRPC boundary is about 32% faster, but still a tens-of-thousands-of-ns boundary compared with direct frame dispatch. |
+| `BenchmarkClientDispatchFrameOverBufconn` | not tracked | `21691 ns/op`, `11013 B/op`, `181 allocs/op` | new row | boundary reference | Cached client call options do not remove the gRPC stack cost; use direct clients for same-process hot paths. |
+| `BenchmarkDispatchOverBufconn` | `39989 ns/op`, `12653 B/op`, `212 allocs/op` | `26831 ns/op`, `12697 B/op`, `213 allocs/op` | `+44 B/op`, `+1 alloc/op` | mixed/noisy | JSON gRPC is faster in wall time but still the highest-allocation compatibility lane. Do not optimize product hot paths around it. |
+
+Regression interpretation:
+
+1. No zero-allocation same-process lane regressed. `RouterDispatchFrameDirect`,
+   `DirectFrameClientDispatch`, `BoundFrameClientDispatch`,
+   `BoundFrameClientDispatchTrusted`, and `BinaryFrameAppendViewRoundTrip` all
+   remain allocation-free.
+2. Owned binary decode improved materially. The learning is the same as the
+   runtimehost and arena passes: append into caller-owned buffers, borrow for
+   synchronous inspection, and only own the bytes/strings that must outlive the
+   source frame.
+3. `GeneratedProtoMarshalAppendRoundTrip` is effectively unchanged. This is a
+   schema-owned compatibility lane; improving it requires protobuf-specific
+   work, not generic loop rewrites.
+4. `RunParallel` is faster but allocates more than the old table. That is an
+   orchestration boundary with goroutines, `context.WithCancel`, and a returned
+   result slice. Do not hide allocation by pooling returned results unless the
+   API changes to make caller ownership explicit.
+5. `DispatchOverBufconn` improved in time but still allocates slightly more
+   than the old table. This remains acceptable as a JSON/gRPC compatibility
+   boundary, not as a same-process hot path.
+
+Recent implementation techniques that produced the improvements:
+
+1. Separate safe public APIs from trusted hot APIs. Examples:
+   `SetInputBytes` keeps defensive clearing; `SetInputBytesFast` is used only
+   after reset/preclear. `DispatchFrame` validates; `DispatchFrameTrusted` is
+   only for already-bound callers.
+2. Prefer borrowed views for synchronous inspection. Examples:
+   `UnmarshalFrameView`, runtimehost `InputBytesView`/`OutputBytesView`, and TS
+   arena descriptor-ID drains.
+3. Use caller-owned storage for repeated work. Examples:
+   `AppendMarshalFrame`, `readFrameInto`, Rust `read_output_bytes_into`, and
+   WebSocket `ForEachLocalValue`.
+4. Avoid transient arrays/callback helpers in hot authorization/routing paths.
+   The Go/TS capability fallback changes use explicit loops so the semantic
+   fallback remains allocation-free.
+5. Treat docs as benchmark ledgers, not prose rewrites. Every future update to
+   this file should identify the code path touched, the benchmark command, the
+   before/after metrics, and the semantic invariant that stayed true.
+
+Future update rule:
+
+1. Add or select the benchmark before changing code.
+2. Run the targeted benchmark before and after the change.
+3. Run `tooling/scripts/performance_check.sh` before closing the pass.
+4. Append a dated note with metric meaning, regression checks, and the learned
+   technique.
+5. If a zero-allocation lane gains an allocation, fix it or document the
+   behavior reason and add a guard test.
+6. If an optimized lane bypasses a safer lane, map it to the safer lane's
+   visible contract using the TLA refinement notes: same input contract, same
+   output semantics, same bounds, same controlled errors.
+
+## 2026-05-17 Server-Kit Lane Refinement Follow-Up
+
+After the table refresh above, the four highlighted lanes were checked against
+the recent implementation techniques from the runtimehost, arena, transport,
+database, event, and WebSocket passes:
+
+1. Avoid repeated map lookup when a route has a hot bound handler.
+2. Decode into caller-owned output structs instead of replacing the whole
+   result.
+3. Reuse already-owned low-cardinality/control strings when the next frame
+   carries the same bytes.
+4. Keep borrowed payload/view semantics explicit and covered by tests.
+5. Add perf guard tests when a zero-allocation lane is established.
+
+Applied changes:
+
+1. `Router.RegisterFrame` now records a hot frame-handler slot, and
+   `Router.DispatchFrame` / gRPC frame dispatch check it before the handler
+   map. This preserves the same missing-handler behavior and only changes
+   hidden lookup state.
+2. `binaryFrameCodec.Unmarshal` now decodes into the caller-provided `Frame`
+   and reuses an existing owned `CorrelationID` string when the incoming bytes
+   are identical. If the bytes differ, it still allocates a fresh owned string.
+3. Perf-tag tests now guard the binary append roundtrip at zero allocations and
+   the codec-compatible roundtrip at no more than two allocations.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+go test -bench='Benchmark(DispatchOverBufconn|DispatchFrameOverBufconn|ClientDispatchFrameOverBufconn|RouterDispatchFrameDirect|DirectFrameClientDispatch|BoundFrameClientDispatch|BoundFrameClientDispatchTrusted|BinaryFrameCodecRoundTrip|BinaryFrameAppendRoundTrip|BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$|BenchmarkRunParallel$' -benchmem -run='^$' ./grpcsvc ./chain
+```
+
+Follow-up deltas versus the first 2026-05-17 refresh:
+
+| Benchmark | First 2026-05-17 refresh | After lane refinement | Allocation delta | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkRouterDispatchFrameDirect` | `14.44 ns/op`, `0 B/op`, `0 allocs/op` | `11.02 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | Hot frame-handler slot removes the repeated map lookup for the common route. |
+| `BenchmarkDirectFrameClientDispatch` | `22.35 ns/op`, `0 B/op`, `0 allocs/op` | `18.84 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | Direct client inherits the router hot-handler lookup. |
+| `BenchmarkBoundFrameClientDispatch` | `11.97 ns/op`, `0 B/op`, `0 allocs/op` | `12.15 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | Bound safe dispatch is effectively flat/noisy; it was already near the handler-call floor. |
+| `BenchmarkBoundFrameClientDispatchTrusted` | `10.78 ns/op`, `0 B/op`, `0 allocs/op` | `10.97 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | Trusted bound dispatch is unchanged, as expected. |
+| `BenchmarkBinaryFrameAppendRoundTrip` | `50.34 ns/op`, `8 B/op`, `1 alloc/op` | `41.82 ns/op`, `0 B/op`, `0 allocs/op` | `-8 B/op`, `-1 alloc/op` | Caller-owned decode plus stable correlation reuse makes the append roundtrip zero-allocation. |
+| `BenchmarkBinaryFrameCodecRoundTrip` | `100.0 ns/op`, `152 B/op`, `3 allocs/op` | `85.97 ns/op`, `144 B/op`, `2 allocs/op` | `-8 B/op`, `-1 alloc/op` | Codec path still allocates its marshaled frame, but no longer reallocates stable correlation on decode. |
+| `BenchmarkBinaryFrameAppendViewRoundTrip` | `19.55 ns/op`, `0 B/op`, `0 allocs/op` | `19.98 ns/op`, `0 B/op`, `0 allocs/op` | unchanged | Borrowed view path was already the floor for synchronous inspection. |
+| `BenchmarkDispatchFrameOverBufconn` | `21482 ns/op`, `10937 B/op`, `179 allocs/op` | `21528 ns/op`, `10926 B/op`, `179 allocs/op` | `-11 B/op`, unchanged allocs | gRPC/server stack dominates wall time; handler lookup changes are mostly hidden under gRPC overhead. |
+| `BenchmarkClientDispatchFrameOverBufconn` | `21691 ns/op`, `11013 B/op`, `181 allocs/op` | `21606 ns/op`, `10991 B/op`, `181 allocs/op` | `-22 B/op`, unchanged allocs | Client wrapper follows the same gRPC boundary pattern: tiny allocation-byte win, noisy wall time. |
+| `BenchmarkDispatchOverBufconn` | `26831 ns/op`, `12697 B/op`, `213 allocs/op` | `26764 ns/op`, `12645 B/op`, `213 allocs/op` | `-52 B/op`, unchanged allocs | JSON compatibility path is mostly unaffected; recent binary-frame techniques do not apply to JSON map materialization. |
+| `BenchmarkGeneratedProtoMarshalAppendRoundTrip` | `392.7 ns/op`, `152 B/op`, `6 allocs/op` | `398.0 ns/op`, `151 B/op`, `6 allocs/op` | effectively unchanged | Generated protobuf remains stable/noisy; future work here must be protobuf-specific. |
+| `BenchmarkRunParallel` | `1207 ns/op`, `640 B/op`, `11 allocs/op` | `1227 ns/op`, `640 B/op`, `11 allocs/op` | unchanged | Parallel chain is unchanged; improving it requires an explicit caller-owned result API or different orchestration contract. |
+
+Regression checks:
+
+1. Zero-allocation direct lanes stayed zero-allocation.
+2. Owned binary append roundtrip moved from one allocation to zero.
+3. gRPC binary frame paths gained a small allocated-byte improvement, but not a
+   reliable allocation-count or wall-time win. Treat gRPC as a boundary lane,
+   not the target for same-process hot dispatch.
+4. JSON gRPC, generated protobuf, and `RunParallel` did not benefit from the
+   binary-frame techniques. Their next improvements require separate benchmark
+   hypotheses: JSON payload shaping, protobuf decode strategy, or a new
+   caller-owned chain result API.
+
+Additional validation:
+
+```bash
+cd foundation/server-kit/go
+go test ./grpcsvc
+go test -tags=perf ./grpcsvc
+cd foundation
+tooling/scripts/performance_check.sh
+```
+
+## 2026-05-18 Open Lane Extension
+
+This section extends the recent optimization work to the bounded open lanes
+identified after the 2026-05-17 pass. These are not vague backlog items: each
+lane has either an implementation, a benchmark-only proof, or an explicit
+report-only status.
+
+### RunParallel Caller-Owned Results
+
+Applied implementation:
+
+1. `chain.RunParallelInto` lets callers provide reusable result storage.
+2. `chain.RunParallel` keeps the existing allocating API and behavior.
+3. The goroutine body moved to a helper function so both APIs avoid per-loop
+   closure allocations.
+4. Perf-tag tests now guard `RunParallel` at `<=8 allocs/run` and
+   `RunParallelInto` at `<=7 allocs/run`.
+5. `chain.HasCriticalFailureOrdered` provides an indexed hot-path check for
+   direct `RunParallel`/`RunParallelInto` results without building a name
+   lookup. `HasCriticalFailure` remains the compatibility helper for filtered,
+   merged, or reordered results.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+GOCACHE=/tmp/ovasabi-foundation-go-build go test -bench='BenchmarkRunParallel' -benchmem -run='^$' ./chain
+```
+
+| Benchmark | Before | After | Meaning |
+| --- | ---: | ---: | --- |
+| `BenchmarkRunParallel` | `1227 ns/op`, `640 B/op`, `11 allocs/op` | `1172 ns/op`, `576 B/op`, `7 allocs/op` | Compatibility API improves from helper extraction; returned result slice is still owned by caller. |
+| `BenchmarkRunParallelInto` | not available | `1108 ns/op`, `448 B/op`, `6 allocs/op` | Caller-owned result storage avoids the result-slice allocation and is the preferred hot orchestration API. |
+| `BenchmarkHasCriticalFailure` | name lookup only | `~36 ns/op`, `0 B/op`, `0 allocs/op` | Compatibility helper is still cheap, but it pays lookup work that ordered chain results do not need. |
+| `BenchmarkHasCriticalFailureOrdered` | not available | `~1.27 ns/op`, `0 B/op`, `0 allocs/op` | Indexed critical-failure detection matches direct chain result order and is the preferred hot-path check. |
+
+Refinement note: visible result order, critical-failure cancellation, nil-run
+error behavior, and nil-context fallback are unchanged. Only result storage and
+goroutine/helper/check shape changed. The remaining `RunParallelInto`
+allocations come from per-call goroutine fanout, `sync.WaitGroup`,
+`context.WithCancel`, and goroutine argument escape. Removing those cleanly
+requires a new reusable runner/lane API that owns worker state across calls; the
+current function API cannot become allocation-free without changing its
+execution model.
+
+### Generated Protobuf Decode Strategy
+
+Applied implementation and benchmark proof:
+
+1. The existing roundtrip benchmark remains the compatibility baseline.
+2. A split reset+unmarshal benchmark isolates protobuf decode cost.
+3. A merge-into-reused-message benchmark measures the protobuf-specific local
+   win.
+4. `protoapi.Binding` now exposes an explicit
+   `ProtobufDecodeReuseCompleteMessages` opt-in.
+5. The typed registry and typed frame adapter wire that opt-in into
+   caller-owned request pooling. Default decode behavior remains
+   reset+unmarshal.
+
+Command:
+
+```bash
+cd foundation/server-kit/go
+GOCACHE=/tmp/ovasabi-foundation-go-build go test -bench='BenchmarkGeneratedProto' -benchmem -run='^$' ./grpcsvc
+GOCACHE=/tmp/ovasabi-foundation-go-build go test -bench='BenchmarkDecodeRequestBytesIntoCompleteReuse$' -benchmem -run='^$' ./protoapi
+GOCACHE=/tmp/ovasabi-foundation-go-build go test -bench='BenchmarkTypedFrameAdapterDispatch(NoMetadata|Reuse)?$' -benchmem -run='^$' ./bootstrap
+```
+
+| Benchmark | Metric | Meaning |
+| --- | ---: | --- |
+| `BenchmarkGeneratedProtoMarshalAppendRoundTrip` | `397.1 ns/op`, `152 B/op`, `6 allocs/op` | Full generated protobuf compatibility roundtrip is stable. |
+| `BenchmarkGeneratedProtoUnmarshalReset` | `242.4 ns/op`, `152 B/op`, `6 allocs/op` | Reset+unmarshal pays nested message/string ownership on every decode. |
+| `BenchmarkGeneratedProtoUnmarshalMergeReuse` | `167.7 ns/op`, `56 B/op`, `5 allocs/op` | Raw merge into caller-owned nested storage is faster, but only valid for explicitly reused complete-message decode lanes. |
+| `BenchmarkDecodeRequestBytesIntoCompleteReuse` | `251.1 ns/op`, `72 B/op`, `8 allocs/op` | Public protoapi helper exposes the valid reuse lane with binding/target checks. |
+| `BenchmarkTypedFrameAdapterDispatchNoMetadata` | `586.8 ns/op`, `536 B/op`, `10 allocs/op` | Product frame path with ordinary reset decode and no metadata overlay. |
+| `BenchmarkTypedFrameAdapterDispatchReuse` | `535.5 ns/op`, `424 B/op`, `9 allocs/op` | Product frame path with opt-in complete-message request pooling. |
+| `BenchmarkTypedFrameAdapterDispatch` | `6282 ns/op`, `3493 B/op`, `78 allocs/op` | Metadata overlay still dominates when frame correlation metadata must be merged into the request message. |
+
+Behavior warning: protobuf `Merge` preserves fields that are absent from later
+messages. Do not silently replace ordinary `Reset`+`Unmarshal` with merge reuse
+on partial/update messages. A product path may use merge reuse only when the
+contract says every decoded frame is complete or when the caller clears fields
+that may be absent. The pooled request object is returned after the typed
+handler returns, so opt-in handlers must not retain request pointers for async
+use.
+
+### Browser Shared-Arena And Packet-Ring
+
+Implementation already exists in `runtime-sdk/ts/browser-host`:
+
+1. `RuntimeSharedArena` owns aligned slabs, descriptor tables, fast batch queue
+   reservation, descriptor-ID drains, release/reallocate free-list reuse, and
+   columnar batch descriptors.
+2. `RuntimePacketRing` owns fixed packet descriptors, burst enqueue/dequeue,
+   view/complete/release lifecycle, and high-water/drop counters.
+3. `lanePlanner` can select `packet-ring` for packet-like same-host batches
+   when available.
+4. Packet-ring enqueue now mutates the preallocated timestamp record instead of
+   replacing it per packet.
+5. Packet-ring hot loops can drain descriptor IDs into caller-owned scratch
+   storage with `dequeueIdsBurstInto`.
+
+Reference numbers from the browser-host benchmark suite:
+
+| Path | Mean | p99 | Meaning |
+| --- | ---: | ---: | --- |
+| 4KB slab write/read | `1400 ns` | `4700 ns` | Owned control-sized slab copy. |
+| 4KB slab fast write/read view | `400 ns` | `500 ns` | Best browser-side control-buffer lane when borrowed views are acceptable. |
+| 64KB slab write/read | `10100 ns` | `48200 ns` | Medium payload copy; use views/descriptors for hot paths. |
+| 64KB slab fast write/read view | `2900 ns` | `3300 ns` | Descriptor/view route avoids copying the read side. |
+| 1024KB slab write/read | `121400 ns` | `758500 ns` | Linear payload movement; descriptor routing should avoid hot-payload copies. |
+| 1024KB slab fast write/read view | `43300 ns` | `63600 ns` | Large-payload view path removes the read copy but still pays write cost. |
+| descriptor-ready id batch x128 | `434500 ns` | `546400 ns` | ID-only control drain avoids queue-entry object construction. |
+| packet-ring x128 | `43600 ns` | `65700 ns` | Packet-like lifecycle is much cheaper than general descriptor orchestration for fixed packet flows. |
+| packet-ring id x128 | `42600 ns` | `63600 ns` | ID-only packet drain is a small mean and p99 win in this JS run; tail remains runtime-noise sensitive. |
+
+Implementation rule: use shared-arena slabs for owned payload movement, borrowed
+views for synchronous inspection, descriptor-ID drains for scheduling, and
+packet rings for fixed packet-like streams. Do not compare packet rings to HTTP
+or gRPC; compare them to descriptor-ring and arena lifecycle costs.
+
+### Native Runtime Lane
+
+Status: report-only until three stable local baselines exist.
+
+Current reference:
+
+| Lane | Payload | Mean | p99 | Notes |
+| --- | ---: | ---: | ---: | --- |
+| `runtime-native` dispatch frame | 4KB | `639 ns` | `667 ns` | In-process Rust bridge; Tauri IPC not included. |
+| `runtime-native` dispatch frame | 64KB | `10180 ns` | `91670 ns` | Tail noise; report-only. |
+| `runtime-native` dispatch frame | 1MB | `112000 ns` | `172000 ns` | Linear in payload size. |
+| descriptor control frame | represents 4KB | `381 ns` | `458 ns` | Copies zero hot-payload bytes. |
+| descriptor control frame | represents 64KB | `323 ns` | `416 ns` | Constant with represented payload size. |
+| descriptor control frame | represents 1MB | `323 ns` | `375 ns` | Desired native control/data split. |
+
+Implementation rule: native control frames may copy small control payloads, but
+hot camera/audio/sensor/market payloads should move by descriptor, shared
+memory, fixed runtime buffer, SAB, arena slab, or packet ring. Full-payload
+native frames are linear in payload size and must not become the default for
+device hot streams.
+
+## 2026-05-20 Bulk Transfer And Object Store
+
+This pass added a bounded benchmark lane for the new `server-kit/go/bulk`
+primitive and the object store streaming surface. The first draft accidentally
+stored every benchmark object under a unique key, which turned the benchmark
+into an unbounded memory-retention test. The accepted benchmark shape now reuses
+a small key ring for object-store writes and sets up per-iteration bulk state
+outside timed sections so memory stays bounded.
+
+The implementation follows the external shape used by large object stores:
+bounded parts, explicit per-part receipts/checksums, a completion manifest, and
+part-aligned range reads where possible. Go hot paths use caller-sized buffers
+or exact-size bounded reads rather than accidental `io.Copy` scratch allocation,
+and checksum hex conversion stays stack-backed so manifest completion does not
+allocate per decoded part hash.
+
+Two lessons were promoted into `performance_practices.md` and
+`coding_practices.md`: bounded copy paths should make scratch-buffer ownership
+explicit, and fixed-size checksum/identifier hex work should use stack-backed
+`hex.Encode`/`hex.Decode` when the path is hot. The same hex pattern was applied
+to metadata correlation suffixes and security redaction hashes so bulk is not a
+one-off optimization island.
+
+Command:
+
+```bash
+make test-bench
+```
+
+Equivalent direct command:
+
+```bash
+cd foundation/server-kit/go
+go test -run=^$ -bench='Benchmark(MemoryStore|Manager)' -benchmem -benchtime=100000000ns -count=1 ./objectstore ./bulk
+```
+
+Current local reference on Apple M1 Pro:
+
+| Benchmark | Result | Allocation shape | Interpretation |
+| --- | ---: | ---: | --- |
+| `BenchmarkMemoryStorePutStream/64KB` | `6316 ns/op`, `10375 MB/s` | `65753 B/op`, `8 allocs/op` | Exact-size stream read removes the earlier 3x heap growth and brings memory-store stream writes near `PutBytes`. |
+| `BenchmarkMemoryStorePutStream/1024KB` | `41486 ns/op`, `25276 MB/s` | `1048835 B/op`, `8 allocs/op` | Stream storage now retains roughly one payload copy for the memory test backend. |
+| `BenchmarkMemoryStorePutStream/4096KB` | `135078 ns/op`, `31051 MB/s` | `4194588 B/op`, `8 allocs/op` | Larger stream writes stay bounded to roughly one payload copy. |
+| `BenchmarkMemoryStorePutBytes/64KB` | `6546 ns/op`, `10012 MB/s` | `65696 B/op`, `6 allocs/op` | Existing-slice path is the baseline because the caller already materialized the object. |
+| `BenchmarkMemoryStorePutBytes/1024KB` | `32459 ns/op`, `32304 MB/s` | `1048772 B/op`, `6 allocs/op` | Existing-slice path remains faster because the caller already materialized the whole object. |
+| `BenchmarkMemoryStorePutBytes/4096KB` | `96705 ns/op`, `43372 MB/s` | `4194520 B/op`, `6 allocs/op` | Large in-memory writes show the store copy cost without stream-reader overhead. |
+| `BenchmarkMemoryStoreGetRange/64KB` | `4043 ns/op`, `16209 MB/s` | `65696 B/op`, `6 allocs/op` | Small range reads copy only the requested range. |
+| `BenchmarkMemoryStoreGetRange/1024KB` | `38441 ns/op`, `27277 MB/s` | `1048737 B/op`, `6 allocs/op` | Memory range reads copy only the requested range. |
+| `BenchmarkManagerAcceptPartIdentity/64KB` | `41984 ns/op`, `1561 MB/s` | `68434 B/op`, `27 allocs/op` | The no-event path no longer builds event payload maps when no event bus is configured. |
+| `BenchmarkManagerAcceptPartIdentity/1024KB` | `531366 ns/op`, `1973 MB/s` | `1051475 B/op`, `27 allocs/op` | Large identity chunks scale linearly and retain about one payload copy in the memory backend. |
+| `BenchmarkManagerAcceptPartIdentity/4096KB` | `2021854 ns/op`, `2074 MB/s` | `4197208 B/op`, `27 allocs/op` | The 4MB lane stays bounded and shows hashing plus store-copy throughput. |
+| `BenchmarkManagerAcceptPartWithCacheAndEvents` | `169111 ns/op`, `1550 MB/s` | `281380 B/op`, `156 allocs/op` | Evented/cache operation is explicitly a control-plane lane; the no-event manager path stays cheaper. |
+| `BenchmarkManagerAcceptPartDuplicateReplay` | `331 ns/op`, `791940 MB/s` | `48 B/op`, `1 alloc/op` | Duplicate replay is a receipt/control-path check, not a payload-copy lane. |
+| `BenchmarkManagerAcceptPartGzipCompressible` | `1546966 ns/op`, `678 MB/s` | `1256036 B/op`, `65 allocs/op` | Gzip at best-speed is the throughput-oriented stored-compression lane. |
+| `BenchmarkManagerAcceptPartZstdCompressible` | `1081163 ns/op`, `970 MB/s` | `9505612 B/op`, `144 allocs/op` | Zstd is fastest on this compressible sample but currently carries high encoder allocation overhead. |
+| `BenchmarkManagerAcceptPartBrotliCompressible` | `1696120 ns/op`, `618 MB/s` | `389923 B/op`, `47 allocs/op` | Brotli is allocation-light here but slower; reserve it for policy-driven size wins. |
+| `BenchmarkManagerAcceptPartAutoCompressible` | `1523000 ns/op`, `688 MB/s` | `2281314 B/op`, `54 allocs/op` | Auto uses exact-size bounded reads and stack-backed checksum hex conversion. |
+| `BenchmarkManagerAcceptPartAutoIncompressible` | `758418 ns/op`, `1383 MB/s` | `2099887 B/op`, `25 allocs/op` | Auto avoids codec work on likely incompressible data and pays roughly one decision buffer plus one store copy. |
+| `BenchmarkManagerCompleteManifest/128Parts` | `161825 ns/op`, `51838 MB/s represented` | `236669 B/op`, `167 allocs/op` | Stack-backed hex decode/encode removes per-part digest allocations from manifest root construction. |
+| `BenchmarkManagerCompleteManifest/1024Parts` | `1178808 ns/op`, `56929 MB/s represented` | `2065479 B/op`, `1074 allocs/op` | Manifest completion is now dominated by receipt sorting and JSON manifest construction. |
+| `BenchmarkManagerCompleteManifestSparseMissing` | `204068 ns/op`, `328855 MB/s represented` | `201687 B/op`, `42 allocs/op` | Sparse missing-part detection stays bounded by manifest metadata, not payload bytes. |
+| `BenchmarkManagerOpenRangeIdentity` | `48093 ns/op`, `10901 MB/s` | `531299 B/op`, `35 allocs/op` | Materialized range reads copy the requested range and compose chunk readers. |
+| `BenchmarkManagerForEachRangeIdentity` | `34111 ns/op`, `15370 MB/s` | `531264 B/op`, `28 allocs/op` | Callback range walking follows the `wsrouting` split technique: avoid the aggregate reader and slice materialization for hot fanout reads. |
+
+Behavior invariants held:
+
+1. No benchmark path routes bulk bytes through generic dispatch or `io.ReadAll`
+   on a full logical transfer.
+2. Each accepted part remains bounded by its declared part size and memory
+   budget; overrun readers fail before extra bytes become accepted payload.
+3. Redis/cache/event work remains control-plane metadata only.
+4. Identity remains the default. Gzip, Brotli, and Zstd are explicit stored
+   artifact policies; `auto` is also explicit because it buffers one bounded
+   chunk to decide whether compression is worth storing.
+
+Adapter gaps to measure next:
+
+1. `runtime-transport` adapter cost: `server-kit/go/bulk.Pipeline` now carries
+   typed transfer-plan, part receipt, resume-token, status, progress, and
+   manifest envelopes separately from byte movement. It also exposes
+   `AcceptHTTPPart` for server-mediated streams and signed object-store grants
+   through `GrantSignedPart`/`AcceptSignedPart` for direct-to-object-store
+   uploads. Same-host producers can bind descriptor readers through
+   `AcceptDescriptorPart`, while `DetectPlatformCapabilities` reports
+   conservative Linux acceleration hints for future zero-copy/MPTCP/QUIC
+   adapters. `Pipeline.PlanLane` ranks descriptor, signed object-store, kernel
+   zero-copy, MPTCP, QUIC, and HTTP stream candidates without changing the
+   receipt/manifest contract. `BenchmarkPipelinePlanLane` reports about
+   `443 ns/op`, `696 B/op`, and `8 allocs/op`; `BenchmarkPipelineHandleStatus`
+   reports about `1700-2000 ns/op`, `1816 B/op`, and `26 allocs/op`. Future work
+   should reduce envelope allocation without moving bulk bytes into envelopes.
+2. Resumable protocol recovery: benchmark idempotent duplicate part acceptance,
+   missing-part discovery, offset retry, and manifest completion after process
+   restart or worker handoff.
+3. Distributed state backend: compare in-memory state, Redis lease/progress
+   state, and durable manifest recovery under bounded concurrency. Redis must
+   remain ephemeral coordination unless the product explicitly promotes state to
+   a durable store.
+4. Data-plane adapters: add filesystem/object-store streaming benchmarks that
+   do not retain the whole object in memory. Memory-store numbers are a fast
+   regression net, not proof of production storage throughput.
+5. Kernel/network acceleration: when implemented, benchmark Linux `sendfile`,
+   `splice`, `MSG_ZEROCOPY`, `io_uring`, pacing, MPTCP, QUIC, and packet-ring
+   lanes as refinements of the same receipt/manifest contract. The benchmark
+   result must report fallback behavior and copy budget, not only MB/s.
+
+## 2026-05-26 service-backed substrate pressure
+
+Command:
+
+```bash
+make test-service-backed
+```
+
+Environment:
+
+- OS/Arch: `darwin/arm64`
+- CPU: Apple M1 Pro
+- Services: Docker-backed `postgres:18-alpine` and `redis:8-alpine`
+- Artifacts:
+  - `benchmark-results/service_backed_20260526T152527Z.log`
+  - `benchmark-results/service_backed_20260526T152527Z.tsv`
+
+Correctness and pressure tests added:
+
+1. Postgres pool saturation proves bounded acquire timeout and records pool pressure.
+2. Redis stream pressure proves pending-window visibility and read/ack latency budgets.
+3. Redis slow-subscriber pressure proves publish latency remains bounded when subscribers do not drain.
+4. Hermes projection pressure proves Postgres rebuild, Redis stream tailing, hot indexed counts, and drift checks.
+5. Mixed workflow pressure measures p95/p99 across Postgres raw writes, Redis batch `SetGetMany`, and Hermes hot-plane apply.
+
+| Benchmark | ns/op | B/op | allocs/op | Unit | Interpretation |
+| --- | ---: | ---: | ---: | --- | --- |
+| `BenchmarkServiceBackedHermesRebuild512` | `2914560` | `1879425` | `21278` | `512 records/op` | Rebuild from canonical Postgres into Hermes is millisecond-scale and should be treated as repair/recovery/control-plane, not per-request hot path. |
+| `BenchmarkServiceBackedHermesApplyBatch512` | `962877` | `1002751` | `6375` | `512 records/op` | In-memory hot-plane batch apply is about 3x faster than rebuild because it avoids Postgres snapshot reads. |
+| `BenchmarkServiceBackedRedisSetGet` | `443338` | `888` | `26` | | Single Redis round-trip pair is network/service-bound. |
+| `BenchmarkServiceBackedRedisSetGetParallel` | `113453` | `1017` | `29` | | Parallelism hides service latency; pool sizing and timeouts matter. |
+| `BenchmarkServiceBackedRedisSetManyGetMany64` | `796525` | `51522` | `1053` | `64 keys/op` | Separate set-many/get-many is slower and more allocation-heavy than combined batch paths. |
+| `BenchmarkServiceBackedRedisSetGetMany64` | `693280` | `49482` | `793` | `64 keys/op` | Foundation batch client is the preferred project API for hot multi-key Redis work. |
+| `BenchmarkServiceBackedRedisRawPipelineSetGet64` | `702681` | `31768` | `657` | `64 keys/op` | Raw pipeline is close in latency but bypasses Foundation semantics; use only inside server-kit. |
+| `BenchmarkServiceBackedPostgresUpsert` | `342599` | `3054` | `49` | | Semantic single writes are service-bound but predictable. |
+| `BenchmarkServiceBackedPostgresUpsertRawJSON` | `409281` | `2204` | `40` | | Raw JSON preserves bytes and lowers allocations, but live latency is similar because Postgres dominates. |
+| `BenchmarkServiceBackedPostgresUpsertParallel` | `77136` | `3091` | `49` | | Parallel pool use improves throughput substantially when pool budgets are explicit. |
+| `BenchmarkServiceBackedPostgresSendBatchUpsert64` | `2811726` | `73373` | `937` | `64 rows/op` | Batched independent statements amortize round trips but still execute per-row upsert logic. |
+| `BenchmarkServiceBackedPostgresCopyFrom64` | `601597` | `37899` | `378` | `64 rows/op` | `CopyFromRows` is the correct append/import lane and is much faster than per-row upsert batches. |
+
+Operational interpretation:
+
+1. Hermes is now proved as a bounded hot-plane over live Postgres/Redis, not only an in-memory unit.
+2. Postgres remains canonical truth; pool saturation must fail fast with `ErrPoolAcquireTimeout`.
+3. Redis remains ephemeral coordination/cache; batch APIs are materially better than sequential calls.
+4. Rebuild and drift checks are control-plane operations. Hot reads should use Hermes indexed queries after projection.
+5. Mixed p95/p99 service-backed tests are now the next truth layer after local microbenchmarks.
+
+## 2026-06-02 typed payload and JSON compatibility pass
+
+Commands:
+
+```bash
+make test-bench-history
+make test-bench
+FOUNDATION_NATIVE_SKIP_BASELINE=1 tooling/scripts/native_benchmark.sh .
+make test-service-backed
+```
+
+Artifacts:
+
+- `benchmark-results/foundation_bench_20260602T224218Z.log`
+- `benchmark-results/foundation_bench_20260602T224218Z.tsv`
+- `benchmark-results/service_backed_20260602T225316Z.log`
+- `benchmark-results/service_backed_20260602T225316Z.tsv`
+
+Contract-debt guard after the pass:
+
+- `map[string]any`: `29` production occurrences, all explicit boundary or compatibility code.
+- JSON encode/decode calls: `47` production occurrences.
+- Guard: `make check-platform-boundary-debt`.
+
+Useful improvements:
+
+| Benchmark | Before | After | Interpretation |
+| --- | ---: | ---: | --- |
+| `BenchmarkTypedFrameAdapterDispatch` | `6293 ns/op`, `3829 B/op`, `80 allocs/op` | `1126 ns/op`, `1824 B/op`, `13 allocs/op` | Direct typed/proto reflection dispatch removed map and JSON bridge churn from the frame adapter lane. |
+| `BenchmarkScale1M_MemoryDBTenantListFiltered` | `21598 ns/op`, `33400 B/op`, `105 allocs/op` | `12255 ns/op`, `26280 B/op`, `56 allocs/op` | Typed state records and indexed filters reduce dynamic field inspection and list materialization. |
+| `BenchmarkScale1M_MemoryDBDenseTenantListFilteredLimit` | `16836 ns/op`, `33400 B/op`, `105 allocs/op` | `11870 ns/op`, `26280 B/op`, `56 allocs/op` | Dense tenant filtering benefits from the same typed/indexed path and earlier bounded result construction. |
+| `BenchmarkMemoryDBListRecordsTenantScopedFiltered` | `12520 ns/op`, `25304 B/op`, `69 allocs/op` | `10506 ns/op`, `22696 B/op`, `38 allocs/op` | Local list paths now spend less time converting open maps to filterable state. |
+| `BenchmarkServiceBackedPostgresSendBatchUpsert64` | `3061392 ns/op` | `2530127 ns/op` | Batched typed record writes kept semantic validation while reducing some payload conversion overhead. |
+| `BenchmarkServiceBackedPostgresCopyFrom64` | `698505 ns/op` | `602784 ns/op` | Copy/import remains the right append lane, and typed record preparation did not hurt it. |
+
+Watch items and regressions:
+
+| Benchmark | Before | After | Interpretation |
+| --- | ---: | ---: | --- |
+| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | `5399 ns/op`, `9219 B/op`, `71 allocs/op` | `10980 ns/op`, `20720 B/op`, `76 allocs/op` | HTTP JSON ingress now builds typed extension values where the old path carried dynamic maps. Structural safety improved, but decode is doing more owned object work. |
+| `BenchmarkDispatchOverBufconn` | `30175 ns/op`, `12624 B/op` | `46544 ns/op`, `19660 B/op` | The compatibility dispatch path inherits the JSON/object conversion cost even when the transport itself is still local. |
+| `BenchmarkEnvelope_FromJSON` | `3777 ns/op`, `2072 B/op`, `40 allocs/op` | `6818 ns/op`, `15416 B/op`, `58 allocs/op` | Event JSON decode is the clearest evidence that typed object construction needs a direct decoder instead of generic staging. |
+| `BenchmarkEnvelope_FromBinary` with JSON payloads | `2258 ns/op`, `2984 B/op`, `35 allocs/op` | `3757 ns/op`, `8744 B/op`, `35 allocs/op` | Binary framing stayed structurally healthy, but JSON payload compatibility decode now retains larger owned values. |
+| `BenchmarkServiceBackedHermesRebuild512` | `3206715 ns/op`, `1703672 B/op`, `19202 allocs/op` | `3477844 ns/op`, `2653848 B/op`, `26881 allocs/op` | Rebuild is safer and more typed, but trusted projector refresh now pays extra per-field record/value ownership. |
+| `BenchmarkServiceBackedHermesApplyBatch512` | `899371 ns/op`, `956955 B/op`, `4836 allocs/op` | `1070326 ns/op`, `1284592 B/op`, `8420 allocs/op` | Durable mixed-event apply still works, but typed value construction increased allocation pressure in batch projection. |
+
+Why the mixed result happened:
+
+1. The typed refactor removed dynamic map contracts from frame adapters, proto
+   binding, record data, metadata, event metadata, registry, worker, and Hermes
+   query surfaces. Paths that stayed typed after ingress improved because they
+   avoid repeated `InterfaceMap` conversion, type assertions, and map-shaped
+   filtering.
+2. JSON compatibility lanes did not receive the same low-level decoder treatment.
+   Several paths now decode JSON into typed `extension.Object`/`Value` ownership
+   graphs. That is safer and more explicit than `map[string]any`, but it can
+   allocate more when the owner only needs routing, validation, or delayed
+   payload access.
+3. Binary lanes remained healthy when they stayed borrowed or byte-preserving.
+   Same-process frame dispatch and runtime borrowed views are still nanosecond,
+   near-zero-allocation paths. The slower binary envelope case is specifically
+   the JSON-payload compatibility decode inside the frame, not the frame boundary.
+4. Service-backed Hermes regressions are mostly allocation shape, not a contract
+   failure. Trusted rebuild/apply paths now own more typed field values per
+   record. That makes projector state more explicit but shows where builder or
+   borrowed `RecordData` APIs should be introduced.
+
+What this tells us:
+
+1. Removing `map[string]any` is a contract and maintainability win, but it is not
+   automatically a performance win for JSON ingress.
+2. The Foundation performance model needs two separate budgets: typed/binary hot
+   lanes and JSON compatibility lanes. A refactor can improve one while
+   regressing the other.
+3. The next optimization is not to reintroduce maps. It is to decode external
+   JSON directly into the final typed representation, or preserve bytes lazily
+   until a typed object is actually required.
+4. Baseline-beating potential is still good: a direct token decoder can avoid
+   both the old dynamic-map materialization and the current typed-object
+   re-materialization, while retaining stronger typed contracts.
+
+Next target:
+
+1. Implement a streaming/token JSON decoder for `extension.Object` and
+   `extension.Value` that parses scalars with append/strconv paths, pre-sizes
+   objects/lists where possible, and never stages through `interface{}`.
+2. Route HTTP JSON body dispatch, `events.FromJSON`, and JSON payload handling in
+   `events.FromBinary` through that decoder.
+3. Preserve raw payload bytes on envelope decode until the owning handler asks
+   for a typed object. The fallback remains external JSON wire compatibility.
+4. Add benchmark guards for `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest`,
+   `BenchmarkEnvelope_FromJSON`, `BenchmarkEnvelope_FromBinary`, and
+   service-backed Hermes rebuild/apply allocations.
+5. Add trusted Hermes batch builders that populate `RecordData` from validated
+   projector rows without per-field generic conversion, then compare
+   `BulkLoad`, `ApplyRecords`, and `ApplyBatch` again.
+
+## 2026-06-03 JSON ingress, lazy payload, and Hermes normalization follow-up
+
+Commands:
+
+```bash
+cd server-kit/go
+go test ./extension ./events ./httpapi ./appbench ./hermes
+go test -run=^$ -bench='Benchmark(AppLane_HTTPIngress_JSONToDispatchRequest|Envelope_(ToJSON|FromJSON|FromBinary))$' -benchmem -count=5 ./appbench ./events
+go test -run=^$ -bench='Benchmark(PayloadFromRequestJSONBody|BuildDispatchRequestJSONBody)$' -benchmem -count=5 ./httpapi
+go test -run=^$ -bench='BenchmarkHermes(ApplyBatch64|ApplyRecords64|BulkLoad512)$' -benchmem -count=5 ./hermes
+cd ../..
+make test-service-backed
+make check-platform-boundary-debt
+tooling/scripts/coding_practices_check.sh .
+tooling/scripts/dynamic_payload_practices_check.sh .
+```
+
+Artifacts:
+
+- `benchmark-results/service_backed_20260602T230927Z.log`
+- `benchmark-results/service_backed_20260602T230927Z.tsv`
+- `benchmark-results/service_backed_20260602T232656Z.log`
+- `benchmark-results/service_backed_20260602T232656Z.tsv`
+- `benchmark-results/service_backed_20260602T233709Z.log`
+- `benchmark-results/service_backed_20260602T233709Z.tsv`
+- `benchmark-results/service_backed_20260602T235909Z.log`
+- `benchmark-results/service_backed_20260602T235909Z.tsv`
+
+Implementation changes:
+
+1. `extension.Value.UnmarshalJSON` and `extension.Object.UnmarshalJSON` now avoid
+   `interface{}` and `json.RawMessage` object/list materialization. They walk
+   bytes directly into typed extension values and parse scalars with
+   `strconv`/`json.Number`.
+2. `extension.Object.MarshalJSON`, extension lists, and event payload encoding
+   now use deterministic append-style encoders instead of generic JSON map/list
+   marshaling.
+3. HTTP JSON body dispatch and event JSON payload decode use the shared
+   `extension.ObjectFromJSON` boundary.
+4. Binary event envelope decode now preserves JSON `PayloadBytes` lazily. Callers
+   that need the object call `MaterializePayload`, so binary frame decode does
+   not pay JSON object construction upfront.
+5. `RecordData.Normalize` now has an already-sorted/unique fast path, and Hermes
+   record normalization injects `organization_id` after one normalized pass
+   instead of `Normalize().With(...)`.
+6. HTTP dispatch-owned request bodies are no longer restored after read, and
+   dispatch metadata no longer re-reads headers already folded into
+   `MetadataFromRequest`.
+7. Event JSON decode parses through the typed extension byte parser and borrows
+   the just-parsed payload/metadata object views instead of unmarshaling into a
+   temporary envelope struct.
+8. `RecordData.UnmarshalJSON` now uses the typed byte parser instead of
+   `json.RawMessage` map staging, which moves Postgres-backed Hermes rebuild off
+   the generic JSON map path.
+9. HTTP route dispatch can now be compiled with `CompileDispatchRoute`, so
+   generated/scaffolded handlers avoid repeated route path/header planning while
+   the compatibility `BuildDispatchRequest` API remains available.
+10. Event JSON decode now uses a true single-pass top-level parser: scalar fields
+    parse directly, metadata parses once, and payload bytes remain lazy until
+    `MaterializePayload`.
+11. `extension.Object.MarshalJSONFast` is available for non-canonical JSON
+    response paths; deterministic `MarshalJSON` remains the canonical/signing
+    path.
+12. Hermes rebuild can opt into `database.NormalizedSnapshotStore` when a source
+    can provide already-normalized records without changing the canonical
+    `StateStore` contract.
+
+Debt guard after the slice:
+
+- `map[string]any`: `29` production occurrences.
+- JSON encode/decode calls: `43` production occurrences after the first follow-up,
+  then expected to remain within the guard after the byte-scanner/lazy-decode
+  slice.
+
+Focused benchmark result on Apple M1 Pro:
+
+| Benchmark | Old baseline | Typed regression | Now | Honest result |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | `5399 ns/op`, `9219 B/op`, `71 allocs/op` | `10980 ns/op`, `20720 B/op`, `76 allocs/op` | `7251-7913 ns/op`, `16615 B/op`, `56 allocs/op` | Compatibility API allocs beat old baseline, but bytes/time remain worse. Use compiled route plans for generated/scaffolded handlers. |
+| `BenchmarkPayloadFromRequestJSONBody` | n/a | n/a | `2534-2688 ns/op`, `7339 B/op`, `19 allocs/op` | Split guard. Body decode is bounded but still retains one raw body plus typed object ownership. |
+| `BenchmarkBuildDispatchRequestJSONBody` | n/a | n/a | `6468-6786 ns/op`, `16615 B/op`, `56 allocs/op` | Compatibility builder keeps dynamic route parsing. It is allocation-better than old app ingress but not byte/time better. |
+| `BenchmarkPlannedDispatchRequestJSONBody` | n/a | n/a | `6472-6657 ns/op`, `16582-16583 B/op`, `52 allocs/op` | New compiled route-plan lane. It saves path/header planning allocations, but body and metadata ownership still dominate bytes. |
+| `BenchmarkEnvelope_FromJSON` | `3777 ns/op`, `2072 B/op`, `40 allocs/op` | `6818 ns/op`, `15416 B/op`, `58 allocs/op` | `3035-3140 ns/op`, `4184 B/op`, `40 allocs/op` | Time beats old baseline and allocations match old baseline. Bytes remain higher because metadata is typed and payload is retained lazily as raw bytes. |
+| `BenchmarkEnvelope_FromBinary` | `2258 ns/op`, `2984 B/op`, `35 allocs/op` | `3757 ns/op`, `8744 B/op`, `35 allocs/op` | `2885-3072 ns/op`, `6224 B/op`, `28 allocs/op` | Allocation count beats old baseline because JSON payload decode is lazy; bytes/time are better than regression but still above old baseline. |
+| `BenchmarkEnvelope_ToJSON` | `3330 ns/op`, `2681 B/op`, `49 allocs/op` | `4068 ns/op`, `4508 B/op`, `38 allocs/op` | `4070-4319 ns/op`, `3619 B/op`, `24 allocs/op` | Allocation count beats old baseline, but deterministic encoding remains slower/larger than old dynamic-map encoding. Use fast unordered encoding only where canonical order is irrelevant. |
+| `BenchmarkServiceBackedHermesApplyBatch512` | `899371 ns/op`, `956955 B/op`, `4836 allocs/op` | `1070326 ns/op`, `1284592 B/op`, `8420 allocs/op` | `876915 ns/op`, `981530 B/op`, `4324 allocs/op` | Beats old baseline on time and allocation count; bytes are close but still slightly above old best. |
+| `BenchmarkServiceBackedHermesRebuild512` | `3206715 ns/op`, `1703672 B/op`, `19202 allocs/op` | `3477844 ns/op`, `2653848 B/op`, `26881 allocs/op` | `2892654 ns/op`, `2342601 B/op`, `17154 allocs/op` | Time and allocation count beat old baseline; bytes remain higher until a source implements the optional normalized snapshot lane. |
+
+Remaining opportunity:
+
+1. HTTP JSON ingress is now allocation-better than baseline but still byte/time
+   worse. The remaining target is route-specific generated dispatch assembly:
+   pre-sized payload objects, generated path-param extraction, and optional
+   single-consume body readers for hot scaffolded routes.
+2. Event JSON decode now beats old time and allocation count but not bytes. The
+   remaining byte pressure is typed extension object size; further work should be
+   justified by compatibility-lane traffic, not by raw count chasing.
+3. Binary event decode is lazy for payloads, but metadata/proto ownership is
+   still visible. Optimize only if binary JSON compatibility decode remains on a
+   real hot path.
+4. Hermes rebuild now beats old time and allocation count, but not bytes. The
+   next improvement would need a true normalized snapshot source that bypasses
+   durable JSONB materialization, not more `BulkLoad` tuning.
+
+## 2026-07-12 Runtime SDK ownership and scheduling pass
+
+Environment: Apple M1 Pro, `darwin/arm64`, Go 1.26.5, Node 24.1.0.
+
+Commands:
+
+```bash
+cd runtime-sdk/go
+go test -run '^$' -bench 'BenchmarkProcessPoolExecute(Owned|Into)1KB$' -benchmem -count=5 ./runtimehost
+cd ../ts/browser-host
+npm test -- --run src/runtimeWorkerPool.test.ts src/packetRing.test.ts
+npm run bench -- src/arena.bench.ts --run --reporter=verbose
+```
+
+| Benchmark | Result | Interpretation |
+| --- | ---: | --- |
+| `BenchmarkProcessPoolExecuteOwned1KB` | 1733-1760 ns/op, 1681 B/op, 11 allocs/op | Compatibility response owns a new output slice. |
+| `BenchmarkProcessPoolExecuteInto1KB` | 1658-1680 ns/op, 656 B/op, 10 allocs/op | Caller-owned destination removes the 1KB response allocation and copy ownership remains explicit. |
+| `BenchmarkProcessPoolExecuteOwned1KB` after persistent loop | 1726-1778 ns/op, 1456-1457 B/op, 8 allocs/op | Reused worker channels remove three per-call allocations without changing the owned response contract. |
+| `BenchmarkProcessPoolExecuteInto1KB` after persistent loop | 1625-1742 ns/op, 432 B/op, 7 allocs/op | Reused worker channels plus caller ownership remove 224 B/op and three allocations from the prior `ExecuteInto` result. |
+| packet-ring lifecycle x1 | 444 ns mean, 500 ns p99 | Batch reservation retains competitive single-packet behavior. |
+| packet-ring lifecycle x8 | 2.9 microseconds mean, 3.3 microseconds p99 | One burst publishes a bounded valid prefix. |
+| packet-ring lifecycle x32 | 11.4 microseconds mean, 12.6 microseconds p99 | Per-descriptor timestamp/copy work dominates after reservation. |
+| packet-ring lifecycle x128 | 45.8 microseconds mean, 54.2 microseconds p99 | Near the prior 47.9-microsecond reference; no large speedup is claimed from this noisy single-host comparison. |
+
+The first Go result is a physical allocation win: 1025 fewer bytes and one fewer
+allocation per 1KB response, about 61% fewer allocated bytes. The follow-up
+replaces the per-call cancellation goroutine/channel pair with one capacity-one
+request/result loop per serialized worker. This reduces `ExecuteInto` from 656
+B/op and 10 allocs/op to 432 B/op and 7 allocs/op. Cancellation, restart, channel
+reuse, and shutdown are regression-tested; worker close remains the bounded
+fallback that terminates the loop and native process together.
+
+The browser worker pool now selects the least-loaded ready worker with rotating
+tie-breaking. This is primarily a saturation and tail-latency correction; a
+load-shaped async worker benchmark is still required before claiming a numeric
+throughput gain. Packet-ring batch reservation establishes prefix-atomic
+publication and removes repeated single-enqueue entry, but current measurements
+are close to the old baseline. Preserve the simpler single-item path and measure
+timestamp sampling separately before further ring specialization.
+
+Invariants: `FrameSizeBound`, `OwnedDecodeLifetime`,
+`EligibleWorkerFairness`, `BatchPrefixVisible`, `QueueBounded`, and
+`FallbackRefinement`. Public fallback: `ProcessPool.Execute` remains unchanged;
+`ExecuteInto` is additive, and single-packet `enqueue` remains available.
+
+Coverage/lifecycle follow-up: the browser-host suite increased from 63.2%
+statements, 56.1% branches, 61.78% functions, and 63.77% lines to 90.45%
+statements, 80.02% branches, 94.03% functions, and 91.13% lines. The added
+oracles cover host buffer imports, dispatcher saturation/timeouts, worker load
+accounting, module fallback/cache behavior, pulse worker/main-thread fallback,
+packet/arena bounds, payload routing, and shutdown. During this pass,
+orchestrator shutdown was corrected to clear timers and reject every pending
+request before releasing worker and pulse ownership; this is both leak
+prevention and bounded-shutdown evidence.
+
+## 2026-07-12 TypeScript side-effect and prototype audit
+
+Environment: Apple M1 Pro, Node 24.1.0, Vitest 4.1.x.
+
+| Lane | Representative result | Interpretation |
+| --- | ---: | --- |
+| Workbench `applyMany` 1k | 0.120 ms mean | Preferred already-batched projection ingest. |
+| Workbench individual apply 1k | 0.149 ms mean | Acceptable stream path, but more commit bookkeeping. |
+| Apply 1k with snapshot after every mutation | 31.75 ms mean | Render-coupled materialization is the dominant frontend gap; read once per committed batch. |
+| Runtime transport protobuf decode | 0.0016 ms mean | Binary decode remains substantially cheaper than JSON-to-protobuf encoding. |
+| Browser arena 1MB fast view | 0.0417 ms mean | Borrowed same-owner views retain the expected large-payload advantage. |
+| WebGPU resident-to-resident fake dispatch 4KB | 0.0011 ms mean | Avoiding materialized readback was about 3x faster in the CPU-side fake dispatch benchmark. |
+| Native response decode | 0.0004 ms mean | Native frame decode is not the current TypeScript bottleneck. |
+
+The optimization pass removed unowned pulse visibility listeners: repeated
+starts now share one listener set and stop/shutdown remove it symmetrically.
+All published TypeScript packages explicitly declare `sideEffects: false`, and
+the static gate blocks production React class components. Browser-host coverage
+remained above its gate at 90.51% statements, 80.11% branches, 94.05%
+functions, and 91.22% lines. Runtime-transport coverage improved after excluding
+bench sources and adding projection codec contract tests. The focused transport
+follow-up then raised the package from 71.49% statements, 59.85% branches,
+74.32% functions, and 72.16% lines to 91.13% statements, 80.09% branches,
+92.85% functions, and 92.07% lines, satisfying its configured 90%/80% gate.
+The added oracles cover HTTP cancellation/timeout and response formats,
+structured failures, WebSocket readiness/reconnect/abort/close, duplicate
+subscription reference counts, compression fallback/corruption, generated
+projection codecs, runtime metadata isolation, store replay/loading/error
+lifecycle, and projection source bounds.
+
+The coverage pass also removed two observable WebSocket side effects. A first
+subscription is no longer sent twice across `connect()` and ready-time replay;
+new patterns on an already-open connection still send once. Best-effort
+resubscribe/unsubscribe requests now consume close-time rejection so reconnect
+or shutdown cannot produce unhandled promise rejections. Post-change routing
+and envelope benchmarks remained in the same performance class: exact
+capability checks measured about 25.3M ops/s, event route lookup about 21.7M
+ops/s, identity binary-frame decode about 5.16M ops/s, and protobuf envelope
+decode about 613k ops/s on the Apple M1 Pro run.
+
+## 2026-06 Hermes Hotplane Optimizations (Lock-Free reads, Map Sharding, TTL, Watermarking)
+
+In 2026-06, we addressed critical architectural trade-offs in the Hermes Hotplane:
+
+- **Lock-Free Reads**: The global read-blocking wait loop `waitForStable` has been removed. Reads access `activeRegistry` atomically. This is 100% thread-safe under concurrency, providing flat latency profiles.
+- **Sharded Map Registry**: Replaced single-point contention maps in `partitionRegistry` with a custom `shardedMap` wrapping 128 independent `sync.Map` segments. This distributes write contention by dividing key allocations.
+- **TTL Eviction**: Records support time-based expiration (`ExpiresAt`) and are evicted inline during batch write processes to keep memory bounded without background goroutines leaking.
+- **Producer Watermarking**: Monotonic watermarks per producer prefix prevent replay of old events without needing infinite sliding windows in memory.
+
+### Benchmark Results (Apple M1 Pro)
+
+Under active concurrent write pressure (4 background writers aggressively applying events):
+
+| Benchmark | ns/op | B/op | allocs/op | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkHermesConcurrentReadWrite-8` | 156.9 | 197 | 4 | Sub-microsecond read latency under heavy write contention. |
+
+## 2026-07-17 Benchmark correctness: dead-code elimination and the `b.Loop()` migration
+
+The whole Go benchmark tree migrated from the classic `for i := 0; i < b.N; i++`
+form to `for b.Loop()` (Go 1.24+). This is a **measurement-correctness** change,
+not a performance change: `b.Loop()` does not alter what the code does. It was
+applied with the authoritative fixer (gopls `bloop` code action), so loops that
+still reference the index keep it (`for i := 0; b.Loop(); i++`) and the rest
+collapse to `for b.Loop()`. All four Go modules are Go >= 1.24
+(`runtime-transport/go` at 1.24.1, the rest at 1.26.0), so the construct is
+valid fleet-wide.
+
+### Why the old form lied: dead-code elimination (DCE)
+
+A benchmark that assigns a result and never observes it invites the compiler to
+prove the work is unobserved and delete it:
+
+```go
+for i := 0; i < b.N; i++ {
+    result := StateRead() // result never read -> whole body is dead -> deleted
+}
+```
+
+What remained was an empty counting loop, so the "benchmark" measured `i++`, not
+`StateRead()`. `b.Loop()` closes this by contract: values produced inside a
+`b.Loop()` body are treated as observed, so DCE cannot strip them. It bakes in
+the protection that previously required manually sinking results into a
+package-level variable — which contributors routinely forgot.
+
+### Measured corrections (Apple M1 Pro, `-benchtime=100ms -count=6`, benchstat)
+
+Allocations and `B/op` were byte-identical before/after everywhere. The timing
+deltas below are the old numbers being corrected upward to honest cost, not
+regressions. The signature is telling: the damage was concentrated in the
+sub-nanosecond micro-benchmarks, exactly where DCE can see through cheap,
+result-ignored work.
+
+| Benchmark | old (`b.N`) | new (`b.Loop`) | Delta | Reading |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkCircuitBreaker_StateRead` | 0.525 ns | 2.169 ns | +313% | Body was fully DCE'd; 0.5 ns was never achievable. ~2.2 ns is real. |
+| `BenchmarkHasCriticalFailureOrdered` | 1.262 ns | 2.130 ns | +69% | Partially optimized away before. |
+| `BenchmarkEnvelope_FromBinary` | 514.9 ns | 530.2 ns | +3.0% | Real work; barely affected. |
+| `BenchmarkEnvelope_FromJSON` | 2.464 us | 2.479 us | +0.6% | Real work; noise-level. |
+
+Everything else (`BenchmarkInMemoryBus_Publish*`, `BenchmarkEnvelope_ToJSON`,
+`BenchmarkEnvelope_ToBinary`, chain, retry, metrics, circuit-breaker execute)
+was statistically unchanged (`~`, p>0.05). **Rule of thumb: any benchmark
+reporting below ~1 ns/op with 0 allocs is suspect — it is very likely timing an
+empty loop.**
+
+### Other benchmark-correctness hazards (`b.Loop()` does not cover all of them)
+
+Researched against the current tree; each is a distinct trap:
+
+1. **`for pb.Next()` parallel loops** (8 in the tree) are outside the `b.Loop()`
+   contract. They still need results sunk (assigned to a package var or a field
+   the compiler cannot prove dead) or they DCE just like the old serial form.
+2. **Discarding to `_`** (for example, `compress/bench_test.go` uses `_, _ = Compress...`)
+   is weaker than a real sink. It preserves side effects, but for a provably
+   pure function with an unused result the compiler may still eliminate it.
+   Prefer a package-level sink for pure computations.
+3. **Loop-invariant / constant inputs** let the compiler hoist the work out of
+   the loop or constant-fold it. Vary inputs by iteration or source them from a
+   sink the compiler cannot predict.
+4. **Setup inside the timed region.** `b.Loop()` runs setup/teardown outside the
+   timer cleanly, but any expensive construction still placed *inside* the loop
+   is measured. Keep using `b.ResetTimer()`/`b.StopTimer()` for per-iteration
+   setup (22 files already do).
+5. **`b.N` used as a value in the body** — for example, `scale_paths_test.go` asserts
+   `deliveries == b.N`. These are legitimate and gopls correctly refused to
+   auto-migrate them; migrating requires a local counter, since `b.Loop()` does
+   not expose an iteration total up front. Do not force these to `b.Loop()`.
+6. **Missing `b.ReportAllocs()`** (for example, `database/executor_bench_test.go`) hides
+   allocation shape unless `-benchmem` is passed globally. Prefer per-benchmark
+   `b.ReportAllocs()`.
+
+### Regression guard
+
+`gopls check` emits the `bloop` diagnostic for any reintroduced `b.N` loop.
+`tooling/scripts/go_static_analysis_check.sh` runs `gopls check` and gates on it
+under `GOPLS_CHECK_STRICT=1` / `FOUNDATION_STRICT_LINT=1` (warn-only otherwise),
+so the fleet cannot silently regress back to the DCE-prone form.
+
+## 2026-08-04 HTTP ingress allocation pass
+
+Rung 03 of the null lane parsed `{}` into a `DispatchRequest` in 28 allocations
+and 7080 bytes. Rung 07 materializes that same `{}` into the extension
+container in 1 allocation and 48 bytes. Ingress was spending ~20x the parse it
+wraps and 7 KB on a two-character body, against a well-tuned-Go target of
+single-digit allocations. This pass closed the gap that was closable and priced
+the rest.
+
+### Where the 28 allocations actually went
+
+Profiled with `-memprofile` on rung 03 rather than reasoned about:
+
+| Cause | Share |
+| --- | --- |
+| `net/textproto.canonicalMIMEHeaderKey` | 33% of allocations |
+| `metadata.appendGlobalContextObject` + its `Clone` | 84% of bytes |
+| `metadata.New` (four eager empty containers) | 13% of allocations |
+| `io.ReadAll` fixed 512-byte start buffer | 512 bytes |
+
+Three of the four are not translation cost. They are spelling and defaults.
+
+### Changes
+
+1. **Canonical MIME header spellings** (`httpapi/correlation.go`).
+   `Header.Get("X-Request-ID")` allocates a new string on every call, because
+   the key is neither already canonical nor in textproto's common-header table.
+   Ingress performs a dozen such lookups per request. `"X-Request-Id"` is free
+   and behaviourally identical — `Get`/`Set` canonicalize either way, and Go
+   was already emitting the canonical spelling on the wire.
+2. **`appendGlobalContextObject` omits empty fields** (`metadata/metadata.go`).
+   It had been materializing all nine `GlobalContext` fields as empty strings
+   and then deep-cloning the map it had just built. It now skips empties, in
+   line with `appendScalarFieldsObject` and the struct's own `omitempty` tags,
+   and takes ownership via the new `extension.ObjectValueOwned`.
+3. **`ToObject` sizes its result map.** Neutral on this path (4-6 keys fit one
+   bucket either way); it documents the expected width and stops a seventh
+   field from silently buying a second ~1 KB bucket.
+4. **`readRequestBody` sizes the first buffer from Content-Length**
+   (`httpapi/dispatch_route.go`), replacing `io.ReadAll`'s fixed 512.
+
+Attribution matters here: **changes 1 and 2 produced the entire null-lane
+win.** Change 3 is documentation with a guard rail, and change 4 is invisible
+to the null lane for the reason described below.
+
+### Results (Apple M1 Pro)
+
+| Benchmark | Before | After |
+| --- | --- | --- |
+| `NullLane_03_HTTPDispatchBuild` | 28 allocs, 7080 B | 14 allocs, 2891 B |
+| `NullLane_04_HTTPRouteHandler` | 28 allocs, 7080 B | 14 allocs, 2891 B |
+| `NullLane_05_HTTPRouteHandlerCorrelated` | 44 allocs, 8073 B | 22 allocs, 3756 B |
+| `NullLane_06_HTTPSecuredChain` | 97 allocs, 11141 B | 75 allocs, 6837 B |
+| `AppLane_HTTPIngress_JSONToDispatchRequest` | 56 allocs, 16643 B | 43 allocs, 12508 B |
+
+### Null-lane fidelity correction
+
+`nullRequest` wrapped its payload in a custom `nullBody` type, which
+`httptest.NewRequest` does not recognize, so `ContentLength` was `-1` and every
+HTTP rung measured the chunked-transfer path that almost no client uses. The
+lane now sets `ContentLength` explicitly, as a real server does from the
+request header. This is what exposed the remaining 509 bytes in rungs 03-06.
+
+The lesson generalizes: the null lane's scaffolding is deliberately synthetic,
+and synthetic scaffolding can silently select a different code path than
+production traffic takes. Check which branch the lane is actually measuring
+before trusting a rung to be a floor.
+
+### `AppLane_HTTPIngress_JSONBodyKilobyte`
+
+Added, because a two-byte body cannot show body-read cost. Measured against
+`io.ReadAll` at realistic payload sizes:
+
+| Body | Sized read | `io.ReadAll` |
+| --- | --- | --- |
+| 41 B | 48 B, 1 alloc | 512 B, 1 alloc |
+| 4 KB | 4864 B, 1 alloc | 10368 B, 9 allocs |
+| 64 KB | 73728 B, 1 alloc | 138112 B, 16 allocs |
+
+Rung 03 measures per-request overhead; this benchmark measures per-kilobyte
+overhead. Only the second scales with the product, and the pair is what keeps
+the two from being confused.
+
+### The finding underneath: `extension.Value` is 112 bytes
+
+`Object` is `map[string]Value`, so one entry costs 128 bytes, and Go allocates
+map buckets eight entries at a time. **Writing the first key into any `Object`
+costs roughly 1 KB, whether it ends up holding one field or eight.** That, not
+translation, is why an empty request cost 7 KB. 25 packages hold
+`extension.Object` on request paths.
+
+This is now documented as a cost model in the `extension` package doc, with
+three rules ordered by savings: prefer a struct on per-request paths; omit
+empty fields; prefer `ObjectValueOwned` over `ObjectValue` for freshly built
+maps. `extension/value_size_test.go` gates the width so it cannot grow
+silently.
+
+### Packing `Value`: measured and declined
+
+Overlapping the union was measured, per populated `Object`, on go1.26:
+
+| `Value` size | bytes/Object | allocs | ns |
+| --- | --- | --- | --- |
+| 112 (today) | 1200 | 2 | 288 |
+| 88 (no unsafe) | 944 | 2 | 225 |
+| 48 (sanctioned unsafe) | 624 | 2 | 166 |
+| 40 (full union) | 528 | 2 | 168 |
+
+**The allocation count does not move at any width.** Shrinking `Value` is a
+bytes-and-latency lever, not an allocations lever; single-digit allocations
+comes from not carrying an `Object` per request at all. The remaining step to
+40 bytes additionally requires storing a Go map through `unsafe.Pointer` — a
+representation the runtime does not promise, and which changed shape when maps
+moved to Swiss tables in Go 1.24 — for 96 bytes and zero nanoseconds.
+
+Declined: putting `unsafe.Pointer` into the most widely held type in server-kit
+was not justified by a benefit that did not address the goal. Reopen with new
+measurements, not intuition. The ceiling constant in
+`extension/value_size_test.go` records the decision.
+
+### Not done
+
+`metadata.New()` eagerly allocates four containers, still 28% of the remaining
+allocations on the ingress path. Only four sites write into a nil-able map
+(three in `metadata`, one in `featureflags`), but `EnvelopeMetadata` is public
+and vendored apps construct and populate it directly, so the non-nil guarantee
+is contract rather than implementation. Removing it needs a deprecation pass
+across the vendored apps, not an edit in `metadata.go`.
+
+## The shared-memory transport: what a crossing actually costs
+
+Apple M1 Pro, release build. Reproduce with:
+
+```bash
+cargo run --release -p ovrt-native --bin shm_exchange_bench --manifest-path runtime-sdk/rust/Cargo.toml
+```
+
+| Exchange body | ns/op |
+| :--- | ---: |
+| control buffer, positional: `pread` + 4 KiB alloc + process + `pwrite` | 1903 |
+| control buffer, mapped: process in place | 130 |
+| arena slab read (64 KiB), positional: 4x `pread` descriptor + slab | 4781 |
+| arena slab read (64 KiB), mapped: descriptor + slab borrow | 10 |
+
+The control-buffer rows measure the transport body only — the unit is an echo,
+so the 130 ns that remain are the epoch and header writes every exchange
+performs regardless of lane.
+
+The arena rows are the larger finding, and they were the least visible cost in
+the system. A slab read is not one `pread`: `descriptor` issued **four separate
+four-byte positional reads** to assemble one table entry, each allocating, and
+only then read the slab into a fresh `Vec`. Reading a columnar batch cost a
+syscall and an allocation *per column*. Mapped, the same read is an offset into
+memory the host already wrote — a borrow, not a copy — which is why it does not
+scale with slab size.
+
+### Why the numbers below are the ones that matter
+
+`shm` was described as zero-copy and was not, on either region. The host mapped
+its control buffer (`syscall.Mmap`, `MAP_SHARED`, in
+`runtimehost/shared_memory_unix.go`) while the Rust kernel opened the same file
+and read it with `pread`, processed a heap copy, and wrote it back with
+`pwrite`. So on the kernel side there was no shared memory at all: a file, two
+syscalls, 8 KiB of copying and one allocation per exchange.
+
+The arena was worse, and its cost was structural rather than incidental. A
+mapped writer against a positional reader **drifts** — on darwin a freshly
+published descriptor reads back as FREE, a failure that looks like a protocol
+race and is not one. The kernel was `#![forbid(unsafe_code)]` and could not
+mmap, so the host gave up its own mapping to match: the arena staged into a
+private buffer, published with a positional write of everything staged, and
+read results back through the file. That is an arena-sized allocation per
+worker, a copy of the working set on every exchange, and an `msync` to make the
+two views agree.
+
+Both ends of both regions map now, through `ovrt_core::SharedMapping` — a safe
+wrapper in the one crate that permits unsafe, so `ovrt-native` still forbids it.
+The staging buffer, the publish copy, the `msync`, and the whole
+mapped-vs-positional hazard are gone with it. `Arena.Sync()` is a no-op on this
+path and `ReadSlab` is a view, because there is no longer a second copy of the
+arena to reconcile.
+
+**This is not the dominant cost, and the measurement above should not be read
+as if it were.** A full `shm` round trip is still governed by its doorbell: the
+host writes the unit id as a stdio frame and blocks reading an acknowledgement,
+which is two context switches and four syscalls per exchange, independent of
+payload size.
+
+Measured end to end from a caller (pronto's `RustArenaRoundTrip`, same
+class of machine), before and after mapping both regions:
+
+| `RustArenaRoundTrip` | ns/op | allocs/op |
+| :--- | ---: | ---: |
+| positional | 38,537 | 14 |
+| mapped, warm | ~22,000 | 13 |
+| in-process FFI, for scale | ~1,300 | 3 |
+| the wire codec alone, for scale | ~84 | 2 |
+
+About 16.5 us came off, and the remainder did not move. That is the shape the
+body measurements predict — the doorbell is untouched by any of this — and it
+is the number that matters for deciding what to do next: **~22 us of a ~22 us
+crossing is now the pipe.** There is nothing else left to blame.
+
+The consequence is a design constraint, not a tuning note. At ~22 us a crossing
+still only pays for batches of thousands of items, so lanes with small payloads
+cannot move work into the native runtime at all — they can only run a second
+implementation and compare it, which is what a blocked offload path degrades
+into. The fix is to make the doorbell an epoch switch: the control buffer
+already carries `IDX_INPUT_WRITTEN`, `IDX_OUTPUT_WRITTEN`, `IDX_OUTPUT_CONSUMED`
+and `IDX_KERNEL_READY`, generated into both lanes, and the FFI path already uses
+them. The `shm` path writes them as bookkeeping and signals over a pipe anyway.
+
+### Cold start: a 17x penalty, and how to avoid measuring it by accident
+
+Rebuild the kernel binary and run the benchmark immediately and the same round
+trip reads **~374,000 ns**. Run it again without rebuilding and it is back to
+**~22,000 ns**. The child's executable pages and the multi-megabyte arena
+mapping are both cold, and the first exchange takes the faults for all of them.
+
+Two consequences, and neither is optional:
+
+- **A pool must warm itself.** `ProcessPool` now faults its arena in at
+  `start()` — one byte written per page, before the header is written and
+  before the child is spawned (`warmMapping`, `runtimehost/warmup.go`).
+  Measured directly on an 8 MiB segment: a first full pass costs **1.499 ms**
+  cold and **16.2 us** after warming. Otherwise the first real caller pays
+  that, and it surfaces as an unreproducible latency spike rather than as a
+  warmup. Note the write: faulting on a *read* installs a read-only entry for a
+  shared file mapping and the first write then takes a second fault, so warming
+  by reading leaves half the cost in place.
+
+  The child's executable pages are the other half, and only an exchange reaches
+  them — a separate address space. `ProcessPool` now also runs one throwaway
+  exchange per worker at startup (`warmupLocked`), carrying the child through
+  frame decoding, buffer validation, dispatch lookup and the reply. It needs no
+  configuration: an unknown unit id is answered with an in-band status code
+  rather than a transport error, because the protocol has always had to tolerate
+  a client sending any id at runtime. `WarmupUnitID` names a real unit instead,
+  which additionally warms that unit's own code and is worth setting for a pool
+  that serves one hot unit.
+
+  The warm-up never fails a start, and it is bounded by the exchange timeout and
+  routed through `executeWithContext` — the exchanges themselves ignore their
+  context, so an unbounded warm-up would let a kernel that hangs on its first
+  call hang startup instead, which is a worse failure than the one being fixed.
+- **Never benchmark immediately after a build.** A transport comparison run
+  that way is measuring page faults, not transport. The 374 us figure above is
+  what that mistake looks like, and it is large enough to invert a conclusion —
+  it reads as a 4.7x *regression* against the positional baseline it replaced.
+
+### The 4 KiB budget, and what happens when a unit exceeds it
+
+`INPUT_MAX_BYTES` is 1024 bytes — **128 `float64`s**. `OUTPUT_MAX_BYTES` is
+2048. A unit whose real payload is larger does not get an error at the boundary:
+the call fails inside the kernel and the Go caller takes its fallback, so the
+native lane silently ceases to exist while continuing to be scheduled. Anyone
+writing a unit with a batch-shaped payload should assume the control buffer is
+a control plane only and put the payload in the arena, passing a descriptor id
+through the buffer. `ArenaBlobUnit` is the worked example.
+
+### Choosing a transport
+
+| Mode | Isolation | ns/op | Use when |
+| :--- | :--- | ---: | :--- |
+| `ffi` | none (same address space) | ~1,300 | trusted safe-Rust kernels, hot units, small payloads |
+| `shm-epoch` | separate process | 3,211 – 4,472 | isolation needed and latency matters; opt-in. Faster than `shm` up to ~100us of kernel service time, level beyond — see the service-time sweep in `runtime_transport_optimization.md` |
+| `shm` | separate process | 15,623 – 16,153 | the current default |
+| `stdio` | separate process | 20,891 – 23,416 | portability, debugging, no shared filesystem |
+
+Measured in foundation against `reference_kernel`, three runs of 3,000
+exchanges, warm, M1 Pro. A cold first exchange costs roughly 17x its warm price;
+pools warm themselves at startup and benchmarks must not be run straight after a
+build. Reproduce:
+
+```bash
+cargo build --release -p ovrt-native --bin reference_kernel --manifest-path runtime-sdk/rust/Cargo.toml
+```
+
+then `OVRT_REFERENCE_KERNEL=<path> go test ./runtimehost/ -run '^$' -bench
+BenchmarkTransport -benchtime 3000x -count 3` from `runtime-sdk/go`. Full
+reasoning, the 10^6-exchange soak and the SIGKILL evidence are in
+`runtime_transport_optimization.md`.
+
+## 2026-08-22 Dispatch placement lane: mirror codec, decision path, and the service-backed trust catch
+
+The compute-placement lane (`server-kit/go/placement` + `runtimehost.DispatchBlock`) carries three hot surfaces: lane-mirror frames crossing nodes on `compute:lane:v1`, the per-decision host path (tick read → descriptor snapshot → stats sweep → argmin), and remote chunk-ticket framing. Benchmarks pin all three; one evidenced optimisation landed same-day.
+
+Apple M1 Pro, darwin/arm64, `-8`, `-benchmem`, medians of 3:
+
+| Benchmark | ns/op | B/op | allocs/op | Notes |
+| --- | ---: | ---: | ---: | --- |
+| `BenchmarkMirrorFrameEncode32` | ~405 | 1,792 | **1** | One frame buffer; fixed-record codec, no per-lane allocation. |
+| `BenchmarkMirrorFrameDecode32` | ~487 | 1,824 | 3 | Frame slice + lanes slice + identity strings. |
+| `BenchmarkRemoteComputeRoundTrip` | ~133 | 168 | 4 | Ticket encode → handler validate/execute → response frame, 4 KiB payload. |
+| `BenchmarkPlacementFullHostPath` (before) | ~1,105 | 1,536 | **33** | Per-row `StatRow()` handles escaped one allocation each inside the sweep. |
+| `BenchmarkPlacementFullHostPath` (after) | **~655** | 1,792 | **2** | `DispatchBlock.SnapshotStats()` batch-reads the same atomic words without materializing handles: **1.7× faster, 31 fewer allocations per decision**. The B/op rise is one 32-entry struct slice replacing scattered escapes — churn consolidated, not added. |
+
+The pure decision function is pinned separately by `TestDecideDoesNotAllocate` (exact zero via `testing.AllocsPerRun`) and by the Rust `ns_bench` gate (p50 = 42 ns cached).
+
+Allocation ceilings for all four benchmarks are registered in `tooling/benchmark_baseline.psv` and enforced by `benchmark_ratchet_check.sh`; allocs/op gate exactly, bytes with tolerance.
+
+### Service-backed catch: guard placement, not adapter placement
+
+`TestServiceBackedPlacementMirrorLane` (live Redis via `make test-service-backed`) drives three legs — valid multi-lane delivery with field fidelity, foreign-frame noise survival, and implausible-latency rejection through the listener error path. Its first run failed: the EWMA plausibility guard lived only in `runtimehost.ApplyMirrorUpdate`, so any *other* `MirrorSink` implementation silently applied lying updates. Validation moved into `ListenMirrors` as the single choke point; the adapter retains a defensive re-check. The service-backed lane caught in one run what the memory-client unit suite structurally could not — the concrete argument for TE-38.
+
+Mirror trust rules now documented in `mesh_dispatch_practices.md`: publisher ticks are discarded (local re-stamp on arrival; cross-region clicks are incomparable), sub-floor latency claims are refused loudly, and stronger attribution belongs to signed transport.
+
+Reproduce:
+
+```bash
+cd foundation/server-kit/go && go test ./placement -run='^$' \
+  -bench='BenchmarkMirrorFrame|BenchmarkRemoteCompute' -benchmem -count=3
+cd foundation/runtime-sdk/go && go test ./runtimehost -run='^$' \
+  -bench='BenchmarkPlacementFullHostPath' -benchmem -count=3
+cd foundation/runtime-sdk/go && go test ./runtimehost -run TestDecideDoesNotAllocate -v
+SERVICE_BACKED_REDIS_URL=redis://localhost:6379 SERVICE_BACKED_DATABASE_URL=unused \
+  go test -tags servicebacked -run TestServiceBackedPlacementMirrorLane -v ./servicebacked
+```
+
+
+## 2026-08-23 Epoch-exchange transport: doorbell/supervision contract proven under load
+
+The shm-epoch pooled exchange (doorbell wake → slot swap → kernel round trip → ack) reached sustained-load stability. Two findings shipped with it:
+
+1. **Baseline-arming lost wakeup (protocol).** Both exchange participants parked healthy on different slots with paired 10s timeouts: each side armed its waited-slot baseline AFTER performing the action that triggers the counterpart's publish, so the counterpart's store landed inside an already-armed baseline. Fix + contract documented in `performance_practices.md` ("baseline-arming") and `mesh_dispatch_practices.md`. Reference child implementation: `process_pool_doorbell_test.go`.
+2. **`time.After` per-park timer churn (Go).** The parked wait allocated a timer per fallback wake (~210 B/wake at benchmark park rates); replaced with a reusable Stop/drain/Reset timer. Regression guard measures TotalAlloc SLOPE across two wait windows so fixed runtime costs cancel (TE-40 9a).
+
+Sustained-load result after fixes (300×3 iterations, no restarts, no peer-lost):
+
+| Benchmark | ns/op | B/op | allocs/op |
+| --- | ---: | ---: | ---: |
+| `BenchmarkProcessPoolEpochExchange` | ~1.24–1.32 ms | ~1,010 | 15 |
+
+The remaining cost is dominated by the kernel child's own round trip; the host-side doorbell path adds only the wake delivery.
+
+Reproduce:
+
+```bash
+cd foundation/runtime-sdk/go && go test -run='^$'   -bench='BenchmarkProcessPoolEpochExchange' -benchmem -count=3 ./runtimehost/
+go test -race -run 'EpochDoorbell|PeerLost|Doorbell' ./runtimehost/
+```
