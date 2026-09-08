@@ -346,10 +346,34 @@ func (s *ProjectedRuntimeStore) EstimateCount(ctx context.Context, domain, colle
 }
 
 func (s *ProjectedRuntimeStore) DeleteRecord(ctx context.Context, domain, collection, organizationID, recordID string) error {
-	if err := s.base.DeleteRecord(ctx, domain, collection, organizationID, recordID); err != nil {
+	return s.DeleteRecordWithFields(ctx, database.DomainRecord{
+		Domain:         domain,
+		Collection:     collection,
+		OrganizationID: organizationID,
+		RecordID:       recordID,
+	})
+}
+
+// DeleteRecordWithFields is DeleteRecord for a record whose deletion has to be
+// ADDRESSED, not just announced.
+//
+// A delete has historically carried an identity and nothing else, which is fine
+// while every subscriber of a scope is entitled to every record in it. Under a
+// per-record audience (see projectiongw.AudiencePolicy) it is not: the audience
+// is derived from the record's own fields, so an identity-only tombstone names
+// nobody and the gateway drops it rather than broadcast it — correct, but it
+// leaves the deletion to converge on the reader's next snapshot instead of
+// live.
+//
+// Passing the record's audience-bearing fields in rec.Data fixes that at the
+// source: the delete mutation reaches exactly the subscribers the record itself
+// reached. Carry only the fields the scope's policy is keyed on; a tombstone is
+// not a place to keep a copy of a row that was just deleted.
+func (s *ProjectedRuntimeStore) DeleteRecordWithFields(ctx context.Context, rec database.DomainRecord) error {
+	if err := s.base.DeleteRecord(ctx, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID); err != nil {
 		return err
 	}
-	s.projectDelete(ctx, domain, collection, organizationID, recordID)
+	s.projectDelete(ctx, rec)
 	return nil
 }
 
@@ -518,19 +542,152 @@ func (s *ProjectedRuntimeStore) projectRaw(ctx context.Context, raw database.Raw
 	})
 }
 
-func (s *ProjectedRuntimeStore) projectDelete(ctx context.Context, domain, collection, organizationID, recordID string) {
-	name, err := s.ensureProjection(domain, collection, organizationID)
+func (s *ProjectedRuntimeStore) projectDelete(ctx context.Context, rec database.DomainRecord) {
+	name, err := s.ensureProjection(rec.Domain, rec.Collection, rec.OrganizationID)
 	if err != nil {
 		return
 	}
 	version := s.version.Add(1)
-	rec := database.DomainRecord{Domain: domain, Collection: collection, OrganizationID: organizationID, RecordID: recordID}
+	// rec.Data rides along: the hot apply hands the event's record to the
+	// gateway's observer, so whatever audience fields the caller supplied are
+	// what the delta is addressed to.
 	_, err = s.hot.Apply(ctx, name, Event{
 		Operation: OperationDelete,
 		SourceID:  sourceID("delete", rec, version),
 		Version:   version,
 		Record:    rec,
 	})
+	s.rememberProjectionResult(name, err)
+}
+
+// batchRecordDeleter is the optional base-store capability DeleteRecords uses
+// to remove a whole batch in one round trip. No base store implements it yet,
+// so the fallback below is the live path; the seam exists so adding it is a
+// database-layer change with no caller churn.
+type batchRecordDeleter interface {
+	DeleteRecordsBatch(ctx context.Context, records []database.DomainRecord) error
+}
+
+// DeleteRecords removes a batch of records through the projected store: one
+// base delete per record (or one round trip where the base store batches),
+// then ONE hot-partition ApplyBatch per scope group.
+//
+// It is to DeleteRecordWithFields what UpsertRecords is to UpsertRecord, and
+// the reason is the same shape of cost. A per-record delete takes the partition
+// lock, runs a full apply cycle, publishes indexes and notifies observers once
+// per row — so a sweep of N deletions paid N of each, and the projection
+// gateway encoded N fan-out frames where one would carry the same batch.
+// Grouping collapses that to one apply and one frame per scope.
+//
+// Semantics per record are identical to DeleteRecordWithFields: idempotent,
+// versioned from the same counter, rec.Data carried so a per-record audience
+// can address the tombstone.
+func (s *ProjectedRuntimeStore) DeleteRecords(ctx context.Context, records []database.DomainRecord) error {
+	switch len(records) {
+	case 0:
+		return nil
+	case 1:
+		return s.DeleteRecordWithFields(ctx, records[0])
+	}
+
+	if batcher, ok := s.base.(batchRecordDeleter); ok {
+		if err := batcher.DeleteRecordsBatch(ctx, records); err != nil {
+			return err
+		}
+	} else {
+		for _, rec := range records {
+			if err := s.base.DeleteRecord(ctx, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID); err != nil {
+				return err
+			}
+		}
+	}
+
+	s.projectDeleteBatch(ctx, records)
+	return nil
+}
+
+// projectDeleteBatch applies deletes to the hot plane grouped by scope, one
+// ApplyBatch call per projection partition. Versions are reserved from the same
+// counter as the single-record path, so LWW ordering between a delete and a
+// concurrent upsert is unchanged by batching.
+func (s *ProjectedRuntimeStore) projectDeleteBatch(ctx context.Context, records []database.DomainRecord) {
+	// A delete source almost always streams one scope, so check for that first:
+	// it needs one scope resolution instead of one per record, one exactly-sized
+	// slice, and neither of the bookkeeping allocations the general path below
+	// makes.
+	if name, ok := s.uniformProjection(records); ok {
+		group := make([]Event, 0, len(records))
+		for _, rec := range records {
+			group = append(group, Event{Operation: OperationDelete, Record: rec})
+		}
+		s.applyDeleteGroup(ctx, name, group)
+		return
+	}
+
+	// An Event embeds a whole DomainRecord, so growing a group slice by append
+	// copies a large value log(n) times — measured as the batch path's single
+	// largest allocation source, and enough to make batching cost MORE bytes
+	// than the per-record path it replaced. Resolve and count first, then
+	// allocate each group once at its exact size.
+	names := make([]string, len(records))
+	sizes := make(map[string]int)
+	for index, rec := range records {
+		name, err := s.ensureProjection(rec.Domain, rec.Collection, rec.OrganizationID)
+		if err != nil {
+			// names[index] stays empty and the record is skipped below, which
+			// matches the single-record path: an unresolvable scope is not
+			// projected, and the base delete has already happened.
+			continue
+		}
+		names[index] = name
+		sizes[name]++
+	}
+	groups := make(map[string][]Event, len(sizes))
+	for name, size := range sizes {
+		groups[name] = make([]Event, 0, size)
+	}
+	for index, rec := range records {
+		name := names[index]
+		if name == "" {
+			continue
+		}
+		groups[name] = append(groups[name], Event{Operation: OperationDelete, Record: rec})
+	}
+	for name, group := range groups {
+		s.applyDeleteGroup(ctx, name, group)
+	}
+}
+
+// uniformProjection resolves the single projection every record belongs to, or
+// reports false when the batch spans scopes (or holds one that will not
+// resolve). Scope identity is three string compares per record, so the check
+// costs far less than the per-record resolution it avoids.
+func (s *ProjectedRuntimeStore) uniformProjection(records []database.DomainRecord) (string, bool) {
+	first := records[0]
+	for _, rec := range records[1:] {
+		if rec.Domain != first.Domain || rec.Collection != first.Collection || rec.OrganizationID != first.OrganizationID {
+			return "", false
+		}
+	}
+	name, err := s.ensureProjection(first.Domain, first.Collection, first.OrganizationID)
+	if err != nil {
+		return "", false
+	}
+	return name, true
+}
+
+// applyDeleteGroup stamps one scope's deletes with a contiguous version run and
+// applies them as a single batch. Versions come from the same counter as the
+// single-record path, so LWW ordering against a concurrent upsert is unchanged.
+func (s *ProjectedRuntimeStore) applyDeleteGroup(ctx context.Context, name string, group []Event) {
+	count := uint64(len(group))
+	baseVersion := s.version.Add(count) - count + 1
+	for index := range group {
+		version := baseVersion + uint64(index)
+		group[index].Version = version
+		group[index].SourceID = sourceID("delete", group[index].Record, version)
+	}
+	_, err := s.hot.ApplyBatch(ctx, name, group)
 	s.rememberProjectionResult(name, err)
 }
 

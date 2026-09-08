@@ -20,6 +20,7 @@ RUNTIME-01|docs/performance_lab.md|performance|high|partial|script:tooling/scrip
 FORMAL-01|docs/tla_architecture_practices.md|formal|high|partial|script:tooling/scripts/formal_methods_check.sh;review|spec-template|yes
 OPS-01|docs/delivery_metrics_practices.md|operations|high|partial|script:tooling/scripts/operational_excellence_check.sh;review|delivery-event|yes
 PROJFRESH-01|docs/projection_freshness_contract.md|data-plane|high|partial|script:tooling/scripts/contract_drift_check.sh;review|freshness-spec|yes
+PROJFRESH-02|docs/projection_freshness_contract.md|security|critical|partial|script:tooling/scripts/projection_audience_check.sh;review|audience-policy-per-scope|yes
 CP-01|docs/coding_practices.md|coding|medium|partial|script:tooling/scripts/coding_practices_check.sh;review|static-analysis|yes
 CP-02|docs/coding_practices.md|coding|high|partial|script:tooling/scripts/coding_practices_check.sh;review|bounded-test|yes
 CP-03|docs/coding_practices.md|coding|medium|partial|script:tooling/scripts/go_static_analysis_check.sh;review|complexity-report|yes

@@ -149,7 +149,10 @@ then set `AudienceConfig.Strict`.
 deletes do not carry the audience fields, the deletion reaches no subscriber and
 converges on the client's next snapshot instead; the gateway counts these in
 `AudienceDrops()` rather than broadcasting them tenant-wide. Emit deletes
-carrying the audience fields.
+carrying the audience fields — `ProjectedRuntimeStore.DeleteRecordWithFields`
+and `MirrorSweeper.AddDeleteRecordSource` carry them; the identity-only
+`DeleteRecord` and `AddDeleteSource` cannot. Carry the audience fields and
+nothing else: a tombstone is not a second place to keep the deleted row.
 
 ## Advisory 2026-08-25: Shared JWT Fallback In Generated Compose
 

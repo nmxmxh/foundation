@@ -59,7 +59,7 @@ Read in order:
 
 Then read deeply into domains that matter for your product:
 
-- **Data**: `database_practices.md`, `redis_practices.md`, `mesh_dispatch_practices.md`, `hermes_hotplane.md`, `projection_freshness_contract.md`, `columnar_null_algebra.md`
+- **Data**: `database_practices.md`, `redis_practices.md`, `mesh_dispatch_practices.md`, `hermes_hotplane.md`, `projection_freshness_contract.md`, `vector_projection_practices.md`, `columnar_null_algebra.md`
 - **Observability**: `delivery_metrics_practices.md`, `performance_practices.md`
 - **Security**: `security_practices.md`, `ai_threat_model.md`, `post_quantum_security.md`
 - **Performance**: `performance_lab.md`, `foundation_benchmarks.md`, `optimization_points.md`, `runtime_transport_optimization.md`, `system_profiling_practices.md`
@@ -104,7 +104,8 @@ Read in order:
 | `mesh_dispatch_practices.md` | Cross-node compute placement: node connections, hub topology, load and edge-class optimization |
 | `hermes_hotplane.md` | Hermes node-local projection contract, scaffold wrapper, consistency modes |
 | `hermes_read_modes.md` | Stable v1 read modes: `fenced`, `live`, `stale_while_revalidate`, `postgres_required` |
-| `projection_freshness_contract.md` | Freshness modes and evidence for Hermes, read models, search, views, caches |
+| `projection_freshness_contract.md` | Freshness modes and evidence for Hermes, read models, search, views, caches — plus the audience, enforcement point, and field allowlist every projection note must state |
+| `vector_projection_practices.md` | Dense-vector projection lane: what a projection carries and what it must not |
 | `transfer_lane.md` | Progress-bearing transfer operations: upload/download lifecycle, resumability |
 | `websocket_scaling.md` | Socket routing, metrics, fanout, scaling budgets |
 
@@ -198,6 +199,9 @@ Non-practice reference documents:
 | `info/scaffolded_projects_executive_summary.md` | Non-technical overview of products built on Foundation |
 | `info/columnar_projection_lane.md` | Design spec for Arrow-compatible columnar Hermes projections |
 | `info/coding_magic.md` | Product-quality interaction and presentation inspiration |
+| `info/benchmarks_archive.md` | Full benchmark history: superseded runs, rejected approaches, and the reasoning behind each current result |
+| `info/documentation_changelog.md` | Where moved documentation went: splits, archives, renames, and reductions |
+| `info/superseded_plans.md` | Planning material the finished work overtook, kept for the reasoning it records |
 | `future_practices_research.md` | Research gap ledger mapped to each Foundation document |
 
 ---

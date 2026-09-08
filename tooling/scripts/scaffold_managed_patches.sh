@@ -1057,6 +1057,43 @@ docker-redeploy:
 }
 
 # @since 0.0.1
+#
+# The projection read path decides authorization by wire scope, so a project
+# that never declares an audience policy broadcasts every record of a scope to
+# every subscriber in its organization. Documentation cannot reach app code, so
+# the check ships as a lint target. The root Makefile is force-managed but only
+# overwritten with --force, so an ordinary update would never deliver the
+# target; this patch adds it in place instead of rewriting a file that carries
+# project-owned settings.
+patch_makefile_projection_audience() {
+  local file="$target/Makefile"
+  [[ -f "$file" ]] || return 0
+
+  if ! grep -Fq 'check-projection-audience:' "$file"; then
+    if grep -Fq 'check-contract-drift:' "$file"; then
+      PATCH_SEARCH='check-contract-drift:
+	@zsh ./scripts/checks/contract_drift_check.sh .'
+      PATCH_REPLACE='check-contract-drift:
+	@zsh ./scripts/checks/contract_drift_check.sh .
+
+check-projection-audience:
+	@zsh ./scripts/checks/projection_audience_check.sh .'
+      replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Makefile adds check-projection-audience target"
+    fi
+  fi
+
+  # Register it in the lint sweep as well, or the target exists and nothing
+  # runs it.
+  if ! grep -Fq 'check-contract-drift check-projection-audience' "$file"; then
+    if grep -Fq 'check-contract-drift check-server-kit-module-contract' "$file"; then
+      PATCH_SEARCH='check-contract-drift check-server-kit-module-contract'
+      PATCH_REPLACE='check-contract-drift check-projection-audience check-server-kit-module-contract'
+      replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "Makefile runs check-projection-audience in lint-foundation"
+    fi
+  fi
+}
+
+# @since 0.0.1
 patch_makefile_local_include() {
   local file="$target/Makefile"
   [[ -f "$file" ]] || return 0
@@ -3238,6 +3275,7 @@ patch_dockerfile_build_bounds
 patch_go_mod_runtime_sdk
 patch_go_dependency_manifests
 patch_makefile_docker_redeploy
+patch_makefile_projection_audience
 patch_makefile_local_include
 patch_server_binary_path
 patch_websocket_runtime_backpressure
