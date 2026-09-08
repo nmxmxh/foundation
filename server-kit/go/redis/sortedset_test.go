@@ -151,6 +151,47 @@ func TestMemoryClientSortedSetTieBreakMatchesRedisReverse(t *testing.T) {
 	}
 }
 
+func TestMemoryClientSortedSetZRem(t *testing.T) {
+	base := NewMemoryClient("rank")
+	client := base.(SortedSetClient)
+	ctx := context.Background()
+	const key = "test:zrem"
+
+	for i := range 4 {
+		if _, err := client.ZAdd(ctx, key, float64(i), memberFor(i)); err != nil {
+			t.Fatalf("zadd %d: %v", i, err)
+		}
+	}
+
+	// Remove single existing member
+	removed, err := client.ZRem(ctx, key, memberFor(1))
+	if err != nil || removed != 1 {
+		t.Fatalf("zrem single = %d,%v want 1", removed, err)
+	}
+
+	// Remove multiple members including non-existent
+	removed, err = client.ZRem(ctx, key, memberFor(0), memberFor(2), "sig-nonexistent")
+	if err != nil || removed != 2 {
+		t.Fatalf("zrem multi = %d,%v want 2", removed, err)
+	}
+
+	// Verify only sig-d remains
+	remaining, err := client.ZRevRange(ctx, key, 0, -1)
+	if err != nil || len(remaining) != 1 || remaining[0] != memberFor(3) {
+		t.Fatalf("remaining = %v want [sig-d]", remaining)
+	}
+
+	// Remove last member
+	removed, err = client.ZRem(ctx, key, memberFor(3))
+	if err != nil || removed != 1 {
+		t.Fatalf("zrem last = %d,%v want 1", removed, err)
+	}
+
+	if card, _ := client.ZCard(ctx, key); card != 0 {
+		t.Fatalf("card = %d want 0", card)
+	}
+}
+
 func memberFor(index int) string {
 	return "sig-" + string(rune('a'+index))
 }

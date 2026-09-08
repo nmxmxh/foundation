@@ -762,9 +762,10 @@ Requirements:
     allocations across two duration windows, not an absolute ceiling. Fixed
     per-call costs (timers, closures, scheduler noise) are identical between
     windows and cancel; only a per-iteration allocator survives the delta. An
-    absolute ceiling breaks whenever the runtime shifts fixed costs.
-    Reference: runtime-sdk/go/runtimehost/epoch_wait_test.go
-    (TestWaitForEpochChangeFallbackIsAllocationStable).
+    absolute ceiling breaks whenever the runtime shifts fixed costs. The worked
+    example is `TestWaitForEpochChangeFallbackIsAllocationStable` in
+    `runtime-sdk/go/runtimehost/epoch_wait_test.go`, which a generated project
+    vendors one level down at `foundation/runtime-sdk/...`.
 10. A source-line profile may identify the allocator, but the before/after
     benchmark sizes the physical win. Sampled profile shares must not be
     reported as exact allocation counts.

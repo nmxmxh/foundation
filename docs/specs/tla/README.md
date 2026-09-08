@@ -21,7 +21,7 @@ occur.
 | `WorkerRetryQueue` | bounded queue, retry budget, leases, terminal states | `QueueBounded`, `RetryBudgetBounded` | bounded work (§6) |
 | `CacheProjectionFreshness` | read-your-write, bounded-stale reads, watermarks, repair | `ProjectionVersionMonotonic` | monotone watermark / G-Counter (§5, CRDT-4) |
 | `WebSocketBackpressure` | authenticated subs, bounded write queues, slow-client close | `WriteQueueBounded`, `TopicAuthorized`, `DisconnectCleansState` | bounded work (§6) |
-| `FrontendLiveProjection` | frontend store: loading buffer, live queue, tenant scope, version monotonicity | `LiveQueueBounded`, `TenantScopeStable`, `VersionMonotone` (step property) | monotone version |
+| `FrontendLiveProjection` | frontend store: loading buffer, live queue, tenant scope, record audience, version monotonicity | `LiveQueueBounded`, `TenantScopeStable`, `AudienceScopeStable`, `VersionMonotone` (step property) | monotone version |
 | `HermesProjectionPublish` | lock-free single-writer projection publish (implementation-mapped) | `TearFreeRead`, `VersionWatermarkConsistent` | — |
 | `MetadataMerge` | CRDT metadata convergence under reordered/duplicate delivery | `StrongEventualConsistency` | join-semilattice / SEC (§5) |
 
@@ -71,6 +71,7 @@ so a named invariant **must** be violated:
 | `MCCacheProjectionFreshnessBroken` | refresh stamps a version past the watermark | `ProjectionVersionMonotonic` |
 | `MCWebSocketBackpressureBroken` | enqueue skips the write-queue cap | `WriteQueueBounded` |
 | `MCFrontendLiveProjectionBroken` | live enqueue skips the `MaxQueued` cap | `LiveQueueBounded` |
+| `MCFrontendLiveProjectionAudienceBroken` | delivery authorizes on tenant/domain/collection only — the pre-audience read path | `AudienceScopeStable` |
 | `HermesProjectionPublishBroken` | publish decouples `bucket` from `status` | `TearFreeRead` |
 | `MCMetadataMergeBroken` | non-idempotent counting fold (counts duplicates) | `StrongEventualConsistency` |
 

@@ -119,6 +119,8 @@ type SortedSetClient interface {
 	// indices count from the end (-1 = last), matching Redis. Newest-N reads
 	// use (0, N-1).
 	ZRevRange(ctx context.Context, key string, start, stop int64) ([]string, error)
+	// ZRem removes the specified members from the sorted set and returns how many were removed.
+	ZRem(ctx context.Context, key string, members ...string) (int64, error)
 	// ZRemRangeByRank removes members in the inclusive ascending-rank window
 	// and returns how many were removed. Bounded buffers trim with
 	// (0, -(keep+1)).
@@ -941,6 +943,31 @@ func (c *memoryClient) zremRangeByRank(qualified string, start, stop int64) (int
 
 func (c *memoryClient) ZRevRange(_ context.Context, key string, start, stop int64) ([]string, error) {
 	return c.zrevRange(c.qualify(key), start, stop)
+}
+
+func (c *memoryClient) zrem(qualified string, members ...string) (int64, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.expireIfNeededLocked(qualified, time.Now())
+	set := c.zsets[qualified]
+	if len(set) == 0 {
+		return 0, nil
+	}
+	var removed int64
+	for _, member := range members {
+		if _, ok := set[member]; ok {
+			delete(set, member)
+			removed++
+		}
+	}
+	if len(set) == 0 {
+		delete(c.zsets, qualified)
+	}
+	return removed, nil
+}
+
+func (c *memoryClient) ZRem(_ context.Context, key string, members ...string) (int64, error) {
+	return c.zrem(c.qualify(key), members...)
 }
 
 func (c *memoryClient) ZRemRangeByRank(_ context.Context, key string, start, stop int64) (int64, error) {
@@ -1839,6 +1866,20 @@ func (c *redisClient) ZRevRange(ctx context.Context, key string, start, stop int
 	return members, err
 }
 
+func (c *redisClient) ZRem(ctx context.Context, key string, members ...string) (int64, error) {
+	if len(members) == 0 {
+		return 0, nil
+	}
+	startedAt := time.Now()
+	args := make([]any, len(members))
+	for i, m := range members {
+		args[i] = m
+	}
+	removed, err := c.client.ZRem(ctx, c.qualify(key), args...).Result()
+	recordRedisOperation("zrem", startedAt, err)
+	return removed, err
+}
+
 func (c *redisClient) ZRemRangeByRank(ctx context.Context, key string, start, stop int64) (int64, error) {
 	startedAt := time.Now()
 	removed, err := c.client.ZRemRangeByRank(ctx, c.qualify(key), start, stop).Result()
@@ -2128,6 +2169,10 @@ func (c *shardedClient) ZAdd(ctx context.Context, key string, score float64, mem
 
 func (c *shardedClient) ZRevRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
 	return c.shard(key).ZRevRange(ctx, key, start, stop)
+}
+
+func (c *shardedClient) ZRem(ctx context.Context, key string, members ...string) (int64, error) {
+	return c.shard(key).ZRem(ctx, key, members...)
 }
 
 func (c *shardedClient) ZRemRangeByRank(ctx context.Context, key string, start, stop int64) (int64, error) {

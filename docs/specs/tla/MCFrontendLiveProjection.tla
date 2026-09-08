@@ -7,7 +7,7 @@ EXTENDS Naturals, Sequences
 \* resolves. applied/rejected/dropped counters and the buffered sequence grow
 \* without bound, so a StateConstraint caps them for finite checking.
 
-CONSTANTS Tenant, OtherTenant, Domain, Collection, Record, NULL
+CONSTANTS Tenant, OtherTenant, Domain, Collection, Record, NULL, Audience, OtherAudience
 
 \* Kept small: buffered/liveQueue are sequences over the Mutation set, so the
 \* state space is very sensitive to these bounds. MaxQueued = 1 still exercises
@@ -15,7 +15,8 @@ CONSTANTS Tenant, OtherTenant, Domain, Collection, Record, NULL
 MaxQueued == 1
 MaxVersion == 2
 
-VARIABLES store, status, buffered, liveQueue, lastVersion, applied, rejected, dropped
+VARIABLES store, status, buffered, liveQueue, lastVersion, applied, rejected, dropped,
+          residentAudience
 
 INSTANCE FrontendLiveProjection
 

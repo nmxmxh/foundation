@@ -111,7 +111,25 @@ func (h *Hub) Subscribe(scope *foundationpb.ProjectionScope) *Subscription {
 // SubscribeWithVectors registers a feed with an explicit dense-vector policy.
 // Legacy callers use Subscribe and keep the v1 vector-bearing frame behavior.
 func (h *Hub) SubscribeWithVectors(scope *foundationpb.ProjectionScope, vectors bool) *Subscription {
-	key := ScopeKey(scope)
+	return h.SubscribeKeys([]string{ScopeKey(scope)}, vectors)
+}
+
+// SubscribeKeys registers ONE subscriber under several topics at once, sharing
+// a single frame channel. It is how an audience-partitioned scope is consumed:
+// a caller belonging to N audiences occupies N buckets of the same scope and
+// still writes one ordered stream to one socket.
+//
+// A record addressed to two of the caller's own audiences is encoded into two
+// groups and therefore arrives twice. That is deliberate: deduplicating it
+// would mean either per-subscriber encoding (the cost the hub exists to avoid)
+// or dropping a group that carries other records too. Mutations are versioned
+// and idempotent at the client, so a repeat costs bytes, not correctness.
+//
+// An empty key list yields a live subscription that never receives a frame —
+// the fail-closed shape. Callers that mean "nobody may read this" should refuse
+// the request instead; see Gateway.SubscribeAudience.
+func (h *Hub) SubscribeKeys(keys []string, vectors bool) *Subscription {
+	keys = dedupeKeys(keys)
 	sub := &subscriber{
 		frames:  make(chan Frame, h.queueSize),
 		dropped: &atomic.Uint64{},
@@ -120,19 +138,25 @@ func (h *Hub) SubscribeWithVectors(scope *foundationpb.ProjectionScope, vectors 
 	}
 
 	h.mu.Lock()
-	bucket := h.subs[key]
-	if bucket == nil {
-		bucket = make(map[*subscriber]struct{})
-		h.subs[key] = bucket
+	for _, key := range keys {
+		bucket := h.subs[key]
+		if bucket == nil {
+			bucket = make(map[*subscriber]struct{})
+			h.subs[key] = bucket
+		}
+		bucket[sub] = struct{}{}
 	}
-	bucket[sub] = struct{}{}
 	h.mu.Unlock()
 
 	var once sync.Once
 	cancel := func() {
 		once.Do(func() {
 			h.mu.Lock()
-			if bucket, ok := h.subs[key]; ok {
+			for _, key := range keys {
+				bucket, ok := h.subs[key]
+				if !ok {
+					continue
+				}
 				delete(bucket, sub)
 				if len(bucket) == 0 {
 					delete(h.subs, key)
@@ -144,6 +168,25 @@ func (h *Hub) SubscribeWithVectors(scope *foundationpb.ProjectionScope, vectors 
 	}
 
 	return &Subscription{Frames: sub.frames, cancel: cancel, dropped: sub.dropped, drops: sub.drops}
+}
+
+// dedupeKeys removes duplicate and empty topics while preserving order. It
+// deliberately does NOT trim: a hub key must match the broadcast key byte for
+// byte, so normalizing here would register a subscriber under a topic nothing
+// is ever published to. Audience ids are trimmed where they are derived
+// (dedupeAudiences), before the key is built.
+func dedupeKeys(keys []string) []string {
+	if len(keys) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key == "" || containsString(out, key) {
+			continue
+		}
+		out = append(out, key)
+	}
+	return out
 }
 
 // Broadcast delivers one already-encoded frame to every subscriber of key. A
