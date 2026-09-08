@@ -9,12 +9,13 @@ EXTENDS Naturals, Sequences
 \* over-capacity is supposed to drop and degrade). Without the bound the live
 \* queue grows past MaxQueued, so LiveQueueBounded MUST be violated.
 
-CONSTANTS Tenant, OtherTenant, Domain, Collection, Record, NULL
+CONSTANTS Tenant, OtherTenant, Domain, Collection, Record, NULL, Audience, OtherAudience
 
 MaxQueued == 1
 MaxVersion == 2
 
-VARIABLES store, status, buffered, liveQueue, lastVersion, applied, rejected, dropped
+VARIABLES store, status, buffered, liveQueue, lastVersion, applied, rejected, dropped,
+          residentAudience
 
 INSTANCE FrontendLiveProjection
 
@@ -23,7 +24,7 @@ BadEnqueueLive(m) ==
   /\ status = "live"
   /\ m \in Mutation
   /\ liveQueue' = Append(liveQueue, m)
-  /\ UNCHANGED <<store, status, buffered, lastVersion, applied, rejected, dropped>>
+  /\ UNCHANGED <<store, residentAudience, status, buffered, lastVersion, applied, rejected, dropped>>
 
 BrokenNext == Next \/ (\E m \in Mutation : BadEnqueueLive(m))
 

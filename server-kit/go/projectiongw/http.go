@@ -99,6 +99,16 @@ type HandlerConfig struct {
 	// Allowlist restricts which scopes this mount serves (see ScopeAllowlist).
 	// Nil applies no restriction.
 	Allowlist ScopeAllowlist
+	// Audience derives the caller's audience ids for scopes the gateway
+	// declares AudiencePerRecord (see WithAudience). It is a trust boundary
+	// exactly like Tenant: the ids come from verified claims, never from the
+	// request's path, headers, query or subscribe frames.
+	//
+	// Leaving it nil is safe, not permissive: a per-record scope on a mount
+	// with no audience resolver is refused with 403 rather than served
+	// tenant-wide. A mount that serves only tenant-wide scopes needs nothing
+	// here.
+	Audience SubjectAudienceFunc
 }
 
 func (c HandlerConfig) tenant() TenantFunc {
@@ -106,6 +116,16 @@ func (c HandlerConfig) tenant() TenantFunc {
 		return c.Tenant
 	}
 	return SecurityTenantFunc
+}
+
+// audiences resolves the caller's audience ids, or none when the mount
+// declares no resolver. An error here is fatal to the request: an identity that
+// cannot be established must not degrade into a wider one.
+func (c HandlerConfig) audiences(r *http.Request) ([]string, error) {
+	if c.Audience == nil {
+		return nil, nil
+	}
+	return c.Audience(r)
 }
 
 func (c HandlerConfig) prefix() string {
@@ -193,7 +213,12 @@ func (g *Gateway) SnapshotHandler(config HandlerConfig) http.Handler {
 		if limit, err := strconv.ParseUint(strings.TrimSpace(r.URL.Query().Get("limit")), 10, 32); err == nil {
 			req.Limit = uint32(limit)
 		}
-		snapshot, err := g.Snapshot(r.Context(), req)
+		audiences, err := config.audiences(r)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		snapshot, err := g.SnapshotAudience(r.Context(), req, audiences)
 		if err != nil {
 			writeError(w, err)
 			return
@@ -234,7 +259,12 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 			writeError(w, err)
 			return
 		}
-		sub, err := g.SubscribeWithVectorMode(scope, vectorModeFromRequest(r))
+		audiences, err := config.audiences(r)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		sub, err := g.SubscribeAudience(scope, audiences, vectorModeFromRequest(r))
 		if err != nil {
 			writeError(w, err)
 			return
@@ -333,6 +363,15 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 			writeError(w, err)
 			return
 		}
+		// Identity is a property of the connection, not of a subscribe frame,
+		// so the audience is resolved once here and never read from the client.
+		// A resolver error refuses the upgrade outright rather than opening a
+		// connection whose subscriptions would have to guess.
+		audiences, err := config.audiences(r)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
 		conn, err := projectionUpgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
@@ -385,7 +424,7 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 			// g.Subscribe validates the scope; a bad scope (e.g. an empty
 			// collection) is answered with a scoped ControlError rather than
 			// tearing the connection down.
-			sub, err := g.SubscribeWithVectorMode(scope, vectorModeFromRequest(r))
+			sub, err := g.SubscribeAudience(scope, audiences, vectorModeFromRequest(r))
 			if err != nil {
 				subsMu.Unlock()
 				_ = writeControl(ControlFrame{Type: ControlError, Reason: err.Error(), Domain: domain, Collection: collection})
@@ -517,7 +556,9 @@ func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrUnauthenticated):
 		http.Error(w, err.Error(), http.StatusUnauthorized)
-	case errors.Is(err, ErrScopeForbidden):
+	case errors.Is(err, ErrScopeForbidden),
+		errors.Is(err, ErrAudienceForbidden),
+		errors.Is(err, ErrAudienceUndeclared):
 		http.Error(w, err.Error(), http.StatusForbidden)
 	case errors.Is(err, ErrScopeInvalid):
 		http.Error(w, err.Error(), http.StatusBadRequest)

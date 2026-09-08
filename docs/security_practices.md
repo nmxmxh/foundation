@@ -77,6 +77,7 @@ High-risk boundary classes:
 | Subdomain takeover | Keep DNS/CNAME inventory, remove DNS before deprovisioning third-party services, avoid high-value wildcard cookies, and monitor dangling records. |
 | Race conditions | Put invariants in database constraints, locks, idempotency keys, and serializable/atomic transitions. Re-check actor authority and state inside the transaction. |
 | IDOR/BOLA | Derive tenant from authenticated context; authorize both action and target object; use opaque IDs only as defense in depth. |
+| Projection read broadcast | The Hermes read path (`projectiongw`) authorizes by wire SCOPE, not by service: a subscriber entitled to a scope receives every record in it for its tenant, on the snapshot and the live delta stream alike. That is the whole access decision — nothing downstream re-checks it, and a UI filter is not a control because the rows are already on the device. Any scope whose records belong to particular parties rather than to the whole organization must declare a `projectiongw.AudiencePolicy`; deployments where every end user shares one organization must treat `tenant` as "everybody". |
 | OAuth | Bind `state` to session, action, redirect, nonce, and short TTL; exact-match redirect URIs; use PKCE for public clients; never log or persist raw tokens unnecessarily. |
 | Logic/configuration flaws | Test negative business paths, default-deny config, disabled debug routes, least-privilege credentials, explicit CORS, and production-safe error messages. |
 | Resource consumption | Cap request bodies, response bodies, upload size, decompressed size, pagination, retry counts, concurrent work, and paid third-party actions. |
@@ -93,6 +94,7 @@ Every exposed feature should add tests for the vulnerability families it touches
 
 1. **Auth/session**: duplicate params, CSRF rejection, state mismatch, token replay, token expiry, cookie flags, role downgrade, logout/revocation.
 2. **Tenant data**: cross-org object access, mass assignment of owner/org/role fields, missing object authorization, pagination/filter leakage.
+2a. **Projection reads**: two subscribers with disjoint audiences on one scope observing none of each other's records — on the snapshot AND on the delta stream — plus an unresolvable audience being refused rather than served tenant-wide.
 3. **Redirect/OAuth**: schemeless target, suffix host, userinfo host, control chars, stale state, redirect URI mismatch.
 4. **Outbound fetch/webhooks**: loopback/private/link-local/metadata addresses, DNS rebinding-style resolver changes, redirect to disallowed host, timeout enforcement.
 5. **Uploads/files**: traversal, absolute paths, extension spoofing, MIME mismatch, oversize bodies, archive expansion, executable storage path.
@@ -111,6 +113,43 @@ Every exposed feature should add tests for the vulnerability families it touches
 8. Treat production security headers, CORS, origin validation, rate limiting, and content-type enforcement as middleware baselines, not optional route features.
 9. Preserve an inventory of exposed routes, API versions, queue topics, webhook receivers, public buckets, DNS records, and package entrypoints.
 10. Generated production scaffolds must default to authentication enabled, exact allowed origins, and protected operational endpoints. `/metricsz`, `/metricsz/trace`, and operational event views are not public production surfaces.
+11. Every projected scope names its audience. Where a record belongs to particular parties, declare `projectiongw.AudiencePolicy{Mode: AudiencePerRecord}` and set `AudienceConfig.Strict` once every scope is declared, so a scope someone forgot is refused instead of broadcast. Materialize only the fields consumers render: what was never projected cannot leak. See `docs/projection_freshness_contract.md`.
+
+## Advisory 2026-09-08: Projection Reads Authorized By Tenant Only
+
+**Applies to** every deployment using `projectiongw` where more than one end
+user authenticates into the same organization.
+
+**What was wrong.** The projection read path's only trust boundary was the
+tenant. Scope identity was `tenant:domain:collection`, the fan-out encoded one
+frame per scope and shared it with every subscriber of that key, and the
+snapshot filtered on organization alone. A consumer product that puts all its
+users in one organization therefore delivered every user's rows — profiles,
+orders, carts, wallet movements, message bodies — to every signed-in device.
+Per-user filtering in the UI did not change what was delivered.
+
+The same missing term made the newest-N snapshot window organization-wide, so a
+user's own rows silently fell out of it once the organization got busy. That
+correctness cliff and the disclosure had one cause.
+
+**What changed.** `projectiongw` gained audience-partitioned scopes: a scope may
+declare `AudiencePerRecord`, whereupon the fan-out partitions on the audience
+ids a record names (`tenant:domain:collection:@audience`), a subscriber is
+registered only under the audiences its verified identity resolves to, and the
+snapshot filters on the same declared fields and re-checks every returned record
+before answering. An unresolvable audience is a 403 on both halves — never a
+fall back to tenant scope.
+
+**What to do.** Audit every projected scope against the product's own access
+rules. `AudienceTenant` remains the default, so nothing changed on upgrade:
+a deployment that has not declared policies is still broadcasting. Declare them,
+then set `AudienceConfig.Strict`.
+
+**Residual gap.** A tombstone carries only what the delete event carried. If
+deletes do not carry the audience fields, the deletion reaches no subscriber and
+converges on the client's next snapshot instead; the gateway counts these in
+`AudienceDrops()` rather than broadcasting them tenant-wide. Emit deletes
+carrying the audience fields.
 
 ## Advisory 2026-08-25: Shared JWT Fallback In Generated Compose
 

@@ -3,9 +3,12 @@ package projectiongw
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
+	"sync/atomic"
 
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes"
 	"google.golang.org/protobuf/proto"
@@ -57,6 +60,16 @@ type Gateway struct {
 	// a snapshot that would return ErrProjectionNotFound instead resolves the
 	// scope through the projected store's warm path and retries once.
 	warmScope func(ctx context.Context, scope *foundationpb.ProjectionScope) error
+	// audience declares which scopes are addressed per record rather than
+	// tenant-wide (see WithAudience). The zero value is every scope
+	// AudienceTenant, which is the pre-audience behavior.
+	audience AudienceConfig
+	// audienceDrops counts accepted mutations that reached no subscriber
+	// because their audience could not be derived — overwhelmingly tombstones
+	// that carried no audience fields. Fanning them out to the whole tenant
+	// would leak membership, so they are dropped and counted here instead of
+	// disappearing silently; a client reconciles them on its next snapshot.
+	audienceDrops atomic.Uint64
 }
 
 // Option configures a Gateway.
@@ -80,6 +93,18 @@ func WithResolver(resolver Resolver) Option {
 func WithScopeWarmer(warm func(ctx context.Context, scope *foundationpb.ProjectionScope) error) Option {
 	return func(g *Gateway) {
 		g.warmScope = warm
+	}
+}
+
+// WithAudience declares per-record audiences for scopes whose records are not
+// addressed to the whole tenant. Scopes left undeclared keep tenant-wide
+// delivery, so wiring this option changes nothing until a policy names a scope;
+// set AudienceConfig.Strict once every scope is declared, so a scope that was
+// forgotten is refused rather than broadcast. An unenforceable policy is a
+// construction error (see AudienceConfig.validate), not a runtime surprise.
+func WithAudience(config AudienceConfig) Option {
+	return func(g *Gateway) {
+		g.audience = config
 	}
 }
 
@@ -132,6 +157,9 @@ func NewGateway(store *hermes.Store, queueSize int, opts ...Option) (*Gateway, e
 	for _, opt := range opts {
 		opt(g)
 	}
+	if err := g.audience.validate(); err != nil {
+		return nil, err
+	}
 	// Subscribe to every accepted apply so live deltas flow regardless of write
 	// path: the in-process projected runtime store, the Redis envelope projector,
 	// or a direct ApplyBatch all reach subscribers through this one seam.
@@ -156,7 +184,11 @@ func (g *Gateway) Hub() *Hub { return g.hub }
 // serializes applies.
 func (g *Gateway) onApplied(projection string, mutations []hermes.AppliedMutation) {
 	epoch, _ := g.store.Epoch(projection)
-	for key, group := range groupAccepted(mutations) {
+	groups, undeliverable := groupAccepted(mutations, g.audience)
+	if undeliverable > 0 {
+		g.audienceDrops.Add(undeliverable)
+	}
+	for key, group := range groups {
 		withVectors, withoutVectors := g.hub.VectorSubscriberCounts(key)
 		if withVectors == 0 && withoutVectors == 0 {
 			continue
@@ -174,51 +206,58 @@ func (g *Gateway) onApplied(projection string, mutations []hermes.AppliedMutatio
 // a ProjectionSnapshot. Records are carried as upsert mutations so the snapshot
 // and the delta stream share one wire shape; watermark/epoch let the client
 // resume the delta stream exactly where the snapshot ended.
+//
+// It carries no caller identity, so an AudiencePerRecord scope is refused with
+// ErrAudienceForbidden. Identity-bearing callers use SnapshotAudience.
 func (g *Gateway) Snapshot(ctx context.Context, req *foundationpb.ProjectionSnapshotRequest) (*foundationpb.ProjectionSnapshot, error) {
+	return g.SnapshotAudience(ctx, req, nil)
+}
+
+// SnapshotAudience reads the scope as the given audiences may see it. On a
+// tenant-wide scope it is Snapshot. On an AudiencePerRecord scope it is the
+// read-side half of the same partition the delta stream uses:
+//
+//   - the declared audience fields become equality filters, so the newest-N
+//     window is the CALLER'S newest N rather than the organization's — which is
+//     also what stops a busy tenant silently pushing a user's own rows out of
+//     the window;
+//   - one bounded read per (field, audience) pair, unioned by version, so the
+//     request stays O(limit) per read and the pair count is capped
+//     (MaxAudienceSnapshotReads);
+//   - every returned record is then re-checked against the caller's audiences
+//     with the same derivation the fan-out uses. The filter is the fast path;
+//     this check is the authority, so a missing index, an unexpected field type
+//     or a resolver that widens the query cannot become a disclosure.
+func (g *Gateway) SnapshotAudience(ctx context.Context, req *foundationpb.ProjectionSnapshotRequest, audiences []string) (*foundationpb.ProjectionSnapshot, error) {
 	scope := req.GetScope()
 	projection, query, err := g.resolve(scope)
 	if err != nil {
 		return nil, err
 	}
-	if limit := int(req.GetLimit()); limit > 0 && (query.Limit == 0 || limit < query.Limit) {
-		query.Limit = limit
+	policy, err := g.audience.resolve(scope.GetDomain(), scope.GetCollection())
+	if err != nil {
+		return nil, err
 	}
-	// Always bound the snapshot. A positive limit engages hermes's ordered-index
-	// early-stop (visiting ~limit newest records instead of the whole scope), so
-	// an unbounded scan can never be triggered by a client or a misconfigured
-	// resolver. This keeps the read O(limit), not O(scope) — the BoundedWork
-	// invariant. Benchmarks: a limited 10K-scope snapshot is ~0.58ms vs ~210ms
-	// unbounded; the incremental (watermark) path over the same scope is ~0.23ms.
-	if query.Limit <= 0 || query.Limit > g.maxLimit {
-		query.Limit = g.maxLimit
+	audiences = dedupeAudiences(audiences)
+	if policy.Mode == AudiencePerRecord && len(audiences) == 0 {
+		return nil, ErrAudienceForbidden
 	}
-	// Honor the resume watermark (forward catch-up) and the keyset cursor
-	// (backward backfill). A client that already holds prior state sends its
-	// watermark for the changed tail; a client backfilling a scope larger than
-	// the limit pages older records via the cursor. Each request stays O(limit).
-	sinceVersion := hermes.ParseWatermark(req.GetSinceWatermark())
-	beforeVersion := hermes.ParseWatermark(req.GetCursor())
-	includeVectors := req.GetVectorMode() != foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_EXCLUDE
-	readSnapshot := func() (hermes.Snapshot, error) {
-		if includeVectors {
-			return g.store.SnapshotPage(ctx, projection, query, hermes.Fence{}, sinceVersion, beforeVersion)
-		}
-		return g.store.SnapshotPageWithoutVectors(ctx, projection, query, hermes.Fence{}, sinceVersion, beforeVersion)
-	}
-	snapshot, err := readSnapshot()
-	if errors.Is(err, hermes.ErrProjectionNotFound) && g.warmScope != nil {
-		// Lazy warm: resolve the cold scope through the projected store (which
-		// registers the partition, rebuilds from the mirror, and self-backfills
-		// an empty mirror), then retry once. Warm failure preserves the
-		// original not-found so the HTTP mapping stays stable.
-		if warmErr := g.warmScope(ctx, scope); warmErr == nil {
-			snapshot, err = readSnapshot()
-		}
+	query.Limit = g.boundedLimit(query.Limit, int(req.GetLimit()))
+	readWarming := g.snapshotReader(ctx, projection, scope, req)
+
+	var snapshot hermes.Snapshot
+	if policy.Mode == AudiencePerRecord {
+		snapshot, err = g.audienceSnapshot(policy, query, audiences, readWarming)
+	} else {
+		snapshot, err = readWarming(query)
 	}
 	if err != nil {
 		return nil, err
 	}
 	mutations := filterScope(snapshot.Mutations, scope)
+	if policy.Mode == AudiencePerRecord {
+		mutations = filterAudience(mutations, policy, audiences)
+	}
 	return &foundationpb.ProjectionSnapshot{
 		Scope:      scope,
 		Batch:      &foundationpb.RecordMutationBatch{Mutations: mutations},
@@ -227,6 +266,165 @@ func (g *Gateway) Snapshot(ctx context.Context, req *foundationpb.ProjectionSnap
 		NextCursor: hermes.FormatWatermark(snapshot.NextCursor),
 		HasMore:    snapshot.HasMore,
 	}, nil
+}
+
+// boundedLimit resolves the record limit for one snapshot.
+//
+// Always bound the snapshot. A positive limit engages hermes's ordered-index
+// early-stop (visiting ~limit newest records instead of the whole scope), so an
+// unbounded scan can never be triggered by a client or a misconfigured
+// resolver. This keeps the read O(limit), not O(scope) — the BoundedWork
+// invariant. Benchmarks: a limited 10K-scope snapshot is ~0.58ms vs ~210ms
+// unbounded; the incremental (watermark) path over the same scope is ~0.23ms.
+func (g *Gateway) boundedLimit(resolved, requested int) int {
+	if requested > 0 && (resolved == 0 || requested < resolved) {
+		resolved = requested
+	}
+	if resolved <= 0 || resolved > g.maxLimit {
+		return g.maxLimit
+	}
+	return resolved
+}
+
+// snapshotReader builds the bounded read this request performs, closing over
+// its resume position and vector mode so the audience union can issue the same
+// read once per (field, audience) pair.
+//
+// It honors the resume watermark (forward catch-up) and the keyset cursor
+// (backward backfill): a client that already holds prior state sends its
+// watermark for the changed tail; a client backfilling a scope larger than the
+// limit pages older records via the cursor. Each read stays O(limit).
+func (g *Gateway) snapshotReader(ctx context.Context, projection string, scope *foundationpb.ProjectionScope, req *foundationpb.ProjectionSnapshotRequest) func(hermes.Query) (hermes.Snapshot, error) {
+	sinceVersion := hermes.ParseWatermark(req.GetSinceWatermark())
+	beforeVersion := hermes.ParseWatermark(req.GetCursor())
+	includeVectors := req.GetVectorMode() != foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_EXCLUDE
+	read := func(scoped hermes.Query) (hermes.Snapshot, error) {
+		if includeVectors {
+			return g.store.SnapshotPage(ctx, projection, scoped, hermes.Fence{}, sinceVersion, beforeVersion)
+		}
+		return g.store.SnapshotPageWithoutVectors(ctx, projection, scoped, hermes.Fence{}, sinceVersion, beforeVersion)
+	}
+	// Lazy warm: resolve the cold scope through the projected store (which
+	// registers the partition, rebuilds from the mirror, and self-backfills an
+	// empty mirror), then retry once. Warm failure preserves the original
+	// not-found so the HTTP mapping stays stable.
+	return func(scoped hermes.Query) (hermes.Snapshot, error) {
+		snapshot, err := read(scoped)
+		if errors.Is(err, hermes.ErrProjectionNotFound) && g.warmScope != nil {
+			if warmErr := g.warmScope(ctx, scope); warmErr == nil {
+				snapshot, err = read(scoped)
+			}
+		}
+		return snapshot, err
+	}
+}
+
+// audienceSnapshot reads a per-record scope as the union of one bounded read
+// per (audience field, audience id) pair.
+//
+// hermes conjoins query filters, so "customer_profile_id = me OR
+// merchant_profile_id = me" cannot be expressed as one query. It does not need
+// to be: each pair is an indexed, limit-bounded read, and the union of a capped
+// number of O(limit) reads is still O(limit). That is what makes this landable
+// without an array-contains filter kind in hermes — which remains the right
+// optimization later for a record with many audiences, not a prerequisite now.
+func (g *Gateway) audienceSnapshot(policy AudiencePolicy, query hermes.Query, audiences []string, read func(hermes.Query) (hermes.Snapshot, error)) (hermes.Snapshot, error) {
+	filters, err := snapshotAudienceFilters(policy, audiences)
+	if err != nil {
+		return hermes.Snapshot{}, err
+	}
+	pages := make([]hermes.Snapshot, 0, len(filters))
+	for _, filter := range filters {
+		scoped := query.RecordQuery()
+		scoped.Filters = append(scoped.Filters, database.RecordFilter{
+			Field: filter.field,
+			Value: database.StringValue(filter.audience),
+		})
+		page, err := read(hermes.QueryFromRecordQuery(query.OrganizationID, scoped))
+		if err != nil {
+			return hermes.Snapshot{}, err
+		}
+		pages = append(pages, page)
+	}
+	return mergeSnapshotPages(pages, query.Limit), nil
+}
+
+// mergeSnapshotPages unions per-audience pages into one version-descending page
+// bounded by limit. Each page is already version-descending, so the merge only
+// has to deduplicate records that matched on more than one audience field and
+// re-apply the limit.
+//
+// Epoch and watermark are the MINIMUM across pages, and the cursor the oldest
+// version actually emitted: a resume token must not claim more progress than
+// the least-advanced read it was derived from, or the delta stream would skip
+// what that read had not yet seen.
+func mergeSnapshotPages(pages []hermes.Snapshot, limit int) hermes.Snapshot {
+	merged := hermes.Snapshot{}
+	for index, page := range pages {
+		if index == 0 || page.Epoch < merged.Epoch {
+			merged.Epoch = page.Epoch
+		}
+		if index == 0 || page.Watermark < merged.Watermark {
+			merged.Watermark = page.Watermark
+		}
+		merged.HasMore = merged.HasMore || page.HasMore
+	}
+	mutations := newestPerRecord(pages)
+	sort.SliceStable(mutations, func(i, j int) bool {
+		return mutations[i].GetVersion() > mutations[j].GetVersion()
+	})
+	if limit > 0 && len(mutations) > limit {
+		mutations = mutations[:limit]
+		merged.HasMore = true
+	}
+	merged.Mutations = mutations
+	if merged.HasMore && len(mutations) > 0 {
+		merged.NextCursor = mutations[len(mutations)-1].GetVersion()
+	}
+	return merged
+}
+
+// newestPerRecord collapses the pages to one mutation per record id, keeping
+// the highest version. A record matched by more than one audience field appears
+// in more than one page, and the pages are read independently, so the newest
+// version is the only one that reflects the record's current state.
+func newestPerRecord(pages []hermes.Snapshot) []*foundationpb.RecordMutation {
+	byRecord := make(map[string]*foundationpb.RecordMutation)
+	order := make([]string, 0)
+	for _, page := range pages {
+		for _, mutation := range page.Mutations {
+			id := mutation.GetRecordId()
+			existing, seen := byRecord[id]
+			if !seen {
+				byRecord[id] = mutation
+				order = append(order, id)
+				continue
+			}
+			if mutation.GetVersion() > existing.GetVersion() {
+				byRecord[id] = mutation
+			}
+		}
+	}
+	mutations := make([]*foundationpb.RecordMutation, 0, len(order))
+	for _, id := range order {
+		mutations = append(mutations, byRecord[id])
+	}
+	return mutations
+}
+
+// filterAudience drops any record the caller is not an audience of. It is the
+// snapshot's counterpart to the fan-out partition: same policy, same
+// derivation, applied to the answer rather than to the query, so the two halves
+// of the read path cannot disagree about who may see a record.
+func filterAudience(mutations []*foundationpb.RecordMutation, policy AudiencePolicy, audiences []string) []*foundationpb.RecordMutation {
+	out := make([]*foundationpb.RecordMutation, 0, len(mutations))
+	for _, mutation := range mutations {
+		if !intersects(policy.audiences(mutation), audiences) {
+			continue
+		}
+		out = append(out, mutation)
+	}
+	return out
 }
 
 // Subscribe opens a live delta feed for a scope. The caller should typically
@@ -238,11 +436,40 @@ func (g *Gateway) Subscribe(scope *foundationpb.ProjectionScope) (*Subscription,
 
 // SubscribeWithVectorMode opens a scoped live feed. Unspecified and INCLUDE
 // preserve v1 frames; EXCLUDE removes dense vectors before socket delivery.
+//
+// It carries no caller identity, so on an AudiencePerRecord scope it fails with
+// ErrAudienceForbidden rather than subscribing tenant-wide. Identity-bearing
+// callers use SubscribeAudience.
 func (g *Gateway) SubscribeWithVectorMode(scope *foundationpb.ProjectionScope, mode foundationpb.ProjectionVectorMode) (*Subscription, error) {
+	return g.SubscribeAudience(scope, nil, mode)
+}
+
+// SubscribeAudience opens a scoped live feed for a caller belonging to the
+// given audiences, which must come from verified identity (see
+// SubjectAudienceFunc) — never from the client.
+//
+// On a tenant-wide scope the audiences are irrelevant and the subscription is
+// exactly what it was before audiences existed. On an AudiencePerRecord scope
+// the subscriber is registered under one hub key per audience and an empty
+// audience set is refused: there is no path from "who is this?" being
+// unanswerable to receiving the tenant's stream.
+func (g *Gateway) SubscribeAudience(scope *foundationpb.ProjectionScope, audiences []string, mode foundationpb.ProjectionVectorMode) (*Subscription, error) {
 	if err := validateScope(scope); err != nil {
 		return nil, err
 	}
-	return g.hub.SubscribeWithVectors(scope, mode != foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_EXCLUDE), nil
+	policy, err := g.audience.resolve(scope.GetDomain(), scope.GetCollection())
+	if err != nil {
+		return nil, err
+	}
+	vectors := mode != foundationpb.ProjectionVectorMode_PROJECTION_VECTOR_MODE_EXCLUDE
+	if policy.Mode != AudiencePerRecord {
+		return g.hub.SubscribeWithVectors(scope, vectors), nil
+	}
+	audiences = dedupeAudiences(audiences)
+	if len(audiences) == 0 {
+		return nil, ErrAudienceForbidden
+	}
+	return g.hub.SubscribeKeys(audienceKeys(scope, audiences), vectors), nil
 }
 
 // ApplyEnvelopes applies projection envelopes to the store. Broadcasting happens
@@ -261,17 +488,23 @@ type scopeGroup struct {
 }
 
 // groupAccepted converts each accepted mutation into a RecordMutation stamped
-// with its assigned version and groups them by exact scope for fan-out.
-func groupAccepted(accepted []hermes.AppliedMutation) map[string]*scopeGroup {
+// with its assigned version and groups them into the fan-out topics that carry
+// them: the plain scope key for a tenant-wide scope, one key per audience for
+// an AudiencePerRecord scope. A record naming two audiences lands in two
+// groups, so encode cost scales with the DISTINCT AUDIENCES IN THIS BATCH and
+// never with the number of subscribers.
+//
+// The second return is the count of mutations that reached no group at all: an
+// undeclared scope under Strict, or — the common case — a per-record scope
+// whose tombstone carried no audience fields. Both are dropped rather than
+// broadcast, which is the fail-closed half of the contract.
+func groupAccepted(accepted []hermes.AppliedMutation, audience AudienceConfig) (map[string]*scopeGroup, uint64) {
 	groups := make(map[string]*scopeGroup)
-	for _, applied := range accepted {
-		mutation := hermes.MutationFromRecord(applied.Record, applied.Operation, applied.Version)
-		scope := &foundationpb.ProjectionScope{
-			TenantId:   mutation.GetOrganizationId(),
-			Domain:     mutation.GetDomain(),
-			Collection: mutation.GetCollection(),
-		}
-		key := ScopeKey(scope)
+	var undeliverable uint64
+	// Most records name one or two audiences; deriving them into a stack array
+	// keeps the apply path from allocating once per accepted mutation.
+	var audienceBuffer [4]string
+	add := func(key string, scope *foundationpb.ProjectionScope, mutation *foundationpb.RecordMutation) {
 		group := groups[key]
 		if group == nil {
 			group = &scopeGroup{scope: scope}
@@ -279,8 +512,41 @@ func groupAccepted(accepted []hermes.AppliedMutation) map[string]*scopeGroup {
 		}
 		group.mutations = append(group.mutations, mutation)
 	}
-	return groups
+	for _, applied := range accepted {
+		mutation := hermes.MutationFromRecord(applied.Record, applied.Operation, applied.Version)
+		scope := &foundationpb.ProjectionScope{
+			TenantId:   mutation.GetOrganizationId(),
+			Domain:     mutation.GetDomain(),
+			Collection: mutation.GetCollection(),
+		}
+		policy, err := audience.resolve(scope.GetDomain(), scope.GetCollection())
+		if err != nil {
+			undeliverable++
+			continue
+		}
+		if policy.Mode != AudiencePerRecord {
+			add(ScopeKey(scope), scope, mutation)
+			continue
+		}
+		ids := policy.appendAudiences(audienceBuffer[:0], mutation)
+		if len(ids) == 0 {
+			undeliverable++
+			continue
+		}
+		for _, key := range audienceKeys(scope, ids) {
+			add(key, scope, mutation)
+		}
+	}
+	return groups, undeliverable
 }
+
+// AudienceDrops reports how many accepted mutations were withheld from the
+// live stream because no audience could be derived for them. A non-zero and
+// growing count on a per-record scope means its deletes do not carry the
+// audience fields: those deletions converge only on the client's next
+// snapshot. It is exported so a deployment can alarm on the gap instead of
+// discovering it as "the row never disappeared".
+func (g *Gateway) AudienceDrops() uint64 { return g.audienceDrops.Load() }
 
 func watermarkFromMutations(mutations []*foundationpb.RecordMutation) string {
 	var max uint64
@@ -387,6 +653,17 @@ func validateScope(scope *foundationpb.ProjectionScope) error {
 		strings.TrimSpace(scope.GetTenantId()) == "" ||
 		strings.TrimSpace(scope.GetDomain()) == "" ||
 		strings.TrimSpace(scope.GetCollection()) == "" {
+		return ErrScopeInvalid
+	}
+	// ':' is the scope key's own separator, and the domain/collection halves
+	// are client-supplied path segments. Without this, a crafted collection
+	// could spell out another subscriber's audience key (or another
+	// collection's topic) and land in its bucket. The projected store already
+	// names partitions "prefix:domain:collection:organization", so a colon in
+	// any component was never addressable to begin with.
+	if strings.ContainsRune(scope.GetTenantId(), ':') ||
+		strings.ContainsRune(scope.GetDomain(), ':') ||
+		strings.ContainsRune(scope.GetCollection(), ':') {
 		return ErrScopeInvalid
 	}
 	return nil
