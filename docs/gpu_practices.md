@@ -742,3 +742,90 @@ runtime language, but several should become explicit review vocabulary:
     <https://docs.nvidia.com/cuda/cuda-driver-api/group__CUDA__EXTRES__INTEROP.html>
 19. Columnar null representation, identity-substitution reductions, and the
     cross-lane bitmap word-width contract: `docs/columnar_null_algebra.md`
+
+## CUDA Rust native kernel lane (research, added 2026-09-09)
+
+NVIDIA released two projects for writing CUDA GPU kernels in native Rust
+(announced September 2026). Neither is production-ready. This section tracks
+Foundation readiness to adopt one or both as a native GPU compute lane when
+project requirements justify server-side or native NVIDIA GPU dispatch. Full
+research tracking is in `future_practices_research.md` lane 9.
+
+### Two tracks
+
+| Track | Project | Programming model | Rust toolchain | CUDA version | Status |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| SIMT | `cuda-oxide` (`NVlabs/cuda-oxide`) | One thread, N instances. You manage indexing, shared memory, sync barriers. | Pinned nightly (`nightly-2026-04-03`) + LLVM + `clang` | 12.x+ | Early alpha. Not on crates.io. |
+| Tile | `cutile-rs` (`NVlabs/cutile-rs`) | One tile of data, compiler maps to threads and memory. | Stable 1.89+ | 13.3+ | Published on crates.io (`cutile`). Used in HuggingFace Grout and mistral.rs. |
+
+Both require Linux and compute capability 8.0 or later.
+
+### Safety models
+
+cuda-oxide uses a three-tier safety model:
+
+1. **Tier 1 (safe by default)**: `DisjointSlice<T>` splits a mutable buffer
+   into per-thread pieces. `ThreadIndex` is `!Send + !Sync + !Copy + !Clone`
+   and `'kernel`-scoped so threads cannot launder each other's indices through
+   shared memory. `#[launch_contract]` plus `PreparedLaunch` validate grid
+   geometry against kernel declarations and live device limits before launch.
+   No `unsafe` is required.
+2. **Tier 2 (scoped unsafe)**: explicit `unsafe` with documented safety
+   contracts for shared memory, warp shuffles, and hardware intrinsics.
+3. **Tier 3 (raw intrinsics)**: full manual responsibility for TMA, tensor
+   cores, and cluster-level communication.
+
+cutile-rs uses Rust ownership directly. Mutable output tensors must be
+`.partition()`-ed before launch. Partitioning gives each tile block exclusive
+ownership of its sub-tensor. The compiler manages thread mapping, shared
+memory, and synchronization. No `DisjointSlice` or thread indexing is
+exposed. Immutable input tensors use standard shared borrowing.
+
+Both projects catch GPU data-race aliasing at compile time: cuda-oxide
+through borrow checker rules at each launch call (`E0502`), cutile-rs through
+move semantics across the launch boundary (`E0382`).
+
+### Foundation integration posture
+
+1. Do not adopt either project into the default `core` or `lite` Foundation
+   profiles. Gate behind the `performance` profile or a feature flag.
+2. cutile-rs is the near-term candidate because it runs on stable Rust and
+   is published on crates.io. It can enter Foundation's `cargo add` dependency
+   path and pass CP-28 supply chain hygiene checks.
+3. cuda-oxide requires a pinned nightly toolchain. Track only. Revisit when
+   it ships on stable Rust.
+4. A CUDA Rust kernel is a candidate `RuntimeUnit` under `rust/crates/`. It
+   would integrate through the `kernellane` descriptor model and the
+   `RuntimeUnitDescriptor` registry. The capability planner would select PTX
+   alongside WASM, FFI, and SHM based on workload shape, hardware presence,
+   and fallback requirements.
+5. JIT compilation in cutile-rs (through CUDA Tile IR at first launch) adds
+   a cold-start cost that must be measured separately from steady-state
+   dispatch. This maps to the existing capture bundle schema requirement:
+   benchmarks must distinguish cold compile, warm cache, first launch, and
+   steady-state dispatch.
+6. All existing GPU practices apply. CUDA Rust kernels must preserve the same
+   visible contract as their scalar or Rust/WASM fallback: metadata, tenant
+   scope, schema version, result semantics, diagnostics, terminal state, and
+   controlled error class.
+7. NVIDIA plans CUDA Rust, CUDA C++, and CUDA Python inter-language interop.
+   Track readiness for mixed-language kernel composition in Foundation's
+   inference and batch compute lanes.
+
+### Additional references
+
+20. Elibol, Koundinyan, Bentz, "Fearless Concurrency on the GPU",
+    arXiv:2606.15991, RustConf 2026.
+21. NVIDIA, "Introducing CUDA Rust: Two Tracks for Writing GPU Kernels",
+    NVIDIA Technical Blog, 2026-09-08:
+    <https://developer.nvidia.com/blog/introducing-cuda-rust-two-tracks-for-writing-gpu-kernels/>
+22. cuda-oxide book: <https://nvlabs.github.io/cuda-oxide/>
+23. cuTile Rust documentation: <https://nvlabs.github.io/cutile-rs/main/>
+24. cuda-oxide safety model:
+    <https://nvlabs.github.io/cuda-oxide/gpu-safety/the-safety-model.html>
+25. Rust + GPU ecosystem appendix:
+    <https://nvlabs.github.io/cuda-oxide/appendix/ecosystem.html>
+26. NVIDIA CUDA Tile IR: <https://docs.nvidia.com/cuda/tile-ir/latest/>
+27. NVIDIA CUDA Tile C++ API Reference:
+    <https://docs.nvidia.com/cuda/cuda-tile-cpp-api-reference/>
+

@@ -197,6 +197,36 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 	}
 	wsConn.binaryFormat = strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("format")), "binary")
 
+	/*
+	 * A socket that arrives with a verified token is authenticated from the
+	 * start.
+	 *
+	 * `security.JWTAuth` accepts the `access_token` query parameter on
+	 * upgrades specifically — a browser cannot set an Authorization header on
+	 * a WebSocket handshake — and leaves the validated claims on the request
+	 * context. Nothing here read them, so every connection began as a guest
+	 * and an application had to implement its own connection-authentication
+	 * command to get an identity onto the socket. Until it did, any event
+	 * addressed to an account could be delivered to nobody.
+	 *
+	 * The claims are taken from the context, never from the query string. The
+	 * middleware is the only thing that verifies a signature, and re-reading
+	 * the raw parameter here would be a second, unverified path to the same
+	 * decision.
+	 *
+	 * `maybeUpgradeConnectionAuth` still applies. An application that
+	 * implements a connection-auth command keeps it, and it overrides this —
+	 * which is what a token refresh on a live socket needs.
+	 */
+	if userID := strings.TrimSpace(security.GetUserIDFromContext(r.Context())); userID != "" {
+		wsConn.setAuth(
+			userID,
+			security.GetOrganizationIDFromContext(r.Context()),
+			security.GetRoleFromContext(r.Context()),
+			security.GetCapabilitiesFromContext(r.Context()),
+		)
+	}
+
 	if !s.registerWSConnection(ctx, wsConn) {
 		s.releaseWSConnectionSlot()
 		cancel()
@@ -300,6 +330,53 @@ func (s *Server) unregisterWSConnection(ctx context.Context, conn *wsConnection)
 			s.log.Warn("failed to unregister websocket route", "connection_id", conn.id, "error", err)
 		}
 	}
+
+	/*
+	 * Tell the application the connection ended.
+	 *
+	 * Any domain that ties state to connection lifetime needs this: presence
+	 * in a room, a held lock, a live cursor, a subscription with a side
+	 * effect. Without it such state can only be expired by a timer, so a
+	 * roster is always a little wrong and a lock outlives the process holding
+	 * it.
+	 *
+	 * Detached from the connection's context on purpose. `ctx` belongs to the
+	 * request that just ended, and cleanup that runs on a cancelled context
+	 * does not run at all. It is bounded rather than left open, and it runs
+	 * off the teardown path so one slow application handler cannot hold up the
+	 * next disconnect.
+	 */
+	if s.onConnectionClosed != nil {
+		auth := conn.authSnapshot()
+		if auth.authenticated && auth.userID != "" {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), WSDisconnectBudget)
+			go func() {
+				defer cancel()
+				s.onConnectionClosed(cleanupCtx, ConnectionClosed{
+					ConnectionID:   conn.id,
+					DeviceID:       conn.deviceID,
+					UserID:         auth.userID,
+					OrganizationID: auth.orgID,
+				})
+			}()
+		}
+	}
+}
+
+// WSDisconnectBudget bounds the application work that follows a disconnect.
+// Cleanup that cannot finish inside it is left to whatever expiry the
+// application already has, rather than held open while more sockets close.
+const WSDisconnectBudget = 10 * time.Second
+
+// ConnectionClosed describes a socket that has ended.
+//
+// A struct rather than loose arguments so a later field — a close reason, a
+// last-seen timestamp — does not break every caller.
+type ConnectionClosed struct {
+	ConnectionID   string
+	DeviceID       string
+	UserID         string
+	OrganizationID string
 }
 
 // runWSReader drains one connection's frames and dispatches each in turn.
@@ -443,6 +520,36 @@ func (s *Server) dispatchWSRequest(ctx context.Context, conn *wsConnection, env 
 	if conn == nil {
 		return errors.New("connection is required")
 	}
+
+	/*
+	 * Connection control is answered by the socket, before dispatch.
+	 *
+	 * Subscribe and unsubscribe manage this connection. They are not
+	 * application commands, and no application should have to register a
+	 * handler for them.
+	 *
+	 * They used to be checked after performDispatch, which meant every
+	 * subscribe was first offered to the service registry. An application that
+	 * had not registered a handler for them — which is every application that
+	 * was not told to — got handler_not_found, dispatch returned on its error
+	 * path, and the branch that records the subscription was never reached.
+	 * The socket stayed subscribed to nothing, no event was ever forwarded,
+	 * and the push lane was silently dead.
+	 *
+	 * The behaviour was invisible here because this package's own tests
+	 * register no-op handlers for both events, so dispatch succeeded and
+	 * execution fell through to the recording branch. The tests encoded the
+	 * workaround rather than the contract.
+	 */
+	if isWSControlEvent(env.EventType) {
+		switch env.EventType {
+		case wsEventSubscribe:
+			s.handleWSSubscribe(conn, env)
+		case wsEventUnsubscribe:
+			s.handleWSUnsubscribe(conn, env)
+		}
+		return nil
+	}
 	md := metadata.FromObject(env.Metadata)
 	if md.GlobalContext == nil {
 		md.GlobalContext = &metadata.GlobalContext{}
@@ -512,15 +619,20 @@ func (s *Server) dispatchWSRequest(ctx context.Context, conn *wsConnection, env 
 	if env.EventType == "identity:logout_connection:v1:requested" {
 		conn.clearAuth()
 	}
-	if env.EventType == "system:websocket_subscribe:v1:requested" {
-		s.handleWSSubscribe(conn, env)
-		return nil
-	}
-	if env.EventType == "system:websocket_unsubscribe:v1:requested" {
-		s.handleWSUnsubscribe(conn, env)
-		return nil
-	}
 	return s.enqueueWSEnvelope(conn, responseEnvelope)
+}
+
+// Connection-control event types. Named because they are part of the socket's
+// contract with a client, not string literals scattered through a dispatcher.
+const (
+	wsEventSubscribe   = "system:websocket_subscribe:v1:requested"
+	wsEventUnsubscribe = "system:websocket_unsubscribe:v1:requested"
+)
+
+// isWSControlEvent reports whether an envelope manages the connection itself
+// rather than asking the application for anything.
+func isWSControlEvent(eventType string) bool {
+	return eventType == wsEventSubscribe || eventType == wsEventUnsubscribe
 }
 
 func (s *Server) handleWSSubscribe(conn *wsConnection, env events.Envelope) {
@@ -634,6 +746,25 @@ func (s *Server) isWSGuestAllowedEvent(eventType string) bool {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {
 		return false
+	}
+	/*
+	 * Connection control is always permitted, for anyone.
+	 *
+	 * Subscribing manages this socket. It is not an application action, and
+	 * the allow-set exists to say which application actions a guest may take.
+	 * Gating control on it meant an application had to add subscribe and
+	 * unsubscribe to its allow-set as well as register handlers for them —
+	 * two separate pieces of undocumented ceremony, and without both the
+	 * socket could never subscribe to anything.
+	 *
+	 * This permits subscribing, not receiving. Delivery is filtered
+	 * separately: an event carrying a user id reaches only that user's
+	 * connections. An application that emits events with no addressee is
+	 * choosing to make them available to every subscriber, and that choice is
+	 * made where the event is emitted, not here.
+	 */
+	if isWSControlEvent(eventType) {
+		return true
 	}
 	if _, ok := s.wsUnauthenticatedAllowset[eventType]; ok {
 		return true

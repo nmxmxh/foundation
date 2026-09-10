@@ -301,7 +301,12 @@ func (e Envelope) ToBinary() ([]byte, error) {
 		return nil, err
 	}
 
-	payload := append([]byte(nil), env.PayloadBytes...)
+	// The payload is passed to proto.Marshal by reference. Marshal reads the
+	// bytes into a fresh output buffer and does not retain the input, and the
+	// EventEnvelope holding it is local and discarded here — so a defensive copy
+	// protects nothing and costs one full payload allocation per encode. (It was
+	// also dead work on the JSON branch below, which overwrites it outright.)
+	payload := env.PayloadBytes
 	if env.PayloadEncoding == PayloadEncodingJSON {
 		payload, err = encodePayloadObject(env.Payload)
 		if err != nil {
@@ -693,7 +698,9 @@ func (b Batch) ToBinary() ([]byte, error) {
 			return nil, err
 		}
 
-		payload := append([]byte(nil), e.PayloadBytes...)
+		// By reference for the same reason as ToBinary: the batch message is
+		// local, and Marshal copies rather than retains.
+		payload := e.PayloadBytes
 		if e.PayloadEncoding == PayloadEncodingJSON {
 			var err error
 			payload, err = encodePayloadObject(e.Payload)
