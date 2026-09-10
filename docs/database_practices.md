@@ -752,3 +752,149 @@ Four rules follow, and they apply to every recurring producer.
 
 Regression coverage for rules 2 and 3 belongs in the TE-14 worker suite; the
 scaffolded baseline ships `internal/worker/periodic_jobs_test.go`.
+
+## Change Notification On The Record Store (2026-09-10)
+
+Every Foundation project writes its domain state to one table,
+`governance_state_records`. That makes it the busiest table in the deployment
+and the worst available place to add per-write work.
+
+A projection is a read model held in the process that serves it, filled by the
+writes that process applied. Every other writer — the worker, a second replica,
+a migration — is invisible to it. Something has to tell it. The obvious
+something is a trigger calling `pg_notify`, and it is the one option that must
+not be used here.
+
+### Measured
+
+`tooling/scripts/record_store_notify_bench.sh` runs the record store's real
+upsert under rising concurrency, with a listener attached and the table reset
+before every run. On PG18, 200k rows, 8 cores:
+
+| configuration | c=1 | c=8 | c=32 | c=64 |
+| --- | --- | --- | --- | --- |
+| no trigger | 4,155 | 15,087 | 23,248 | **27,199** |
+| `pg_notify` per statement | 3,886 | 6,532 | 5,976 | **6,027** |
+| `pg_notify` per row | 4,197 | 6,199 | 5,616 | **6,028** |
+
+Notification costs **78% of write throughput** at c=64, and the shape matters
+more than the number: without it the table scales with concurrency, and with it
+throughput is flat from c=8 onward. That is not resource exhaustion. Committing
+a transaction that called `NOTIFY` takes a global exclusive lock, so those
+commits serialize — which is why the loss is invisible in CPU and I/O, and why
+it looks like the database has stopped rather than slowed.
+
+Note the second and third rows are the same. Moving the trigger from per-row to
+per-statement changes how many notifications are sent and not how many
+*transactions notified*, and the lock is taken per committing transaction. The
+common advice to "batch your notifications" only helps when batching removes
+transactions from the notifying set — which a trigger, by construction, cannot
+do. The upstream fix landed for PG19; nothing before it has it.
+
+Triggers themselves are not the problem. The same benchmark with the trigger
+bodies emptied of `pg_notify` measures within noise of no trigger at all.
+
+### The rule
+
+**Do not put `pg_notify` in a trigger on the record store.** Do not put one on
+any table on a hot write path. If a projection needs to know that a scope
+moved, the writer says so, on the bus the deployment already runs:
+`RuntimeStoreOptions.OnCommandWrite` is that seam.
+
+Consequences worth stating plainly:
+
+- **The application already knows what it wrote.** Deriving that from the
+  database is paying to rediscover it, on the commit path, in the one place
+  where contention is most expensive.
+- **The announcement is a hint, never data.** It carries a scope, no records.
+  Losing one costs time, not correctness, because the cursor read behind it
+  reads everything since the cursor whenever it next runs.
+- **Convergence writes must not be announced.** A replica that rebroadcasts
+  what it just converged turns a fan-out lane into an echo chamber whose
+  traffic grows with the square of the fleet. The store excludes
+  `MirrorSweeper` writes for exactly this reason.
+- **Keep a slow reconcile.** Signals cover what the application writes; a
+  migration or an admin `UPDATE` announces nothing. A minute is ample, and it
+  is cheap: see below.
+
+### Wire it with `hermes.ScopeSignal`, not by hand
+
+The seam is three lines, and every one of them has a way to be wrong that looks
+like it works. `hermes.ScopeSignal` is the assembled lane, so a project gets the
+answers rather than the questions:
+
+```go
+signal, err := hermes.NewScopeSignal(hermes.ScopeSignalOptions{Bus: bus})
+store, err := hermes.WrapRuntimeStore(db, hermes.RuntimeStoreOptions{
+    OnCommandWrite: signal.OnCommandWrite,
+})
+sweeper, err := hermes.NewMirrorSweeper(store, hermes.MirrorSweepOptions{Interval: time.Minute})
+_ = sweeper.AddScopeSource("menu", "dishes", dishesChangedSince)
+_ = sweeper.AddScopeDeleteRecordSource("menu", "dishes", dishTombstonesSince)
+err = signal.Converge(sweeper)   // subscribe, after the sources exist
+go sweeper.Run(ctx)
+```
+
+What that buys, in the order these bite:
+
+- **Neither end blocks the goroutine that reached it.** `OnCommandWrite` runs on
+  the writer's goroutine right after commit, so announcing hands a scope name to
+  a buffered channel and returns — no commit waits on Redis. Receiving runs on
+  the one goroutine a bus dispatches every subscription from, so converging
+  flags a source (`MirrorSweeper.Notify`) and returns — no bus dispatch waits on
+  Postgres. Sweeping inline in a subscriber puts a database round trip in front
+  of every other event that process was about to handle.
+- **A burst costs one announcement and one sweep, not one of each per write.**
+  A hint carries no data, so a second copy of one says exactly what the first
+  already said: writes to a scope whose announcement is still in flight are
+  folded into it, and signals arriving while a sweep runs collapse onto the flag
+  it left, because the sweep that follows reads everything past the cursor
+  anyway. Every replica receives every announcement, so without both, a burst of
+  *k* writes puts *k* messages on the channel and *k* queries on each of *n*
+  processes.
+- **The two halves cannot disagree about a name.** `AddScopeSource` registers
+  under the name `DefaultScopeSourceName` derives, so a source registered under
+  one name and woken under another — which converges nothing while every part
+  looks correct alone — is not expressible. Hard deletes converge through the
+  tombstone source under its own name, which the announcement knows to use.
+- **The identity is random, not a clock.** Two processes started together on one
+  host can read the same clock, and two nodes sharing an id each mistake the
+  other's announcements for an echo of their own and skip them.
+- **The payload is materialized before it is read.** A bus materializes an
+  envelope's metadata on receipt and leaves the payload as bytes. Reading
+  through the nil payload yields empty strings rather than an error, so a
+  subscriber that skips `MaterializePayload` silently discards every message.
+
+`ScopeSignal.Stats()` and `MirrorSweeper.Stats()` are how a working lane is told
+from one that looks like it: `Announced` and `Received` rising, `Unroutable` and
+`Dropped` flat at zero, and `Signalled` above zero on a process that converged
+something — a converged write with `Signalled` still at zero means the timer
+did it and the signal lane is dead.
+
+Set `Interval` for staleness tolerance, not latency. With signals wired it is no
+longer how long a change takes to arrive; it is the backstop for writers the
+application never saw.
+
+### Polling was never the load problem
+
+Worth recording because it is the opposite of what everyone assumes. A sweeper
+polling ten sources every two seconds cost **11 transactions/second idle —
+0.04%** of what the same table sustains. Moving to signals with a 60-second
+reconcile took that to **1.0/second, 0.004%**.
+
+So the case for removing the poll is not load. It is latency: a change made by
+another replica waited for the next tick. Measured on the same deployment, a
+write on one process became visible on another in **11ms** with signals, against
+**60,027ms** on the reconcile timer alone. Optimize the poll interval for
+staleness tolerance, not for database load, and do not accept a commit-path cost
+to remove a poll that was costing four hundredths of a percent.
+
+### If you need every out-of-band write immediately
+
+Logical replication is the only mechanism that carries every writer at no cost
+to the commit path, since the WAL is written regardless. It is also the most
+operationally demanding: `wal_level=logical` needs a restart, and a stalled
+replication slot retains WAL until the disk fills. Prefer one consumer feeding
+the bus over one slot per replica. Unmeasured here — the benchmark environment
+could not be restarted — so treat the write-path cost of `wal_level=logical` as
+an open question rather than a settled one.

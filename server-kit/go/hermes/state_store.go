@@ -44,6 +44,22 @@ type RuntimeStoreOptions struct {
 	// writes keep the mirror current afterward. Errors degrade to the normal
 	// lazy-warm fallback, never fail the store.
 	ScopeBackfill func(ctx context.Context, domain, collection, organizationID string, visit database.RecordVisitor) error
+
+	// OnCommandWrite is called after a COMMAND write commits — an application
+	// upsert or delete — with the records it wrote. It is the seam an app uses
+	// to tell other processes that a scope moved, so their projections can
+	// converge without polling for the news.
+	//
+	// It is deliberately not called for writes the MirrorSweeper makes while
+	// converging. Those are this process catching up with a change somebody
+	// else already announced, and announcing them again is how a fan-out lane
+	// becomes an echo chamber: every replica re-broadcasts every write it
+	// receives, and the traffic grows with the square of the fleet.
+	//
+	// Called synchronously on the writer's goroutine after the durable write
+	// and the hot apply, so an implementation must not block: hand off to a
+	// bus or a channel and return.
+	OnCommandWrite func(ctx context.Context, records []database.DomainRecord, op Operation)
 }
 
 type ProjectedRuntimeStore struct {
@@ -194,12 +210,31 @@ func (s *ProjectedRuntimeStore) Close() {
 }
 
 func (s *ProjectedRuntimeStore) UpsertRecord(ctx context.Context, rec database.DomainRecord) (database.DomainRecord, error) {
+	saved, err := s.upsertRecordConverging(ctx, rec)
+	if err != nil {
+		return database.DomainRecord{}, err
+	}
+	s.announceCommand(ctx, []database.DomainRecord{saved}, OperationUpsert)
+	return saved, nil
+}
+
+// upsertRecordConverging is UpsertRecord without the command announcement, for
+// the sweeper: see RuntimeStoreOptions.OnCommandWrite.
+func (s *ProjectedRuntimeStore) upsertRecordConverging(ctx context.Context, rec database.DomainRecord) (database.DomainRecord, error) {
 	saved, err := s.base.UpsertRecord(ctx, rec)
 	if err != nil {
 		return database.DomainRecord{}, err
 	}
 	s.projectUpsert(ctx, saved)
 	return saved, nil
+}
+
+// announceCommand notifies the application that a command moved a scope.
+func (s *ProjectedRuntimeStore) announceCommand(ctx context.Context, records []database.DomainRecord, op Operation) {
+	if s.opts.OnCommandWrite == nil || len(records) == 0 {
+		return
+	}
+	s.opts.OnCommandWrite(ctx, records, op)
 }
 
 // batchRecordUpserter is the optional base-store capability UpsertRecords uses
@@ -218,11 +253,21 @@ type batchRecordUpserter interface {
 // to UpsertRecord (idempotent, LWW-versioned from the same counter, live
 // fan-out through the store observer).
 func (s *ProjectedRuntimeStore) UpsertRecords(ctx context.Context, records []database.DomainRecord) ([]database.DomainRecord, error) {
+	saved, err := s.upsertRecordsConverging(ctx, records)
+	if err != nil {
+		return nil, err
+	}
+	s.announceCommand(ctx, saved, OperationUpsert)
+	return saved, nil
+}
+
+// upsertRecordsConverging is UpsertRecords without the command announcement.
+func (s *ProjectedRuntimeStore) upsertRecordsConverging(ctx context.Context, records []database.DomainRecord) ([]database.DomainRecord, error) {
 	switch len(records) {
 	case 0:
 		return nil, nil
 	case 1:
-		saved, err := s.UpsertRecord(ctx, records[0])
+		saved, err := s.upsertRecordConverging(ctx, records[0])
 		if err != nil {
 			return nil, err
 		}
@@ -370,6 +415,16 @@ func (s *ProjectedRuntimeStore) DeleteRecord(ctx context.Context, domain, collec
 // reached. Carry only the fields the scope's policy is keyed on; a tombstone is
 // not a place to keep a copy of a row that was just deleted.
 func (s *ProjectedRuntimeStore) DeleteRecordWithFields(ctx context.Context, rec database.DomainRecord) error {
+	if err := s.deleteRecordConverging(ctx, rec); err != nil {
+		return err
+	}
+	s.announceCommand(ctx, []database.DomainRecord{rec}, OperationDelete)
+	return nil
+}
+
+// deleteRecordConverging is DeleteRecordWithFields without the command
+// announcement, for the sweeper: see RuntimeStoreOptions.OnCommandWrite.
+func (s *ProjectedRuntimeStore) deleteRecordConverging(ctx context.Context, rec database.DomainRecord) error {
 	if err := s.base.DeleteRecord(ctx, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID); err != nil {
 		return err
 	}
@@ -475,7 +530,10 @@ func (s *ProjectedRuntimeStore) backfillScope(ctx context.Context, domain, colle
 		if len(batch) == 0 {
 			return nil
 		}
-		if _, err := s.UpsertRecords(ctx, batch); err != nil {
+		// Converging, not commanding: a backfill is this process reading the
+		// app's own tables into its projection, so there is nothing to tell
+		// anybody else about.
+		if _, err := s.upsertRecordsConverging(ctx, batch); err != nil {
 			return err
 		}
 		total += int64(len(batch))
@@ -583,11 +641,20 @@ type batchRecordDeleter interface {
 // versioned from the same counter, rec.Data carried so a per-record audience
 // can address the tombstone.
 func (s *ProjectedRuntimeStore) DeleteRecords(ctx context.Context, records []database.DomainRecord) error {
+	if err := s.deleteRecordsConverging(ctx, records); err != nil {
+		return err
+	}
+	s.announceCommand(ctx, records, OperationDelete)
+	return nil
+}
+
+// deleteRecordsConverging is DeleteRecords without the command announcement.
+func (s *ProjectedRuntimeStore) deleteRecordsConverging(ctx context.Context, records []database.DomainRecord) error {
 	switch len(records) {
 	case 0:
 		return nil
 	case 1:
-		return s.DeleteRecordWithFields(ctx, records[0])
+		return s.deleteRecordConverging(ctx, records[0])
 	}
 
 	if batcher, ok := s.base.(batchRecordDeleter); ok {

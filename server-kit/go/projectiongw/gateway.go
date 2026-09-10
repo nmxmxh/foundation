@@ -70,6 +70,9 @@ type Gateway struct {
 	// would leak membership, so they are dropped and counted here instead of
 	// disappearing silently; a client reconciles them on its next snapshot.
 	audienceDrops atomic.Uint64
+	// snapshotCache holds assembled snapshot responses keyed by epoch (see
+	// WithSnapshotCache). Nil disables it, which is the default.
+	snapshotCache *snapshotCache
 }
 
 // Option configures a Gateway.
@@ -105,6 +108,26 @@ func WithScopeWarmer(warm func(ctx context.Context, scope *foundationpb.Projecti
 func WithAudience(config AudienceConfig) Option {
 	return func(g *Gateway) {
 		g.audience = config
+	}
+}
+
+// WithSnapshotCache enables the epoch-keyed snapshot response cache with the
+// given byte budget. Zero or negative disables it.
+//
+// The cache serves byte-identical repeat reads of an unchanged page without
+// re-reading or re-encoding it, which is the shape a scope with many subscribers
+// produces: every client that connects at the same epoch is asking for the same
+// bytes. Validity is proven by the partition epoch, not by a clock — hermes
+// advances the epoch on every accepted apply, so a matching epoch means the
+// materialized page has not moved.
+//
+// It is opt-in because it trades resident memory for encode time, and only the
+// deploying project knows its page sizes and subscriber counts. A budget is a
+// hard ceiling: entries are evicted least-recently-used, and a page larger than
+// the whole budget is never admitted.
+func WithSnapshotCache(maxBytes int) Option {
+	return func(g *Gateway) {
+		g.snapshotCache = newSnapshotCache(maxBytes)
 	}
 }
 

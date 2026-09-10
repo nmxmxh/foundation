@@ -13,7 +13,6 @@ import (
 	"github.com/gorilla/websocket"
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
-	"google.golang.org/protobuf/proto"
 )
 
 // projectionUpgrader upgrades projection subscription requests. Origin is
@@ -194,7 +193,9 @@ func (g *Gateway) Handler(config HandlerConfig) http.Handler {
 
 // SnapshotHandler serves GET {prefix}{domain}/{collection} as a binary
 // ProjectionSnapshot proto. The optional `since` query parameter carries a
-// resume watermark and `limit` bounds the record count.
+// resume watermark for forward catch-up, `cursor` carries a keyset cursor from a
+// prior response's next_cursor for backward backfill, and `limit` bounds the
+// record count.
 func (g *Gateway) SnapshotHandler(config HandlerConfig) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -208,7 +209,13 @@ func (g *Gateway) SnapshotHandler(config HandlerConfig) http.Handler {
 		req := &foundationpb.ProjectionSnapshotRequest{
 			Scope:          scope,
 			SinceWatermark: strings.TrimSpace(r.URL.Query().Get("since")),
-			VectorMode:     vectorModeFromRequest(r),
+			// Keyset backfill: a client pages older records by presenting the
+			// prior response's next_cursor. Without this the cursor half of the
+			// documented pagination contract is unreachable over HTTP — the
+			// gateway returns next_cursor and has_more, and snapshotReader
+			// honors req.Cursor, but nothing populated it from the request.
+			Cursor:     strings.TrimSpace(r.URL.Query().Get("cursor")),
+			VectorMode: vectorModeFromRequest(r),
 		}
 		if limit, err := strconv.ParseUint(strings.TrimSpace(r.URL.Query().Get("limit")), 10, 32); err == nil {
 			req.Limit = uint32(limit)
@@ -218,20 +225,14 @@ func (g *Gateway) SnapshotHandler(config HandlerConfig) http.Handler {
 			writeError(w, err)
 			return
 		}
-		snapshot, err := g.SnapshotAudience(r.Context(), req, audiences)
-		if err != nil {
+		// ServeSnapshot owns the read, the encode, and the write: it returns an
+		// error only before the first byte is on the wire, so a failure here is
+		// still mappable to a status code. A write failure after the header is
+		// sent cannot be, and is left to the transport.
+		if err := g.ServeSnapshot(r.Context(), w, req, audiences); err != nil {
 			writeError(w, err)
 			return
 		}
-		raw, err := proto.Marshal(snapshot)
-		if err != nil {
-			http.Error(w, "encode error", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/x-protobuf")
-		w.Header().Set("X-Projection-Epoch", strconv.FormatUint(snapshot.GetEpoch(), 10))
-		w.Header().Set("X-Projection-Watermark", snapshot.GetWatermark())
-		_, _ = w.Write(raw)
 	})
 }
 

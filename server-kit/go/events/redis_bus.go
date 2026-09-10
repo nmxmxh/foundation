@@ -2,6 +2,8 @@ package events
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"sync"
@@ -33,6 +35,24 @@ type RedisBus struct {
 	wg     sync.WaitGroup
 }
 
+// newBusNodeID identifies this bus instance, so it can drop its own messages
+// coming back around the channel.
+//
+// It is random and not a clock. Two processes started together on one host can
+// read the same clock — the coarser the platform's timer, the likelier — and
+// two buses sharing an id each mistake every message from the other for an echo
+// of its own and drop it. Silently, and for every event type, not just the one
+// being debugged.
+func newBusNodeID() string {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// crypto/rand does not fail in practice; if it ever does, a clock is
+		// still better than a constant.
+		return fmt.Sprintf("bus-%d", time.Now().UTC().UnixNano())
+	}
+	return "bus-" + hex.EncodeToString(buf[:])
+}
+
 func NewRedisBus(client rediskit.Client, channel string, maxRecent int, l logger.Logger) *RedisBus {
 	if strings.TrimSpace(channel) == "" {
 		channel = "ovasabi:events"
@@ -48,7 +68,7 @@ func NewRedisBus(client rediskit.Client, channel string, maxRecent int, l logger
 	bus := &RedisBus{
 		client:             client,
 		channel:            channel,
-		nodeID:             fmt.Sprintf("bus-%d", time.Now().UTC().UnixNano()),
+		nodeID:             newBusNodeID(),
 		logger:             l,
 		exactSubscribers:   map[string][]Subscriber{},
 		prefixSubscribers:  map[string][]Subscriber{},

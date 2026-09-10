@@ -88,6 +88,10 @@ type Server struct {
 	// Public paths that bypass authentication
 	publicPaths []string
 
+	// onConnectionClosed is called when a WebSocket connection ends. See
+	// OnConnectionClosed.
+	onConnectionClosed func(ctx context.Context, closed ConnectionClosed)
+
 	// Auth configuration
 	requireAuthForDispatch bool
 	protectOperational     bool
@@ -310,6 +314,21 @@ func (s *Server) ConfigureCompression(enabled bool, minBytes, level int) {
 }
 
 // ConfigureWebSocket sets up WebSocket communication
+// OnConnectionClosed registers what the application does when a WebSocket
+// connection ends.
+//
+// One hook rather than a list: there is one thing per application that needs
+// to know, and a slice here would invite a second subscriber whose failure is
+// invisible to the first. An application that needs to fan out does so on its
+// own side, where it can decide what a partial failure means.
+//
+// The callback runs off the teardown path with a bounded context. It is called
+// only for a connection that was authenticated, because an anonymous socket
+// holds no application state to release.
+func (s *Server) OnConnectionClosed(fn func(ctx context.Context, closed ConnectionClosed)) {
+	s.onConnectionClosed = fn
+}
+
 func (s *Server) ConfigureWebSocket(enabled bool, maxConnections int, authRequired bool) {
 	s.wsEnabled = enabled
 	if maxConnections <= 0 {

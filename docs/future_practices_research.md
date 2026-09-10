@@ -25,7 +25,8 @@ move it into the owning practice document and, where possible, into tooling.
    unsafe autonomous execution.
 3. Low-level performance: CPU counters, allocator pressure, cache/TLB/branch
    behavior, virtual memory, syscall shape, I/O zero-copy, WebGPU/CUDA/native
-   GPU timing, and thermal/cold-start profiles.
+   GPU timing, CUDA Rust native kernel compilation (cutile-rs Tile, cuda-oxide
+   SIMT), and thermal/cold-start profiles.
 4. Formal and model-based practice: TLA+, PlusCal, Alloy, P-style state
    machines, model-based tests, and invariant-to-test mapping.
 5. Data-plane evolution: PostgreSQL 18+ async I/O and observability, Redis 8+
@@ -83,6 +84,59 @@ move it into the owning practice document and, where possible, into tooling.
      batch due at once after a restart or failover. Seed once from durable
      state and stagger sweep phases across replicas. Promotion targets:
      `database_practices.md` River lane and TE-14 worker regression tests.
+9. CUDA Rust native GPU kernel programming (added 2026-09-09, source class 1:
+   NVIDIA official announcement and documentation, September 2026; source
+   class 2: Elibol, Koundinyan, Bentz, "Fearless Concurrency on the GPU",
+   arXiv:2606.15991, RustConf 2026): NVIDIA released two projects for writing
+   CUDA GPU kernels in native Rust. The governing question is whether
+   Foundation should add a PTX kernel lane alongside WebGPU, WASM, and FFI for
+   server-side and native GPU workloads. Software-level deltas to track:
+   - **cutile-rs Tile track** (`NVlabs/cutile-rs`, crates.io `cutile`):
+     tile-based GPU programming on stable Rust 1.89+, CUDA 13.3+, Linux,
+     compute capability 8.0+. No nightly toolchain, no custom LLVM. The
+     `#[cutile::module]` macro captures kernel AST into the host binary and
+     JIT-compiles through CUDA Tile IR at first launch. Ownership model:
+     mutable output tensors must be `.partition()`-ed before launch, which
+     gives each tile block exclusive ownership of its sub-tensor. The
+     compiler manages thread mapping and shared memory. Already used outside
+     NVIDIA in HuggingFace Grout inference engine and mistral.rs. Promotion
+     candidate for `gpu_practices.md` as a tracked optional compute lane
+     under the `performance` Foundation profile.
+   - **cuda-oxide SIMT track** (`NVlabs/cuda-oxide`, early alpha): custom
+     `rustc` codegen backend that compiles `#[kernel]` Rust functions to PTX
+     through Rust MIR, the Pliron IR framework, and LLVM. Requires pinned
+     nightly toolchain (`nightly-2026-04-03`), LLVM, and `clang` headers.
+     Safety model: `DisjointSlice<T>` gives each thread exclusive access to
+     its element; `ThreadIndex` is `!Send + !Sync + !Copy + !Clone` and
+     `'kernel`-scoped. `#[launch_contract]` plus `PreparedLaunch` validate
+     grid geometry against kernel declarations and device limits at prepare
+     time. Shared memory access still requires `unsafe`. Three-tier safety
+     model: Tier 1 (safe by default), Tier 2 (scoped `unsafe` with
+     contracts), Tier 3 (raw hardware intrinsics). Track only; do not adopt
+     until the project ships on stable Rust.
+   - **Compile-time aliasing prevention**: both projects catch the classic
+     GPU data race (two threads alias the same write target) at compile time
+     through Rust's ownership system. cuda-oxide uses borrow checker rules
+     at each launch call (`&c_dev` and `&mut c_dev` in the same call fails
+     `E0502`). cutile-rs uses move semantics across the launch boundary
+     (`use of moved value` fails `E0382`). This directly supports CP-06
+     (minimize mutable shared state) and CP-09 (restrict unsafe patterns)
+     for GPU code. Promotion target: `gpu_practices.md` testing section.
+   - **Inter-language interop**: NVIDIA plans CUDA Rust, CUDA C++, and CUDA
+     Python interop so that the choice of kernel language does not lock out
+     other ecosystems. Track readiness for Foundation's `kernellane`
+     descriptor model: a Go orchestrator dispatches to a Rust unit that
+     launches a PTX kernel, with the same `RuntimeUnitDescriptor` registry
+     and capability planner that today selects WASM, FFI, or SHM.
+   - **Existing Rust GPU ecosystem context**: Rust-GPU (Embark/Traverse),
+     rust-cuda, CubeCL, cudarc. The cuda-oxide book maintains an ecosystem
+     appendix at `nvlabs.github.io/cuda-oxide/appendix/ecosystem.html`.
+     Track convergence and community library maturation.
+   - **Revisit trigger**: re-evaluate cutile-rs readiness when Foundation
+     projects require server-side NVIDIA GPU compute (inference, signal
+     processing, batch scoring, columnar transforms). Re-evaluate cuda-oxide
+     when it ships on stable Rust or when Foundation needs SIMT-level
+     control (shared memory, warp-level programming, TMA).
 
 ## Per-Document Gap Map
 
@@ -105,10 +159,10 @@ move it into the owning practice document and, where possible, into tooling.
 | `database_practices.md` | Track PostgreSQL 18/19 async I/O, skip-scan caveats, virtual generated columns, `pg_stat_io`, WAL bytes/op, RLS tests, vector recall, and projection-lag fences. Queue-as-clock boundary rules and recurring-producer backlog bounds promoted 2026-08-25 (lane 8). |
 | `redis_practices.md` | Track Redis 8 behavior, client-side cache invalidation, Streams pending recovery, shard policy, script safety, big-key automation, and eviction simulation. |
 | `websocket_scaling.md` | Add reconnect storm modeling, browser backpressure, slow-client fairness, auth-expiry mid-socket tests, QUIC/WebTransport research, and topic fanout complexity budgets. |
-| `runtime_foundation.md` | Add lane-selection proof tables: direct Go, Rust, WASM/SAB, FFI, shared memory, stdio, native GPU, WebGPU, WebSocket, HTTP, registry dispatch, graceful event emission, and JSON fallback. |
+| `runtime_foundation.md` | Add lane-selection proof tables: direct Go, Rust, WASM/SAB, FFI, shared memory, stdio, native GPU, WebGPU, WebSocket, HTTP, registry dispatch, graceful event emission, JSON fallback, and CUDA Rust PTX (cutile-rs Tile, cuda-oxide SIMT) when adopted. |
 | `runtime_native.md` | Add native plugin provenance, OS permission matrices, fd/handle leak checks, sensor/camera/audio latency budgets, and mobile store/privacy review. |
 | `rust_runtime_practices.md` | Track Rust 2024 unsafe discipline, Miri eligibility, Loom concurrency tests, `cargo-semver-checks`, panic strategy, Criterion profiles, and FFI fuzzing. |
-| `gpu_practices.md` | Add WebGPU compatibility matrix, WGSL layout generator, device-loss chaos tests, CUDA graph invalidation, occupancy-vs-latency guidance, and capture bundle schema. |
+| `gpu_practices.md` | Add WebGPU compatibility matrix, WGSL layout generator, device-loss chaos tests, CUDA graph invalidation, occupancy-vs-latency guidance, capture bundle schema, and CUDA Rust native kernel lane readiness (cutile-rs Tile track for stable Rust, cuda-oxide SIMT track when it ships on stable). |
 | `game_runtime_practices.md` | Add hitch ledger, browser trace bundle, input latency vs frame latency, quality-tier contracts, and streaming priority scheduler rules. |
 | `hermes_hotplane.md` | Add freshness taxonomy: monotonic, read-your-write, bounded-stale, stale-while-revalidate, and fallback-required. Add Merkle/count/watermark drift repair. |
 | `projection_freshness_contract.md` | Keep projection, cache, search, materialized-view, and Hermes freshness modes synchronized with tests and metrics. |
@@ -142,7 +196,8 @@ Research becomes Foundation practice only when all are true:
 Prefer primary or near-primary sources:
 
 1. Official docs and standards: Go, Rust, PostgreSQL, Redis, WebGPU, WGSL,
-   CUDA, Tauri, OpenTelemetry, NIST, OWASP, CISA, W3C, Khronos.
+   CUDA, CUDA Rust (cuda-oxide book, cuTile Rust docs), Tauri, OpenTelemetry,
+   NIST, OWASP, CISA, W3C, Khronos.
 2. Research papers with a clear method and limitation.
 3. Vendor performance guides when results are verified against Foundation
    benchmarks instead of copied as assumptions.
