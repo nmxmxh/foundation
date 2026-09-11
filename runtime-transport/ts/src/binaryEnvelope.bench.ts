@@ -1,4 +1,4 @@
-import { bench, describe } from "vitest";
+import { test } from "vitest";
 import {
   decodeRuntimeEnvelope,
   encodeJSONRuntimeEnvelope,
@@ -39,28 +39,30 @@ const framedIdentity = encodeRuntimeBinaryFrame({
   rawLength: encodedProtobufEnvelope.byteLength,
 });
 
-describe("runtime transport binary envelope", () => {
-  bench("encode json envelope to protobuf bytes", () => {
-    encodeRuntimeEnvelope(jsonEnvelope);
-  });
+test("runtime transport binary envelope", async ({ bench }) => {
+  await bench.compare(
+    bench("encode json envelope to protobuf bytes", () => {
+      encodeRuntimeEnvelope(jsonEnvelope);
+    }),
 
-  bench("decode json envelope from protobuf bytes", () => {
-    decodeRuntimeEnvelope(encodedJSONEnvelope);
-  });
+    bench("decode json envelope from protobuf bytes", () => {
+      decodeRuntimeEnvelope(encodedJSONEnvelope);
+    }),
 
-  bench("encode protobuf envelope bytes", () => {
-    encodeRuntimeEnvelope(protobufEnvelope);
-  });
+    bench("encode protobuf envelope bytes", () => {
+      encodeRuntimeEnvelope(protobufEnvelope);
+    }),
 
-  bench("decode protobuf envelope bytes", () => {
-    decodeRuntimeEnvelope(encodedProtobufEnvelope);
-  });
+    bench("decode protobuf envelope bytes", () => {
+      decodeRuntimeEnvelope(encodedProtobufEnvelope);
+    }),
 
-  bench("encode json compatibility envelope", () => {
-    encodeJSONRuntimeEnvelope(jsonEnvelope);
-  });
+    bench("encode json compatibility envelope", () => {
+      encodeJSONRuntimeEnvelope(jsonEnvelope);
+    }),
 
-  bench("decode identity binary frame", async () => {
-    await decodeRuntimeBinaryFrame(framedIdentity);
-  });
+    bench("decode identity binary frame", async () => {
+      await decodeRuntimeBinaryFrame(framedIdentity);
+    }),
+  );
 });

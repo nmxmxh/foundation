@@ -1,4 +1,4 @@
-import { bench, describe } from "vitest";
+import { test } from "vitest";
 import {
   INOS_COMPAT_REGISTRY_LAYOUT,
   RuntimeRegistryReader,
@@ -12,7 +12,7 @@ const writeCString = (buffer: ArrayBuffer, offset: number, length: number, value
   new Uint8Array(buffer, offset, Math.min(length, bytes.length)).set(bytes.slice(0, length));
 };
 
-describe("RuntimeRegistryReader", () => {
+test("RuntimeRegistryReader", async ({ bench }) => {
   const layout = {
     ...INOS_COMPAT_REGISTRY_LAYOUT,
     registryOffset: 0,
@@ -46,7 +46,7 @@ describe("RuntimeRegistryReader", () => {
 
   const reader = new RuntimeRegistryReader(buffer, layout);
 
-  bench("scan 64 modules", () => {
+  await bench("scan 64 modules", () => {
     reader.scan();
-  });
+  }).run();
 });

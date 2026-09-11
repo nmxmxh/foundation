@@ -1,4 +1,4 @@
-import { bench, describe } from "vitest";
+import { test } from "vitest";
 import type { RenderSurfaceFrame } from "./renderSurfaceClient";
 
 /*
@@ -16,7 +16,7 @@ import type { RenderSurfaceFrame } from "./renderSurfaceClient";
  * `--expose-gc`. That file reports 0 bytes/frame for both halves of the lane
  * and 88 bytes/frame for the literal these benches cannot tell apart.
  */
-describe("render surface loop throughput", () => {
+test("render surface loop throughput", async ({ bench }) => {
   const reusedFrame: RenderSurfaceFrame = {
     width: 0,
     height: 0,
@@ -30,35 +30,37 @@ describe("render surface loop throughput", () => {
 
   let sink = 0;
 
-  bench("draw step writing a reused frame descriptor", () => {
-    reusedFrame.width = 1920;
-    reusedFrame.height = 1080;
-    reusedFrame.detail = 80;
-    reusedFrame.elapsed = 1500;
-    reusedFrame.delta = 16.6;
-    reusedFrame.tier = 1;
+  await bench.compare(
+    bench("draw step writing a reused frame descriptor", () => {
+      reusedFrame.width = 1920;
+      reusedFrame.height = 1080;
+      reusedFrame.detail = 80;
+      reusedFrame.elapsed = 1500;
+      reusedFrame.delta = 16.6;
+      reusedFrame.tier = 1;
 
-    // Simulate pass drawing
-    sink += reusedFrame.width + reusedFrame.height + reusedFrame.detail;
-  });
+      // Simulate pass drawing
+      sink += reusedFrame.width + reusedFrame.height + reusedFrame.detail;
+    }),
 
-  bench("draw step building a frame object literal", () => {
-    const frame: RenderSurfaceFrame = {
-      width: 1920,
-      height: 1080,
-      detail: 80,
-      elapsed: 1500,
-      delta: 16.6,
-      tier: 1,
-      shared: null,
-      sharedGeneration: 0,
-    };
+    bench("draw step building a frame object literal", () => {
+      const frame: RenderSurfaceFrame = {
+        width: 1920,
+        height: 1080,
+        detail: 80,
+        elapsed: 1500,
+        delta: 16.6,
+        tier: 1,
+        shared: null,
+        sharedGeneration: 0,
+      };
 
-    sink += frame.width + frame.height + frame.detail;
-  });
+      sink += frame.width + frame.height + frame.detail;
+    }),
+  );
 });
 
-describe("canvas stage frame gating throughput", () => {
+test("canvas stage frame gating throughput", async ({ bench }) => {
   let lastDrawAt = 0;
   const cadenceMs = 25;
   const width = 800;
@@ -66,7 +68,7 @@ describe("canvas stage frame gating throughput", () => {
   const maxRatio = 1.5;
   let sink = 0;
 
-  bench("cadence and scale gating check", () => {
+  await bench("cadence and scale gating check", () => {
     const now = 1000;
     if (now - lastDrawAt >= cadenceMs) {
       lastDrawAt = now;
@@ -75,5 +77,5 @@ describe("canvas stage frame gating throughput", () => {
       const backingHeight = Math.round(height * ratio);
       sink += backingWidth + backingHeight;
     }
-  });
+  }).run();
 });

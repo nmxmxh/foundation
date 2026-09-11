@@ -174,14 +174,14 @@ echo "== foundation runtime-transport Go benchmarks =="
 
 if [[ -n "$RUNTIME_SDK_TS_BROWSER_HOST" && -n "$RUN_VITEST" && -d "$RUNTIME_SDK_TS_BROWSER_HOST/node_modules" ]]; then
 	echo "== foundation runtime-sdk browser-host benchmarks =="
-	"$RUN_VITEST" "$RUNTIME_SDK_TS_BROWSER_HOST" bench --run
+	"$RUN_VITEST" "$RUNTIME_SDK_TS_BROWSER_HOST" bench --run --reporter=verbose
 else
 	echo "skip runtime-sdk TS benchmarks: node_modules not installed"
 fi
 
 if [[ -n "$FRONTEND_KIT_TS" && -n "$RUN_VITEST" && -d "$FRONTEND_KIT_TS/node_modules" ]]; then
 	echo "== foundation frontend-kit workbench benchmarks =="
-	"$RUN_VITEST" "$FRONTEND_KIT_TS" bench --run src/runtimeWorkbench.bench.ts
+	"$RUN_VITEST" "$FRONTEND_KIT_TS" bench --run --reporter=verbose src/runtimeWorkbench.bench.ts
 else
 	echo "skip frontend-kit workbench benchmarks: node_modules not installed"
 fi
@@ -213,7 +213,7 @@ fi
 if [[ -n "$RUNTIME_TRANSPORT_TS" && -n "$RUN_VITEST" && -d "$RUNTIME_TRANSPORT_TS/node_modules" ]]; then
 	echo "== foundation runtime-transport TS tests =="
 	"$RUN_VITEST" "$RUNTIME_TRANSPORT_TS" run
-	"$RUN_VITEST" "$RUNTIME_TRANSPORT_TS" bench --run src/binaryEnvelope.bench.ts src/routing.bench.ts
+	"$RUN_VITEST" "$RUNTIME_TRANSPORT_TS" bench --run --reporter=verbose src/binaryEnvelope.bench.ts src/routing.bench.ts
 else
 	echo "skip runtime-transport TS tests: node_modules not installed"
 fi

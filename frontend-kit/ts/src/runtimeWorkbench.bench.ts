@@ -1,4 +1,4 @@
-import { bench, describe } from "vitest";
+import { test } from "vitest";
 import {
   createLocalProjectionNormalizer,
   createProjectionEventPipeline,
@@ -60,79 +60,81 @@ const rawProjectionEvents = patchMutations.map((mutation) => ({
   },
 }));
 
-describe("frontend runtime workbench", () => {
-  bench("dummy factory list 1k", () => {
-    createDummyDataFactory<BenchRecord>(schema, { seed: "bench" }).list(1000);
-  });
-
-  bench("tenant projection apply 1k patches", () => {
-    const store = createTenantProjectionStore<BenchRecord>(benchScope);
-
-    for (const mutation of patchMutations) {
-      store.apply(mutation);
-    }
-  });
-
-  bench("tenant projection applyMany 1k patches", () => {
-    const store = createTenantProjectionStore<BenchRecord>(benchScope);
-
-    store.applyMany(patchMutations);
-  });
-
-  bench("tenant projection apply 1k with snapshot reads", () => {
-    const store = createTenantProjectionStore<BenchRecord>(benchScope);
-
-    for (const mutation of patchMutations) {
-      store.apply(mutation);
-      store.getSnapshot().records.length;
-    }
-  });
-
-  bench("live projection binding apply 1k", () => {
-    const store = createTenantProjectionStore<BenchRecord>(benchScope);
-    const binding = createLiveProjectionBinding({ scope: store.scope(), store });
-
-    for (const mutation of patchMutations) {
-      binding.applyLiveMutation(mutation);
-    }
-  });
-
-  bench("live projection binding applyMany 1k", () => {
-    const store = createTenantProjectionStore<BenchRecord>(benchScope);
-    const binding = createLiveProjectionBinding({ scope: store.scope(), store });
-
-    binding.applyLiveMutations(patchMutations);
-  });
-
-  bench("projection event pipeline normalize 1k", async () => {
-    let normalized = 0;
-    const pipeline = createProjectionEventPipeline<BenchRecord>(
-      benchScope,
-      createLocalProjectionNormalizer(),
-      () => {
-        normalized += 1;
-      },
-      { maxBatchSize: 2000 }
-    );
-
-    for (const event of rawProjectionEvents) {
-      pipeline.push(event);
-    }
-    await pipeline.flush();
-    pipeline.close();
-    if (normalized !== rawProjectionEvents.length) {
-      throw new Error(`normalized ${normalized} of ${rawProjectionEvents.length}`);
-    }
-  });
-
+test("frontend runtime workbench", async ({ bench }) => {
   const workbench = createRuntimeWorkbench("runtime", {
     planCompute: () => ({ lane: "wasm-sab", reason: "bench" }),
     dispatchCompute: async () => 1,
   });
 
-  bench("planned compute 1k", async () => {
-    for (let index = 0; index < 1000; index += 1) {
-      await workbench.dispatchCompute({ job: index, byteLength: 256 });
-    }
-  });
+  await bench.compare(
+    bench("dummy factory list 1k", () => {
+      createDummyDataFactory<BenchRecord>(schema, { seed: "bench" }).list(1000);
+    }),
+
+    bench("tenant projection apply 1k patches", () => {
+      const store = createTenantProjectionStore<BenchRecord>(benchScope);
+
+      for (const mutation of patchMutations) {
+        store.apply(mutation);
+      }
+    }),
+
+    bench("tenant projection applyMany 1k patches", () => {
+      const store = createTenantProjectionStore<BenchRecord>(benchScope);
+
+      store.applyMany(patchMutations);
+    }),
+
+    bench("tenant projection apply 1k with snapshot reads", () => {
+      const store = createTenantProjectionStore<BenchRecord>(benchScope);
+
+      for (const mutation of patchMutations) {
+        store.apply(mutation);
+        store.getSnapshot().records.length;
+      }
+    }),
+
+    bench("live projection binding apply 1k", () => {
+      const store = createTenantProjectionStore<BenchRecord>(benchScope);
+      const binding = createLiveProjectionBinding({ scope: store.scope(), store });
+
+      for (const mutation of patchMutations) {
+        binding.applyLiveMutation(mutation);
+      }
+    }),
+
+    bench("live projection binding applyMany 1k", () => {
+      const store = createTenantProjectionStore<BenchRecord>(benchScope);
+      const binding = createLiveProjectionBinding({ scope: store.scope(), store });
+
+      binding.applyLiveMutations(patchMutations);
+    }),
+
+    bench("projection event pipeline normalize 1k", async () => {
+      let normalized = 0;
+      const pipeline = createProjectionEventPipeline<BenchRecord>(
+        benchScope,
+        createLocalProjectionNormalizer(),
+        () => {
+          normalized += 1;
+        },
+        { maxBatchSize: 2000 }
+      );
+
+      for (const event of rawProjectionEvents) {
+        pipeline.push(event);
+      }
+      await pipeline.flush();
+      pipeline.close();
+      if (normalized !== rawProjectionEvents.length) {
+        throw new Error(`normalized ${normalized} of ${rawProjectionEvents.length}`);
+      }
+    }),
+
+    bench("planned compute 1k", async () => {
+      for (let index = 0; index < 1000; index += 1) {
+        await workbench.dispatchCompute({ job: index, byteLength: 256 });
+      }
+    }),
+  );
 });

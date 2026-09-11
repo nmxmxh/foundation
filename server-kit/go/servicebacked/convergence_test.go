@@ -382,6 +382,8 @@ func TestServiceBackedProjectionConvergence(t *testing.T) {
 		return writer.polls.Load() >= 2 && reader.polls.Load() >= 2
 	})
 	readerPollsBefore := reader.polls.Load()
+	readerSignalledBefore := reader.sweeper.Stats().Signalled
+	firstPassAt := time.Now()
 
 	t.Run("signal", func(t *testing.T) {
 		if records, _ := projectedRecords(reader, orgID); records != 0 {
@@ -435,21 +437,6 @@ func TestServiceBackedProjectionConvergence(t *testing.T) {
 		t.Logf("delete converged on the second process after %s", took.Round(time.Millisecond))
 	})
 
-	t.Run("idle", func(t *testing.T) {
-		// Nothing is happening, and the reconcile interval is an hour: a sweeper
-		// that is polling anyway is polling for no reason. This is the check
-		// that fails if somebody tightens the interval to paper over a broken
-		// signal lane.
-		before := reader.polls.Load()
-		time.Sleep(2 * time.Second)
-		if after := reader.polls.Load(); after != before {
-			t.Fatalf("the reader polled %d times while idle over 2s, want 0: something is sweeping on its own", after-before)
-		}
-		// Every poll the reader made was one it was told to make, plus its
-		// opening full sync.
-		t.Logf("reader polls: %d total, %d since the first pass", reader.polls.Load(), reader.polls.Load()-readerPollsBefore)
-	})
-
 	t.Run("reconcile", func(t *testing.T) {
 		// A write no application made — a migration, an admin UPDATE —
 		// announces nothing, so only the timer can carry it. This node runs a
@@ -488,6 +475,27 @@ func TestServiceBackedProjectionConvergence(t *testing.T) {
 		if got := backstop.sweeper.Stats().Unroutable; got != 0 {
 			t.Fatalf("Unroutable = %d, want 0: a signal named a source nobody registered", got)
 		}
+	})
+
+	t.Run("idle", func(t *testing.T) {
+		// The reconcile interval is an hour, so since its first pass the reader
+		// has had no reason to poll except the signals the legs above sent it.
+		// A signalled sweep reads one source once, so it costs exactly one poll;
+		// a timer pass polls every source and counts as no signal. Any poll the
+		// signals do not account for is a sweeper polling on its own — the check
+		// that fails if somebody tightens the interval to paper over a broken
+		// signal lane. The window is the whole run since the first pass,
+		// reconcile leg included, so no idle wait of its own is needed.
+		polls := reader.polls.Load() - readerPollsBefore
+		signalled := reader.sweeper.Stats().Signalled - readerSignalledBefore
+		window := time.Since(firstPassAt).Round(time.Millisecond)
+		if polls != signalled {
+			t.Fatalf("the reader polled %d times over %s but was signalled %d times: something is sweeping on its own", polls, window, signalled)
+		}
+		if signalled == 0 {
+			t.Fatal("the reader was never signalled: the accounting above compared nothing")
+		}
+		t.Logf("reader polls: %d total, %d since the first pass, all signalled, over %s", reader.polls.Load(), polls, window)
 	})
 
 	for _, node := range []*convergenceNode{writer, reader} {

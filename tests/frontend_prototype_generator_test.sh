@@ -107,4 +107,82 @@ for expected in \
   fi
 done
 
+# Generated identifiers come from the bare message name and schema keys from
+# domain.collection, so a collision must fail generation (and --check, which is
+# what make check-contract-drift runs) instead of emitting a file that
+# redeclares identifiers and does not compile.
+COLLIDE_ROOT="$OUT_DIR/collide"
+COLLIDE_OUT_FILE="$OUT_DIR/collidePrototypeRuntime.ts"
+COLLIDE_LOG="$OUT_DIR/collide.out"
+rm -rf "$COLLIDE_ROOT"
+
+write_entity_proto() {
+  local file="$1" package="$2" message="$3" field="$4"
+  mkdir -p "$(dirname "$file")"
+  cat >"$file" <<EOF
+syntax = "proto3";
+
+package $package;
+
+message $message {
+  string id = 1;
+  string $field = 2;
+}
+EOF
+}
+
+expect_collision() {
+  local root="$1"
+  shift
+  local mode
+  for mode in generate check; do
+    local args=(--proto-root "$root" --out "$COLLIDE_OUT_FILE")
+    if [[ "$mode" == "check" ]]; then
+      args+=(--check)
+    fi
+    rm -f "$COLLIDE_OUT_FILE"
+    if node "$FOUNDATION_DIR/tooling/scripts/generate_frontend_prototype_runtime.mjs" "${args[@]}" >"$COLLIDE_LOG" 2>&1; then
+      cat "$COLLIDE_LOG" >&2
+      echo "frontend prototype generator ($mode) accepted colliding schemas under $root" >&2
+      exit 1
+    fi
+    if [[ -e "$COLLIDE_OUT_FILE" ]]; then
+      echo "frontend prototype generator ($mode) wrote output despite a collision under $root" >&2
+      exit 1
+    fi
+    local expected
+    for expected in "$@"; do
+      if ! rg -F -q -- "$expected" "$COLLIDE_LOG"; then
+        cat "$COLLIDE_LOG" >&2
+        echo "frontend prototype generator ($mode) collision report missing: $expected" >&2
+        exit 1
+      fi
+    done
+  done
+}
+
+# Two domains declaring the same entity name.
+write_entity_proto "$COLLIDE_ROOT/cross/billing/v1/billing.proto" billing.v1 Subscription plan
+write_entity_proto "$COLLIDE_ROOT/cross/mealplan/v1/mealplan.proto" mealplan.v1 Subscription zone
+expect_collision "$COLLIDE_ROOT/cross" \
+  "entity name collision" \
+  "billing/v1/billing.proto (billing.v1.Subscription)" \
+  "mealplan/v1/mealplan.proto (mealplan.v1.Subscription)"
+
+# One entity declared in two versions of a domain.
+write_entity_proto "$COLLIDE_ROOT/versions/billing/v1/billing.proto" billing.v1 Subscription plan
+write_entity_proto "$COLLIDE_ROOT/versions/billing/v2/billing.proto" billing.v2 Subscription plan
+expect_collision "$COLLIDE_ROOT/versions" \
+  "billing/v1/billing.proto (billing.v1.Subscription)" \
+  "billing/v2/billing.proto (billing.v2.Subscription)"
+
+# Distinct identifiers that map to one domain.collection key.
+write_entity_proto "$COLLIDE_ROOT/key/billing/v1/billing.proto" billing.v1 Subscription plan
+write_entity_proto "$COLLIDE_ROOT/key/billing/v1/ledger.proto" billing.v1 SubscriptionRecord entry
+expect_collision "$COLLIDE_ROOT/key" \
+  "schema key collision" \
+  "\"billing.subscriptions\"" \
+  "billing/v1/billing.proto (billing.v1.Subscription)" \
+  "billing/v1/ledger.proto (billing.v1.SubscriptionRecord)"
+
 echo "frontend prototype generator test passed"
