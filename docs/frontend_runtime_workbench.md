@@ -209,6 +209,18 @@ The generator accepts `--proto-root`, `--out`, `--package-import`,
 `frontend/src/generated/prototypeRuntime.ts` so generated applications can keep
 prototype state code separate from handwritten app code.
 
+Each entity message generates top-level identifiers from its bare message name
+(`Subscription` becomes `subscriptionSchema`, `useSubscriptionSnapshot`, and so
+on) and a `domain.collection` key. Both must be unique across the whole proto
+root. When two domains declare the same entity message name, or two messages map
+to one key (the same entity in `billing.v1` and `billing.v2`, say, or
+`Subscription` beside `SubscriptionRecord`), the generator fails and names both
+declarations. It fails in `--check` mode too, so `make check-contract-drift`
+catches it instead of passing a file that does not compile. Fix it by renaming
+one message, for example `MealPlanSubscription`. The generator deliberately
+does not namespace colliding names itself: that would silently rename
+identifiers the first domain already exports.
+
 Generated artifacts must import `frontend-kit` APIs instead of constructing raw
 transport or runtime lanes. The generator uses protobuf descriptors instead of
 text parsing so field kinds, repeated fields, enum values, map fields, and

@@ -1,4 +1,4 @@
-import { bench, describe } from "vitest";
+import { test } from "vitest";
 import { createEnvelope, encodeRuntimeEnvelope } from "@ovasabi/runtime-transport";
 
 import {
@@ -40,21 +40,23 @@ const nativeGpuDescriptor = {
   fallback: "copy-to-webgpu",
 };
 
-describe("native frame codec", () => {
-  bench("encode native dispatch frame", () => {
-    encodeNativeDispatchFrame({
-      unitId: "media:process_asset:v1:requested",
-      schemaVersion: "1.0",
-      encoding: 2,
-      payload,
-    });
-  });
+test("native frame codec", async ({ bench }) => {
+  await bench.compare(
+    bench("encode native dispatch frame", () => {
+      encodeNativeDispatchFrame({
+        unitId: "media:process_asset:v1:requested",
+        schemaVersion: "1.0",
+        encoding: 2,
+        payload,
+      });
+    }),
 
-  bench("decode native dispatch response", () => {
-    decodeNativeDispatchResponse(responseFrame);
-  });
+    bench("decode native dispatch response", () => {
+      decodeNativeDispatchResponse(responseFrame);
+    }),
 
-  bench("validate native GPU descriptor receipt", () => {
-    validateRuntimeNativeGpuDescriptor(nativeGpuDescriptor);
-  });
+    bench("validate native GPU descriptor receipt", () => {
+      validateRuntimeNativeGpuDescriptor(nativeGpuDescriptor);
+    }),
+  );
 });

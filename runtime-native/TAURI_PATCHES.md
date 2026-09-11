@@ -5,7 +5,11 @@ Foundation pins Tauri as a device shell dependency and keeps the fork narrow.
 Pinned baseline:
 
 - Tauri v2 line
-- Preferred exact crate/CLI pin in scaffold templates: `=2.11.1`
+- Preferred exact crate pins in scaffold templates: `tauri =2.11.5`,
+  `tauri-build =2.6.3`; CLI `@tauri-apps/cli 2.11.4`, API `@tauri-apps/api 2.11.1`
+- There is no Tauri fork today: the patch scope below is honored by upstream
+  2.11.x, so a bump is a lockfile change plus `make check-project-scaffold`.
+  The scaffold check requires an exact `=2.x.y` pin, not a specific version.
 
 Patch scope:
 

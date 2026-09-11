@@ -212,7 +212,7 @@ test-bench-dispatch:
 test-bench-frontend:
 	@echo "Running frontend workbench benchmarks and allocation profile..."
 	@if [ -d frontend-kit/ts/node_modules ]; then \
-		tooling/scripts/run_vitest.sh frontend-kit/ts bench --run src/runtimeWorkbench.bench.ts; \
+		tooling/scripts/run_vitest.sh frontend-kit/ts bench --run --reporter=verbose src/runtimeWorkbench.bench.ts; \
 		tooling/scripts/frontend_workbench_profile.sh .; \
 	else \
 		echo "Skipping frontend workbench benchmarks; run npm install in frontend-kit/ts first"; \

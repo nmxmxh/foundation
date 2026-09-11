@@ -27,6 +27,18 @@ The default scaffold exposes only binary runtime dispatch and capability discove
 
 The scaffold follows Tauri 2's current security model: explicit app-command manifests, window-scoped capabilities, restrictive CSP, no remote IPC, and least-privilege plugin permissions. Release applications must also use platform code signing; updater adoption requires signed update artifacts and protected offline private keys.
 
+## Mobile Release Hardening
+
+`tauri android init` / `tauri ios init` generate `native/src-tauri/gen/` from Tauri's own templates, so Foundation cannot own those files; the template `native/README.md` carries the checklist to apply once after init. The invariants:
+
+1. **CSP.** Every overlay carries `object-src 'none'; base-uri 'self'`. Release CSP never allows inline scripts. Inline styles are allowed only as a documented exception (`CSP exception: style-src 'unsafe-inline'` in `native/README.md`), for CSS-in-JS libraries that inject `<style>` at runtime; such projects must also set `app.security.dangerousDisableAssetCspModification: ["style-src"]`, because Tauri adds a style nonce whenever the built HTML contains a `<style>` element and a nonce makes browsers ignore `'unsafe-inline'`. Remote font/script CDNs are not allowlisted; self-host them. `make check-project-scaffold` enforces the script, style, and capability rules.
+2. **Backups.** While session material lives in WebView storage, Android sets `allowBackup="false"` and `dataExtractionRules` excluding every domain (on API 31+ `allowBackup` alone still permits device-to-device transfer).
+3. **Platform metadata.** Release-only iOS keys go in `src-tauri/Info.ios.plist`, which the Tauri CLI merges into the generated plist and which survives re-init. Remove Tauri's default Android TV launcher entries unless the app targets TV.
+4. **Rust release profile.** The template ships LTO, one codegen unit, `opt-level = "s"`, `strip`, and `panic = "abort"`: a panic must never unwind across the Swift/Kotlin FFI boundary.
+5. **Toolchain.** Gradle 8.14 (Tauri 2.11's Android template) needs JDK 17 or 21; NDK r28+ produces 16 KB page-aligned libraries by default, which new Google Play submissions require.
+6. **API origins.** Shell requests are cross-origin: the Android WebView origin is `http://tauri.localhost` and the iOS origin is `tauri://localhost`. The backend's `ALLOWED_ORIGINS` must list both, or the API rejects the CORS preflight with 403 and every call — sign-in first — fails as a generic network error. server-kit matches origins as exact strings, so list them verbatim.
+7. **Signing.** Android release signing reads a gitignored `keystore.properties` and falls back to an unsigned artifact when absent; iOS archives need a development team. Neither secret enters the repository.
+
 ## Device Access Lanes
 
 Foundation treats device APIs as two separate lanes.

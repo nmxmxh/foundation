@@ -887,22 +887,70 @@ if [[ "${WITH_NATIVE:-false}" == "true" ]]; then
   check_exists "native Tauri Rust manifest" "$target/native/src-tauri/Cargo.toml"
   check_exists "native Tauri capability" "$target/native/src-tauri/capabilities/main.json"
   check_exists "native capability examples" "$target/native/src-tauri/capabilities/examples.md"
-  check_file_contains "native active capability list is explicit" "$target/native/src-tauri/tauri.conf.json" '"capabilities": ["main"]'
+  # Whitespace-insensitive: formatters may split the array across lines.
+  if [[ -f "$target/native/src-tauri/tauri.conf.json" ]] && tr -d '[:space:]' <"$target/native/src-tauri/tauri.conf.json" | grep -Fq '"capabilities":["main"]'; then
+    echo "[OK] native active capability list is explicit"
+  else
+    echo "[FAIL] native active capability list is explicit"
+    echo '  missing pattern: "capabilities": ["main"] (whitespace-insensitive)'
+    echo "  file: native/src-tauri/tauri.conf.json"
+    failed=1
+  fi
   check_file_contains "native dev uses config overlay" "$target/native/package.json" 'tauri dev --config src-tauri/tauri.dev.conf.json'
   check_file_contains "native build uses prod config overlay" "$target/native/package.json" 'tauri build --config src-tauri/tauri.prod.conf.json'
+  # Xcode's "Build Rust Code" phase and Android's Gradle BuildTask call back
+  # into `npm run -- tauri <platform> *-script`; without this script every
+  # mobile build fails inside Xcode/Gradle.
+  check_file_contains "native package exposes tauri script for mobile build phases" "$target/native/package.json" '"tauri": "tauri"'
+  # Tauri runs before*Command hooks from native/, not src-tauri/: a hook that
+  # does `cd ../../frontend` points outside the project and every build fails.
+  for tauri_conf in tauri.conf.json tauri.dev.conf.json tauri.prod.conf.json; do
+    check_file_not_contains "native ${tauri_conf} hook resolves frontend from native/" "$target/native/src-tauri/$tauri_conf" 'cd ../../frontend'
+  done
   check_file_contains "native dev CSP allows Vite websocket" "$target/native/src-tauri/tauri.dev.conf.json" 'ws://127.0.0.1:5173'
   check_file_contains "native dev CSP allows inline styles" "$target/native/src-tauri/tauri.dev.conf.json" "'unsafe-inline'"
   check_file_not_contains "native prod CSP forbids Vite websocket" "$target/native/src-tauri/tauri.prod.conf.json" 'ws://127.0.0.1:5173'
-  check_file_not_contains "native prod CSP forbids inline styles" "$target/native/src-tauri/tauri.prod.conf.json" "'unsafe-inline'"
+  # Inline scripts are never allowed in the release CSP. Inline styles are
+  # allowed only as a documented exception (a CSS-in-JS library injecting
+  # <style> at runtime), recorded in native/README.md with the exact marker.
+  if grep -Eq "script-src[^;\"]*'unsafe-inline'" "$target/native/src-tauri/tauri.prod.conf.json" 2>/dev/null; then
+    echo "[FAIL] native prod CSP forbids inline scripts"
+    echo "  file: native/src-tauri/tauri.prod.conf.json"
+    failed=1
+  else
+    echo "[OK] native prod CSP forbids inline scripts"
+  fi
+  if grep -Fq "'unsafe-inline'" "$target/native/src-tauri/tauri.prod.conf.json" 2>/dev/null; then
+    check_file_contains "native prod CSP inline styles are a documented exception" "$target/native/README.md" "CSP exception: style-src 'unsafe-inline'"
+  else
+    echo "[OK] native prod CSP forbids inline styles"
+  fi
   check_file_contains "native README documents frontend layout" "$target/native/README.md" "../../frontend"
   check_file_contains "native command dispatch" "$target/native/src-tauri/src/lib.rs" "foundation_runtime_dispatch"
-  check_file_contains "native command ACL manifest" "$target/native/src-tauri/build.rs" "AppManifest::new().commands"
+  # Whitespace-insensitive: rustfmt breaks the builder chain across lines.
+  if [[ -f "$target/native/src-tauri/build.rs" ]] && tr -d '[:space:]' <"$target/native/src-tauri/build.rs" | grep -Fq 'AppManifest::new().commands'; then
+    echo "[OK] native command ACL manifest"
+  else
+    echo "[FAIL] native command ACL manifest"
+    echo "  missing pattern: AppManifest::new().commands (whitespace-insensitive)"
+    echo "  file: native/src-tauri/build.rs"
+    failed=1
+  fi
   check_file_contains "native capability allows runtime dispatch explicitly" "$target/native/src-tauri/capabilities/main.json" "allow-foundation-runtime-dispatch"
   check_file_not_contains "native capability avoids broad core defaults" "$target/native/src-tauri/capabilities/main.json" "core:default"
   check_file_not_contains "native scaffold does not expose ephemeral storage as a vault" "$target/native/src-tauri/src/lib.rs" "foundation_secure_store_get"
   check_file_not_contains "native scaffold avoids startup expect" "$target/native/src-tauri/src/lib.rs" ".expect("
   check_file_contains "native uses runtime-native crate" "$target/native/src-tauri/Cargo.toml" "ovasabi-runtime-native"
-  check_file_contains "native scaffold pins Tauri" "$target/native/src-tauri/Cargo.toml" '=2.11.1'
+  # Exact pin required (runtime-native/TAURI_PATCHES.md); the version itself
+  # moves with each audited bump, so the check does not hard-code it.
+  if grep -Eq '^tauri = (\{ *version = *)?"=2\.[0-9]+\.[0-9]+"' "$target/native/src-tauri/Cargo.toml" 2>/dev/null; then
+    echo "[OK] native scaffold pins Tauri exactly"
+  else
+    echo "[FAIL] native scaffold pins Tauri exactly"
+    echo '  missing pattern: tauri = { version = "=2.x.y" }'
+    echo "  file: native/src-tauri/Cargo.toml"
+    failed=1
+  fi
   check_file_contains "make native dev target" "$target/Makefile" "native-dev:"
   check_file_contains "make native benchmark target" "$target/Makefile" "native-bench:"
   check_exists "native benchmark script" "$target/scripts/checks/native_benchmark.sh"

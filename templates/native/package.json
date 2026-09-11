@@ -4,16 +4,23 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "tauri": "tauri",
     "dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "build": "tauri build --config src-tauri/tauri.prod.conf.json",
     "mobile:init": "tauri android init && tauri ios init",
     "doctor": "tauri info",
-    "bench": "cargo run --manifest-path ../foundation/runtime-native/rust/Cargo.toml --release --bin native_bench"
+    "bench": "cargo run --manifest-path ../foundation/runtime-native/rust/Cargo.toml --release --bin native_bench",
+    "ios:init": "tauri ios init",
+    "ios:dev": "tauri ios dev --config src-tauri/tauri.dev.conf.json",
+    "ios:build": "tauri ios build --config src-tauri/tauri.prod.conf.json",
+    "android:init": "tauri android init",
+    "android:dev": "tauri android dev --config src-tauri/tauri.dev.conf.json",
+    "android:build": "tauri android build --config src-tauri/tauri.prod.conf.json"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "2.11.1"
+    "@tauri-apps/cli": "2.11.4"
   }
 }

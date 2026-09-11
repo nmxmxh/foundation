@@ -1,4 +1,4 @@
-import { bench, describe } from "vitest";
+import { test } from "vitest";
 
 import { planRuntimeLane, type RuntimeLanePlannerCapabilities } from "./lanePlanner";
 import { validateRuntimeNativeGpuDescriptor, type RuntimeNativeGpuDescriptor } from "./nativeGpu";
@@ -30,21 +30,23 @@ const capabilities: RuntimeLanePlannerCapabilities = {
   packetRing: true,
 };
 
-describe("runtime native GPU descriptor contract", () => {
-  bench("validate native GPU descriptor", () => {
-    validateRuntimeNativeGpuDescriptor(descriptor);
-  });
+test("runtime native GPU descriptor contract", async ({ bench }) => {
+  await bench.compare(
+    bench("validate native GPU descriptor", () => {
+      validateRuntimeNativeGpuDescriptor(descriptor);
+    }),
 
-  bench("plan native GPU lane", () => {
-    planRuntimeLane({
-      byteLength: 1920 * 1080 * 4,
-      workload: "media",
-      batchItems: 1,
-      trust: "trusted",
-      locality: "same-host",
-      capabilities,
-      unit: { supportsGpu: true },
-      nativeGpuDescriptor: descriptor,
-    });
-  });
+    bench("plan native GPU lane", () => {
+      planRuntimeLane({
+        byteLength: 1920 * 1080 * 4,
+        workload: "media",
+        batchItems: 1,
+        trust: "trusted",
+        locality: "same-host",
+        capabilities,
+        unit: { supportsGpu: true },
+        nativeGpuDescriptor: descriptor,
+      });
+    }),
+  );
 });

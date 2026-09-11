@@ -84,6 +84,14 @@ assert_contains "native/package.json" "tauri build --config src-tauri/tauri.prod
 assert_contains "native/src-tauri/tauri.dev.conf.json" "ws://127.0.0.1:5173"
 assert_contains "native/src-tauri/tauri.dev.conf.json" "'unsafe-inline'"
 assert_contains "native/src-tauri/tauri.prod.conf.json" "connect-src 'self'"
+assert_contains "native/src-tauri/tauri.prod.conf.json" "object-src 'none'"
+# Tauri runs before*Command hooks from native/; ../../frontend leaves the project.
+assert_not_contains "native/src-tauri/tauri.conf.json" "cd \.\./\.\./frontend"
+assert_not_contains "native/src-tauri/tauri.dev.conf.json" "cd \.\./\.\./frontend"
+assert_not_contains "native/src-tauri/tauri.prod.conf.json" "cd \.\./\.\./frontend"
+assert_contains "native/src-tauri/Cargo.toml" 'panic = "abort"'
+# Xcode/Gradle build phases run `npm run -- tauri ...`.
+assert_contains "native/package.json" '"tauri": "tauri"'
 assert_contains "Makefile" "native-bench:"
 assert_file "docs/foundation/foundation_architecture_contract.md"
 assert_file "docs/foundation/foundation_tour.md"

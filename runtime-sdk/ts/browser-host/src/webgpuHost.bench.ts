@@ -1,4 +1,4 @@
-import { bench, describe } from "vitest";
+import { test } from "vitest";
 import { RuntimeSharedArena, type RuntimeArenaDescriptor } from "./arena";
 import { ARENA_HEAVY_BYTES } from "./generated/runtimeBuffer";
 import {
@@ -115,11 +115,19 @@ const allocateReadyDescriptors = (
   });
 };
 
-describe("RuntimeWebGpuHost CPU-side helpers", () => {
-  for (const size of [4 * 1024, 64 * 1024, 1024 * 1024]) {
+// One test per shape: vitest 5 applies the test timeout to a whole
+// bench.compare, so a single test holding every registration times out.
+const cpuHelperShapes = [
+  ...[4 * 1024, 64 * 1024, 1024 * 1024].map((size) => ({ batchSize: 1, bytes: size })),
+  ...[8, 32, 128].map((batchSize) => ({ batchSize, bytes: 1024 })),
+];
+
+for (const { batchSize, bytes } of cpuHelperShapes) {
+  const shape = `${bytes / 1024}KB x${batchSize}`;
+
+  test(`RuntimeWebGpuHost CPU-side helpers ${shape}`, async ({ bench }) => {
     const arena = RuntimeSharedArena.create({ arenaBytes: ARENA_HEAVY_BYTES });
-    const [descriptor] = allocateReadyDescriptors(arena, 1, size);
-    const descriptors = [descriptor];
+    const descriptors = allocateReadyDescriptors(arena, batchSize, bytes);
     const layout = planRuntimeGpuBatchLayout(descriptors, {
       dispatchItemsFrom: "u32",
       strict: true,
@@ -128,71 +136,35 @@ describe("RuntimeWebGpuHost CPU-side helpers", () => {
     const packTarget = new Uint8Array(layout.totalBytes);
     const layoutScratch = createRuntimeGpuBatchLayoutScratch();
 
-    bench(`gpu layout strict u32 ${size / 1024}KB x1`, () => {
-      planRuntimeGpuBatchLayout(descriptors, {
-        dispatchItemsFrom: "u32",
-        strict: true,
-      });
-    });
+    await bench.compare(
+      bench(`gpu layout strict u32 ${shape}`, () => {
+        planRuntimeGpuBatchLayout(descriptors, {
+          dispatchItemsFrom: "u32",
+          strict: true,
+        });
+      }),
 
-    bench(`gpu layout strict u32 into ${size / 1024}KB x1`, () => {
-      planRuntimeGpuBatchLayoutInto(descriptors, layoutScratch, {
-        dispatchItemsFrom: "u32",
-        strict: true,
-      });
-    });
+      bench(`gpu layout strict u32 into ${shape}`, () => {
+        planRuntimeGpuBatchLayoutInto(descriptors, layoutScratch, {
+          dispatchItemsFrom: "u32",
+          strict: true,
+        });
+      }),
 
-    bench(`gpu pack arena descriptors ${size / 1024}KB x1`, () => {
-      packArenaDescriptors(arena, descriptors, layout);
-    });
+      bench(`gpu pack arena descriptors ${shape}`, () => {
+        packArenaDescriptors(arena, descriptors, layout);
+      }),
 
-    bench(`gpu pack arena descriptors into ${size / 1024}KB x1`, () => {
-      packArenaDescriptorsInto(arena, descriptors, layout, packTarget);
-    });
+      bench(`gpu pack arena descriptors into ${shape}`, () => {
+        packArenaDescriptorsInto(arena, descriptors, layout, packTarget);
+      }),
 
-    bench(`gpu writeback arena descriptors ${size / 1024}KB x1`, () => {
-      writeGpuOutputToArena(arena, descriptors, layout, output);
-    });
-  }
-
-  for (const batchSize of [8, 32, 128]) {
-    const arena = RuntimeSharedArena.create({ arenaBytes: ARENA_HEAVY_BYTES });
-    const descriptors = allocateReadyDescriptors(arena, batchSize, 1024);
-    const layout = planRuntimeGpuBatchLayout(descriptors, {
-      dispatchItemsFrom: "u32",
-      strict: true,
-    });
-    const output = payload(layout.totalBytes);
-    const packTarget = new Uint8Array(layout.totalBytes);
-    const layoutScratch = createRuntimeGpuBatchLayoutScratch();
-
-    bench(`gpu layout strict u32 1KB x${batchSize}`, () => {
-      planRuntimeGpuBatchLayout(descriptors, {
-        dispatchItemsFrom: "u32",
-        strict: true,
-      });
-    });
-
-    bench(`gpu layout strict u32 into 1KB x${batchSize}`, () => {
-      planRuntimeGpuBatchLayoutInto(descriptors, layoutScratch, {
-        dispatchItemsFrom: "u32",
-        strict: true,
-      });
-    });
-
-    bench(`gpu pack arena descriptors 1KB x${batchSize}`, () => {
-      packArenaDescriptors(arena, descriptors, layout);
-    });
-
-    bench(`gpu pack arena descriptors into 1KB x${batchSize}`, () => {
-      packArenaDescriptorsInto(arena, descriptors, layout, packTarget);
-    });
-
-    bench(`gpu writeback arena descriptors 1KB x${batchSize}`, () => {
-      writeGpuOutputToArena(arena, descriptors, layout, output);
-    });
-  }
-});
+      bench(`gpu writeback arena descriptors ${shape}`, () => {
+        writeGpuOutputToArena(arena, descriptors, layout, output);
+      }),
+    );
+  });
+}
 
 const residentHost = await RuntimeWebGpuHost.create({ device: createFakeGpuDevice() as any });
 await residentHost.prewarmKernel({ shader: PASSTHROUGH_U32_SHADER });
@@ -204,26 +176,28 @@ const seedResidentDispatch = await residentHost.dispatchArenaBatch(residentArena
 });
 const seedResidentResourceId = seedResidentDispatch.resources.output?.id ?? -1;
 
-describe("RuntimeWebGpuHost resident dispatch policies", () => {
-  bench("webgpu fake dispatch gpu-resident 4KB x1", async () => {
-    const dispatch = await residentHost.dispatchArenaBatch(residentArena, [residentDescriptor.id], {
-      shader: PASSTHROUGH_U32_SHADER,
-    });
-    residentHost.destroyResource(dispatch.resources.output?.id ?? -1);
-  });
+test("RuntimeWebGpuHost resident dispatch policies", async ({ bench }) => {
+  await bench.compare(
+    bench("webgpu fake dispatch gpu-resident 4KB x1", async () => {
+      const dispatch = await residentHost.dispatchArenaBatch(residentArena, [residentDescriptor.id], {
+        shader: PASSTHROUGH_U32_SHADER,
+      });
+      residentHost.destroyResource(dispatch.resources.output?.id ?? -1);
+    }),
 
-  bench("webgpu fake dispatch materialize-readback 4KB x1", async () => {
-    const dispatch = await residentHost.dispatchArenaBatch(residentArena, [residentDescriptor.id], {
-      shader: PASSTHROUGH_U32_SHADER,
-      dataPolicy: "materialize-readback",
-    });
-    residentHost.destroyResource(dispatch.resources.output?.id ?? -1);
-  });
+    bench("webgpu fake dispatch materialize-readback 4KB x1", async () => {
+      const dispatch = await residentHost.dispatchArenaBatch(residentArena, [residentDescriptor.id], {
+        shader: PASSTHROUGH_U32_SHADER,
+        dataPolicy: "materialize-readback",
+      });
+      residentHost.destroyResource(dispatch.resources.output?.id ?? -1);
+    }),
 
-  bench("webgpu fake dispatch resident-to-resident 4KB x1", async () => {
-    const dispatch = await residentHost.dispatchResidentBatch(seedResidentResourceId, {
-      shader: PASSTHROUGH_U32_SHADER,
-    });
-    residentHost.destroyResource(dispatch.resources.output?.id ?? -1);
-  });
+    bench("webgpu fake dispatch resident-to-resident 4KB x1", async () => {
+      const dispatch = await residentHost.dispatchResidentBatch(seedResidentResourceId, {
+        shader: PASSTHROUGH_U32_SHADER,
+      });
+      residentHost.destroyResource(dispatch.resources.output?.id ?? -1);
+    }),
+  );
 });

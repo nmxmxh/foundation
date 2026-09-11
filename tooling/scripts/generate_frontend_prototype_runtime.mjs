@@ -167,7 +167,61 @@ function discoverPrototypeSchemas(protoRoot, includeTemplate) {
   }
 
   schemas.sort((left, right) => left.key.localeCompare(right.key));
+  errors.push(...prototypeSchemaCollisions(schemas));
   return { schemas, errors };
+}
+
+// Every generated identifier derives from the bare message name, and every
+// store key from domain.collection, so neither is namespaced by proto package.
+// Two domains declaring an entity named Subscription would both emit
+// subscriptionSchema, useSubscriptionSnapshot, ... and the output would not
+// compile — while --check, comparing against an equally broken regeneration,
+// kept passing. Namespacing only the colliding pair would silently rename
+// identifiers the first domain already exports, so a collision is an error that
+// names every declaration involved.
+function prototypeSchemaCollisions(schemas) {
+  const errors = [];
+  const describe = (group) =>
+    group.map((schema) => `${schema.protoFile} (${schema.protoPackage}.${schema.messageName})`).join(" and ");
+
+  const byIdentifier = groupSchemas(schemas, (schema) => safePascalIdentifier(schema.messageName));
+  for (const [identifier, group] of byIdentifier) {
+    if (group.length < 2) continue;
+    const variableBase = lowerFirst(identifier);
+    const suggestion = `${safePascalIdentifier(group[1].domain)}${identifier}`;
+    errors.push(
+      `entity name collision: ${describe(group)} would each generate ${variableBase}Schema, ` +
+        `use${identifier}Snapshot, register${identifier}Store, ... in one module. ` +
+        `Rename one of the messages so entity names are unique across the proto root (for example ${suggestion}).`
+    );
+  }
+
+  const byKey = groupSchemas(schemas, (schema) => schema.key);
+  for (const [key, group] of byKey) {
+    if (group.length < 2) continue;
+    // Same identifier and same key is one collision, already reported above.
+    if (new Set(group.map((schema) => safePascalIdentifier(schema.messageName))).size === 1) continue;
+    errors.push(
+      `schema key collision: ${describe(group)} all map to ${JSON.stringify(key)}, ` +
+        `so their stores and fixtures would share one domain.collection key. ` +
+        `Rename one of the messages so each entity has its own collection.`
+    );
+  }
+  return errors;
+}
+
+function groupSchemas(schemas, keyOf) {
+  const groups = new Map();
+  for (const schema of schemas) {
+    const key = keyOf(schema);
+    const group = groups.get(key);
+    if (group) {
+      group.push(schema);
+    } else {
+      groups.set(key, [schema]);
+    }
+  }
+  return groups;
 }
 
 function loadDescriptorModule(errors) {
@@ -324,6 +378,7 @@ function schemaFromMessage(file, message, index) {
     key,
     messageName: message.name,
     protoFile: file.name,
+    protoPackage: file.package,
     typeName: `${domainInfo.domain}_${message.name}`,
     version: domainInfo.version,
   };

@@ -46,7 +46,14 @@ const pinnedDependencyVersions = new Set([
   '@ovasabi/runtime-native',
   'framer-motion',
 ])
-const pinnedDevDependencyVersions = new Set(['ts-proto'])
+// vitest is pinned to the template range because an app left on an older major
+// makes npm resolve vitest@latest through optional peers (@vitejs/devtools-vitest
+// peers vitest@*), and the mixed-major peer set crashes arborist (npm 11:
+// "Cannot read properties of null (reading 'edgesOut')").
+const pinnedDevDependencyVersions = new Set(['ts-proto', 'vitest'])
+// Plugins that peer on an exact vitest version: never added, but when present
+// they must move in lockstep with the pinned vitest range.
+const lockstepDevDependencies = ['@vitest/coverage-v8']
 
 let changed = false
 
@@ -85,6 +92,14 @@ if (process.env.WITH_NATIVE === 'true') {
 for (const key of requiredDevDependencies) {
   const value = template.devDependencies?.[key]
   if (value && (!target.devDependencies[key] || (pinnedDevDependencyVersions.has(key) && target.devDependencies[key] !== value))) {
+    target.devDependencies[key] = value
+    changed = true
+  }
+}
+
+for (const key of lockstepDevDependencies) {
+  const value = template.devDependencies?.[key]
+  if (value && target.devDependencies[key] && target.devDependencies[key] !== value) {
     target.devDependencies[key] = value
     changed = true
   }

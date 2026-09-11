@@ -389,8 +389,10 @@ scaffold_sync_frontend_manifest_contract() {
     fi
 
     if [[ "$old_hash" != "$new_hash" ]]; then
-        foundation_log_info "Frontend manifest contract updated; running npm install to synchronize lockfile..."
-        if command -v npm >/dev/null 2>&1; then
+        if [[ "${SKIP_DEPS:-false}" == "true" ]]; then
+            foundation_log_warn "Frontend manifest contract updated; --skip-deps set, run 'npm install' in $frontend_root to synchronize the lockfile"
+        elif command -v npm >/dev/null 2>&1; then
+            foundation_log_info "Frontend manifest contract updated; running npm install to synchronize lockfile..."
             (cd "$frontend_root" && npm install --package-lock-only)
             foundation_log_success "Frontend lockfile synchronized"
         else
