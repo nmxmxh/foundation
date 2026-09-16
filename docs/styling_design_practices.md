@@ -51,56 +51,67 @@ Keep frontend styling responsibilities in this order:
 
 Do not let page files become the source of truth for tokens, default focus states, or reusable interaction patterns.
 
-## 3. Styled-Components Format
+## 3. Linaria Format (build-time extracted styles)
+
+Foundation styles are written with Linaria: the same `styled` tagged-template
+shape, extracted to a static stylesheet at build time by `@wyw-in-js/vite`. No
+styling runtime ships, no rules are injected on the main thread, and the CSS can
+load before any script (research doc `ui_render_performance_research.md` §14.8).
+`ui-minimal` and the frontend template use it; new code must.
 
 Preferred file shape for app and feature code:
 
 ```tsx
-import styled, { css } from "styled-components";
+import { styled } from "@linaria/react";
+import { minimalVars, variantRules } from "@ovasabi/ui-minimal";
 
 const Style = {
   Root: styled.section`
     display: grid;
-    gap: ${({ theme }) => theme.spacing.md};
-    padding: ${({ theme }) => theme.spacing.lg};
-    background: ${({ theme }) => theme.color.bgSurface};
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.lg};
+    gap: ${minimalVars.space.md};
+    padding: ${minimalVars.space.lg};
+    background: ${minimalVars.color.bgSurface};
+    border: 1px solid ${minimalVars.color.borderSubtle};
+    border-radius: ${minimalVars.radius.lg};
   `,
   Title: styled.h2`
     margin: 0;
-    font: ${({ theme }) => theme.typography.weightSemibold}
-      ${({ theme }) => theme.typography.h2Size}
-      ${({ theme }) => theme.typography.displayFamily};
-    color: ${({ theme }) => theme.color.textPrimary};
+    font: ${minimalVars.typography.weightSemibold} ${minimalVars.typography.h2Size}
+      ${minimalVars.typography.displayFamily};
+    color: ${minimalVars.color.textPrimary};
   `,
-  Meta: styled.span<{ $tone: "default" | "muted" }>`
-    color: ${({ theme, $tone }) =>
-      $tone === "muted" ? theme.color.textSecondary : theme.color.textPrimary};
+  Meta: styled.span`
+    color: ${minimalVars.color.textPrimary};
+    ${variantRules("tone", ["muted"] as const, () => `color: ${minimalVars.color.textSecondary};`)}
   `,
 };
 
 export const ExamplePanel = () => (
   <Style.Root>
     <Style.Title>Panel title</Style.Title>
-    <Style.Meta $tone="muted">Supporting metadata</Style.Meta>
+    <Style.Meta data-minimal-tone="muted">Supporting metadata</Style.Meta>
   </Style.Root>
 );
 ```
 
 Rules:
 
-1. Use one `Style` object per component module unless the file is purely primitives/tokens.
-2. Keep transient styling props prefixed with `$`.
-3. Keep conditionals in helpers or `css` blocks, not inlined string chaos.
-4. Export React components, not styled primitives, from feature modules.
-5. For shared primitives packages, internal helper groupings may be split by concern, but new work should still favor grouped declarations over long flat lists.
+1. Read tokens through `minimalVars` (CSS variables with base-theme fallbacks), never a runtime theme object. Code that needs a resolved value in script uses `useMinimalTheme()`.
+2. Discrete variants are attribute selectors — `variantRules(name, values, block)` plus `data-minimal-<name>` on the element — not prop functions returning blocks. They cost nothing at runtime and are cheaper for the style engine than per-element variables (research doc §14.3).
+3. A prop function (`${(props) => value}`) is allowed only in a property value, for genuinely continuous values; Linaria turns it into a per-element CSS variable. Keep transient props prefixed with `$`.
+4. Everything else in a template is evaluated at build time, so it must be importable without React or a styling runtime: import tokens from `@ovasabi/ui-minimal/tokens` in build-time helpers, hoist helpers that take callbacks into module constants, and write `import type` rather than inline `type` specifiers.
+5. Keyframes live in the template that uses them (Linaria scopes their names); `minimalEnter` fragments already do this.
+6. Use one `Style` object per component module unless the file is purely primitives/tokens, and export React components, not styled primitives, from feature modules.
+
+Existing apps whose own code still uses styled-components keep working through
+`MinimalStyledThemeBridge` (`@ovasabi/ui-minimal/styled-components`, mounted by
+`AppThemeProvider`); migrate a module to the format above when it is touched.
 
 Allowed inline style exceptions:
 
 1. runtime positioning for portals, popovers, and anchored overlays
 2. injecting CSS variables from dynamic measurements
-3. transform values controlled by Motion/WAAPI where styled-components would fight the runtime
+3. transform values driven by a WAAPI timeline (`createMinimalTimeline`)
 
 ## 4. Theme And Token Rules
 
@@ -180,11 +191,20 @@ Never animate:
 
 Implementation order:
 
-1. CSS transitions
-2. WAAPI
-3. spring-based Motion
-4. CSS keyframes
-5. manual `requestAnimationFrame`
+1. CSS transitions, with `@starting-style` for enter and `transition-behavior: allow-discrete` for exit
+2. native elements that bring their own lifecycle: `<dialog>`, `popover`, `<details>`, View Transitions
+3. CSS keyframes (infinite ones paused off screen)
+4. WAAPI, for sequences a transition cannot express
+5. spring-based Motion, only for gesture physics and drag
+6. manual `requestAnimationFrame`
+
+Why this order (measured, research doc `ui_render_performance_research.md` §14):
+framer-motion animates independent transforms (`x`, `y`, `scale`, `rotate`),
+`height: auto` and springs from JavaScript on the main thread — 49–61 style
+writes per animation against zero for the CSS equivalent — so a main-thread
+stall freezes them. Only its opacity reaches the compositor. A `motion.*`
+component also costs 2.5–3.9× the mount time of the same element with a CSS
+fade, per instance.
 
 Animate:
 
@@ -239,18 +259,19 @@ Rules:
 1. Anchored overlays should measure the trigger and viewport, then clamp `left`, `width`, and `max-height` before rendering. Dropdowns should expose whether they match trigger width or use a minimum panel width.
 2. Modals should use `width: min(...)`, explicit `max-height`, and an internal scroll body. Content should never push a dialog beyond the viewport.
 3. Mobile dialogs should be able to become bottom sheets, with safe-area-aware padding and no hidden action rows.
-4. Fixed-format media regions need `aspect-ratio`, `min/max-height`, and overflow policy. Do not rely on image intrinsic size to define the layout.
+4. Fixed-format media regions need `aspect-ratio`, `min/max-height`, and overflow policy. Do not rely on image intrinsic size to define the layout. Every image reserves its box before it loads: use `MinimalImage` (its type requires `width`+`height` or `aspectRatio`), or write both attributes on a raw `<img>` — the surface check fails an unsized one. Measured: an unsized image moved the content below it by its full height; `MinimalImage` by 0 px (research doc §15.5). The first-screen hero takes `priority`; everything else stays lazy with async decode.
 5. Display sections should declare their composition anchor, visual mode, and minimum height. Do not rebuild hero geometry with one-off inline styles.
 6. Information panels should handle icon, copy, metadata, and action regions without text collision at narrow widths.
 7. When a component has portal positioning, runtime coordinates are allowed inline; the surrounding sizing rules still belong in the primitive.
 
 Use these shared primitives for the common dimensional cases:
 
-1. `MinimalDisplaySection`: hero or display-first section with art-directed anchors, background/image modes, min-height, and media aspect ratio.
-2. `MinimalLandingSection`: editorial landing/information sections with optional media and responsive composition anchors.
-3. `MinimalInfoPanel`: dense but readable information callouts, receipts, validation notes, proof rows, and explanation panels.
-4. `MinimalDropdown`: anchored select/search panels with viewport-aware width and max-height.
-5. `MinimalActionModal`: confirmation and action dialogs with max-width, max-height, mobile sheet behavior, and scrollable bodies.
+1. `MinimalImage`: any content image; sized box before load, lazy + async decode by default, `priority` for the hero, `reveal` to fade in after decode (client-only, never on a prerendered hero).
+2. `MinimalDisplaySection`: hero or display-first section with art-directed anchors, background/image modes, min-height, and media aspect ratio.
+3. `MinimalLandingSection`: editorial landing/information sections with optional media and responsive composition anchors.
+4. `MinimalInfoPanel`: dense but readable information callouts, receipts, validation notes, proof rows, and explanation panels.
+5. `MinimalDropdown`: anchored select/search panels with viewport-aware width and max-height.
+6. `MinimalActionModal`: confirmation and action dialogs with max-width, max-height, mobile sheet behavior, and scrollable bodies.
 
 ## 8. Frontend Reference Art Direction
 
@@ -507,7 +528,113 @@ container. It is a fine implementation of rule 3 for a uniform stack. It is
 **not** an implementation of rule 2 and it does not produce hierarchy;
 `data-space` is the part that does.
 
-## 12. Reference Notes
+## 12. Fonts And First Paint
+
+A stylesheet that is correct and a page that paints quickly are different
+achievements, and the second one is mostly decided outside the style layer — in
+`index.html`, in `public/fonts`, and in what the build emits. These rules are
+the standard every app is held to; the evidence for each number is in
+[ui_render_performance_research.md](ui_render_performance_research.md) §15.3–§15.6,
+and the adoption state per app is in
+[frontend_paint_performance_handover.md](frontend_paint_performance_handover.md).
+
+`make check-frontend-surface-practices` enforces F1, F2, F3, F4 and F6.
+
+### Fonts
+
+**F1 — No third-party font origin.** No `fonts.googleapis.com` or
+`fonts.gstatic.com` link, and no `@import` of one. A third-party stylesheet
+costs a DNS lookup, a TLS handshake and a round trip before the first glyph;
+an `@import` is worse than a `<link>`, because it cannot start until the
+stylesheet containing it has arrived and so serialises behind its own parent.
+Self-host in `public/fonts`, served from the app's own origin.
+
+**F2 — One variable `woff2` per family, subset by `unicode-range`.** No `.ttf`,
+`.otf` or `.woff` in `public/`. Split latin / latin-ext / vietnamese so a reader
+who needs only latin downloads only latin. ChooseChow is the reference: 9 files,
+220 KB, largest 40 KB.
+
+**F3 — `font-display: swap`, plus a size-adjusted fallback face.** `swap` paints
+text immediately instead of holding the line blank; the fallback's `size-adjust`
+and `ascent-override` keep the swap from moving anything when the real face
+arrives. That pairing is what took ChooseChow's load CLS from 0.119 to 0 on a
+mid phone — `swap` alone would have caused the shift, not prevented it.
+Generate the metrics with `frontend-lab/profile/fontFallbackMetrics.mjs` and
+list `"<family> Fallback"` directly after the web family in every stack.
+
+**F4 — Preload only what *this route's* first screen paints**, `as="font"
+type="font/woff2" crossorigin`, one or two faces.
+
+Get the loading model right before optimising it, because the obvious worry is
+the wrong one:
+
+- **Declaring a face costs nothing.** A `@font-face` block is a rule, not a
+  fetch. The browser downloads a face only when it is matched to text being
+  rendered, and `unicode-range` narrows that to the subset those characters
+  need. An app may declare every family it uses anywhere; a page that renders
+  none of their glyphs downloads none of them. Splitting `@font-face` blocks
+  per route buys nothing and costs a cache entry.
+- **Preloading is the eager part.** `<link rel="preload">` fetches
+  unconditionally, on every route that ships the tag, before the browser knows
+  whether any text will use it. A preload in `index.html` is a preload on all of
+  them. That is the only place where "this font is only needed on the pricing
+  page" turns into real waste.
+
+So the rule is per route, not per app. An app whose first screen is the same
+everywhere (a body face) preloads it once in `index.html` — trotters and
+civic_watch_ng are this shape. An app with a display face used only on its
+landing route should preload it only there: `render(url)` may return
+`{ html, head }`, and `prerenderShell` injects that `head` into that route's HTML
+alone, so each prerendered page carries exactly its own preloads.
+
+Preloads compete with the HTML and the CSS for the same early bytes, so
+preloading past the first screen makes FCP worse rather than better — which is
+why the ceiling is two faces and the check enforces it.
+
+**F5 — `@font-face` is reachable without JavaScript.** Either in `index.html` or
+in the extracted stylesheet (a `css` block from `@linaria/core`). It must never
+sit behind a component render — that is the failure the styled-components
+removal fixed, and it is what makes critical CSS possible at all: you cannot
+inline what does not exist until script runs.
+
+**F6 — No unused face ships.** `public/` is copied verbatim into the image, so a
+face nothing references is deploy weight and a supply-chain surface even though
+no browser ever requested it.
+
+### Paint
+
+**P1 — Prerender the shell and hydrate it.** `prerenderShell({ entry:
+'src/entry-server.tsx', routes: [...], criticalCss: 'subset' })` in
+`vite.config.ts` and `mountRoot` in `main.tsx`. `render(url)` must produce the
+same markup on both sides for that URL: no `window`, no `Date.now()`, no
+randomness, no signed-in data; `useSyncExternalStore` needs its server snapshot;
+anything data-dependent renders a skeleton **of the final size**. Prerender
+every route whose first screen does not need a session. Two constraints that
+cost a day each to find: the SSR pass must bundle React and the router together
+or the two copies crash on `useContext`, and an app that paints its own markup
+inside `#root` (a splash screen) has to move it out before hydrating.
+
+**P2 — The prerendered HTML is the first screen, not the page.** Use
+`useFirstScreenCount(first, total, step)`. Committing a long list in one pass was
+a 70–77 ms long task at CPU 6x; growing it per frame keeps it off the critical
+path.
+
+**P3 — Route-level code splitting, with a budget.** Every route that is not the
+landing route loads as its own chunk (`createLazyPage` from
+`@ovasabi/frontend-kit`). Entry chunk **≤ 120 KB brotli**, no single chunk above
+150 KB.
+
+**P4 — An image always knows its box before its pixels arrive.** `MinimalImage`
+with intrinsic `width`/`height` or an explicit aspect ratio. An unsized image
+moved the content below it by 200 px in the §13 measurement; `MinimalImage`
+moved it 0.
+
+**P5 — Motion runs on the compositor.** `transform` and `opacity` only, in CSS
+or WAAPI. JS-driven geometry per frame freezes under a main-thread stall: 1
+changed frame against 36 in a 400 ms block. Enforced by
+`frontend_surface_practices_check.mjs`.
+
+## 13. Reference Notes
 
 Use the animation reference notes in `docs/references/`:
 

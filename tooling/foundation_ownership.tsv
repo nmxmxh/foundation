@@ -11,6 +11,7 @@ tooling/enforcement_manifest.tsv	foundation-enforcement	foundation-only	Hash man
 tests/docker-compose.service-backed.yml	foundation-test	foundation-only	Foundation service-backed harness; not scaffolded into apps.
 tests/service_backed_foundation_test.sh	foundation-test	foundation-only	Foundation service-backed harness; not scaffolded into apps.
 server-kit/go/servicebacked/	foundation-test	foundation-only	Foundation service-backed tests; references must be pruned from generated projects.
+frontend-lab/	foundation-test	foundation-only	Foundation frontend lab (jsdom, real-browser, profiling); outside the sync allowlist, never vendored into apps.
 templates/	scaffold-source	foundation-only	Source of managed scaffold files.
 templates/backend/internal/service/	project-owned-template	create-only	Domain services belong to generated projects after creation.
 templates/backend/migrations/	project-owned-template	create-only	Seed migration only; project migrations are not overwritten.

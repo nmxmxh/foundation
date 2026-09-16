@@ -1,0 +1,36 @@
+{
+  "name": "@ovasabi/frontend-lab",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Foundation-only frontend test, measurement and profiling lab. Never vendored into projects (see README).",
+  "scripts": {
+    "test": "vitest run --project dom",
+    "test:browser": "vitest run --project browser",
+    "test:all": "vitest run",
+    "profile": "node profile/scrollProfile.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@babel/preset-react": "^7.29.7",
+    "@babel/preset-typescript": "^7.29.7",
+    "@linaria/core": "^8.2.0",
+    "@linaria/react": "^8.2.0",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitest/browser": "5.0.0",
+    "@vitest/browser-playwright": "5.0.0",
+    "@wyw-in-js/vite": "^2.5.1",
+    "framer-motion": "12.38.0",
+    "jsdom": "30.0.1",
+    "playwright": "1.62.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "styled-components": "6.4.1",
+    "typescript": "5.9.3",
+    "vitest": "5.0.0"
+  }
+}

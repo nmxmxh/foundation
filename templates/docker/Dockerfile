@@ -136,6 +136,7 @@ COPY foundation/runtime-transport/ts/package.json ./foundation/runtime-transport
 COPY foundation/frontend-kit/ts/package.json ./foundation/frontend-kit/ts/
 COPY foundation/ui-minimal/ts/package.json ./foundation/ui-minimal/ts/
 COPY foundation/runtime-native/ts/package.json ./foundation/runtime-native/ts/
+COPY foundation/runtime-sdk/ts/browser-host/package.json ./foundation/runtime-sdk/ts/browser-host/
 COPY frontend/package.json frontend/package-lock.json* ./frontend/
 
 # Install dependencies using the shared npm cache
@@ -147,12 +148,17 @@ COPY foundation/runtime-transport/ts ./foundation/runtime-transport/ts
 COPY foundation/frontend-kit/ts ./foundation/frontend-kit/ts
 COPY foundation/ui-minimal/ts ./foundation/ui-minimal/ts
 COPY foundation/runtime-native/ts ./foundation/runtime-native/ts
+COPY foundation/runtime-sdk/ts/browser-host ./foundation/runtime-sdk/ts/browser-host
 
 # Copy frontend source code
 COPY frontend/ ./frontend/
 
-# Build the frontend
-RUN cd frontend && npm run build
+# Build the frontend. Linaria extraction (wyw-in-js -> oxc-parser) reserves a
+# single 6 GiB ArrayBuffer for raw transfer, which a small swapless host refuses
+# under heuristic overcommit. JSON transfer yields identical output; see
+# foundation/ui-minimal/ts/scripts/wyw-oxc-raw-transfer.mjs.
+ENV WYW_OXC_RAW_TRANSFER=0
+RUN cd frontend && node ../foundation/ui-minimal/ts/scripts/wyw-oxc-raw-transfer.mjs . && npm run build
 
 # --- Frontend Final ---
 FROM alpine:3.23 AS frontend

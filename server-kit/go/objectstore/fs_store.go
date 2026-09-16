@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -18,7 +20,8 @@ import (
 // PutFileRange for the zero-copy ingest lane.
 //
 // It is intended for local, edge, and same-host deployments. Content type is
-// preserved best-effort via a small sidecar; payload bytes are the contract.
+// not stored: it is reported from the caller on Put and inferred from the key's
+// extension on Open. Payload bytes are the contract.
 type FSStore struct {
 	root   string
 	bucket string
@@ -75,6 +78,13 @@ func (s *FSStore) objectPath(key string) (string, error) {
 }
 
 func (s *FSStore) object(key string, size int64, contentType string, meta map[string]string) Object {
+	// The filesystem keeps no content type, so Open always arrives here with
+	// none. The extension is the only record left; without it every image is
+	// served as octet-stream, which a cross-origin <img> under nosniff (and
+	// Chromium's opaque response blocking) refuses to render.
+	if contentType == "" {
+		contentType = mime.TypeByExtension(path.Ext(normalizeKey(key)))
+	}
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}

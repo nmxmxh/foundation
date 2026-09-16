@@ -434,6 +434,50 @@ describe("shared state channel profile", () => {
     return ((performance.now() - start) * 1e6) / iterations;
   };
 
+  /*
+   * The fastest of several interleaved repetitions, for each side of a
+   * comparison.
+   *
+   * These comparisons used to be single loops against single loops, and they
+   * flipped under CPU contention (`inPlace <= staged * 1.1` failed about one
+   * run in three with another vitest job running: 692 ns against a 577 ns
+   * bound). Two properties make this form robust without making it blind:
+   *
+   * - Preemption, GC pauses and other processes only ever *add* time to a
+   *   loop, so the minimum across repetitions converges on the intrinsic cost
+   *   while a mean or a single sample carries whatever burst it caught.
+   * - The sides alternate, so a burst of contention that lasts several loops
+   *   lands on both rather than on whichever side happened to be running.
+   *
+   * A real regression is not noise: it raises every repetition, so it raises
+   * the minimum too.
+   */
+  const REPEATS = 5;
+  const fastestOfInterleaved = (a: () => void, b: () => void): [number, number] => {
+    let bestA = Number.POSITIVE_INFINITY;
+    let bestB = Number.POSITIVE_INFINITY;
+    for (let repeat = 0; repeat < REPEATS; repeat += 1) {
+      bestA = Math.min(bestA, nsPerOp(ITERATIONS, a));
+      bestB = Math.min(bestB, nsPerOp(ITERATIONS, b));
+    }
+    return [bestA, bestB];
+  };
+
+  /*
+   * Absolute slack for the in-place comparison, in ns/op.
+   *
+   * `fill` computing into the slot avoids exactly one copy of `size * 4` bytes.
+   * At 16 floats that copy is ~2 ns inside ~100–500 ns of identical work on both
+   * sides — below what a loop timer resolves, so a pure ratio there measures
+   * jitter, not the API. Checked by planting a regression (two extra payload
+   * copies inside the in-place fill): it passed at 16 and 256 floats, where
+   * the copies are tens of ns against a 10% + 25 ns tolerance, and failed at
+   * 4,096 floats (4,278 ns against a 3,980 ns bound). So this assertion guards
+   * the sizes where a copy is worth avoiding at all — kilobytes and up — and
+   * deliberately does not pretend to resolve a few ns at small payloads.
+   */
+  const IN_PLACE_SLACK_NS = 25;
+
   it("reports write, read and clone cost across payload sizes", () => {
     for (const size of SIZES) {
       const channel = createRenderStateChannel(size)!;
@@ -443,21 +487,23 @@ describe("shared state channel profile", () => {
 
       const kb = ((size * 4) / 1024).toFixed(size < 256 ? 2 : 0);
 
-      // The incumbent: one structured clone, main thread, every frame.
-      const clone = nsPerOp(ITERATIONS, () => {
-        const copy = structuredClone(source);
-        if (copy.length !== size) throw new Error("clone lost data");
-      });
+      // The incumbent: one structured clone, main thread, every frame — against
+      // the replacement, for a caller that already holds the data elsewhere:
+      // one bulk copy into shared memory plus the exchange. Asserted below, so
+      // measured as an interleaved pair.
+      const [clone, write] = fastestOfInterleaved(
+        () => {
+          const copy = structuredClone(source);
+          if (copy.length !== size) throw new Error("clone lost data");
+        },
+        () => {
+          channel.write((slot) => {
+            slot.set(source);
+            return size;
+          });
+        },
+      );
       emit(`clone_${size}_floats_${kb}kb`, clone.toFixed(0), "ns/op");
-
-      // The replacement, for a caller that already holds the data elsewhere:
-      // one bulk copy into shared memory plus the exchange.
-      const write = nsPerOp(ITERATIONS, () => {
-        channel.write((slot) => {
-          slot.set(source);
-          return size;
-        });
-      });
       emit(`channel_write_${size}_floats_${kb}kb`, write.toFixed(0), "ns/op");
 
       /*
@@ -475,19 +521,21 @@ describe("shared state channel profile", () => {
       const compute = (target: Float32Array) => {
         for (let i = 0; i < size; i += 1) target[i] = i * 0.5;
       };
-      const staged = nsPerOp(ITERATIONS, () => {
-        compute(staging);
-        channel.write((slot) => {
-          slot.set(staging);
-          return size;
-        });
-      });
-      const inPlace = nsPerOp(ITERATIONS, () => {
-        channel.write((slot) => {
-          compute(slot);
-          return size;
-        });
-      });
+      const [staged, inPlace] = fastestOfInterleaved(
+        () => {
+          compute(staging);
+          channel.write((slot) => {
+            slot.set(staging);
+            return size;
+          });
+        },
+        () => {
+          channel.write((slot) => {
+            compute(slot);
+            return size;
+          });
+        },
+      );
       emit(`compute_then_copy_${size}_floats_${kb}kb`, staged.toFixed(0), "ns/op");
       emit(`compute_in_place_${size}_floats_${kb}kb`, inPlace.toFixed(0), "ns/op");
       emit(`copy_avoided_${size}_floats_${kb}kb`, Math.max(0, staged - inPlace).toFixed(0), "ns/op");
@@ -531,10 +579,15 @@ describe("shared state channel profile", () => {
       emit(`speedup_write_vs_clone_${size}_floats`, (clone / write).toFixed(1), "x");
       emit(`speedup_roundtrip_vs_clone_${size}_floats`, (clone / read).toFixed(1), "x");
 
-      expect(write).toBeLessThan(clone);
-      expect(inPlace).toBeLessThanOrEqual(staged * 1.1);
+      expect(write, `channel write vs structuredClone at ${size} floats`).toBeLessThan(clone);
+      // Ratio for the sizes where the avoided copy is measurable, slack for the
+      // one where it is below timer resolution — see IN_PLACE_SLACK_NS.
+      expect(inPlace, `compute-in-place vs compute-then-copy at ${size} floats`).toBeLessThanOrEqual(
+        staged * 1.1 + IN_PLACE_SLACK_NS,
+      );
     }
-  });
+    // Five interleaved repetitions per asserted pair: seconds, not the 5 s default.
+  }, 60_000);
 
   it("reports retained heap per publish and per read", () => {
     const size = 4096;

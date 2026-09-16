@@ -82,6 +82,7 @@ templates/frontend/vitest.config.ts	{{FRONTEND_ROOT}}/vitest.config.ts	full,fron
 templates/frontend/nginx.conf	{{FRONTEND_ROOT}}/nginx.conf	full,frontend	always	force
 templates/frontend/src/App.tsx	{{FRONTEND_ROOT}}/src/App.tsx	full,frontend	always	create
 templates/frontend/src/main.tsx	{{FRONTEND_ROOT}}/src/main.tsx	full,frontend	always	create
+templates/frontend/src/entry-server.tsx	{{FRONTEND_ROOT}}/src/entry-server.tsx	full,frontend	always	create
 templates/frontend/src/components/ui/Button.tsx	{{FRONTEND_ROOT}}/src/components/ui/Button.tsx	full,frontend	always	create
 templates/frontend/src/components/ui/Input.tsx	{{FRONTEND_ROOT}}/src/components/ui/Input.tsx	full,frontend	always	create
 templates/frontend/src/components/ui/index.ts	{{FRONTEND_ROOT}}/src/components/ui/index.ts	full,frontend	always	create

@@ -1,10 +1,30 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import wyw from '@wyw-in-js/vite'
+import { prerenderShell } from '@ovasabi/frontend-kit/vite'
 import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    wyw({
+      // Styles are Linaria, extracted at build time — ui-minimal's and this app's own
+      // (Foundation research doc 14.8). The kit is reached through node_modules,
+      // hence transformLibraries.
+      include: [/ui-minimal[\\/](ts[\\/])?src[\\/].*\.[jt]sx?$/, /[\\/]src[\\/].*\.[jt]sx?$/],
+      transformLibraries: true,
+      prefixer: false,
+    }),
+    // Paint before JavaScript: the built index.html carries the first screen's
+    // markup and the CSS that markup can use (criticalCss: 'subset'), so the
+    // first paint needs neither script nor a stylesheet round trip; main.tsx
+    // hydrates it. Keep long lists to their first screen with useFirstScreen
+    // (@ovasabi/frontend-kit). Add a route for every page whose first screen
+    // renders without signed-in data. Lab: FCP 1,198 → 585 ms on a mid phone
+    // (Foundation research doc §15.5).
+    prerenderShell({ entry: 'src/entry-server.tsx', routes: ['/'], criticalCss: 'subset' }),
+  ],
   resolve: {
     preserveSymlinks: true,
     alias: {
@@ -12,10 +32,8 @@ export default defineConfig({
       '@generated': path.resolve(__dirname, './src/types/protos'),
       react: path.resolve(__dirname, './node_modules/react'),
       'react-dom': path.resolve(__dirname, './node_modules/react-dom'),
-      'styled-components': path.resolve(__dirname, './node_modules/styled-components'),
-      'framer-motion': path.resolve(__dirname, './node_modules/framer-motion'),
     },
-    dedupe: ['react', 'react-dom', 'styled-components', 'framer-motion', 'zustand'],
+    dedupe: ['react', 'react-dom', '@linaria/react', 'zustand'],
   },
   server: {
     port: 5173,
@@ -52,7 +70,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'react-router-dom'],
-          ui: ['styled-components', 'framer-motion'],
+          ui: ['@linaria/react'],
         },
       },
     },

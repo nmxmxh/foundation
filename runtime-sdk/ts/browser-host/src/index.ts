@@ -19,6 +19,8 @@ export * from "./renderSurfaceClient";
 export * from "./renderSurfaceWorker";
 export * from "./canvasStage";
 export * from "./frameClock";
+export * from "./frameTelemetry";
+export * from "./uiQuality";
 export * from "./renderMarks";
 export * from "./webgpuDeviceProbe";
 export * from "./nativeGpu";

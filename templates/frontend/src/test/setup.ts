@@ -1,4 +1,5 @@
-import '@testing-library/jest-dom'
+// Vitest 5 reads jest-dom's matcher types from its /vitest entry.
+import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach, vi } from 'vitest'
 

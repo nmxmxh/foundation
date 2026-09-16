@@ -1,7 +1,7 @@
 # UI Render Performance Research
 
-Status: research (handoff)  
-Date: 2026-09-11  
+Status: in implementation (see section 13, the ledger)  
+Date: 2026-09-11, ledger updated 2026-09-14  
 Owner: Platform Architecture
 
 ## Purpose
@@ -276,8 +276,15 @@ Invariants:
 
 1. Samples only while `document.visibilityState === "visible"`. Browsers pause
    animation frames in hidden documents, so hidden samples are fiction.
-2. Uses `PerformanceObserver` for `long-animation-frame` where available, and a
-   `frameClock`-driven interval sampler otherwise; never a second rAF loop.
+2. Uses `PerformanceObserver` for `long-animation-frame` where available, and
+   reads `requestAnimationFrame` timestamps directly for intervals, only inside a
+   window the caller opens and closes. *Revised 2026-09-14:* the original
+   "`frameClock`-driven sampler, never a second rAF loop" was wrong for
+   measurement. `frameClock` ticks come from the pulse worker, so its callback
+   gap is pulse timing plus frame timing (a drifted tick reports a skipped frame
+   nobody saw), and it is capped at its target rate, so 90/120 Hz displays are
+   invisible through it. Work still goes through `frameClock`; the instrument
+   does not.
 3. Bounded ring buffers; zero cost when disabled; low-cardinality scope names
    through `renderMarks`.
 4. Reports slow and frozen counts with the same thresholds as Android vitals
@@ -453,6 +460,11 @@ Proposals:
 4. Cross-origin isolation (COOP/COEP) in the Tauri shells so the `sab` lane
    exists there. Requires `Cross-Origin-Resource-Policy` or CORS on
    cross-origin images, because WKWebView has no `credentialless` mode.
+   *Finding 2026-09-14:* Android WebView ignores COOP/COEP on responses the shell
+   serves itself (`shouldInterceptRequest`). Verified on WebView 133: headers
+   present, `crossOriginIsolated` false, `SharedArrayBuffer` undefined. The
+   Android shell cannot get the `sab` lane this way; the headers stay for parity
+   and the runtime's fallback lane carries it. WKWebView is unverified.
 
 Invariants: no private APIs; debug-only flags never ship in release; every knob
 measured before and after with P1.
@@ -543,6 +555,9 @@ architect, framed here as options:
 | C. Zero-runtime `styled` API (Linaria on WyW-in-JS) | Same `styled`/`css` tagged-template syntax, extracted to static CSS at build | Build pipeline change, after B | No runtime injection; the CSP exception can go |
 | D. Different zero-runtime system (vanilla-extract, StyleX, Panda) | New authoring format | Largest rewrite | Same outcome as C, with a larger migration |
 
+Decision (2026-09-11, platform architect): **B, then C** is accepted. The
+Linaria migration will happen; step B lands first.
+
 Recommendation for the ADR: **B, then C.** Step B is valuable on its own and is
 exactly the preparation C needs, because extracted styles cannot call theme
 functions at runtime. The theme already exports tokens as CSS variables (styling
@@ -587,7 +602,13 @@ download size.
 2. **Measuring in a hidden document.** Animation frames pause in hidden
    documents; a script waiting on them never completes and a sampler records
    nothing. This happened while gathering this baseline. P1 invariant 1 exists
-   for this reason.
+   for this reason. It happened again on 2026-09-14 in a subtler form: an
+   embedded browser pane that is not on screen is a hidden document, and
+   Chromium *throttled* rather than paused it — `requestAnimationFrame` ran at
+   ~1 Hz (1,003–1,008 ms intervals) while worker-owned render surfaces kept
+   drawing and publishing facts. A probe that did not check visibility reported
+   a clean, slow page. `frameTelemetry` drops those intervals because
+   `visibilityState` reads `hidden`; ad-hoc probes must do the same.
 3. **Desktop or emulator numbers as proof.** They do not represent the floor
    device's GPU bandwidth, thermals, or memory.
 4. **Permanent `will-change` and blanket layer promotion.** Layer memory leads
@@ -633,6 +654,727 @@ layout properties and permanent `will-change`, a scaffold check for shell
 COOP/COEP, and a CI assertion that no runtime style rules appear after first
 paint once P5 lands.
 
+## 13. Implementation Ledger
+
+Picking the work up in a new session: start with
+[ui_render_performance_handover.md](ui_render_performance_handover.md) (how to
+run the lab and device tooling, open experiments, pending user decisions).
+
+The working record of this document. A row moves to **shipped** when code and a
+test exist, to **measured** when a before/after capture exists, and to
+**promoted** when its owning document (section 12) carries the rule. Emulator
+and desktop captures are estimates: they drive tuning, and are labelled as such.
+
+| Item | State | Where | Evidence and notes |
+| --- | --- | --- | --- |
+| P1 `frameTelemetry` | shipped | `runtime-sdk/ts/browser-host/src/frameTelemetry.ts` | 9 unit tests (display-relative slow frames incl. 120 Hz, hidden time excluded, LoAF counts, bounded ring, degraded runs, renderMarks). Not yet wired into an app or a gate. |
+| P5 option B, theme reads | shipped | `ui-minimal/ts/src/theme.tsx` (`minimalVars`) | 359 theme interpolations became `var()` references; 1,122/1,122 render cases identical. |
+| P5 option B, block variants | shipped | `ui-minimal/ts/src/variantRules.ts` | 16 block-returning prop interpolations became `:where([data-minimal-*])` rules; 2,240/2,240 cases identical under a per-element cascade harness (negative-tested). ~108 value-position prop functions remain by design (Linaria compiles those to variables). |
+| P5 option C, Linaria | open | — | Decided (section 8). Needs a build pipeline change; blocked on nothing. |
+| P3 rule 1, motion tokens as CSS | partial | `ui-minimal` theme | Durations and easings (`--minimal-ease-*`) exported; helpers still framer-motion. |
+| P8 rule 1, inspection | shipped (local) | `tauri android build --features tauri/devtools` | No file change needed; build flag only, never for release. |
+| P8 rule 4, COOP/COEP | shipped, **ineffective on Android** | Foundation native template, ChooseChow shell | Headers set; Android WebView does not isolate (see P8). Media route now sends CORP `cross-origin`; FSStore infers content types. |
+| Section 7 harness | partial | session tooling, not yet in repo | adb + DevTools protocol: `gfxinfo` scroll scenario, runtime CSS A/B, plain-list control, Chromium trace, LoAF attribution. To be committed as tooling. |
+| P2 `uiQuality` | shipped | `runtime-sdk/ts/browser-host/src/uiQuality.ts` | 9 unit tests: device-prior start (desktop high, flagship phone balanced, 4-core/2 GB low_power), save-data cap, reduced motion pinned, burst demote, forgive, slow promote, degraded/short windows ignored, platform floor, reasons logged. Demotes on slow-frame *share* per window (finding 5 below). Not yet consumed by an app: ChooseChow does not depend on browser-host. |
+| P2 tier CSS in ui-minimal | shipped | `ui-minimal/ts/src/theme.tsx` | `low_power` swaps `--minimal-shadow-*` to 2–12 px blur and sets `--minimal-backdrop-filter: none`; `reduced_motion` drops backdrop blur. No component changed (option B dividend). Untiered render unchanged: 2,240/2,240. |
+| P3 rule 4, pause loops | shipped (ui-minimal) | `MinimalSkeleton` | Shimmer stops on `low_power` and `reduced_motion`. Offscreen pausing waits on P4. |
+| `frameClock` honest diagnostics | shipped | `browser-host/src/frameClock.ts` | A pulse that falls back with every capability present now reports `worker unavailable: pass configureFrameClock({ createWorker })` instead of `ok`. Regression test mocks full capabilities and a failing worker (`frameClock.diagnostics.test.ts`); browser-host suite 241/241. |
+| `frameClock` subscription-time latch | fixed | `browser-host/src/frameClock.ts` | Root cause of the lab's `frames`-instead-of-`worker` failure. `ensurePulse()` calls `watchEpochs()` before `start()`; `watchEpochs()` reports diagnostics with the pulse still `stopped`; the clock treated any non-`worker` mode as a fallback, so **every consumer's clock latched onto animation frames at subscription**, and `start()`'s next report marked the fact `worker`/`ok`. The 120 ms grace window could never engage and nothing handed back. Fixed: `stopped` is ignored; a real no-tick grace window bridges on frames and marks the fact `frames`/`bridging`; the first worker tick hands the clock back and re-marks `worker`; the tick count resets with the clock. Evidence: `frameClock.bridge.test.ts` failed against the latch (fact read `worker`/`ok` while mode read `frames`) and passes after (clock tests 6/6, browser-host 243/243); the lab's frame-clock lane passes 2/2 in isolated Chromium. **Not a slow worker:** the lab's pulse latency probe (headless Chromium 151, isolated) measured the first worker tick at 57 ms, well inside the 120 ms window, with 12–20 ms intervals at 60 TPS; its diagnostics sequence `stopped → worker → worker → stopped` shows the pre-start `stopped` report that caused the latch. The frames bridge stays as protection for genuinely slow boots on weak devices. |
+| ovasabi_v1 pulse worker wired | worker loads; clock latched until sync | `ovasabi_v1/frontend/src/lib/render/frameClock.ts` | The app shipped a correct `pulse.worker.ts` that nothing passed to the clock, so the single frame pacer ran on the main-thread lane for its whole life while its fact read `reason: "ok"`. Now configured on first import, and `pulse.worker.ts` loads 200. **Correction:** the `lane: "worker"` fact seen afterwards came from the pulse manager, not from what drives the clock — ovasabi_v1's vendored `frameClock` still has the subscription-time latch recorded in the next row, so its clock is self-driven on animation frames until that app syncs Foundation (blocked on its uncommitted vendored `server-kit` edits). Render surfaces on that page: `blackHole` WebGPU tier 0 at 40 Hz scale 0.62, `paper` WebGPU at 4 Hz, `footer` WebGL2 fallback at 20 Hz (desktop Chromium, cross-origin isolated). |
+| P4 `cullSection` | shipped (primitive) | `ui-minimal` `MinimalCullSection` | `content-visibility: auto` + `contain-intrinsic-size: auto var(--minimal-cull-estimate)`; the estimate enters as a variable on `style`, so the rule stays static. SSR probe verified markup and CSS; 2,240/2,240 existing cases unchanged. Browser behaviour (skipping, find-in-page, scroll stability) needs the real-browser lab. Not yet adopted by an app. |
+| P4 `virtualList` | open | — | — |
+| Frontend lab (section 7, P10) | shipped, lanes 1–2 | `frontend-lab/` (foundation-only, like `servicebacked`) | Outside the sync allowlist; `tooling/foundation_ownership.tsv` marks it `foundation-test` / `foundation-only`; `make test-frontend-lab` and `make test-frontend-lab-browser`. `dom` lane (jsdom + Testing Library): 6/6 — cull markup and props, `uiQuality` on the real document element, reduced-motion and save-data read from the platform. `browser` lane (headless Chromium 1234, Playwright 1.62.1, Vitest browser mode): 8/8 — computed card shadow, backdrop blur and shimmer switch per tier (`low_power` cheap; `reduced_motion` keeps shadows; `balanced` unchanged), cull sections skip offscreen content, restore on scroll, hold scroll height, and remember real size under a wrong estimate. Pins React 18.3.1 runtime with React 19 types, matching `ui-minimal`. Negative-tested against planted source violations (tier selector renamed; `content-visibility: visible`): exactly the low_power tier test and both skip tests failed, the other five held; plants restored by hand and re-verified (browser 8/8, surface check, render harness 2,240/2,240). Lanes added since: `ssr` cascade eval (digest baseline 202 KB; negative-tested — a one-word Card shadow plant failed every Card case and printed the exact `box-shadow` change); frame-clock worker lane and pulse latency probe under COOP/COEP (isolation guarded by its own test); scripted scroll profile (`npm run profile`, capture bundle in `results/profile/`). Full lab 19/19. First profile bundle (Chromium 151, 412×915 @2.625x, CPU 1x, 80 sections, 3 runs after 1 warm-up): every variant p50 8.3 ms / p95 ≈ 9 ms / 0% slow / 0 LoAF, P1 repeatability PASS (p95 spread 0–3%) — repeatable, but a desktop at 1x does not separate variants, and node count is flat by design (`content-visibility` skips rendering, not nodes). Throttled, traced bundle (same setup, CPU 6x, P1 repeatability PASS, spread 0–1%): baseline p50 16.4 ms / p95 25 ms / **71% slow**; `cull`, `low_power` and `low_power+cull` all p50 8.3 ms / p95 ≈ 9 ms / **0% slow**. Median trace work: baseline style 952 ms, paint 1,556 ms, raster 1,010 ms; `low_power` style 0, paint 17.6 ms (−99%), raster 66 ms (−93%); `cull` style 245 ms (−74%), paint 720 ms (−54%) but raster 1,308 ms (+30%, open question). **P2's evidence gate — forcing `low_power` removes the slow frames `high` produces — passes in the lab.** |
+| P2 on device (ChooseChow, emulator) | wired; gate not met on device | ChooseChow P7 build | `uiQuality` wrote `data-ui-tier="low_power"`, reason `device prior` (4 cores / 2 GB); no infinite animations running; loading fix confirmed (Home shows chef of the week and chefs rail, empty dish rail hidden). Interleaved Profile runs, 1 warm-up + 3 pairs: `low_power` p50 53–77 ms, `high` p50 17–69 ms, janky 7–79% on both, bimodal as before — **no separation on this screen**. Profile's cost on the emulator is not dominated by tier-controlled effects; next device step is a trace of which layers and paints remain. |
+| P6 image pipeline, intrinsic sizes | shipped (primitive + lint) | `ui-minimal` `MinimalImage`; `frontend_surface_practices_check.mjs`; `frontend-lab/src/browser/imageStability.browser.test.tsx` | `MinimalImage`'s type has no unsized form: `width`+`height` (the browser derives the ratio and scales the box to the column) or `aspectRatio` (fills its column). Defaults `loading="lazy"`, `decoding="async"`; `priority` → eager + `fetchpriority="high"`; `reveal` fades in only after `img.decode()`; a plain `<img className>`, so every attribute reaches the element. Chromium geometry, 400 px column, 800×400 image not yet loaded at first measure: **unsized `<img>` moved the content below it 200 px; `MinimalImage` 0 px** (both forms). Lint: an `<img>` without `width` and `height` fails. Rules 3–5 (worker decode, decode queue, pixel budget) still open. |
+| P7 raster rules and lint | shipped (Foundation sources) | `tooling/scripts/frontend_surface_practices_check.mjs` | Rules: no `transition: all`; no permanent `will-change`; `backdrop-filter` only through `var(--minimal-backdrop-filter, …)`; infinite animations carry a `low_power` + `reduced_motion` guard in the same template. Contracts: the `low_power` tier block swaps shadow and blur tokens; `uiQuality` divides `slowFrames` by `frames` and reads no percentile; a degraded `frameClock` names the failure. Each rule negative-tested against a planted violation (7/7 fail); Foundation passes. Scans Foundation roots only — app-code enforcement is still open. Enforcement manifest refresh pending (human-supervised). |
+| P7 in ChooseChow app styles | shipped (unmeasured) | ChooseChow frontend | All 17 `backdrop-filter` read `--chow-backdrop-filter` (none on `low_power`/`reduced_motion`, with more opaque glass fills so text stays legible); heavy shadows through `--chow-shadow-*` and `minimalVars.shadow.*` (31 raw theme reads converted, so ui-minimal's tier swap reaches app code); 8 infinite animations paused on low tiers; 4 `transition: all` replaced with explicit lists. `createUiQuality` runs once before first render; windows come from one passive capture scroll listener on `#main-content` (300 ms idle) and route changes (first route skipped as cold). `tsc -p tsconfig.app.json` 0 errors; vitest 36 files / 167 tests. Lesson: the app's `npm run typecheck` checks nothing (root tsconfig is `files: []` with references), so earlier "typecheck passes" claims made with it were unverified. Open: `balanced` has no CSS; `contain: layout paint` on list cards needs a visual check. |
+| P9 warm-up and hitch ledger | open | — | — |
+| Lab GPU backend (finding 7) | fixed in harness | `frontend-lab/profile/scrollProfile.mjs` (`PROFILE_GPU`), `vitest.config.ts` `gpu` project | Headless Chromium's default backend is **SwiftShader, a CPU Vulkan**: WebGL2 renderer "SwiftShader driver", no WebGPU adapter (a *fallback* one with `--enable-unsafe-webgpu`). Every raster number in the 09-14 bundles above was software raster, throttled with the page. Same scenario, CPU 6x, 3 runs after a warm-up, on ANGLE/Metal (M1 Pro): baseline RasterTask **50 ms vs 1,531 ms** on SwiftShader; `cull` still adds GPU work (Raster 61 vs 50, GPUTask 217 vs 158 ms) but in absolute terms it is ~70 ms per pass. Bundles now record the renderer and adapter (capture schema, `gpu_practices.md`). Emulator WebView 133 (`-gpu host`): `navigator.gpu` present, `requestAdapter()` null; WebGL2 through the emulator's GLES translator — **no WebGPU on this Android WebView** (section 11 question 1, emulator only). |
+| Skeleton shimmer (finding 8) | fixed; measured | `frontend-lab/profile` (`PROFILE_GPU=metal`) | Tier profile after the fix (Metal, CPU 6x, 3 runs after a warm-up, P1 repeatability PASS): baseline p50 8.5 / p95 17.5 ms / **28% slow** (was 54–65% with the always-running sweep), style 213 ms, PrePaint 526 ms; `cull` 9% slow; `low_power` and `low_power+cull` 0% slow. What remains in baseline is the on-screen sweep's layer upkeep (PrePaint) — the tier still has a job, but a small one. |
+| Skeleton shimmer, shipped design | fixed | `ui-minimal` `MinimalSkeleton`; `frontend-lab/profile` `PROFILE_SET=skeleton`; `frontend-lab/src/browser/skeletonOffscreen.browser.test.tsx` | **Shipped design: the sweep pauses while the placeholder is off screen** (one shared `IntersectionObserver`, 25% margin, marks `data-minimal-offscreen`; `animation-play-state: paused` on `::after`; no observer ⇒ runs as before). Second interleaved A/B, same settings, 7 variants: `paused` p50 8.3 / p95 9.2 ms / **0% slow**, style 0, repeatable (1% spread) — identical to `static` and `none`; `transform+cull` 5% slow, p95 9.3–15.9, style 176 ms, not repeatable; always-running transform 62%, bgpos 71%, pulse 55% slow. Browser test: off-screen marked and paused, on-screen running, resumes on scroll; planting a wrong attribute in the pause rule failed it. SSR/DOM lanes unchanged (no winning-style change). History below. |
+| Skeleton shimmer, history | superseded | — | On the real GPU, `low_power` took baseline UpdateLayoutTree 876 → 0 ms and Paint 1,477 → 18 ms per pass. Zero style work can only come from stopping an animation: the sweep animated `background-position`, which never composites, so 240 skeletons restyled and repainted every frame. **The lab's P2 separation was the shimmer, not shadows or blur** — which is why the ChooseChow Profile screen, with no infinite animations, did not separate (handover experiment 1). First attempt: highlight on `::after` animating `transform`. Against the *previous session's* bgpos bundle it looked worse (p50 15.8 → 24.9 ms), but cross-session comparisons drift. **Interleaved in one session** (`PROFILE_SET=skeleton`, CPU 6x, Metal, 3 runs after a warm-up): bgpos p95 33.9 ms / 68% slow (style 2,217, paint 930, raster 35, GPU 120 ms); transform p95 26.0 / 59% (style 816, prepaint 815, layerize 701, paint 18); opacity pulse p95 25.9 / 53% (style 2,021, layerize 161, paint 15); static and none both p50 8.3 / p95 9.2 / **0% slow**. So the transform design is better than bgpos (paint −98%, p95 −23%), but **no animated design is cheap: 240 running animations cost 0.8–2.2 s of main-thread work per pass whether or not they composite**, and none reach budget. The lever is not the property; it is not running animations nobody can see. Offscreen-paused and cull variants under test. Repeatability fails for every animated variant (frame timing is noisy while 240 animations run), so these are ranges, not gates. SSR re-baselined for the attempt (64 cases, all `MinimalSkeleton`); lint tier-guard rule negative-tested against the `::after` selector. |
+| Render-surface lane on real GPU (finding 9) | shipped (lab lane) | `frontend-lab/src/gpu/` | New `gpu` lab project (ANGLE/Metal, WebGPU): a lab worker built from the SDK (`createRenderSurfaceWorker` + `serveRenderSurface`) with a fixed-cost fragment load, 4/4. Measured: shared worker **1 device for 3 surfaces**; prewarm first frame **p50 10 ms vs 32 ms cold** (5 interleaved pairs after a warm-up). |
+| GPU backpressure (finding 10) | fixed | `browser-host` `renderSurfaceClient.ts` (`RenderSurfacePass.settled`) | **The ladder could not see the GPU.** WebGPU `draw` returns at `queue.submit`, and the loop timed `draw`. Load 40× on real hardware: GPU 1,276 ms p50 / 2,528 ms max per frame, the loop reported 40.2 Hz, rung 0, **101 frames queued**. With `settled` (`queue.onSubmittedWorkDone()`), a tick finding the last frame unsettled draws nothing and counts as a miss: same load demoted to rung 1, GPU p50 15.7 ms, 39.2 Hz, ≤1 frame in flight; light load untouched. 2 s watchdog; epoch guard for a retired pass's late frame; shared-worker wrapper forwards `settled`. 4 unit tests; planting the old behaviour failed exactly those. Open: WebGL2 has no working GPU barrier yet (`gl.finish()` ~0 ms at 40× on ANGLE/Metal; a fence never signalled in the lab). |
+| Shared device release (finding 11) | fixed | `browser-host` `renderSurfaceWorker.ts` (`releaseWhenIdleMs`) | Real hardware: three hosts disposed, every pass retired, **device still alive** — release was keyed to `serve()` disposers, which production workers never call. Now keyed to live passes (a build in flight counts) plus an idle window (default 10 s, sized by the prewarm numbers above). Lab: kept inside the window, then `releases: 1`, driver `lost: "destroyed"`. 6 unit tests; planting the old behaviour failed the 3 release tests. |
+| ovasabi_v1 `blackHolePass` audit | open (app) | `ovasabi_v1/frontend/src/lib/render/passes/blackHolePass.ts` | Requests its own adapter and device per pass inside the shared worker and `dispose` never destroys it (a device leaked per remount; violates `gpu_practices.md` rule 8 and the disposal contract, whose lint scans Foundation only); allocates a render-pass descriptor per frame; no `settled`, so it is exposed to finding 10. Fix after the ovasabi_v1 Foundation sync is unblocked. |
+
+### ChooseChow captures (emulator estimates, 2026-09-11 to 09-14)
+
+Pixel-class AVD, Android 16, WebView 133, host GPU, Profile screen, scripted
+scroll (5 swipe pairs), `gfxinfo`:
+
+| Build / condition | p50 | p99 | Janky |
+| --- | --- | --- | --- |
+| Release before option B (09-11) | 200 ms | 650 ms | 100% |
+| After option B + shell headers (09-14) | 89–117 ms | 200–500 ms | 90% |
+| Same, blur and shadows disabled at runtime | 81–117 ms | 250–350 ms | 72–92% |
+| Control: plain 200-row list, same WebView | 23 ms | 150 ms | 5% |
+
+What the captures say, and what they do not:
+
+1. The WebView on this emulator can scroll near budget (control), so the cost
+   is the screen's content, not the host.
+2. The overworked lane is raster and composite: `DrawFn_DrawGL` on the app's
+   render thread dominates the trace, and long animation frames carry almost no
+   script (blocking ≈ 0 ms on most runs). JavaScript is not the bottleneck.
+3. Runs are bimodal: the same configuration measured 17 ms and 121 ms p50 on
+   consecutive runs. Single runs are not evidence; interleave baseline and
+   variant, settle 15 s after navigation, and report ranges.
+4. Blur and shadow removal helps on some runs only, so it is not the whole
+   story; the remaining candidates are layer count and invalidation of the
+   sticky, rounded, shadowed header over the scroller.
+5. Page-side frame timing under-reports compositor jank. In the same scroll,
+   `requestAnimationFrame` intervals read p50 17 ms (p90 50–117 ms) while
+   `gfxinfo` read p50 93–150 ms: the renderer main thread kept its cadence and
+   the app's render thread did not. The slow-frame *share* still separates a bad
+   screen (22–34%) from the control (~5%). Consequences: P2 demotes on slow-frame
+   share per window, never on the median; inside native shells the platform's
+   frame metrics (P8) are the authoritative input; and a P1 report from a WebView
+   is a lower bound, not the user's experience.
+6. **Most of the slow numbers were cold.** Four interleaved baseline/low-power
+   pairs, 15 s settle each, same screen: the *baseline* alone drifted from p50
+   117 ms (95% janky) to 17–27 ms (8–42% janky) across the session, and the
+   emulated low-power effects beat baseline clearly in only one pair. The first
+   minutes after install or launch pay JIT, shader-cache, and raster-cache
+   warm-up that steady state does not. Harness rule, effective now: run the
+   scenario to warm before any capture, record cold and warm separately, and
+   treat the cold run as a P9 first-use hitch rather than as scroll performance.
+   Warm steady state for ChooseChow Profile is near budget on this emulator;
+   cold start is the real defect to chase.
+
+## 14. Dependency Audit: framer-motion and styled-components (2026-09-15)
+
+Question from the platform architect: there was a complaint about framer-motion
+and styled-components; do they need to go, and can native elements reduce the
+dependencies?
+
+The complaint has a record. ChooseChow commit `dc4c567` moved its modal from
+framer-motion to CSS keyframes "for smoother transitions", and `9c370b4` removed
+`AnimatePresence` from page routing. Both were fixes for felt jank, made in the
+app, without a measurement to say why. This section supplies the why.
+
+All numbers below: frontend lab, headless Chromium 151 on ANGLE/Metal (M1 Pro),
+`frontend-lab/src/gpu/runtimeCost.gpu.test.tsx` and
+`results/bundle/measure.mjs` (rolldown, minified, production). Desktop numbers:
+the ratios transfer, the milliseconds do not — a floor Android phone is several
+times slower, and its WebView parses JavaScript slower still.
+
+### 14.1 What they weigh
+
+| Bundle (min + gzip) | gzip |
+| --- | --- |
+| framer-motion, as `ui-minimal` imports it (`motion`, `AnimatePresence`, `useScroll`, `useSpring`, `useTransform`, `useVelocity`, `useReducedMotion`) | **47.6 KB** |
+| framer-motion, `m` + `LazyMotion(domAnimation)` | 31.5 KB |
+| styled-components (+ stylis) | 12.2 KB |
+| react + react-dom | 43.6 KB |
+| `@ovasabi/ui-minimal`, everything, dependencies bundled | 125.4 KB |
+
+**framer-motion as used is heavier than React and ReactDOM together**, and
+`motion-dom` alone is the largest module in ui-minimal's bundle. For a 125 KB
+UI kit, roughly 38% is animation runtime.
+
+### 14.2 Which lane motion actually runs on
+
+Measured by counting writes to each element's `style` attribute while it
+animates (a JavaScript-driven animation writes once per frame; a CSS or WAAPI
+animation writes nothing) and reading the properties each WAAPI animation
+carries:
+
+| Shape | Where ui-minimal / apps use it | style writes | Compositor animation carries |
+| --- | --- | ---: | --- |
+| framer `opacity` + `scale` | `popVariants` (FloatingPanel, ActionModal), tooltips | 49 | opacity only |
+| framer `opacity` + `y` | `slideUpVariants` (Header, DisplaySection), `pageVariants`, ChooseChow's old modal | 51 | opacity only |
+| framer `height: auto` | `MinimalExplainer` | 50 | opacity only |
+| framer spring `scale` | `spring` (SegmentedControl, calendar selection) | 61 | nothing |
+| CSS transition `opacity` + `translate` | — | **0** | opacity, translate |
+| CSS `interpolate-size` `height: auto` | — | **0** | height |
+
+**framer-motion runs independent transforms (`x`, `y`, `scale`, `rotate`),
+`height: auto` and springs from JavaScript on the main thread, every frame.**
+Only opacity is handed to WAAPI. Motion's own performance guide says the same:
+individual transforms animate CSS variables, "and currently these are not
+accelerated". A main-thread stall — a projection delta, a route chunk, React
+committing — therefore freezes these animations mid-flight, and on a floor
+phone the stall is the common case. That is the ChooseChow complaint, measured.
+
+Not yet measured: frame-level proof that the CSS versions keep time through a
+stall (a timeline's `currentTime` cannot be read across a synchronous block on
+the main thread; it needs a trace — handover experiment list).
+
+### 14.3 What it costs per instance
+
+| Workload | cold mount | warm mount | style writes |
+| --- | ---: | ---: | ---: |
+| 300 cards as `styled(motion.section)` with a mount fade (MinimalCard's shape) | 26.3 ms | 8.6 ms | 300 |
+| 300 cards as `styled.section` + CSS `@starting-style` fade | **6.8 ms** | **3.4 ms** | **0** |
+| 1,000 buttons, styled-components interpolated props | 21.3 ms script, 24 rules injected | 7.0 ms | — |
+| 1,000 buttons, static styled template + CSS variables | 11.6 ms, 1 rule | 6.7 ms | — |
+| 1,000 buttons, plain class + CSS variables | **6.6 ms**, 0 rules | **4.9 ms** | — |
+| Enter/exit open, framer `AnimatePresence` | 3.0 ms script to first frame | | |
+| Enter/exit open, CSS `@starting-style` / WAAPI | 1.3 / 1.1 ms | | |
+
+Every `MinimalCard` is a framer-motion component, so a feed pays framer's
+per-instance setup once per card: **3.9× the cold mount cost** of the same card
+with a CSS fade. styled-components' cost is concentrated on the cold path
+(3.2× plain CSS on first mount, converging once its rule cache is warm).
+
+One counter-intuitive result: changing inline CSS custom properties on 1,000
+elements cost *more* style recalculation (7.4 ms) than swapping interpolated
+classes (3.5 ms). Per-element variables are right for continuous values; for
+discrete variants, attribute or class selectors — ui-minimal's `variantRules`
+(`:where([data-minimal-*])`) — are cheaper. Option B already made that choice.
+
+### 14.4 Native replacements, site by site
+
+Support floor: Android WebView is evergreen Chromium (the emulator runs 133).
+iOS shells target **iOS 14.0**; WKWebView follows the OS's Safari. iOS 26 is
+~79% of iPhones and iOS 18 ~14% (June 2026); devices on iOS 16 or older are
+~8%. Anything below Safari 17.5 gets the P3 fallback — the instant state change.
+
+| ui-minimal site | framer feature | Native replacement | Engine floor |
+| --- | --- | --- | --- |
+| `MinimalButton` hover/tap scale | `whileHover`, `whileTap` | `:hover` / `:active` + `transition: scale` | all |
+| `Chevron` rotate | `animate={{ rotate }}` | `transition: rotate` on an attribute | Safari 14.1 |
+| Button `Spinner` | infinite JS `rotate` | CSS `@keyframes` rotate, paused off screen and on low tiers (finding 8) | all |
+| `MinimalCard`, `Header`, `DisplaySection` mount fade/slide | `variants` + `initial`/`animate` | `@starting-style` + `transition` on `opacity`/`translate` | Safari 17.5, Chrome 117 |
+| `FloatingPanel`, `Tooltip`, `ActionModal` enter **and exit** | `AnimatePresence` | `<dialog>` / `popover` in the top layer, `transition-behavior: allow-discrete` on `display` and `overlay`; exit plays before removal with no React presence tracking | popover Safari 17, `@starting-style` 17.5 |
+| Tooltip / dropdown placement | `getBoundingClientRect` + state (a forced layout per open) | CSS anchor positioning | Safari 26, Chrome 125; keep the measured path as fallback |
+| `MinimalExplainer` expand | `height: auto` | `grid-template-rows: 0fr → 1fr` transition (all engines), `interpolate-size` where supported | all / Chrome 129 |
+| Calendar month slide | keyed `AnimatePresence` | same-document View Transitions (`document.startViewTransition`) | Safari 18, Chrome 111 |
+| Calendar selection, `SegmentedControl` indicator | `layoutId`, `layout` (FLIP: measures on every render) | the indicator already knows `$index`: `translate: calc(var(--index) * 100%)` + transition; or a `view-transition-name` | all / Safari 18 |
+| `useMinimalScrollFeedback` | `useScroll` + `useVelocity` + `useSpring` | **no users in Foundation, ChooseChow or ovasabi_v1**; remove, or a scroll-driven animation if a use appears | Safari 26, Chrome 115 |
+| `motion.ts` token helpers | `Transition`/`Variants` objects | CSS custom properties already exported (`--minimal-ease-*`, durations) | all |
+
+Every site has a native equivalent. None needs gesture physics or drag, which
+is the one job P3 reserved for a JavaScript motion library.
+
+### 14.5 Recommendation
+
+1. **framer-motion: remove it from `ui-minimal`.** It is the largest dependency,
+   it runs the shapes ui-minimal uses on the main thread, it costs 2.5–3.9× per
+   mounted instance, and every use has a native replacement on the engines the
+   products target. Apps that want gesture physics may still import it
+   themselves; the kit should not make every app pay for it. Order: `MinimalCard`
+   and button motion first (highest instance count), then overlays
+   (`<dialog>`/`popover`), then calendar/segmented (View Transitions,
+   index-driven translate), then delete `useMinimalScrollFeedback`.
+2. **styled-components: keep the decided path — B, then C (Linaria).** Its runtime
+   cost is real but concentrated on the cold path and on interpolated props,
+   which option B already removed from ui-minimal; the remaining reasons to go
+   are the 12 KB, the CSP exception, and maintenance mode. Linaria keeps the
+   `styled` syntax, so the migration is mechanical. Do not replace it with
+   another runtime library.
+3. **Native elements are not only a dependency win.** `<dialog>` and `popover`
+   bring the top layer, focus handling, `Escape` and light dismiss that
+   ui-minimal currently reimplements in JavaScript, and anchor positioning
+   removes the forced layout each tooltip open pays today.
+4. **Gate it.** Extend `frontend_surface_practices_check.mjs`: no new
+   `framer-motion` import under `ui-minimal/` once the migration starts (ratchet),
+   and no `motion.*` independent transforms in Foundation sources.
+
+### 14.6 Implementation (landed 2026-09-15, uncommitted)
+
+Decision (platform architect, 2026-09-15): **breaking removal now**, and keep
+the iOS 14.0 deployment target — older devices must stay compatible and
+efficient, not merely tolerated.
+
+What changed in `ui-minimal`:
+
+1. `framer-motion` is no longer a peer dependency or an import. `motion.ts` is
+   CSS: `minimalEnter.{fade, pop, slideUp, page, tooltip, slideX}` style
+   fragments (keyframes on insertion, `backwards` fill, individual `translate`
+   / `scale` so component `transform`s are never overridden, off for reduced
+   motion and the `reduced_motion` tier, off per element with
+   `data-minimal-enter="false"`), `minimalMotionMs`, `useMinimalReducedMotion`,
+   and `useMinimalMotion()` → `{ reducedMotion, ms }`.
+2. `useMinimalPresence(open, exitMs)` (`presence.ts`) replaces
+   `AnimatePresence` where an exit is real (`MinimalExplainer`, via a
+   `grid-template-rows` transition).
+3. Public types: `MinimalHeader/Button/Card/DisplaySection/ScrollMain` props
+   extend React's HTML attributes, not `HTMLMotionProps`. `Card`, `Header` and
+   `DisplaySection` gain `enter?: boolean` (replaces `initial={false}`).
+   Removed: the `create*Transition` / `create*Variants` helpers,
+   `useMinimalScrollFeedback`, `MinimalScrollFeedbackSurface` (no users).
+4. Per site: Chevron and spinner are CSS (spinner stops on low tiers);
+   Button hover/press were already CSS and the framer layer on top is gone;
+   SegmentedControl's indicator is an index-driven `translateX` transition;
+   the calendar month panel enters with `slideX` (the simultaneous exit slide
+   was dropped); calendar selection pops in (the spring between days was
+   dropped); overlays enter with `pop`/`tooltip`/`fade`.
+
+Two things the audit found while doing it:
+
+- **The overlay exits never ran.** `ActionModal`, `Tooltip` and the dropdown
+  panel return `null` or unmount outside their `AnimatePresence`, so framer's
+  exit variants were dead code; enter-only CSS is full parity.
+- **framer made server-rendered cards invisible.** The SSR cascade shows the
+  old `MinimalCard` HTML carried `style="opacity:0"` until hydration, and
+  buttons carried a framer-added `tabindex="0"`. Both are gone.
+
+Bundle, same rolldown measurement as 14.1: `@ovasabi/ui-minimal` with its
+dependencies **125.4 KB → 80.9 KB gzip (−35%)**; `motion-dom` and
+`framer-motion` are gone from the graph.
+
+Mount, 300 cards, interleaved (lab `gpu` project): the shipped `MinimalCard`
+now mounts **11.6 ms cold with 0 style writes**, against 26.4 ms and 300 writes
+for the framer-motion shape. Warm it is 10.1 ms against 9.1 ms, and a plain
+card with a trivial template is 2.5 ms — but those are not like for like: the
+shipped card carries its full styled-components template (surface variants,
+tiers, theme provider). That remaining gap is the styled-components runtime,
+which is the case for option C (Linaria) rather than for more motion work.
+
+Verification: ui-minimal `tsc` clean; lab `ssr` re-baselined (only the changed
+components moved — Card, Header, DisplaySection, Button, Dropdown, TimePicker,
+SegmentedControl, Explainer, Calendar, ScrollMain; `ScrollFeedbackSurface`
+removed), `dom` 6/6, `browser` 13/13; surface lint passes, with the new ratchet
+"ui-minimal imports no JavaScript animation runtime" negative-tested (a planted
+import failed it). Template (`templates/frontend`) and
+`frontend_manifest_sync.mjs` no longer require or alias framer-motion; apps that
+import it for their own code keep it.
+
+Apps (the 11 vendoring projects were surveyed; three used the retired API):
+
+| App | Change | Evidence |
+| --- | --- | --- |
+| ChooseChow | synced; 23 `initial={false}` → `enter={false}` (incl. two on a styled `MinimalCard`); `PageTransition` is a CSS transform-only keyframe; `useChoreography` builds its framer transition from theme tokens; route-transition source test pins the CSS form | `tsc -p tsconfig.app.json` clean, vitest 36 files / 168 tests |
+| trotters_v1 | synced (its 23 local vendored edits were byte-identical to Foundation); `PageTransition` and `motion.ts` build framer variants from theme tokens (it relies on `AnimatePresence` exits) | `tsc` clean, vitest 6 files / 35 tests |
+| pronto_v1 | synced; `CwfViewer` uses `minimalEnter.slideUp` (framer import dropped); `ExecutiveBulletinBoard` owns its row fade (keeps framer for `layout="position"`) | Differential `tsc`: against the synced vendored source 12 errors, all harness-only missing Node types; the same harness against the stale install shows those 12 plus the `minimalEnter` error. **Its own `tsc` and tests need a reinstall** — `node_modules` is a stale pnpm tree while the lockfile is npm's |
+
+### 14.7 Linaria spike and animation primitives (2026-09-15)
+
+**Linaria (option C) — the pipeline works.** `frontend-lab/linaria/` builds a
+MinimalCard-shaped component with `@linaria/react` 8.2.0 and `@wyw-in-js/vite`
+2.5.1 (Node ≥ 22.12; the machine runs 24.1). wyw-in-js evaluated
+`minimalVars` from Foundation's TypeScript source outside the project root, the
+extracted CSS carries the theme variables and fallbacks, keyframes are scoped
+automatically, and prop interpolations became per-instance CSS variables
+(`padding: var(--l1abmdf9-0)`). A bundle with only the Linaria card contained
+neither `styled-components` nor `stylis`. Build 0.7–1.9 s for the spike.
+
+Mount, production build, 300 cards, real GPU, 5 interleaved fresh pages (cold,
+median) plus 45 repeat mounts (warm, fastest):
+
+| Engine | cold script | cold style + layout | rules injected | warm script | warm style + layout |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Linaria card | **6.7 ms** | 12.3 ms | **0** | **0.6 ms** | 8.0 ms |
+| styled-components `MinimalCard` | 9.4 ms | 13.5 ms | 10 | 1.7 ms | 8.4 ms |
+
+Script time falls 29% cold and 65% warm; style and layout are the engine's and
+barely move, as expected. Caveat: the spike card is simpler than the shipped
+`MinimalCard` (fewer surface variants), so the gap for real primitives is an
+estimate until one is ported.
+
+What the migration has to solve, found by the spike and the inventory:
+
+1. **Every consumer's build and test runner needs the wyw-in-js plugin.**
+   Linaria's `styled` throws at runtime without extraction, so each app's
+   `vite.config.ts` and `vitest.config.ts` (and the lab's `ssr` cascade eval,
+   which reads styled-components' SSR sheet) must change together. That is a
+   template + `update-project.sh` change, not a ui-minimal change alone.
+2. **Evaluation pulls runtime modules.** Importing `@ovasabi/ui-minimal`'s
+   index made wyw-in-js evaluate `motion.ts` (styled-components) and
+   `runtimeStyle.tsx` (react) at build time — it worked, with warnings. Token
+   modules should be importable without React or a styling runtime
+   (`importOverrides` or a `tokens` entry point).
+3. **ui-minimal's styled-components surface:** 141 `styled.*`, 34 `css`, 8
+   `keyframes`, 3 `createGlobalStyle` (→ `:global()`), 8 `ThemeProvider` / 1
+   `useTheme` (→ CSS-variable scopes; the components already read only
+   `minimalVars`), 11 `as` (supported). The three block-returning functions are
+   inside `variantRules`, evaluated at build time, so they are compatible.
+4. **Apps keep styled-components for their own code** (ChooseChow 61 files,
+   ovasabi_v1 50) until they migrate; both can coexist, so the kit can move
+   first.
+
+**Animation primitives.** `ui-minimal/ts/src/timeline.ts`:
+`createMinimalTimeline` (GSAP-shaped positions `"<"`, `">"`, `"+=n"`, labels;
+stagger from start/end/centre; seek, progress, reverse, timeScale, repeat,
+yoyo; forward callbacks), `minimalEntry` / `minimalExit`, `minimalKeyframes`
+presets on compositor properties only, and `useMinimalTimeline`. Every tween
+is a native `Element.animate()`; the group is kept in lockstep by using each
+tween's `delay` as its position and one shared `startTime`, with a null-target
+master animation for `finished` and repeats. No per-frame JavaScript; `hold`
+commits end styles and cancels instead of leaving open-ended fills; reduced
+motion jumps to the end; non-compositor properties are reported in `issues`.
+Two traps fixed while testing: `Element.animate()` rejects `var()` easings
+(tokens are resolved from the root's computed custom properties), and a
+callback at the very end could lose the race with `finished`. Lab browser lane:
+9 tests.
+
+Still open: overlays onto `<dialog>` / `popover` (`@starting-style` exits where
+supported, instant below), anchor positioning with the measured fallback, View
+Transitions for the calendar, trotters' JS page transitions, a trace proving
+CSS motion keeps frames through a main-thread stall, and the same runtime-cost
+tests on the emulator WebView.
+
+### 14.8 Linaria port of ui-minimal (landed 2026-09-15, uncommitted)
+
+Decision (platform architect, 2026-09-15): proceed with option C.
+
+**The kit no longer uses styled-components.** Every `styled.*` in
+`primitives.tsx` and `interactions.tsx` is `@linaria/react`'s; styles are
+extracted at build time by `@wyw-in-js/vite`. What changed to make that
+possible:
+
+1. `css` fragments and `variantRules` return plain strings (evaluated at build
+   time). No fragment contained a runtime prop function, so this was
+   mechanical.
+2. Keyframes live inside the template that uses them (Linaria scopes keyframe
+   names per component; a keyframe declared under `:global()` and referenced by
+   name elsewhere does not resolve — spike finding). `minimalEnter` fragments
+   carry their own `@keyframes`.
+3. `theme.tsx`: the global stylesheet (base-theme variables, quality tiers,
+   reset) is static extracted CSS; `MinimalThemeProvider` / `MinimalThemeScope`
+   / `useMinimalTheme` use a React context; `MinimalGlobalStyles` renders a
+   small `<style>` only for a non-base theme. Build-time values come from the
+   runtime-free `tokens.ts`.
+4. `@ovasabi/ui-minimal/styled-components` (`MinimalStyledThemeBridge`): mount
+   it inside `MinimalThemeProvider` and application styled-components keep
+   receiving the resolved theme (123 app files read it). styled-components is
+   now an optional peer.
+5. Two extractor constraints found and fixed: inline `type` import specifiers
+   (`import { type X }`) break wyw-in-js's evaluation parser — split into
+   `import type`; and build-time interpolations containing callbacks must be
+   hoisted out of the template into module constants (20 in primitives, 1 in
+   interactions).
+6. Vendor prefixes off (`prefixer: false`): no target engine needs them.
+
+**Equivalence proof.** `frontend-lab/src/ssr/linariaPort.eval.test.ts` builds
+the kit as an app would, renders the full 2,240-case sweep from the built
+module against the one extracted stylesheet, and compares every case with the
+styled-components cascade saved before the port (winning value of every
+property on every element, keyframe bodies, markup): **2,176 identical; the 64
+others are one accepted shape** — `MinimalFieldGrid` given an array where it
+takes a number, which both engines turn into garbage differently. The harness
+gained engine-neutral canonicalisation (component identity classes, Linaria's
+per-element custom properties resolved with the element's own value first,
+keyframe names replaced by bodies, invalid HTML attributes dropped on both
+sides). The digest eval now renders the built kit and was re-baselined on that
+proof.
+
+Side effects on markup, all improvements: sweep props no longer leak into the
+DOM as junk attributes (`options="[object Object]"`), because Linaria forwards
+only valid HTML props.
+
+**Sizes** (production library build, `node src/ssr/buildKit.mjs`): extracted
+CSS **62.4 KB → 7.9 KB brotli**, loadable in `<head>` before any script; kit JS
+140.1 KB → 30.3 KB brotli, with neither styled-components nor stylis in it.
+
+**ChooseChow pilot (2026-09-15): green.** Vendored sync, `frontend_linaria_patch.mjs`
+(Vite + Vitest plugin, `AppThemeProvider` bridge), manifest sync, `npm install`:
+`tsc -p tsconfig.app.json` clean, vitest **36 files / 168 tests**, production
+build succeeds. Production sizes: CSS 61.1 KB → **7.9 KB brotli** (static
+file); `ui` chunk (styled-components still used by the app, plus ui-minimal)
+48.2 KB br; `vendor` 15.2 KB br; the app's main chunk **192.1 KB br (938 KB
+raw)** — which is now the dominant loading cost and a code-splitting job, not a
+kit one. The pilot forced four fixes, each now in Foundation:
+
+1. Build-time evaluation of a *vendored* kit runs from its real path
+   (`app/foundation/ui-minimal/ts/src`), where neither React nor extensionless
+   TypeScript imports resolve. The modules a template reads are now
+   runtime-free (`tokens.ts`, `motionStyles.ts`, `globalStyles.ts`,
+   `variantRules.ts`) and import each other with explicit `.ts` extensions
+   (every app's tsconfig already allows them; Node 24 strips types natively).
+2. Tests that render inside `MinimalThemeProvider` directly lose the
+   styled-components theme their app's own templates read; they must use the
+   app's bridged `AppThemeProvider` (2 files in ChooseChow; none elsewhere).
+3. The manifest sync moved the app from Vitest 4 to the template's pinned 5,
+   whose jest-dom matcher types come from `@testing-library/jest-dom/vitest`
+   (template `src/test/setup.ts` updated).
+4. `frontend_linaria_patch.mjs` + `patch_frontend_linaria` in
+   `scaffold_managed_patches.sh` deliver the plugin and bridge in place,
+   idempotently, and report shapes they will not rewrite (dry-run on three app
+   shapes: extra plugins, semicolon style, no `AppThemeProvider` alias).
+
+**New adoptions start on Linaria (2026-09-15).** The frontend template no longer
+depends on styled-components: `package.json` drops it, the Vite/Vitest configs
+drop its alias and dedupe and let wyw-in-js transform the app's own `src` as
+well as the kit, `App.tsx` is written with `@linaria/react` and `minimalVars`,
+`styles/theme.ts` is `MinimalThemeProvider` again with no styled-components
+type augmentation, `frontend_manifest_sync.mjs` no longer requires it, and
+`project_scaffold_check.sh` checks for `@linaria/react` instead. The styling
+guide's §3 is now the Linaria format. What remains of styled-components in
+Foundation is deliberate: the opt-in `@ovasabi/ui-minimal/styled-components`
+bridge (optional peer) for existing apps' own code, the managed patch that
+installs it, and the lab's styled-components reference used by the equivalence
+proof.
+
+**Still to do for apps:** every app's `vite.config.ts` and `vitest.config.ts`
+need the wyw-in-js plugin (template + `update-project.sh`), the Linaria and
+Babel preset dependencies, Node ≥ 22.12 in CI/Docker (core CI already runs 24;
+the template Dockerfile builds on `node:22-alpine`), and
+`MinimalStyledThemeBridge` in each app's root so their own styled-components
+keep the theme. Until then, a synced app cannot build the ported kit.
+
+## 15. Deliverables Audit (2026-09-15)
+
+The platform architect asked whether this program has achieved its
+deliverables, with the bar set at stability (no unnecessary layout shift),
+minimal bytes and loading overhead, and extreme hardware and styling sympathy.
+This is the honest answer, proposal by proposal, then gate by gate.
+
+### 15.1 Proposals
+
+| Item | Built | Gate met | Evidence / what is missing |
+| --- | --- | --- | --- |
+| P1 `frameTelemetry` | yes | lab yes; device no | Lab p95 repeatable ±10% (PASS, Metal and SwiftShader). No floor-device run; finding 5 says a WebView P1 report is a lower bound. |
+| P2 `uiQuality` | yes (+ ChooseChow) | lab yes; device no | Lab separation was the non-composited shimmer (finding 8), now fixed at the source; after the fix baseline is 28% slow, `low_power` 0%. `balanced` still has no CSS. No thermal/power inputs (P8). |
+| P3 compositor-first motion | mostly | **lab yes** (§15.5) | Tokens as CSS ✓; framer-motion removed from the kit ✓ (§14.6); CSS enter + WAAPI timeline ✓ (§14.7); infinite loops pause off screen and on low tiers ✓; no exit-gated routes in ChooseChow ✓; **stall gate measured**: through a 400 ms main-thread block CSS and WAAPI motion kept presenting changed frames (36–37), JS rAF motion presented 1. **Missing:** View Transitions (calendar, routes), scroll-driven animations (none used). |
+| P4 cull / virtualList | cull only | partly | `MinimalCullSection` shipped, skip/restore/scroll-height tested in Chromium; find-in-page and a11y tree untested; not adopted by an app. `virtualList` not built. The raster cost `cull` adds is small on a real GPU (finding 7). |
+| P5 styling runtime | B done, C spiked | this page yes | Option B landed; **0 CSS rules injected after first paint** on the load profile (51 at FCP, 51 after scroll). Linaria extraction proven and a runtime-free `tokens` entry split out; the kit has not moved yet. Navigation-time injection in a real app is unmeasured. |
+| P6 image pipeline | intrinsic sizes | lab yes (sizing) | `MinimalImage` (no unsized form in its type) + lint on unsized `<img>`; measured 200 px → 0 px shift (§13). Worker decode, decode queue and pixel budget not built; apps have not adopted it. |
+| P7 raster rules | yes (lint) | lab only | Rules and gates in `frontend_surface_practices_check.mjs` (tier guard, keyframe properties, backdrop token, no permanent will-change, no framer in the kit), each negative-tested. `contain: layout paint` on list cards and the composited-layer budget are not set. |
+| P8 native tuning | partly | no | Inspection flag ✓; COOP/COEP set but ineffective on Android WebView (verified). No ADPF/thermal/low-power signals. |
+| P9 warm-up / hitch ledger | surfaces only | no | `prewarmRenderSurface` (10 vs 32 ms first frame). No UI hitch ledger; ChooseChow cold start (launch 12.8 s) remains the biggest user-facing defect. |
+| P10 evidence harness | yes | — | Lab lanes `ssr` / `dom` / `browser` / `gpu`, scroll profile, load profile (new, below), device CDP tooling. |
+| Graphics lane | yes | lab yes | GPU backpressure (`settled`), shared-device idle release, disposal — all on real hardware (findings 9–11). WebGL2 has no GPU barrier yet. |
+
+### 15.2 Gates (section 6)
+
+| Gate | Target | Status |
+| --- | --- | --- |
+| Scroll p95 / p99 | ≤ 16.7 / 25 ms on the floor device | Lab (CPU 6x, Metal) baseline p95 17.5 ms, `low_power` 9.2 ms. **Floor device: not measured**; emulator estimates only. |
+| Max hitch, frozen frames | ≤ 50 ms, 0 | Lab: 0 LoAF on every variant. Device: unmeasured. |
+| Runtime CSS rules after first paint | 0 | **Met** on the lab page (load profile). |
+| LoAF attributed to image decode | 0 | Not measured: the lab feed has no images yet. Layout shift from images is gated (`MinimalImage`, lint, browser test). |
+| Paint before JavaScript (§15.4 target) | FCP < 1 s on the floor emulation | **Met on the lab page**: 987 ms prerendered vs 1,216 ms client-rendered (§15.5). |
+| Route change to first paint | ≤ 100 ms perceived | Not measured. |
+| 90/120 Hz motion on the compositor | all UI motion | Kit motion is CSS/WAAPI on compositor properties (0 style writes measured); apps still use framer in places. |
+
+### 15.3 Stability, bytes and loading (new measurements)
+
+`frontend-lab/profile/loadProfile.mjs`: production build of the lab feed, served
+with COOP/COEP, loaded on the real GPU with a floor-device emulation (CPU 4x,
+Slow 4G, 412×915 @2.625x, touch), 3 runs after a warm-up.
+
+| Metric | Result |
+| --- | --- |
+| CLS during load | **0** |
+| CLS during a scripted scroll | **0** |
+| CLS on a quality-tier change (`low_power`) | **0** — the tier swaps paint-only tokens, never geometry |
+| FCP = LCP | 2,035 ms |
+| Total blocking time (long tasks > 50 ms) | 53 ms |
+| Script on the wire | 227.9 KB raw → **71.0 KB gzip / 62.2 KB brotli** (React, ReactDOM, styled-components and the ui-minimal it uses) |
+| CSS rules at FCP / after load / after scroll | 51 / 51 / 51 |
+
+What these say, and do not:
+
+1. The kit itself is stable: nothing it does moves layout after first paint,
+   including a tier change and `MinimalCullSection`-free scrolling.
+2. First paint is **entirely JavaScript**: the HTML is an empty `#root`, so FCP
+   waits on 62 KB brotli of script over Slow 4G, then parse and a client
+   render. The largest lever on loading is not a smaller dependency but paint
+   before JavaScript — prerendered or server-rendered shell HTML with the
+   extracted CSS (which Linaria makes possible: its CSS is a static file that
+   can be in the first response).
+3. This page has no images, web fonts or data loading, which is where real
+   apps shift. Stability is not proven for ChooseChow or ovasabi_v1 until the
+   same profile runs against their production builds with seeded data.
+
+### 15.4 What is left, ordered by what the hardware and the user feel
+
+1. ~~**Paint before JavaScript**~~ — built and measured on the lab page (§15.5).
+   Open: adoption by apps (ChooseChow's signed-in screens need a
+   signed-out shell per route), and a `react-dom/static` prerender for routes
+   that suspend.
+2. ~~**P6 image pipeline with intrinsic sizes**~~ — sizing built and gated
+   (§15.5). Open: sized sources (`srcset` from the media backend), worker
+   decode, app adoption (ChooseChow `ChowThumb`).
+3. **Load profile against real apps** (ChooseChow, ovasabi_v1 production builds
+   with seeded data), including web fonts (`font-display`, size-adjusted
+   fallbacks) and skeleton-to-content swaps.
+4. ~~**The P3 stall trace**~~ — lab and emulator (§15.5). Open: floor-device
+   runs of P1/P2 on real hardware.
+5. ~~**Linaria migration of the kit**~~ — done (§14.8); the fleet's own
+   styled-components code is in `styled_components_removal_handover.md`.
+6. P9 hitch ledger and ChooseChow cold start.
+
+### 15.5 Paint before JavaScript, image stability and the stall trace (2026-09-15)
+
+**Paint before JavaScript.** `prerenderShell` (`frontend-kit/ts/vite`,
+exported as `@ovasabi/frontend-kit/vite`) runs after the client build: it builds
+the app's `entry-server` for SSR *with the app's own Vite config* (same aliases,
+same wyw transform, so Linaria class names match the client build), calls its
+`render(url)` per route, and writes the markup into the built HTML's `#root`.
+Vite already links the extracted CSS in the `<head>`, so the first response is
+paintable HTML + one stylesheet. `mountRoot` (`@ovasabi/frontend-kit`) hydrates
+when the root has markup and client-renders otherwise (dev). The frontend
+template wires all three (`src/entry-server.tsx` is a new create-mode seed).
+
+`loadProfile.mjs` now builds both variants and loads them interleaved, served
+brotli-11 as a production edge would (earlier bundles were uncompressed and
+overstated every text byte ~4–7×), CPU 4x, Slow 4G, Metal, 3 runs each after a
+warm-up, 40 feed sections:
+
+| Metric | Client-rendered | Prerendered + hydrate |
+| --- | --- | --- |
+| FCP = LCP | 1,216 ms | **987 ms** (−19%) |
+| TBT (long tasks > 50 ms) | 40 ms | **0 ms** — hydration adopts DOM instead of building it |
+| App ready (two frames after mount) | 942 ms | 856 ms |
+| CLS load / scroll / tier | 0 / 0 / 0 | 0 / 0 / 0 |
+| Hydration mismatches | — | 0 |
+| HTML on the wire | 0.5 KB | 1.1 KB (72.7 KB decoded) |
+| CSS / script on the wire | 7.3 / 50.3 KB | 7.3 / 50.3 KB |
+| CSS rules at FCP / injected after | 305 / 0 | 305 / 0 |
+
+Uncompressed, the same pair read 1,975 → 1,465 ms: the HTML and CSS bytes were
+the floor. With compression the remaining FCP is the Slow 4G round trips for
+HTML then CSS. Next levers, in order: inline the critical CSS for the first
+screen (removes one round trip), and prerender only the first screen rather
+than the whole feed.
+
+Rules for apps: render nothing during `render` that differs on the client for
+that URL (no `window`, time, randomness, signed-in data); `useSyncExternalStore`
+needs its server snapshot; anything data-dependent renders a skeleton **of the
+final size** so hydration and data arrival shift nothing.
+
+**Image stability.** See the §13 row: an unsized image moved the content below
+it by the image's full scaled height (200 px); `MinimalImage` in either sizing
+form moved it 0 px. Lint rule "images reserve their box before they load".
+
+**Stall trace (P3 gate).** `frontend-lab/profile/stallTrace.mjs` measures what
+the viewer sees, not what script reads: `Page.startScreencast` frames
+(produced from the compositor's output and acknowledged outside the renderer
+main thread), hashed, counting frames that *changed* inside a synchronous
+main-thread block. One box sliding 240 px three ways, interleaved, 3 runs, block
+400 ms, headless Chromium on ANGLE/Metal:
+
+| Variant | Changed frames in the 400 ms block | Same span before the block |
+| --- | --- | --- |
+| CSS `@keyframes` on `transform` | **36** | 35 |
+| WAAPI `element.animate` on `transform` | **37** | 36 |
+| JS `requestAnimationFrame` writing `style.transform` | **1** | 36 |
+
+Emulator (ChooseChow devtools WebView, Android 16, `-gpu host`; the page is
+written into `about:blank` because the app WebView blocks cleartext localhost).
+Its screencast delivers only ~25 frames/s, so the block is 1 s. Valid runs only:
+the capture stalled after two rounds (0 frames even *before* the block, one
+block stretched to 3.8 s), and the script now drops such runs.
+
+| Variant (1 s block) | Changed frames in block, run 1 / run 2 | Same span before |
+| --- | --- | --- |
+| CSS `@keyframes` | 14 / 13 | 25 / 26 |
+| WAAPI | 20 / 14 | 29 / 31 |
+| JS rAF | 1 / 2 | 23 / 17 |
+
+Same direction as the lab on a WebView: compositor motion kept about half to
+two thirds of the capture's rate through the stall, JS motion froze. Two valid
+pairs is a direction, not a gate; a physical floor device is still owed.
+
+Compositor motion kept its cadence through the block; main-thread motion froze
+for all of it — the ChooseChow complaint about framer-driven motion (§14.2),
+now as a trace rather than an argument.
+
+### 15.6 First screen only, critical CSS, small phones and a real app (2026-09-15)
+
+**Levers built** (all in `@ovasabi/frontend-kit`):
+
+- `useFirstScreenCount(first, total, step)`: `first` items in the prerendered
+  HTML and during hydration, then `step` more per frame. A single commit of the
+  remainder was one 70–77 ms long task at CPU 6x — transitions yield during
+  render, never during commit — so it grows a few items per frame instead.
+- `prerenderShell({ criticalCss: "subset" })` inlines only the rules that can
+  match the prerendered markup (`vite/criticalCss.ts`: a rule is dropped only
+  when every selector names a class the markup lacks; conditional at-rules
+  filtered inside, referenced keyframes kept; unit-tested). The full stylesheet
+  is **preloaded at its original place in the head** and promoted in place by
+  a tiny external module (CSP-safe), with a `<noscript>` fallback. `"all"`
+  inlines the whole stylesheet instead.
+- `render(url)` may return `{ html, head }` — e.g. styled-components'
+  `ServerStyleSheet` tags — and `ssrConfig` carries inline config (aliases,
+  Rollup externals, transforms) into the SSR build, which otherwise starts from
+  the config file alone.
+- Load profile: `LOAD_DEVICE=small` (360×640 @2x, CPU 6x, 3G 300 ms / 750 kbps)
+  next to `mid` (412×915, CPU 4x, Slow 4G); app mode (`LOAD_APP=`) serving a real
+  production build with fixtures and media over the throttled network, blocking
+  and recording any external host; LCP element, per-font arrival times,
+  hydration and page errors per run. A run with a page error is not a result.
+
+**Lab feed**, brotli, interleaved:
+
+| Variant | FCP mid | FCP small | TBT small | HTML (br) |
+| --- | --- | --- | --- | --- |
+| Client-rendered | 1,198 ms | 1,914 ms | 115 ms | 0.5 KB |
+| Prerender, whole feed | 992 ms | 1,357 ms | 5 ms | 1.1 KB |
+| Prerender, first screen | 934 ms | 1,241 ms | 0 | 0.8 KB |
+| + critical CSS (7.7 of 54 KB) | **585 ms** | **793 ms** | **0** | 2.7 KB |
+| + whole CSS inlined | 592 ms | 815 ms | 0 | 7.8 KB |
+
+CLS 0 and 0 hydration mismatches in every variant; no long task in the
+first-screen variants after the per-frame expansion. Critical subset matches
+full inlining on paint and keeps the full stylesheet cacheable.
+
+**ChooseChow's signed-out landing page** (production build; seed catalogue as
+fixtures, since production hides seed rows; lab-only transforms, no app edits —
+`frontend-lab/profile/apps/choosechow/`), 3 interleaved runs:
+
+| Build | FCP small | FCP mid | TBT small | CLS small / mid | HTML (br) |
+| --- | --- | --- | --- | --- | --- |
+| Baseline (client-rendered) | 5,024 ms | 3,152 ms | 246 ms | 0.119 / 0.093 | 2 KB |
+| Prerender (styled-components SSR) | 2,072 ms¹ | 2,132 ms¹ | 286 ms | 0.077 / 0.076 | 9.5 KB |
+| Prerender + critical CSS | **664 ms** | **408 ms** | 254 ms | 0.138 / 0.076 | 10.3 KB |
+| Prerender + whole CSS inlined | 724 ms | 448 ms | 371 ms | 0.138 / 0.076 | 16.6 KB |
+
+¹ The same build measured 1,204 / 648 ms in the previous session: without
+critical CSS, paint waits on a stylesheet round trip on a jittery emulated
+link. Critical CSS removes that wait and the variance with it.
+
+What the app profile found:
+
+1. **First paint: 7.6× faster on a small phone** (5,024 → 664 ms), with 0
+   hydration mismatches. Script is unchanged (256 KB brotli, 1.14 MB decoded),
+   so TBT and time-to-interactive are not improved — that is code splitting.
+2. **An early paint catches more font swaps.** The hero block moves 34 px
+   (one wrapped line) each time a web font arrives. Correction to a claim made
+   during this work: the higher CLS of the critical variant was first blamed
+   on the moved stylesheet overriding app styles; the whole-inline variant,
+   with no late stylesheet, shows the same shift at the same moment, so the
+   cause is paint landing before the first font rather than after it. (Keeping
+   the full stylesheet at its original place in the cascade is still correct
+   and is what shipped.)
+3. **styled-components re-inserts `@font-face` on hydration — measured.** It
+   moves server-rendered `<style data-styled>` rules into its own sheet and
+   removes the originals; removing a sheet destroys its font faces. Per-font
+   arrivals in the profile: Plus Jakarta Sans and Instrument Sans both download
+   at ~1.25 s and **again at ~5.9 s** on the small phone (~0.6 s and ~3.5 s on
+   mid), and the hero re-wraps each time. Fonts belong in static CSS (the
+   Linaria migration does this), never in runtime CSS-in-JS.
+4. **Data-driven label swap.** The hero pill reads "Hot-delivery riders" until
+   the kitchens list lands and "3 cooking right now" after: a different length
+   re-wraps it (94 → 61 px). Reserve its box (one line, fixed height).
+5. **Third-party image host on the first screen.** Curated fallbacks load from
+   `images.unsplash.com` — on a real phone a DNS + TLS setup per visit. Three seed
+   photos are ~950 KB 1024×1024 JPEGs. Self-host and size (`MinimalImage`).
+6. **Size-adjusted fallback faces** (`frontend-lab/profile/fontFallbackMetrics.mjs`):
+   each woff2 measured in Chromium (`measureText` width, font ascent/descent) against
+   local fallbacks at regular and bold, emitting `size-adjust`, `ascent-override`,
+   `descent-override`. One set cannot serve both platforms: Arial-tuned values were
+   2.5% wide on Roboto and 9% on Roboto Bold, so each web font gets an
+   Arial/Helvetica family and a Roboto family, both listed in the stack.
+   **Result: no CLS change on their own** (small 0.1376 → 0.1373, mid 0.0763 →
+   0.0763, 4 interleaved runs): while the faces are destroyed and recreated by
+   the CSS-in-JS library, matching the fallback's metrics does not stop the
+   hero re-wrapping. They are necessary for a swap to be invisible, not
+   sufficient.
+7. **Fonts as static CSS fixes it.** Lab variant `prerender-critical-fonts-static`:
+   `FontFaces` renders nothing, and the same `@font-face` rules plus the fallback
+   faces sit in a static `<style>` in the head. Each font now downloads once.
+   4 interleaved runs:
+
+   | Build | FCP small | CLS small | FCP mid | CLS mid |
+   | --- | --- | --- | --- | --- |
+   | Baseline | 5,020 ms | 0.119 | 3,196 ms | 0.093 |
+   | Prerender + critical CSS | 724 ms | 0.138 | 416 ms | 0.076 |
+   | + fallback faces | 652 ms | 0.137 | 400 ms | 0.076 |
+   | + fallback faces, fonts static | **640 ms** | **0.062** | **400 ms** | **0** |
+
+   Mid phone: zero layout shift during load. Small phone: one shift left — the
+   hero heading still re-wraps by one line at 360 px when the first font lands
+   (the fallback's average width is close, not exact, for that string at that
+   width). Remaining options: `font-display: optional` on the display face (no
+   swap after first paint on a slow first visit; the fallback holds), or tune
+   `size-adjust` on the hero copy itself. TBT is unchanged by all of this
+   (~250–290 ms small): that is script, and needs code splitting.
+
 ## Sources
 
 Engines and pacing:
@@ -674,6 +1416,22 @@ Web platform:
 - [Can I use: scheduler.yield](https://caniuse.com/mdn-api_scheduler_yield)
 - [What does the image decoding attribute actually do?](https://www.tunetheweb.com/blog/what-does-the-image-decoding-attribute-actually-do/)
 - [Can I WebView: WebGPU](https://caniwebview.com/features/web-feature-webgpu/)
+
+Dependencies (section 14):
+
+- [Motion: web animation performance guide](https://motion.dev/docs/performance)
+- [Motion: reduce bundle size / LazyMotion](https://motion.dev/docs/react-reduce-bundle-size)
+- [styled-components: library entering maintenance mode](https://github.com/orgs/styled-components/discussions/5568)
+- [Sanity: styled-components maintenance mode, a 40% faster fork](https://www.sanity.io/blog/cut-styled-components-into-pieces-this-is-our-last-resort)
+- [css-in-js-bench (report)](https://jantimon.github.io/css-in-js-bench/)
+- [The state of zero-runtime CSS-in-JS, mid-2026](https://dx-styles.dev/blog/state-of-zero-runtime-css-in-js/)
+- [Linaria](https://github.com/callstack/linaria)
+- [Can I use: @starting-style](https://caniuse.com/mdn-css_at-rules_starting-style)
+- [Can I WebView: popover](https://caniwebview.com/features/web-feature-popover/)
+- [Can I WebView: view transitions](https://caniwebview.com/features/web-feature-view-transitions/)
+- [Announcing Interop 2026 (WebKit)](https://webkit.org/blog/17818/announcing-interop-2026/)
+- [Chrome: animate to height: auto](https://developer.chrome.com/docs/css-ui/animate-to-height-auto)
+- [Statista: iPhone share by iOS version](https://www.statista.com/statistics/565270/apple-devices-ios-version-share-worldwide/)
 - [WebGPU implementation status (gpuweb)](https://github.com/gpuweb/gpuweb/wiki/Implementation-Status)
 
 Frameworks and styling:

@@ -1,12 +1,23 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import wyw from '@wyw-in-js/vite'
 import path from 'path'
 
 const serial = process.env.FOUNDATION_VITEST_SERIAL !== '0'
 const maxWorkers = Number.parseInt(process.env.FOUNDATION_VITEST_WORKERS ?? '0', 10)
 
 export default defineConfig({
-  plugins: [react() as never],
+  plugins: [
+    react() as never,
+    wyw({
+      // Styles are Linaria, extracted at build time — ui-minimal's and this app's own
+      // (Foundation research doc 14.8). The kit is reached through node_modules,
+      // hence transformLibraries.
+      include: [/ui-minimal[\\/](ts[\\/])?src[\\/].*\.[jt]sx?$/, /[\\/]src[\\/].*\.[jt]sx?$/],
+      transformLibraries: true,
+      prefixer: false,
+    }) as never,
+  ],
   resolve: {
     preserveSymlinks: true,
     alias: {
@@ -14,11 +25,9 @@ export default defineConfig({
       '@generated': path.resolve(__dirname, './src/types/protos'),
       react: path.resolve(__dirname, './node_modules/react'),
       'react-dom': path.resolve(__dirname, './node_modules/react-dom'),
-      'styled-components': path.resolve(__dirname, './node_modules/styled-components'),
-      'framer-motion': path.resolve(__dirname, './node_modules/framer-motion'),
       zustand: path.resolve(__dirname, './node_modules/zustand'),
     },
-    dedupe: ['react', 'react-dom', 'styled-components', 'framer-motion'],
+    dedupe: ['react', 'react-dom', '@linaria/react'],
   },
   test: {
     globals: true,

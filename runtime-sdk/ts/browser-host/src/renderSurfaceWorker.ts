@@ -1,9 +1,13 @@
 import {
   serveRenderSurface,
   type RenderSurfaceDefinition,
+  type RenderSurfaceFrame,
   type RenderSurfacePass,
   type RenderSurfaceScope,
 } from "./renderSurfaceClient";
+
+/** See `RenderSurfaceWorkerOptions.releaseWhenIdleMs`. */
+export const DEFAULT_RELEASE_WHEN_IDLE_MS = 10_000;
 
 /**
  * One worker serving several surfaces, on one device.
@@ -78,12 +82,30 @@ export type RenderSurfaceWorkerOptions<TShared> = {
    */
   acquire: () => Promise<TShared> | TShared;
   /**
-   * Release it, once the last surface has gone.
+   * Release it, once no surface is using it.
    *
    * A shared worker outlives its surfaces, so nothing else will. `device.destroy()`
    * belongs here.
    */
   release?: (shared: TShared) => void;
+  /**
+   * How long the resource outlives the last live pass. Defaults to 10 seconds.
+   *
+   * A served surface is registered for the life of the worker — `serve` runs at
+   * module load and nobody disposes it — so releasing only when a registration
+   * is disposed meant releasing never. Measured on real hardware (frontend lab,
+   * `gpu` lane): three hosts disposed, every pass retired, the device alive.
+   *
+   * So release follows the *passes*: when the last one is retired (a host's
+   * `STOP`, a superseded build), a timer starts, and a pass built before it
+   * fires keeps the device. The window is there because re-acquiring is not
+   * free — the lab measured first frame at 28–37 ms cold against 7–11 ms on a
+   * warm device on an M1 Pro, and adapter negotiation on a phone is slower — and
+   * the ordinary unmount is followed by a mount: React StrictMode, a route
+   * change and back. `0` releases on the next task; `Infinity` keeps the
+   * resource for the worker's life, which was the previous behaviour.
+   */
+  releaseWhenIdleMs?: number;
   /** The worker global. Injected for tests. */
   scope?: RenderSurfaceScope;
 };
@@ -123,6 +145,19 @@ export const createRenderSurfaceWorker = <TShared>(
    */
   let settled = false;
   let disposed = false;
+  /*
+   * Passes built or building on the shared resource. A build in flight counts:
+   * releasing while it awaits would hand it a device about to be destroyed.
+   */
+  let live = 0;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
+  const idleMs = options.releaseWhenIdleMs ?? DEFAULT_RELEASE_WHEN_IDLE_MS;
+
+  const cancelIdle = () => {
+    if (idleTimer === null) return;
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  };
 
   /*
    * One in-flight acquisition, shared by everyone who asks while it runs.
@@ -148,7 +183,23 @@ export const createRenderSurfaceWorker = <TShared>(
 
   const releaseIfEmpty = () => {
     if (handlers.size > 0 || !sharing) return;
+    releaseShared();
+  };
+
+  /** No pass left: release after the idle window, unless one is built first. */
+  const scheduleIdleRelease = () => {
+    if (disposed || live > 0 || !sharing || !Number.isFinite(idleMs)) return;
+    cancelIdle();
+    idleTimer = setTimeout(() => {
+      idleTimer = null;
+      if (live === 0 && sharing) releaseShared();
+    }, Math.max(0, idleMs));
+  };
+
+  const releaseShared = () => {
+    cancelIdle();
     const pending = sharing;
+    if (!pending) return;
     const value = acquiredValue;
     const wasSettled = settled;
     sharing = null;
@@ -187,15 +238,52 @@ export const createRenderSurfaceWorker = <TShared>(
 
       const wrapped: RenderSurfaceDefinition<never, TShared> = {
         warm: async () => {
+          // A surface is coming: an idle release now would destroy the device
+          // this warm is about to compile against.
+          cancelIdle();
           const shared = await share();
           await definition.warm?.(shared);
           return shared;
         },
         build: async (canvas) => {
-          // `share()` rather than the warm result: a surface can be built
-          // without ever being warmed, and it must still land on the one device.
-          const shared = await share();
-          return definition.build(canvas, shared) as never;
+          live += 1;
+          cancelIdle();
+          let built: RenderSurfacePass<unknown> | null;
+          try {
+            // `share()` rather than the warm result: a surface can be built
+            // without ever being warmed, and it must still land on the one device.
+            const shared = await share();
+            built = (await definition.build(canvas, shared)) as RenderSurfacePass<unknown> | null;
+          } catch (error) {
+            live -= 1;
+            scheduleIdleRelease();
+            throw error;
+          }
+          if (!built) {
+            live -= 1;
+            scheduleIdleRelease();
+            return null;
+          }
+          const pass = built;
+          let retired = false;
+          // A wrapper, not a patched `dispose`: the pass is the caller's object.
+          return {
+            lane: pass.lane,
+            resize: (width: number, height: number) => pass.resize(width, height),
+            draw: (state: unknown, frame: RenderSurfaceFrame) => pass.draw(state, frame),
+            // Forwarded, or a shared surface loses GPU backpressure without a sound.
+            settled: pass.settled ? () => pass.settled!() : undefined,
+            dispose: () => {
+              if (retired) return;
+              retired = true;
+              live -= 1;
+              try {
+                pass.dispose();
+              } finally {
+                scheduleIdleRelease();
+              }
+            },
+          } as never;
         },
       };
 

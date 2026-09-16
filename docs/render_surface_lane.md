@@ -45,9 +45,20 @@ Driving frame updates from the main thread would overload the main queue and int
 Moving between ladder rungs adjusts resolution, cadence, and computation budget without altering underlying scene state.
 `renderSurfaceClient.ts` monitors achieved frame intervals:
 
-- Demotes one rung after 24 late frames.
-- Promotes one rung after 180 on-time frames.
+- A frame is late past `cadenceMs × 1.35`.
+- Demotes one rung after 6 misses; a clean run of 48 forgives earlier misses.
+- Promotes one rung after 240 on-time frames.
 - Reuses a pre-allocated `RenderSurfaceFrame` descriptor to eliminate heap allocations during 60 or 120 FPS ticks.
+
+### GPU backpressure
+
+A WebGPU `draw` returns at `queue.submit`, before the GPU has done the work, so a loop that times `draw` cannot see GPU overload.
+Measured on real hardware: 101 frames queued and seconds of latency while the loop reported 40 Hz on rung zero.
+
+- A pass that sets `settled` (for WebGPU, `() => device.queue.onSubmittedWorkDone()`) keeps at most one frame in flight.
+- A tick that finds the previous frame unsettled draws nothing and counts as a miss, so GPU overload demotes like CPU overload.
+- The loop stops waiting after 2 s, so a promise that never resolves cannot freeze the surface.
+- WebGL2 has no working barrier yet; see `gpu_practices.md`, *One frame in flight*.
 
 ## Graceful Degradation
 
@@ -75,6 +86,7 @@ Key design requirements:
 - Listeners use `addEventListener` instead of `onmessage` to prevent handler overwrite bugs.
 - The `STOP` command retires the individual pass while keeping the worker server running.
 - A generation counter ignores completed asynchronous pipeline builds that were superseded by newer init commands.
+- `createRenderSurfaceWorker` acquires one device for every surface it serves, and releases it once no pass is built or building for `releaseWhenIdleMs` (default 10 s). Registrations made with `serve()` last for the worker's life and do not hold the device.
 
 ## Pulse Worker Resolution
 

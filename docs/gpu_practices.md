@@ -366,10 +366,17 @@ devices: the exact thing the arrangement exists to avoid.
 3. **Acquire lazily.** A page that renders no surface should not have negotiated
    a GPU device. Nothing is acquired until a surface is actually initialised or
    warmed.
-4. **Reference-count the release.** A single-surface worker can be terminated
-   and the browser reclaims; a shared worker outlives every surface in it, so
-   something has to notice when the last one goes. This is the case where a
-   leaked device is never reclaimed at all.
+4. **Release follows live passes, after an idle window.** A single-surface
+   worker can be terminated and the browser reclaims; a shared worker outlives
+   every surface in it, so something has to notice when the last one goes. The
+   count must be of *passes* — built or still building — not of `serve()`
+   registrations: a production worker calls `serve` at module load and never
+   disposes it, so a release keyed to registrations never runs. The frontend
+   lab caught exactly that on real hardware (every host disposed, every pass
+   retired, device alive). `releaseWhenIdleMs` (default 10 s) keeps the device
+   across the ordinary unmount-then-mount — StrictMode, a route change and
+   back — because re-acquiring costs: first frame 32 ms cold against 10 ms on a
+   warm device on an M1 Pro, and more on a phone.
 5. **Release an acquisition that lands after the last surface left.** Dropping
    the in-flight promise loses a device that is about to arrive and that nothing
    else references. It is the one path where a shared device can leak with no
@@ -401,6 +408,12 @@ cold, 10 units warmed — 91% of the startup chain removed from the critical
 path.** The fraction is what transfers to real hardware; the units are a
 parameter.
 
+On real hardware (frontend lab `gpu` lane, Chromium 151, ANGLE/Metal on an M1
+Pro, one pipeline, five interleaved pairs after a warm-up): first frame **p50
+32 ms cold, 10 ms prewarmed** from host creation — 69% off the critical path
+for a single small pipeline. A surface with more pipelines or a slower adapter
+has more to move.
+
 1. **A definition splits its build.** `warm()` does everything that does not
    need a canvas; `build(canvas, warmed)` does the rest and receives the result.
    `gpu_practices` has asked for this since it was written — *"pipeline creation
@@ -426,6 +439,40 @@ parameter.
 7. **Adopting a warmed worker transfers ownership.** Two references to one
    worker, and only one of them may terminate it — otherwise a caller that
    prewarms, mounts, then tidies up its handle kills a surface that is drawing.
+
+## One frame in flight
+
+A quality ladder can only react to what its loop measures, and a WebGPU pass's
+`draw` returns the moment `queue.submit` does — long before the GPU has done any
+of the work. A loop that paces itself on `draw` is measuring the CPU half of a
+frame and nothing else.
+
+Measured on real hardware (frontend lab `gpu` lane, fragment load dialled to
+~50× the cadence): GPU time 1,276 ms p50 and 2,528 ms max per frame, while the
+loop reported a steady **40.2 Hz, held rung zero, and had 101 frames queued**
+behind the one on the GPU. Latency grew by seconds; the ladder never moved. On a
+phone that is a pinned GPU, a hot device, and a figure answering its input
+several seconds late.
+
+1. **A GPU pass reports when its frame has settled.** `RenderSurfacePass.settled`
+   returns a promise that resolves when the frame just drawn has finished — for
+   WebGPU, `device.queue.onSubmittedWorkDone()`.
+2. **At most one frame in flight.** A tick that finds the previous frame
+   unsettled draws nothing and counts as a miss, so GPU overload demotes a
+   surface exactly as CPU overload does. Same load, same hardware: demoted to
+   rung 1, GPU p50 15.7 ms, 39.2 Hz, never more than one frame queued. A load
+   inside its budget is untouched.
+3. **Never wait forever.** A promise can fail to resolve — a lost device, a
+   dropped callback — and a frozen surface is worse than an overloaded one. The
+   loop stops waiting after 2 s.
+4. **A late frame from a retired pass must not release its successor's wait.**
+   The loop tags each wait with an epoch that `STOP` advances.
+5. **A shared-worker wrapper forwards `settled`.** One that rebuilds the pass
+   object without it removes backpressure from every surface on the device,
+   silently.
+6. **WebGL2 has no equivalent yet.** `gl.finish()` read ~0 ms under the same
+   load on ANGLE/Metal, and a fence sync did not signal in the lab; a WebGL2 pass
+   stays exposed until a working barrier is measured.
 
 ## Releasing what you allocated
 
@@ -814,18 +861,17 @@ move semantics across the launch boundary (`E0382`).
 
 ### Additional references
 
-20. Elibol, Koundinyan, Bentz, "Fearless Concurrency on the GPU",
+ 1. Elibol, Koundinyan, Bentz, "Fearless Concurrency on the GPU",
     arXiv:2606.15991, RustConf 2026.
-21. NVIDIA, "Introducing CUDA Rust: Two Tracks for Writing GPU Kernels",
+ 2. NVIDIA, "Introducing CUDA Rust: Two Tracks for Writing GPU Kernels",
     NVIDIA Technical Blog, 2026-09-08:
     <https://developer.nvidia.com/blog/introducing-cuda-rust-two-tracks-for-writing-gpu-kernels/>
-22. cuda-oxide book: <https://nvlabs.github.io/cuda-oxide/>
-23. cuTile Rust documentation: <https://nvlabs.github.io/cutile-rs/main/>
-24. cuda-oxide safety model:
+ 3. cuda-oxide book: <https://nvlabs.github.io/cuda-oxide/>
+ 4. cuTile Rust documentation: <https://nvlabs.github.io/cutile-rs/main/>
+ 5. cuda-oxide safety model:
     <https://nvlabs.github.io/cuda-oxide/gpu-safety/the-safety-model.html>
-25. Rust + GPU ecosystem appendix:
+ 6. Rust + GPU ecosystem appendix:
     <https://nvlabs.github.io/cuda-oxide/appendix/ecosystem.html>
-26. NVIDIA CUDA Tile IR: <https://docs.nvidia.com/cuda/tile-ir/latest/>
-27. NVIDIA CUDA Tile C++ API Reference:
+ 7. NVIDIA CUDA Tile IR: <https://docs.nvidia.com/cuda/tile-ir/latest/>
+ 8. NVIDIA CUDA Tile C++ API Reference:
     <https://docs.nvidia.com/cuda/cuda-tile-cpp-api-reference/>
-

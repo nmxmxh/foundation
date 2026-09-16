@@ -1,0 +1,197 @@
+/**
+ * Temporary styled-components → Linaria equivalence snapshot for an app.
+ * Copied into <app>/frontend/src/ with `__style_cases__.tsx` beside it; removed after.
+ *
+ *   STYLE_EQ_MODE=before STYLE_EQ_OUT=<dir> npx vitest run src/__style_equivalence__.snapshot.test.tsx
+ *   STYLE_EQ_MODE=after  STYLE_EQ_OUT=<dir> STYLE_EQ_CSS=<dist>/assets npx vitest run src/__style_equivalence__.snapshot.test.tsx
+ *
+ * before: every case rendered with styled-components' ServerStyleSheet (kit + app styles).
+ * after:  every case rendered from the Linaria build, paired with all CSS the build emitted.
+ * Both sides resolve `var(--minimal-*, fallback)` with the app's own theme values, so a
+ * token read compares equal to the literal the theme provider used to inject.
+ * `<style>` elements in markup (the Linaria kit's MinimalGlobalStyles for a non-base theme)
+ * are removed from the markup and their rules appended to the sheet, so element indices
+ * and global rules line up with styled-components, which injected them into its sheet.
+ * Raw renders are saved too, so a comparison can be re-derived without re-rendering.
+ */
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import type { ReactElement } from 'react'
+import { renderToString } from 'react-dom/server'
+import { describe, expect, it } from 'vitest'
+import { cascadeOf, compareCascaded, type CascadedSnapshot } from '/Users/okhai/Desktop/OVASABI STUDIOS/foundation/frontend-lab/src/ssr/cascade.ts'
+import { cases, ignoreAttributes, themeVariables } from './__style_cases__'
+
+const mode = process.env.STYLE_EQ_MODE
+const out = process.env.STYLE_EQ_OUT ?? ''
+
+const resolveVars = (input: string, vars: Record<string, string>): string => {
+  let s = input
+  let from = 0
+  for (;;) {
+    const i = s.indexOf('var(--minimal-', from)
+    if (i < 0) return s
+    let depth = 0
+    let comma = -1
+    let end = -1
+    for (let j = i + 3; j < s.length; j++) {
+      const c = s[j]
+      if (c === '(') depth++
+      else if (c === ')') {
+        depth--
+        if (depth === 0) {
+          end = j
+          break
+        }
+      } else if (c === ',' && depth === 1 && comma < 0) comma = j
+    }
+    if (end < 0) {
+      from = i + 4
+      continue
+    }
+    const name = s.slice(i + 4, comma < 0 ? end : comma).trim()
+    const value = vars[name] ?? (comma < 0 ? undefined : s.slice(comma + 1, end).trim())
+    if (value === undefined) {
+      from = i + 4
+      continue
+    }
+    s = s.slice(0, i) + value + s.slice(end + 1)
+  }
+}
+
+const decode = (s: string) => s.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&')
+/** Split markup `<style>` elements out: markup without them, and their CSS. */
+const splitStyles = (html: string) => {
+  const css: string[] = []
+  const markup = html.replace(/<style[^>]*>([\s\S]*?)<\/style>/g, (_, body: string) => {
+    css.push(decode(body))
+    return ''
+  })
+  return { markup, css: css.join('\n') }
+}
+const stripIgnored = (html: string) => (ignoreAttributes ? html.replace(ignoreAttributes, '') : html)
+
+/** Class-less top-level rules (reset, :root tokens, app globals), whitespace-free, one per selector list. */
+const globalRules = (css: string) => {
+  const rules: string[] = []
+  const text = css.replace(/\/\*[\s\S]*?\*\//g, '')
+  let i = 0
+  while (i < text.length) {
+    const open = text.indexOf('{', i)
+    if (open < 0) break
+    const prelude = text.slice(i, open).trim()
+    let depth = 1
+    let j = open + 1
+    for (; j < text.length && depth; j++) {
+      if (text[j] === '{') depth++
+      else if (text[j] === '}') depth--
+    }
+    const body = text.slice(open + 1, j - 1)
+    if (!prelude.startsWith('@') && !prelude.includes('.') && !prelude.startsWith('data-styled')) {
+      const decls = body.split(';').map((d) => d.replace(/\s+/g, '')).filter(Boolean).sort().join(';')
+      rules.push(`${prelude.replace(/\s+/g, '')}{${decls}}`)
+    }
+    i = j
+  }
+  return rules
+}
+
+describe('style equivalence snapshot', () => {
+  it(`captures (${mode})`, async () => {
+    expect(mode === 'before' || mode === 'after', 'STYLE_EQ_MODE').toBe(true)
+    mkdirSync(out, { recursive: true })
+    const vars = await themeVariables()
+    const silenced = console.error
+    const silencedWarn = console.warn
+    console.error = () => {}
+    console.warn = () => {}
+    const cascaded: CascadedSnapshot = { app: {} }
+    const raw: Record<string, { css: string; html: string } | { error: string }> = {}
+    const globals = new Set<string>()
+    let sheetCss = ''
+    try {
+      // after: the Linaria build's CSS. before: optional — an app already on the Linaria kit
+      // (phase A) passes its current build so the kit's extracted rules sit under the
+      // styled-components sheet, as they do in the browser.
+      if (mode === 'after' || process.env.STYLE_EQ_CSS) {
+        const dir = process.env.STYLE_EQ_CSS ?? ''
+        // Stylesheets in load order: the ones index.html links (the entry, where the kit
+        // lives) first, then lazily loaded chunks. Alphabetical order would put page
+        // chunks before the kit and let the kit's rules win a same-specificity tie.
+        const indexHtml = join(dir, '..', 'index.html')
+        const linked = existsSync(indexHtml)
+          ? [...readFileSync(indexHtml, 'utf8').matchAll(/href="[^"]*?\/assets\/([^"]+\.css)"/g)].map((m) => m[1])
+          : []
+        // With a build manifest, order by chunk dependency the way Vite loads CSS: a lazy
+        // chunk's imported chunks (the kit) before the chunk's own stylesheet.
+        const manifestPath = join(dir, '..', '.vite', 'manifest.json')
+        const ordered: string[] = [...linked]
+        if (existsSync(manifestPath)) {
+          const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, { file: string; css?: string[]; imports?: string[]; dynamicImports?: string[]; isEntry?: boolean }>
+          const seen = new Set<string>()
+          const visit = (key: string) => {
+            if (seen.has(key) || !manifest[key]) return
+            seen.add(key)
+            for (const dep of manifest[key].imports ?? []) visit(dep)
+            for (const css of manifest[key].css ?? []) { const f = css.replace(/^assets\//, ''); if (!ordered.includes(f)) ordered.push(f) }
+            for (const dep of manifest[key].dynamicImports ?? []) visit(dep)
+          }
+          for (const [key, chunk] of Object.entries(manifest)) if (chunk.isEntry) visit(key)
+          for (const key of Object.keys(manifest)) visit(key)
+        }
+        const all = readdirSync(dir).filter((f) => f.endsWith('.css'))
+        sheetCss = [...ordered.filter((f) => all.includes(f)), ...all.filter((f) => !ordered.includes(f)).sort()]
+          .map((f) => readFileSync(join(dir, f), 'utf8'))
+          .join('\n')
+      }
+      const { ServerStyleSheet } =
+        mode === 'before' ? await import(/* @vite-ignore */ ['styled', 'components'].join('-')) : { ServerStyleSheet: null }
+      // A case is an element, or { element, setup } when the render needs state first
+      // (a seeded session, an active edition); setup runs immediately before the render.
+      for (const [name, entry] of Object.entries(cases())) {
+        const { element, setup } = ('element' in (entry as object) ? entry : { element: entry }) as { element: ReactElement; setup?: () => void }
+        const sheet = ServerStyleSheet ? new ServerStyleSheet() : null
+        try {
+          setup?.()
+          const rendered = renderToString(sheet ? sheet.collectStyles(element as ReactElement) : (element as ReactElement))
+          const { markup, css: inlineCss } = splitStyles(rendered)
+          const css = resolveVars(`${sheet ? `${sheetCss}\n${sheet.instance.toString()}` : sheetCss}\n${inlineCss}`, vars)
+          // Inside markup the substituted value lands in a quoted attribute, so a token
+          // whose value carries double quotes (a font stack) must be rewritten to single quotes (CSS-equivalent) or it ends the
+          // attribute and every later element index shifts.
+          const html = resolveVars(markup, Object.fromEntries(Object.entries(vars).map(([k, v]) => [k, v.replace(/"/g, "'")])))
+          raw[name] = { css: sheet ? css : `@sheet\n${inlineCss}`, html }
+          for (const g of globalRules(css)) globals.add(g)
+          // Cascade against the real markup (data-* rules must match), then drop the
+          // migration's own attributes from the markup that is compared.
+          const result = cascadeOf({ css, html })
+          cascaded.app[name] = { ...result, html: stripIgnored(result.html) }
+        } catch (thrown) {
+          const error = String((thrown as Error)?.message ?? thrown).split('\n')[0]
+          raw[name] = { error }
+          cascaded.app[name] = { error }
+        } finally {
+          sheet?.seal()
+        }
+      }
+    } finally {
+      console.error = silenced
+      console.warn = silencedWarn
+    }
+    const uniqueGlobals = [...globals].sort()
+    writeFileSync(join(out, `${mode}.cascaded.json`), JSON.stringify(cascaded))
+    writeFileSync(join(out, `${mode}.raw.json`), JSON.stringify(raw))
+    writeFileSync(join(out, `${mode}.globals.json`), JSON.stringify(uniqueGlobals, null, 1))
+    if (mode === 'after' && existsSync(join(out, 'before.cascaded.json'))) {
+      const before = JSON.parse(readFileSync(join(out, 'before.cascaded.json'), 'utf8')) as CascadedSnapshot
+      const comparison = compareCascaded(before, cascaded)
+      const beforeGlobals = JSON.parse(readFileSync(join(out, 'before.globals.json'), 'utf8')) as string[]
+      const globalsMissing = beforeGlobals.filter((g) => !globals.has(g))
+      const globalsAdded = uniqueGlobals.filter((g) => !beforeGlobals.includes(g))
+      writeFileSync(join(out, 'comparison.json'), JSON.stringify({ ...comparison, globalsMissing, globalsAdded }, null, 2))
+      console.info(`style equivalence: ${comparison.identical} identical, ${comparison.sameError} same error, ${comparison.diffs.length} different; globals ${globalsMissing.length} missing, ${globalsAdded.length} added`)
+    }
+    const errors = Object.entries(cascaded.app).filter(([, c]) => 'error' in c).map(([n, c]) => `${n}: ${(c as { error: string }).error}`)
+    console.info(`${mode}: ${Object.keys(cascaded.app).length} cases, ${errors.length} render errors${errors.length ? `\n  ${errors.join('\n  ')}` : ''}`)
+  }, 600_000)
+})

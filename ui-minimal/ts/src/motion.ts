@@ -1,96 +1,58 @@
-import { useMemo } from "react";
-import { Transition, Variants, useReducedMotion } from "framer-motion";
+import { useSyncExternalStore } from "react";
 
-import { minimalBaseTheme, useMinimalTheme } from "./theme";
-import type { MinimalTheme } from "./types";
 
-const noMotionTransition: Transition = { duration: 0 };
+/*
+ * Motion for ui-minimal, on the platform rather than on a JavaScript runtime.
+ *
+ * This module used to build framer-motion `Variants` and `Transition` objects.
+ * The frontend lab measured what those cost (research doc section 14): framer-
+ * motion as ui-minimal imported it was 47.6 KB gzip — more than React and
+ * ReactDOM together — it animated `y`, `scale`, `height: auto` and springs by
+ * writing style from JavaScript on every frame (49–61 writes per animation,
+ * against zero for the CSS equivalent), and a `motion.*` card mounted 3.9×
+ * slower cold than the same card with a CSS fade.
+ *
+ * So motion is CSS. Enter animations are `@keyframes` on insertion, which play
+ * in every engine the shells target (the iOS shells run back to iOS 14): no
+ * `@starting-style` requirement and no JavaScript presence tracking. Keyframes
+ * animate `opacity` and the individual `translate` / `scale` properties — never
+ * `transform`, which components use for their own positioning (a centred
+ * modal, a placed tooltip) and an animation would override. On an engine
+ * without individual transform properties the movement is dropped and the fade
+ * remains, which is the fallback P3 asks for.
+ *
+ * The fragments are plain strings, extracted at build time (Linaria, research
+ * doc 14.7). Each carries its own `@keyframes`: Linaria scopes keyframe names to
+ * the component that declares them, so a keyframe declared once globally and
+ * referenced by name elsewhere would not resolve. The repetition is a few dozen
+ * bytes per component that animates.
+ */
 
-export const createMicroTransition = (reducedMotion: boolean, theme: MinimalTheme = minimalBaseTheme): Transition =>
-  reducedMotion
-    ? noMotionTransition
-    : {
-        duration: theme.motion.microDuration,
-        ease: theme.motion.standardEase,
-      };
+export { minimalEnter, minimalMotionMs } from "./motionStyles";
+import { minimalMotionMs } from "./motionStyles";
 
-export const createStandardTransition = (reducedMotion: boolean, theme: MinimalTheme = minimalBaseTheme): Transition =>
-  reducedMotion
-    ? noMotionTransition
-    : {
-        duration: theme.motion.standardDuration,
-        ease: theme.motion.standardEase,
-      };
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
-export const createSpringTransition = (reducedMotion: boolean, theme: MinimalTheme = minimalBaseTheme): Transition =>
-  reducedMotion
-    ? noMotionTransition
-    : {
-        type: "spring",
-        stiffness: theme.motion.springStiffness,
-        damping: theme.motion.springDamping,
-      };
+const subscribeReducedMotion = (onChange: () => void) => {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => undefined;
+  const query = window.matchMedia(REDUCED_MOTION_QUERY);
+  query.addEventListener?.("change", onChange);
+  return () => query.removeEventListener?.("change", onChange);
+};
 
-export const createFadeVariants = (reducedMotion: boolean, theme: MinimalTheme = minimalBaseTheme): Variants => ({
-  initial: reducedMotion ? { opacity: 1 } : { opacity: 0 },
-  animate: { opacity: 1, transition: createStandardTransition(reducedMotion, theme) },
-  exit: reducedMotion ? { opacity: 1 } : { opacity: 0, transition: createStandardTransition(reducedMotion, theme) },
-});
+const readReducedMotion = () =>
+  typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia(REDUCED_MOTION_QUERY).matches;
 
-export const createPopVariants = (reducedMotion: boolean, theme: MinimalTheme = minimalBaseTheme): Variants => ({
-  initial: reducedMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.97 },
-  animate: { opacity: 1, scale: 1, transition: createStandardTransition(reducedMotion, theme) },
-  exit: reducedMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.97, transition: createStandardTransition(reducedMotion, theme) },
-});
+/** Whether the user asked for reduced motion. Live, and `false` on the server. */
+export const useMinimalReducedMotion = (): boolean =>
+  useSyncExternalStore(subscribeReducedMotion, readReducedMotion, () => false);
 
-export const createSlideUpVariants = (reducedMotion: boolean, theme: MinimalTheme = minimalBaseTheme): Variants => ({
-  initial: reducedMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: theme.motion.pageOffset },
-  animate: { opacity: 1, y: 0, transition: createStandardTransition(reducedMotion, theme) },
-  exit: reducedMotion
-    ? { opacity: 1, y: 0 }
-    : { opacity: 0, y: -theme.motion.pageOffset, transition: createStandardTransition(reducedMotion, theme) },
-});
-
-export const createTooltipVariants = (reducedMotion: boolean, theme: MinimalTheme = minimalBaseTheme): Variants => ({
-  initial: reducedMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.96, y: 4 },
-  animate: { opacity: 1, scale: 1, y: 0, transition: createMicroTransition(reducedMotion, theme) },
-  exit: reducedMotion ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.96, y: 4, transition: createMicroTransition(reducedMotion, theme) },
-});
-
-export const createPageTransitionVariants = (reducedMotion: boolean, theme: MinimalTheme = minimalBaseTheme): Variants => ({
-  initial: reducedMotion ? { opacity: 1, y: 0 } : { opacity: 0, y: theme.motion.pageOffset },
-  animate: {
-    opacity: 1,
-    y: 0,
-    transition: reducedMotion
-      ? noMotionTransition
-      : { duration: theme.motion.slowDuration, ease: theme.motion.entranceEase },
-  },
-  exit: reducedMotion
-    ? { opacity: 1, y: 0 }
-    : {
-        opacity: 0,
-        y: -theme.motion.pageOffset,
-        transition: { duration: theme.motion.standardDuration, ease: theme.motion.exitEase },
-      },
-});
-
+/**
+ * Motion facts for components that decide something in script — whether to
+ * wait for an exit, how long to delay. Styling itself should use
+ * `minimalEnter` and the `minimalVars.motion` tokens.
+ */
 export const useMinimalMotion = () => {
-  const theme = useMinimalTheme();
-  const reducedMotion = Boolean(useReducedMotion());
-
-  return useMemo(
-    () => ({
-      reducedMotion,
-      micro: createMicroTransition(reducedMotion, theme),
-      standard: createStandardTransition(reducedMotion, theme),
-      spring: createSpringTransition(reducedMotion, theme),
-      fadeVariants: createFadeVariants(reducedMotion, theme),
-      popVariants: createPopVariants(reducedMotion, theme),
-      slideUpVariants: createSlideUpVariants(reducedMotion, theme),
-      tooltipVariants: createTooltipVariants(reducedMotion, theme),
-      pageVariants: createPageTransitionVariants(reducedMotion, theme),
-    }),
-    [reducedMotion, theme]
-  );
+  const reducedMotion = useMinimalReducedMotion();
+  return { reducedMotion, ms: minimalMotionMs } as const;
 };

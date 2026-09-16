@@ -80,6 +80,24 @@ export type RenderSurfacePass<TState> = {
   /** Draw one frame. */
   draw: (state: TState | undefined, frame: RenderSurfaceFrame) => void;
   /**
+   * Resolves when the frame just drawn has finished on the GPU. Optional, and
+   * the thing that lets the ladder see the GPU at all.
+   *
+   * `draw` for a WebGPU pass returns the moment `queue.submit` does, which is
+   * long before the GPU has done anything. A loop that paces itself on `draw`
+   * therefore measures only the CPU half of a frame: the frontend lab put a
+   * fragment pass at 1.3–2.4 s of GPU time per frame on real hardware, and the
+   * loop reported a steady 40 Hz, held rung zero, and had 99 frames queued
+   * behind the one on the GPU. Latency grew by seconds; the ladder never moved.
+   *
+   * With `settled`, the loop keeps at most one frame in flight: a tick that
+   * finds the previous frame unfinished draws nothing and counts as a miss, so
+   * GPU overload demotes the surface exactly as CPU overload does. For WebGPU
+   * this is `() => device.queue.onSubmittedWorkDone()`. It costs one promise
+   * per frame, so a pass that is always far inside its budget may leave it out.
+   */
+  settled?: () => Promise<unknown>;
+  /**
    * Release everything the pass created. **Required.**
    *
    * Required, and not optional as it was, because the resources a pass holds
@@ -182,6 +200,15 @@ const PROMOTE_AFTER = 240;
  * count a burst detector, which is what it was always meant to be.
  */
 const FORGIVE_AFTER = 48;
+/**
+ * How long a frame may stay unsettled before the loop stops waiting for it.
+ *
+ * `settled` is the pass's promise and a promise can fail to resolve — a lost
+ * device, an implementation that drops the callback. A loop that waited forever
+ * would be a frozen surface, which is worse than an overloaded one, so past
+ * this the loop draws anyway and the ladder has already counted every tick.
+ */
+const SETTLE_TIMEOUT_MS = 2000;
 
 /**
  * Serve one surface inside a worker.
@@ -226,6 +253,11 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
   let startedAt = 0;
   let lastDrawAt = 0;
   let targetNextFrame = 0;
+  /* GPU backpressure — see `RenderSurfacePass.settled`. */
+  let awaitingGpu = false;
+  let awaitingSince = 0;
+  let skippedSinceDraw = false;
+  let gpuEpoch = 0;
 
   let stateReader: RenderStateReader | null = null;
   /*
@@ -280,6 +312,44 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
     );
   };
 
+  /**
+   * One ladder observation. A miss is a cadence slot with no frame in it —
+   * a late draw, or a tick skipped because the GPU still had the last one.
+   */
+  const judge = (missed: boolean) => {
+    if (missed) {
+      overBudget += 1;
+      underBudget = 0;
+    } else {
+      underBudget += 1;
+      if (underBudget >= FORGIVE_AFTER) overBudget = 0;
+    }
+    if (overBudget >= DEMOTE_AFTER && tier < tiers.length - 1) {
+      tier += 1;
+      overBudget = 0;
+      underBudget = 0;
+      applySize();
+      report();
+    } else if (underBudget >= PROMOTE_AFTER && tier > 0) {
+      tier -= 1;
+      overBudget = 0;
+      underBudget = 0;
+      applySize();
+      report();
+    }
+  };
+
+  /** Aim at the cadence and compensate for drift, resetting if jitter is huge. */
+  const schedule = (cadenceMs: number, now: number) => {
+    if (targetNextFrame === 0 || Math.abs(now - targetNextFrame) > cadenceMs * 5) {
+      targetNextFrame = now + cadenceMs;
+    } else {
+      targetNextFrame += cadenceMs;
+    }
+    const delay = Math.max(0, targetNextFrame - performance.now());
+    timer = setTimeout(step, delay);
+  };
+
   const step = () => {
     timer = null;
     if (!pass || stopped || !visible) {
@@ -288,6 +358,20 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
     }
     const current = rung();
     const now = performance.now();
+
+    /*
+     * The previous frame is still on the GPU. Drawing now would queue another
+     * behind it — latency, and memory, that the viewer pays and the ladder
+     * never sees. So this slot is a miss, and nothing is submitted.
+     */
+    if (awaitingGpu && now - awaitingSince < SETTLE_TIMEOUT_MS) {
+      skippedSinceDraw = true;
+      judge(true);
+      schedule(current.cadenceMs, now);
+      return;
+    }
+    awaitingGpu = false;
+
     const delta = lastDrawAt === 0 ? current.cadenceMs : now - lastDrawAt;
     lastDrawAt = now;
 
@@ -313,42 +397,31 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
 
     pass.draw(state, frameDescriptor);
 
+    if (pass.settled) {
+      awaitingGpu = true;
+      awaitingSince = now;
+      // The epoch, not a flag: a frame from a retired pass settling late must
+      // not release the wait of the pass that replaced it.
+      const epoch = gpuEpoch;
+      const release = () => {
+        if (epoch === gpuEpoch) awaitingGpu = false;
+      };
+      pass.settled().then(release, release);
+    }
+
     /*
      * The ladder, measured on the gap the loop actually achieved.
      *
      * Not on how long `draw` took: a surface that fits its own budget while
      * the worker is busy with something else has not fitted anything, and the
-     * number that matters to a viewer is how often a frame arrived.
+     * number that matters to a viewer is how often a frame arrived. A draw that
+     * follows skipped ticks is late by construction and those ticks were
+     * already counted, so it is not counted twice.
      */
-    if (delta > current.cadenceMs * MISS_FACTOR) {
-      overBudget += 1;
-      underBudget = 0;
-    } else {
-      underBudget += 1;
-      if (underBudget >= FORGIVE_AFTER) overBudget = 0;
-    }
-    if (overBudget >= DEMOTE_AFTER && tier < tiers.length - 1) {
-      tier += 1;
-      overBudget = 0;
-      underBudget = 0;
-      applySize();
-      report();
-    } else if (underBudget >= PROMOTE_AFTER && tier > 0) {
-      tier -= 1;
-      overBudget = 0;
-      underBudget = 0;
-      applySize();
-      report();
-    }
+    judge(!skippedSinceDraw && delta > current.cadenceMs * MISS_FACTOR);
+    skippedSinceDraw = false;
 
-    // Aim at the cadence and compensate for drift, resetting if jitter is huge.
-    if (targetNextFrame === 0 || Math.abs(now - targetNextFrame) > current.cadenceMs * 5) {
-      targetNextFrame = now + current.cadenceMs;
-    } else {
-      targetNextFrame += current.cadenceMs;
-    }
-    const delay = Math.max(0, targetNextFrame - performance.now());
-    timer = setTimeout(step, delay);
+    schedule(current.cadenceMs, now);
   };
 
   const start = () => {
@@ -363,6 +436,10 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
   const stop = () => {
     running = false;
     targetNextFrame = 0;
+    // A frame in flight belongs to the pass as it was; whatever resumes starts clean.
+    gpuEpoch += 1;
+    awaitingGpu = false;
+    skippedSinceDraw = false;
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;

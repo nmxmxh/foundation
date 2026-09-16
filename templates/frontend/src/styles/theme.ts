@@ -12,12 +12,12 @@ export const appTheme: DeepPartial<MinimalTheme> = {
 
 export const theme = createMinimalTheme(appTheme)
 export const GlobalStyles = MinimalGlobalStyles
+/**
+ * The app's styles are Linaria like ui-minimal's, so they read tokens through
+ * `minimalVars` (CSS variables) at build time and never a runtime theme object.
+ * Code that needs a resolved value in script uses `useMinimalTheme()`.
+ */
 export const AppThemeProvider = MinimalThemeProvider
 
 export type Theme = MinimalTheme
 
-declare module 'styled-components' {
-  // styled-components requires interface augmentation for DefaultTheme.
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-  export interface DefaultTheme extends MinimalTheme {}
-}

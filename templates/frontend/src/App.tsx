@@ -1,7 +1,14 @@
 import { useSyncExternalStore } from 'react'
 import { Routes, Route } from 'react-router-dom'
-import { styled } from 'styled-components'
+import { styled } from '@linaria/react'
+import { minimalVars } from '@ovasabi/ui-minimal/tokens'
 import { offlinePrototypeRuntime } from './stores/prototype'
+
+/*
+ * Styles are Linaria: extracted to a static stylesheet at build time, with
+ * tokens read as CSS variables through `minimalVars` — no runtime theme object
+ * and no style injection on the main thread (Foundation research doc 14.8).
+ */
 
 const Container = styled.div`
   min-height: 100svh;
@@ -11,38 +18,38 @@ const Container = styled.div`
 
 const Main = styled.main`
   flex: 1;
-  padding: ${({ theme }) => theme.space.md};
+  padding: ${minimalVars.space.md};
 `
 
 const Header = styled.header`
   display: grid;
-  gap: ${({ theme }) => theme.space.xs};
+  gap: ${minimalVars.space.xs};
   max-width: 960px;
 `
 
 const RuntimeGrid = styled.section`
   display: grid;
-  gap: ${({ theme }) => theme.space.sm};
+  gap: ${minimalVars.space.sm};
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  margin-top: ${({ theme }) => theme.space.md};
+  margin-top: ${minimalVars.space.md};
   max-width: 960px;
 `
 
 const RuntimePanel = styled.article`
-  border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-  border-radius: ${({ theme }) => theme.radius.sm};
-  padding: ${({ theme }) => theme.space.sm};
+  border: 1px solid ${minimalVars.color.borderSubtle};
+  border-radius: ${minimalVars.radius.sm};
+  padding: ${minimalVars.space.sm};
 `
 
 const Metric = styled.p`
-  font-size: ${({ theme }) => theme.typography.h2Size};
-  font-weight: ${({ theme }) => theme.typography.weightSemibold};
+  font-size: ${minimalVars.typography.h2Size};
+  font-weight: ${minimalVars.typography.weightSemibold};
   margin: 0;
 `
 
 const Label = styled.p`
-  color: ${({ theme }) => theme.color.textSecondary};
-  margin: 0 0 ${({ theme }) => theme.space["2xs"]};
+  color: ${minimalVars.color.textSecondary};
+  margin: 0 0 ${minimalVars.space['2xs']};
 `
 
 const EMPTY_SNAPSHOT = {
