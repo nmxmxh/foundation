@@ -1,8 +1,12 @@
-import { type HTMLAttributes, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
-import { css, styled } from "styled-components";
+import type { HTMLAttributes, ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { styled } from "@linaria/react";
 
-import { MinimalCalendar, MinimalDropdown, type MinimalOption } from "./primitives";
-import type { MinimalSize } from "./types";
+import type { MinimalOption } from "./primitives";
+import { MinimalCalendar, MinimalDropdown } from "./primitives";
+import { minimalVars } from "./tokens.ts";
+import { variantRules } from "./variantRules.ts";
+import type { MinimalSize } from "./types.ts";
 
 type FieldCopy = {
   label: ReactNode;
@@ -110,14 +114,14 @@ export interface MinimalTimePickerProps
   placeholder?: ReactNode;
 }
 
-const focusRing = css`
+const focusRing = `
   &:focus-visible {
-    outline: 2px solid ${({ theme }) => theme.color.borderFocus};
+    outline: 2px solid ${minimalVars.color.borderFocus};
     outline-offset: 2px;
   }
 `;
 
-const controlReset = css`
+const controlReset = `
   appearance: none;
   border: 0;
   background: transparent;
@@ -125,7 +129,7 @@ const controlReset = css`
   font: inherit;
 `;
 
-const popIn = css`
+const popIn = `
   @media (prefers-reduced-motion: no-preference) {
     animation: minimal-interactions-pop 140ms cubic-bezier(0.22, 1, 0.36, 1);
   }
@@ -142,46 +146,48 @@ const popIn = css`
   }
 `;
 
+/* Build-time style block (Linaria evaluates it once). */
+const interactionBlock1 = variantRules("open", [true] as const, () => popIn);
 const Style = {
   Field: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
     width: 100%;
   `,
   Label: styled.label`
-    color: ${({ theme }) => theme.color.textPrimary};
-    font-size: ${({ theme }) => theme.typography.captionSize};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    color: ${minimalVars.color.textPrimary};
+    font-size: ${minimalVars.typography.captionSize};
+    font-weight: ${minimalVars.typography.weightSemibold};
   `,
   Description: styled.div`
-    color: ${({ theme }) => theme.color.textTertiary};
-    font-size: ${({ theme }) => theme.typography.captionSize};
-    line-height: ${({ theme }) => theme.typography.lineHeightBody};
+    color: ${minimalVars.color.textTertiary};
+    font-size: ${minimalVars.typography.captionSize};
+    line-height: ${minimalVars.typography.lineHeightBody};
   `,
   Message: styled.p<{ $error: boolean }>`
     margin: 0;
-    color: ${({ theme, $error }) => ($error ? theme.color.danger : theme.color.textSecondary)};
-    font-size: ${({ theme }) => theme.typography.captionSize};
-    line-height: ${({ theme }) => theme.typography.lineHeightBody};
+    color: ${({ $error }) => ($error ? minimalVars.color.danger : minimalVars.color.textSecondary)};
+    font-size: ${minimalVars.typography.captionSize};
+    line-height: ${minimalVars.typography.lineHeightBody};
   `,
   ChoiceLabel: styled.label<{ $disabled: boolean }>`
     display: grid;
     grid-template-columns: max-content minmax(0, 1fr);
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     align-items: start;
     cursor: ${({ $disabled }) => ($disabled ? "not-allowed" : "pointer")};
     opacity: ${({ $disabled }) => ($disabled ? 0.56 : 1)};
   `,
   ChoiceCopy: styled.span`
     display: grid;
-    gap: ${({ theme }) => theme.space["3xs"]};
+    gap: ${minimalVars.space["3xs"]};
     min-width: 0;
     padding-block: 4px;
   `,
   ChoiceTitle: styled.span`
-    color: ${({ theme }) => theme.color.textPrimary};
-    font-size: ${({ theme }) => theme.typography.bodySize};
-    font-weight: ${({ theme }) => theme.typography.weightMedium};
+    color: ${minimalVars.color.textPrimary};
+    font-size: ${minimalVars.typography.bodySize};
+    font-weight: ${minimalVars.typography.weightMedium};
   `,
   ChoiceControl: styled.span`
     position: relative;
@@ -192,15 +198,15 @@ const Style = {
     margin-block: 4px;
 
     & > input:focus-visible + span {
-      outline: 2px solid ${({ theme }) => theme.color.borderFocus};
+      outline: 2px solid ${minimalVars.color.borderFocus};
       outline-offset: 2px;
     }
 
     & > input:checked + span,
     & > input:indeterminate + span {
-      border-color: ${({ theme }) => theme.color.brand};
-      background: ${({ theme }) => theme.color.brand};
-      color: ${({ theme }) => theme.color.textInverse};
+      border-color: ${minimalVars.color.brand};
+      background: ${minimalVars.color.brand};
+      color: ${minimalVars.color.textInverse};
 
       & > span {
         opacity: 1;
@@ -221,13 +227,13 @@ const Style = {
     place-items: center;
     width: var(--minimal-control-min-target);
     height: var(--minimal-control-min-target);
-    border: 1px solid ${({ theme }) => theme.color.borderStrong};
-    border-radius: ${({ theme }) => theme.radius.sm};
-    background: ${({ theme }) => theme.color.bgSurface};
+    border: 1px solid ${minimalVars.color.borderStrong};
+    border-radius: ${minimalVars.radius.sm};
+    background: ${minimalVars.color.bgSurface};
 
     & > span {
       font-size: 1rem;
-      font-weight: ${({ theme }) => theme.typography.weightBold};
+      font-weight: ${minimalVars.typography.weightBold};
       line-height: 1;
       opacity: 0;
     }
@@ -241,21 +247,21 @@ const Style = {
     height: 28px;
     padding: 0 3px;
     margin-block: 8px;
-    border: 1px solid ${({ theme }) => theme.color.borderStrong};
-    border-radius: ${({ theme }) => theme.radius.pill};
-    background: ${({ theme }) => theme.color.bgSurfaceAlt};
+    border: 1px solid ${minimalVars.color.borderStrong};
+    border-radius: ${minimalVars.radius.pill};
+    background: ${minimalVars.color.bgSurfaceAlt};
     transition:
       background-color 160ms cubic-bezier(0.22, 1, 0.36, 1),
       border-color 160ms cubic-bezier(0.22, 1, 0.36, 1);
 
     & > input:focus-visible + span {
-      outline: 2px solid ${({ theme }) => theme.color.borderFocus};
+      outline: 2px solid ${minimalVars.color.borderFocus};
       outline-offset: 2px;
     }
 
     &:has(input:checked) {
-      border-color: ${({ theme }) => theme.color.brand};
-      background: ${({ theme }) => theme.color.brand};
+      border-color: ${minimalVars.color.brand};
+      background: ${minimalVars.color.brand};
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -271,8 +277,8 @@ const Style = {
     width: 20px;
     height: 20px;
     border-radius: 50%;
-    background: ${({ theme }) => theme.color.bgSurface};
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
+    background: ${minimalVars.color.bgSurface};
+    border: 1px solid ${minimalVars.color.borderSubtle};
     box-shadow: 0 1px 3px rgba(28, 28, 30, 0.24);
     transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
 
@@ -283,25 +289,25 @@ const Style = {
   `,
   NumberRoot: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
   `,
   NumberGroup: styled.div<{ $size: MinimalSize; $invalid: boolean }>`
     display: grid;
     grid-template-columns: var(--minimal-control-min-target) minmax(0, 1fr) var(--minimal-control-min-target);
     min-height: ${({ $size }) => `var(--minimal-control-height-${$size})`};
     overflow: hidden;
-    border: 1px solid ${({ theme, $invalid }) => ($invalid ? theme.color.danger : theme.color.borderSubtle)};
-    border-radius: ${({ theme }) => theme.radius.sm};
-    background: ${({ theme }) => theme.color.bgSurface};
+    border: 1px solid ${({ $invalid }) => ($invalid ? minimalVars.color.danger : minimalVars.color.borderSubtle)};
+    border-radius: ${minimalVars.radius.sm};
+    background: ${minimalVars.color.bgSurface};
 
     &:focus-within {
-      border-color: ${({ theme, $invalid }) => ($invalid ? theme.color.danger : theme.color.borderFocus)};
+      border-color: ${({ $invalid }) => ($invalid ? minimalVars.color.danger : minimalVars.color.borderFocus)};
       /* Built in one interpolation rather than two. A declaration whose value
          wraps onto a following line that begins with an interpolation is
          unparseable to the CSS-in-JS language service, which then reports a
          spurious "semi-colon expected" for the whole block. */
-      box-shadow: ${({ theme, $invalid }) =>
-        `0 0 0 ${theme.focus.ringWidth} ${$invalid ? theme.color.dangerSoft : theme.color.brandSoft}`};
+      box-shadow: ${({ $invalid }) =>
+        `0 0 0 ${minimalVars.focus.ringWidth} ${$invalid ? minimalVars.color.dangerSoft : minimalVars.color.brandSoft}`};
     }
   `,
   NumberButton: styled.button`
@@ -309,8 +315,8 @@ const Style = {
     ${focusRing}
     min-width: var(--minimal-control-min-target);
     cursor: pointer;
-    color: ${({ theme }) => theme.color.textSecondary};
-    background: ${({ theme }) => theme.color.bgSurfaceAlt};
+    color: ${minimalVars.color.textSecondary};
+    background: ${minimalVars.color.bgSurfaceAlt};
 
     &:disabled {
       cursor: not-allowed;
@@ -322,22 +328,22 @@ const Style = {
     min-width: 0;
     width: 100%;
     outline: 0;
-    color: ${({ theme }) => theme.color.textPrimary};
-    padding: 0 ${({ theme }) => theme.space.xs};
+    color: ${minimalVars.color.textPrimary};
+    padding: 0 ${minimalVars.space.xs};
     text-align: center;
   `,
   TabsRoot: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.space.sm};
+    gap: ${minimalVars.space.sm};
   `,
   TabsList: styled.div`
     display: flex;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
     overflow-x: auto;
-    padding: ${({ theme }) => theme.space["2xs"]};
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.md};
-    background: ${({ theme }) => theme.color.bgSurfaceAlt};
+    padding: ${minimalVars.space["2xs"]};
+    border: 1px solid ${minimalVars.color.borderSubtle};
+    border-radius: ${minimalVars.radius.md};
+    background: ${minimalVars.color.bgSurfaceAlt};
 
     &[data-orientation="vertical"] {
       flex-direction: column;
@@ -348,15 +354,15 @@ const Style = {
     ${focusRing}
     min-height: var(--minimal-control-min-target);
     padding: 8px 14px;
-    border-radius: ${({ theme }) => theme.radius.sm};
-    color: ${({ theme }) => theme.color.textSecondary};
+    border-radius: ${minimalVars.radius.sm};
+    color: ${minimalVars.color.textSecondary};
     cursor: pointer;
     white-space: nowrap;
 
     &[aria-selected="true"] {
-      background: ${({ theme }) => theme.color.bgSurface};
-      color: ${({ theme }) => theme.color.textPrimary};
-      box-shadow: ${({ theme }) => theme.shadow.subtle};
+      background: ${minimalVars.color.bgSurface};
+      color: ${minimalVars.color.textPrimary};
+      box-shadow: ${minimalVars.shadow.subtle};
     }
 
     &:disabled {
@@ -379,14 +385,14 @@ const Style = {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     width: 100%;
     min-height: var(--minimal-control-height-md);
     padding: 10px 14px;
-    border: 1px solid ${({ theme, $invalid }) => ($invalid ? theme.color.danger : theme.color.borderSubtle)};
-    border-radius: ${({ theme }) => theme.radius.sm};
-    background: ${({ theme }) => theme.color.bgSurface};
-    color: ${({ theme, $placeholder }) => ($placeholder ? theme.color.textTertiary : theme.color.textPrimary)};
+    border: 1px solid ${({ $invalid }) => ($invalid ? minimalVars.color.danger : minimalVars.color.borderSubtle)};
+    border-radius: ${minimalVars.radius.sm};
+    background: ${minimalVars.color.bgSurface};
+    color: ${({ $placeholder }) => ($placeholder ? minimalVars.color.textTertiary : minimalVars.color.textPrimary)};
     cursor: pointer;
     text-align: left;
 
@@ -400,28 +406,28 @@ const Style = {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-weight: ${({ theme }) => theme.typography.weightMedium};
+    font-weight: ${minimalVars.typography.weightMedium};
   `,
   DateTriggerIcon: styled.span`
     display: inline-flex;
     flex: 0 0 auto;
-    color: ${({ theme }) => theme.color.textSecondary};
+    color: ${minimalVars.color.textSecondary};
   `,
   DatePanel: styled.div<{ $open: boolean }>`
     position: absolute;
     top: calc(100% + var(--minimal-overlay-anchored-offset));
     left: 0;
-    z-index: ${({ theme }) => theme.zIndex.dropdown};
+    z-index: ${minimalVars.zIndex.dropdown};
     width: min(calc(100vw - (2 * var(--minimal-overlay-viewport-gutter))), 368px);
     max-height: var(--minimal-overlay-max-height);
     overflow: auto;
     visibility: ${({ $open }) => ($open ? "visible" : "hidden")};
-    border: 1px solid ${({ theme }) => theme.color.borderStrong};
-    border-radius: ${({ theme }) => theme.radius.md};
-    background: ${({ theme }) => theme.color.bgSurface};
-    box-shadow: ${({ theme }) => theme.shadow.floating};
+    border: 1px solid ${minimalVars.color.borderStrong};
+    border-radius: ${minimalVars.radius.md};
+    background: ${minimalVars.color.bgSurface};
+    box-shadow: ${minimalVars.shadow.floating};
 
-    ${({ $open }) => ($open ? popIn : "")}
+    ${interactionBlock1}
 
     & [data-minimal="Calendar"] {
       border: 0;
@@ -444,7 +450,7 @@ const Style = {
     ${focusRing}
     justify-self: start;
     min-height: var(--minimal-control-min-target);
-    color: ${({ theme }) => theme.color.textSecondary};
+    color: ${minimalVars.color.textSecondary};
     cursor: pointer;
   `,
 };
@@ -915,6 +921,7 @@ export const MinimalDatePicker = ({
           not identify the control.
         */}
         <Style.DatePanel
+          data-minimal-open={open}
           $open={open}
           role="dialog"
           aria-label={typeof label === "string" ? `Choose ${label}` : "Choose a date"}

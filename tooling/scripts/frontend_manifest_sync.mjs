@@ -23,9 +23,10 @@ const requiredDependencies = [
   '@ovasabi/runtime-transport',
   '@ovasabi/frontend-kit',
   '@ovasabi/ui-minimal',
-  'framer-motion',
+  // ui-minimal's styles are Linaria (Foundation research doc 14.8).
+  '@linaria/core',
+  '@linaria/react',
   'react-router-dom',
-  'styled-components',
   'zustand',
 ]
 const requiredNativeDependencies = [
@@ -35,6 +36,10 @@ const requiredDevDependencies = [
   '@testing-library/jest-dom',
   '@testing-library/react',
   '@testing-library/user-event',
+  // Build-time extraction for ui-minimal's Linaria styles.
+  '@wyw-in-js/vite',
+  '@babel/preset-typescript',
+  '@babel/preset-react',
   'jsdom',
   'ts-proto',
   'vitest',
@@ -44,7 +49,6 @@ const pinnedDependencyVersions = new Set([
   '@ovasabi/frontend-kit',
   '@ovasabi/ui-minimal',
   '@ovasabi/runtime-native',
-  'framer-motion',
 ])
 // vitest is pinned to the template range because an app left on an older major
 // makes npm resolve vitest@latest through optional peers (@vitejs/devtools-vitest

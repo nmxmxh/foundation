@@ -2,6 +2,7 @@ export * from "./chunkGate";
 export * from "./indexedDBStorage";
 export * from "./lazyPage";
 export * from "./metadata";
+export * from "./mountRoot";
 export * from "./projectionWorkerPipeline";
 export * from "./runtimeExternalStore";
 export * from "./runtimeWorkbench";

@@ -1,7 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["DOM", "ES2022"],
+    "lib": [
+      "DOM",
+      "ES2022"
+    ],
     "strict": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
@@ -10,8 +13,14 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "skipLibCheck": true,
-    "types": ["react", "react-dom"],
-    "noEmit": true
+    "types": [
+      "react",
+      "react-dom"
+    ],
+    "noEmit": true,
+    "allowImportingTsExtensions": true
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

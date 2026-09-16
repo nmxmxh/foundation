@@ -203,6 +203,124 @@ describe("one worker serving several surfaces", () => {
     expect(release).toHaveBeenCalledWith({ device: "late" });
   });
 
+  /*
+   * Found on real hardware (frontend-lab `gpu` lane): `serve` runs at module
+   * load and is never disposed, so a release keyed to registrations never ran —
+   * every host disposed, every pass retired, the device still alive.
+   */
+  describe("release follows live passes, not registrations", () => {
+    const stop = (surface: string): RenderSurfaceCommand<unknown> => ({ kind: "STOP", surface });
+
+    it("releases once every pass is retired and the idle window passes, while still serving", async () => {
+      const release = vi.fn();
+      const { scope, send } = makeScope();
+      const worker = createRenderSurfaceWorker({ acquire: () => ({ device: "shared" }), release, scope });
+      worker.serve("a", { build: () => pass() });
+      worker.serve("b", { build: () => pass() });
+      send(init("a"));
+      send(init("b"));
+      await vi.advanceTimersByTimeAsync(0);
+
+      send(stop("a"));
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(release, "released while b still drew").not.toHaveBeenCalled();
+
+      send(stop("b"));
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(release).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(release).toHaveBeenCalledTimes(1);
+      expect(release).toHaveBeenCalledWith({ device: "shared" });
+      expect(worker.size).toBe(2);
+      expect(worker.acquired).toBe(false);
+    });
+
+    it("keeps the device for a surface that mounts again inside the window", async () => {
+      const release = vi.fn();
+      const acquire = vi.fn(() => ({ device: "shared" }));
+      const { scope, send } = makeScope();
+      const worker = createRenderSurfaceWorker({ acquire, release, scope });
+      worker.serve("a", { build: () => pass() });
+
+      send(init("a"));
+      await vi.advanceTimersByTimeAsync(0);
+      send(stop("a"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      send(init("a")); // StrictMode, or back-navigation
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(release).not.toHaveBeenCalled();
+      expect(acquire).toHaveBeenCalledTimes(1);
+    });
+
+    it("acquires again after an idle release", async () => {
+      let n = 0;
+      const release = vi.fn();
+      const seen: unknown[] = [];
+      const { scope, send } = makeScope();
+      const worker = createRenderSurfaceWorker({ acquire: () => ({ device: ++n }), release, releaseWhenIdleMs: 0, scope });
+      worker.serve("a", { build: (_canvas, shared) => (seen.push(shared), pass()) });
+
+      send(init("a"));
+      await vi.advanceTimersByTimeAsync(0);
+      send(stop("a"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(release).toHaveBeenCalledWith({ device: 1 });
+
+      send(init("a"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(seen).toEqual([{ device: 1 }, { device: 2 }]);
+    });
+
+    it("does not release under a build still in flight", async () => {
+      const release = vi.fn();
+      let finish: (() => void) | undefined;
+      const { scope, send } = makeScope();
+      const worker = createRenderSurfaceWorker({ acquire: () => ({ device: "shared" }), release, releaseWhenIdleMs: 0, scope });
+      worker.serve("a", { build: () => pass() });
+      worker.serve("b", { build: () => new Promise<ReturnType<typeof pass>>((resolve) => (finish = () => resolve(pass()))) });
+
+      send(init("a"));
+      await vi.advanceTimersByTimeAsync(0);
+      send(init("b")); // compiling
+      send(stop("a"));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(release, "destroyed the device b was compiling against").not.toHaveBeenCalled();
+
+      finish?.();
+      await vi.advanceTimersByTimeAsync(0);
+      send(stop("b"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(release).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the device for the worker's life with releaseWhenIdleMs: Infinity", async () => {
+      const release = vi.fn();
+      const { scope, send } = makeScope();
+      const worker = createRenderSurfaceWorker({ acquire: () => ({ device: 1 }), release, releaseWhenIdleMs: Infinity, scope });
+      worker.serve("a", { build: () => pass() });
+      send(init("a"));
+      await vi.advanceTimersByTimeAsync(0);
+      send(stop("a"));
+      await vi.advanceTimersByTimeAsync(3_600_000);
+      expect(release).not.toHaveBeenCalled();
+      worker.dispose();
+      expect(release).toHaveBeenCalledTimes(1);
+    });
+
+    it("disposes each pass exactly once through the wrapper", async () => {
+      const disposals: string[] = [];
+      const { scope, send } = makeScope();
+      const worker = createRenderSurfaceWorker({ acquire: () => ({ device: 1 }), scope });
+      worker.serve("a", { build: () => ({ ...pass(), dispose: () => disposals.push("a") }) });
+      send(init("a"));
+      await vi.advanceTimersByTimeAsync(0);
+      send(stop("a"));
+      worker.dispose();
+      expect(disposals).toEqual(["a"]);
+    });
+  });
+
   it("warms each surface on the one shared device", async () => {
     const acquire = vi.fn(async () => ({ device: "shared" }));
     const warmed: unknown[] = [];

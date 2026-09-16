@@ -448,6 +448,16 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   if [[ -f "$target/Dockerfile" ]]; then
     check_file_contains "Docker server image generates OpenAPI spec" "$target/Dockerfile" "go run ./cmd/docgen > /tmp/openapi.json"
     check_file_contains "Docker server image embeds OpenAPI spec" "$target/Dockerfile" "COPY --from=builder /tmp/openapi.json ./openapi.json"
+    # Every `file:` dependency the frontend links must reach the Docker build
+    # context. A linked package the image never copies still resolves on a dev
+    # machine (node_modules symlinks into ./foundation), so the gap only shows
+    # as a failed deploy: TS2307 inside `npm run build`.
+    if [[ -f "$target/frontend/package.json" ]]; then
+      local linked_dep
+      for linked_dep in $(grep -oE '"file:\.\./[^"]+"' "$target/frontend/package.json" | sed -E 's#"file:\.\./([^"]+)"#\1#'); do
+        check_file_contains "Docker frontend build copies linked package $linked_dep" "$target/Dockerfile" "COPY $linked_dep ./$linked_dep"
+      done
+    fi
   fi
   # The project's HTTP surface is declared once, in bootstrap.Services: a single
   # HTTPRoutes() catalogue consumed by both the server (SetHTTPRoutes) and docgen
@@ -647,7 +657,11 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "backend" ]]; then
   check_file_contains "load tests bound pre/post infrastructure probes" "$target/tests/load/load_test.go" "probeCtx, probeCancel := context.WithTimeout(ctx, opTimeout)"
   check_file_contains "config loads allowed origins" "$target/internal/config/config.go" "ALLOWED_ORIGINS"
   check_file_contains "config loads explicit Redis URL" "$target/internal/config/config.go" "REDIS_URL"
-  check_file_contains "config defaults auth on in production" "$target/internal/config/config.go" 'env == "production"'
+  # The comparison matters, not what the variable is called: the template says
+  # `env`, reframe_v1 says `appEnv`, and an app is free to say something else.
+  # Requiring one spelling invites code contorted to satisfy a grep.
+  check_file_contains_any "config defaults auth on in production" "$target/internal/config/config.go" \
+    'env == "production"' 'Env == "production"' 'env == EnvProduction' 'Env == EnvProduction'
   check_file_contains "env documents operational endpoint protection" "$target/.env.example" "PROTECT_OPERATIONAL_ENDPOINTS"
   check_exists "foundation runtime transport" "$target/foundation/runtime-transport/go/go.mod"
   check_exists "foundation proto envelope" "$target/foundation/runtime-transport/protos/foundation/v1/envelope.proto"
@@ -831,7 +845,8 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then
   check_frontend_package_contains "frontend test script" "$frontend_root/package.json" '"test": "vitest run"'
   check_frontend_package_contains "frontend test watch script" "$frontend_root/package.json" '"test:watch": "vitest"'
   check_frontend_package_contains "frontend router dependency" "$frontend_root/package.json" '"react-router-dom"'
-  check_frontend_package_contains "frontend styled-components dependency" "$frontend_root/package.json" '"styled-components"'
+  # ui-minimal's styles are Linaria, extracted at build time (research doc 14.8).
+  check_frontend_package_contains "frontend Linaria dependency" "$frontend_root/package.json" '"@linaria/react"'
   check_frontend_package_contains "frontend zustand dependency" "$frontend_root/package.json" '"zustand"'
   check_frontend_package_contains "frontend jsdom dependency" "$frontend_root/package.json" '"jsdom"'
   check_frontend_package_contains "frontend testing library react" "$frontend_root/package.json" '"@testing-library/react"'
@@ -910,6 +925,17 @@ if [[ "${WITH_NATIVE:-false}" == "true" ]]; then
   check_file_contains "native dev CSP allows Vite websocket" "$target/native/src-tauri/tauri.dev.conf.json" 'ws://127.0.0.1:5173'
   check_file_contains "native dev CSP allows inline styles" "$target/native/src-tauri/tauri.dev.conf.json" "'unsafe-inline'"
   check_file_not_contains "native prod CSP forbids Vite websocket" "$target/native/src-tauri/tauri.prod.conf.json" 'ws://127.0.0.1:5173'
+  # Cross-origin isolation is what makes the sab lane exist in the shell. A
+  # missing header is reversible and the lane falls back, so this warns rather
+  # than fails; shells scaffolded before the template carried it still pass.
+  for isolation_header in Cross-Origin-Opener-Policy Cross-Origin-Embedder-Policy; do
+    if grep -Fq "\"${isolation_header}\"" "$target/native/src-tauri/tauri.conf.json" 2>/dev/null; then
+      echo "[OK] native shell sets ${isolation_header}"
+    else
+      echo "[WARN] native shell sets ${isolation_header}"
+      echo "  add app.security.headers to native/src-tauri/tauri.conf.json (see native/README.md, release hardening item 6)"
+    fi
+  done
   # Inline scripts are never allowed in the release CSP. Inline styles are
   # allowed only as a documented exception (a CSS-in-JS library injecting
   # <style> at runtime), recorded in native/README.md with the exact marker.

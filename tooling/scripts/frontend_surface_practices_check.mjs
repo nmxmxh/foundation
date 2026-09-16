@@ -421,10 +421,11 @@ rule(
 );
 
 /** Two steps a reader cannot tell apart are not two steps. */
-const theme = sources.find((file) => file.rel.endsWith("ui-minimal/ts/src/theme.tsx"));
+// The space scale lives with the other pure tokens (tokens.ts, split from theme.tsx on 2026-09-15).
+const theme = sources.find((file) => file.rel.endsWith("ui-minimal/ts/src/tokens.ts"));
 const scale = theme?.code.match(/const space: MinimalSpaceTheme = \{([\s\S]*?)\n\};/)?.[1];
 if (!scale) {
-  fail("spacing scale ratio", "could not read the space scale out of ui-minimal/ts/src/theme.tsx");
+  fail("spacing scale ratio", "could not read the space scale out of ui-minimal/ts/src/tokens.ts");
 } else {
   const steps = [...scale.matchAll(/"?([0-9a-z]+)"?:\s*"(\d+(?:\.\d+)?)px"/g)].map((m) => ({
     name: m[1],
@@ -444,6 +445,426 @@ if (!scale) {
     );
   } else ok(`every spacing step is distinguishable from its neighbours (${steps.length} steps)`);
 }
+
+/* ── raster and motion budget: ui_render_performance_research.md P2, P3, P7 ── */
+
+rule(
+  "no transition: all",
+  hits((line) => /transition(?:-property)?:\s*all\b/.test(line)),
+  "Name the properties. transition: all animates layout properties the moment one changes, and a layout animation runs on the main thread — research doc §10 lesson 6.",
+);
+
+/*
+ * A will-change in a static declaration promotes a layer for the life of the
+ * element, which is GPU memory held whether or not anything moves. P7 rule 4
+ * allows promotion only while a gesture or animation runs, and a styled
+ * template cannot express "only while".
+ */
+rule(
+  "no permanent will-change",
+  hits((line) => /will-change:\s*(?!auto\b)[a-z]/.test(line)),
+  "Set will-change from script at gesture start and clear it at the end, or leave promotion to the browser — research doc P7 rule 4.",
+);
+
+rule(
+  "backdrop-filter goes through the quality-tier token",
+  // The lookbehind keeps the token's own declaration (--minimal-backdrop-filter: none)
+  // from reading as a use of the property it controls.
+  hits((line) => /(?<![\w-])(?:-webkit-)?backdrop-filter\s*:/.test(line) && !/var\(--minimal-backdrop-filter\b/.test(line)),
+  "Write backdrop-filter: var(--minimal-backdrop-filter, <value>) so low_power and reduced_motion can drop the blur — research doc P7 rule 1.",
+);
+
+/*
+ * An infinite animation spends a frame forever. The guard is looked for in the
+ * same styled template as the loop, between its opening and closing backticks,
+ * because a tier block anywhere else in the file does not stop this element.
+ */
+const loopHits = [];
+for (const file of sources) {
+  for (const match of file.code.matchAll(/animation:[^;`]*\binfinite\b/g)) {
+    const start = file.code.lastIndexOf("`", match.index);
+    const end = file.code.indexOf("`", match.index);
+    const block = file.code.slice(start === -1 ? 0 : start, end === -1 ? undefined : end);
+    if (/data-ui-tier="low_power"/.test(block) && /data-ui-tier="reduced_motion"/.test(block)) continue;
+    const line = file.code.slice(0, match.index).split("\n").length;
+    loopHits.push(`${file.rel}:${line}: ${match[0].trim()}`);
+  }
+}
+rule(
+  "infinite animations stop on the low_power and reduced_motion tiers",
+  loopHits,
+  'Add :root:where([data-ui-tier="low_power"], [data-ui-tier="reduced_motion"]) & { animation: none; } to the same template — research doc P3 rule 4.',
+);
+
+/*
+ * Keyframes run on the compositor only when they animate compositor
+ * properties. Anything else restyles and repaints the element on every frame
+ * for as long as the animation runs: MinimalSkeleton's background-position
+ * sweep cost the frontend lab ~880 ms of style and ~1,480 ms of paint per
+ * scroll pass (research ledger finding 8). The lab itself is exempt — it keeps
+ * the old design deliberately, as a profile variant.
+ */
+const COMPOSITED_KEYFRAME_PROPERTIES = new Set(["transform", "opacity", "translate", "rotate", "scale"]);
+const keyframeHits = [];
+const scanKeyframes = (file, body, at) => {
+  const declarations = body.replace(/\$\{[^}]*\}/g, "");
+  for (const declaration of declarations.matchAll(/(?:^|[;{\s])(-{0,2}[a-z][a-z-]*)\s*:/g)) {
+    const property = declaration[1];
+    if (property.startsWith("--") || COMPOSITED_KEYFRAME_PROPERTIES.has(property)) continue;
+    const line = file.code.slice(0, at).split("\n").length;
+    keyframeHits.push(`${file.rel}:${line}: keyframes animate ${property}`);
+  }
+};
+for (const file of sources) {
+  if (file.rel.startsWith("frontend-lab/")) continue;
+  for (const match of file.code.matchAll(/\bkeyframes`/g)) {
+    const start = match.index + match[0].length;
+    const end = file.code.indexOf("`", start);
+    scanKeyframes(file, file.code.slice(start, end === -1 ? undefined : end), match.index);
+  }
+  for (const match of file.code.matchAll(/@keyframes\s+[\w-]+\s*\{/g)) {
+    let depth = 1;
+    let index = match.index + match[0].length;
+    for (; index < file.code.length && depth > 0; index += 1) {
+      if (file.code[index] === "{") depth += 1;
+      else if (file.code[index] === "}") depth -= 1;
+    }
+    scanKeyframes(file, file.code.slice(match.index + match[0].length, index), match.index);
+  }
+}
+rule(
+  "keyframes animate only compositor properties",
+  keyframeHits,
+  "Animate transform or opacity; move a colour or position change onto a pseudo-element's transform or opacity — research doc P3, ledger finding 8.",
+);
+
+/*
+ * ui-minimal carries no JavaScript animation runtime. framer-motion was removed
+ * on 2026-09-15 (research doc section 14): 47.6 KB gzip, independent transforms
+ * and springs written from JavaScript every frame, 3.9× cold mount per card.
+ * Its motion is CSS (`minimalEnter`, `useMinimalPresence`). A ratchet: nothing
+ * under ui-minimal may import it again.
+ */
+const animationRuntimeHits = [];
+for (const file of sources) {
+  if (!file.rel.startsWith("ui-minimal/")) continue;
+  for (const match of file.code.matchAll(/from\s+["'](framer-motion|motion\/react|motion)["']/g)) {
+    const line = file.code.slice(0, match.index).split("\n").length;
+    animationRuntimeHits.push(`${file.rel}:${line}: imports ${match[1]}`);
+  }
+}
+rule(
+  "ui-minimal imports no JavaScript animation runtime",
+  animationRuntimeHits,
+  "Use minimalEnter / useMinimalPresence and CSS transitions — research doc section 14.",
+);
+
+/*
+ * Every image reserves its box before it loads. An <img> without width and
+ * height is zero pixels tall until its bytes arrive and then shoves everything
+ * below it down — the classic layout shift (research doc P6, §15.4). The lab
+ * measures it: an unsized image moves the content under it by its full height,
+ * MinimalImage by zero. Use MinimalImage, or write both attributes.
+ */
+const imageHits = [];
+for (const file of sources) {
+  for (const match of file.code.matchAll(/<img\b/g)) {
+    let depth = 0;
+    let index = match.index + match[0].length;
+    for (; index < file.code.length; index += 1) {
+      const char = file.code[index];
+      if (char === "{") depth += 1;
+      else if (char === "}") depth -= 1;
+      else if (char === ">" && depth === 0) break;
+    }
+    const tag = file.code.slice(match.index, index);
+    if (/\bwidth=/.test(tag) && /\bheight=/.test(tag)) continue;
+    const line = file.code.slice(0, match.index).split("\n").length;
+    imageHits.push(`${file.rel}:${line}: <img> without width and height`);
+  }
+}
+rule(
+  "images reserve their box before they load",
+  imageHits,
+  "Use MinimalImage (width+height or aspectRatio are required by its type) or give the <img> both width and height — research doc P6.",
+);
+
+/** The tier block is what gives every ui-minimal surface a cheap mode; losing it is silent. */
+// The tier block lives in the extracted global stylesheet (globalStyles.ts) since the Linaria port.
+const tierTheme = sources.find((file) => file.rel.endsWith("ui-minimal/ts/src/globalStyles.ts"));
+const lowPowerBlock = tierTheme?.code.match(/:root\[data-ui-tier="low_power"\]\s*\{([^}]*)\}/)?.[1] ?? "";
+if (!tierTheme) {
+  fail("low_power tier tokens", "ui-minimal/ts/src/globalStyles.ts not found");
+} else if (
+  !/--minimal-shadow-subtle:/.test(lowPowerBlock) ||
+  !/--minimal-shadow-floating:/.test(lowPowerBlock) ||
+  !/--minimal-backdrop-filter:\s*none/.test(lowPowerBlock)
+) {
+  fail(
+    "the low_power tier swaps the shadow and blur tokens",
+    "globalStyles.ts has no :root[data-ui-tier=\"low_power\"] block overriding --minimal-shadow-* and --minimal-backdrop-filter",
+    "Without it data-ui-tier changes nothing: every surface keeps its full-radius shadows and blur on the devices the tier exists to protect.",
+  );
+} else {
+  ok("the low_power tier swaps the shadow and blur tokens");
+}
+
+/**
+ * Tiers move on the slow-frame share, never the median. Measured on a WebView:
+ * requestAnimationFrame p50 read 17 ms while the render thread drew at ~10 fps,
+ * and only the share of slow frames moved (research doc §13, finding 5). A
+ * ladder keyed on p50 would never demote on the jank that matters.
+ */
+const quality = sources.find((file) => file.rel.endsWith("browser-host/src/uiQuality.ts"));
+if (!quality) {
+  fail("ui quality tiers", "runtime-sdk/ts/browser-host/src/uiQuality.ts not found");
+} else if (!/window\.slowFrames\s*\/\s*window\.frames/.test(quality.code) || /\bp(?:50|95|99)Ms\b/.test(quality.code)) {
+  fail(
+    "ui quality demotes on the slow-frame share, never a percentile",
+    "uiQuality.ts does not divide slowFrames by frames, or reads a percentile",
+    "Page-side percentiles under-report compositor jank; the share of slow frames is the signal that separates a bad screen (22–34%) from a good one (~5%).",
+  );
+} else {
+  ok("ui quality demotes on the slow-frame share, never a percentile");
+}
+
+/** A frame clock that fell back must say so; ovasabi_v1 ran main-thread for its whole life reading "ok". */
+const clock = sources.find((file) => file.rel.endsWith("browser-host/src/frameClock.ts"));
+if (!clock) {
+  fail("frame clock diagnostics", "runtime-sdk/ts/browser-host/src/frameClock.ts not found");
+} else if (!/worker unavailable/.test(clock.code)) {
+  fail(
+    "a degraded frame clock reports why",
+    "frameClock.ts can mark the clock lane as a fallback with reason \"ok\"",
+    "A worker that fails to load raises no capability issue, so the reason must name the failure and the fix (configureFrameClock({ createWorker })).",
+  );
+} else {
+  ok("a degraded frame clock reports why");
+}
+
+/**
+ * styled-components is gone from the kit and from every app (2026-09-16). It is a
+ * runtime that injects a stylesheet on the main thread; the kit and the template are
+ * Linaria, extracted at build time, and an app that reintroduces the import pays that
+ * cost again and loses the build-time equivalence the migration proved.
+ *
+ * Run against a project's vendored `foundation/`, this also reads the app's own
+ * `../frontend/src`, which is how a Foundation check reaches project code.
+ */
+const STYLED_IMPORT = /from\s*["']styled-components["']/;
+const styledHits = sources.filter((file) => STYLED_IMPORT.test(file.code)).map((file) => file.rel);
+const scanAppSources = (dir) => {
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry === "node_modules" || entry === "dist") continue;
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      scanAppSources(full);
+      continue;
+    }
+    if (!/\.tsx?$/.test(entry)) continue;
+    if (STYLED_IMPORT.test(stripComments(readFileSync(full, "utf8")))) {
+      styledHits.push(relative(resolve(root, ".."), full));
+    }
+  }
+};
+scanAppSources(resolve(root, "../frontend/src"));
+if (styledHits.length) {
+  fail(
+    "no styled-components import in kit, template or app code",
+    styledHits.slice(0, 8).join(", "),
+    "Styles are Linaria (Foundation research doc 14.8): use `styled` from @linaria/react and tokens from @ovasabi/ui-minimal/tokens.",
+  );
+} else {
+  ok("no styled-components import in kit, template or app code");
+}
+
+/* ── fonts: frontend_paint_performance_handover.md §2, rules F1–F4 and F6 ── */
+
+/**
+ * A web font is the one asset that can hold text off the screen and then move it
+ * once it arrives, and every lever is in markup rather than in code — which is
+ * why none of this is reachable by a typechecker and all of it drifts.
+ *
+ * The surfaces are the app's `index.html`, its stylesheets and its TypeScript
+ * (a `@font-face` can live in a `css` block from @linaria/core), plus the font
+ * files themselves in `public/fonts`. Run against a project's vendored
+ * `foundation/`, `../frontend` is the app; run in Foundation it is the template,
+ * which carries no fonts of its own, so these rules gate app code.
+ */
+const stripHtmlComments = (text) =>
+  text.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, " "));
+
+/** index.html, every .css, and every .ts/.tsx under a frontend root. */
+const fontTextSurfaces = [];
+const collectFontText = (dir, appRel) => {
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry === "node_modules" || entry === "dist") continue;
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      collectFontText(full, appRel);
+      continue;
+    }
+    if (!/\.(css|tsx?|html)$/.test(entry)) continue;
+    const raw = readFileSync(full, "utf8");
+    const code = /\.html$/.test(entry) ? stripHtmlComments(raw) : stripComments(raw);
+    fontTextSurfaces.push({ rel: relative(appRel, full), code });
+  }
+};
+
+const frontendRoot = resolve(root, "../frontend");
+const appRel = resolve(root, "..");
+collectFontText(join(frontendRoot, "src"), appRel);
+try {
+  const indexHtml = join(frontendRoot, "index.html");
+  statSync(indexHtml);
+  fontTextSurfaces.push({
+    rel: relative(appRel, indexHtml),
+    code: stripHtmlComments(readFileSync(indexHtml, "utf8")),
+  });
+} catch {
+  /* Foundation has no sibling frontend; the template below is the surface. */
+}
+// Foundation's own scaffold, so a violation cannot be introduced at the source.
+collectFontText(join(root, "templates/frontend/src"), root);
+try {
+  const templateHtml = join(root, "templates/frontend/index.html");
+  statSync(templateHtml);
+  fontTextSurfaces.push({
+    rel: relative(root, templateHtml),
+    code: stripHtmlComments(readFileSync(templateHtml, "utf8")),
+  });
+} catch {
+  /* No template in a vendored foundation/. */
+}
+
+const fontTextHits = (pattern) => {
+  const found = [];
+  for (const file of fontTextSurfaces) {
+    const lines = file.code.split("\n");
+    for (let i = 0; i < lines.length; i += 1) {
+      if (pattern.test(lines[i])) found.push(`${file.rel}:${i + 1}: ${lines[i].trim()}`);
+    }
+  }
+  return found;
+};
+
+/**
+ * F1. A third-party font origin costs a DNS lookup, a TLS handshake and a round
+ * trip before the first glyph. An `@import` is worse than a `<link>`: it cannot
+ * start until the stylesheet containing it has arrived, so it serialises behind
+ * its own parent.
+ */
+rule(
+  "no third-party font origin",
+  fontTextHits(/fonts\.(?:googleapis|gstatic)\.com|@import[^;\n]*https?:\/\//),
+  "Self-host in public/fonts and serve from the app's own origin (paint performance handover F1).",
+);
+
+/**
+ * F3. `swap` is what paints text in the fallback instead of holding the line
+ * blank; a face without it inherits `auto`, which in Chrome is a three-second
+ * block. Brace-matched so the rule reads the declaration block rather than the
+ * next three lines.
+ */
+const faceMisses = [];
+for (const file of fontTextSurfaces) {
+  for (const match of file.code.matchAll(/@font-face\s*\{/g)) {
+    const open = file.code.indexOf("{", match.index);
+    let depth = 0;
+    let end = open;
+    for (; end < file.code.length; end += 1) {
+      if (file.code[end] === "{") depth += 1;
+      else if (file.code[end] === "}") {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    const body = file.code.slice(open, end);
+    if (!/font-display/.test(body)) {
+      const line = file.code.slice(0, match.index).split("\n").length;
+      const family = body.match(/font-family:\s*([^;]+)/);
+      faceMisses.push(`${file.rel}:${line}: @font-face ${family ? family[1].trim() : "(no family)"}`);
+    }
+  }
+}
+rule(
+  "every @font-face declares font-display",
+  faceMisses,
+  "Add `font-display: swap` and a size-adjusted fallback face (paint performance handover F3).",
+);
+
+/**
+ * F4. Preloads compete with the HTML and the CSS for the same early bytes, so
+ * preloading past the first screen makes FCP worse rather than better. The rule
+ * is one or two faces; the count is the part a check can see.
+ */
+const preloadCounts = fontTextSurfaces
+  .filter((file) => /\.html$/.test(file.rel))
+  .map((file) => ({ rel: file.rel, n: (file.code.match(/rel=["']preload["'][^>]*as=["']font["']/g) ?? []).length }))
+  .filter((entry) => entry.n > 2)
+  .map((entry) => `${entry.rel}: ${entry.n} font preloads`);
+rule(
+  "at most two font faces are preloaded",
+  preloadCounts,
+  "Preload only the faces the first screen paints; the rest are fetched by the CSS (paint performance handover F4).",
+);
+
+/* Font files: F2 (format) and F6 (nothing unused ships). */
+const fontFiles = [];
+const collectFontFiles = (dir) => {
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      collectFontFiles(full);
+      continue;
+    }
+    if (/\.(woff2?|ttf|otf|eot)$/i.test(entry)) fontFiles.push(full);
+  }
+};
+collectFontFiles(join(frontendRoot, "public"));
+
+/**
+ * F2. One variable `woff2` per family, subset by `unicode-range`. `woff` is
+ * roughly 30% larger for the same glyphs and `ttf` is uncompressed; every
+ * browser that runs this app has supported `woff2` for years.
+ */
+rule(
+  "fonts ship as woff2 only",
+  fontFiles.filter((file) => !/\.woff2$/i.test(file)).map((file) => relative(appRel, file)),
+  "Convert to a variable woff2 subset by unicode-range and delete the other formats (paint performance handover F2).",
+);
+
+/**
+ * F6. `public/` is copied verbatim into the image, so a face nothing references
+ * is deploy weight and a supply-chain surface that no browser ever requested —
+ * reframe_v1 carried 3.6 MB of them.
+ */
+const referenced = fontTextSurfaces.map((file) => file.code).join("\n");
+rule(
+  "no unreferenced font file ships",
+  fontFiles
+    .filter((file) => !referenced.includes(file.split("/").pop()))
+    .map((file) => relative(appRel, file)),
+  "Delete it, or reference it from a @font-face; public/ is copied verbatim into the image (paint performance handover F6).",
+);
 
 console.log(failed ? "\nfrontend surface practices FAILED" : "\nfrontend surface practices passed");
 process.exit(failed ? 1 : 0);

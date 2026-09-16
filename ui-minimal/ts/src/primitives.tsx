@@ -1,15 +1,5 @@
-import {
-  AnimatePresence,
-  HTMLMotionProps,
-  motion,
-  type MotionValue,
-  type Transition,
-  useScroll,
-  useSpring,
-  useTransform,
-  useVelocity,
-} from "framer-motion";
 import React, {
+  ButtonHTMLAttributes,
   ForwardedRef,
   HTMLAttributes,
   InputHTMLAttributes,
@@ -26,18 +16,21 @@ import React, {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { css, keyframes, styled } from "styled-components";
+import { css } from "@linaria/core";
+import { styled } from "@linaria/react";
 
-import { useMinimalMotion } from "./motion";
-import { from, until, useMinimalTheme } from "./theme";
+import { minimalEnter, minimalMotionMs } from "./motionStyles.ts";
+import { useMinimalPresence } from "./presence";
+import type { MinimalThemeVars } from "./tokens.ts";
+import { from, minimalVars, until } from "./tokens.ts";
+import { variantRules } from "./variantRules.ts";
 import type {
   MinimalDensity,
   MinimalEmphasis,
   MinimalSize,
   MinimalSpaceTheme,
-  MinimalTheme,
   MinimalTone,
-} from "./types";
+} from "./types.ts";
 
 /** A rung of the spacing scale, by name. */
 export type MinimalSpaceStep = keyof MinimalSpaceTheme;
@@ -73,7 +66,9 @@ export interface MinimalOption<T extends string> {
   searchableText?: string;
 }
 
-export interface MinimalHeaderProps extends Omit<HTMLMotionProps<"header">, "children" | "ref" | "title"> {
+export interface MinimalHeaderProps extends Omit<HTMLAttributes<HTMLElement>, "children" | "title"> {
+  /** Play the mount animation. Defaults to `true`; `false` renders in place. */
+  enter?: boolean;
   children?: ReactNode;
   kicker?: ReactNode;
   title: ReactNode;
@@ -85,7 +80,7 @@ export interface MinimalHeaderProps extends Omit<HTMLMotionProps<"header">, "chi
   titleAs?: "h1" | "h2" | "h3" | "h4";
 }
 
-export interface MinimalButtonProps extends Omit<HTMLMotionProps<"button">, "children" | "ref"> {
+export interface MinimalButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> {
   children?: ReactNode;
   variant?: ButtonVariant;
   tone?: MinimalTone;
@@ -96,7 +91,9 @@ export interface MinimalButtonProps extends Omit<HTMLMotionProps<"button">, "chi
   trailing?: ReactNode;
 }
 
-export interface MinimalCardProps extends Omit<HTMLMotionProps<"section">, "children" | "ref"> {
+export interface MinimalCardProps extends Omit<HTMLAttributes<HTMLElement>, "children"> {
+  /** Play the mount animation. Defaults to `true`; `false` renders in place. */
+  enter?: boolean;
   children?: ReactNode;
   header?: ReactNode;
   footer?: ReactNode;
@@ -277,6 +274,20 @@ export interface MinimalStackProps extends HTMLAttributes<HTMLDivElement> {
   as?: "div" | "section" | "article" | "ul" | "ol" | "nav" | "aside";
 }
 
+export interface MinimalCullSectionProps extends HTMLAttributes<HTMLDivElement> {
+  children: ReactNode;
+  /**
+   * The height this section is expected to occupy before it has ever been
+   * rendered, as a CSS length. Used only until the browser has laid the section
+   * out once; after that it remembers the real size (`contain-intrinsic-size:
+   * auto`). An estimate close to the real height is what keeps the scrollbar
+   * from jumping as sections are skipped and restored. Defaults to `600px`.
+   */
+  estimatedSize?: string;
+  /** Render as something other than a `div` — `section`, `article`, `li`. */
+  as?: "div" | "section" | "article" | "li";
+}
+
 export interface MinimalTableColumn<T> {
   id: string;
   header: ReactNode;
@@ -340,7 +351,9 @@ export interface MinimalActionModalProps {
   onConfirm?: () => void | Promise<void>;
 }
 
-export interface MinimalDisplaySectionProps extends Omit<HTMLMotionProps<"section">, "children" | "ref" | "title"> {
+export interface MinimalDisplaySectionProps extends Omit<HTMLAttributes<HTMLElement>, "children" | "title"> {
+  /** Play the mount animation. Defaults to `true`; `false` renders in place. */
+  enter?: boolean;
   eyebrow?: ReactNode;
   title: ReactNode;
   description?: ReactNode;
@@ -386,6 +399,33 @@ export interface MinimalSkeletonProps extends HTMLAttributes<HTMLSpanElement> {
   radius?: string;
 }
 
+/**
+ * An image always knows its box before its pixels arrive. Either the intrinsic
+ * `width` and `height` (the browser derives the aspect ratio from them and
+ * scales the box to the column), or an `aspectRatio` for images that fill
+ * their container. There is deliberately no unsized form: an unsized image is
+ * zero pixels tall until it loads and then pushes everything below it down.
+ */
+export type MinimalImageSize =
+  | { width: number; height: number; aspectRatio?: never }
+  | { aspectRatio: number | string; width?: never; height?: never };
+
+export type MinimalImageProps = Omit<
+  React.ImgHTMLAttributes<HTMLImageElement>,
+  "width" | "height" | "src" | "alt"
+> &
+  MinimalImageSize & {
+    src: string;
+    /** Required; pass "" for a purely decorative image. */
+    alt: string;
+    /** The image is the largest thing on first screen: load eagerly at high fetch priority. */
+    priority?: boolean;
+    fit?: "cover" | "contain";
+    /** Fade in once decoded (P6 rule 2). Client-only: never on a prerendered or LCP image. */
+    reveal?: boolean;
+    radius?: string;
+  };
+
 export interface MinimalSkipLinkProps extends HTMLAttributes<HTMLAnchorElement> {
   href?: string;
   children?: ReactNode;
@@ -408,29 +448,13 @@ export interface MinimalSidebarProps extends HTMLAttributes<HTMLElement> {
   bannerOffset?: string;
 }
 
-export interface MinimalScrollMainProps extends Omit<HTMLMotionProps<"main">, "children" | "ref"> {
+export interface MinimalScrollMainProps extends Omit<HTMLAttributes<HTMLElement>, "children"> {
   children: ReactNode;
   sidebarWidth?: string;
   bannerOffset?: string;
   mobile?: boolean;
   compact?: boolean;
   scrollAttribute?: string;
-}
-
-export interface MinimalScrollFeedbackOptions {
-  enabled?: boolean;
-  maxSkew?: number;
-  minScale?: number;
-}
-
-export interface MinimalScrollFeedback {
-  skewY: MotionValue<number> | number;
-  scale: MotionValue<number> | number;
-}
-
-export interface MinimalScrollFeedbackSurfaceProps extends Omit<HTMLMotionProps<"div">, "children" | "ref"> {
-  children: ReactNode;
-  feedback?: MinimalScrollFeedback;
 }
 
 type FloatingPosition = {
@@ -471,7 +495,7 @@ const inputPadding = {
   lg: "14px 16px",
 } satisfies Record<MinimalSize, string>;
 
-const toneAccent = (theme: MinimalTheme, tone: MinimalTone) => {
+const toneAccent = (theme: MinimalThemeVars, tone: MinimalTone) => {
   switch (tone) {
     case "brand":
       return { color: theme.color.brand, soft: theme.color.brandSoft };
@@ -489,7 +513,7 @@ const toneAccent = (theme: MinimalTheme, tone: MinimalTone) => {
   }
 };
 
-const tonePresentation = (theme: MinimalTheme, tone: MinimalTone, emphasis: MinimalEmphasis) => {
+const tonePresentation = (theme: MinimalThemeVars, tone: MinimalTone, emphasis: MinimalEmphasis) => {
   const accent = toneAccent(theme, tone);
   switch (emphasis) {
     case "solid":
@@ -514,7 +538,7 @@ const tonePresentation = (theme: MinimalTheme, tone: MinimalTone, emphasis: Mini
   }
 };
 
-const surfacePresentation = (theme: MinimalTheme, variant: SurfaceVariant) => {
+const surfacePresentation = (theme: MinimalThemeVars, variant: SurfaceVariant) => {
   switch (variant) {
     case "muted":
       return {
@@ -544,6 +568,22 @@ const surfacePresentation = (theme: MinimalTheme, variant: SurfaceVariant) => {
   }
 };
 
+/**
+ * Every member of a union, as a list `variantRules` can enumerate. Fails to
+ * compile when a member is missing, because a missing one would render with
+ * no variant styles at all rather than with the wrong ones.
+ */
+const allOf =
+  <U extends string>() =>
+  <const T extends readonly U[]>(values: T & ([U] extends [T[number]] ? unknown : { missing: Exclude<U, T[number]> })) =>
+    values;
+
+const minimalTones = allOf<MinimalTone>()(["neutral", "brand", "info", "success", "warning", "danger"]);
+const emphases = allOf<MinimalEmphasis>()(["soft", "solid", "outline"]);
+const buttonVariants = allOf<ButtonVariant>()(["primary", "secondary", "ghost", "quiet"]);
+const surfaceVariants = allOf<SurfaceVariant>()(["default", "muted", "raised", "outlined"]);
+const inputStates = allOf<InputState>()(["default", "invalid", "locked"]);
+
 const actionJustify = {
   start: "flex-start",
   center: "center",
@@ -570,76 +610,290 @@ const tonalShadow = (accent: string, strength = 52, y = 10, blur = 22, spread = 
 const litEdge = (strength: number) =>
   `inset 0 1px 0 color-mix(in srgb, #ffffff ${strength}%, transparent)`;
 export const minimalMainScrollAttribute = "data-minimal-main-scroll";
-const skeletonSweep = keyframes`
-  0% {
-    background-position: 100% 50%;
-  }
+/*
+ * The sweep moves a highlight band with `transform`, never `background-position`.
+ *
+ * A `background-position` keyframe cannot run on the compositor: every skeleton
+ * on screen restyles and repaints on every frame for as long as it exists. The
+ * frontend lab measured it (CPU 6x, Metal GPU, 240 skeletons in a feed): the
+ * shimmer was ~880 ms of style recalculation and ~1,480 ms of paint per scroll
+ * pass, and the only reason `low_power` separated from `high` at all.
+ */
+/*
+ * Placeholders sweep only while someone can see them.
+ *
+ * The property was not the whole cost. Interleaved in the lab (240 skeletons,
+ * CPU 6x, Metal): every always-running design — transform, background-position,
+ * opacity pulse — cost 0.8–2.2 s of main-thread work per scroll pass and left
+ * 55–71% of frames slow, because Chromium updates every running animation each
+ * frame whether it is on screen or not. Pausing the ones off screen measured
+ * the same as no animation at all (p50 8.3 ms, 0% slow) and beat
+ * content-visibility culling (5% slow).
+ *
+ * One observer for every skeleton on the page, created on first use. Absent
+ * IntersectionObserver (SSR, old engines) nothing is marked and the sweep simply
+ * runs, as before. The margin starts a placeholder just before it scrolls in.
+ */
+let skeletonVisibility: IntersectionObserver | null = null;
+const observeSkeleton = (element: Element): (() => void) => {
+  if (typeof IntersectionObserver === "undefined") return () => undefined;
+  skeletonVisibility ??= new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) entry.target.toggleAttribute("data-minimal-offscreen", !entry.isIntersecting);
+    },
+    { rootMargin: "25% 0px" },
+  );
+  skeletonVisibility.observe(element);
+  return () => skeletonVisibility?.unobserve(element);
+};
 
-  100% {
-    background-position: 0 50%;
-  }
-`;
 
-const focusRing = css`
+const focusRing = `
   &:focus-visible {
-    outline: 2px solid ${({ theme }) => theme.color.borderFocus};
+    outline: 2px solid ${minimalVars.color.borderFocus};
     outline-offset: 2px;
   }
 `;
 
-const clickableReset = css`
+const clickableReset = `
   appearance: none;
   border: 0;
   background: transparent;
   font: inherit;
 `;
 
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock1 = variantRules("tone", minimalTones, (tone) => {
+      const accent = toneAccent(minimalVars, tone);
+      return `
+        background: ${accent.color};
+        color: ${minimalVars.color.textInverse};
+        border: 1px solid ${accent.color};
+      `;
+    });
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock2 = variantRules("variant", buttonVariants.filter((v) => v !== "primary"), (variant) =>
+      variantRules("tone", minimalTones, (tone) => {
+        const accent = toneAccent(minimalVars, tone);
+        if (variant === "secondary") {
+          return `
+            background: transparent;
+            color: ${accent.color};
+            border: 1px solid ${accent.color};
+          `;
+        }
+        if (variant === "ghost") {
+          return `
+            background: ${accent.soft};
+            color: ${accent.color};
+            border: 1px solid transparent;
+          `;
+        }
+        return `
+          background: transparent;
+          color: ${minimalVars.color.textSecondary};
+          border: 1px solid transparent;
+        `;
+      })
+    );
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock3 = variantRules("variant", ["primary"] as const, () => `
+      box-shadow: ${litEdge(14)};
+    `);
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock4 = variantRules("variant", surfaceVariants.filter((v) => v !== "default"), (variant) => {
+      const surface = surfacePresentation(minimalVars, variant);
+      return `
+        background: ${surface.background};
+        border: 1px solid ${surface.border};
+        box-shadow: ${surface.shadow};
+      `;
+    });
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock5 = variantRules("hoverable", [true] as const, () => `
+      @media (hover: hover) and (pointer: fine) {
+        &:hover {
+          border-color: ${minimalVars.color.borderStrong};
+          box-shadow: ${minimalVars.shadow.floating};
+          transform: translateY(-1px);
+        }
+
+        /* Don't move the surface for reduced-motion users — deepen the
+           shadow and border so the affordance still reads. */
+        @media (prefers-reduced-motion: reduce) {
+          &:hover {
+            transform: none;
+          }
+        }
+      }
+    `);
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock6 = variantRules("state", inputStates, (state) => {
+      const borderColor =
+        state === "invalid"
+          ? minimalVars.color.danger
+          : state === "locked"
+            ? minimalVars.color.borderStrong
+            : minimalVars.color.borderSubtle;
+
+      const background =
+        state === "locked" ? minimalVars.color.bgSurfaceAlt : minimalVars.color.bgSurface;
+
+      return `
+        background: ${background};
+        border: 1px solid ${borderColor};
+      `;
+    });
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock7 = variantRules("tone", minimalTones, (tone) =>
+      variantRules("emphasis", emphases, (emphasis) => {
+        const presentation = tonePresentation(minimalVars, tone, emphasis);
+        return `
+          background: ${presentation.background};
+          color: ${presentation.color};
+          border: 1px solid ${presentation.border};
+        `;
+      })
+    );
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock8 = variantRules("tone", minimalTones, (tone) => {
+      const presentation = tonePresentation(minimalVars, tone, "soft");
+      return `
+        background: ${presentation.background};
+        color: ${presentation.color};
+        border: 1px solid ${presentation.border};
+        border-left-width: 2px;
+      `;
+    });
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock9 = variantRules("selected", [true, false] as const, (selected) =>
+      selected
+        ? `
+            background: ${minimalVars.color.bgSurface};
+            border: 1px solid ${minimalVars.color.borderFocus};
+            color: ${minimalVars.color.textPrimary};
+            box-shadow: ${minimalVars.shadow.subtle};
+          `
+        : `
+            background: transparent;
+            border: 1px solid transparent;
+            color: ${minimalVars.color.textSecondary};
+          `
+    );
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock10 = variantRules("tone", minimalTones, (tone) => {
+      const accent = toneAccent(minimalVars, tone);
+      return `
+        background: ${minimalVars.color.bgSurface};
+        border: 1px solid ${minimalVars.color.borderSubtle};
+        box-shadow: ${minimalVars.shadow.subtle};
+        --minimal-stat-accent: ${accent.color};
+        --minimal-stat-bg: ${accent.soft};
+      `;
+    });
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock11 = (Object.keys(minimalVars.space) as MinimalSpaceStep[]).map(
+        (step) => `
+          > [data-space="${step}"] {
+            margin-block-start: ${minimalVars.space[step]};
+          }
+        `,
+      ).join("");
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock12 = variantRules("selected", [true] as const, () => `
+      background: transparent;
+      color: ${minimalVars.color.textInverse};
+      border: 1px solid transparent;
+    `);
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock13 = variantRules("selected", [false] as const, () => `
+      background: ${minimalVars.color.bgSurface};
+      ${variantRules("current-month", [true, false] as const, (currentMonth) => `
+        color: ${currentMonth ? minimalVars.color.textPrimary : minimalVars.color.textTertiary};
+      `)}
+      ${variantRules("today", [true, false] as const, (today) => `
+        border: 1px solid ${today ? minimalVars.color.brand : "transparent"};
+      `)}
+    `);
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock14 = variantRules("disabled", [true] as const, () => `
+      color: ${minimalVars.color.textTertiary};
+      cursor: not-allowed;
+      opacity: 0.46;
+    `);
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock15 = variantRules("mobile-sheet", [true] as const, () => `
+        border-right: 0;
+        border-bottom: 0;
+        border-left: 0;
+      `);
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock16 = variantRules("visual-mode", ["background", "canvas"] as const, () => `
+      color: ${minimalVars.color.textPrimary};
+    `);
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock17 = variantRules("anchor", ["right-visual"] as const, () => `
+        grid-template-columns: minmax(0, 0.9fr) minmax(320px, 1.1fr);
+      `);
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock18 = variantRules("anchor", ["left-visual"] as const, () => `
+        grid-template-columns: minmax(320px, 1.1fr) minmax(0, 0.9fr);
+      `);
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock19 = variantRules("tone", minimalTones, (tone) => {
+      const accent = toneAccent(minimalVars, tone);
+      return `
+        --minimal-info-accent: ${accent.color};
+        --minimal-info-bg: ${accent.soft};
+      `;
+    });
 const Style = {
-  HeaderShell: styled(motion.header)<{ $align: HeaderAlign }>`
+  HeaderShell: styled.header<{ $align: HeaderAlign }>`
     display: grid;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     justify-items: ${({ $align }) => ($align === "center" ? "center" : "stretch")};
     text-align: ${({ $align }) => ($align === "center" ? "center" : "left")};
+    ${minimalEnter.slideUp}
   `,
   HeaderTop: styled.div`
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: ${({ theme }) => theme.space.sm};
+    gap: ${minimalVars.space.sm};
     width: 100%;
   `,
   HeaderCopy: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
     min-width: 0;
   `,
   HeaderKicker: styled.p`
     margin: 0;
-    color: ${({ theme }) => theme.color.textTertiary};
-    font-size: ${({ theme }) => theme.typography.metaSize};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    color: ${minimalVars.color.textTertiary};
+    font-size: ${minimalVars.typography.metaSize};
+    font-weight: ${minimalVars.typography.weightSemibold};
     letter-spacing: 0.14em;
     text-transform: uppercase;
   `,
   HeaderTitle: styled.h1`
     margin: 0;
-    color: ${({ theme }) => theme.color.textPrimary};
-    font-family: ${({ theme }) => theme.typography.displayFamily};
-    font-size: ${({ theme }) => theme.typography.displaySize};
-    line-height: ${({ theme }) => theme.typography.lineHeightTight};
+    color: ${minimalVars.color.textPrimary};
+    font-family: ${minimalVars.typography.displayFamily};
+    font-size: ${minimalVars.typography.displaySize};
+    line-height: ${minimalVars.typography.lineHeightTight};
     letter-spacing: 0;
   `,
   HeaderSubtitle: styled.p`
     margin: 0;
-    color: ${({ theme }) => theme.color.textSecondary};
-    font-size: ${({ theme }) => theme.typography.bodySize};
-    line-height: ${({ theme }) => theme.typography.lineHeightBody};
+    color: ${minimalVars.color.textSecondary};
+    font-size: ${minimalVars.typography.bodySize};
+    line-height: ${minimalVars.typography.lineHeightBody};
   `,
   HeaderMeta: styled.div`
-    color: ${({ theme }) => theme.color.textTertiary};
-    font-size: ${({ theme }) => theme.typography.captionSize};
+    color: ${minimalVars.color.textTertiary};
+    font-size: ${minimalVars.typography.captionSize};
   `,
-  ButtonShell: styled(motion.button)<{
+  ButtonShell: styled.button<{
     $variant: ButtonVariant;
     $tone: MinimalTone;
     $size: MinimalSize;
@@ -660,40 +914,16 @@ const Style = {
       width: 100%;
       height: 100%;
     }
-    ${({ theme, $tone, $variant }) => {
-      const accent = toneAccent(theme, $tone);
-      if ($variant === "secondary") {
-        return css`
-          background: transparent;
-          color: ${accent.color};
-          border: 1px solid ${accent.color};
-        `;
-      }
-      if ($variant === "ghost") {
-        return css`
-          background: ${accent.soft};
-          color: ${accent.color};
-          border: 1px solid transparent;
-        `;
-      }
-      if ($variant === "quiet") {
-        return css`
-          background: transparent;
-          color: ${theme.color.textSecondary};
-          border: 1px solid transparent;
-        `;
-      }
-      return css`
-        background: ${accent.color};
-        color: ${theme.color.textInverse};
-        border: 1px solid ${accent.color};
-      `;
-    }}
+    /* Primary is the fallthrough, as it was when this was an if-chain: every
+       button gets the filled treatment for its tone, and the other variants
+       override it. Same specificity, later in the sheet, so they win. */
+    ${styleBlock1}
+    ${styleBlock2}
     align-items: center;
-    border-radius: ${({ theme }) => theme.radius.sm};
+    border-radius: ${minimalVars.radius.sm};
     cursor: pointer;
     display: inline-flex;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     justify-content: center;
     letter-spacing: 0.02em;
     line-height: 1;
@@ -710,28 +940,23 @@ const Style = {
       transform 180ms ${pressCurve};
     width: ${({ $fullWidth }) => ($fullWidth ? "100%" : "auto")};
     font-size: ${({ $size }) => sizeFont[$size]};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    font-weight: ${minimalVars.typography.weightSemibold};
 
     /* Filled buttons rest with a hairline lit top edge so the fill is a material,
        not a swatch. Quiet/ghost buttons stay flat until touched. */
-    ${({ $variant }) =>
-      $variant === "primary"
-        ? css`
-            box-shadow: ${litEdge(14)};
-          `
-        : null}
+    ${styleBlock3}
 
     @media (hover: hover) and (pointer: fine) {
       &:not(:disabled):hover {
         transform: translateY(-1px);
         /* The shadow is tinted to the button's own tone and cast short + soft,
            so the lift feels owned by the colour instead of a generic float. */
-        box-shadow: ${({ theme, $tone, $variant }) =>
+        box-shadow: ${({ $tone, $variant }) =>
           $variant === "quiet"
             ? "none"
             : $variant === "primary"
-              ? `${litEdge(18)}, ${tonalShadow(toneAccent(theme, $tone).color, 52)}`
-              : tonalShadow(toneAccent(theme, $tone).color, 30)};
+              ? `${litEdge(18)}, ${tonalShadow(toneAccent(minimalVars, $tone).color, 52)}`
+              : tonalShadow(toneAccent(minimalVars, $tone).color, 30)};
       }
     }
 
@@ -740,12 +965,12 @@ const Style = {
     &:not(:disabled):active {
       transform: translateY(0);
       transition-duration: 70ms;
-      box-shadow: ${({ theme, $tone, $variant }) =>
+      box-shadow: ${({ $tone, $variant }) =>
         $variant === "quiet"
           ? "none"
           : $variant === "primary"
-            ? `${litEdge(8)}, ${tonalShadow(toneAccent(theme, $tone).color, 46, 3, 8, -6)}`
-            : tonalShadow(toneAccent(theme, $tone).color, 26, 3, 8, -6)};
+            ? `${litEdge(8)}, ${tonalShadow(toneAccent(minimalVars, $tone).color, 46, 3, 8, -6)}`
+            : tonalShadow(toneAccent(minimalVars, $tone).color, 26, 3, 8, -6)};
     }
 
     &:disabled {
@@ -776,91 +1001,71 @@ const Style = {
     border-bottom-color: transparent;
     border-radius: 50%;
     display: inline-block;
+    /* A CSS rotation, not framer-motion's: its independent rotate is written
+       from JavaScript every frame (research doc section 14.2), which is the
+       one animation that must keep turning while the main thread is busy. */
+    @keyframes minimal-spinner-turn {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    animation: minimal-spinner-turn 1s linear infinite;
+
+    @media (prefers-reduced-motion: reduce) {
+      animation-duration: 3s;
+    }
+
+    :root:where([data-ui-tier="low_power"], [data-ui-tier="reduced_motion"]) & {
+      animation: none;
+      border-bottom-color: currentColor;
+      opacity: 0.6;
+    }
   `,
-  CardShell: styled(motion.section)<{
-    $variant: SurfaceVariant;
-    $padding: MinimalSize;
-    $hoverable: boolean;
-  }>`
-    ${({ theme, $variant }) => {
-      const surface = surfacePresentation(theme, $variant);
-      return css`
-        background: ${surface.background};
-        border: 1px solid ${surface.border};
-        box-shadow: ${surface.shadow};
-      `;
-    }}
-    border-radius: ${({ theme }) => theme.radius.md};
+  CardShell: styled.section<{ $padding: MinimalSize }>`
+    /* "default" is the fallthrough, as it is in surfacePresentation: declared
+       inline here, and the other variants override it from later in the sheet. */
+    background: ${surfacePresentation(minimalVars, "default").background};
+    border: 1px solid ${surfacePresentation(minimalVars, "default").border};
+    box-shadow: ${surfacePresentation(minimalVars, "default").shadow};
+    ${styleBlock4}
+    border-radius: ${minimalVars.radius.md};
     display: grid;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     overflow: hidden;
     padding: ${({ $padding }) => cardPadding[$padding]};
     transition:
       box-shadow 220ms ${moveCurve},
       transform 220ms ${moveCurve},
       border-color 220ms ${enterCurve};
+    ${minimalEnter.fade}
 
-    ${({ $hoverable, theme }) =>
-      $hoverable
-        ? css`
-            @media (hover: hover) and (pointer: fine) {
-              &:hover {
-                border-color: ${theme.color.borderStrong};
-                box-shadow: ${theme.shadow.floating};
-                transform: translateY(-1px);
-              }
-
-              /* Don't move the surface for reduced-motion users — deepen the
-                 shadow and border so the affordance still reads. */
-              @media (prefers-reduced-motion: reduce) {
-                &:hover {
-                  transform: none;
-                }
-              }
-            }
-          `
-        : null}
+    ${styleBlock5}
   `,
   CardSlot: styled.div`
     min-width: 0;
   `,
   FieldShell: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
     width: 100%;
   `,
   FieldLabel: styled.label`
-    color: ${({ theme }) => theme.color.textPrimary};
-    font-size: ${({ theme }) => theme.typography.captionSize};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    color: ${minimalVars.color.textPrimary};
+    font-size: ${minimalVars.typography.captionSize};
+    font-weight: ${minimalVars.typography.weightSemibold};
   `,
   FieldDescription: styled.div`
-    color: ${({ theme }) => theme.color.textTertiary};
-    font-size: ${({ theme }) => theme.typography.captionSize};
-    line-height: ${({ theme }) => theme.typography.lineHeightBody};
+    color: ${minimalVars.color.textTertiary};
+    font-size: ${minimalVars.typography.captionSize};
+    line-height: ${minimalVars.typography.lineHeightBody};
   `,
   InputFrame: styled.div<{ $state: InputState; $size: MinimalSize }>`
-    ${({ theme, $state }) => {
-      const borderColor =
-        $state === "invalid"
-          ? theme.color.danger
-          : $state === "locked"
-            ? theme.color.borderStrong
-            : theme.color.borderSubtle;
-
-      const background =
-        $state === "locked" ? theme.color.bgSurfaceAlt : theme.color.bgSurface;
-
-      return css`
-        background: ${background};
-        border: 1px solid ${borderColor};
-      `;
-    }}
+    ${styleBlock6}
     ${focusRing}
     align-items: center;
-    border-radius: ${({ theme }) => theme.radius.sm};
+    border-radius: ${minimalVars.radius.sm};
     display: flex;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     min-height: ${({ $size }) => ($size === "sm" ? "36px" : $size === "lg" ? "48px" : "44px")};
     padding: ${({ $size }) => inputPadding[$size]};
     transition:
@@ -869,17 +1074,17 @@ const Style = {
       background 160ms ${enterCurve};
 
     &:focus-within {
-      border-color: ${({ theme, $state }) => ($state === "invalid" ? theme.color.danger : theme.color.borderFocus)};
+      border-color: ${({ $state }) => ($state === "invalid" ? minimalVars.color.danger : minimalVars.color.borderFocus)};
       /* Built in one interpolation rather than two. A declaration whose value
          wraps onto a following line that begins with an interpolation is
          unparseable to the CSS-in-JS language service, which then reports a
          spurious "semi-colon expected" for the whole block. */
-      box-shadow: ${({ theme, $state }) =>
-        `0 0 0 ${theme.focus.ringWidth} ${$state === "invalid" ? theme.color.dangerSoft : theme.color.brandSoft}`};
+      box-shadow: ${({ $state }) =>
+        `0 0 0 ${minimalVars.focus.ringWidth} ${$state === "invalid" ? minimalVars.color.dangerSoft : minimalVars.color.brandSoft}`};
     }
   `,
   InputAdornment: styled.span`
-    color: ${({ theme }) => theme.color.textSecondary};
+    color: ${minimalVars.color.textSecondary};
     display: inline-flex;
     flex-shrink: 0;
     align-items: center;
@@ -887,7 +1092,7 @@ const Style = {
   InputField: styled.input`
     background: transparent;
     border: 0;
-    color: ${({ theme }) => theme.color.textPrimary};
+    color: ${minimalVars.color.textPrimary};
     flex: 1;
     font: inherit;
     min-width: 0;
@@ -898,60 +1103,44 @@ const Style = {
     &:-webkit-autofill:hover,
     &:-webkit-autofill:focus,
     &:-webkit-autofill:active {
-      -webkit-text-fill-color: ${({ theme }) => theme.color.textPrimary} !important;
-      caret-color: ${({ theme }) => theme.color.textPrimary};
-      -webkit-box-shadow: 0 0 0 1000px ${({ theme }) => theme.color.bgSurface} inset !important;
-      box-shadow: 0 0 0 1000px ${({ theme }) => theme.color.bgSurface} inset !important;
+      -webkit-text-fill-color: ${minimalVars.color.textPrimary} !important;
+      caret-color: ${minimalVars.color.textPrimary};
+      -webkit-box-shadow: 0 0 0 1000px ${minimalVars.color.bgSurface} inset !important;
+      box-shadow: 0 0 0 1000px ${minimalVars.color.bgSurface} inset !important;
       transition: background-color 9999s ease-out 0s;
     }
   `,
   FieldMessage: styled.p<{ $tone: MinimalTone }>`
     margin: 0;
-    color: ${({ theme, $tone }) => toneAccent(theme, $tone).color};
-    font-size: ${({ theme }) => theme.typography.captionSize};
-    line-height: ${({ theme }) => theme.typography.lineHeightBody};
+    color: ${({ $tone }) => toneAccent(minimalVars, $tone).color};
+    font-size: ${minimalVars.typography.captionSize};
+    line-height: ${minimalVars.typography.lineHeightBody};
   `,
-  BadgeShell: styled.span<{
-    $tone: MinimalTone;
-    $emphasis: MinimalEmphasis;
-    $size: MinimalSize;
-  }>`
-    ${({ theme, $tone, $emphasis }) => {
-      const presentation = tonePresentation(theme, $tone, $emphasis);
-      return css`
-        background: ${presentation.background};
-        color: ${presentation.color};
-        border: 1px solid ${presentation.border};
-      `;
-    }}
+  BadgeShell: styled.span<{ $size: MinimalSize }>`
+    ${styleBlock7}
     align-items: center;
-    border-radius: ${({ theme }) => theme.radius.sm};
+    border-radius: ${minimalVars.radius.sm};
     display: inline-flex;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
     justify-content: center;
     letter-spacing: 0.04em;
     line-height: 1;
     padding: ${({ $size }) => ($size === "sm" ? "3px 8px" : $size === "lg" ? "5px 10px" : "4px 9px")};
     text-transform: uppercase;
     white-space: nowrap;
-    font-size: ${({ $size, theme }) =>
-      $size === "sm" ? theme.typography.metaSize : theme.typography.captionSize};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    font-size: ${({ $size }) =>
+      $size === "sm" ? minimalVars.typography.metaSize : minimalVars.typography.captionSize};
+    font-weight: ${minimalVars.typography.weightSemibold};
   `,
-  AlertShell: styled.section<{ $tone: Exclude<MinimalTone, "brand" | "neutral"> }>`
-    ${({ theme, $tone }) => {
-      const presentation = tonePresentation(theme, $tone, "soft");
-      return css`
-        background: ${presentation.background};
-        color: ${presentation.color};
-        border: 1px solid ${presentation.border};
-      `;
-    }}
-    border-left-width: 2px;
-    border-radius: ${({ theme }) => theme.radius.sm};
+  AlertShell: styled.section`
+    /* The left-edge width lives inside the variant, after the border
+       shorthand: the variant rule is emitted after this rule's own
+       declarations, so a width declared here would be reset by it. */
+    ${styleBlock8}
+    border-radius: ${minimalVars.radius.sm};
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     padding: 10px 12px;
     font-size: 0.75rem;
   `,
@@ -963,68 +1152,56 @@ const Style = {
   `,
   AlertBody: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
   `,
   AlertTitle: styled.strong`
-    font-size: ${({ theme }) => theme.typography.captionSize};
+    font-size: ${minimalVars.typography.captionSize};
     text-transform: uppercase;
     letter-spacing: 0.06em;
   `,
   EmptyStateShell: styled.section<{ $align: HeaderAlign }>`
     align-items: ${({ $align }) => ($align === "center" ? "center" : "flex-start")};
-    background: ${({ theme }) => theme.color.bgSurfaceAlt};
-    border: 1px dashed ${({ theme }) => theme.color.borderStrong};
-    border-radius: ${({ theme }) => theme.radius.md};
+    background: ${minimalVars.color.bgSurfaceAlt};
+    border: 1px dashed ${minimalVars.color.borderStrong};
+    border-radius: ${minimalVars.radius.md};
     display: grid;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     justify-items: ${({ $align }) => ($align === "center" ? "center" : "stretch")};
-    padding: ${({ theme }) => theme.space.lg};
+    padding: ${minimalVars.space.lg};
     text-align: ${({ $align }) => ($align === "center" ? "center" : "left")};
   `,
   EmptyIcon: styled.div`
     width: 42px;
     height: 42px;
     border-radius: 999px;
-    border: 1px solid ${({ theme }) => theme.color.borderStrong};
-    color: ${({ theme }) => theme.color.textSecondary};
+    border: 1px solid ${minimalVars.color.borderStrong};
+    color: ${minimalVars.color.textSecondary};
     display: inline-flex;
     align-items: center;
     justify-content: center;
   `,
   EmptyStateTitle: styled.h3`
     margin: 0;
-    color: ${({ theme }) => theme.color.textPrimary};
-    font-family: ${({ theme }) => theme.typography.displayFamily};
-    font-size: ${({ theme }) => theme.typography.h2Size};
-    line-height: ${({ theme }) => theme.typography.lineHeightTight};
+    color: ${minimalVars.color.textPrimary};
+    font-family: ${minimalVars.typography.displayFamily};
+    font-size: ${minimalVars.typography.h2Size};
+    line-height: ${minimalVars.typography.lineHeightTight};
     letter-spacing: 0;
   `,
   FilterBarShell: styled.section`
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
   `,
-  FilterChip: styled.button<{ $selected: boolean; $size: MinimalSize }>`
+  FilterChip: styled.button<{ $size: MinimalSize }>`
     ${clickableReset}
     ${focusRing}
-    ${({ theme, $selected }) =>
-      $selected
-        ? css`
-            background: ${theme.color.bgSurface};
-            border: 1px solid ${theme.color.borderFocus};
-            color: ${theme.color.textPrimary};
-            box-shadow: ${theme.shadow.subtle};
-          `
-        : css`
-            background: transparent;
-            border: 1px solid transparent;
-            color: ${theme.color.textSecondary};
-          `}
-    border-radius: ${({ theme }) => theme.radius.sm};
+    ${styleBlock9}
+    border-radius: ${minimalVars.radius.sm};
     cursor: pointer;
     font-size: ${({ $size }) => sizeFont[$size]};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    font-weight: ${minimalVars.typography.weightSemibold};
     letter-spacing: 0.02em;
     line-height: 1;
     min-height: ${({ $size }) => `var(--minimal-control-height-${$size})`};
@@ -1044,7 +1221,7 @@ const Style = {
        and shadow, so the chip reads without the extra fade. */
     @media (hover: hover) and (pointer: fine) {
       &:hover {
-        color: ${({ theme }) => theme.color.textPrimary};
+        color: ${minimalVars.color.textPrimary};
       }
     }
   `,
@@ -1052,33 +1229,42 @@ const Style = {
     position: relative;
     display: inline-flex;
     align-items: stretch;
-    background: ${({ theme }) => theme.color.bgSurface};
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.sm};
-    gap: ${({ theme }) => theme.space["2xs"]};
+    background: ${minimalVars.color.bgSurface};
+    border: 1px solid ${minimalVars.color.borderSubtle};
+    border-radius: ${minimalVars.radius.sm};
+    gap: ${minimalVars.space["2xs"]};
     padding: 4px;
     min-height: ${({ $size }) => ($size === "sm" ? "34px" : $size === "lg" ? "44px" : "38px")};
   `,
-  SegmentedIndicator: styled(motion.div)<{ $count: number; $index: number; $variant: "neutral" | "brand" }>`
+  SegmentedIndicator: styled.div<{ $count: number; $index: number; $variant: "neutral" | "brand" }>`
     position: absolute;
     top: 4px;
     bottom: 4px;
-    left: ${({ $count, $index }) => `calc(${$index} * (100% / ${$count}) + 4px)`};
+    left: 4px;
+    /* Index-driven translate, not framer's layout animation (which measures on
+       every render): one composited property. Each segment is (100% of the
+       indicator + its 8px of inset) apart. */
+    transform: ${({ $index }) => `translateX(calc(${$index} * (100% + 8px)))`};
+    transition: transform ${minimalVars.motion.standard} ${minimalVars.motion.easeStandard};
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
     width: ${({ $count }) => `calc((100% / ${$count}) - 8px)`};
-    background: ${({ theme, $variant }) => ($variant === "brand" ? theme.color.brand : theme.color.bgSurface)};
-    border: 1px solid ${({ theme, $variant }) => ($variant === "brand" ? "transparent" : theme.color.borderStrong)};
-    border-radius: ${({ theme }) => theme.radius.sm};
-    box-shadow: ${({ theme, $variant }) => ($variant === "brand" ? "none" : theme.shadow.subtle)};
+    background: ${({ $variant }) => ($variant === "brand" ? minimalVars.color.brand : minimalVars.color.bgSurface)};
+    border: 1px solid ${({ $variant }) => ($variant === "brand" ? "transparent" : minimalVars.color.borderStrong)};
+    border-radius: ${minimalVars.radius.sm};
+    box-shadow: ${({ $variant }) => ($variant === "brand" ? "none" : minimalVars.shadow.subtle)};
   `,
   SegmentedButton: styled.button<{ $selected: boolean; $size: MinimalSize; $count: number; $variant: "neutral" | "brand" }>`
     ${clickableReset}
     ${focusRing}
-    color: ${({ theme, $selected, $variant }) =>
+    color: ${({ $selected, $variant }) =>
       $selected
         ? $variant === "brand"
-          ? theme.color.textInverse
-          : theme.color.textPrimary
-        : theme.color.textSecondary};
+          ? minimalVars.color.textInverse
+          : minimalVars.color.textPrimary
+        : minimalVars.color.textSecondary};
     cursor: pointer;
     position: relative;
     z-index: 1;
@@ -1088,7 +1274,7 @@ const Style = {
     letter-spacing: 0;
     line-height: 1;
     font-size: ${({ $size }) => sizeFont[$size]};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    font-weight: ${minimalVars.typography.weightSemibold};
 
     &:disabled {
       cursor: not-allowed;
@@ -1096,71 +1282,83 @@ const Style = {
     }
   `,
   ExplainerShell: styled.div`
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.md};
-    background: ${({ theme }) => theme.color.bgSurfaceAlt};
+    border: 1px solid ${minimalVars.color.borderSubtle};
+    border-radius: ${minimalVars.radius.md};
+    background: ${minimalVars.color.bgSurfaceAlt};
     overflow: hidden;
   `,
   ExplainerToggle: styled.button`
     ${clickableReset}
     ${focusRing}
     width: 100%;
-    color: ${({ theme }) => theme.color.textPrimary};
+    color: ${minimalVars.color.textPrimary};
     display: flex;
     align-items: center;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     justify-content: space-between;
-    padding: ${({ theme }) => theme.space.sm};
+    padding: ${minimalVars.space.sm};
     cursor: pointer;
   `,
   ExplainerCopy: styled.div`
     display: flex;
     align-items: center;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     min-width: 0;
   `,
   ExplainerText: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
     text-align: left;
   `,
   ExplainerActions: styled.div`
     display: flex;
     align-items: center;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
   `,
-  ExplainerPanel: styled(motion.div)`
+  ExplainerPanel: styled.div`
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    /* Height through the grid track, not framer's per-frame height writes: the
+       engine interpolates the row itself. Still layout work, kept to this one
+       small panel; an engine that cannot interpolate tracks changes instantly. */
+    transition:
+      grid-template-rows ${minimalVars.motion.standard} ${minimalVars.motion.easeStandard},
+      opacity ${minimalVars.motion.standard} ${minimalVars.motion.easeStandard};
+
+    &[data-state="open"] {
+      grid-template-rows: 1fr;
+      opacity: 1;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  `,
+  ExplainerPanelClip: styled.div`
+    min-height: 0;
     overflow: hidden;
   `,
   ExplainerPanelBody: styled.div`
-    padding: 0 ${({ theme }) => theme.space.sm} ${({ theme }) => theme.space.sm};
+    padding: 0 ${minimalVars.space.sm} ${minimalVars.space.sm};
   `,
-  StatShell: styled.article<{ $tone: MinimalTone }>`
-    ${({ theme, $tone }) => {
-      const accent = toneAccent(theme, $tone);
-      return css`
-        background: ${theme.color.bgSurface};
-        border: 1px solid ${theme.color.borderSubtle};
-        box-shadow: ${theme.shadow.subtle};
-        --minimal-stat-accent: ${accent.color};
-        --minimal-stat-bg: ${accent.soft};
-      `;
-    }}
-    border-radius: ${({ theme }) => theme.radius.md};
+  StatShell: styled.article`
+    ${styleBlock10}
+    border-radius: ${minimalVars.radius.md};
     display: grid;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
     min-height: 0;
     padding: 20px;
   `,
   StatMeta: styled.div`
     display: flex;
     align-items: center;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
   `,
   StatIcon: styled.div`
     width: 36px;
     height: 36px;
-    border-radius: ${({ theme }) => theme.radius.sm};
+    border-radius: ${minimalVars.radius.sm};
     background: var(--minimal-stat-bg);
     color: var(--minimal-stat-accent);
     display: inline-flex;
@@ -1168,56 +1366,56 @@ const Style = {
     justify-content: center;
   `,
   StatLabel: styled.span`
-    color: ${({ theme }) => theme.color.textTertiary};
-    font-size: ${({ theme }) => theme.typography.metaSize};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    color: ${minimalVars.color.textTertiary};
+    font-size: ${minimalVars.typography.metaSize};
+    font-weight: ${minimalVars.typography.weightSemibold};
     letter-spacing: 0.08em;
     text-transform: uppercase;
   `,
   StatValue: styled.strong`
-    color: ${({ theme }) => theme.color.textPrimary};
+    color: ${minimalVars.color.textPrimary};
     font-size: 1.625rem;
     font-weight: 300;
-    line-height: ${({ theme }) => theme.typography.lineHeightTight};
+    line-height: ${minimalVars.typography.lineHeightTight};
     letter-spacing: 0;
     font-variant-numeric: tabular-nums;
   `,
   StatHint: styled.p`
     margin: 0;
     color: var(--minimal-stat-accent);
-    font-size: ${({ theme }) => theme.typography.captionSize};
+    font-size: ${minimalVars.typography.captionSize};
   `,
   StatTitle: styled.p`
     margin: 0;
-    color: ${({ theme }) => theme.color.textSecondary};
-    font-size: ${({ theme }) => theme.typography.bodySize};
-    line-height: ${({ theme }) => theme.typography.lineHeightBody};
+    color: ${minimalVars.color.textSecondary};
+    font-size: ${minimalVars.typography.bodySize};
+    line-height: ${minimalVars.typography.lineHeightBody};
   `,
   FormSectionShell: styled.section`
     display: grid;
-    gap: ${({ theme }) => theme.space.sm};
+    gap: ${minimalVars.space.sm};
   `,
   FormSectionHeader: styled.div`
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
-    gap: ${({ theme }) => theme.space.sm};
+    gap: ${minimalVars.space.sm};
   `,
   FormSectionCopy: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
   `,
   FormSectionTitle: styled.h3`
     margin: 0;
-    color: ${({ theme }) => theme.color.textPrimary};
-    font-family: ${({ theme }) => theme.typography.displayFamily};
+    color: ${minimalVars.color.textPrimary};
+    font-family: ${minimalVars.typography.displayFamily};
     font-size: 1.125rem;
-    line-height: ${({ theme }) => theme.typography.lineHeightTight};
+    line-height: ${minimalVars.typography.lineHeightTight};
     letter-spacing: 0;
   `,
   FieldGridShell: styled.div<{ $columns: 1 | 2 | 3 }>`
     display: grid;
-    gap: ${({ theme }) => theme.space.sm};
+    gap: ${minimalVars.space.sm};
     /* Mobile-first: one column is the base state, columns are what a wider
        viewport adds. The rule it replaces read the other way round and
        switched at a hand-typed 800px, a number no other rule in the system
@@ -1240,20 +1438,13 @@ const Style = {
        there is never a trailing margin pushing the container and never a
        \`:last-child\` reset to remember. */
     > * + * {
-      margin-block-start: ${({ theme, $rhythm }) => theme.space[$rhythm]};
+      margin-block-start: ${({ $rhythm }) => minimalVars.space[$rhythm]};
     }
 
     /* How a child claims more than the default. This is the part \`gap\` cannot
        express: the claim is written on the element that needs it, so it travels
        when the element moves and applies the moment another one is added. */
-    ${({ theme }) =>
-      (Object.keys(theme.space) as MinimalSpaceStep[]).map(
-        (step) => css`
-          > [data-space="${step}"] {
-            margin-block-start: ${theme.space[step]};
-          }
-        `,
-      )}
+    ${styleBlock11}
 
     /* Nothing claims space above the first child; the container's own padding
        owns that edge. */
@@ -1265,33 +1456,33 @@ const Style = {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     justify-content: ${({ $align }) => actionJustify[$align]};
   `,
   TableShell: styled.div`
     overflow-x: auto;
-    border-radius: ${({ theme }) => theme.radius.md};
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    background: ${({ theme }) => theme.color.bgSurface};
+    border-radius: ${minimalVars.radius.md};
+    border: 1px solid ${minimalVars.color.borderSubtle};
+    background: ${minimalVars.color.bgSurface};
   `,
   StyledTable: styled.table<{ $density: MinimalDensity }>`
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    font-size: ${({ theme }) => theme.typography.captionSize};
+    font-size: ${minimalVars.typography.captionSize};
 
     caption {
       caption-side: top;
-      padding: ${({ theme }) => theme.space.sm};
+      padding: ${minimalVars.space.sm};
       text-align: left;
-      color: ${({ theme }) => theme.color.textSecondary};
-      font-size: ${({ theme }) => theme.typography.captionSize};
+      color: ${minimalVars.color.textSecondary};
+      font-size: ${minimalVars.typography.captionSize};
     }
 
     th,
     td {
       padding: ${({ $density }) => densityPadding[$density]};
-      border-bottom: 1px solid ${({ theme }) => theme.color.borderSubtle};
+      border-bottom: 1px solid ${minimalVars.color.borderSubtle};
       vertical-align: top;
     }
 
@@ -1305,18 +1496,18 @@ const Style = {
 
     @media (hover: hover) and (pointer: fine) {
       tbody tr[data-clickable="true"]:hover {
-        background: ${({ theme }) => theme.color.bgSurfaceHover};
+        background: ${minimalVars.color.bgSurfaceHover};
       }
     }
   `,
   TableHeaderCell: styled.th<{ $align: "left" | "center" | "right"; $width?: string }>`
     width: ${({ $width }) => $width ?? "auto"};
     text-align: ${({ $align }) => $align};
-    background: ${({ theme }) => theme.color.bgSurface};
-    color: ${({ theme }) => theme.color.textSecondary};
-    font-family: ${({ theme }) => theme.typography.bodyFamily};
-    font-size: ${({ theme }) => theme.typography.metaSize};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    background: ${minimalVars.color.bgSurface};
+    color: ${minimalVars.color.textSecondary};
+    font-family: ${minimalVars.typography.bodyFamily};
+    font-size: ${minimalVars.typography.metaSize};
+    font-weight: ${minimalVars.typography.weightSemibold};
     letter-spacing: 0.04em;
     text-transform: uppercase;
   `,
@@ -1325,20 +1516,20 @@ const Style = {
   `,
   CalendarShell: styled.section`
     display: grid;
-    gap: ${({ theme }) => theme.space.sm};
+    gap: ${minimalVars.space.sm};
     width: 100%;
     min-width: 0;
     box-sizing: border-box;
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.md};
-    background: ${({ theme }) => theme.color.bgSurface};
-    padding: ${({ theme }) => theme.space.sm};
+    border: 1px solid ${minimalVars.color.borderSubtle};
+    border-radius: ${minimalVars.radius.md};
+    background: ${minimalVars.color.bgSurface};
+    padding: ${minimalVars.space.sm};
   `,
   CalendarHeader: styled.div`
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
   `,
   CalendarTitleButton: styled.button`
     ${clickableReset}
@@ -1347,11 +1538,11 @@ const Style = {
     min-height: var(--minimal-control-min-target);
     display: inline-flex;
     align-items: center;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
     padding: 4px 8px;
-    border-radius: ${({ theme }) => theme.radius.sm};
-    color: ${({ theme }) => theme.color.textPrimary};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    border-radius: ${minimalVars.radius.sm};
+    color: ${minimalVars.color.textPrimary};
+    font-weight: ${minimalVars.typography.weightSemibold};
     cursor: pointer;
 
     &:disabled {
@@ -1360,21 +1551,21 @@ const Style = {
 
     @media (hover: hover) and (pointer: fine) {
       &:not(:disabled):hover {
-        background: ${({ theme }) => theme.color.bgSurfaceHover};
+        background: ${minimalVars.color.bgSurfaceHover};
       }
     }
   `,
   CalendarNavGroup: styled.div`
     display: inline-flex;
     align-items: center;
-    gap: ${({ theme }) => theme.space["3xs"]};
+    gap: ${minimalVars.space["3xs"]};
   `,
   CalendarNavButton: styled.button`
     ${clickableReset}
     ${focusRing}
-    color: ${({ theme }) => theme.color.textSecondary};
+    color: ${minimalVars.color.textSecondary};
     border: 1px solid transparent;
-    border-radius: ${({ theme }) => theme.radius.sm};
+    border-radius: ${minimalVars.radius.sm};
     width: var(--minimal-control-min-target);
     height: var(--minimal-control-min-target);
     display: inline-flex;
@@ -1389,9 +1580,9 @@ const Style = {
 
     @media (hover: hover) and (pointer: fine) {
       &:not(:disabled):hover {
-        color: ${({ theme }) => theme.color.textPrimary};
-        border-color: ${({ theme }) => theme.color.borderSubtle};
-        background: ${({ theme }) => theme.color.bgSurfaceHover};
+        color: ${minimalVars.color.textPrimary};
+        border-color: ${minimalVars.color.borderSubtle};
+        background: ${minimalVars.color.bgSurfaceHover};
       }
     }
   `,
@@ -1400,7 +1591,8 @@ const Style = {
     min-height: 300px;
     overflow: hidden;
   `,
-  CalendarViewPanel: styled(motion.div)`
+  CalendarViewPanel: styled.div`
+    ${minimalEnter.slideX}
     position: absolute;
     inset: 0;
     width: 100%;
@@ -1408,80 +1600,61 @@ const Style = {
   CalendarGrid: styled.div`
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: ${({ theme }) => theme.space["3xs"]};
+    gap: ${minimalVars.space["3xs"]};
   `,
   CalendarWeekday: styled.div`
-    color: ${({ theme }) => theme.color.textTertiary};
-    font-size: ${({ theme }) => theme.typography.metaSize};
-    font-family: ${({ theme }) => theme.typography.monoFamily};
+    color: ${minimalVars.color.textTertiary};
+    font-size: ${minimalVars.typography.metaSize};
+    font-family: ${minimalVars.typography.monoFamily};
     text-align: center;
     text-transform: uppercase;
-    padding: 4px 0 ${({ theme }) => theme.space["2xs"]};
+    padding: 4px 0 ${minimalVars.space["2xs"]};
   `,
   CalendarBlank: styled.span`
     min-height: 40px;
   `,
   CalendarDay: styled.button<{
     $selected: boolean;
-    $currentMonth: boolean;
-    $disabled: boolean;
-    $today: boolean;
     $hasContent: boolean;
   }>`
     ${clickableReset}
     ${focusRing}
-    ${({ theme, $selected, $currentMonth, $today }) =>
-      $selected
-        ? css`
-            background: transparent;
-            color: ${theme.color.textInverse};
-            border: 1px solid transparent;
-          `
-        : css`
-            background: ${theme.color.bgSurface};
-            color: ${$currentMonth ? theme.color.textPrimary : theme.color.textTertiary};
-            border: 1px solid ${$today ? theme.color.brand : "transparent"};
-          `}
+    ${styleBlock12}
+    ${styleBlock13}
     position: relative;
     isolation: isolate;
     min-width: 0;
     min-height: ${({ $hasContent }) => ($hasContent ? "52px" : "40px")};
     aspect-ratio: ${({ $hasContent }) => ($hasContent ? "auto" : "1")};
-    border-radius: ${({ theme }) => theme.radius.sm};
-    padding: ${({ theme, $hasContent }) => ($hasContent ? theme.space.xs : theme.space["2xs"])};
+    border-radius: ${minimalVars.radius.sm};
+    padding: ${({ $hasContent }) => ($hasContent ? minimalVars.space.xs : minimalVars.space["2xs"])};
     display: grid;
     place-items: center;
     align-content: ${({ $hasContent }) => ($hasContent ? "start" : "center")};
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
     cursor: pointer;
     transition:
       border-color 160ms ${enterCurve},
       background-color 160ms ${enterCurve},
       color 160ms ${enterCurve};
 
-    ${({ theme, $disabled }) =>
-      $disabled
-        ? css`
-            color: ${theme.color.textTertiary};
-            cursor: not-allowed;
-            opacity: 0.46;
-          `
-        : null}
+    ${styleBlock14}
 
     @media (hover: hover) and (pointer: fine) {
       &:not([aria-disabled="true"]):hover {
-        border-color: ${({ theme, $selected }) => ($selected ? theme.color.brand : theme.color.borderStrong)};
-        background: ${({ theme, $selected }) => ($selected ? theme.color.brand : theme.color.bgSurfaceAlt)};
+        border-color: ${({ $selected }) => ($selected ? minimalVars.color.brand : minimalVars.color.borderStrong)};
+        background: ${({ $selected }) => ($selected ? minimalVars.color.brand : minimalVars.color.bgSurfaceAlt)};
       }
     }
   `,
-  CalendarSelection: styled(motion.span)`
+  CalendarSelection: styled.span`
+    ${minimalEnter.pop}
     position: absolute;
     inset: 0;
     z-index: -1;
     border-radius: inherit;
-    background: ${({ theme }) => theme.color.brand};
-    box-shadow: ${({ theme }) => theme.shadow.subtle};
+    background: ${minimalVars.color.brand};
+    box-shadow: ${minimalVars.shadow.subtle};
   `,
   CalendarDayContent: styled.span`
     position: relative;
@@ -1491,22 +1664,22 @@ const Style = {
   CalendarSelectorGrid: styled.div<{ $columns: number }>`
     display: grid;
     grid-template-columns: repeat(${({ $columns }) => $columns}, minmax(0, 1fr));
-    gap: ${({ theme }) => theme.space["2xs"]};
-    padding-top: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
+    padding-top: ${minimalVars.space["2xs"]};
   `,
   CalendarOption: styled.button<{ $active: boolean }>`
     ${clickableReset}
     ${focusRing}
     min-height: var(--minimal-control-min-target);
     padding: 8px;
-    border: 1px solid ${({ theme, $active }) => ($active ? theme.color.brand : theme.color.borderSubtle)};
-    border-radius: ${({ theme }) => theme.radius.sm};
-    background: ${({ theme, $active }) => ($active ? theme.color.brand : theme.color.bgSurface)};
-    color: ${({ theme, $active }) => ($active ? theme.color.textInverse : theme.color.textPrimary)};
+    border: 1px solid ${({ $active }) => ($active ? minimalVars.color.brand : minimalVars.color.borderSubtle)};
+    border-radius: ${minimalVars.radius.sm};
+    background: ${({ $active }) => ($active ? minimalVars.color.brand : minimalVars.color.bgSurface)};
+    color: ${({ $active }) => ($active ? minimalVars.color.textInverse : minimalVars.color.textPrimary)};
     cursor: pointer;
-    font-size: ${({ theme }) => theme.typography.captionSize};
-    font-weight: ${({ theme, $active }) =>
-      $active ? theme.typography.weightSemibold : theme.typography.weightMedium};
+    font-size: ${minimalVars.typography.captionSize};
+    font-weight: ${({ $active }) =>
+      $active ? minimalVars.typography.weightSemibold : minimalVars.typography.weightMedium};
 
     &:disabled {
       cursor: not-allowed;
@@ -1515,31 +1688,31 @@ const Style = {
 
     @media (hover: hover) and (pointer: fine) {
       &:not(:disabled):hover {
-        border-color: ${({ theme }) => theme.color.brand};
-        background: ${({ theme, $active }) => ($active ? theme.color.brand : theme.color.brandSoft)};
+        border-color: ${minimalVars.color.brand};
+        background: ${({ $active }) => ($active ? minimalVars.color.brand : minimalVars.color.brandSoft)};
       }
     }
   `,
   CalendarFooter: styled.div`
     display: flex;
     justify-content: flex-start;
-    padding-top: ${({ theme }) => theme.space["2xs"]};
-    border-top: 1px solid ${({ theme }) => theme.color.borderSubtle};
+    padding-top: ${minimalVars.space["2xs"]};
+    border-top: 1px solid ${minimalVars.color.borderSubtle};
   `,
   CalendarTodayButton: styled.button`
     ${clickableReset}
     ${focusRing}
     min-height: var(--minimal-control-min-target);
     padding: 6px 8px;
-    border-radius: ${({ theme }) => theme.radius.sm};
-    color: ${({ theme }) => theme.color.brand};
+    border-radius: ${minimalVars.radius.sm};
+    color: ${minimalVars.color.brand};
     cursor: pointer;
-    font-size: ${({ theme }) => theme.typography.captionSize};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    font-size: ${minimalVars.typography.captionSize};
+    font-weight: ${minimalVars.typography.weightSemibold};
 
     &:disabled {
       cursor: not-allowed;
-      color: ${({ theme }) => theme.color.textTertiary};
+      color: ${minimalVars.color.textTertiary};
     }
   `,
   FloatingPanelContainer: styled.div<{
@@ -1554,31 +1727,32 @@ const Style = {
     left: ${({ $left }) => `${$left}px`};
     width: ${({ $width }) => `${$width}px`};
     max-height: ${({ $maxHeight }) => `${$maxHeight}px`};
-    z-index: ${({ theme }) => theme.zIndex.dropdown};
+    z-index: ${minimalVars.zIndex.dropdown};
     transform: ${({ $placement }) => ($placement === "top" ? "translateY(-100%)" : "none")};
     display: flex;
     flex-direction: column;
   `,
-  FloatingPanel: styled(motion.div)`
+  FloatingPanel: styled.div`
+    ${minimalEnter.pop}
     display: flex;
     flex-direction: column;
     width: 100%;
     max-height: inherit;
     min-height: 0;
-    background: ${({ theme }) => theme.color.bgSurface};
-    border: 1px solid ${({ theme }) => theme.color.borderStrong};
-    border-radius: ${({ theme }) => theme.radius.md};
-    box-shadow: ${({ theme }) => theme.shadow.floating};
+    background: ${minimalVars.color.bgSurface};
+    border: 1px solid ${minimalVars.color.borderStrong};
+    border-radius: ${minimalVars.radius.md};
+    box-shadow: ${minimalVars.shadow.floating};
     overflow: hidden;
   `,
-  DropdownTriggerButton: styled(motion.button)<{ $placeholder: boolean }>`
+  DropdownTriggerButton: styled.button<{ $placeholder: boolean }>`
     ${clickableReset}
     ${focusRing}
     width: 100%;
     align-items: center;
-    color: ${({ theme, $placeholder }) => ($placeholder ? theme.color.textTertiary : theme.color.textPrimary)};
+    color: ${({ $placeholder }) => ($placeholder ? minimalVars.color.textTertiary : minimalVars.color.textPrimary)};
     display: inline-flex;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     justify-content: space-between;
     min-height: 0;
     padding: 0;
@@ -1596,36 +1770,36 @@ const Style = {
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: ${({ theme }) => theme.space["2xs"]};
+    padding: ${minimalVars.space["2xs"]};
   `,
   DropdownSearchWrap: styled.div`
     flex: 0 0 auto;
-    padding: ${({ theme }) => theme.space.xs} ${({ theme }) => theme.space.xs} ${({ theme }) => theme.space["2xs"]};
-    border-bottom: 1px solid ${({ theme }) => theme.color.borderSubtle};
+    padding: ${minimalVars.space.xs} ${minimalVars.space.xs} ${minimalVars.space["2xs"]};
+    border-bottom: 1px solid ${minimalVars.color.borderSubtle};
   `,
   DropdownSearch: styled.input`
     width: 100%;
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    border-radius: ${({ theme }) => theme.radius.sm};
-    background: ${({ theme }) => theme.color.bgSurfaceAlt};
+    border: 1px solid ${minimalVars.color.borderSubtle};
+    border-radius: ${minimalVars.radius.sm};
+    background: ${minimalVars.color.bgSurfaceAlt};
     padding: 10px 12px;
     font: inherit;
-    color: ${({ theme }) => theme.color.textPrimary};
+    color: ${minimalVars.color.textPrimary};
     outline: none;
     transition:
       border-color 160ms ${enterCurve},
       box-shadow 160ms ${enterCurve};
 
     &:focus {
-      border-color: ${({ theme }) => theme.color.borderFocus};
-      box-shadow: 0 0 0 ${({ theme }) => theme.focus.ringWidth} ${({ theme }) => theme.color.brandSoft};
+      border-color: ${minimalVars.color.borderFocus};
+      box-shadow: 0 0 0 ${minimalVars.focus.ringWidth} ${minimalVars.color.brandSoft};
     }
   `,
   DropdownEmptyState: styled.div`
     padding: 10px 12px;
-    color: ${({ theme }) => theme.color.textSecondary};
-    font-size: ${({ theme }) => theme.typography.captionSize};
-    line-height: ${({ theme }) => theme.typography.lineHeightBody};
+    color: ${minimalVars.color.textSecondary};
+    font-size: ${minimalVars.typography.captionSize};
+    line-height: ${minimalVars.typography.lineHeightBody};
   `,
   DropdownOptionButton: styled.button<{ $selected: boolean; $active?: boolean }>`
     ${clickableReset}
@@ -1633,34 +1807,34 @@ const Style = {
     width: 100%;
     text-align: left;
     display: grid;
-    gap: ${({ theme }) => theme.space["3xs"]};
+    gap: ${minimalVars.space["3xs"]};
     padding: 10px 12px;
-    border-radius: ${({ theme }) => theme.radius.sm};
+    border-radius: ${minimalVars.radius.sm};
     cursor: pointer;
-    background: ${({ theme, $selected, $active }) => ($selected || $active ? theme.color.bgSurfaceAlt : "transparent")};
-    color: ${({ theme }) => theme.color.textPrimary};
+    background: ${({ $selected, $active }) => ($selected || $active ? minimalVars.color.bgSurfaceAlt : "transparent")};
+    color: ${minimalVars.color.textPrimary};
     transition: background-color 160ms ${enterCurve}, color 160ms ${enterCurve};
 
     @media (hover: hover) and (pointer: fine) {
       &:hover {
-        background: ${({ theme }) => theme.color.bgSurfaceAlt};
+        background: ${minimalVars.color.bgSurfaceAlt};
       }
     }
 
     &:disabled {
       cursor: not-allowed;
-      color: ${({ theme }) => theme.color.textTertiary};
+      color: ${minimalVars.color.textTertiary};
     }
   `,
   DropdownOptionRow: styled.div`
     display: flex;
     justify-content: space-between;
-    gap: ${({ theme }) => theme.space.sm};
+    gap: ${minimalVars.space.sm};
   `,
   TooltipAnchor: styled.span`
     display: inline-flex;
   `,
-  TooltipPanel: styled(motion.div)<{
+  TooltipPanel: styled.div<{
     $maxWidth: string;
     $top: number;
     $left: number;
@@ -1670,39 +1844,43 @@ const Style = {
     top: ${({ $top }) => `${$top}px`};
     left: ${({ $left }) => `${$left}px`};
     max-width: ${({ $maxWidth }) => $maxWidth};
-    background: ${({ theme }) => theme.color.textPrimary};
-    color: ${({ theme }) => theme.color.textInverse};
-    border-radius: ${({ theme }) => theme.radius.sm};
+    background: ${minimalVars.color.textPrimary};
+    color: ${minimalVars.color.textInverse};
+    border-radius: ${minimalVars.radius.sm};
     padding: 8px 10px;
-    box-shadow: ${({ theme }) => theme.shadow.medium};
-    z-index: ${({ theme }) => theme.zIndex.tooltip};
-    font-size: ${({ theme }) => theme.typography.captionSize};
-    line-height: ${({ theme }) => theme.typography.lineHeightBody};
+    box-shadow: ${minimalVars.shadow.medium};
+    z-index: ${minimalVars.zIndex.tooltip};
+    font-size: ${minimalVars.typography.captionSize};
+    line-height: ${minimalVars.typography.lineHeightBody};
     pointer-events: none;
     transform: ${({ $placement }) =>
       $placement === "top" ? "translate(-50%, -100%)" : "translate(-50%, 0)"};
+    ${minimalEnter.tooltip}
   `,
-  ModalBackdrop: styled(motion.div)`
+  ModalBackdrop: styled.div`
+    ${minimalEnter.fade}
     position: fixed;
     inset: 0;
-    background: ${({ theme }) => theme.color.bgOverlay};
-    backdrop-filter: blur(4px);
-    z-index: ${({ theme }) => theme.zIndex.overlay};
+    background: ${minimalVars.color.bgOverlay};
+    /* Tier-controlled (theme.tsx): none on low_power and reduced_motion. */
+    backdrop-filter: var(--minimal-backdrop-filter, blur(4px));
+    z-index: ${minimalVars.zIndex.overlay};
   `,
-  ModalShell: styled(motion.section)<{ $mobileSheet: boolean }>`
+  ModalShell: styled.section<{ $mobileSheet: boolean }>`
+    ${minimalEnter.pop}
     position: fixed;
     inset: 50% auto auto 50%;
     transform: translate(-50%, -50%);
     width: min(92vw, var(--minimal-modal-max-width, 520px));
     max-height: var(--minimal-modal-max-height, calc(100dvh - 48px));
-    background: ${({ theme }) => theme.color.bgSurface};
-    border: 1px solid ${({ theme }) => theme.color.borderStrong};
-    border-radius: ${({ theme }) => theme.radius.md};
-    box-shadow: ${({ theme }) => theme.shadow.floating};
-    padding: ${({ theme }) => theme.space.md};
-    z-index: ${({ theme }) => theme.zIndex.modal};
+    background: ${minimalVars.color.bgSurface};
+    border: 1px solid ${minimalVars.color.borderStrong};
+    border-radius: ${minimalVars.radius.md};
+    box-shadow: ${minimalVars.shadow.floating};
+    padding: ${minimalVars.space.md};
+    z-index: ${minimalVars.zIndex.modal};
     display: grid;
-    gap: ${({ theme }) => theme.space.sm};
+    gap: ${minimalVars.space.sm};
     overflow: hidden;
 
     ${until("page")} {
@@ -1710,36 +1888,29 @@ const Style = {
       transform: ${({ $mobileSheet }) => ($mobileSheet ? "none" : "translate(-50%, -50%)")};
       width: ${({ $mobileSheet }) => ($mobileSheet ? "100%" : "min(92vw, var(--minimal-modal-max-width, 520px))")};
       max-height: min(90dvh, var(--minimal-modal-max-height, 90dvh));
-      border-radius: ${({ theme, $mobileSheet }) =>
-        $mobileSheet ? `${theme.radius.lg} ${theme.radius.lg} 0 0` : theme.radius.md};
-      padding: ${({ theme }) => `${theme.space.md} ${theme.space.sm}`};
+      border-radius: ${({ $mobileSheet }) =>
+        $mobileSheet ? `${minimalVars.radius.lg} ${minimalVars.radius.lg} 0 0` : minimalVars.radius.md};
+      padding: ${`${minimalVars.space.md} ${minimalVars.space.sm}`};
 
-      ${({ $mobileSheet }) =>
-        $mobileSheet
-          ? css`
-              border-right: 0;
-              border-bottom: 0;
-              border-left: 0;
-            `
-          : null}
+      ${styleBlock15}
     }
   `,
   ModalHeader: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
   `,
   ModalTitle: styled.h2`
     margin: 0;
-    color: ${({ theme }) => theme.color.textPrimary};
-    font-family: ${({ theme }) => theme.typography.displayFamily};
-    font-size: ${({ theme }) => theme.typography.h1Size};
-    line-height: ${({ theme }) => theme.typography.lineHeightTight};
+    color: ${minimalVars.color.textPrimary};
+    font-family: ${minimalVars.typography.displayFamily};
+    font-size: ${minimalVars.typography.h1Size};
+    line-height: ${minimalVars.typography.lineHeightTight};
     letter-spacing: 0;
   `,
   ModalActions: styled.div`
     display: flex;
     justify-content: flex-end;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     flex-wrap: wrap;
   `,
   ModalBody: styled.div<{ $scrollable: boolean }>`
@@ -1747,57 +1918,55 @@ const Style = {
     overflow-y: ${({ $scrollable }) => ($scrollable ? "auto" : "visible")};
     padding-right: ${({ $scrollable }) => ($scrollable ? "4px" : "0")};
   `,
-  DisplaySection: styled(motion.section)<{
+  DisplaySection: styled.section<{
     $anchor: LandingAnchor;
-    $visualMode: LandingVisualMode;
     $intensity: LandingIntensity;
     $minHeight: string;
     $backgroundImage?: string;
     $overlay?: string;
   }>`
+    ${minimalEnter.slideUp}
     position: relative;
     isolation: isolate;
     display: grid;
     align-items: ${({ $anchor }) => ($anchor === "bottom-left" || $anchor === "bottom-right" ? "end" : "center")};
     min-height: ${({ $minHeight }) => $minHeight};
     overflow: hidden;
-    border-radius: ${({ theme }) => theme.radius.md};
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
+    border-radius: ${minimalVars.radius.md};
+    border: 1px solid ${minimalVars.color.borderSubtle};
     background:
-      ${({ theme, $overlay }) =>
+      ${({ $overlay }) =>
         $overlay ??
-        `linear-gradient(180deg, color-mix(in srgb, ${theme.color.bgSurface} 72%, transparent), color-mix(in srgb, ${theme.color.bgSurface} 92%, transparent))`},
+        `linear-gradient(180deg, color-mix(in srgb, ${minimalVars.color.bgSurface} 72%, transparent), color-mix(in srgb, ${minimalVars.color.bgSurface} 92%, transparent))`},
       ${({ $backgroundImage }) => ($backgroundImage ? `url(${$backgroundImage}) center / cover` : "transparent")};
-    box-shadow: ${({ theme, $intensity }) => ($intensity === "statement" ? theme.shadow.medium : theme.shadow.subtle)};
-    padding: ${({ theme, $intensity }) =>
-      $intensity === "statement" ? theme.space.lg : $intensity === "calm" ? theme.space.md : theme.space.lg};
+    box-shadow: ${({ $intensity }) => ($intensity === "statement" ? minimalVars.shadow.medium : minimalVars.shadow.subtle)};
+    padding: ${({ $intensity }) =>
+      $intensity === "statement" ? minimalVars.space.lg : $intensity === "calm" ? minimalVars.space.md : minimalVars.space.lg};
 
-    ${({ theme, $visualMode, $anchor }) =>
-      $visualMode === "background" || $visualMode === "canvas"
-        ? css`
-            color: ${theme.color.textPrimary};
-          `
-        : css`
-            grid-template-columns: ${$anchor === "right-visual" || $anchor === "left-visual"
-              ? $anchor === "right-visual"
-                ? "minmax(0, 0.9fr) minmax(320px, 1.1fr)"
-                : "minmax(320px, 1.1fr) minmax(0, 0.9fr)"
-              : "minmax(0, 1fr)"};
-            gap: ${theme.space.lg};
-            background-color: ${theme.color.bgSurface};
-          `}
+    ${styleBlock16}
+    /* Every other mode — including one the union does not name — gets the
+       split layout, as the else-branch this replaced did. The negation sits
+       inside :where() so it adds no specificity, and is chained rather than
+       comma-listed so no selector splitter can misread it. */
+    &:where(:not([data-minimal-visual-mode="background"]):not([data-minimal-visual-mode="canvas"])) {
+      grid-template-columns: minmax(0, 1fr);
+      gap: ${minimalVars.space.lg};
+      background-color: ${minimalVars.color.bgSurface};
+      ${styleBlock17}
+      ${styleBlock18}
+    }
 
     ${until("page")} {
       grid-template-columns: 1fr;
       min-height: min(760px, max(520px, 76dvh));
-      padding: ${({ theme }) => theme.space.md};
+      padding: ${minimalVars.space.md};
     }
   `,
   DisplayCopy: styled.div<{ $anchor: LandingAnchor; $intensity: LandingIntensity }>`
     position: relative;
     z-index: 1;
     display: grid;
-    gap: ${({ theme }) => theme.space.sm};
+    gap: ${minimalVars.space.sm};
     max-width: ${({ $intensity }) => ($intensity === "statement" ? "760px" : "620px")};
     justify-self: ${({ $anchor }) =>
       $anchor === "center" || $anchor === "stacked"
@@ -1810,11 +1979,11 @@ const Style = {
   `,
   DisplayTitle: styled.h1<{ $intensity: LandingIntensity }>`
     margin: 0;
-    color: ${({ theme }) => theme.color.textPrimary};
-    font-family: ${({ theme }) => theme.typography.displayFamily};
-    font-size: ${({ theme, $intensity }) =>
-      $intensity === "statement" ? theme.typography.displaySize : theme.typography.h1Size};
-    line-height: ${({ theme }) => theme.typography.lineHeightTight};
+    color: ${minimalVars.color.textPrimary};
+    font-family: ${minimalVars.typography.displayFamily};
+    font-size: ${({ $intensity }) =>
+      $intensity === "statement" ? minimalVars.typography.displaySize : minimalVars.typography.h1Size};
+    line-height: ${minimalVars.typography.lineHeightTight};
     letter-spacing: 0;
   `,
   DisplayVisual: styled.div<{ $anchor: LandingAnchor; $aspect: string }>`
@@ -1827,7 +1996,7 @@ const Style = {
     justify-self: stretch;
     order: ${({ $anchor }) => ($anchor === "left-visual" ? -1 : 0)};
     overflow: hidden;
-    border-radius: ${({ theme }) => theme.radius.md};
+    border-radius: ${minimalVars.radius.md};
 
     > * {
       width: 100%;
@@ -1841,9 +2010,9 @@ const Style = {
   `,
   LandingSection: styled.section<{ $anchor: LandingAnchor; $intensity: LandingIntensity }>`
     display: grid;
-    gap: ${({ theme, $intensity }) => ($intensity === "calm" ? theme.space.sm : theme.space.md)};
-    padding: ${({ theme, $intensity }) =>
-      $intensity === "statement" ? `${theme.space.xl} 0` : `${theme.space.lg} 0`};
+    gap: ${({ $intensity }) => ($intensity === "calm" ? minimalVars.space.sm : minimalVars.space.md)};
+    padding: ${({ $intensity }) =>
+      $intensity === "statement" ? `${minimalVars.space.xl} 0` : `${minimalVars.space.lg} 0`};
     align-items: center;
     grid-template-columns: ${({ $anchor }) =>
       $anchor === "left-visual"
@@ -1854,12 +2023,12 @@ const Style = {
 
     ${until("page")} {
       grid-template-columns: 1fr;
-      padding: ${({ theme }) => `${theme.space.lg} 0`};
+      padding: ${`${minimalVars.space.lg} 0`};
     }
   `,
   LandingCopy: styled.div<{ $anchor: LandingAnchor }>`
     display: grid;
-    gap: ${({ theme }) => theme.space.xs};
+    gap: ${minimalVars.space.xs};
     max-width: 680px;
     justify-self: ${({ $anchor }) => ($anchor === "center" || $anchor === "stacked" ? "center" : "start")};
     text-align: ${({ $anchor }) => ($anchor === "center" || $anchor === "stacked" ? "center" : "left")};
@@ -1870,34 +2039,28 @@ const Style = {
     aspect-ratio: ${({ $aspect }) => $aspect};
     order: ${({ $anchor }) => ($anchor === "left-visual" ? -1 : 0)};
     overflow: hidden;
-    border-radius: ${({ theme }) => theme.radius.md};
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    background: ${({ theme }) => theme.color.bgSurfaceAlt};
+    border-radius: ${minimalVars.radius.md};
+    border: 1px solid ${minimalVars.color.borderSubtle};
+    background: ${minimalVars.color.bgSurfaceAlt};
 
     > * {
       width: 100%;
       height: 100%;
     }
   `,
-  InfoPanel: styled.article<{ $tone: MinimalTone; $layout: InfoLayout }>`
-    ${({ theme, $tone }) => {
-      const accent = toneAccent(theme, $tone);
-      return css`
-        --minimal-info-accent: ${accent.color};
-        --minimal-info-bg: ${accent.soft};
-      `;
-    }}
+  InfoPanel: styled.article<{ $layout: InfoLayout }>`
+    ${styleBlock19}
     display: grid;
     grid-template-columns: ${({ $layout }) =>
       $layout === "row" ? "auto minmax(0, 1fr) auto" : $layout === "split" ? "minmax(0, 1fr) auto" : "1fr"};
-    gap: ${({ theme }) => theme.space.sm};
+    gap: ${minimalVars.space.sm};
     align-items: start;
     min-width: 0;
-    padding: ${({ theme }) => theme.space.sm};
-    border: 1px solid ${({ theme }) => theme.color.borderSubtle};
+    padding: ${minimalVars.space.sm};
+    border: 1px solid ${minimalVars.color.borderSubtle};
     border-left: 2px solid var(--minimal-info-accent);
-    border-radius: ${({ theme }) => theme.radius.sm};
-    background: ${({ theme }) => theme.color.bgSurface};
+    border-radius: ${minimalVars.radius.sm};
+    background: ${minimalVars.color.bgSurface};
 
     ${until("page")} {
       grid-template-columns: 1fr;
@@ -1906,7 +2069,7 @@ const Style = {
   InfoIcon: styled.div`
     width: 36px;
     height: 36px;
-    border-radius: ${({ theme }) => theme.radius.sm};
+    border-radius: ${minimalVars.radius.sm};
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1915,14 +2078,14 @@ const Style = {
   `,
   InfoCopy: styled.div`
     display: grid;
-    gap: ${({ theme }) => theme.space["2xs"]};
+    gap: ${minimalVars.space["2xs"]};
     min-width: 0;
   `,
   InfoTitle: styled.h3`
     margin: 0;
-    color: ${({ theme }) => theme.color.textPrimary};
-    font-size: ${({ theme }) => theme.typography.h2Size};
-    line-height: ${({ theme }) => theme.typography.lineHeightTight};
+    color: ${minimalVars.color.textPrimary};
+    font-size: ${minimalVars.typography.h2Size};
+    line-height: ${minimalVars.typography.lineHeightTight};
   `,
   Skeleton: styled.span<{
     $width?: string;
@@ -1930,20 +2093,48 @@ const Style = {
     $inline: boolean;
     $radius?: string;
   }>`
+    @keyframes minimal-skeleton-sweep {
+      0% {
+        transform: translateX(-100%);
+      }
+      100% {
+        transform: translateX(100%);
+      }
+    }
+    position: relative;
+    overflow: hidden;
     display: ${({ $inline }) => ($inline ? "inline-flex" : "block")};
     width: ${({ $width }) => $width ?? "100%"};
     height: ${({ $height }) => $height ?? "1rem"};
-    border-radius: ${({ theme, $radius }) => $radius ?? theme.radius.md};
-    background: linear-gradient(
-      90deg,
-      ${({ theme }) => theme.color.bgSurfaceAlt} 0%,
-      ${({ theme }) => theme.color.bgSurface} 50%,
-      ${({ theme }) => theme.color.bgSurfaceAlt} 100%
-    );
-    background-size: 200% 100%;
-    animation: ${skeletonSweep} 1.2s linear infinite;
+    border-radius: ${({ $radius }) => $radius ?? minimalVars.radius.md};
+    background: ${minimalVars.color.bgSurfaceAlt};
+
+    /* The highlight is its own box so the sweep is a transform the compositor
+       runs alone; the placeholder underneath never restyles or repaints. */
+    &::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent 0%, ${minimalVars.color.bgSurface} 50%, transparent 100%);
+      transform: translateX(-100%);
+      animation: minimal-skeleton-sweep 1.2s linear infinite;
+    }
+
+    /* Off screen: paused, not removed, so it resumes mid-sweep with no restart. */
+    &[data-minimal-offscreen]::after {
+      animation-play-state: paused;
+    }
 
     @media (prefers-reduced-motion: reduce) {
+      &::after {
+        animation: none;
+      }
+    }
+
+    /* P3 rule 4: an infinite loop spends a frame forever. Where the quality
+       tier says spend less, the placeholder holds still; it still reads as a
+       placeholder without the sweep. */
+    :root:where([data-ui-tier="low_power"], [data-ui-tier="reduced_motion"]) &::after {
       animation: none;
     }
   `,
@@ -1987,6 +2178,7 @@ const {
   ExplainerText,
   ExplainerActions,
   ExplainerPanel,
+  ExplainerPanelClip,
   ExplainerPanelBody,
   StatShell,
   StatMeta,
@@ -2055,15 +2247,54 @@ const {
   Skeleton,
 } = Style;
 
+/*
+ * A plain class, not a styled component: every attribute (loading, decoding,
+ * fetchpriority, srcset, sizes) must reach the <img> untouched.
+ */
+const imageClass = css`
+  display: block;
+  max-width: 100%;
+  height: auto;
+  /* The reserved box reads as a placeholder until pixels arrive. */
+  background: ${minimalVars.color.bgSurfaceAlt};
+
+  &[data-minimal-fill] {
+    width: 100%;
+  }
+  &[data-minimal-fit="cover"] {
+    object-fit: cover;
+  }
+  &[data-minimal-fit="contain"] {
+    object-fit: contain;
+  }
+  &[data-minimal-reveal] {
+    transition: opacity 240ms ${minimalVars.motion.easeStandard};
+  }
+  &[data-minimal-reveal="pending"] {
+    opacity: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &[data-minimal-reveal] {
+      transition: none;
+    }
+  }
+`;
+
+/* A transform transition on an attribute: composited, and supported back to Safari 9. */
+const ChevronSvg = styled.svg`
+  transition: transform 180ms ${minimalVars.motion.easeStandard};
+
+  &[data-open="true"] {
+    transform: rotate(180deg);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    transition: none;
+  }
+`;
+
 const Chevron = ({ open }: { open: boolean }) => (
-  <motion.svg
-    width="14"
-    height="14"
-    viewBox="0 0 20 20"
-    fill="none"
-    animate={{ rotate: open ? 180 : 0 }}
-    transition={{ duration: 0.18 }}
-  >
+  <ChevronSvg width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true" data-open={open}>
     <path
       d="M5 7.5 10 12.5 15 7.5"
       stroke="currentColor"
@@ -2071,7 +2302,7 @@ const Chevron = ({ open }: { open: boolean }) => (
       strokeLinecap="round"
       strokeLinejoin="round"
     />
-  </motion.svg>
+  </ChevronSvg>
 );
 
 const isBrowser = () => typeof window !== "undefined" && typeof document !== "undefined";
@@ -2340,63 +2571,43 @@ export const scrollMinimalMainToTop = (
   }
 };
 
-export const useMinimalScrollFeedback = (
-  containerRef: RefObject<HTMLElement | null>,
-  options: MinimalScrollFeedbackOptions = {},
-): MinimalScrollFeedback => {
-  const { reducedMotion } = useMinimalMotion();
-  const { enabled = true, maxSkew = 2, minScale = 0.998 } = options;
-  const { scrollY } = useScroll({ container: containerRef });
-  const scrollVelocity = useVelocity(scrollY);
-  const skew = useTransform(scrollVelocity, [-2000, 2000], [-maxSkew, maxSkew]);
-  const scale = useTransform(scrollVelocity, [-3000, 0, 3000], [minScale, 1, minScale]);
-  const smoothSkew = useSpring(skew, { stiffness: 400, damping: 60, mass: 0.5 });
-  const smoothScale = useSpring(scale, { stiffness: 400, damping: 60, mass: 0.5 });
-
-  if (reducedMotion || !enabled) {
-    return { skewY: 0, scale: 1 };
-  }
-
-  return { skewY: smoothSkew, scale: smoothScale };
-};
-
+/* Build-time style block (Linaria evaluates it once). */
+const styleBlock20 = variantRules("mobile", [true] as const, () => `
+      max-width: 480px;
+      width: 100%;
+      margin: 0 auto;
+      box-shadow: ${minimalVars.shadow.floating};
+      position: relative;
+      overflow-x: hidden;
+    `);
 const ShellStyle = {
   App: styled.div<{ $mobile?: boolean }>`
     min-height: 100dvh;
     display: flex;
     flex-direction: ${({ $mobile }) => ($mobile ? "column" : "row")};
     isolation: isolate;
-    background: ${({ theme }) => theme.color.bgApp};
-    color: ${({ theme }) => theme.color.textPrimary};
+    background: ${minimalVars.color.bgApp};
+    color: ${minimalVars.color.textPrimary};
 
-    ${({ $mobile }) =>
-      $mobile &&
-      css`
-        max-width: 480px;
-        width: 100%;
-        margin: 0 auto;
-        box-shadow: ${({ theme }) => theme.shadow.floating};
-        position: relative;
-        overflow-x: hidden;
-      `}
+    ${styleBlock20}
   `,
   SkipLink: styled.a`
     position: absolute;
     top: -44px;
-    left: ${({ theme }) => theme.space.sm};
-    z-index: ${({ theme }) => theme.zIndex.tooltip + 1};
-    padding: ${({ theme }) => `${theme.space.xs} ${theme.space.sm}`};
-    border-radius: ${({ theme }) => theme.radius.md};
-    background: ${({ theme }) => theme.color.brand};
-    color: ${({ theme }) => theme.color.textInverse};
-    font-size: ${({ theme }) => theme.typography.metaSize};
-    font-weight: ${({ theme }) => theme.typography.weightSemibold};
+    left: ${minimalVars.space.sm};
+    z-index: calc(${minimalVars.zIndex.tooltip} + 1);
+    padding: ${`${minimalVars.space.xs} ${minimalVars.space.sm}`};
+    border-radius: ${minimalVars.radius.md};
+    background: ${minimalVars.color.brand};
+    color: ${minimalVars.color.textInverse};
+    font-size: ${minimalVars.typography.metaSize};
+    font-weight: ${minimalVars.typography.weightSemibold};
     text-decoration: none;
     transition: top 160ms ${enterCurve};
 
     &:focus {
-      top: ${({ theme }) => theme.space.xs};
-      outline: 2px solid ${({ theme }) => theme.color.borderFocus};
+      top: ${minimalVars.space.xs};
+      outline: 2px solid ${minimalVars.color.borderFocus};
       outline-offset: 2px;
     }
   `,
@@ -2410,42 +2621,37 @@ const ShellStyle = {
        sidebar is a scrolling flex column of uniform navigation peers: it needs
        flex for the scroll region to size against the fixed inset, and the
        spacing between its items genuinely is uniform. Rule 3, not rule 4. */
-    gap: ${({ theme }) => theme.space.sm};
-    padding: ${({ theme, $bannerOffset }) => `calc(${$bannerOffset} + ${theme.space.lg}) ${theme.space.sm} ${theme.space.md}`};
+    gap: ${minimalVars.space.sm};
+    padding: ${({ $bannerOffset }) => `calc(${$bannerOffset} + ${minimalVars.space.lg}) ${minimalVars.space.sm} ${minimalVars.space.md}`};
     overflow-y: auto;
     overscroll-behavior: contain;
-    background: linear-gradient(180deg, ${({ theme }) => theme.color.bgSurface} 0%, ${({ theme }) => theme.color.bgSurfaceAlt} 100%);
-    border-right: 1px solid ${({ theme }) => theme.color.borderSubtle};
-    box-shadow: ${({ theme }) => theme.shadow.subtle};
-    z-index: ${({ theme }) => theme.zIndex.sticky};
+    background: linear-gradient(180deg, ${minimalVars.color.bgSurface} 0%, ${minimalVars.color.bgSurfaceAlt} 100%);
+    border-right: 1px solid ${minimalVars.color.borderSubtle};
+    box-shadow: ${minimalVars.shadow.subtle};
+    z-index: ${minimalVars.zIndex.sticky};
     transform: translateZ(0);
   `,
-  Main: styled(motion.main)<{ $sidebarWidth: string; $bannerOffset: string; $mobile: boolean; $compact: boolean }>`
+  Main: styled.main<{ $sidebarWidth: string; $bannerOffset: string; $mobile: boolean; $compact: boolean }>`
     flex: 1;
     min-height: 100dvh;
     height: 100dvh;
     width: 100%;
     max-width: ${({ $mobile, $sidebarWidth }) => ($mobile ? "100%" : `calc(100% - ${$sidebarWidth})`)};
     margin-left: ${({ $mobile, $sidebarWidth }) => ($mobile ? "0" : $sidebarWidth)};
-    padding-top: ${({ theme, $mobile, $bannerOffset }) =>
-      $mobile ? `calc(${$bannerOffset} + env(safe-area-inset-top, 0px))` : `calc(${$bannerOffset} + ${theme.space.lg})`};
-    padding-right: ${({ theme, $mobile, $compact }) => ($mobile && $compact ? theme.space.xs : theme.space.md)};
-    padding-bottom: ${({ theme, $mobile, $compact }) =>
-      $mobile ? `calc(${$compact ? "64px" : "72px"} + env(safe-area-inset-bottom, 0px))` : theme.space.lg};
-    padding-left: ${({ theme, $mobile, $compact }) => ($mobile && $compact ? theme.space.xs : theme.space.md)};
+    padding-top: ${({ $mobile, $bannerOffset }) =>
+      $mobile ? `calc(${$bannerOffset} + env(safe-area-inset-top, 0px))` : `calc(${$bannerOffset} + ${minimalVars.space.lg})`};
+    padding-right: ${({ $mobile, $compact }) => ($mobile && $compact ? minimalVars.space.xs : minimalVars.space.md)};
+    padding-bottom: ${({ $mobile, $compact }) =>
+      $mobile ? `calc(${$compact ? "64px" : "72px"} + env(safe-area-inset-bottom, 0px))` : minimalVars.space.lg};
+    padding-left: ${({ $mobile, $compact }) => ($mobile && $compact ? minimalVars.space.xs : minimalVars.space.md)};
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    background: ${({ theme }) => theme.color.bgApp};
+    background: ${minimalVars.color.bgApp};
     transition:
       padding 240ms ${moveCurve},
       margin-left 240ms ${moveCurve},
       background-color 240ms ${enterCurve};
-  `,
-  FeedbackSurface: styled(motion.div)`
-    min-width: 0;
-    transform-origin: center top;
-    padding-top: 0;
   `,
 };
 
@@ -2469,7 +2675,7 @@ export const MinimalAppShell = ({
   mobile = false,
   ...props
 }: MinimalAppShellProps) => (
-  <ShellStyle.App data-minimal="AppShell" $mobile={mobile} {...props}>
+  <ShellStyle.App data-minimal="AppShell" data-minimal-mobile={mobile} $mobile={mobile} {...props}>
     <MinimalSkipLink />
     {!mobile && sidebar ? (
       <ShellStyle.Sidebar aria-label="Main navigation" $width={sidebarWidth} $bannerOffset={bannerOffset}>
@@ -2537,23 +2743,6 @@ export const MinimalScrollMain = forwardRef<HTMLElement, MinimalScrollMainProps>
   );
 });
 
-export const MinimalScrollFeedbackSurface = ({
-  children,
-  feedback,
-  style,
-  ...props
-}: MinimalScrollFeedbackSurfaceProps) => {
-  const feedbackStyle = feedback
-    ? ({ skewY: feedback.skewY, scale: feedback.scale } as CSSProperties)
-    : undefined;
-
-  return (
-    <ShellStyle.FeedbackSurface style={{ ...feedbackStyle, ...style }} {...props}>
-      {children}
-    </ShellStyle.FeedbackSurface>
-  );
-};
-
 export const MinimalHeader = ({
   kicker,
   title,
@@ -2563,19 +2752,15 @@ export const MinimalHeader = ({
   actions,
   align = "start",
   titleAs = "h1",
+  enter = true,
   children,
   ...props
 }: MinimalHeaderProps) => {
-  const { slideUpVariants } = useMinimalMotion();
-
   return (
     <HeaderShell
       data-minimal="Header"
+      data-minimal-enter={enter ? undefined : "false"}
       $align={align}
-      variants={slideUpVariants}
-      initial="initial"
-      animate="animate"
-      exit="exit"
       {...props}
     >
       <HeaderTop>
@@ -2606,24 +2791,21 @@ export const MinimalDisplaySection = ({
   mediaAspectRatio = "4 / 3",
   backgroundImage,
   overlay,
+  enter = true,
   children,
   ...props
 }: MinimalDisplaySectionProps) => {
-  const { slideUpVariants } = useMinimalMotion();
-
   return (
     <DisplaySection
       data-minimal="DisplaySection"
+      data-minimal-enter={enter ? undefined : "false"}
+      data-minimal-anchor={anchor}
+      data-minimal-visual-mode={visualMode}
       $anchor={anchor}
-      $visualMode={visualMode}
       $intensity={intensity}
       $minHeight={minHeight}
       $backgroundImage={backgroundImage}
       $overlay={overlay}
-      variants={slideUpVariants}
-      initial="initial"
-      animate="animate"
-      exit="exit"
       {...props}
     >
       <DisplayCopy $anchor={anchor} $intensity={intensity}>
@@ -2681,7 +2863,7 @@ export const MinimalInfoPanel = ({
   layout = "row",
   ...props
 }: MinimalInfoPanelProps) => (
-  <InfoPanel data-minimal="InfoPanel" $tone={tone} $layout={layout} {...props}>
+  <InfoPanel data-minimal="InfoPanel" data-minimal-tone={tone} $layout={layout} {...props}>
     {icon ? <InfoIcon>{icon}</InfoIcon> : null}
     <InfoCopy>
       {eyebrow ? <HeaderKicker as="span">{eyebrow}</HeaderKicker> : null}
@@ -2705,26 +2887,23 @@ export const MinimalButton = ({
   disabled,
   ...props
 }: MinimalButtonProps) => {
-  const { micro, reducedMotion } = useMinimalMotion();
-  const theme = useMinimalTheme();
-  const hoverMotion = !reducedMotion && !disabled && !loading ? { y: theme.motion.hoverLift } : undefined;
-  const tapMotion = !reducedMotion && !disabled && !loading ? { scale: 0.98 } : undefined;
+  // Hover lift and press are CSS on ButtonShell (with reduced-motion rules); the
+  // framer whileHover/whileTap that used to sit on top of them are gone.
 
   return (
     <ButtonShell
       data-minimal="Button"
+      data-minimal-variant={variant}
+      data-minimal-tone={tone}
       $variant={variant}
       $tone={tone}
       $size={size}
       $fullWidth={fullWidth}
       aria-busy={loading || undefined}
       disabled={disabled || loading}
-      transition={micro}
-      whileHover={hoverMotion}
-      whileTap={tapMotion}
       {...props}
     >
-      {loading ? <Spinner as={motion.span} animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" } as Transition} /> : leading}
+      {loading ? <Spinner aria-hidden="true" /> : leading}
       {children}
       {!loading ? trailing : null}
     </ButtonShell>
@@ -2737,17 +2916,83 @@ export const MinimalSkeleton = ({
   inline = false,
   radius,
   ...props
-}: MinimalSkeletonProps) => (
-  <Skeleton
-    data-minimal="Skeleton"
-    aria-hidden="true"
-    $width={width}
-    $height={height}
-    $inline={inline}
-    $radius={radius}
-    {...props}
-  />
-);
+}: MinimalSkeletonProps) => {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => (ref.current ? observeSkeleton(ref.current) : undefined), []);
+  return (
+    <Skeleton
+      ref={ref}
+      data-minimal="Skeleton"
+      aria-hidden="true"
+      $width={width}
+      $height={height}
+      $inline={inline}
+      $radius={radius}
+      {...props}
+    />
+  );
+};
+
+export const MinimalImage = forwardRef<HTMLImageElement, MinimalImageProps>(function MinimalImage(
+  { width, height, aspectRatio, priority = false, fit, reveal = false, radius, loading, decoding, className, style, ...props },
+  forwarded,
+) {
+  const local = useRef<HTMLImageElement | null>(null);
+  const [revealed, setRevealed] = useState(false);
+  const setRef = useCallback(
+    (node: HTMLImageElement | null) => {
+      local.current = node;
+      if (typeof forwarded === "function") forwarded(node);
+      else if (forwarded) forwarded.current = node;
+    },
+    [forwarded],
+  );
+
+  useEffect(() => {
+    const image = local.current;
+    if (!reveal || !image) return;
+    let live = true;
+    const show = () => {
+      if (live) setRevealed(true);
+    };
+    // Reveal after decode, so the fade never waits on the decoder (P6 rule 2).
+    const decodeThenShow = () => image.decode().then(show, show);
+    if (image.complete) decodeThenShow();
+    else {
+      image.addEventListener("load", decodeThenShow, { once: true });
+      image.addEventListener("error", show, { once: true });
+    }
+    return () => {
+      live = false;
+      image.removeEventListener("load", decodeThenShow);
+      image.removeEventListener("error", show);
+    };
+  }, [reveal, props.src]);
+
+  const fill = aspectRatio !== undefined;
+  const boxStyle: CSSProperties | undefined =
+    fill || radius ? { aspectRatio: fill ? String(aspectRatio) : undefined, borderRadius: radius, ...style } : style;
+  // Lowercase: a plain attribute to every React version (fetchPriority is React 19 only).
+  const fetchPriority = priority ? ({ fetchpriority: "high" } as Record<string, string>) : undefined;
+
+  return (
+    <img
+      ref={setRef}
+      data-minimal="Image"
+      data-minimal-fill={fill ? "" : undefined}
+      data-minimal-fit={fit}
+      data-minimal-reveal={reveal ? (revealed ? "done" : "pending") : undefined}
+      className={className ? `${imageClass} ${className}` : imageClass}
+      width={width}
+      height={height}
+      loading={loading ?? (priority ? "eager" : "lazy")}
+      decoding={decoding ?? (priority ? "auto" : "async")}
+      style={boxStyle}
+      {...fetchPriority}
+      {...props}
+    />
+  );
+});
 
 export const MinimalCard = ({
   children,
@@ -2756,20 +3001,16 @@ export const MinimalCard = ({
   variant = "default",
   padding = "md",
   hoverable = false,
+  enter = true,
   ...props
 }: MinimalCardProps) => {
-  const { fadeVariants } = useMinimalMotion();
-
   return (
     <CardShell
       data-minimal="Card"
-      $variant={variant}
+      data-minimal-enter={enter ? undefined : "false"}
+      data-minimal-variant={variant}
+      data-minimal-hoverable={hoverable}
       $padding={padding}
-      $hoverable={hoverable}
-      variants={fadeVariants}
-      initial="initial"
-      animate="animate"
-      exit="exit"
       {...props}
     >
       {header ? <CardSlot>{header}</CardSlot> : null}
@@ -2807,7 +3048,7 @@ export const MinimalInput = forwardRef<HTMLInputElement, MinimalInputProps>(func
     <FieldShell data-minimal="Input" className={containerClassName}>
       {label ? <FieldLabel htmlFor={inputId}>{label}</FieldLabel> : null}
       {description ? <FieldDescription>{description}</FieldDescription> : null}
-      <InputFrame $state={state} $size={inputSize}>
+      <InputFrame data-minimal-state={state} $state={state} $size={inputSize}>
         {prefix ? <InputAdornment>{prefix}</InputAdornment> : null}
         <InputField
           {...props}
@@ -2865,7 +3106,6 @@ export const MinimalDropdown = <T extends string>({
   // button (which sits inside the frame's padding). This makes the panel span
   // the select's full width and align to its bottom edge instead of being inset.
   const position = useFloatingPosition(frameRef, open, panelMaxHeight, panelMinWidth, matchTriggerWidth);
-  const { popVariants } = useMinimalMotion();
   const dismissRefs = useMemo(() => [frameRef, panelRef], []);
 
   useDismissLayer(dismissRefs, open, () => setOpen(false));
@@ -3051,7 +3291,12 @@ export const MinimalDropdown = <T extends string>({
   return (
     <FieldShell data-minimal="Dropdown" {...props} onKeyDown={handleKeyDown}>
       {label ? <FieldLabel htmlFor={triggerId}>{label}</FieldLabel> : null}
-      <InputFrame ref={frameRef} $state={error ? "invalid" : "default"} $size="md">
+      <InputFrame
+        ref={frameRef}
+        data-minimal-state={error ? "invalid" : "default"}
+        $state={error ? "invalid" : "default"}
+        $size="md"
+      >
         <DropdownTriggerButton
           type="button"
           id={triggerId}
@@ -3084,10 +3329,6 @@ export const MinimalDropdown = <T extends string>({
                 id={listboxId}
                 role="listbox"
                 aria-labelledby={label ? triggerId : undefined}
-                variants={popVariants}
-                initial="initial"
-                animate="animate"
-                exit="exit"
               >
                 {showSearch ? (
                   <DropdownSearchWrap>
@@ -3163,7 +3404,7 @@ export const MinimalBadge = ({
   icon,
   ...props
 }: MinimalBadgeProps) => (
-  <BadgeShell data-minimal="Badge" $tone={tone} $emphasis={emphasis} $size={size} {...props}>
+  <BadgeShell data-minimal="Badge" data-minimal-tone={tone} data-minimal-emphasis={emphasis} $size={size} {...props}>
     {icon}
     {children}
   </BadgeShell>
@@ -3181,7 +3422,7 @@ export const MinimalAlert = ({
   const liveMode = tone === "warning" || tone === "danger" ? "assertive" : "polite";
 
   return (
-    <AlertShell data-minimal="Alert" $tone={tone} role={liveRole} aria-live={liveMode} {...props}>
+    <AlertShell data-minimal="Alert" data-minimal-tone={tone} role={liveRole} aria-live={liveMode} {...props}>
       {icon ? <AlertIcon>{icon}</AlertIcon> : null}
       <AlertBody>
         {title ? <AlertTitle>{title}</AlertTitle> : null}
@@ -3228,7 +3469,7 @@ export const MinimalFilterBar = <T extends string>({
         <FilterChip
           type="button"
           key={option.value}
-          $selected={selected}
+          data-minimal-selected={Boolean(selected)}
           $size={size}
           aria-pressed={selected}
           onClick={() => onChange(option.value)}
@@ -3251,15 +3492,12 @@ export const MinimalSegmentedControl = <T extends string>({
   variant = "neutral",
   ...props
 }: MinimalSegmentedControlProps<T>) => {
-  const { spring } = useMinimalMotion();
   const currentIndex = options.findIndex((option) => option.value === value);
 
   return (
     <SegmentedShell data-minimal="SegmentedControl" $size={size} role="group" aria-label={ariaLabel} {...props}>
       {currentIndex >= 0 ? (
         <SegmentedIndicator
-          layout
-          transition={spring}
           $index={currentIndex}
           $count={options.length}
           $variant={variant}
@@ -3301,7 +3539,7 @@ export const MinimalExplainer = ({
   const uncontrolled = open === undefined;
   const [localOpen, setLocalOpen] = useState(defaultOpen);
   const isOpen = uncontrolled ? localOpen : open;
-  const { standard } = useMinimalMotion();
+  const presence = useMinimalPresence(Boolean(isOpen), minimalMotionMs.standard + 20);
 
   const toggle = () => {
     const next = !isOpen;
@@ -3326,18 +3564,13 @@ export const MinimalExplainer = ({
           <Chevron open={Boolean(isOpen)} />
         </ExplainerActions>
       </ExplainerToggle>
-      <AnimatePresence initial={false}>
-        {isOpen ? (
-          <ExplainerPanel
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={standard}
-          >
+      {presence.mounted ? (
+        <ExplainerPanel data-state={presence.state} aria-hidden={presence.state === "open" ? undefined : true}>
+          <ExplainerPanelClip>
             <ExplainerPanelBody>{children}</ExplainerPanelBody>
-          </ExplainerPanel>
-        ) : null}
-      </AnimatePresence>
+          </ExplainerPanelClip>
+        </ExplainerPanel>
+      ) : null}
     </ExplainerShell>
   );
 };
@@ -3353,7 +3586,7 @@ export const MinimalStatCard = ({
   tone = "neutral",
   ...props
 }: MinimalStatCardProps) => (
-  <StatShell data-minimal="StatCard" $tone={tone} {...props}>
+  <StatShell data-minimal="StatCard" data-minimal-tone={tone} {...props}>
     <StatMeta>
       {icon ? <StatIcon>{icon}</StatIcon> : null}
       <StatLabel>{label}</StatLabel>
@@ -3403,6 +3636,41 @@ export const MinimalStack = ({
   <StackShell data-minimal="Stack" $rhythm={rhythm} {...props}>
     {children}
   </StackShell>
+);
+
+/*
+ * Offscreen culling for long pages (research doc P4).
+ *
+ * `content-visibility: auto` lets the browser skip style, layout and paint for
+ * a section that is outside the viewport, the DOM equivalent of frustum
+ * culling. The content stays in the document: it is still in the accessibility
+ * tree and still found by find-in-page. Animations inside a skipped section are
+ * not updated either, so an offscreen skeleton shimmer stops costing frames.
+ *
+ * `contain-intrinsic-size: auto <estimate>` is what makes skipping safe. A
+ * skipped section needs a size or the scroll height collapses; `auto` makes the
+ * browser remember the size it last rendered at, so the estimate only matters
+ * for a section that has never been on screen. The estimate reaches CSS as a
+ * variable on the element, which keeps the rule itself static.
+ */
+const CullSectionShell = styled.div`
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--minimal-cull-estimate, 600px);
+`;
+
+export const MinimalCullSection = ({
+  children,
+  estimatedSize = "600px",
+  style,
+  ...props
+}: MinimalCullSectionProps) => (
+  <CullSectionShell
+    data-minimal="CullSection"
+    style={{ "--minimal-cull-estimate": estimatedSize, ...style } as CSSProperties}
+    {...props}
+  >
+    {children}
+  </CullSectionShell>
 );
 
 export const MinimalActionRow = ({
@@ -3510,7 +3778,6 @@ export const MinimalCalendar = ({
   const minimumDate = normalizeDateValue(minDate);
   const maximumDate = normalizeDateValue(maxDate);
   const today = normalizeDateValue(new Date()) as Date;
-  const selectionLayoutId = `minimal-calendar-selection-${useId().replace(/:/g, "")}`;
   const [viewMode, setViewMode] = useState<CalendarViewMode>("day");
   const [direction, setDirection] = useState(0);
   const [internalMonth, setInternalMonth] = useState(
@@ -3661,11 +3928,6 @@ export const MinimalCalendar = ({
       : `${yearPageStart}–${yearPageStart + 15}`;
   const periodName = viewMode === "day" ? "month" : viewMode === "month" ? "year" : "year range";
   const viewKey = `${viewMode}:${viewMode === "year" ? yearPageStart : `${visibleYear}:${visibleMonthIndex}`}`;
-  const slide = {
-    initial: { opacity: 0, x: direction === 0 ? 0 : direction > 0 ? 18 : -18 },
-    animate: { opacity: 1, x: 0 },
-    exit: { opacity: 0, x: direction === 0 ? 0 : direction > 0 ? -18 : 18 },
-  };
 
   return (
     <CalendarShell data-minimal="Calendar" aria-label="Calendar" {...props}>
@@ -3703,13 +3965,9 @@ export const MinimalCalendar = ({
       </CalendarHeader>
 
       <CalendarViewport>
-        <AnimatePresence initial={false}>
           <CalendarViewPanel
             key={viewKey}
-            initial={slide.initial}
-            animate={slide.animate}
-            exit={slide.exit}
-            transition={{ duration: 0.16, ease: "easeOut" }}
+            style={{ "--minimal-motion-shift": direction === 0 ? "0px" : direction > 0 ? "18px" : "-18px" } as CSSProperties}
           >
             {viewMode === "day" ? (
               <CalendarGrid ref={gridRef}>
@@ -3730,10 +3988,11 @@ export const MinimalCalendar = ({
                       key={day.toISOString()}
                       data-date={day.toISOString()}
                       type="button"
+                      data-minimal-selected={Boolean(selected)}
+                      data-minimal-current-month={Boolean(currentMonth)}
+                      data-minimal-disabled={Boolean(disabled)}
+                      data-minimal-today={Boolean(isToday)}
                       $selected={selected}
-                      $currentMonth={currentMonth}
-                      $disabled={disabled}
-                      $today={isToday}
                       $hasContent={Boolean(renderDayContent)}
                       aria-label={dayFormatter.format(day)}
                       aria-current={isToday ? "date" : undefined}
@@ -3747,10 +4006,7 @@ export const MinimalCalendar = ({
                       }}
                     >
                       {selected ? (
-                        <CalendarSelection
-                          layoutId={selectionLayoutId}
-                          transition={{ type: "spring", stiffness: 520, damping: 38 }}
-                        />
+                        <CalendarSelection />
                       ) : null}
                       <CalendarDayContent>
                         <span>{day.getDate()}</span>
@@ -3798,7 +4054,6 @@ export const MinimalCalendar = ({
               </CalendarSelectorGrid>
             )}
           </CalendarViewPanel>
-        </AnimatePresence>
       </CalendarViewport>
 
       {showTodayAction ? (
@@ -3832,7 +4087,6 @@ export const MinimalTooltip = ({
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLSpanElement>(null);
   const timeoutRef = useRef<number | null>(null);
-  const { tooltipVariants } = useMinimalMotion();
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
 
   const clearTooltipTimer = () => {
@@ -3904,10 +4158,6 @@ export const MinimalTooltip = ({
               $left={coords.left}
               $top={coords.top}
               $placement={placement}
-              variants={tooltipVariants}
-              initial="initial"
-              animate="animate"
-              exit="exit"
             >
               {content}
             </TooltipPanel>,
@@ -3937,7 +4187,6 @@ export const MinimalActionModal = ({
 }: MinimalActionModalProps) => {
   const [pending, setPending] = useState(false);
   const modalRef = useRef<HTMLElement>(null);
-  const { popVariants, fadeVariants } = useMinimalMotion();
   const dismissRefs = useMemo(() => [modalRef], []);
 
   useDismissLayer(dismissRefs, open, onClose);
@@ -3974,17 +4223,12 @@ export const MinimalActionModal = ({
   }
 
   return createPortal(
-    <AnimatePresence>
-      <ModalBackdrop
-        variants={fadeVariants}
-        initial="initial"
-        animate="animate"
-        exit="exit"
-        onClick={onClose}
-      />
+    <>
+      <ModalBackdrop onClick={onClose} />
       <ModalShell
         data-minimal="ActionModal"
         ref={modalRef}
+        data-minimal-mobile-sheet={mobileSheet}
         $mobileSheet={mobileSheet}
         role="dialog"
         aria-modal="true"
@@ -3993,10 +4237,6 @@ export const MinimalActionModal = ({
           "--minimal-modal-max-width": maxWidth,
           "--minimal-modal-max-height": maxHeight,
         } as CSSProperties}
-        variants={popVariants}
-        initial="initial"
-        animate="animate"
-        exit="exit"
         onClick={(event) => event.stopPropagation()}
       >
         <ModalHeader style={{ textAlign: align === "center" ? "center" : "left" }}>
@@ -4022,7 +4262,7 @@ export const MinimalActionModal = ({
           ) : null}
         </ModalActions>
       </ModalShell>
-    </AnimatePresence>,
+    </>,
     document.body
   );
 };

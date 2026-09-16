@@ -150,6 +150,15 @@ test-service-backed:
 test-service-backed-load:
 	@tests/service_backed_load_research.sh
 
+# Foundation-only frontend lab (frontend-lab/README.md): jsdom behaviour and
+# real-Chromium rendering contracts for ui-minimal, frontend-kit and
+# browser-host. Never vendored into projects.
+test-frontend-lab:
+	@cd frontend-lab && npm run test
+
+test-frontend-lab-browser:
+	@cd frontend-lab && npm run test:browser
+
 test-load-research:
 	@tooling/scripts/load_research.sh
 
@@ -494,6 +503,8 @@ help:
 	@echo "  make test-bench-frontend Run frontend workbench benchmarks and allocation profile"
 	@echo "  make test-load-research  Run opt-in staged 1K->1M local load research"
 	@echo "  make test-service-backed-load  Run opt-in staged service-backed load research"
+	@echo "  make test-frontend-lab   Run the foundation-only frontend lab (jsdom lane)"
+	@echo "  make test-frontend-lab-browser  Run the frontend lab's real-Chromium rendering lane"
 	@echo "  make test-bench-native-rust  Run native GPU/runtime Rust benchmark simulation"
 	@echo "  make bench-simd          Run opt-in Go SIMD columnar benchmarks (GOEXPERIMENT=simd)"
 	@echo "  make lint                Run foundation scaffold/practice checks"

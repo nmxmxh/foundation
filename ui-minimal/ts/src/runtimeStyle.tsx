@@ -1,4 +1,5 @@
-import { createContext, useContext, useMemo, type PropsWithChildren } from "react";
+import type { PropsWithChildren } from "react";
+import { createContext, useContext, useMemo } from "react";
 
 /**
  * The render lane and frame budget a surface is running under.

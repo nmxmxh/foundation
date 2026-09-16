@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "strict": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "skipLibCheck": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@ovasabi/ui-minimal": ["../ui-minimal/ts/src/index.ts"],
+      "@ovasabi/runtime-browser": ["../runtime-sdk/ts/browser-host/src/index.ts"],
+      "@ovasabi/frontend-kit": ["../frontend-kit/ts/src/index.ts"]
+    }
+  },
+  "include": ["src", "profile", "vitest.config.ts"]
+}

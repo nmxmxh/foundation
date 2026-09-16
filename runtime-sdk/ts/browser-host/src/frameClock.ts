@@ -67,14 +67,28 @@ function ensurePulse(): PulseManager {
     createWorker: customWorkerFactory,
     onDiagnostics: (diagnostics) => {
       diagnosticsSeen = { mode: diagnostics.mode, degraded: diagnostics.degraded };
+      // "stopped" is the pulse before start(), not a degraded pulse.
+      // ensurePulse() calls watchEpochs() before start(), and watchEpochs()
+      // reports diagnostics; reading that "stopped" as a fallback latched every
+      // clock onto animation frames at subscription — before its worker could
+      // tick — while start()'s report then marked the lane "worker". Only a
+      // started pulse says anything about the lane.
+      if (diagnostics.mode === "stopped") return;
       if (diagnostics.degraded || diagnostics.mode !== "worker") {
         fallbackToFrames();
       }
+      const fallback = diagnostics.degraded || diagnostics.mode !== "worker";
       markLane(PASS.clock, {
         lane: diagnostics.mode,
         cadence: diagnostics.targetTPS,
-        fallback: diagnostics.degraded || diagnostics.mode !== "worker",
-        reason: diagnostics.issues.map((issue) => issue.capability).join(",") || "ok",
+        fallback,
+        reason:
+          diagnostics.issues.map((issue) => issue.capability).join(",") ||
+          // Every capability is present and the pulse still fell back: the
+          // worker itself failed to load, which is the consumer-bundling case
+          // pulseManager.ts describes. It must not read as healthy — ovasabi_v1
+          // ran on the main-thread lane for its whole life with reason "ok".
+          (fallback ? "worker unavailable: pass configureFrameClock({ createWorker })" : "ok"),
       });
     },
   });
@@ -84,6 +98,7 @@ function ensurePulse(): PulseManager {
       const buffer = new SharedArrayBuffer(BUFFER_TOTAL_BYTES);
       manager.watchEpochs([IDX_RUNTIME_TICK], () => {
         workerTicksReceived++;
+        handBackToWorker();
         schedule();
       });
       manager.start(buffer);
@@ -100,10 +115,34 @@ function ensurePulse(): PulseManager {
   return manager;
 }
 
+/**
+ * Return the clock to its worker pulse once the worker is actually ticking.
+ *
+ * A module worker's first tick arrives only after its script has loaded, which
+ * can take longer than `onFrame`'s grace window. That window used to latch:
+ * once the clock had bridged onto its own animation frames it never went back,
+ * so a healthy worker pulse ticked alongside a clock that ignored it — two
+ * loops for one pacer — while the clock fact still read "worker". Only a
+ * worker-mode, non-degraded pulse is handed back to; a main-thread pulse is a
+ * timer, and animation frames pace better than it does.
+ */
+function handBackToWorker(): void {
+  if (!selfDriven || diagnosticsSeen?.mode !== "worker" || diagnosticsSeen.degraded) return;
+  selfDriven = false;
+  markLane(PASS.clock, {
+    lane: "worker",
+    cadence: targetTPS,
+    fallback: false,
+    reason: "worker pulse arrived; frames bridge released",
+  });
+}
+
 function fallbackToFrames(): void {
   if (selfDriven) return;
   selfDriven = true;
   const loop = (now?: number) => {
+    // Released: the worker pulse has taken the clock back.
+    if (!selfDriven) return;
     if (subscribers.size === 0) {
       selfDriven = false;
       return;
@@ -165,6 +204,14 @@ export function onFrame(runCallback: (tick: Tick) => void, cadenceMs = 1000 / 30
       setTimeout(() => {
         if (!selfDriven && subscribers.size > 0 && workerTicksReceived === 0) {
           fallbackToFrames();
+          // Honest while bridging: the pulse reported "worker" when it started,
+          // but no tick has arrived, so animation frames are driving the clock.
+          markLane(PASS.clock, {
+            lane: "frames",
+            cadence: targetTPS,
+            fallback: true,
+            reason: "no worker tick within 120 ms; bridging on animation frames",
+          });
         }
       }, 120);
     }
@@ -200,5 +247,6 @@ export function _resetFrameClockForTesting(): void {
   scheduled = false;
   selfDriven = false;
   diagnosticsSeen = null;
+  workerTicksReceived = 0;
   subscribers.clear();
 }

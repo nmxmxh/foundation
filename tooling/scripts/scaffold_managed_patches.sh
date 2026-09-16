@@ -1065,6 +1065,7 @@ docker-redeploy:
 # overwritten with --force, so an ordinary update would never deliver the
 # target; this patch adds it in place instead of rewriting a file that carries
 # project-owned settings.
+# @since 0.0.1
 patch_makefile_projection_audience() {
   local file="$target/Makefile"
   [[ -f "$file" ]] || return 0
@@ -1975,6 +1976,75 @@ patch_frontend_tsconfig_baseurl() {
     log_patch "frontend tsconfig drops removed baseUrl for TS7: ${file#$target/}"
   fi
   rm -f "$before"
+}
+
+# @since 0.0.1
+patch_frontend_linaria() {
+  local root="$target/frontend"
+  [[ -d "$root" ]] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+
+  # ui-minimal's styles are Linaria, extracted at build time (Foundation research
+  # doc 14.8). The app's Vite build and Vitest runner both need the wyw-in-js
+  # plugin, and an app whose own styled-components read the theme needs the
+  # styled-components bridge. vite.config.ts and styles/theme.ts are
+  # project-owned, so the edit is made in place by frontend_linaria_patch.mjs,
+  # which is idempotent and reports a diverged file instead of rewriting it.
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    case "$line" in
+      patched\ *) log_patch "frontend Linaria build: ${line#patched }" ;;
+      manual\ *) printf '[PATCH] manual step: %s\n' "${line#manual }" ;;
+    esac
+  done < <(node "$foundation_root/tooling/scripts/frontend_linaria_patch.mjs" "$root")
+}
+
+# @since 0.0.1
+patch_frontend_prerender() {
+  local root="$target/frontend"
+  [[ -d "$root" ]] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+
+  # Paint the first screen from HTML and CSS instead of waiting for script
+  # (docs/frontend_paint_performance_handover.md, P1). src/entry-server.tsx
+  # seeds through the ordinary update, but vite.config.ts and src/main.tsx are
+  # project-owned, so the plugin and the mountRoot swap are made in place by
+  # frontend_prerender_patch.mjs. It is idempotent, and it reports a manual step
+  # rather than editing an app that has grown its own Vite plugins or paints its
+  # own markup inside #root — a prerender is only correct when the server and
+  # the client render the same thing for a URL.
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    case "$line" in
+      patched\ *) log_patch "frontend prerender: ${line#patched }" ;;
+      manual\ *) printf '[PATCH] manual step: %s\n' "${line#manual }" ;;
+    esac
+  done < <(node "$foundation_root/tooling/scripts/frontend_prerender_patch.mjs" "$root")
+}
+
+# @since 0.0.1
+patch_native_shell() {
+  local root="$target/native"
+  [[ -d "$root" ]] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+
+  # native/package.json and the three tauri*.conf.json files are create-mode, so
+  # a template change never reaches an app that already exists. The before-
+  # commands run from native/, and an app seeded before that was settled still
+  # says `cd ../../frontend`, which walks one level past the frontend; Tauri's
+  # mobile build phases also shell out to `npm run tauri`, which has to exist.
+  # native_shell_patch.mjs makes both edits in place, touching nothing else —
+  # frontendDist and any app-specific environment in the command survive.
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    case "$line" in
+      patched\ *) log_patch "native shell: ${line#patched }" ;;
+      manual\ *) printf '[PATCH] manual step: %s\n' "${line#manual }" ;;
+    esac
+  done < <(node "$foundation_root/tooling/scripts/native_shell_patch.mjs" "$root")
 }
 
 # @since 0.0.1
@@ -3287,6 +3357,9 @@ patch_test_compose_ephemeral_ports
 patch_postgres_config_baseline
 patch_startup_dependencies_double_close_redis
 patch_frontend_tsconfig_baseurl
+patch_frontend_linaria
+patch_frontend_prerender
+patch_native_shell
 patch_remove_base_ui_dependency
 patch_frontend_nginx_security_headers
 patch_env_example_hermes_warm_scopes

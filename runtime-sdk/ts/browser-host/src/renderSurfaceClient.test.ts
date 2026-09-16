@@ -350,6 +350,125 @@ describe("the quality ladder", () => {
     expect(resize).toHaveBeenCalledWith(100, 50);
     expect(sent.find((event) => event.kind === "READY")).toBeDefined();
   });
+
+  /*
+   * GPU backpressure. Found on real hardware (frontend-lab `gpu` lane): a
+   * WebGPU pass at 1.3–2.4 s of GPU time per frame drew at a steady 40 Hz, held
+   * rung zero, and queued 99 frames, because `draw` returns when `submit` does.
+   */
+  describe("with a pass that says when its frame has settled", () => {
+    const gpuPass = (settled: () => Promise<unknown>, onDraw: () => void = () => undefined) => ({
+      lane: "webgpu",
+      dispose: () => undefined,
+      resize: () => undefined,
+      draw: onDraw,
+      settled,
+    });
+
+    it("keeps one frame in flight and demotes when the GPU cannot keep up", async () => {
+      let inFlight = 0;
+      let maxInFlight = 0;
+      let draws = 0;
+      const { scope, sent, send } = makeScope();
+      serveRenderSurface(
+        "test",
+        {
+          build: () =>
+            gpuPass(
+              () => {
+                inFlight += 1;
+                maxInFlight = Math.max(maxInFlight, inFlight);
+                // 200 ms of GPU work against a 25 ms cadence.
+                return new Promise((resolve) => setTimeout(() => (inFlight -= 1, resolve(undefined)), 200));
+              },
+              () => (draws += 1),
+            ),
+        },
+        scope,
+      );
+
+      send(init());
+      await vi.advanceTimersByTimeAsync(400);
+
+      expect(maxInFlight, "queued a frame behind one still on the GPU").toBe(1);
+      // Two or three frames in 400 ms, not sixteen.
+      expect(draws).toBeLessThanOrEqual(3);
+      expect(demotions(sent).length).toBeGreaterThan(0);
+      expect(demotions(sent)[0]).toMatchObject({ diagnostics: { tier: 1 } });
+    });
+
+    it("leaves a GPU that finishes inside its cadence alone", async () => {
+      let draws = 0;
+      const { scope, sent, send } = makeScope();
+      serveRenderSurface(
+        "test",
+        {
+          build: () =>
+            gpuPass(
+              () => new Promise((resolve) => setTimeout(resolve, 5)),
+              () => (draws += 1),
+            ),
+        },
+        scope,
+      );
+
+      send(init());
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(demotions(sent)).toHaveLength(0);
+      expect(draws).toBeGreaterThan(700);
+    });
+
+    it("stops waiting for a frame that never settles rather than freezing", async () => {
+      let draws = 0;
+      const { scope, send } = makeScope();
+      serveRenderSurface(
+        "test",
+        { build: () => gpuPass(() => new Promise(() => undefined), () => (draws += 1)) },
+        scope,
+      );
+
+      send(init());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(draws).toBe(1);
+      await vi.advanceTimersByTimeAsync(1_900);
+      expect(draws, "drew over a frame still in flight").toBe(1);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(draws, "froze on a promise that never resolved").toBeGreaterThan(1);
+    });
+
+    it("does not let a retired pass's late frame release the next pass's wait", async () => {
+      const resolvers: Array<() => void> = [];
+      let draws = 0;
+      const { scope, send } = makeScope();
+      serveRenderSurface(
+        "test",
+        {
+          build: () =>
+            gpuPass(
+              () => new Promise<void>((resolve) => resolvers.push(resolve)),
+              () => (draws += 1),
+            ),
+        },
+        scope,
+      );
+
+      send(init());
+      await vi.advanceTimersByTimeAsync(0);
+      send({ kind: "STOP", surface: "test" });
+      send(init());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(draws).toBe(2);
+      expect(resolvers).toHaveLength(2);
+
+      resolvers[0]!(); // the old pass's frame lands
+      await vi.advanceTimersByTimeAsync(100);
+      expect(draws, "a stale frame released the new pass's wait").toBe(2);
+
+      resolvers[1]!();
+      await vi.advanceTimersByTimeAsync(30);
+      expect(draws).toBe(3);
+    });
+  });
 });
 
 describe("a surface reading shared state", () => {

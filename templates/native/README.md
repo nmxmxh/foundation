@@ -148,3 +148,18 @@ apply these once after `mobile:init`:
 5. The backend's `ALLOWED_ORIGINS` must include the shell origins,
    `http://tauri.localhost` (Android) and `tauri://localhost` (iOS), or the API
    rejects the CORS preflight and every call from the app fails.
+6. Cross-origin isolation: `tauri.conf.json` sets COOP `same-origin` and COEP
+   `require-corp` under `app.security.headers`. Android WebView does not honour
+   them: it ignores COOP/COEP on responses the shell serves itself
+   (`client-via: shouldInterceptRequest`). Verified on WebView 133 —
+   `crossOriginIsolated` stays `false` and `SharedArrayBuffer` is undefined — so
+   the `sab` lane does not exist in the Android shell and the runtime takes its
+   fallback. Keep the headers (parity with the web build, and correct wherever a
+   WebView does honour them), but never assume isolation in a native shell;
+   WKWebView is unverified. The dev overlay sets `headers` to
+   `null` because mobile dev proxies the Vite server, which already sends them;
+   both at once duplicate the header and the WebView ignores it. Under COEP every
+   cross-origin image needs `Cross-Origin-Resource-Policy: cross-origin` (or CORS
+   with `crossorigin`). The server-kit security middleware sends `same-origin`
+   on every response, so a public media route must override it. WKWebView has no
+   `credentialless` mode. Verify with `self.crossOriginIsolated` in the WebView.

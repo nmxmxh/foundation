@@ -1,9 +1,18 @@
-.PHONY: all setup deps install-tools dev run-local dev-local build build-server build-profiling build-frontend build-runtime test-go-race test-rust-loom communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime frontend-commands runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-redeploy docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-markdown-frontmatter check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-sql-prepare check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-projection-audience check-server-kit-module-contract check-server-kit-usage check-system-profiling check-project-scaffold
+.PHONY: all setup deps install-tools dev run-local dev-local build build-server build-profiling build-frontend build-runtime test-go-race test-rust-loom communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime frontend-commands runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-redeploy docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-markdown-frontmatter check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-sql-prepare check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-projection-audience check-server-kit-module-contract check-server-kit-usage check-system-profiling check-project-scaffold check-frontend-surface-practices
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
 FOUNDATION_PATH := $(shell grep -m1 "^FOUNDATION_PATH=" .foundation 2>/dev/null | cut -d'=' -f2 | sed 's/\\ / /g')
 PROTO_PATH := api/protos
+
+# ts-proto codegen options. Types only by default: the envelope is protobuf
+# (encoded by @ovasabi/runtime-transport) and domain payloads travel as JSON
+# inside it, so the encoders would be dead weight in the bundle. An app that
+# encodes domain messages itself overrides this in Makefile.local, which is
+# read before this assignment and therefore wins:
+#
+#   TS_PROTO_OPT := esModuleInterop=true,forceLong=string,useOptionals=messages,outputJsonMethods=false,outputClientImpl=false
+TS_PROTO_OPT ?= esModuleInterop=true,forceLong=string,useOptionals=messages,outputEncodeMethods=false,outputJsonMethods=false,outputClientImpl=false
 WASM_PUBLIC_DIR ?= frontend/public
 WASM_MODULE_DIR ?= $(WASM_PUBLIC_DIR)/modules
 WASM_MANIFEST ?= $(WASM_PUBLIC_DIR)/runtime/wasm-manifest.json
@@ -150,7 +159,7 @@ proto-ts:
 				-I=$(PROTO_PATH) \
 				--plugin=protoc-gen-ts_proto=./frontend/node_modules/.bin/protoc-gen-ts_proto \
 				--ts_proto_out=frontend/src/types/protos \
-				--ts_proto_opt=esModuleInterop=true,forceLong=string,useOptionals=messages,outputEncodeMethods=false,outputJsonMethods=false,outputClientImpl=false \
+				--ts_proto_opt=$(TS_PROTO_OPT) \
 				$$(find $$latest_version_dir -name '*.proto'); \
 		fi; \
 	done
@@ -783,7 +792,7 @@ lint-frontend: frontend-prototype-runtime
 		echo "No frontend package; skipping frontend lint"; \
 	fi
 
-FOUNDATION_LINT_CHECKS := check-doc-references check-markdown-frontmatter check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-projection-audience check-server-kit-module-contract check-server-kit-usage check-system-profiling check-project-scaffold
+FOUNDATION_LINT_CHECKS := check-doc-references check-markdown-frontmatter check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-projection-audience check-server-kit-module-contract check-server-kit-usage check-system-profiling check-project-scaffold check-frontend-surface-practices
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
 
 lint-foundation:
@@ -913,6 +922,19 @@ check-server-kit-module-contract:
 
 check-server-kit-usage:
 	@zsh ./scripts/checks/server_kit_usage_check.sh .
+
+check-frontend-surface-practices:
+	@if [ ! -d frontend/src ]; then \
+		echo "No frontend sources; skipping frontend surface practices"; \
+	elif [ -f scripts/checks/frontend_surface_practices_check.mjs ]; then \
+		node scripts/checks/frontend_surface_practices_check.mjs foundation; \
+	elif [ -f foundation/tooling/scripts/frontend_surface_practices_check.mjs ]; then \
+		node foundation/tooling/scripts/frontend_surface_practices_check.mjs foundation; \
+	elif [ -n "$(FOUNDATION_PATH)" ] && [ -f "$(FOUNDATION_PATH)/tooling/scripts/frontend_surface_practices_check.mjs" ]; then \
+		node "$(FOUNDATION_PATH)/tooling/scripts/frontend_surface_practices_check.mjs" "$(FOUNDATION_PATH)"; \
+	else \
+		echo "frontend_surface_practices_check.mjs not found; skipping"; \
+	fi
 
 check-project-scaffold:
 	@zsh ./scripts/checks/project_scaffold_check.sh .
@@ -1053,6 +1075,7 @@ help:
 	@echo "  check-contract-drift"
 	@echo "  check-projection-audience"
 	@echo "  check-project-scaffold"
+	@echo "  check-frontend-surface-practices"
 	@echo ""
 	@echo "Docker & DB:"
 	@echo "  docker-up        - Start development containers"
