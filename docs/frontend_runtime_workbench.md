@@ -204,6 +204,13 @@ descriptors and emits:
 - `prototypeDomains` and `createPrototypeTenantStores` aggregate helpers for
   scaffolded apps.
 
+A message with a `@no-projection` marker in its leading comment is skipped. A
+marker in the leading comment of the `package` statement skips the whole file.
+Use it for command-only domains whose data must never reach a client projection
+(for example identity documents). The server's projection audience guard
+refuses any frontend-bound scope without a declared audience, so an unmarked
+private entity fails loudly at the first read instead of leaking.
+
 The generator accepts `--proto-root`, `--out`, `--package-import`,
 `--include-template`, and `--check`. Its default output is
 `frontend/src/generated/prototypeRuntime.ts` so generated applications can keep
