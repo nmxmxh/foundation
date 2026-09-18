@@ -110,6 +110,10 @@ Lab notes:
   - `node frontend-lab/device/cdp.mjs eval '<js>'` or `nav '<url>'`
   - `node frontend-lab/device/cdp-trace.mjs out.json 9` while swiping
   - `frontend-lab/device/scrollGfx.sh` for interleaved `gfxinfo` A/B
+  - `node frontend-lab/device/scrollMatrix.mjs` — instrumented, interleaved variant matrix: gfxinfo summary + framestats phases, page rAF/LoAF, style/layout deltas, layer count, WebSocket frames mid-swipe, **and the run's host load / guest memory**. `ROUTES=/orders VARIANTS=baseline,plain-list PAIRS=3`. Always include `plain-list`: it is the control that says whether the run is evidence.
+  - `node frontend-lab/device/layerPaintProfile.mjs` and `paintShadowDepth.mjs` — **per-layer paint replay** (`LayerTree.makeSnapshot` + `profileSnapshot`): what the PAGE costs to raster, independent of the device's fill speed. This is the instrument that found finding 12; whole-frame A/B cannot see content cost on either emulator lane.
+  - `node frontend-lab/device/soak.mjs` — degradation soak: user-like tours, then app + WebView-control + non-WebView (Settings) samples with memory, to tell a degraded device from a degraded app.
+  - `frontend-lab/device/coldScroll.sh <pkg> <runs> <settle> [route]` — cold-start ledger; the route is reached in-app so the launch stays cold.
 - **Sign-in:** the agent must not enter passwords. Ask the user to sign in on the emulator. The seeded test accounts (`tayo@` / `amara@choosechow.com`, `demo1234`) exist only in local seeded databases, not production.
 - **ovasabi_v1 in Docker:** `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d app-postgres app-redis migrate server`.
   - Port 5173 is dual-bound: `localhost` reaches the Vite dev server, `127.0.0.1` reaches the stale nginx container.
@@ -118,15 +122,11 @@ Lab notes:
 
 ## 5. Open questions and next experiments (prioritised)
 
-1. **Why P2 separates in the lab but not on the device — largely answered 09-15 (ledger findings 7 and 8).**
-   - The lab's separation came from `MinimalSkeleton`'s non-composited `background-position` shimmer, which `low_power` stopped, and its raster numbers were SwiftShader. ChooseChow Profile runs no infinite animation, so there was nothing for the tier to stop. Shimmer is now transform-only.
-   - Still open for the device: what *does* cost on Profile. `cdp-trace.mjs` traces per layer and paint (`DrawFn_DrawGL`, `RasterTask`, `Paint` sizes) and composited-layer counts (`LayerTree`). Hypotheses:
-     - sticky rounded header invalidation over the scroller;
-     - layer count or tile eviction on a 2 GB device;
-     - costs that aren't tier-controlled (gradients, images, `border-radius` clipping).
-   - Test each with runtime CSS A/B through `scrollGfx.sh`.
-   - Add a P7 lint rule: keyframes may animate only `transform`, `opacity` (and `filter` where measured). Negative-test it.
-2. **Bimodal device runs.** The same configuration measures p50 17 ms or ~100 ms. Correlate with thermal state, GC, whether a projection delta arrived mid-run (instrument the WebSocket), and time since launch. Until explained, any device A/B needs more pairs and should report distributions.
+1. ~~**Why P2 separates in the lab but not on the device.**~~ **Answered 09-17 (ledger finding 12): a blurred shadow behind a rounded rect costs ~25 ms of raster per screen; the same shadow on a square rect costs ~1 ms.** Shadows are >90% of page paint on every ChooseChow screen measured. The cheap tiers now draw an unblurred edge (Orders low_power 31 → 7.2 ms paint; balanced 68 → 31). Still open: whether `balanced` should also go blur-free (it still costs 31 ms/screen on Orders), and iOS/WKWebView, where Core Graphics may not have the same cliff — measure before assuming.
+   - **Instrument:** `frontend-lab/device/layerPaintProfile.mjs` and `paintShadowDepth.mjs` (per-layer paint replay via `LayerTree.profileSnapshot`). Whole-frame gfxinfo A/B **cannot** see content cost on either emulator lane (host GPU draws everything at 17 ms; SwiftShader saturates at ~61 ms including the control) — see the method row in the ledger.
+
+2. ~~**Bimodal device runs.**~~ **Closed 09-17: it is the emulator, not the app.** A 45-minute soak (44 tours, plain-list control plus a non-WebView Settings control, memory tracked) held 17 ms p50 with flat memory; the slow sessions were a degraded emulator in which the *control itself* read 89–200 ms and only a reboot recovered it. **Harness rule: every device capture carries a plain-list control and the run's host load / guest memory (`scrollMatrix.mjs` records them); a run whose control is over budget is not evidence.**
+
 3. **`cull` raises raster by 30% in the lab** while cutting style by 74% and paint by 54%. Find out whether it's re-raster on section restore, `contain-intrinsic-size` placeholders, or tile churn. Try different `estimatedSize` values and a larger overscan margin. The answer decides when apps should use `MinimalCullSection`.
 4. **Page-side vs platform frame truth (finding 5).** rAF p50 17 ms coexists with gfxinfo p50 ~100 ms. Build a lab or device harness that records both for the same run, and decide what `uiQuality` should consume inside native shells (P8 platform metrics bridge).
 5. **Lab coverage gaps:**
@@ -136,7 +136,7 @@ Lab notes:
    - The ssr eval covers the base theme only; add sweeps under `MinimalThemeScope` and a dark theme.
    - ~~The render-surface lane has no lab lane.~~ Done 09-15: `frontend-lab/src/gpu/` (findings 9–11: GPU backpressure via `RenderSurfacePass.settled`, shared-device idle release, prewarm 10 vs 32 ms). Still open there: **WebGL2 has no GPU barrier** (`gl.finish()` ~0 ms under 40× load on ANGLE/Metal, fence never signalled). Try `clientWaitSync` with a timeout, `EXT_disjoint_timer_query_webgl2`, or measure presentation instead. Also: a promote test (load dropped mid-run), GPU allocation per frame (count descriptor/object churn in the worker), and the lane on the emulator's WebView (WebGL2 only there).
    - ovasabi_v1 `blackHolePass`: a device per pass that is never destroyed, a pass descriptor allocated per frame, and no `settled`. Fix once that app can sync Foundation.
-6. **`balanced` tier has no CSS.** Decide what it drops (probably backdrop blur only). Then give the tier's effect on the lab profile.
+6. ~~**`balanced` tier has no CSS.**~~ Shipped 09-17: `balanced` collapses multi-layer shadows to one layer (ledger finding 12; Orders paint 68 → 31 ms, profile 22 → 10.7). Open: whether it should drop blur entirely like `low_power`, which is a design call — blur-free would take Orders to ~7 ms.
 7. **P7 enforcement in app code.** The surface check scans Foundation roots only. ChooseChow's P7 conformance was verified by grep this session; decide whether a project-side check ships (script checks do reach apps).
 8. **Not started:** P4 `virtualList`, P6 rules 3–5 (worker decode, decode queue, pixel budget; sizing is done), P8 device signals (ADPF / iOS thermal), P9 warm-up and hitch ledger (cold start is the real ChooseChow defect: launch `TotalTime` 12.8 s on the P7 build, first scroll runs ~100 ms frames), P5 option C (Linaria), iOS simulator verification (COOP/COEP in WKWebView, 120 Hz questions).
 

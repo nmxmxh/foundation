@@ -39,19 +39,49 @@ export const minimalGlobalStylesClass = css`
     /*
      * Quality tiers: data-ui-tier, written by browser-host's createUiQuality.
      *
-     * Detail only. Shadow and blur cost scales with blur radius and covered area
-     * (research doc §1.4), so the low-power tier keeps every edge but draws it
-     * with a few pixels of blur instead of 28–80, and drops backdrop blur. Every
-     * ui-minimal surface reads these tokens, so this block is the whole swap.
+     * Detail only. Every ui-minimal surface reads these tokens, so this block is
+     * the whole swap.
+     *
+     * ## Why the cheap tiers use ZERO blur, not a small blur
+     *
+     * Measured on a device (Android 16 WebView 133, ChooseChow Orders, per-layer
+     * paint replay via LayerTree.profileSnapshot; research doc §13 finding 12):
+     * a blurred shadow behind a ROUNDED rect costs ~25 ms of raster per screen,
+     * while the same shadow on a square rect costs ~1 ms — the rounded case
+     * loses Skia's fast path, and every shadow layer pays it again. Blur radius
+     * adds on top of that penalty, but it is not the penalty:
+     *
+     *   two-layer (the ChooseChow card)  68 ms      20px blur        41 ms
+     *   8px blur                         32 ms      3px blur         30 ms
+     *   1px blur                         53 ms      0 blur hairline   6.9 ms
+     *   no shadow                         5.8 ms    no shadow+border  5.2 ms
+     *
+     * So "a few pixels of blur instead of 28" — what this block used to do — was
+     * still paying the whole penalty (30 ms against 6.9). The cheap tiers now
+     * draw elevation with an unblurred offset edge, which keeps a visible edge
+     * on every surface and stays on the fast path. Rounded corners themselves
+     * are free and are untouched.
      *
      * A MinimalThemeScope writes its tokens inline on its own element, which wins
      * over :root for that subtree; scopes are small embeds, and that is accepted.
      */
     :root[data-ui-tier="low_power"] {
-      --minimal-shadow-subtle: 0 1px 2px rgba(28, 28, 30, 0.12);
-      --minimal-shadow-medium: 0 2px 6px rgba(28, 28, 30, 0.16);
-      --minimal-shadow-floating: 0 4px 12px rgba(28, 28, 30, 0.2);
+      --minimal-shadow-subtle: 0 1px 0 rgba(28, 28, 30, 0.16);
+      --minimal-shadow-medium: 0 1px 0 rgba(28, 28, 30, 0.22);
+      --minimal-shadow-floating: 0 2px 0 rgba(28, 28, 30, 0.26);
       --minimal-backdrop-filter: none;
+    }
+
+    /*
+     * balanced: the rung most mid-range phones sit on. It keeps blur where a
+     * design reads as flat without it, but collapses multi-layer shadows to one
+     * layer — measured 68 ms → 32 ms on the same screen, since each additional
+     * shadow layer repeats the rounded-rect penalty above.
+     */
+    :root[data-ui-tier="balanced"] {
+      --minimal-shadow-subtle: 0 2px 6px rgba(28, 28, 30, 0.1);
+      --minimal-shadow-medium: 0 3px 10px rgba(28, 28, 30, 0.14);
+      --minimal-shadow-floating: 0 6px 16px rgba(28, 28, 30, 0.18);
     }
 
     :root[data-ui-tier="reduced_motion"] {
