@@ -1,4 +1,4 @@
-@0xfafac001d15ea003;
+@0xfafac001d15ea009;
 
 # Opaque native GPU descriptor receipt.
 #
@@ -10,29 +10,29 @@
 # textures, or synchronization primitives are deliberately absent. Those live in
 # runtime-native/plugin-owned side tables.
 
-const NATIVE_GPU_DESCRIPTOR_SCHEMA_VERSION :UInt32 = 1;
+const nativeGpuDescriptorSchemaVersion :UInt32 = 1;
 
-const NATIVE_GPU_KIND_BUFFER :UInt32 = 1;
-const NATIVE_GPU_KIND_TEXTURE :UInt32 = 2;
-const NATIVE_GPU_KIND_EXTERNAL_IMAGE :UInt32 = 3;
+const nativeGpuKindBuffer :UInt32 = 1;
+const nativeGpuKindTexture :UInt32 = 2;
+const nativeGpuKindExternalImage :UInt32 = 3;
 
-const NATIVE_GPU_PLATFORM_LINUX_DMABUF :UInt32 = 1;
-const NATIVE_GPU_PLATFORM_APPLE_IOSURFACE :UInt32 = 2;
-const NATIVE_GPU_PLATFORM_ANDROID_HARDWARE_BUFFER :UInt32 = 3;
-const NATIVE_GPU_PLATFORM_CUDA_EXTERNAL :UInt32 = 4;
-const NATIVE_GPU_PLATFORM_VULKAN_EXTERNAL :UInt32 = 5;
+const nativeGpuPlatformLinuxDmabuf :UInt32 = 1;
+const nativeGpuPlatformAppleIosurface :UInt32 = 2;
+const nativeGpuPlatformAndroidHardwareBuffer :UInt32 = 3;
+const nativeGpuPlatformCudaExternal :UInt32 = 4;
+const nativeGpuPlatformVulkanExternal :UInt32 = 5;
 
-const NATIVE_GPU_FALLBACK_COPY_TO_ARENA :UInt32 = 1;
-const NATIVE_GPU_FALLBACK_COPY_TO_WEBGPU :UInt32 = 2;
-const NATIVE_GPU_FALLBACK_CPU_MATERIALIZE :UInt32 = 3;
+const nativeGpuFallbackCopyToArena :UInt32 = 1;
+const nativeGpuFallbackCopyToWebgpu :UInt32 = 2;
+const nativeGpuFallbackCpuMaterialize :UInt32 = 3;
 
-const NATIVE_GPU_DESCRIPTOR_TEXT_MAX_BYTES :UInt32 = 256;
-const NATIVE_GPU_DESCRIPTOR_ID_MAX_BYTES :UInt32 = 128;
+const nativeGpuDescriptorTextMaxBytes :UInt32 = 256;
+const nativeGpuDescriptorIdMaxBytes :UInt32 = 128;
 
-# Version travels as the NATIVE_GPU_DESCRIPTOR_SCHEMA_VERSION const above, not as
+# Version travels as the nativeGpuDescriptorSchemaVersion const above, not as
 # a per-descriptor field: descriptors are constructed in-process and never
 # persisted, so a per-instance version byte would be dead weight on a hot path.
-struct RuntimeNativeGpuDescriptor {
+struct RuntimeNativeGpuDescriptor @0xdc8535f1bb689c0c {
   id @0 :Text;
   kind @1 :UInt32;
   platform @2 :UInt32;

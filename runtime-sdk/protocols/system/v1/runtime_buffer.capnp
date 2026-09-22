@@ -1,19 +1,19 @@
 @0xfafac001d15ea001;
 
-const BUFFER_TOTAL_BYTES :UInt32 = 4096;
+const bufferTotalBytes :UInt32 = 4096;
 
-const OFFSET_EPOCHS :UInt32 = 0;
-const EPOCH_SLOT_COUNT :UInt32 = 16;
-const EPOCH_SLOT_BYTES :UInt32 = 4;
+const offsetEpochs :UInt32 = 0;
+const epochSlotCount :UInt32 = 16;
+const epochSlotBytes :UInt32 = 4;
 
-const IDX_KERNEL_READY :UInt32 = 0;
-const IDX_INPUT_WRITTEN :UInt32 = 1;
-const IDX_OUTPUT_WRITTEN :UInt32 = 2;
-const IDX_OUTPUT_CONSUMED :UInt32 = 3;
-const IDX_PANIC_STATE :UInt32 = 4;
-const IDX_DIAGNOSTICS_WRITTEN :UInt32 = 5;
-const IDX_RUNTIME_TICK :UInt32 = 6;
-const IDX_VISIBILITY_STATE :UInt32 = 7;
+const idxKernelReady :UInt32 = 0;
+const idxInputWritten :UInt32 = 1;
+const idxOutputWritten :UInt32 = 2;
+const idxOutputConsumed :UInt32 = 3;
+const idxPanicState :UInt32 = 4;
+const idxDiagnosticsWritten :UInt32 = 5;
+const idxRuntimeTick :UInt32 = 6;
+const idxVisibilityState :UInt32 = 7;
 
 # The route names the unit for an exchange that has no side channel to carry it.
 #
@@ -26,27 +26,27 @@ const IDX_VISIBILITY_STATE :UInt32 = 7;
 # 64 bytes is a hard limit rather than a soft one: an id that does not fit is
 # refused at the exchange, because a truncated route resolves to a different
 # unit or to none, and both are worse than a clear error.
-const OFFSET_ROUTE_BYTES :UInt32 = 64;
-const ROUTE_MAX_BYTES :UInt32 = 64;
+const offsetRouteBytes :UInt32 = 64;
+const routeMaxBytes :UInt32 = 64;
 
-const OFFSET_HEADER_INTS :UInt32 = 128;
-const HEADER_INT_COUNT :UInt32 = 8;
-const INT_IDX_SCHEMA_VERSION :UInt32 = 0;
-const INT_IDX_INPUT_LENGTH :UInt32 = 1;
-const INT_IDX_OUTPUT_LENGTH :UInt32 = 2;
-const INT_IDX_STATUS_CODE :UInt32 = 3;
-const INT_IDX_CONTEXT_HASH :UInt32 = 4;
-const INT_IDX_MODULE_VERSION :UInt32 = 5;
-const INT_IDX_RESERVED0 :UInt32 = 6;
-const INT_IDX_RESERVED1 :UInt32 = 7;
+const offsetHeaderInts :UInt32 = 128;
+const headerIntCount :UInt32 = 8;
+const intIdxSchemaVersion :UInt32 = 0;
+const intIdxInputLength :UInt32 = 1;
+const intIdxOutputLength :UInt32 = 2;
+const intIdxStatusCode :UInt32 = 3;
+const intIdxContextHash :UInt32 = 4;
+const intIdxModuleVersion :UInt32 = 5;
+const intIdxReserved0 :UInt32 = 6;
+const intIdxReserved1 :UInt32 = 7;
 
-const BUFFER_SCHEMA_VERSION :UInt32 = 1;
+const bufferSchemaVersion :UInt32 = 1;
 
-const OFFSET_INPUT_BYTES :UInt32 = 256;
-const INPUT_MAX_BYTES :UInt32 = 1024;
+const offsetInputBytes :UInt32 = 256;
+const inputMaxBytes :UInt32 = 1024;
 
-const OFFSET_OUTPUT_BYTES :UInt32 = 1280;
-const OUTPUT_MAX_BYTES :UInt32 = 2048;
+const offsetOutputBytes :UInt32 = 1280;
+const outputMaxBytes :UInt32 = 2048;
 
-const OFFSET_DIAGNOSTIC_BYTES :UInt32 = 3328;
-const DIAGNOSTIC_MAX_BYTES :UInt32 = 768;
+const offsetDiagnosticBytes :UInt32 = 3328;
+const diagnosticMaxBytes :UInt32 = 768;

@@ -49,9 +49,105 @@ const init = (
   ...overrides,
 });
 
+describe("enforced render requirements", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it("rejects an implementation without completion evidence before drawing", async () => {
+    const {scope,sent,send}=makeScope();
+    const draw=vi.fn(),dispose=vi.fn();
+    const stop=serveRenderSurface("test",{build:()=>({lane:"webgpu",draw,dispose,resize:()=>undefined})},scope);
+    send(init({requirements:{gpuCompletion:"required"}}));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(draw).not.toHaveBeenCalled();expect(dispose).toHaveBeenCalledOnce();
+    expect(sent).toContainEqual({kind:"FAILED",surface:"test",reason:"GPU completion unavailable"});stop();
+  });
+
+  it("bounds actual backing dimensions across resize and tier changes", async () => {
+    const {scope,sent,send}=makeScope();
+    const resize=vi.fn();const sizes:number[][]=[];
+    const stop=serveRenderSurface("test",{build:()=>({lane:"webgpu",dispose:()=>undefined,resize,
+      settled:()=>Promise.resolve(),draw:(_state,frame)=>{sizes.push([frame.width,frame.height]);}})},scope);
+    send(init({requirements:{gpuCompletion:"required",maxBackingPixels:4096}}));
+    await vi.advanceTimersByTimeAsync(100);
+    send({kind:"RESIZE",surface:"test",width:1920,height:1080,ratio:3});
+    await vi.advanceTimersByTimeAsync(100);
+    send({kind:"TIER_FLOOR",surface:"test",tier:1});
+    await vi.advanceTimersByTimeAsync(100);
+    for(const [width,height] of [...resize.mock.calls,...sizes])expect(width*height).toBeLessThanOrEqual(4096);
+    expect(sent.find(event=>event.kind==="READY")).toMatchObject({evidence:{completion:"settled",state:"messages",maxBackingPixels:4096}});
+    stop();
+  });
+
+  it.each(["reject","throw","timeout"])("stops when required completion fails: %s",async(mode)=>{
+    const {scope,sent,send}=makeScope();const draw=vi.fn(),dispose=vi.fn();
+    const stop=serveRenderSurface("test",{build:()=>({lane:"webgpu",draw,dispose,resize:()=>undefined,
+      settled:()=>{if(mode==="throw")throw new Error("lost");return mode==="reject"?Promise.reject(new Error("lost")):new Promise(()=>undefined);}})},scope);
+    send(init({requirements:{gpuCompletion:"required"}}));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(draw).toHaveBeenCalledOnce();expect(dispose).toHaveBeenCalledOnce();
+    expect(sent.some(event=>event.kind==="FAILED")).toBe(true);stop();
+  });
+});
+
 describe("a render surface inside a worker", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
+
+  it("resumes after a missed slot without waiting another cadence", async () => {
+    const { scope, send } = makeScope();
+    const draws: number[] = [];
+    let inflight = 0;
+    let maximumInflight = 0;
+    const stop = serveRenderSurface("test", { build: () => ({
+      lane: "webgpu", resize: () => undefined, dispose: () => undefined,
+      draw: () => { draws.push(performance.now()); maximumInflight = Math.max(maximumInflight, ++inflight); },
+      settled: () => new Promise<void>(resolve => setTimeout(() => { inflight--; resolve(); }, 26)),
+    }) }, scope);
+    send(init({ tiers: [{ scale: 1, cadenceMs: 25 }], requirements: { gpuCompletion: "required" } }));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(draws.length).toBeGreaterThanOrEqual(37);
+    expect(maximumInflight).toBe(1);
+    expect(draws[1]! - draws[0]!).toBeLessThan(30);
+    stop();
+  });
+
+  it("honors a slower tier after GPU completion wakes a missed slot", async () => {
+    const { scope, send } = makeScope();
+    const draws: number[] = [];
+    const stop = serveRenderSurface("test", { build: () => ({
+      lane: "webgpu", resize: () => undefined, dispose: () => undefined,
+      draw: () => draws.push(performance.now()),
+      settled: () => new Promise<void>(resolve => setTimeout(resolve, 26)),
+    }) }, scope);
+    send(init());
+    await vi.advanceTimersByTimeAsync(25);
+    send({ kind: "TIER_FLOOR", surface: "test", tier: 1 });
+    await vi.advanceTimersByTimeAsync(24);
+    expect(draws).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(draws).toHaveLength(2);
+    expect(draws[1]! - draws[0]!).toBeGreaterThanOrEqual(50);
+    stop();
+  });
+
+  it("retains the GPU fence across hide and resume", async () => {
+    const { scope, send } = makeScope();
+    const draw = vi.fn();
+    const stop = serveRenderSurface("test", { build: () => ({
+      lane: "webgpu", resize: () => undefined, dispose: () => undefined, draw,
+      settled: () => new Promise<void>(resolve => setTimeout(resolve, 100)),
+    }) }, scope);
+    send(init({ tiers: [{ scale: 1, cadenceMs: 25 }], requirements: { gpuCompletion: "required" } }));
+    await vi.advanceTimersByTimeAsync(5);
+    send({ kind: "VISIBILITY", surface: "test", visible: false });
+    send({ kind: "VISIBILITY", surface: "test", visible: true });
+    await vi.advanceTimersByTimeAsync(90);
+    expect(draw).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(draw).toHaveBeenCalledTimes(2);
+    stop();
+  });
 
   it("sizes the backing store from the rung and the ratio, not from the caller", async () => {
     const resize = vi.fn();

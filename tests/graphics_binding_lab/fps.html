@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Foundation · FPS comparison</title>
+  <style>
+    body {
+      margin: 0;
+      background: #10160f;
+      color: #edf0df;
+      font: 16px system-ui;
+    }
+    main {
+      max-width: 1100px;
+      margin: auto;
+      padding: 28px;
+    }
+    h1 {
+      font-size: 32px;
+    }
+    p {
+      max-width: 880px;
+      line-height: 1.5;
+      color: #c0c9b4;
+    }
+    label {
+      display: inline-block;
+      margin: 12px 16px 12px 0;
+    }
+    button,
+    select {
+      font: inherit;
+      padding: 10px;
+      background: #263522;
+      color: inherit;
+      border: 1px solid #708662;
+      border-radius: 5px;
+    }
+    button {
+      cursor: pointer;
+      background: #bfda85;
+      color: #12200d;
+    }
+    canvas {
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: #040603;
+      display: block;
+      margin: 18px 0;
+    }
+    pre {
+      white-space: pre-wrap;
+      background: #1c2617;
+      padding: 20px;
+      max-height: 460px;
+      overflow: auto;
+    }
+    .metric {
+      font-size: 22px;
+      color: #d6edae;
+    }
+    button:disabled {
+      opacity: 0.5;
+    }
+  </style>
+  <main>
+    <p>FOUNDATION / FRAME THROUGHPUT</p>
+    <h1>Same pixels. Same shader. Measured frames.</h1>
+    <p>
+      Compare the previous scheduler with completion-driven recovery, or compare
+      the 40 and 60 FPS targets. Each pair uses identical backing pixels, 118
+      ray steps, and a fixed camera. One warm-up second precedes each
+      five-second sample. Six samples alternate their order.
+    </p>
+    <label
+      >Comparison
+      <select id="comparison">
+        <option value="scheduler">Scheduler at 60 FPS</option>
+        <option value="cadence">40 → 60 FPS target</option>
+      </select></label
+    >
+    <label
+      >Backing resolution
+      <select id="resolution">
+        <option value="1280">1280 × 720</option>
+        <option value="1920" selected>1920 × 1080</option>
+        <option value="2560">2560 × 1440</option>
+      </select></label
+    >
+    <button id="run">Run six samples</button>
+    <button id="save" disabled>Save evidence</button>
+    <p id="status" role="status">
+      Ready. The comparison measures completed render frames, not display
+      presentation or isolated GPU timestamps.
+    </p>
+    <p id="summary" class="metric"></p>
+    <div id="surface"></div>
+    <pre id="report">No measurements yet.</pre>
+  </main>
+  <script type="module" src="./fps.ts"></script>
+</html>

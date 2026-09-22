@@ -1,0 +1,41 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/placement
+cpu: Apple M1 Pro
+BenchmarkBindingMegabyte/direct-8         	     883	    402825 ns/op	2603.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBindingMegabyte/direct-8         	     861	    397693 ns/op	2636.65 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBindingMegabyte/direct-8         	     877	    398323 ns/op	2632.47 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBindingMegabyte/direct-8         	     907	    404811 ns/op	2590.29 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBindingMegabyte/direct-8         	     861	    416180 ns/op	2519.52 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBindingMegabyte/resident-8       	     810	    425998 ns/op	2461.46 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBindingMegabyte/resident-8       	     902	    417278 ns/op	2512.90 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBindingMegabyte/resident-8       	     844	    417758 ns/op	2510.01 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBindingMegabyte/resident-8       	     860	    401621 ns/op	2610.86 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBindingMegabyte/resident-8       	     872	    401193 ns/op	2613.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBindingMegabyte/inline-ticket-8  	     598	    629782 ns/op	1664.98 MB/s	 2375877 B/op	       7 allocs/op
+BenchmarkBindingMegabyte/inline-ticket-8  	     514	    815585 ns/op	1285.67 MB/s	 2375862 B/op	       7 allocs/op
+BenchmarkBindingMegabyte/inline-ticket-8  	     618	    575514 ns/op	1821.98 MB/s	 2375858 B/op	       7 allocs/op
+BenchmarkBindingMegabyte/inline-ticket-8  	     627	    597318 ns/op	1755.48 MB/s	 2375858 B/op	       7 allocs/op
+BenchmarkBindingMegabyte/inline-ticket-8  	     595	    634495 ns/op	1652.61 MB/s	 2375859 B/op	       7 allocs/op
+BenchmarkBindingMegabyte/publish-8        	    5506	     67900 ns/op	15442.94 MB/s	 1048626 B/op	       2 allocs/op
+BenchmarkBindingMegabyte/publish-8        	    4700	     68526 ns/op	15301.93 MB/s	 1048625 B/op	       2 allocs/op
+BenchmarkBindingMegabyte/publish-8        	    4864	     79658 ns/op	13163.46 MB/s	 1048626 B/op	       2 allocs/op
+BenchmarkBindingMegabyte/publish-8        	    4662	     76930 ns/op	13630.24 MB/s	 1048626 B/op	       2 allocs/op
+BenchmarkBindingMegabyte/publish-8        	    4749	     67743 ns/op	15478.70 MB/s	 1048624 B/op	       2 allocs/op
+BenchmarkBindingFrame-8                   	  392781	      1058 ns/op	    1120 B/op	      11 allocs/op
+BenchmarkBindingFrame-8                   	  195739	      4144 ns/op	    1120 B/op	      11 allocs/op
+BenchmarkBindingFrame-8                   	   30916	     10072 ns/op	    1120 B/op	      11 allocs/op
+BenchmarkBindingFrame-8                   	  100866	      5310 ns/op	    1120 B/op	      11 allocs/op
+BenchmarkBindingFrame-8                   	  110095	      4427 ns/op	    1120 B/op	      11 allocs/op
+BenchmarkBindingResident/direct-8         	76571306	        15.02 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBindingResident/direct-8         	35393736	        18.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBindingResident/direct-8         	72684439	        15.99 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBindingResident/direct-8         	47088406	        10.94 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBindingResident/direct-8         	72525198	         9.027 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBindingResident/checked-8        	 1000000	       933.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBindingResident/checked-8        	 1000000	       737.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBindingResident/checked-8        	 1000000	       739.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBindingResident/checked-8        	 1000000	       383.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBindingResident/checked-8        	 1684444	       216.5 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/placement	19.475s

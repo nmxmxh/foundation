@@ -18,161 +18,187 @@ export const runtimeContractManifest = {
   "schemaRoot": "runtime-sdk/protocols/system/v1",
   "files": [
     {
+      "file": "runtime_binding.capnp",
+      "id": "0x9eccda21d814e5f2",
+      "constants": [
+        {
+          "name": "bindingSchemaVersion",
+          "type": "UInt32",
+          "value": "1"
+        },
+        {
+          "name": "bindingMaxTimeoutMillis",
+          "type": "UInt32",
+          "value": "30000"
+        },
+        {
+          "name": "bindingMaxOutputBytes",
+          "type": "UInt32",
+          "value": "2097152"
+        }
+      ],
+      "structs": [
+        "RuntimeBindingRequest",
+        "RuntimeBindingReceipt"
+      ],
+      "enums": []
+    },
+    {
       "file": "runtime_buffer.capnp",
       "id": "0xfafac001d15ea001",
       "constants": [
         {
-          "name": "BUFFER_TOTAL_BYTES",
+          "name": "bufferTotalBytes",
           "type": "UInt32",
           "value": "4096"
         },
         {
-          "name": "OFFSET_EPOCHS",
+          "name": "offsetEpochs",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "EPOCH_SLOT_COUNT",
+          "name": "epochSlotCount",
           "type": "UInt32",
           "value": "16"
         },
         {
-          "name": "EPOCH_SLOT_BYTES",
+          "name": "epochSlotBytes",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "IDX_KERNEL_READY",
+          "name": "idxKernelReady",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "IDX_INPUT_WRITTEN",
+          "name": "idxInputWritten",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "IDX_OUTPUT_WRITTEN",
+          "name": "idxOutputWritten",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "IDX_OUTPUT_CONSUMED",
+          "name": "idxOutputConsumed",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "IDX_PANIC_STATE",
+          "name": "idxPanicState",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "IDX_DIAGNOSTICS_WRITTEN",
+          "name": "idxDiagnosticsWritten",
           "type": "UInt32",
           "value": "5"
         },
         {
-          "name": "IDX_RUNTIME_TICK",
+          "name": "idxRuntimeTick",
           "type": "UInt32",
           "value": "6"
         },
         {
-          "name": "IDX_VISIBILITY_STATE",
+          "name": "idxVisibilityState",
           "type": "UInt32",
           "value": "7"
         },
         {
-          "name": "OFFSET_ROUTE_BYTES",
+          "name": "offsetRouteBytes",
           "type": "UInt32",
           "value": "64"
         },
         {
-          "name": "ROUTE_MAX_BYTES",
+          "name": "routeMaxBytes",
           "type": "UInt32",
           "value": "64"
         },
         {
-          "name": "OFFSET_HEADER_INTS",
+          "name": "offsetHeaderInts",
           "type": "UInt32",
           "value": "128"
         },
         {
-          "name": "HEADER_INT_COUNT",
+          "name": "headerIntCount",
           "type": "UInt32",
           "value": "8"
         },
         {
-          "name": "INT_IDX_SCHEMA_VERSION",
+          "name": "intIdxSchemaVersion",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "INT_IDX_INPUT_LENGTH",
+          "name": "intIdxInputLength",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "INT_IDX_OUTPUT_LENGTH",
+          "name": "intIdxOutputLength",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "INT_IDX_STATUS_CODE",
+          "name": "intIdxStatusCode",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "INT_IDX_CONTEXT_HASH",
+          "name": "intIdxContextHash",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "INT_IDX_MODULE_VERSION",
+          "name": "intIdxModuleVersion",
           "type": "UInt32",
           "value": "5"
         },
         {
-          "name": "INT_IDX_RESERVED0",
+          "name": "intIdxReserved0",
           "type": "UInt32",
           "value": "6"
         },
         {
-          "name": "INT_IDX_RESERVED1",
+          "name": "intIdxReserved1",
           "type": "UInt32",
           "value": "7"
         },
         {
-          "name": "BUFFER_SCHEMA_VERSION",
+          "name": "bufferSchemaVersion",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "OFFSET_INPUT_BYTES",
+          "name": "offsetInputBytes",
           "type": "UInt32",
           "value": "256"
         },
         {
-          "name": "INPUT_MAX_BYTES",
+          "name": "inputMaxBytes",
           "type": "UInt32",
           "value": "1024"
         },
         {
-          "name": "OFFSET_OUTPUT_BYTES",
+          "name": "offsetOutputBytes",
           "type": "UInt32",
           "value": "1280"
         },
         {
-          "name": "OUTPUT_MAX_BYTES",
+          "name": "outputMaxBytes",
           "type": "UInt32",
           "value": "2048"
         },
         {
-          "name": "OFFSET_DIAGNOSTIC_BYTES",
+          "name": "offsetDiagnosticBytes",
           "type": "UInt32",
           "value": "3328"
         },
         {
-          "name": "DIAGNOSTIC_MAX_BYTES",
+          "name": "diagnosticMaxBytes",
           "type": "UInt32",
           "value": "768"
         }
@@ -268,7 +294,7 @@ export const runtimeContractManifest = {
     },
     {
       "file": "runtime_dispatch.capnp",
-      "id": "0xdf5cac001d15ea01",
+      "id": "0xdf5cac001d15ea01a",
       "constants": [
         {
           "name": "dispatchSchemaVersion",
@@ -356,75 +382,75 @@ export const runtimeContractManifest = {
     },
     {
       "file": "runtime_native_gpu.capnp",
-      "id": "0xfafac001d15ea003",
+      "id": "0xfafac001d15ea009",
       "constants": [
         {
-          "name": "NATIVE_GPU_DESCRIPTOR_SCHEMA_VERSION",
+          "name": "nativeGpuDescriptorSchemaVersion",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "NATIVE_GPU_KIND_BUFFER",
+          "name": "nativeGpuKindBuffer",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "NATIVE_GPU_KIND_TEXTURE",
+          "name": "nativeGpuKindTexture",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "NATIVE_GPU_KIND_EXTERNAL_IMAGE",
+          "name": "nativeGpuKindExternalImage",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "NATIVE_GPU_PLATFORM_LINUX_DMABUF",
+          "name": "nativeGpuPlatformLinuxDmabuf",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "NATIVE_GPU_PLATFORM_APPLE_IOSURFACE",
+          "name": "nativeGpuPlatformAppleIosurface",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "NATIVE_GPU_PLATFORM_ANDROID_HARDWARE_BUFFER",
+          "name": "nativeGpuPlatformAndroidHardwareBuffer",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "NATIVE_GPU_PLATFORM_CUDA_EXTERNAL",
+          "name": "nativeGpuPlatformCudaExternal",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "NATIVE_GPU_PLATFORM_VULKAN_EXTERNAL",
+          "name": "nativeGpuPlatformVulkanExternal",
           "type": "UInt32",
           "value": "5"
         },
         {
-          "name": "NATIVE_GPU_FALLBACK_COPY_TO_ARENA",
+          "name": "nativeGpuFallbackCopyToArena",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "NATIVE_GPU_FALLBACK_COPY_TO_WEBGPU",
+          "name": "nativeGpuFallbackCopyToWebgpu",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "NATIVE_GPU_FALLBACK_CPU_MATERIALIZE",
+          "name": "nativeGpuFallbackCpuMaterialize",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "NATIVE_GPU_DESCRIPTOR_TEXT_MAX_BYTES",
+          "name": "nativeGpuDescriptorTextMaxBytes",
           "type": "UInt32",
           "value": "256"
         },
         {
-          "name": "NATIVE_GPU_DESCRIPTOR_ID_MAX_BYTES",
+          "name": "nativeGpuDescriptorIdMaxBytes",
           "type": "UInt32",
           "value": "128"
         }
@@ -436,540 +462,540 @@ export const runtimeContractManifest = {
     },
     {
       "file": "runtime_shared_arena.capnp",
-      "id": "0xfafac001d15ea002",
+      "id": "0xfafac001d15ea008",
       "constants": [
         {
-          "name": "ARENA_SCHEMA_VERSION",
+          "name": "arenaSchemaVersion",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "ARENA_MIN_BYTES",
+          "name": "arenaMinBytes",
           "type": "UInt32",
           "value": "1048576"
         },
         {
-          "name": "ARENA_DEFAULT_BYTES",
+          "name": "arenaDefaultBytes",
           "type": "UInt32",
           "value": "8388608"
         },
         {
-          "name": "ARENA_INTERACTIVE_BYTES",
+          "name": "arenaInteractiveBytes",
           "type": "UInt32",
           "value": "33554432"
         },
         {
-          "name": "ARENA_HEAVY_BYTES",
+          "name": "arenaHeavyBytes",
           "type": "UInt32",
           "value": "67108864"
         },
         {
-          "name": "ARENA_MAX_BYTES",
+          "name": "arenaMaxBytes",
           "type": "UInt32",
           "value": "536870912"
         },
         {
-          "name": "ARENA_OFFSET_HEADER",
+          "name": "arenaOffsetHeader",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "ARENA_HEADER_BYTES",
+          "name": "arenaHeaderBytes",
           "type": "UInt32",
           "value": "256"
         },
         {
-          "name": "ARENA_HEADER_MAGIC",
+          "name": "arenaHeaderMagic",
           "type": "UInt32",
           "value": "1330400321"
         },
         {
-          "name": "ARENA_HEADER_IDX_MAGIC",
+          "name": "arenaHeaderIdxMagic",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "ARENA_HEADER_IDX_SCHEMA_VERSION",
+          "name": "arenaHeaderIdxSchemaVersion",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "ARENA_HEADER_IDX_CAPACITY_BYTES",
+          "name": "arenaHeaderIdxCapacityBytes",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "ARENA_HEADER_IDX_ALLOCATED_BYTES",
+          "name": "arenaHeaderIdxAllocatedBytes",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "ARENA_HEADER_IDX_DESCRIPTOR_COUNT",
+          "name": "arenaHeaderIdxDescriptorCount",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "ARENA_HEADER_IDX_QUEUE_DROPPED",
+          "name": "arenaHeaderIdxQueueDropped",
           "type": "UInt32",
           "value": "5"
         },
         {
-          "name": "ARENA_HEADER_IDX_FLAGS",
+          "name": "arenaHeaderIdxFlags",
           "type": "UInt32",
           "value": "6"
         },
         {
-          "name": "ARENA_HEADER_IDX_RESERVED",
+          "name": "arenaHeaderIdxReserved",
           "type": "UInt32",
           "value": "7"
         },
         {
-          "name": "ARENA_OFFSET_EPOCHS",
+          "name": "arenaOffsetEpochs",
           "type": "UInt32",
           "value": "256"
         },
         {
-          "name": "ARENA_EPOCH_COUNT",
+          "name": "arenaEpochCount",
           "type": "UInt32",
           "value": "64"
         },
         {
-          "name": "ARENA_EPOCH_BYTES",
+          "name": "arenaEpochBytes",
           "type": "UInt32",
           "value": "256"
         },
         {
-          "name": "ARENA_IDX_READY",
+          "name": "arenaIdxReady",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "ARENA_IDX_ALLOC_HEAD",
+          "name": "arenaIdxAllocHead",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "ARENA_IDX_DESCRIPTOR_EPOCH",
+          "name": "arenaIdxDescriptorEpoch",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "ARENA_IDX_QUEUE_HEAD",
+          "name": "arenaIdxQueueHead",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "ARENA_IDX_QUEUE_TAIL",
+          "name": "arenaIdxQueueTail",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "ARENA_IDX_QUEUE_EPOCH",
+          "name": "arenaIdxQueueEpoch",
           "type": "UInt32",
           "value": "5"
         },
         {
-          "name": "ARENA_IDX_DIAGNOSTICS_EPOCH",
+          "name": "arenaIdxDiagnosticsEpoch",
           "type": "UInt32",
           "value": "6"
         },
         {
-          "name": "ARENA_IDX_BACKPRESSURE",
+          "name": "arenaIdxBackpressure",
           "type": "UInt32",
           "value": "7"
         },
         {
-          "name": "ARENA_OFFSET_DESCRIPTOR_TABLE",
+          "name": "arenaOffsetDescriptorTable",
           "type": "UInt32",
           "value": "4096"
         },
         {
-          "name": "ARENA_DESCRIPTOR_SIZE",
+          "name": "arenaDescriptorSize",
           "type": "UInt32",
           "value": "32"
         },
         {
-          "name": "ARENA_DESCRIPTOR_COUNT",
+          "name": "arenaDescriptorCount",
           "type": "UInt32",
           "value": "512"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TABLE_BYTES",
+          "name": "arenaDescriptorTableBytes",
           "type": "UInt32",
           "value": "16384"
         },
         {
-          "name": "ARENA_DESCRIPTOR_STATE_FREE",
+          "name": "arenaDescriptorStateFree",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "ARENA_DESCRIPTOR_STATE_ALLOCATED",
+          "name": "arenaDescriptorStateAllocated",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "ARENA_DESCRIPTOR_STATE_READY",
+          "name": "arenaDescriptorStateReady",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "ARENA_DESCRIPTOR_STATE_CONSUMED",
+          "name": "arenaDescriptorStateConsumed",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TYPE_BYTES",
+          "name": "arenaDescriptorTypeBytes",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TYPE_CAPNP",
+          "name": "arenaDescriptorTypeCapnp",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TYPE_TEXT",
+          "name": "arenaDescriptorTypeText",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TYPE_IMAGE",
+          "name": "arenaDescriptorTypeImage",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TYPE_MEDIA",
+          "name": "arenaDescriptorTypeMedia",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH",
+          "name": "arenaDescriptorTypeColumnarBatch",
           "type": "UInt32",
           "value": "5"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TYPE_COLUMNAR_FIELD",
+          "name": "arenaDescriptorTypeColumnarField",
           "type": "UInt32",
           "value": "6"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALUES",
+          "name": "arenaDescriptorTypeColumnarValues",
           "type": "UInt32",
           "value": "7"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TYPE_COLUMNAR_VALIDITY",
+          "name": "arenaDescriptorTypeColumnarValidity",
           "type": "UInt32",
           "value": "8"
         },
         {
-          "name": "ARENA_DESCRIPTOR_TYPE_COLUMNAR_OFFSETS",
+          "name": "arenaDescriptorTypeColumnarOffsets",
           "type": "UInt32",
           "value": "9"
         },
         {
-          "name": "ARENA_OFFSET_QUEUE",
+          "name": "arenaOffsetQueue",
           "type": "UInt32",
           "value": "20480"
         },
         {
-          "name": "ARENA_QUEUE_SLOT_SIZE",
+          "name": "arenaQueueSlotSize",
           "type": "UInt32",
           "value": "64"
         },
         {
-          "name": "ARENA_QUEUE_SLOT_COUNT",
+          "name": "arenaQueueSlotCount",
           "type": "UInt32",
           "value": "1024"
         },
         {
-          "name": "ARENA_QUEUE_BYTES",
+          "name": "arenaQueueBytes",
           "type": "UInt32",
           "value": "65536"
         },
         {
-          "name": "ARENA_QUEUE_OP_NONE",
+          "name": "arenaQueueOpNone",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "ARENA_QUEUE_OP_DESCRIPTOR_READY",
+          "name": "arenaQueueOpDescriptorReady",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "ARENA_QUEUE_OP_DESCRIPTOR_CONSUMED",
+          "name": "arenaQueueOpDescriptorConsumed",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "ARENA_QUEUE_OP_DIAGNOSTIC",
+          "name": "arenaQueueOpDiagnostic",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "ARENA_OFFSET_DIAGNOSTICS",
+          "name": "arenaOffsetDiagnostics",
           "type": "UInt32",
           "value": "86016"
         },
         {
-          "name": "ARENA_DIAGNOSTIC_BYTES",
+          "name": "arenaDiagnosticBytes",
           "type": "UInt32",
           "value": "4096"
         },
         {
-          "name": "ARENA_OFFSET_PAGES",
+          "name": "arenaOffsetPages",
           "type": "UInt32",
           "value": "131072"
         },
         {
-          "name": "ARENA_PAGE_BYTES",
+          "name": "arenaPageBytes",
           "type": "UInt32",
           "value": "4096"
         },
         {
-          "name": "COLUMNAR_BATCH_SCHEMA_VERSION",
+          "name": "columnarBatchSchemaVersion",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "COLUMNAR_BATCH_MAGIC",
+          "name": "columnarBatchMagic",
           "type": "UInt32",
           "value": "1129460291"
         },
         {
-          "name": "COLUMNAR_BATCH_ALIGNMENT_BYTES",
+          "name": "columnarBatchAlignmentBytes",
           "type": "UInt32",
           "value": "64"
         },
         {
-          "name": "COLUMNAR_BATCH_MAX_COLUMNS",
+          "name": "columnarBatchMaxColumns",
           "type": "UInt32",
           "value": "1024"
         },
         {
-          "name": "COLUMNAR_BATCH_HEADER_BYTES",
+          "name": "columnarBatchHeaderBytes",
           "type": "UInt32",
           "value": "32"
         },
         {
-          "name": "COLUMNAR_FIELD_DESCRIPTOR_BYTES",
+          "name": "columnarFieldDescriptorBytes",
           "type": "UInt32",
           "value": "64"
         },
         {
-          "name": "COLUMNAR_BATCH_HEADER_IDX_MAGIC",
+          "name": "columnarBatchHeaderIdxMagic",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "COLUMNAR_BATCH_HEADER_IDX_SCHEMA_VERSION",
+          "name": "columnarBatchHeaderIdxSchemaVersion",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "COLUMNAR_BATCH_HEADER_IDX_ROW_COUNT",
+          "name": "columnarBatchHeaderIdxRowCount",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT",
+          "name": "columnarBatchHeaderIdxColumnCount",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "COLUMNAR_BATCH_HEADER_IDX_FLAGS",
+          "name": "columnarBatchHeaderIdxFlags",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "COLUMNAR_BATCH_HEADER_IDX_METADATA_DESCRIPTOR_ID",
+          "name": "columnarBatchHeaderIdxMetadataDescriptorId",
           "type": "UInt32",
           "value": "5"
         },
         {
-          "name": "COLUMNAR_BATCH_HEADER_IDX_DICTIONARY_DESCRIPTOR_ID",
+          "name": "columnarBatchHeaderIdxDictionaryDescriptorId",
           "type": "UInt32",
           "value": "6"
         },
         {
-          "name": "COLUMNAR_BATCH_HEADER_IDX_RESERVED",
+          "name": "columnarBatchHeaderIdxReserved",
           "type": "UInt32",
           "value": "7"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_FIELD_ID",
+          "name": "columnarFieldIdxFieldId",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_LOGICAL_TYPE",
+          "name": "columnarFieldIdxLogicalType",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_PHYSICAL_TYPE",
+          "name": "columnarFieldIdxPhysicalType",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_FLAGS",
+          "name": "columnarFieldIdxFlags",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_LENGTH",
+          "name": "columnarFieldIdxLength",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_NULL_COUNT",
+          "name": "columnarFieldIdxNullCount",
           "type": "UInt32",
           "value": "5"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_VALIDITY_DESCRIPTOR_ID",
+          "name": "columnarFieldIdxValidityDescriptorId",
           "type": "UInt32",
           "value": "6"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_OFFSETS_DESCRIPTOR_ID",
+          "name": "columnarFieldIdxOffsetsDescriptorId",
           "type": "UInt32",
           "value": "7"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_VALUES_DESCRIPTOR_ID",
+          "name": "columnarFieldIdxValuesDescriptorId",
           "type": "UInt32",
           "value": "8"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_AUX_DESCRIPTOR_ID",
+          "name": "columnarFieldIdxAuxDescriptorId",
           "type": "UInt32",
           "value": "9"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_BYTE_WIDTH",
+          "name": "columnarFieldIdxByteWidth",
           "type": "UInt32",
           "value": "10"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_SCALE",
+          "name": "columnarFieldIdxScale",
           "type": "UInt32",
           "value": "11"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_PRECISION",
+          "name": "columnarFieldIdxPrecision",
           "type": "UInt32",
           "value": "12"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_TIMEZONE_HASH",
+          "name": "columnarFieldIdxTimezoneHash",
           "type": "UInt32",
           "value": "13"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_DICTIONARY_ID",
+          "name": "columnarFieldIdxDictionaryId",
           "type": "UInt32",
           "value": "14"
         },
         {
-          "name": "COLUMNAR_FIELD_IDX_RESERVED",
+          "name": "columnarFieldIdxReserved",
           "type": "UInt32",
           "value": "15"
         },
         {
-          "name": "COLUMNAR_DESCRIPTOR_ID_NONE",
+          "name": "columnarDescriptorIdNone",
           "type": "UInt32",
           "value": "4294967295"
         },
         {
-          "name": "COLUMNAR_LOGICAL_TYPE_NULL",
+          "name": "columnarLogicalTypeNull",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "COLUMNAR_LOGICAL_TYPE_BOOL",
+          "name": "columnarLogicalTypeBool",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "COLUMNAR_LOGICAL_TYPE_INT",
+          "name": "columnarLogicalTypeInt",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "COLUMNAR_LOGICAL_TYPE_UINT",
+          "name": "columnarLogicalTypeUint",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "COLUMNAR_LOGICAL_TYPE_FLOAT",
+          "name": "columnarLogicalTypeFloat",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "COLUMNAR_LOGICAL_TYPE_DECIMAL",
+          "name": "columnarLogicalTypeDecimal",
           "type": "UInt32",
           "value": "5"
         },
         {
-          "name": "COLUMNAR_LOGICAL_TYPE_TIMESTAMP",
+          "name": "columnarLogicalTypeTimestamp",
           "type": "UInt32",
           "value": "6"
         },
         {
-          "name": "COLUMNAR_LOGICAL_TYPE_BINARY",
+          "name": "columnarLogicalTypeBinary",
           "type": "UInt32",
           "value": "7"
         },
         {
-          "name": "COLUMNAR_LOGICAL_TYPE_UTF8",
+          "name": "columnarLogicalTypeUtf8",
           "type": "UInt32",
           "value": "8"
         },
         {
-          "name": "COLUMNAR_LOGICAL_TYPE_DICTIONARY",
+          "name": "columnarLogicalTypeDictionary",
           "type": "UInt32",
           "value": "9"
         },
         {
-          "name": "COLUMNAR_PHYSICAL_TYPE_NULL",
+          "name": "columnarPhysicalTypeNull",
           "type": "UInt32",
           "value": "0"
         },
         {
-          "name": "COLUMNAR_PHYSICAL_TYPE_FIXED_WIDTH",
+          "name": "columnarPhysicalTypeFixedWidth",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "COLUMNAR_PHYSICAL_TYPE_VARIABLE_BINARY",
+          "name": "columnarPhysicalTypeVariableBinary",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "COLUMNAR_PHYSICAL_TYPE_DICTIONARY_INDEX",
+          "name": "columnarPhysicalTypeDictionaryIndex",
           "type": "UInt32",
           "value": "3"
         },
         {
-          "name": "COLUMNAR_FIELD_FLAG_NULLABLE",
+          "name": "columnarFieldFlagNullable",
           "type": "UInt32",
           "value": "1"
         },
         {
-          "name": "COLUMNAR_FIELD_FLAG_DICTIONARY_ENCODED",
+          "name": "columnarFieldFlagDictionaryEncoded",
           "type": "UInt32",
           "value": "2"
         },
         {
-          "name": "COLUMNAR_FIELD_FLAG_SORTED_ASC",
+          "name": "columnarFieldFlagSortedAsc",
           "type": "UInt32",
           "value": "4"
         },
         {
-          "name": "COLUMNAR_FIELD_FLAG_SORTED_DESC",
+          "name": "columnarFieldFlagSortedDesc",
           "type": "UInt32",
           "value": "8"
         }

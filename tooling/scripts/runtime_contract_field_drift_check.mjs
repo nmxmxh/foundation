@@ -40,7 +40,7 @@ const MIRROR_DIRS = {
     "runtime-sdk/rust/crates/ovrt-dispatch/src",
     "runtime-native/rust/src",
   ],
-  go: ["runtime-sdk/go/runtimehost"],
+  go: ["runtime-sdk/go/runtimehost", "server-kit/go/placement"],
   ts: ["runtime-sdk/ts/browser-host/src", "runtime-native/ts/src"],
 };
 
@@ -176,7 +176,7 @@ function collectSchemaStructs() {
 
 function parseCapnpStructs(text) {
   const structs = [];
-  const structRe = /struct\s+([A-Za-z0-9_]+)\s*\{([^}]*)\}/g;
+  const structRe = /struct\s+([A-Za-z0-9_]+)(?:\s+@0x[0-9a-fA-F]+)?\s*\{([^}]*)\}/g;
   let m;
   while ((m = structRe.exec(text)) !== null) {
     const name = m[1];

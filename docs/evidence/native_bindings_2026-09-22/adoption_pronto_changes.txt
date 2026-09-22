@@ -1,0 +1,120 @@
+ M .foundation
+ M docs/foundation/README.md
+ M docs/foundation/foundation_benchmarks.md
+ M docs/foundation/foundation_glossary.md
+ M docs/foundation/frontend_paint_performance_handover.md
+ M docs/foundation/frontend_runtime_workbench.md
+ M docs/foundation/future_practices_research.md
+ M docs/foundation/gpu_practices.md
+ M docs/foundation/hermes_hotplane.md
+ M docs/foundation/performance_lab.md
+ M docs/foundation/performance_practices.md
+ M docs/foundation/projection_freshness_contract.md
+ M docs/foundation/render_surface_lane.md
+ M docs/foundation/scaffold_manifest.md
+ M docs/foundation/styling_design_practices.md
+ M docs/foundation/testing_practices.md
+ M docs/foundation/ui_render_performance_handover.md
+ M docs/foundation/ui_render_performance_research.md
+ M foundation/frontend-kit/ts/vite/prerenderShell.ts
+ M foundation/runtime-sdk/go/runtimehost/generated/runtime_buffer_gen.go
+ M foundation/runtime-sdk/protocols/system/v1/runtime_buffer.capnp
+ M foundation/runtime-sdk/protocols/system/v1/runtime_dispatch.capnp
+ M foundation/runtime-sdk/protocols/system/v1/runtime_native_gpu.capnp
+ M foundation/runtime-sdk/protocols/system/v1/runtime_shared_arena.capnp
+ M foundation/runtime-sdk/rust/crates/ovrt-core/src/generated.rs
+ M foundation/runtime-sdk/rust/crates/ovrt-core/src/lib.rs
+ M foundation/runtime-sdk/ts/browser-host/src/generated/runtimeBuffer.ts
+ M foundation/runtime-sdk/ts/browser-host/src/generated/runtimeContracts.ts
+ M foundation/runtime-sdk/ts/browser-host/src/index.ts
+ M foundation/runtime-sdk/ts/browser-host/src/renderSurface.bench.ts
+ M foundation/runtime-sdk/ts/browser-host/src/renderSurface.test.ts
+ M foundation/runtime-sdk/ts/browser-host/src/renderSurface.ts
+ M foundation/runtime-sdk/ts/browser-host/src/renderSurfaceClient.test.ts
+ M foundation/runtime-sdk/ts/browser-host/src/renderSurfaceClient.ts
+ M foundation/server-kit/go/README.md
+ M foundation/server-kit/go/go.mod
+ M foundation/server-kit/go/go.sum
+ M foundation/server-kit/go/hermes/apply.go
+ M foundation/server-kit/go/hermes/columnar.go
+ M foundation/server-kit/go/hermes/columnar_pushdown.go
+ M foundation/server-kit/go/hermes/indexes.go
+ M foundation/server-kit/go/hermes/store.go
+ M foundation/server-kit/go/projectiongw/snapshot_cache.go
+ M foundation/server-kit/go/projectiongw/snapshot_cache_test.go
+ M foundation/server-kit/go/security/middleware.go
+ M foundation/tooling/benchmark_baseline.psv
+ M foundation/tooling/benchmark_ratchet_packages.tsv
+ M foundation/tooling/coverage_baseline.psv
+ M foundation/tooling/enforcement_manifest.tsv
+ M foundation/tooling/scripts/benchmark_history.sh
+ M foundation/tooling/scripts/benchmark_ratchet_check.sh
+ M foundation/tooling/scripts/contract_drift_check.sh
+ M foundation/tooling/scripts/coverage_ratchet_check.sh
+ M foundation/tooling/scripts/enforcement_integrity_check.sh
+ M foundation/tooling/scripts/frontend_linaria_patch.mjs
+ M foundation/tooling/scripts/frontend_surface_practices_check.mjs
+ M foundation/tooling/scripts/generate_frontend_prototype_runtime.mjs
+ M foundation/tooling/scripts/generate_runtime_contract_manifest.mjs
+ M foundation/tooling/scripts/go_static_analysis_check.sh
+ M foundation/tooling/scripts/practice_controls_check.sh
+ M foundation/tooling/scripts/project_scaffold_check.sh
+ M foundation/tooling/scripts/runtime_contract_field_drift_check.mjs
+ M foundation/tooling/scripts/scaffold_managed_patches.sh
+ M foundation/tooling/scripts/server_kit_module_contract_check.sh
+ M foundation/ui-minimal/ts/src/globalStyles.ts
+ M scripts/checks/benchmark_history.sh
+ M scripts/checks/benchmark_ratchet_check.sh
+ M scripts/checks/contract_drift_check.sh
+ M scripts/checks/coverage_ratchet_check.sh
+ M scripts/checks/enforcement_integrity_check.sh
+ M scripts/checks/frontend_linaria_patch.mjs
+ M scripts/checks/generate_frontend_prototype_runtime.mjs
+ M scripts/checks/generate_runtime_contract_manifest.mjs
+ M scripts/checks/go_static_analysis_check.sh
+ M scripts/checks/practice_controls_check.sh
+ M scripts/checks/project_scaffold_check.sh
+ M scripts/checks/runtime_contract_field_drift_check.mjs
+ M scripts/checks/scaffold_managed_patches.sh
+ M scripts/checks/server_kit_module_contract_check.sh
+?? docs/foundation/evidence/
+?? docs/foundation/foundation_cleanup_review_20260922.md
+?? docs/foundation/graphics_fps_refinement.md
+?? docs/foundation/native_resource_bindings.md
+?? foundation/runtime-sdk/go/runtimehost/binding.go
+?? foundation/runtime-sdk/go/runtimehost/binding_test.go
+?? foundation/runtime-sdk/protocols/system/v1/runtime_binding.capnp
+?? foundation/runtime-sdk/protocols/system/v1/testdata/
+?? foundation/runtime-sdk/rust/crates/ovrt-core/src/binding_contract_gen.rs
+?? foundation/runtime-sdk/rust/crates/ovrt-core/tests/
+?? foundation/runtime-sdk/scripts/generate_binding_contracts.mjs
+?? foundation/runtime-sdk/ts/browser-host/src/generated/bindingContracts.test.ts
+?? foundation/runtime-sdk/ts/browser-host/src/generated/bindingContracts.ts
+?? foundation/runtime-sdk/ts/browser-host/src/renderRequirements.test.ts
+?? foundation/runtime-sdk/ts/browser-host/src/renderRequirements.ts
+?? foundation/server-kit/go/hermes/columnar_assembly_test.go
+?? foundation/server-kit/go/hermes/columnar_candidates.go
+?? foundation/server-kit/go/hermes/columnar_candidates_test.go
+?? foundation/server-kit/go/objectstore/content.go
+?? foundation/server-kit/go/objectstore/content_serve_test.go
+?? foundation/server-kit/go/objectstore/serve.go
+?? foundation/server-kit/go/placement/binding.go
+?? foundation/server-kit/go/placement/binding_bench_test.go
+?? foundation/server-kit/go/placement/binding_contract_gen.go
+?? foundation/server-kit/go/placement/binding_contract_test.go
+?? foundation/server-kit/go/placement/binding_execute.go
+?? foundation/server-kit/go/placement/binding_remote.go
+?? foundation/server-kit/go/placement/binding_remote_test.go
+?? foundation/server-kit/go/placement/binding_test.go
+?? foundation/server-kit/go/projectiongw/snapshot_cache_isolation_test.go
+?? foundation/server-kit/go/pushdelivery/
+?? foundation/server-kit/go/security/headers_test.go
+?? foundation/server-kit/go/security/onetime_code.go
+?? foundation/server-kit/go/security/onetime_code_test.go
+?? foundation/tooling/scripts/command_timeout.sh
+?? foundation/tooling/scripts/frontend_prerender_patch.mjs
+?? foundation/tooling/scripts/native_shell_patch.mjs
+?? foundation/ui-minimal/ts/scripts/
+?? scripts/checks/command_timeout.sh
+?? scripts/checks/frontend_prerender_patch.mjs
+?? scripts/checks/native_shell_patch.mjs

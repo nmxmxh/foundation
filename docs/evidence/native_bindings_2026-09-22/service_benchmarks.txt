@@ -1,0 +1,16 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/servicebacked
+cpu: Apple M1 Pro
+BenchmarkServiceBackedResidentBinding/native-8         	 1608675	       220.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServiceBackedResidentBinding/native-8         	 1649398	       217.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServiceBackedResidentBinding/native-8         	 1659900	       215.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServiceBackedResidentBinding/native-8         	 1682551	       214.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServiceBackedResidentBinding/native-8         	 1646553	       220.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkServiceBackedResidentBinding/grpc-8           	    3469	     97863 ns/op	   15680 B/op	     217 allocs/op
+BenchmarkServiceBackedResidentBinding/grpc-8           	    3648	     99070 ns/op	   15566 B/op	     217 allocs/op
+BenchmarkServiceBackedResidentBinding/grpc-8           	    3811	     95566 ns/op	   15485 B/op	     217 allocs/op
+BenchmarkServiceBackedResidentBinding/grpc-8           	    3781	     97340 ns/op	   15617 B/op	     217 allocs/op
+BenchmarkServiceBackedResidentBinding/grpc-8           	    4119	    102427 ns/op	   15527 B/op	     217 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/servicebacked	4.553s

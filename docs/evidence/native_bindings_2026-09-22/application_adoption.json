@@ -1,0 +1,120 @@
+{
+  "date": "2026-09-22",
+  "coreRevision": "3131e6f62d60303bbedcec2d866b2d2ad4b13751",
+  "includesUncommittedCoreChanges": true,
+  "projects": {
+    "pronto_v1": {
+      "update": {
+        "project": "pronto",
+        "path": "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1",
+        "dry_run": false,
+        "status": "success",
+        "validation": "passed separately with project_scaffold_check.sh",
+        "idempotence": "passed",
+        "migration_id": "20260712-managed-compat-v1"
+      },
+      "files": {
+        "runtime-sdk/ts/browser-host/src/renderSurfaceClient.ts": {
+          "core": "98b19de8aac283a6bd1af7d17ff23637425328476d05783a8fefe0c0a1b26fb6",
+          "adopted": "98b19de8aac283a6bd1af7d17ff23637425328476d05783a8fefe0c0a1b26fb6"
+        },
+        "runtime-sdk/go/runtimehost/binding.go": {
+          "core": "761412c6f03c8e6901c7132921f5df57347b1badb1c6555c177bbde6088c97cb",
+          "adopted": "761412c6f03c8e6901c7132921f5df57347b1badb1c6555c177bbde6088c97cb"
+        },
+        "server-kit/go/placement/binding.go": {
+          "core": "35feb7b85725017c2bbf5c348899d71984f52ac815281ed38a0f251bd04ae55b",
+          "adopted": "35feb7b85725017c2bbf5c348899d71984f52ac815281ed38a0f251bd04ae55b"
+        },
+        "server-kit/go/placement/binding_remote.go": {
+          "core": "9f1b810fa5d8d64c0e62db9971b5a1c49d25e337957b6faecab1391cff7edb4a",
+          "adopted": "9f1b810fa5d8d64c0e62db9971b5a1c49d25e337957b6faecab1391cff7edb4a"
+        },
+        "runtime-sdk/protocols/system/v1/runtime_binding.capnp": {
+          "core": "e27afa2d4f339ca78f6f7d10d018e76bcc8b26624f84c521f5e00d304c9137d1",
+          "adopted": "e27afa2d4f339ca78f6f7d10d018e76bcc8b26624f84c521f5e00d304c9137d1"
+        }
+      },
+      "frontendTests": 348,
+      "frontendBuild": "passed",
+      "serverWorkerBuild": "passed",
+      "backendChecks": "38 packages passed initially; translation passed after removing embedded live-test credential"
+    },
+    "ovasabi_v1": {
+      "update": {
+        "project": "ovasabi",
+        "path": "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1",
+        "dry_run": false,
+        "status": "success",
+        "validation": "passed separately with project_scaffold_check.sh",
+        "idempotence": "passed",
+        "migration_id": "20260712-managed-compat-v1"
+      },
+      "files": {
+        "runtime-sdk/ts/browser-host/src/renderSurfaceClient.ts": {
+          "core": "98b19de8aac283a6bd1af7d17ff23637425328476d05783a8fefe0c0a1b26fb6",
+          "adopted": "98b19de8aac283a6bd1af7d17ff23637425328476d05783a8fefe0c0a1b26fb6"
+        },
+        "runtime-sdk/go/runtimehost/binding.go": {
+          "core": "761412c6f03c8e6901c7132921f5df57347b1badb1c6555c177bbde6088c97cb",
+          "adopted": "761412c6f03c8e6901c7132921f5df57347b1badb1c6555c177bbde6088c97cb"
+        },
+        "server-kit/go/placement/binding.go": {
+          "core": "35feb7b85725017c2bbf5c348899d71984f52ac815281ed38a0f251bd04ae55b",
+          "adopted": "35feb7b85725017c2bbf5c348899d71984f52ac815281ed38a0f251bd04ae55b"
+        },
+        "server-kit/go/placement/binding_remote.go": {
+          "core": "9f1b810fa5d8d64c0e62db9971b5a1c49d25e337957b6faecab1391cff7edb4a",
+          "adopted": "9f1b810fa5d8d64c0e62db9971b5a1c49d25e337957b6faecab1391cff7edb4a"
+        },
+        "runtime-sdk/protocols/system/v1/runtime_binding.capnp": {
+          "core": "e27afa2d4f339ca78f6f7d10d018e76bcc8b26624f84c521f5e00d304c9137d1",
+          "adopted": "e27afa2d4f339ca78f6f7d10d018e76bcc8b26624f84c521f5e00d304c9137d1"
+        }
+      },
+      "frontendTests": 271,
+      "frontendBuild": "passed",
+      "serverWorkerBuild": "passed",
+      "backendChecks": "15 test packages passed; 6 packages have no tests"
+    }
+  },
+  "ovasabiServedAssets": [
+    {
+      "asset": "/assets/index-CiBXnxGl.js",
+      "bytes": 127628,
+      "matchesBuiltArtifact": true,
+      "sha256": "8ed971af70075703215c7361032375d5a10974deca522d87de947167ee5c234f"
+    },
+    {
+      "asset": "/assets/vendor-C4apGxjK.js",
+      "bytes": 229979,
+      "matchesBuiltArtifact": true,
+      "sha256": "46164a9c0f21e63bcd5b11475b2e08d431bf0d8f30a429388ffd11fcbfc4cfff"
+    },
+    {
+      "asset": "/assets/ui-BfHx7EHi.js",
+      "bytes": 5793,
+      "matchesBuiltArtifact": true,
+      "sha256": "dcaa22e8138dae1cf7d7822947dff732116716db1809c69ba9780703e34ecb47"
+    },
+    {
+      "asset": "/assets/index-FvXVO3-B.css",
+      "bytes": 57295,
+      "matchesBuiltArtifact": true,
+      "sha256": "014024514df6c385f4c316d93738c8407b2b89e856cb55895b519bb58e5c4241"
+    },
+    {
+      "asset": "/assets/surfaces.worker-BHnXIrmK.js",
+      "matchesBuiltArtifact": true,
+      "sha256": "fcddb7748085f4fb10626ee036cff46923b2bf4665963a54170cf9fd355c7238",
+      "bytes": 55689
+    }
+  ],
+  "limitations": [
+    "No remote production deployment",
+    "No backend service started",
+    "Ovasabi health proxy still fails while backend is absent",
+    "Live DeepL provider check hit exhausted quota; exposed embedded test key requires rotation",
+    "No new full-page FPS claim"
+  ]
+}

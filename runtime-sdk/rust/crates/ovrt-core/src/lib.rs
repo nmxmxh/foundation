@@ -1,6 +1,7 @@
 #![allow(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod binding_contract_gen;
 pub mod diagnostics;
 pub mod epoch;
 pub mod generated;

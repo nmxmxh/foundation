@@ -4,6 +4,8 @@ The `server-kit` module provides the core primitives for Ovasabi backend service
 
 ## Core Components
 
+- [Push delivery](pushdelivery/README.md): bounded notification dispatch, Web Push encryption, retry policy, and background resource budgets.
+
 ## Scaffold Runtime Contract
 
 Generated backends must use `server-kit` as the runtime spine, not as a copied
