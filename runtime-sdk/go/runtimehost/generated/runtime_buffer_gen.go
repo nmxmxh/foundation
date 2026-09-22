@@ -2,6 +2,9 @@
 
 package generated
 
+const BINDING_SCHEMA_VERSION uint32 = 1
+const BINDING_MAX_TIMEOUT_MILLIS uint32 = 30000
+const BINDING_MAX_OUTPUT_BYTES uint32 = 2097152
 const BUFFER_TOTAL_BYTES uint32 = 4096
 const OFFSET_EPOCHS uint32 = 0
 const EPOCH_SLOT_COUNT uint32 = 16

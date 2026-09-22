@@ -1,0 +1,55 @@
+package fusionbridge
+
+import (
+ "context"
+ "errors"
+ "os"
+ "testing"
+ "time"
+
+ "github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost"
+ "github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
+ "github.com/nmxmxh/ovasabi_foundation/server-kit/go/placement"
+ "github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
+)
+
+func prontoFoundationBinding(tb testing.TB) (context.Context,*runtimehost.FFIPool,*placement.BindingRegistry,placement.RuntimeBindingRequest,[]byte) {
+ tb.Helper()
+ pool,err:=runtimehost.NewFFIPool(runtimehost.FFIPoolOptions{LibraryPath:os.Getenv("PRONTO_FUSION_LIB"),Workers:1})
+ if err!=nil{tb.Fatal(err)}
+ tb.Cleanup(func(){if err:=pool.Close();err!=nil{tb.Error(err)}})
+ payload,err:=EncodeKernelRequest(OpRecessionProbit,[]float64{0.76},nil);if err!=nil{tb.Fatal(err)}
+ ctx,cancel:=context.WithTimeout(context.Background(),30*time.Second);tb.Cleanup(cancel)
+ ctx=security.ContextWithOrganizationID(ctx,"binding-reference")
+ md:=metadata.New();md.CorrelationID="pronto-native-binding";ctx=metadata.IntoContext(ctx,md)
+ registry,err:=placement.NewBindingRegistry(1,placement.BindingLimits{Resources:1,Bindings:1,ResidentBytes:4096,InFlight:1},
+  func(context.Context,placement.BindingAction,uint64,uint64)error{return nil},
+  placement.BindingType{ID:1,Validate:func(data []byte)error{if len(data)!=len(payload){return placement.ErrBindingInvalid};return nil}},
+  placement.BindingType{ID:2,Validate:func(data []byte)error{_,err:=DecodeKernelResponse(data);return err}})
+ if err!=nil{tb.Fatal(err)}
+ tb.Cleanup(func(){if err:=registry.Close();err!=nil{tb.Error(err)}})
+ if _,err:=registry.PublishResource(ctx,1,1,0,payload);err!=nil{tb.Fatal(err)}
+ spec,err:=runtimehost.NewFFIBinding(pool,"pronto.fusion.v1",placement.BindingSpec{ID:1,ResourceID:1,ResourceGeneration:1,InputTypeID:1,OutputTypeID:2,MaxInputBytes:uint64(len(payload)),MaxOutputBytes:128,MaxConcurrency:1})
+ if err!=nil{tb.Fatal(err)}
+ request,err:=registry.Bind(ctx,spec,0);if err!=nil{tb.Fatal(err)}
+ return ctx,pool,registry,request,payload
+}
+
+func TestFoundationNativeResourceBinding(t *testing.T) {
+ ctx,_,registry,request,_:=prontoFoundationBinding(t)
+ output:=make([]byte,128)
+ receipt,err:=registry.Execute(ctx,request,"pronto-native-binding",output);if err!=nil{t.Fatal(err)}
+ values,err:=DecodeKernelResponse(output[:receipt.OutputBytes])
+ if err!=nil||len(values)!=1||values[0]<0.149||values[0]>0.151{t.Fatalf("native oracle: %v %v",values,err)}
+ if receipt.InputCopiedBytes!=request.MaxInputCopyBytes||receipt.InputCopiedBytes==0{t.Fatal("native copy was concealed")}
+ request.MaxInputCopyBytes=0
+ if _,err:=registry.Execute(ctx,request,"pronto-native-binding",output);!errors.Is(err,placement.ErrBindingBudget){t.Fatal(err)}
+}
+
+func BenchmarkFoundationNativeBinding(b *testing.B) {
+ ctx,pool,registry,request,payload:=prontoFoundationBinding(b)
+ output:=make([]byte,128)
+ if _,err:=registry.Execute(ctx,request,"pronto-native-binding",output);err!=nil{b.Fatal(err)}
+ b.Run("ffi-direct",func(b *testing.B){b.ReportAllocs();for b.Loop(){if _,err:=pool.ExecuteInto(ctx,runtimehost.ProcessRequest{UnitID:"pronto.fusion.v1",Input:payload},output);err!=nil{b.Fatal(err)}}})
+ b.Run("ffi-binding",func(b *testing.B){b.ReportAllocs();for b.Loop(){if _,err:=registry.Execute(ctx,request,"pronto-native-binding",output);err!=nil{b.Fatal(err)}}})
+}

@@ -1,0 +1,71 @@
+{
+  "source": "Ovasabi black-hole pass, Core graphics lab, Codex in-app browser",
+  "measurementDate": "2026-09-22",
+  "limitation": "One warm sample per mode; this does not establish a statistical speedup or mobile GPU performance.",
+  "samples": [
+    {
+      "pixelLimit": 1000000,
+      "viewport": {
+        "width": 1280,
+        "height": 720,
+        "ratio": 2
+      },
+      "crossOriginIsolated": true,
+      "mode": "submitted",
+      "evidence": {
+        "version": 1,
+        "completion": "submitted",
+        "state": "shared",
+        "maxBackingPixels": 1000000
+      },
+      "sample": {
+        "submitted": 201,
+        "completed": 200,
+        "inflight": 1,
+        "maximumInflight": 2,
+        "width": 1579,
+        "height": 633,
+        "maximumBackingPixels": 999507,
+        "backingPixels": 999507,
+        "completionMilliseconds": {
+          "p50": 9.870000004768372,
+          "p95": 15.174999952316284
+        },
+        "timingScope": "CPU submission through GPU queue completion",
+        "durationSeconds": 5.003184999942779
+      }
+    },
+    {
+      "pixelLimit": 1000000,
+      "viewport": {
+        "width": 1280,
+        "height": 720,
+        "ratio": 2
+      },
+      "crossOriginIsolated": true,
+      "mode": "settled",
+      "evidence": {
+        "version": 1,
+        "completion": "settled",
+        "state": "shared",
+        "maxBackingPixels": 1000000
+      },
+      "sample": {
+        "submitted": 201,
+        "completed": 200,
+        "inflight": 1,
+        "maximumInflight": 1,
+        "width": 1579,
+        "height": 633,
+        "maximumBackingPixels": 999507,
+        "backingPixels": 999507,
+        "completionMilliseconds": {
+          "p50": 8.145000100135803,
+          "p95": 13.799999952316284
+        },
+        "timingScope": "CPU submission through GPU queue completion",
+        "durationSeconds": 5.005174999952316
+      }
+    }
+  ]
+}

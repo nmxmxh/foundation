@@ -1,0 +1,17 @@
+ok  	github.com/ovasabi/pronto/internal/fusionbridge	1.540s
+goos: darwin
+goarch: arm64
+pkg: github.com/ovasabi/pronto/internal/fusionbridge
+cpu: Apple M1 Pro
+BenchmarkFoundationNativeBinding/ffi-direct-8         	  510464	       702.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFoundationNativeBinding/ffi-direct-8         	  530653	       801.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFoundationNativeBinding/ffi-direct-8         	  543102	       672.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFoundationNativeBinding/ffi-direct-8         	  541014	       674.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFoundationNativeBinding/ffi-direct-8         	  532858	       676.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFoundationNativeBinding/ffi-binding-8        	  435016	       862.3 ns/op	       8 B/op	       1 allocs/op
+BenchmarkFoundationNativeBinding/ffi-binding-8        	  421552	       855.4 ns/op	       8 B/op	       1 allocs/op
+BenchmarkFoundationNativeBinding/ffi-binding-8        	  423201	       855.2 ns/op	       8 B/op	       1 allocs/op
+BenchmarkFoundationNativeBinding/ffi-binding-8        	  425428	       869.1 ns/op	       8 B/op	       1 allocs/op
+BenchmarkFoundationNativeBinding/ffi-binding-8        	  392248	      1022 ns/op	       8 B/op	       1 allocs/op
+PASS
+ok  	github.com/ovasabi/pronto/internal/fusionbridge	4.353s

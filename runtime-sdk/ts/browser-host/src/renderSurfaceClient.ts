@@ -1,4 +1,5 @@
 import type { RenderSurfaceCommand, RenderSurfaceEvent } from "./renderSurface";
+import { renderRequirementsFailure, type RenderSurfaceEvidence } from "./renderRequirements";
 import { attachRenderStateReader, type RenderStateReader } from "./renderStateChannel";
 import type { RenderSurfaceQualityTier } from "./types";
 
@@ -12,12 +13,9 @@ import type { RenderSurfaceQualityTier } from "./types";
  *
  * ## The clock
  *
- * A dedicated worker has no `requestAnimationFrame`. That is usually written
- * up as a limitation and it is closer to a favour: a decorative pass wants a
- * *cadence*, not a display refresh, and a timer gives it one directly. The
- * loop below aims at the rung's `cadenceMs` and corrects for its own drift, so
- * a surface asking for 40 a second gets 40 a second on a 60 Hz panel and on a
- * 144 Hz one, without the caller thinking about it.
+ * Dedicated workers can support `requestAnimationFrame` with an owner window.
+ * This timer supports explicit decorative cadences independently of display refresh.
+ * GPU completion wakes a missed slot without waiting for another full cadence.
  *
  * ## The ladder
  *
@@ -225,6 +223,10 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
   let tiers: readonly RenderSurfaceQualityTier[] = [{ scale: 1, cadenceMs: 1000 / 60 }];
   let state: TState | undefined;
   let cssWidth = 0;
+  let maxBackingPixels: number | undefined;
+  let requireGpuCompletion = false;
+  let backingWidth = 1;
+  let backingHeight = 1;
   let cssHeight = 0;
   let ratio = 1;
   let tier = 0;
@@ -306,10 +308,17 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
   const applySize = () => {
     if (!pass || cssWidth < 1 || cssHeight < 1) return;
     const scale = rung().scale * ratio;
-    pass.resize(
-      Math.max(1, Math.round(cssWidth * scale)),
-      Math.max(1, Math.round(cssHeight * scale)),
-    );
+    if (!Number.isFinite(cssWidth * scale) || !Number.isFinite(cssHeight * scale) || scale <= 0) return;
+    backingWidth = Math.max(1, Math.round(cssWidth * scale));
+    backingHeight = Math.max(1, Math.round(cssHeight * scale));
+    if (maxBackingPixels !== undefined && backingWidth * backingHeight > maxBackingPixels) {
+      const factor = Math.sqrt(maxBackingPixels / (backingWidth * backingHeight));
+      backingWidth = Math.max(1, Math.floor(backingWidth * factor));
+      backingHeight = Math.max(1, Math.floor(backingHeight * factor));
+      backingWidth = Math.min(backingWidth, maxBackingPixels);
+      backingHeight = Math.min(backingHeight, Math.floor(maxBackingPixels / backingWidth));
+    }
+    pass.resize(backingWidth, backingHeight);
   };
 
   /**
@@ -370,14 +379,21 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
       schedule(current.cadenceMs, now);
       return;
     }
+    if (awaitingGpu && requireGpuCompletion) {
+      stopped = true;
+      stop(true);
+      pass.dispose();
+      pass = null;
+      emit({ kind: "FAILED", surface, reason: "GPU completion timed out" });
+      return;
+    }
     awaitingGpu = false;
 
     const delta = lastDrawAt === 0 ? current.cadenceMs : now - lastDrawAt;
     lastDrawAt = now;
 
-    const scale = current.scale * ratio;
-    frameDescriptor.width = Math.max(1, Math.round(cssWidth * scale));
-    frameDescriptor.height = Math.max(1, Math.round(cssHeight * scale));
+    frameDescriptor.width = backingWidth;
+    frameDescriptor.height = backingHeight;
     frameDescriptor.detail = current.detail ?? 0;
     frameDescriptor.elapsed = now - startedAt;
     frameDescriptor.delta = delta;
@@ -404,10 +420,27 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
       // not release the wait of the pass that replaced it.
       const epoch = gpuEpoch;
       const release = () => {
-        if (epoch === gpuEpoch) awaitingGpu = false;
+        if (epoch !== gpuEpoch) return;
+        awaitingGpu = false;
+        if (!skippedSinceDraw || !running || stopped || !visible) return;
+        // Resume a missed slot when work completes. Preserve the current cadence floor.
+        const readyAt = Math.max(performance.now(), lastDrawAt + rung().cadenceMs);
+        if (timer !== null) clearTimeout(timer);
+        targetNextFrame = readyAt;
+        timer = setTimeout(step, Math.max(0, readyAt - performance.now()));
       };
-      pass.settled().then(release, release);
+      const rejected = () => {
+        if (epoch !== gpuEpoch) return;
+        if (!requireGpuCompletion) { release(); return; }
+        stopped = true;
+        stop(true);
+        pass?.dispose();
+        pass = null;
+        emit({ kind: "FAILED", surface, reason: "GPU completion failed" });
+      };
+      try { pass.settled().then(release, rejected); } catch { rejected(); }
     }
+    if (stopped) return;
 
     /*
      * The ladder, measured on the gap the loop actually achieved.
@@ -433,12 +466,14 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
     step();
   };
 
-  const stop = () => {
+  const stop = (retire = false) => {
     running = false;
     targetNextFrame = 0;
-    // A frame in flight belongs to the pass as it was; whatever resumes starts clean.
-    gpuEpoch += 1;
-    awaitingGpu = false;
+    // Visibility changes retain the outstanding fence. Only retirement invalidates it.
+    if (retire) {
+      gpuEpoch += 1;
+      awaitingGpu = false;
+    }
     skippedSinceDraw = false;
     if (timer !== null) {
       clearTimeout(timer);
@@ -459,7 +494,7 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
     generation += 1;
     const mine = generation;
     stopped = false;
-    stop();
+    stop(true);
     pass?.dispose();
     pass = null;
     visible = true;
@@ -481,6 +516,8 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
      * state from `STATE` messages exactly as before.
      */
     stateReader = message.stateBuffer ? attachRenderStateReader(message.stateBuffer) : null;
+    maxBackingPixels = message.requirements?.maxBackingPixels;
+    requireGpuCompletion = message.requirements?.gpuCompletion === "required";
     frameDescriptor.shared = null;
     frameDescriptor.sharedGeneration = 0;
     cssWidth = message.width;
@@ -508,9 +545,21 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
       emit({ kind: "FAILED", surface, reason: "no lane available" });
       return;
     }
+    const evidence: RenderSurfaceEvidence = {
+      version: 1,
+      completion: built.settled ? "settled" : "submitted",
+      state: stateReader ? "shared" : "messages",
+      maxBackingPixels,
+    };
+    const failure = renderRequirementsFailure(message.requirements, evidence);
+    if (failure) {
+      built.dispose();
+      emit({ kind: "FAILED", surface, reason: failure });
+      return;
+    }
     pass = built;
     applySize();
-    emit({ kind: "READY", surface, lane: pass.lane });
+    emit({ kind: "READY", surface, lane: pass.lane, evidence });
     start();
   };
 
@@ -565,7 +614,7 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
         // Retires the pass, not the server. A later INIT revives the surface;
         // see `generation`.
         stopped = true;
-        stop();
+        stop(true);
         pass?.dispose();
         pass = null;
         return;
@@ -577,7 +626,7 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
 
   return () => {
     stopped = true;
-    stop();
+    stop(true);
     scope.removeEventListener("message", onMessage);
     pass?.dispose();
     pass = null;

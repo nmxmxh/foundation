@@ -70,6 +70,7 @@ pre-answered questions without scanning multiple files.
 | **Retry policy** | `server-kit/go/retry` — exponential backoff with jitter, max attempts, context-aware cancellation, and preset policies. | `foundation_guide.md` |
 | **River** | Go-based background job queue used for durable worker execution with bounded retries and dead-letter support. | `foundation_guide.md` |
 | **Route catalog** | Machine-readable JSON projection of all registered server routes, used to generate `runtimeRoutes.ts` for the frontend. | `frontend_command_registry.md` |
+| **Resource binding** | A versioned operation attached to an owned resource, with checked types, access, generations, and performance budgets. | `native_resource_bindings.md` |
 | **Runtime envelope** | See *Envelope* above. | `foundation_nervous_system.md` |
 | **Runtime-native** | `@ovasabi/runtime-native` — Tauri-backed native shell bridge: binary frames, secure storage, capability discovery, and native dispatch. | `runtime_native.md` |
 | **Runtime-sdk** | WASM/Rust/Go runtime kernel with a 4KB control-buffer contract for high-performance JS/Rust communication. | `foundation_guide.md` |

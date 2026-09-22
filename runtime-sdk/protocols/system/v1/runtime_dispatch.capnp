@@ -1,4 +1,4 @@
-@0xdf5cac001d15ea01;
+@0xdf5cac001d15ea01a;
 
 # Dispatch lane table shared between the Rust kernel, Go hosts, and browser
 # workers. One region holds a dual-buffered descriptor table, a global tick,

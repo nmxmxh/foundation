@@ -117,7 +117,7 @@ function parseConstants(text) {
 
 function parseNamedBlocks(text, keyword) {
   const names = [];
-  const pattern = new RegExp(`^\\s*${keyword}\\s+([A-Za-z0-9_]+)\\s*[{]`, "gm");
+  const pattern = new RegExp(`^\\s*${keyword}\\s+([A-Za-z0-9_]+)(?:\\s+@0x[0-9a-fA-F]+)?\\s*[{]`, "gm");
   let match;
   while ((match = pattern.exec(text)) !== null) {
     names.push(match[1]);

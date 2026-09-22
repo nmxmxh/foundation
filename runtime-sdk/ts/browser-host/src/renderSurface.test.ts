@@ -41,6 +41,29 @@ describe("render surface host", () => {
     expect(probe.transferControl).toBe(true);
   });
 
+  it("rejects an older worker that cannot attest requested requirements", () => {
+    let listener: ((event: MessageEvent<RenderSurfaceEvent>) => void) | undefined;
+    const postMessage = vi.fn(), onFailed = vi.fn();
+    const worker = {postMessage,addEventListener:(_name:string,fn:typeof listener)=>{listener=fn;},removeEventListener:vi.fn(),terminate:vi.fn()} as unknown as Worker;
+    const canvas = {clientWidth:100,clientHeight:100,transferControlToOffscreen:()=>({})} as unknown as HTMLCanvasElement;
+    const host=createRenderSurfaceHost({canvas,createWorker:()=>worker,surface:"required",tiers:[{scale:1,cadenceMs:25}],requirements:{gpuCompletion:"required"},onFailed});
+    listener?.({data:{kind:"READY",surface:"required",lane:"webgpu"}} as MessageEvent<RenderSurfaceEvent>);
+    expect(onFailed).toHaveBeenCalledWith("render evidence unavailable");
+    expect(postMessage).toHaveBeenCalledWith({kind:"STOP",surface:"required"});host.dispose();
+  });
+
+  it("pins requirements until the host is replaced", () => {
+    let listener: ((event: MessageEvent<RenderSurfaceEvent>) => void) | undefined;
+    const onEvidence=vi.fn(),onFailed=vi.fn();
+    const worker={postMessage:vi.fn(),addEventListener:(_name:string,fn:typeof listener)=>{listener=fn;},removeEventListener:vi.fn(),terminate:vi.fn()} as unknown as Worker;
+    const canvas={clientWidth:100,clientHeight:100,transferControlToOffscreen:()=>({})} as unknown as HTMLCanvasElement;
+    const requirements={maxBackingPixels:1000};
+    const host=createRenderSurfaceHost({canvas,createWorker:()=>worker,surface:"required",tiers:[{scale:1,cadenceMs:25}],requirements,onEvidence,onFailed});
+    requirements.maxBackingPixels=2000;
+    listener?.({data:{kind:"READY",surface:"required",lane:"webgpu",evidence:{version:1,completion:"settled",state:"messages",maxBackingPixels:1000}}} as MessageEvent<RenderSurfaceEvent>);
+    expect(onFailed).not.toHaveBeenCalled();expect(onEvidence).toHaveBeenCalledOnce();host.dispose();
+  });
+
   it("degrades gracefully to main-thread mode when worker construction fails", () => {
     const canvas = {
       clientWidth: 300,

@@ -1,4 +1,5 @@
 import { startingTierForDevice } from "./deviceProfile";
+import { renderRequirementsFailure, type RenderSurfaceEvidence, type RenderSurfaceRequirements } from "./renderRequirements";
 import { createRenderStateChannel, type RenderStateChannel } from "./renderStateChannel";
 import { getRuntimeCapabilities } from "./pulse/runtimeCaps";
 import type { RenderSurfaceDiagnostics, RenderSurfaceMode, RenderSurfaceQualityTier } from "./types";
@@ -50,6 +51,8 @@ import type { RenderSurfaceDiagnostics, RenderSurfaceMode, RenderSurfaceQualityT
 
 /** Everything the host needs to stand a lane up. */
 export type RenderSurfaceHostOptions<TState> = {
+  requirements?: RenderSurfaceRequirements;
+  onEvidence?: (evidence: RenderSurfaceEvidence) => void;
   /** The canvas to hand over. Must not have a 2D/WebGL context already. */
   canvas: HTMLCanvasElement;
   /**
@@ -218,6 +221,7 @@ export type RenderSurfaceCommand<TState> =
       kind: "INIT";
       surface: string;
       canvas: OffscreenCanvas;
+      requirements?: RenderSurfaceRequirements;
       tiers: readonly RenderSurfaceQualityTier[];
       /**
        * Which rung to open on. Chosen by the host, because the signals it is
@@ -247,7 +251,7 @@ export type RenderSurfaceCommand<TState> =
 
 /** Messages the worker sends back. Diagnostics only; no pixels come this way. */
 export type RenderSurfaceEvent =
-  | { kind: "READY"; surface: string; lane: string }
+  | { kind: "READY"; surface: string; lane: string; evidence?: RenderSurfaceEvidence }
   /**
    * Something degraded without the surface dying — a failed prewarm, say, which
    * costs the latency the warm was for and nothing else. Separate from `FAILED`
@@ -335,6 +339,7 @@ export const prewarmRenderSurface = (options: {
 export const createRenderSurfaceHost = <TState,>(
   options: RenderSurfaceHostOptions<TState>,
 ): RenderSurfaceHost<TState> => {
+  const requirements = options.requirements ? { ...options.requirements } : undefined;
   const probe = probeRenderSurface();
   const issues: string[] = [];
   if (!probe.offscreenCanvas) issues.push("OffscreenCanvas is unavailable");
@@ -424,6 +429,13 @@ export const createRenderSurfaceHost = <TState,>(
     if (message.kind === "FAILED") options.onFailed?.(message.reason);
     if (message.kind === "WARNING") options.onWarning?.(message.reason);
     if (message.kind === "READY") {
+      const failure = renderRequirementsFailure(requirements, message.evidence);
+      if (failure) {
+        post({ kind: "STOP", surface });
+        options.onFailed?.(failure);
+        return;
+      }
+      if (message.evidence) options.onEvidence?.(message.evidence);
       // The rung the surface actually opened on, not rung zero: reporting a
       // constant here made every diagnostic sink believe every device started
       // at the top, which is precisely the claim the device prior exists to
@@ -467,6 +479,7 @@ export const createRenderSurfaceHost = <TState,>(
       kind: "INIT",
       surface,
       canvas: offscreen,
+      requirements,
       tiers,
       tier: openingTier,
       stateBuffer: stateChannel?.buffer,

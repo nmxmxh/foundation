@@ -91,7 +91,7 @@ set +e
     GOCACHE="$GO_CACHE_DIR" go test \
         -tags=servicebacked \
         -run '^$' \
-        -bench=BenchmarkServiceBacked \
+        -bench="${SERVICE_BACKED_BENCH_PATTERN:-BenchmarkServiceBacked}" \
         -benchmem \
         -benchtime "${SERVICE_BACKED_BENCHTIME:-1s}" \
         -count "${SERVICE_BACKED_BENCH_COUNT:-1}" \

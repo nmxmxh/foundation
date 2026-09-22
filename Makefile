@@ -85,8 +85,16 @@ generate-contracts:
 	@echo "Generating shared runtime contracts..."
 	@if [ -x runtime-transport/scripts/generate_bindings.sh ]; then runtime-transport/scripts/generate_bindings.sh; fi
 	@if [ -x runtime-sdk/scripts/generate_system_bindings.sh ]; then runtime-sdk/scripts/generate_system_bindings.sh; fi
+	@node runtime-sdk/scripts/generate_binding_contracts.mjs
 	@node tooling/scripts/generate_runtime_contract_manifest.mjs
 	@node tooling/scripts/generate_frontend_commands.mjs
+
+.PHONY: test-pronto-bindings graphics-binding-lab
+test-pronto-bindings:
+	@bash tests/pronto_binding_reference_test.sh "$(PRONTO_PROJECT)"
+
+graphics-binding-lab:
+	@OVASABI_PROJECT="$(OVASABI_PROJECT)" node "$(OVASABI_PROJECT)/frontend/node_modules/vite/bin/vite.js" --config tests/graphics_binding_lab/vite.config.mjs
 
 build: test-go test-rust frontend-build
 
@@ -310,6 +318,7 @@ check-contract-drift:
 
 check-runtime-contract-field-drift:
 	@node tooling/scripts/runtime_contract_field_drift_check.mjs
+	@node runtime-sdk/scripts/generate_binding_contracts.mjs --check
 
 check-doc-references:
 	@node tooling/scripts/docs_reference_check.mjs .

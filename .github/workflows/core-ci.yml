@@ -39,9 +39,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install zsh
+      - name: Install schema compiler and zsh
         run: |
-          sudo apt-get update && sudo apt-get install -y zsh
+          sudo apt-get update && sudo apt-get install -y zsh capnproto
 
       - name: Set up Go
         uses: actions/setup-go@v6

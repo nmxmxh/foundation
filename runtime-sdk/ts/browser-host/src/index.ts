@@ -1,5 +1,6 @@
 export * from "./generated/runtimeBuffer";
 export * from "./generated/runtimeContracts";
+export * from "./generated/bindingContracts";
 export * from "./arena";
 export * from "./host";
 export * from "./runtimeBridge";
@@ -14,6 +15,7 @@ export * from "./gpuLayout";
 export * from "./webgpuHost";
 export * from "./deviceProfile";
 export * from "./renderSurface";
+export * from "./renderRequirements";
 export * from "./renderStateChannel";
 export * from "./renderSurfaceClient";
 export * from "./renderSurfaceWorker";

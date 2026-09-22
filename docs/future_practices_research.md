@@ -17,6 +17,10 @@ move it into the owning practice document and, where possible, into tooling.
 
 ## Research Lanes To Track
 
+The [graphics FPS refinement](graphics_fps_refinement.md) applies current worker and WebGPU guidance to measured frame throughput.
+Completed frames improve under GPU pressure without changing shader detail or backing resolution.
+Mobile endurance and full-page presentation remain separate evidence requirements.
+
 The [2026-09-22 cleanup review](foundation_cleanup_review_20260922.md) maps
 current research to measured Foundation costs and remaining work.
 Adopted changes repair benchmark gates, measurement boundaries, and frontend validation.
