@@ -146,30 +146,33 @@ func (p *partition) recordForOrderEntry(registry *partitionRegistry, entry recor
 }
 
 func (p *partition) recordEntry(registry *partitionRegistry, key string) (recordEntry, bool) {
-	value, ok := registry.records.Load(key)
-	if !ok {
-		return recordEntry{}, false
-	}
-	entry, ok := recordEntryFromCell(value)
-	if !ok {
-		return recordEntry{}, false
-	}
-	if !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
-		return recordEntry{}, false
-	}
-	return entry, true
-}
-
-func recordEntryFromCell(value any) (recordEntry, bool) {
-	cell, ok := value.(*recordCell)
-	if !ok || cell == nil {
-		return recordEntry{}, false
-	}
-	entry := cell.ptr.Load()
+	entry := p.recordEntryPointer(registry, key)
 	if entry == nil {
 		return recordEntry{}, false
 	}
 	return *entry, true
+}
+
+// Published entries are immutable. Readers retain the loaded version until their operation ends.
+func (p *partition) recordEntryPointer(registry *partitionRegistry, key string) *recordEntry {
+	value, _ := registry.records.Load(key)
+	return liveRecordEntryPointer(value)
+}
+
+func liveRecordEntryPointer(value any) *recordEntry {
+	entry := recordEntryPointerFromCell(value)
+	if entry != nil && !entry.expiresAt.IsZero() && time.Now().After(entry.expiresAt) {
+		return nil
+	}
+	return entry
+}
+
+func recordEntryPointerFromCell(value any) *recordEntry {
+	cell, ok := value.(*recordCell)
+	if !ok || cell == nil {
+		return nil
+	}
+	return cell.ptr.Load()
 }
 
 func (p *partition) recordCellLocked(registry *partitionRegistry, key string) *recordCell {

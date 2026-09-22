@@ -1,0 +1,46 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesGetRecordCopied-8           	  799423	       299.4 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  710644	       287.4 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  828134	       286.6 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  661460	       349.2 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  841579	       285.7 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  867469	       276.9 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  697952	       286.8 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  804937	       297.3 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  838256	       283.5 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  850011	       280.9 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   19304	     12574 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18744	     12703 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18379	     12925 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   19006	     12716 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18938	     12632 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18670	     12877 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18249	     13047 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18517	     12747 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   17904	     13317 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18751	     12753 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8   	      42	   5745835 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8   	      44	   5624845 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8   	      42	   5677336 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8   	      43	   5559215 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8   	      43	   5598521 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8   	      43	   6109898 ns/op	    179736 bytes_touched/op	 2332168 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8   	      36	   6063248 ns/op	    179736 bytes_touched/op	 2332171 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8   	      43	   5860316 ns/op	    179736 bytes_touched/op	 2332168 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8   	      37	   6295096 ns/op	    179736 bytes_touched/op	 2332168 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8   	      43	   6079241 ns/op	    179736 bytes_touched/op	 2332168 B/op	      14 allocs/op
+BenchmarkHermesListRecordsFilterSum-8      	      31	   7364151 ns/op	 7807659 B/op	   10010 allocs/op
+BenchmarkHermesListRecordsFilterSum-8      	      27	   7805889 ns/op	 7807668 B/op	   10010 allocs/op
+BenchmarkHermesListRecordsFilterSum-8      	      28	   7603308 ns/op	 7807656 B/op	   10010 allocs/op
+BenchmarkHermesListRecordsFilterSum-8      	      30	   7303721 ns/op	 7807659 B/op	   10010 allocs/op
+BenchmarkHermesListRecordsFilterSum-8      	      28	   7287815 ns/op	 7807656 B/op	   10010 allocs/op
+BenchmarkHermesListRecordsFilterSum-8      	      26	   8098867 ns/op	 7807656 B/op	   10010 allocs/op
+BenchmarkHermesListRecordsFilterSum-8      	      28	   7374260 ns/op	 7807660 B/op	   10010 allocs/op
+BenchmarkHermesListRecordsFilterSum-8      	      26	   7914410 ns/op	 7807660 B/op	   10010 allocs/op
+BenchmarkHermesListRecordsFilterSum-8      	      30	   7396699 ns/op	 7807659 B/op	   10010 allocs/op
+BenchmarkHermesListRecordsFilterSum-8      	      32	   7848568 ns/op	 7807656 B/op	   10010 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	12.046s

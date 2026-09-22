@@ -12,10 +12,12 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "paths": {
+      "vite": ["./node_modules/vite/dist/node/index.d.ts"],
       "@ovasabi/ui-minimal": ["../ui-minimal/ts/src/index.ts"],
       "@ovasabi/runtime-browser": ["../runtime-sdk/ts/browser-host/src/index.ts"],
       "@ovasabi/frontend-kit": ["../frontend-kit/ts/src/index.ts"]
     }
   },
-  "include": ["src", "profile", "vitest.config.ts"]
+  "include": ["src", "profile", "vitest.config.ts"],
+  "exclude": ["profile/apps"]
 }

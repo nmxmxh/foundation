@@ -1,0 +1,96 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesGetRecordCopied-8           	  856828	       278.5 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  873294	       276.0 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  899998	       279.3 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  872338	       276.4 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  866702	       276.6 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  795931	       277.0 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  845701	       286.4 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  708477	       303.6 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  853399	       284.3 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesGetRecordCopied-8           	  889368	       283.8 ns/op	     224 B/op	       2 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18567	     12892 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   19008	     12504 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   19201	     12511 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18741	     12620 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   19090	     12523 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   19213	     12405 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18546	     12808 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   19106	     12523 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   19190	     13126 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesForEachViewLimit50-8        	   18882	     12613 ns/op	   20024 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8         	    5482	     42337 ns/op	   31272 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8         	    5595	     42103 ns/op	   31272 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8         	    5490	     42594 ns/op	   31272 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8         	    5618	     42512 ns/op	   31272 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8         	    5726	     42342 ns/op	   31272 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8         	    5676	     42149 ns/op	   31272 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8         	    5606	     42467 ns/op	   31272 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8         	    5448	     43184 ns/op	   31272 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8         	    5554	     42546 ns/op	   31272 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8         	    5634	     42526 ns/op	   31272 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8      	   21132	     11360 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8      	   20998	     11359 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8      	   19880	     12125 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8      	   19995	     11804 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8      	   20670	     11471 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8      	   20920	     11529 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8      	   20445	     11770 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8      	   20980	     11537 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8      	   21055	     11379 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8      	   20266	     11955 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	   27780	      8531 ns/op	    7096 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	   29102	      8340 ns/op	    7096 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	   28804	      8469 ns/op	    7096 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	   27840	      8562 ns/op	    7096 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	   28167	      8504 ns/op	    7096 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	   28645	      8416 ns/op	    7096 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	   28480	      8409 ns/op	    7096 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	   27908	      8531 ns/op	    7096 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	   28600	      8397 ns/op	    7096 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	   28648	      8371 ns/op	    7096 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	      38	   6102525 ns/op	 2329610 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	      38	   5698010 ns/op	 2329608 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	      36	   6217821 ns/op	 2329608 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	      34	   6117583 ns/op	 2329608 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	      42	   5694307 ns/op	 2329608 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	      36	   5657773 ns/op	 2329611 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	      37	   5832472 ns/op	 2329611 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	      36	   5942290 ns/op	 2329611 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	      36	   5982253 ns/op	 2329608 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	      36	   5719253 ns/op	 2329608 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	   20863	     11843 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	   20524	     11634 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	   20848	     11474 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	   20764	     11738 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	   20912	     11449 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	   20408	     11617 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	   20640	     11633 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	   20886	     11495 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	   20664	     11487 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	   19932	     11752 ns/op	   12248 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     564	    423825 ns/op	  435544 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     560	    424008 ns/op	  435544 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     559	    423047 ns/op	  435544 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     560	    425833 ns/op	  435544 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     560	    428199 ns/op	  435544 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     550	    424432 ns/op	  435544 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     577	    425510 ns/op	  435544 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     558	    425253 ns/op	  435544 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     560	    424810 ns/op	  435544 B/op	      12 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     540	    434512 ns/op	  435544 B/op	      12 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8                            	      39	   5689668 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8                            	      43	   5692953 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8                            	      42	   5779626 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8                            	      43	   5804585 ns/op	    179736 bytes_touched/op	 2332173 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8                            	      42	   5722913 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8                            	      43	   5919234 ns/op	    179736 bytes_touched/op	 2332173 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8                            	      37	   5884900 ns/op	    179736 bytes_touched/op	 2332171 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8                            	      43	   5902181 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8                            	      36	   5957639 ns/op	    179736 bytes_touched/op	 2332168 B/op	      14 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8                            	      43	   5847453 ns/op	    179736 bytes_touched/op	 2332170 B/op	      14 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	23.254s

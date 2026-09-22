@@ -30,7 +30,7 @@ github.com/nmxmxh/ovasabi_foundation/server-kit/go/featureflags|95.2|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful|85.3|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc|89.3|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/healthcheck|88.8|95.0
-github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes|83.9|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes|84.7|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermessnapshot|91.6|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi|88.9|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpserver|89.9|95.0
@@ -54,7 +54,7 @@ github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry|86.5|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/resilience|87.3|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/retry|86.6|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/scaling|100.0|95.0
-github.com/nmxmxh/ovasabi_foundation/server-kit/go/security|89.7|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/security|89.9|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/slo|100.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/startup|92.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing|84.3|95.0

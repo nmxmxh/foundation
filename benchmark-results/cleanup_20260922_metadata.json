@@ -1,0 +1,100 @@
+{
+  "schema": "foundation.cleanup_capture.v1",
+  "captured_at": "2026-09-22T13:21:50.626883+00:00",
+  "revision": "a670d3eb73cae9e9bc2817c18751d3fb92fd7b0f",
+  "working_tree": "dirty; cleanup changes accompany this capture",
+  "machine": {
+    "os_arch": "Darwin 25.5.0 arm64",
+    "cpu": "Apple M1 Pro",
+    "go_benchmark_procs": 8
+  },
+  "versions": {
+    "go": "go version go1.26.6 darwin/arm64",
+    "node": "v24.1.0",
+    "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+    "vitest": "5.0.0",
+    "playwright": "1.62.1",
+    "chromium": "151.0.7922.34"
+  },
+  "method": {
+    "go_count": 10,
+    "go_benchtime": "200ms",
+    "go_summary": "benchstat median and reported confidence range",
+    "timing_comparison": "reference only; no production implementation changed",
+    "hermes_records": 10000,
+    "profile_benchtime": "2s",
+    "profile_includes_setup": true,
+    "cpu_pinning": false,
+    "thermal_control": false
+  },
+  "replay_commands": [
+    {
+      "cwd": "server-kit/go",
+      "command": "GOCACHE=/tmp/ovasabi-foundation-go-build go test ./appbench -run='^$' -bench='^BenchmarkNullLane_' -benchmem -benchtime=200ms -count=10"
+    },
+    {
+      "cwd": "server-kit/go",
+      "command": "GOCACHE=/tmp/ovasabi-foundation-go-build go test ./grpcsvc -run='^$' -bench='^Benchmark(BinaryFrameAppendViewRoundTrip|GeneratedProtoMarshalAppendRoundTrip)$' -benchmem -benchtime=200ms -count=10"
+    },
+    {
+      "cwd": "server-kit/go",
+      "command": "GOCACHE=/tmp/ovasabi-foundation-go-build go test ./hermes -run='^$' -bench='^BenchmarkHermes(GetRecordCopied|ForEachViewLimit50|ColumnarBitmapFilterSum|ListRecordsFilterSum)$' -benchmem -benchtime=200ms -count=10"
+    },
+    {
+      "cwd": "server-kit/go",
+      "command": "GOCACHE=/tmp/ovasabi-foundation-go-build go test ./hermes -run='^$' -bench='^BenchmarkHermesColumnarBitmapFilterCachedBatch$' -benchmem -benchtime=200ms -count=10"
+    },
+    {
+      "cwd": ".",
+      "command": "tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host bench --run src/renderSurface.bench.ts"
+    },
+    {
+      "cwd": ".",
+      "command": "tooling/scripts/run_vitest.sh frontend-lab run --project gpu src/gpu/surfaceLane.gpu.test.ts -t 'records completed WebGL2 fences'"
+    },
+    {
+      "cwd": "server-kit/go",
+      "command": "GOCACHE=/tmp/ovasabi-foundation-go-build go test ./hermes -run='^$' -bench='^BenchmarkHermesColumnarBitmapFilterSum$' -benchtime=2s -cpuprofile=/tmp/foundation-cleanup-hermes.cpu -memprofile=/tmp/foundation-cleanup-hermes.mem -o /tmp/foundation-cleanup-hermes.test"
+    },
+    {
+      "cwd": ".",
+      "command": "go run cmd/pprof -top -nodecount=12 /tmp/foundation-cleanup-hermes.cpu"
+    },
+    {
+      "cwd": ".",
+      "command": "go run cmd/pprof -top -alloc_space -nodecount=10 /tmp/foundation-cleanup-hermes.mem"
+    }
+  ],
+  "source_sha256": {
+    "server-kit/go/appbench/null_lane_test.go": "006d609627b4e6c3619a8917a009d1f864d8b8266a4734b46fff20f319642611",
+    "server-kit/go/hermes/columnar_select_test.go": "7d9a1508b6b05e0c0e9eabac2730ca0ae106c6731dbd6cd3283b1c55953daa18",
+    "server-kit/go/hermes/columnar.go": "c36f4fc02dc32c2ead0a05d46764eeb6703e123857bf86915fcd2e94f6a23731",
+    "runtime-sdk/ts/browser-host/src/renderSurface.bench.ts": "771a1555a733c5209d71579ffbe1a20c96a31d91fb0331237c290106aed7083a",
+    "frontend-lab/src/gpu/fixtures/labSurfaces.worker.ts": "6993945dae5fe117370462848f2cfc77c3bc4fa68abb7e8c170a74595bee1e4b",
+    "frontend-lab/src/gpu/surfaceLane.gpu.test.ts": "abe4ee077fcaad9e61fee47c0f16ac9c997b5be04c547c8cf6a58e0bbc79b104",
+    "frontend-lab/src/latencySummary.ts": "2c694a9d9083b3197b0af0ed0904966bf6097d7f85b882ebf9348e96e60560ec",
+    "frontend-lab/package-lock.json": "6fd470c3b938226ffda0e287134bfd42d107693b5e5b8c100e0baa61c006ad41",
+    "server-kit/go/grpcsvc/grpcsvc_test.go": "dcd14ed0bd284b25c689e544c52686b2f0625de6a58c970841cbe7634d73a4dd"
+  },
+  "limitations": [
+    "No representative production, Linux container, database, or network measurements.",
+    "Canvas uses a Node stub context; it does not measure GPU rendering.",
+    "WebGL has two completion samples: correctness evidence only, with p95 below the sample floor.",
+    "Go allocs/op are averages; benchmark setup is included in whole-process profiles.",
+    "Local Go installation lacks the pprof tool binary; cmd/pprof was run from its installed source.",
+    "Historical benchmark tables outside the selected lanes were not refreshed."
+  ],
+  "artifact_sha256": {
+    "benchmark-results/cleanup_20260922_canvas.txt": "32aceec7a6ae4b0095896f09b613aff4408faf382248024422a5267523761263",
+    "benchmark-results/cleanup_20260922_go.txt": "421357af1df5183b38e361a5e989549e27fc054b366c96e730595679a538badd",
+    "benchmark-results/cleanup_20260922_go_summary.txt": "3705a0effcad9228e5fb4da0c975d83ec9bc36b7e7acc1230a47257b5bc360b1",
+    "benchmark-results/cleanup_20260922_hermes.txt": "b4c01357d404d1d5cbf9eecb5a6038b8e81f62766bad4d36c85717dc3a9c06d6",
+    "benchmark-results/cleanup_20260922_hermes_alloc.txt": "bcbc167c39a80ab6da47fc81771d08cf7fe18efd781ce042bfbd1efbbca2c83a",
+    "benchmark-results/cleanup_20260922_hermes_cpu.txt": "33275e676ca7898fec8451f531a86d07b4fc74ea5bcc765b1119907dda8f9d07",
+    "benchmark-results/cleanup_20260922_hermes_resident.txt": "1f31c0f78fce3c8d9ad9067ecdfc3f12611ffe7d14900fe39f3fa07516a4c7c1",
+    "benchmark-results/cleanup_20260922_hermes_resident_summary.txt": "7316f05929ea12202f3bd82c80f52f452348903186f7f10fc246e23596b33c5a",
+    "benchmark-results/cleanup_20260922_hermes_summary.txt": "3def2563d8343bfff77baa76b09bb4ee41f0aaae0fbeca99852d355c5aba0f4f",
+    "benchmark-results/cleanup_20260922_ratchet.txt": "f3c1e54b79e51b8a520e6779bab8ddaa7bf9fa96a5df82ae621ada4875035faa",
+    "benchmark-results/cleanup_20260922_webgl.json": "c604774cefe5b8a8c91347af99cbb1cbb93c7a22fb956c7d5ab7d7d00bfa78aa"
+  }
+}

@@ -260,7 +260,7 @@ The Foundation modules are linked through a unified "Nervous System":
 
 ## Coding Practice Rules (CP-*)
 
-The foundation enforces 36 coding practices. Key ones to remember:
+`tooling/practice_controls.psv` lists the current coding controls and their enforcement. Key examples follow:
 
 | Rule | Summary |
 | ------ | --------- |

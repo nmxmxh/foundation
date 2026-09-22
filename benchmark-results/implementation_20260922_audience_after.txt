@@ -1,0 +1,26 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/projectiongw
+cpu: Apple M1 Pro
+BenchmarkAudienceDigest/single-8         	 1758607	       131.0 ns/op	      64 B/op	       2 allocs/op
+BenchmarkAudienceDigest/single-8         	 2105822	       115.4 ns/op	      64 B/op	       2 allocs/op
+BenchmarkAudienceDigest/single-8         	 2070333	       115.5 ns/op	      64 B/op	       2 allocs/op
+BenchmarkAudienceDigest/single-8         	 2065882	       115.6 ns/op	      64 B/op	       2 allocs/op
+BenchmarkAudienceDigest/single-8         	 2049541	       116.6 ns/op	      64 B/op	       2 allocs/op
+BenchmarkAudienceDigest/single-8         	 2095018	       117.2 ns/op	      64 B/op	       2 allocs/op
+BenchmarkAudienceDigest/single-8         	 2068705	       116.6 ns/op	      64 B/op	       2 allocs/op
+BenchmarkAudienceDigest/single-8         	 2101416	       115.6 ns/op	      64 B/op	       2 allocs/op
+BenchmarkAudienceDigest/single-8         	 2083839	       118.1 ns/op	      64 B/op	       2 allocs/op
+BenchmarkAudienceDigest/single-8         	 2096217	       115.2 ns/op	      64 B/op	       2 allocs/op
+BenchmarkAudienceDigest/multiple-8       	 1000000	       205.4 ns/op	     112 B/op	       3 allocs/op
+BenchmarkAudienceDigest/multiple-8       	 1000000	       204.5 ns/op	     112 B/op	       3 allocs/op
+BenchmarkAudienceDigest/multiple-8       	 1000000	       205.7 ns/op	     112 B/op	       3 allocs/op
+BenchmarkAudienceDigest/multiple-8       	 1000000	       206.3 ns/op	     112 B/op	       3 allocs/op
+BenchmarkAudienceDigest/multiple-8       	 1000000	       206.0 ns/op	     112 B/op	       3 allocs/op
+BenchmarkAudienceDigest/multiple-8       	 1000000	       204.3 ns/op	     112 B/op	       3 allocs/op
+BenchmarkAudienceDigest/multiple-8       	 1000000	       206.2 ns/op	     112 B/op	       3 allocs/op
+BenchmarkAudienceDigest/multiple-8       	 1000000	       203.0 ns/op	     112 B/op	       3 allocs/op
+BenchmarkAudienceDigest/multiple-8       	 1000000	       219.1 ns/op	     112 B/op	       3 allocs/op
+BenchmarkAudienceDigest/multiple-8       	 1000000	       204.7 ns/op	     112 B/op	       3 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/projectiongw	4.980s

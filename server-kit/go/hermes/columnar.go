@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
+	"slices"
 	"strconv"
 	"time"
 
@@ -282,90 +282,51 @@ func (s *Store) GetColumnarBatch(ctx context.Context, projection string, query Q
 // collectRecordEntries — shared candidate collection used by getColumnarBatch.
 // ---------------------------------------------------------------------------
 
-func (p *partition) collectRecordEntries(ctx context.Context, registry *partitionRegistry, query Query) ([]recordEntry, error) {
-	if keys, ok := p.bitmapCandidates(registry, query); ok {
-		capacity := len(keys)
-		if query.Limit > 0 && capacity > query.Limit {
-			capacity = query.Limit
-		}
-		candidates := make([]recordEntry, 0, capacity)
-		for _, key := range keys {
-			if query.Limit > 0 && len(candidates) >= query.Limit {
-				break
-			}
-			entry, exists := p.recordEntry(registry, key)
-			if exists {
-				candidates = append(candidates, entry)
-			}
-		}
-		return candidates, nil
-	}
-
-	ordered := p.orderedCandidateIndex(registry, query)
+func (p *partition) collectRecordEntries(ctx context.Context, registry *partitionRegistry, query Query) ([]*recordEntry, error) {
 	index := p.candidateIndex(registry, query)
-	capacity := int(p.records.Load())
-	if query.Limit > 0 && ordered.len() > 0 {
-		capacity = query.Limit
-	} else if index != nil {
-		capacity = index.len()
+	capacity := index.len()
+	if query.Limit > 0 {
+		capacity = min(capacity, query.Limit)
 	}
-	if query.Limit > 0 && capacity > query.Limit {
-		capacity = query.Limit
-	}
-	candidates := make([]recordEntry, 0, capacity)
-
-	if query.Limit > 0 && ordered.len() > 0 {
-		var err error
-		ordered.forEachOrderDesc(func(order recordOrderEntry) bool {
-			if len(candidates) >= query.Limit {
-				return false
-			}
-			entry, ok := p.recordForOrderEntry(registry, order)
-			if !ok {
-				return true
-			}
-			if err = ctxErr(ctx); err != nil {
-				return false
-			}
-			if recordMatches(entry.record, p.spec, query) {
-				candidates = append(candidates, entry)
-			}
-			return true
-		})
-		return candidates, err
-	}
-
-	if index != nil {
-		var err error
-		index.forEachKey(func(key string) bool {
-			entry, ok := p.recordEntry(registry, key)
-			if !ok {
-				return true
-			}
-			if err = ctxErr(ctx); err != nil {
-				return false
-			}
-			if recordMatches(entry.record, p.spec, query) {
-				candidates = append(candidates, entry)
-			}
-			return true
-		})
-		return candidates, err
-	}
-
-	var err error
-	registry.records.Range(func(_ any, value any) bool {
-		entry, ok := recordEntryFromCell(value)
-		if !ok || !recordMatches(entry.record, p.spec, query) {
-			return true
-		}
-		if err = ctxErr(ctx); err != nil {
+	candidates := entryCandidates{entries: make([]*recordEntry, 0, capacity), limit: query.Limit}
+	var iterErr error
+	accept := func(entry *recordEntry) bool {
+		if iterErr = ctxErr(ctx); iterErr != nil {
 			return false
 		}
-		candidates = append(candidates, entry)
+		if entry != nil && recordMatches(entry.record, p.spec, query) {
+			candidates.add(entry)
+		}
 		return true
-	})
-	return candidates, err
+	}
+	visit := func(key string) bool { return accept(p.recordEntryPointer(registry, key)) }
+	if query.Limit > 0 && !registry.columnarUnordered.Load() {
+		index.forEachOrderDesc(func(order recordOrderEntry) bool {
+			if len(candidates.entries) >= query.Limit {
+				return false
+			}
+			entry := p.recordEntryPointer(registry, order.key)
+			if entry != nil && entry.version != order.version {
+				entry = nil
+			}
+			return accept(entry)
+		})
+		if iterErr != nil || !registry.columnarUnordered.Load() {
+			return candidates.entries, iterErr
+		}
+		// A concurrent publication invalidated the order proof. Rescan once with bounded selection.
+		candidates.entries = candidates.entries[:0]
+	}
+	if keys, ok := p.bitmapCandidates(registry, query); ok {
+		for _, key := range keys {
+			if !visit(key) {
+				break
+			}
+		}
+	} else {
+		index.forEachKey(visit)
+	}
+	return candidates.entries, iterErr
 }
 
 // ---------------------------------------------------------------------------
@@ -413,7 +374,7 @@ func (p *partition) getColumnarBatchWhere(ctx context.Context, query Query, fiel
 	collectQuery := query
 	collectQuery.Limit = 0
 	registry := p.activeRegistry()
-	var entries []recordEntry
+	var entries []*recordEntry
 	var err error
 	if plan, ok := p.bestRangeCandidatePlan(registry, collectQuery, predicates); ok {
 		entries, _, err = p.collectRangeEntries(ctx, registry, collectQuery, plan)
@@ -433,11 +394,11 @@ func (p *partition) collectRangeEntries(
 	registry *partitionRegistry,
 	query Query,
 	plan rangeCandidatePlan,
-) ([]recordEntry, int, error) {
+) ([]*recordEntry, int, error) {
 	if plan.snapshot == nil || plan.estimate == 0 {
 		return nil, 0, nil
 	}
-	entries := make([]recordEntry, 0, plan.estimate)
+	entries := make([]*recordEntry, 0, plan.estimate)
 	inspected := 0
 	var iterErr error
 	plan.forEach(func(candidate rangeIndexEntry) bool {
@@ -446,8 +407,8 @@ func (p *partition) collectRangeEntries(
 			return false
 		}
 		inspected++
-		entry, ok := p.recordEntry(registry, candidate.key)
-		if !ok || entry.version != candidate.version || !recordMatches(entry.record, p.spec, query) {
+		entry := p.recordEntryPointer(registry, candidate.key)
+		if entry == nil || entry.version != candidate.version || !recordMatches(entry.record, p.spec, query) {
 			return true
 		}
 		entries = append(entries, entry)
@@ -458,18 +419,8 @@ func (p *partition) collectRangeEntries(
 
 // sortAndLimitEntries applies the canonical batch order (descending UpdatedAt
 // → descending version → ascending RecordID), then the query limit.
-func sortAndLimitEntries(entries []recordEntry, query Query) []recordEntry {
-	if query.Limit <= 0 || len(entries) > 1 {
-		sort.Slice(entries, func(i, j int) bool {
-			if !entries[i].record.UpdatedAt.Equal(entries[j].record.UpdatedAt) {
-				return entries[i].record.UpdatedAt.After(entries[j].record.UpdatedAt)
-			}
-			if entries[i].version != entries[j].version {
-				return entries[i].version > entries[j].version
-			}
-			return entries[i].record.RecordID < entries[j].record.RecordID
-		})
-	}
+func sortAndLimitEntries(entries []*recordEntry, query Query) []*recordEntry {
+	slices.SortFunc(entries, compareColumnarEntries)
 	if query.Limit > 0 && len(entries) > query.Limit {
 		entries = entries[:query.Limit]
 	}
@@ -477,7 +428,7 @@ func sortAndLimitEntries(entries []recordEntry, query Query) []recordEntry {
 }
 
 // buildRecordBatch materializes the requested field vectors for the entries.
-func buildRecordBatch(fields []string, entries []recordEntry) (*RecordBatch, error) {
+func buildRecordBatch(fields []string, entries []*recordEntry) (*RecordBatch, error) {
 	rows := len(entries)
 	columns := make([]Column, 0, len(fields))
 	for _, field := range fields {
@@ -497,7 +448,7 @@ func buildRecordBatch(fields []string, entries []recordEntry) (*RecordBatch, err
 // map to fixed record attributes; any other field is resolved from the record's
 // data map, with the column type inferred from the first valid scalar value.
 // Zero-copy/borrowed-view semantics and allocation shape are preserved exactly.
-func buildFieldVector(field string, entries []recordEntry, rows int) (Vector, error) {
+func buildFieldVector(field string, entries []*recordEntry, rows int) (Vector, error) {
 	switch field {
 	case "_record":
 		vals := make([]database.DomainRecord, rows)
@@ -562,7 +513,7 @@ func buildFieldVector(field string, entries []recordEntry, rows int) (Vector, er
 // buildDataFieldVector resolves a non-reserved field from the record data map.
 // The column type is determined from the first valid scalar entry; an empty
 // string column is produced when no entry carries the field.
-func buildDataFieldVector(field string, entries []recordEntry, rows int) (Vector, error) {
+func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vector, error) {
 	// Determine column type from the first valid entry.
 	var kind byte
 	found := false

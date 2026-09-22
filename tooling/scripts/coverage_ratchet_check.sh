@@ -40,6 +40,10 @@ ok()   { echo "[OK] $1"; }
 warn() { echo "[WARN] $1"; }
 fail() { echo "[FAIL] $1"; shift; local d; for d in "$@"; do [[ -n "$d" ]] && echo "  $d"; done; failed=1; }
 
+measurements="$(mktemp "${TMPDIR:-/tmp}/foundation-coverage-measurements.XXXXXX")"
+command_output="$(mktemp "${TMPDIR:-/tmp}/foundation-coverage-command.XXXXXX")"
+trap 'rm -f "$measurements" "$command_output"' EXIT
+
 # Measure statement coverage for every package across all Go module roots.
 # Emits "package<TAB>pct" lines; skips packages with no test files / no statements.
 measure() {
@@ -47,7 +51,12 @@ measure() {
   for root in server-kit/go runtime-transport/go runtime-sdk/go config-contracts/go; do
     [[ -f "$target/$root/go.mod" ]] || continue
     mod="$(awk 'NR==1{print $2}' "$target/$root/go.mod")"
-    ( cd "$target/$root" && go test -cover ./... 2>/dev/null ) | awk -v mod="$mod" '
+    if ! ( cd "$target/$root" && go test -cover ./... ) > "$command_output" 2>&1; then
+      cat "$command_output" >&2
+      echo "[FAIL] coverage command failed: $root" >&2
+      return 1
+    fi
+    awk -v mod="$mod" '
       /\[no test files\]/ { next }
       /\[no statements\]/ { next }
       {
@@ -59,18 +68,39 @@ measure() {
         # Generated code (protobuf, etc.) is not hand-authored; do not gate it.
         if (pkg ~ /\/generated\//) next
         if (pkg!="" && pct!="") printf "%s\t%s\n", pkg, pct
-      }'
+      }' "$command_output"
   done
 }
+
+# Preserve test failures before parsing successful package summaries.
+if ! measure > "$measurements"; then
+  echo "coverage ratchet check failed; baseline unchanged"
+  exit 1
+fi
 
 typeset -A current
 while IFS=$'\t' read -r pkg pct; do
   [[ -n "$pkg" ]] && current[$pkg]="$pct"
-done < <(measure)
+done < "$measurements"
 
 if [[ "${#current[@]}" -eq 0 ]]; then
   fail "coverage measurement produced no packages" "is the Go toolchain available?"
   echo "coverage ratchet check failed"
+  exit 1
+fi
+
+# Require evidence for every recorded package before checking or updating floors.
+if [[ -f "$baseline" ]]; then
+  while IFS='|' read -r pkg floor tgt; do
+    [[ -z "$pkg" || "$pkg" == \#* ]] && continue
+    if [[ -z "${current[$pkg]:-}" ]]; then
+      fail "package in baseline not measured: $pkg" \
+           "Restore coverage evidence or explicitly review package retirement before updating."
+    fi
+  done < "$baseline"
+fi
+if [[ "$failed" -ne 0 ]]; then
+  echo "coverage ratchet check failed; baseline unchanged"
   exit 1
 fi
 
@@ -124,10 +154,6 @@ while IFS='|' read -r pkg floor tgt; do
   seen[$pkg]=1
   short="${pkg##*/server-kit/go/}"; short="${short##*ovasabi_foundation/}"
   cur="${current[$pkg]:-}"
-  if [[ -z "$cur" ]]; then
-    warn "package in baseline not measured: $short (deleted or no tests?)"
-    continue
-  fi
   # Regression gate applies to every package, including service-lane ones:
   # current must not drop below the recorded floor (minus tolerance).
   if awk -v c="$cur" -v f="$floor" -v t="$TOLERANCE" 'BEGIN{exit !(c < f - t)}'; then

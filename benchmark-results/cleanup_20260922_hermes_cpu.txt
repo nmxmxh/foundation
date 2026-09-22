@@ -1,0 +1,20 @@
+File: hermes.test
+Type: cpu
+Time: 2026-09-22 14:10:02 WAT
+Duration: 2.52s, Total samples = 2550ms (101.03%)
+Showing nodes accounting for 1570ms, 61.57% of 2550ms total
+Dropped 47 nodes (cum <= 12.75ms)
+Showing top 12 nodes out of 117
+      flat  flat%   sum%        cum   cum%
+     310ms 12.16% 12.16%      700ms 27.45%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.(*partition).recordEntry
+     230ms  9.02% 21.18%      970ms 38.04%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.(*partition).collectRecordEntries.func2
+     180ms  7.06% 28.24%      470ms 18.43%  sort.partition_func
+     170ms  6.67% 34.90%      270ms 10.59%  internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).Load
+     130ms  5.10% 40.00%      270ms 10.59%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.sortAndLimitEntries.func1
+     120ms  4.71% 44.71%      120ms  4.71%  runtime.memmove
+      80ms  3.14% 47.84%       90ms  3.53%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/database.RecordData.Get
+      80ms  3.14% 50.98%       80ms  3.14%  runtime.pthread_cond_signal
+      70ms  2.75% 53.73%      110ms  4.31%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.(*shardedMap).getShard
+      70ms  2.75% 56.47%      110ms  4.31%  runtime.tryDeferToSpanScan
+      70ms  2.75% 59.22%       70ms  2.75%  runtime.usleep
+      60ms  2.35% 61.57%       60ms  2.35%  internal/strconv.readFloat

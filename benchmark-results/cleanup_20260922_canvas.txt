@@ -1,0 +1,19 @@
+[RUN] vitest /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host bench --run src/renderSurface.bench.ts --reporter=verbose --no-file-parallelism
+
+ RUN  v5.0.0 /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host
+
+ ✓ |bench| src/renderSurface.bench.ts > render surface loop throughput 28916ms
+   name                                                    hz     min     max    mean     p75     p99    p995    p999     rme   samples
+   draw step writing a reused frame descriptor  30,395,003.93  0.0000  3.0472  0.0000  0.0000  0.0000  0.0000  0.0001  ±0.92%  38610618   fastest
+   draw step building a frame object literal    29,309,464.53  0.0000  4.3505  0.0000  0.0000  0.0000  0.0000  0.0001  ±1.84%  35840068
+ ✓ |bench| src/renderSurface.bench.ts > canvas stage frame gating throughput 21606ms
+   name                                                hz     min     max    mean     p75     p99    p995    p999     rme   samples
+   canvas stage cadence-skipped frame       26,311,894.59  0.0000  0.0908  0.0000  0.0000  0.0000  0.0000  0.0001  ±0.12%  32407528   fastest
+   canvas stage eligible frame bookkeeping  23,791,153.52  0.0000  7.2157  0.0000  0.0000  0.0000  0.0001  0.0002  ±1.92%  22434647
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  14:07:27
+   Duration  50.66s (tests 100%)
+
+[OK] vitest /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host

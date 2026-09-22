@@ -1,0 +1,193 @@
+{
+  "schemaVersion": "1.0",
+  "objective": "Implement measured runtime, isolation, and tooling improvements from the cleanup review.",
+  "risk": "Tier 1 for security headers, projection cache audience isolation, and concurrent record ownership; Tier 2 for tooling.",
+  "filesTouched": [
+    "server-kit/go/hermes/apply.go",
+    "server-kit/go/hermes/columnar.go",
+    "server-kit/go/hermes/columnar_pushdown.go",
+    "server-kit/go/hermes/indexes.go",
+    "server-kit/go/hermes/store.go",
+    "server-kit/go/hermes/columnar_candidates.go",
+    "server-kit/go/hermes/columnar_assembly_test.go",
+    "server-kit/go/hermes/columnar_candidates_test.go",
+    "server-kit/go/security/middleware.go",
+    "server-kit/go/security/headers_test.go",
+    "server-kit/go/projectiongw/snapshot_cache.go",
+    "server-kit/go/projectiongw/snapshot_cache_isolation_test.go",
+    "scripts/update-project.sh",
+    "scripts/lib/foundation.sh",
+    "scripts/lib/scaffold.sh",
+    "tooling/scripts/command_timeout.sh",
+    "tooling/scripts/contract_drift_check.sh",
+    "tooling/scripts/go_static_analysis_check.sh",
+    "tooling/scripts/server_kit_module_contract_check.sh",
+    "tooling/scripts/coverage_ratchet_check.sh",
+    "tooling/scripts/enforcement_integrity_check.sh",
+    "tooling/enforcement_manifest.tsv",
+    "tooling/coverage_baseline.psv",
+    "tooling/benchmark_baseline.psv",
+    "tooling/benchmark_ratchet_packages.tsv",
+    "tests/command_timeout_test.sh",
+    "tests/coverage_ratchet_test.sh",
+    "tests/update_project_test.sh",
+    "tests/core_validation_contract_test.sh",
+    "README.md",
+    "docs/foundation_cleanup_review_20260922.md",
+    "docs/foundation_benchmarks.md",
+    "docs/hermes_hotplane.md",
+    "docs/scaffold_manifest.md",
+    "docs/performance_lab.md",
+    "docs/future_practices_research.md",
+    "docs/testing_practices.md",
+    "docs/projection_freshness_contract.md",
+    "cmd/ovasabi/main.go",
+    "cmd/ovasabi/refresh_test.go",
+    "server-kit/go/projectiongw/snapshot_cache_test.go"
+  ],
+  "contractsChanged": [
+    "No exported API signatures, wire schemas, or database schemas changed.",
+    "Limited columnar reads now enforce canonical order when publication order differs.",
+    "Internal audience cache keys use unambiguous length framing.",
+    "Updater script and CLI update/refresh add --skip-deps. Dependency commands have a configurable 120-second deadline.",
+    "Coverage checks reject incomplete or failed measurements before baseline updates."
+  ],
+  "invariants": [
+    "Tenant and audience scope remain authoritative on projection reads.",
+    "Immutable entries stay internal; returned vector and borrowed-view ownership rules remain unchanged.",
+    "Ordering is descending UpdatedAt, descending version, ascending RecordID.",
+    "Headers retain their exact values and independent response ownership.",
+    "Allocation ceilings only decrease and coverage floors only increase."
+  ],
+  "scopeBoundary": "Foundation Core runtime internals, Core-owned scaffold distribution, and enforcement tooling. No consuming application was changed.",
+  "fallback": [
+    "Unordered limited selection inspects candidates with a bounded heap. A concurrent proof invalidation triggers at most one rescan.",
+    "Uncacheable projection requests retain the uncached path.",
+    "Missing Perl prevents an unbounded command. Deadline expiry terminates its process group.",
+    "Dependency synchronization can run manually after --skip-deps or a reported failure."
+  ],
+  "regressionEvidence": [
+    {
+      "test": "TestColumnarLimitUsesCanonicalOrder",
+      "before": "Failed: returned tick5,tick6,tick7 instead of tick0,tick1,tick2.",
+      "after": "Pass, including equality-filter variants."
+    },
+    {
+      "test": "TestSecurityHeadersAllocationBudget",
+      "before": "HTTP headers allocated 9 times against a budget of 1.",
+      "after": "HTTP 1; HTTPS 2."
+    },
+    {
+      "test": "TestSnapshotCacheSeparatesAudienceBoundaries",
+      "before": "The HTTP snapshot for audience a\\x00b returned the cached record for the separate a,b audience set.",
+      "after": "Pass; disjoint records and reusable entries remain separated."
+    },
+    {
+      "test": "tests/coverage_ratchet_test.sh",
+      "before": "The original checker accepted a missing recorded package.",
+      "after": "Failed commands, absent evidence, regressions, and incomplete updates are rejected."
+    },
+    {
+      "test": "tests/command_timeout_test.sh",
+      "after": "Pass: arguments, exit status, diagnostics, signals, invalid bounds, missing executables, missing Perl, descendants, zsh, and dependency wrapper."
+    }
+  ],
+  "validation": [
+    {
+      "command": "go test -race ./hermes ./security ./httpapi -coverprofile=<profile>",
+      "directory": "server-kit/go",
+      "result": "PASS"
+    },
+    {
+      "command": "go test -race ./projectiongw -coverprofile=<profile>",
+      "directory": "server-kit/go",
+      "result": "PASS; local listeners required sandbox escalation."
+    },
+    {
+      "command": "go vet ./hermes ./security ./httpapi ./projectiongw",
+      "directory": "server-kit/go",
+      "result": "PASS"
+    },
+    {
+      "command": "GOPROXY=off GOSUMDB=off make check-coverage-ratchet",
+      "result": "PASS across all four Go module roots; dependencies came from local caches."
+    },
+    {
+      "command": "make check-benchmark-ratchet",
+      "result": "PASS: 48 gated workloads. HTTP ceilings tighten to 74 and 68; Hermes full assembly uses 11 allocations and 251104 bytes."
+    },
+    {
+      "command": "GOPROXY=off GOSUMDB=off make check-update-project check-init-project check-scaffold-idempotency",
+      "result": "PASS; update fixture spies confirm --skip-deps does not invoke npm or Go."
+    },
+    {
+      "command": "make check-core-validation-contract check-contract-drift check-server-kit-module-contract check-doc-references check-benchmark-evidence check-practice-controls check-agent-contract check-runtime-performance-contracts check-managed-patch-hygiene check-coding-practices check-go-concurrency-practices check-enforcement-integrity",
+      "result": "PASS; final documentation, benchmark evidence, integrity, and practice checks also pass."
+    },
+    {
+      "command": "STATICCHECK_CACHE=/tmp/foundation-staticcheck-cache staticcheck ./hermes ./security ./httpapi ./projectiongw",
+      "directory": "server-kit/go",
+      "result": "PASS after redirecting the sandbox-restricted cache."
+    },
+    {
+      "command": "go test ./... -coverprofile=<profile> && go vet ./...",
+      "directory": "cmd/ovasabi",
+      "result": "PASS; CLI flag forwarding is covered."
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS"
+    },
+    {
+      "command": "make check-doc-references check-benchmark-evidence check-core-validation-contract check-enforcement-integrity",
+      "result": "PASS on the final artifacts."
+    }
+  ],
+  "coverage": {
+    "hermes_before": 84.2,
+    "hermes_after": 84.7,
+    "security_before": 89.7,
+    "security_after": 89.9,
+    "projectiongw_before": 94.4,
+    "projectiongw_after": 95.8,
+    "projectiongw_race_after": 95.7,
+    "new_candidate_functions": 100,
+    "collectRecordEntries": 96.8,
+    "collectRangeEntries": 100,
+    "SecurityHeaders": 100,
+    "legacyNote": "Hermes, security, and CLI remain below the 95% package target. Their coverage increases. New candidate functions and changed selection/header functions meet the target.",
+    "cli_after": 72.8,
+    "cli_before": 72.4
+  },
+  "benchmarkEvidence": [
+    "benchmark-results/implementation_20260922_metadata.json",
+    "benchmark-results/implementation_20260922_comparison.txt",
+    "benchmark-results/implementation_20260922_ratchet.txt",
+    "benchmark-results/implementation_20260922_coverage.txt"
+  ],
+  "limitations": [
+    "Full make verify was not run: local Rust is 1.92.0; the CI baseline is 1.95.0.",
+    "No live PostgreSQL/Redis, consumer application, production canary, retained RSS, or cross-device evidence.",
+    "Timing is local fixture evidence; bytes/op measures temporary allocations, not retained process memory.",
+    "The initial write and HTTP timing comparisons were superseded by alternating original and changed binaries; both captures remain available.",
+    "The audience fix is local and has not been rolled out to production consumers.",
+    "An unordered 10K limit-50 query still measures 1.674ms and 428.1KiB because it must inspect candidates and reconcile existing index deltas. The ordered-read improvements do not represent this workload."
+  ],
+  "documentation": "Benchmark boundaries, ownership, canonical ordering, audience key framing, updater recovery, and coverage failure behavior are documented.",
+  "reviewNotes": [
+    "The concurrency checker reports two existing scope_signal.go review items. The lock protects channel-close ownership; the select has an explicit nonblocking drop branch. No changes were required.",
+    "The initial projection gateway coverage was below its recorded floor. Cached HTTP isolation and invalid-request tests restore the floor. An unused private invalidation helper was removed; epoch validation remains the active path.",
+    "The projection-audience project wiring check is inapplicable to Core. Gateway scope and audience behavior is tested directly."
+  ],
+  "sourceHashes": {
+    "server-kit/go/hermes/apply.go": "c22e2829cc80c6bdf0c81976859dd2a8dd3f1cbb8df50649c39a3d82c3c00c33",
+    "server-kit/go/hermes/columnar.go": "dc30da1de2c204005496310ace172d8c19cbf01f45607756c437c53c707f4835",
+    "server-kit/go/hermes/columnar_pushdown.go": "158f08a345c179dcea88697c62ea64b3f01241cdf1960d9d4356d149d7261e22",
+    "server-kit/go/hermes/indexes.go": "10e5f82b2321665b1fe3dc80e9627b505933496c43fc2100259b219a48849b13",
+    "server-kit/go/hermes/store.go": "53c3e5603ed3a0bf66f7a8bfcdabf25c757b7ee3da9ffd5ae8f52fdc723c18af",
+    "server-kit/go/hermes/columnar_candidates.go": "fa659f3103bf954a4fca57e70dfd0b6c7c6473c3e00d4d1c173995f202aac02f",
+    "server-kit/go/security/middleware.go": "55a14b990558bb0f43ec26495fab2fd51bf265cb1a28ffe587f9e6612dd0375b",
+    "server-kit/go/projectiongw/snapshot_cache.go": "44f9a851ef64ce6f4132cea44858465e6b51d168205dea8bc302a3f4fbf5ef40",
+    "cmd/ovasabi/main.go": "df19c4c2505e8c8d936c0ae90012a89a35687d087b5dc8a59a0d382cd1e8e47a"
+  }
+}

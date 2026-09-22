@@ -37,7 +37,6 @@ await build({
     wyw({
       include: ["**/ui-minimal/ts/src/**/*.{ts,tsx}"],
       prefixer: false,
-      babelOptions: { presets: ["@babel/preset-typescript", ["@babel/preset-react", { runtime: "automatic" }]] },
     }),
   ],
   build: {

@@ -2,6 +2,7 @@ package projectiongw
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"sort"
 	"strings"
@@ -21,12 +22,8 @@ import (
 //
 // Only the canonical cold-start shape is cached — no resume watermark, no
 // keyset cursor. Those requests are per-client by construction and would each
-// occupy an entry for one use. Audience-partitioned scopes are not cached here
-// either: their response depends on the caller's audience set, and the union
-// read that produces them has no unfiltered page to key on. wire.go's framed-
-// record primitive is what that case needs, and is already built and tested
-// against it; wiring it in requires restructuring the audience read path, which
-// is deliberately not part of this change.
+// occupy an entry for one use. Audience scopes include a digest of the caller's
+// normalized membership set in the cache key.
 //
 // The cache is opt-in (WithSnapshotCache). A zero budget disables it, which is
 // the default: it trades memory for encode time and that trade belongs to the
@@ -74,12 +71,13 @@ func audienceDigest(audiences []string) string {
 		return ""
 	}
 	sort.Strings(normalized)
-	// A length prefix per id keeps the digest injective: {"a","bc"} and
-	// {"ab","c"} must not hash to the same key.
+	// Length prefixes keep distinct sets separate, including identifiers that contain zero bytes.
 	sum := sha256.New()
+	var length [8]byte
 	for _, id := range normalized {
+		binary.LittleEndian.PutUint64(length[:], uint64(len(id)))
+		_, _ = sum.Write(length[:])
 		_, _ = sum.Write([]byte(id))
-		_, _ = sum.Write([]byte{0})
 	}
 	return hex.EncodeToString(sum.Sum(nil)[:16])
 }
@@ -166,21 +164,6 @@ func (c *snapshotCache) store(key snapshotCacheKey, entry *snapshotCacheEntry) {
 	c.entries[key] = entry
 	c.bytes += len(entry.body)
 	c.evictLocked()
-}
-
-// invalidateScope drops every entry for a scope regardless of vector mode or
-// limit. Used when a scope is known to have changed out of band.
-func (c *snapshotCache) invalidateScope(scope string) {
-	if c == nil {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	for key, entry := range c.entries {
-		if key.scope == scope {
-			c.removeLocked(key, entry)
-		}
-	}
 }
 
 func (c *snapshotCache) removeLocked(key snapshotCacheKey, entry *snapshotCacheEntry) {

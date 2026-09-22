@@ -167,98 +167,17 @@ The 8 canonical invariants from `foundation_nervous_system.md`:
 
 ## Part 4: Practice Control Quick Reference
 
-### Coding Practices (CP-01 through CP-36)
+The canonical rules live in two documents:
 
-| Rule | Summary |
-| :--- | :--- |
-| CP-01 | No goto, no uncontrolled recursion |
-| CP-02 | All loops, retries, and time-consuming operations must be bounded |
-| CP-03 | Functions ≤80 lines, cyclomatic complexity ≤15 |
-| CP-04 | Check return values and propagate errors intentionally |
-| CP-05 | Use assertions/invariants at boundaries |
-| CP-06 | Minimize mutable shared state and scope data tightly |
-| CP-07 | Apply allocation discipline in hot paths |
-| CP-07b | Specify hot-path behavior before optimizing |
-| CP-08 | Zero-warning mindset and static analysis in CI |
-| CP-09 | Restrict unsafe and reflection-heavy patterns |
-| CP-10 | Keep event contracts deterministic and idempotent |
-| CP-11 | Code for testability-first behavior |
-| CP-11A | Use cleanup and unlock patterns deliberately |
-| CP-12 | Keep documentation and traceability current |
-| CP-13 | Prefer styled-component architecture and shared UI primitives |
-| CP-14 | Form state should default to a single object model |
-| CP-15 | Use lodash intentionally to reduce code bloat |
-| CP-16 | Prefer adaptive concurrency over fixed internal request pacing |
-| CP-17 | Frontend realtime architecture must stay contract-first and minimal |
-| CP-18 | Ingress edge security, abuse resistance, and origin controls |
-| CP-19 | Frontend token and secret lifecycle safety |
-| CP-20 | Defence in depth: validation, authorization, and state safety |
-| CP-21 | Frontend resilience and error isolation |
-| CP-22 | Operational monitoring and startup safety |
-| CP-23 | Safe asset management and storage |
-| CP-24 | Offload slow context operations to background workers |
-| CP-25 | Frontend request replay, dedupe, and loading state must be scoped |
-| CP-26 | Frontend boot, runtime singleton, and stale-build recovery |
-| CP-27 | Browser boundary, headers, and cache control must be explicit |
-| CP-28 | Dependency, third-party integration, and secret supply chain hygiene |
-| CP-29 | Adversarial threat modeling for exposed features |
-| CP-30 | Use coverage plus complexity to prioritize change risk |
-| CP-31 | MutationObserver is exception-only architecture |
-| CP-32 | Runtime communication must use foundation transport contracts |
-| CP-33 | Post-quantum readiness must be crypto-agile and hot-path safe |
-| CP-34 | Observability, SLOs, and fault tests are foundation requirements |
-| CP-35 | River / background job reliability and scaling |
-| CP-36 | Agent-authored changes must carry evidence |
+- `coding_practices.md`: coding controls (`CP-*`).
+- `testing_practices.md`: testing controls (`TE-*`).
 
-Full rules: `coding_practices.md`
+`tooling/practice_controls.psv` maps every rule to its owner, enforcement,
+evidence, and merge gate. `make check-practice-controls` verifies this mapping.
+Use that matrix to distinguish automated checks from review obligations.
 
-### Testing Practices (TE-01 through TE-41)
-
-| Rule | Summary |
-| :--- | :--- |
-| TE-01 | Tests are part of the architecture contract |
-| TE-02 | Use black-box tests before structural tests |
-| TE-03 | Define an oracle for every test |
-| TE-04 | Select cases by equivalence classes, boundaries, and duplicates |
-| TE-05 | Cross-product only where interactions matter |
-| TE-06 | Coverage is a floor, not proof |
-| TE-07 | Test loops and retries at zero, one, two, many, and exhausted |
-| TE-08 | Every mutating test command carries correlation and idempotency evidence |
-| TE-09 | Tenant isolation tests must be negative as well as positive |
-| TE-10 | Event lifecycle tests are required for domain flows |
-| TE-11 | Runtime envelope and binary-frame parity must be tested |
-| TE-12 | Database tests must prove constraints, not only app prechecks |
-| TE-13 | Redis and cache tests must distinguish ephemeral state from truth |
-| TE-14 | Worker tests must prove idempotency and bounded progress |
-| TE-15 | Frontend tests must exercise user-visible behavior and transport state |
-| TE-16 | WASM/Rust runtime tests must prove host/guest contract safety |
-| TE-17 | Concurrency tests must make ownership and termination observable |
-| TE-18 | Performance tests must separate hard bounds from statistical targets |
-| TE-19 | Security tests must target trust boundaries |
-| TE-20 | Regression tests are mandatory for repaired defects |
-| TE-21 | Integration tests must own their environment |
-| TE-22 | Stubs, mocks, and fakes must preserve the contract they replace |
-| TE-23 | Test data must be explicit, minimal, and domain-shaped |
-| TE-24 | Tests must not hide failures behind broad skips |
-| TE-25 | Generated contracts must be checked for drift |
-| TE-26 | Test documentation must explain risk, not restate code |
-| TE-27 | Test files must stay deterministic |
-| TE-28 | Acceptance and E2E tests must cover core journeys |
-| TE-29 | Model-based tests are required for stateful protocols |
-| TE-30 | Fault-based tests must target likely Foundation bug classes |
-| TE-31 | Use property tests for invariant-heavy code |
-| TE-32 | Acceptance mutation hardens generated acceptance tests |
-| TE-33 | Test suites must be organized by speed and dependency |
-| TE-34 | Test failures must preserve diagnostics |
-| TE-35 | Test automation must be reproducible locally |
-| TE-36 | Testing checks are linted as part of Foundation |
-| TE-37 | Update this document when test strategy changes |
-| TE-38 | Service-backed pressure tests prove substrate claims |
-| TE-39 | Scaffold smoke belongs in verify, not fast lint |
-| TE-40 | Benchmark and latency statistics must be sound |
-| TE-41 | Agent-generated test changes must prove oracle strength |
-
-Full rules: `testing_practices.md`
+This glossary does not duplicate the rule tables. Earlier copies omitted newer
+controls and became stale while the canonical documents continued to evolve.
 
 ---
 

@@ -1,0 +1,26 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarUnorderedLimit50/rows128-8         	    9518	     24394 ns/op	    8057 B/op	      12 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows128-8         	    9550	     23874 ns/op	    8056 B/op	      12 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows128-8         	   10000	     23890 ns/op	    8056 B/op	      12 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows128-8         	    9943	     24168 ns/op	    8056 B/op	      12 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows128-8         	   10000	     24135 ns/op	    8056 B/op	      12 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows128-8         	    9578	     26084 ns/op	    8056 B/op	      12 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows128-8         	    9872	     24379 ns/op	    8056 B/op	      12 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows128-8         	   10000	     24172 ns/op	    8056 B/op	      12 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows128-8         	   10000	     24182 ns/op	    8056 B/op	      12 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows128-8         	   10000	     24016 ns/op	    8056 B/op	      12 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows10000-8       	     150	   1635216 ns/op	  438352 B/op	      42 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows10000-8       	     144	   1624852 ns/op	  438352 B/op	      42 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows10000-8       	     130	   1777251 ns/op	  438352 B/op	      42 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows10000-8       	     116	   2028016 ns/op	  438352 B/op	      42 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows10000-8       	     133	   1766814 ns/op	  438352 B/op	      42 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows10000-8       	     144	   1684698 ns/op	  438352 B/op	      42 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows10000-8       	     134	   1668980 ns/op	  438352 B/op	      42 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows10000-8       	     138	   1679239 ns/op	  438352 B/op	      42 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows10000-8       	     139	   1664253 ns/op	  438352 B/op	      42 allocs/op
+BenchmarkHermesColumnarUnorderedLimit50/rows10000-8       	     141	   1648616 ns/op	  438352 B/op	      42 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	6.188s

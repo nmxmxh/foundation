@@ -50,7 +50,7 @@ describe("quality tier tokens (chromium)", () => {
   it("swaps to cheap shadows, drops blur and stops the shimmer on low_power", async () => {
     const { getByTestId } = mount();
     await setTier("low_power");
-    expect(getComputedStyle(getByTestId("card")).boxShadow).toBe("rgba(28, 28, 30, 0.12) 0px 1px 2px 0px");
+    expect(getComputedStyle(getByTestId("card")).boxShadow).toBe("rgba(28, 28, 30, 0.16) 0px 1px 0px 0px");
     expect(getComputedStyle(getByTestId("backdrop")).backdropFilter).toBe("none");
     expect(getComputedStyle(getByTestId("skeleton"), "::after").animationName).toBe("none");
   });
@@ -63,10 +63,10 @@ describe("quality tier tokens (chromium)", () => {
     expect(getComputedStyle(getByTestId("skeleton"), "::after").animationName).toBe("none");
   });
 
-  it("changes nothing on balanced, which has no CSS yet", async () => {
+  it("uses a smaller shadow on balanced while retaining backdrop blur", async () => {
     const { getByTestId } = mount();
     await setTier("balanced");
-    expect(getComputedStyle(getByTestId("card")).boxShadow).toBe("rgba(28, 28, 30, 0.22) 0px 10px 28px -18px");
+    expect(getComputedStyle(getByTestId("card")).boxShadow).toBe("rgba(28, 28, 30, 0.1) 0px 2px 6px 0px");
     expect(getComputedStyle(getByTestId("backdrop")).backdropFilter).toBe("blur(4px)");
   });
 });

@@ -36,7 +36,17 @@ BASELINE_GENERATION=legacy
 EOF
 
 test_step "update legacy fixture from current foundation"
-"$FOUNDATION_DIR/scripts/update-project.sh" "$PROJECT_DIR" >/dev/null
+mkdir -p "$PROJECT_DIR/dependency-spies"
+cat > "$PROJECT_DIR/dependency-spies/npm" <<'EOF'
+#!/bin/bash
+printf '%s\n' "$0 $*" >> "$DEPENDENCY_SPY_LOG"
+exit 1
+EOF
+cp "$PROJECT_DIR/dependency-spies/npm" "$PROJECT_DIR/dependency-spies/go"
+chmod +x "$PROJECT_DIR/dependency-spies/npm" "$PROJECT_DIR/dependency-spies/go"
+DEPENDENCY_SPY_LOG="$PROJECT_DIR/dependency-spy.log" PATH="$PROJECT_DIR/dependency-spies:$PATH" \
+    "$FOUNDATION_DIR/scripts/update-project.sh" "$PROJECT_DIR" --skip-deps >/dev/null
+assert_absent "dependency-spy.log"
 
 assert_contains ".foundation" "^WITH_WASM=true$"
 assert_contains ".foundation" "^BASELINE_GENERATION=manifest-v4$"

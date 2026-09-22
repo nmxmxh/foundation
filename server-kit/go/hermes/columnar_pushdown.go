@@ -57,7 +57,7 @@ func PredicateString(field string, op CompareOp, operand string) ColumnPredicate
 }
 
 // matches evaluates the predicate against one candidate entry.
-func (p ColumnPredicate) matches(entry recordEntry) bool {
+func (p ColumnPredicate) matches(entry *recordEntry) bool {
 	switch p.Field {
 	case "record_id":
 		return p.kind == predicateString && compareMatches(p.Op, entry.record.RecordID, p.stringOperand)
@@ -108,7 +108,7 @@ func (p ColumnPredicate) matchesDataField(data database.RecordData) bool {
 
 // filterEntriesInPlace keeps only entries matching every predicate, reusing
 // the candidate slice's storage.
-func filterEntriesInPlace(entries []recordEntry, predicates []ColumnPredicate) []recordEntry {
+func filterEntriesInPlace(entries []*recordEntry, predicates []ColumnPredicate) []*recordEntry {
 	if len(predicates) == 0 {
 		return entries
 	}
@@ -125,6 +125,7 @@ func filterEntriesInPlace(entries []recordEntry, predicates []ColumnPredicate) [
 			kept = append(kept, entry)
 		}
 	}
+	clear(entries[len(kept):])
 	return kept
 }
 

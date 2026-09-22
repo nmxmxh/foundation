@@ -44,6 +44,11 @@ default_paths() {
     tests/migration_seed_policy_test.sh \
     tests/lifecycle_contract_generator_test.sh \
     tests/core_validation_contract_test.sh \
+    tests/benchmark_ratchet_test.sh \
+    tests/benchmark_history_test.sh \
+    tests/practice_controls_test.sh \
+    tests/command_timeout_test.sh \
+    tests/coverage_ratchet_test.sh \
     tests/frontend_commands_generator_test.sh
   find "$target/tooling/scripts" -maxdepth 1 -type f | while IFS= read -r file; do
     printf '%s\n' "${file#$target/}"

@@ -1,4 +1,5 @@
-import { test } from "vitest";
+import { expect, test } from "vitest";
+import { createCanvasStage } from "./canvasStage";
 import type { RenderSurfaceFrame } from "./renderSurfaceClient";
 
 /*
@@ -58,24 +59,36 @@ test("render surface loop throughput", async ({ bench }) => {
       sink += frame.width + frame.height + frame.detail;
     }),
   );
+  expect(sink).toBeGreaterThan(0);
 });
 
 test("canvas stage frame gating throughput", async ({ bench }) => {
-  let lastDrawAt = 0;
   const cadenceMs = 25;
-  const width = 800;
-  const height = 600;
-  const maxRatio = 1.5;
+  // Node measures SDK bookkeeping. Browser layout and GPU work need the frontend lab.
+  const canvas = { clientWidth: 800, clientHeight: 600, width: 800, height: 600 } as HTMLCanvasElement;
+  const drawing = createCanvasStage(canvas, null, { cadenceMs });
+  const gated = createCanvasStage(canvas, null, { cadenceMs });
+  gated.frame(cadenceMs);
+  let now = 0;
   let sink = 0;
-
-  await bench("cadence and scale gating check", () => {
-    const now = 1000;
-    if (now - lastDrawAt >= cadenceMs) {
-      lastDrawAt = now;
-      const ratio = Math.min(2, maxRatio);
-      const backingWidth = Math.round(width * ratio);
-      const backingHeight = Math.round(height * ratio);
-      sink += backingWidth + backingHeight;
-    }
-  }).run();
+  let skipped = 0;
+  try {
+    await bench.compare(
+      bench("canvas stage eligible frame bookkeeping", () => {
+        now += cadenceMs;
+        const frame = drawing.frame(now);
+        if (!frame) throw new Error("eligible frame was skipped");
+        sink += frame.width + frame.height;
+      }),
+      bench("canvas stage cadence-skipped frame", () => {
+        if (gated.frame(cadenceMs) !== null) throw new Error("early frame was drawn");
+        skipped += 1;
+      }),
+    );
+    expect(sink).toBeGreaterThan(0);
+    expect(skipped).toBeGreaterThan(0);
+  } finally {
+    drawing.dispose();
+    gated.dispose();
+  }
 });

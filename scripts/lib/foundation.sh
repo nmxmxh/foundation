@@ -89,6 +89,11 @@ foundation_log_success() { echo -e "\033[0;32m[SUCCESS]\033[0m $1"; }
 foundation_log_warn() { echo -e "\033[1;33m[WARN]\033[0m $1"; }
 foundation_log_error() { echo -e "\033[0;31m[ERROR]\033[0m $1"; }
 
+foundation_run_dependency_command() {
+    source "$FOUNDATION_DIR/tooling/scripts/command_timeout.sh"
+    run_with_timeout "${FOUNDATION_DEPENDENCY_TIMEOUT_SEC:-120}" "$@"
+}
+
 foundation_read_metadata_value() {
     local file="$1"
     local key="$2"

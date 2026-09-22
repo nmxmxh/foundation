@@ -7,7 +7,7 @@
 ./appbench|BenchmarkAppLane_DirectFrame_DomainCall|1|32|44.17
 ./appbench|BenchmarkAppLane_HTTPIngress_JSONBodyKilobyte|32|17828|21630
 ./appbench|BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest|43|12508|7393
-./appbench|BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC|81|11286|10976
+./appbench|BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC|74|11286|8018
 ./appbench|BenchmarkAppLane_Retry_CanceledWait|2|96|178.1
 ./appbench|BenchmarkAppLane_Retry_NoRetrySuccess|0|0|8.960
 ./appbench|BenchmarkNullLane_00_GoCall|0|0|3.750
@@ -16,7 +16,7 @@
 ./appbench|BenchmarkNullLane_03_HTTPDispatchBuild|14|2891|2350
 ./appbench|BenchmarkNullLane_04_HTTPRouteHandler|14|2891|2357
 ./appbench|BenchmarkNullLane_05_HTTPRouteHandlerCorrelated|22|3756|2898
-./appbench|BenchmarkNullLane_06_HTTPSecuredChain|75|6837|8992
+./appbench|BenchmarkNullLane_06_HTTPSecuredChain|68|6837|7492
 ./appbench|BenchmarkNullLane_07_JSONObjectMaterialization|1|48|265.4
 ./chain|BenchmarkHasCriticalFailure|0|0|117.1
 ./chain|BenchmarkHasCriticalFailureOrdered|0|0|7.290
@@ -44,6 +44,7 @@
 ./grpcsvc|BenchmarkGeneratedProtoUnmarshalMergeReuse|5|56|290.6
 ./grpcsvc|BenchmarkGeneratedProtoUnmarshalReset|6|152|435.6
 ./grpcsvc|BenchmarkRouterDispatchFrameDirect|0|0|39.16
+./hermes|BenchmarkHermesColumnarBitmapFilterSum|11|251104|4665000
 ./placement|BenchmarkMirrorFrameEncode32|1|1900|405
 ./placement|BenchmarkMirrorFrameDecode32|3|1950|487
 ./placement|BenchmarkRemoteComputeRoundTrip|4|185|133

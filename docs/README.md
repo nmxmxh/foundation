@@ -1,6 +1,6 @@
 # Foundation Documentation Map
 
-**Status**: current as of 2026-06-30
+**Status**: index updated 2026-09-22; individual documents carry their own evidence dates.
 
 This directory contains the source documentation for Foundation Core and the reference copy distributed to generated projects. Keep files short enough for humans to scan and precise enough for coding agents to enforce.
 
@@ -133,6 +133,7 @@ Read in order:
 | `performance_lab.md` | Low-level evidence contract for CPU, allocator, syscall, I/O, WASM, FFI, GPU lanes |
 | `system_profiling_practices.md` | perf/system lane: symbols, sampling vs event tracing, counters, and the build and design rules profiling implies |
 | `foundation_benchmarks.md` | Benchmark commands, reference runs, interpretation, performance ladder |
+| [`foundation_cleanup_review_20260922.md`](foundation_cleanup_review_20260922.md) | Cleanup findings, repaired checks, fresh measurements, research, and prioritized work |
 | `runtime_transport_optimization.md` | Why the ffi/shm/stdio lanes cost what they cost, per-transport decision table, cold-start trap |
 | `rust_runtime_practices.md` | Rust/WASM/native runtime coding, async, performance, error-handling |
 | `rust_unit_guide.md` | End-to-end walkthrough for adding an app-owned Rust performance unit across stdio/FFI/shm/WASM lanes |

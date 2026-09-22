@@ -7,6 +7,8 @@
 
 .DEFAULT_GOAL := help
 
+.PHONY: test-frontend-lab test-frontend-lab-browser test-frontend-lab-contracts
+
 FOUNDATION_LINT_CHECKS := \
 	check-scaffold-manifest \
 	check-init-project \
@@ -158,6 +160,10 @@ test-frontend-lab:
 
 test-frontend-lab-browser:
 	@cd frontend-lab && npm run test:browser
+
+test-frontend-lab-contracts:
+	@npm --prefix frontend-lab run typecheck
+	@tooling/scripts/run_vitest.sh frontend-lab run --project dom --project ssr --project browser
 
 test-load-research:
 	@tooling/scripts/load_research.sh
@@ -505,6 +511,7 @@ help:
 	@echo "  make test-service-backed-load  Run opt-in staged service-backed load research"
 	@echo "  make test-frontend-lab   Run the foundation-only frontend lab (jsdom lane)"
 	@echo "  make test-frontend-lab-browser  Run the frontend lab's real-Chromium rendering lane"
+	@echo "  make test-frontend-lab-contracts  Typecheck and run DOM, SSR, and Chromium contracts"
 	@echo "  make test-bench-native-rust  Run native GPU/runtime Rust benchmark simulation"
 	@echo "  make bench-simd          Run opt-in Go SIMD columnar benchmarks (GOEXPERIMENT=simd)"
 	@echo "  make lint                Run foundation scaffold/practice checks"

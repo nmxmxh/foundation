@@ -8,6 +8,7 @@ import {
   type RenderSurfaceQualityTier,
 } from "@ovasabi/runtime-browser";
 import type { LoadState } from "./fixtures/labSurfaces.worker";
+import { summarizeLatency as summary } from "../latencySummary";
 
 /*
  * The render-surface lane on the real GPU (ANGLE/Metal, non-fallback WebGPU).
@@ -29,6 +30,7 @@ type SurfaceStats = {
   gaps: number[];
   drawMs: number[];
   gpuMs: number[];
+  gpuWaitFailures: number;
   inFlightAtDraw: number[];
   tiers: number[];
   pixels: number[];
@@ -40,9 +42,14 @@ type LabStats = {
 };
 
 const query = (worker: Worker) =>
-  new Promise<LabStats>((resolve) => {
+  new Promise<LabStats>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      worker.removeEventListener("message", onMessage);
+      reject(new Error("timed out waiting for LAB_STATS"));
+    }, 5000);
     const onMessage = (event: MessageEvent) => {
       if (event.data?.kind !== "LAB_STATS") return;
+      clearTimeout(timer);
       worker.removeEventListener("message", onMessage);
       resolve(event.data as LabStats);
     };
@@ -52,18 +59,6 @@ const query = (worker: Worker) =>
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const epochNow = () => performance.timeOrigin + performance.now();
-
-const quantile = (values: readonly number[], q: number) => {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  return Math.round(sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))]! * 10) / 10;
-};
-const summary = (values: readonly number[]) => ({
-  n: values.length,
-  p50: quantile(values, 0.5),
-  p95: quantile(values, 0.95),
-  max: values.length ? Math.round(Math.max(...values) * 10) / 10 : null,
-});
 
 const mounted: Array<{ host: RenderSurfaceHost<LoadState>; canvas: HTMLCanvasElement }> = [];
 const workers: Worker[] = [];
@@ -116,6 +111,37 @@ const LOAD_TIERS: readonly RenderSurfaceQualityTier[] = [
 ];
 
 describe("render surface lane on the real GPU", () => {
+  it("records completed WebGL2 fences and stops polling after disposal", async () => {
+    const worker = spawn();
+    workers.push(worker);
+    const { host, failures } = mount({
+      surface: "gl-a", createWorker: () => worker, ownsWorker: false,
+      tiers: LOAD_TIERS, startingTier: 3, size: 120,
+      initialState: { load: 0.05, timeGpu: true },
+    });
+    const deadline = performance.now() + 5000;
+    let observed = (await query(worker)).stats["gl-a"];
+    while ((!observed || observed.gpuMs.length < 2) && performance.now() < deadline) {
+      await sleep(50);
+      observed = (await query(worker)).stats["gl-a"];
+    }
+    expect(failures).toEqual([]);
+    expect(observed?.gpuMs.length, "WebGL2 fence produced no completion evidence").toBeGreaterThanOrEqual(2);
+    host.dispose();
+    await sleep(100);
+    const stopped = (await query(worker)).stats["gl-a"]!;
+    await sleep(100);
+    const later = (await query(worker)).stats["gl-a"]!;
+    expect(stopped.disposes).toBe(1);
+    expect(stopped.gpuWaitFailures).toBe(0);
+    expect(later.gpuMs).toEqual(stopped.gpuMs);
+    await commands.writeFile("results/gpu/webgl-fence.json", `${JSON.stringify({
+      measuredAt: new Date().toISOString(), userAgent: navigator.userAgent,
+      completionMs: summary(stopped.gpuMs), disposed: stopped.disposes, waitFailures: stopped.gpuWaitFailures,
+      note: "Queue completion plus timer polling; not GPU kernel time.",
+    }, null, 2)}\n`);
+  });
+
   it("records the adapter and context the lane draws on", async () => {
     const adapter = await (navigator as any).gpu?.requestAdapter({ powerPreference: "low-power" });
     const gl = document.createElement("canvas").getContext("webgl2");
@@ -181,6 +207,7 @@ describe("render surface lane on the real GPU", () => {
           gapMs: summary(s.gaps),
           drawCpuMs: summary(s.drawMs),
           gpuMs: summary(s.gpuMs),
+          gpuWaitFailures: s.gpuWaitFailures,
           maxInFlightAtDraw: s.inFlightAtDraw.length ? Math.max(...s.inFlightAtDraw) : null,
           finalTier: s.tiers.at(-1),
           tierChanges,

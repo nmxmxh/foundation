@@ -65,6 +65,27 @@ func TestRefreshRejectsOverrideFlags(t *testing.T) {
 	}
 }
 
+func TestUpdateAndRefreshSkipDependencyResolution(t *testing.T) {
+	root := foundationFixture(t)
+	for _, command := range []string{"update", "refresh"} {
+		t.Run(command, func(t *testing.T) {
+			runner := &recordingRunner{}
+			a := app{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, runner: runner, client: http.DefaultClient}
+			err := a.run(t.Context(), []string{
+				command, "--project-dir=/tmp/trader_os_v1", "--foundation-dir=" + root,
+				"--skip-license", "--skip-deps",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"/tmp/trader_os_v1", "--skip-deps"}
+			if !equalStrings(runner.run.args, want) {
+				t.Fatalf("args = %#v, want %#v", runner.run.args, want)
+			}
+		})
+	}
+}
+
 func TestRefreshRequiresProjectDir(t *testing.T) {
 	root := foundationFixture(t)
 	a := app{stdout: &bytes.Buffer{}, stderr: &bytes.Buffer{}, runner: &recordingRunner{}, client: http.DefaultClient}

@@ -41,6 +41,7 @@ type SurfaceStats = {
   drawMs: number[];
   /** Submit to queue-drained, per frame, when `timeGpu` is set. */
   gpuMs: number[];
+  gpuWaitFailures: number;
   /** Frames submitted whose GPU work had not finished when the next was drawn. */
   inFlightAtDraw: number[];
   tiers: number[];
@@ -55,7 +56,7 @@ const stats = new Map<string, SurfaceStats>();
 const statsFor = (surface: string, lane: string): SurfaceStats => {
   let entry = stats.get(surface);
   if (!entry) {
-    entry = { lane, builtAtMs: null, firstFrameAtMs: null, draws: 0, gaps: [], drawMs: [], gpuMs: [], inFlightAtDraw: [], tiers: [], pixels: [], disposes: 0 };
+    entry = { lane, builtAtMs: null, firstFrameAtMs: null, draws: 0, gaps: [], drawMs: [], gpuMs: [], gpuWaitFailures: 0, inFlightAtDraw: [], tiers: [], pixels: [], disposes: 0 };
     stats.set(surface, entry);
   }
   return entry;
@@ -239,6 +240,7 @@ serveRenderSurface<LoadState>("gl-a", {
     const location = gl.getUniformLocation(program, "u");
     const vao = gl.createVertexArray();
     let pendingSync: WebGLSync | null = null;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let syncStartedAt = 0;
     entry.builtAtMs = now();
     return {
@@ -255,27 +257,35 @@ serveRenderSurface<LoadState>("gl-a", {
         gl.uniform4f(location, frame.width, frame.height, frame.elapsed, Math.max(1, Math.round(frame.detail * (state?.load ?? 1))));
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         if (state?.timeGpu && pendingSync === null) {
-          /*
-           * A fence, polled without blocking. `gl.finish()` read ~0 ms at 40×
-           * load on ANGLE/Metal (2026-09-15), so it is not a GPU barrier there;
-           * a sync object reports when the driver actually got to this point.
-           */
-          pendingSync = gl.fenceSync(gl.SYNC_OBJECT_TYPE, 0);
+          // Submit the fence before polling. Completion includes queue and timer delay.
+          pendingSync = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+          if (!pendingSync) throw new Error("WebGL2 fence creation failed");
+          gl.flush();
           syncStartedAt = performance.now();
           const poll = () => {
+            pollTimer = null;
             if (!pendingSync) return;
+            if (gl.isContextLost() || performance.now() - syncStartedAt >= 2000) {
+              entry.gpuWaitFailures += 1;
+              gl.deleteSync(pendingSync);
+              pendingSync = null;
+              return;
+            }
             if (gl.getSyncParameter(pendingSync, gl.SYNC_STATUS) === gl.SIGNALED) {
               if (entry.gpuMs.length < 4000) entry.gpuMs.push(performance.now() - syncStartedAt);
               gl.deleteSync(pendingSync);
               pendingSync = null;
-            } else setTimeout(poll, 1);
+            } else pollTimer = setTimeout(poll, 1);
           };
-          setTimeout(poll, 0);
+          pollTimer = setTimeout(poll, 0);
         }
         record(entry, frame, performance.now() - started);
       },
       dispose() {
         entry.disposes += 1;
+        if (pollTimer !== null) clearTimeout(pollTimer);
+        if (pendingSync) gl.deleteSync(pendingSync);
+        pendingSync = null;
         gl.deleteVertexArray(vao);
         gl.deleteProgram(program);
         gl.deleteShader(vs);

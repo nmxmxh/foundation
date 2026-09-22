@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
@@ -108,6 +109,11 @@ type partitionRegistry struct {
 	fields  shardedMap
 	ranges  shardedMap
 	bitmaps *BitmapIndexRegistry
+
+	// Writers maintain these bounds under the partition lock. Readers only inspect the atomic flag.
+	columnarUnordered atomic.Bool
+	lastColumnarTime  time.Time
+	lastColumnarVer   uint64
 }
 
 const numShards = 128

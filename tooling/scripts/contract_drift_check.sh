@@ -174,55 +174,7 @@ check_runtime_contract_manifest() {
   fi
 }
 
-run_with_timeout() {
-  local timeout_sec="$1"
-  shift
-
-  if command -v perl >/dev/null 2>&1; then
-    perl -e '
-      use strict;
-      use warnings;
-
-      my $timeout = shift @ARGV;
-      my @cmd = @ARGV;
-      my $pid = fork();
-      die "fork failed: $!\n" unless defined $pid;
-
-      if ($pid == 0) {
-        setpgrp(0, 0) or die "setpgrp failed: $!\n";
-        exec @cmd or die "exec failed: $!\n";
-      }
-
-      my $timed_out = 0;
-      local $SIG{ALRM} = sub {
-        $timed_out = 1;
-        kill "TERM", -$pid;
-        select(undef, undef, undef, 0.5);
-        kill "KILL", -$pid;
-      };
-
-      alarm $timeout;
-      waitpid($pid, 0);
-      my $status = $?;
-      alarm 0;
-
-      if ($timed_out) {
-        print STDERR "command timed out after ${timeout}s\n";
-        exit 124;
-      }
-      if ($status == -1) {
-        print STDERR "waitpid failed: $!\n";
-        exit 1;
-      }
-      if ($status & 127) {
-        exit 128 + ($status & 127);
-      }
-      exit($status >> 8);
-    ' "$timeout_sec" "$@"
-  else
-    "$@"
-  fi
-}
+source "$(cd "$(dirname "$0")" && pwd)/command_timeout.sh"
 
 check_exists "foundation proto envelope present" "foundation/runtime-transport/protos/foundation/v1/envelope.proto"
 check_exists "runtime transport generation script present" "foundation/runtime-transport/scripts/generate_bindings.sh"

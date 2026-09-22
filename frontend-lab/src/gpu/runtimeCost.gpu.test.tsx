@@ -204,8 +204,8 @@ describe("runtime cost of the styling and motion dependencies (real engine)", ()
       flushSync(() => root.render(null));
       await observe(
         name,
-        () => host.querySelector<HTMLElement>("[data-lab-framer]"),
-        () => flushSync(() => root.render(createElement(motion.div, { "data-lab-framer": "", className: "lab-box", ...props }, content()))),
+        () => host.querySelector<HTMLElement>(".lab-box"),
+        () => flushSync(() => root.render(createElement(motion.div, { className: "lab-box", ...props }, content()))),
       );
     };
     await framerCase("framer opacity+scale", { initial: { opacity: 0, scale: 0.97 }, animate: { opacity: 1, scale: 1 }, transition: { duration: 0.4 } });

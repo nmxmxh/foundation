@@ -255,7 +255,6 @@ func TestSnapshotCacheZeroBudgetIsNil(t *testing.T) {
 		t.Fatalf("nil cache lookup outcome = %s, want bypass", outcome)
 	}
 	cache.store(snapshotCacheKey{}, &snapshotCacheEntry{body: []byte{1}})
-	cache.invalidateScope("anything")
 	if stats := cache.stats(); stats != (SnapshotCacheStats{}) {
 		t.Fatalf("nil cache stats = %+v, want zero value", stats)
 	}

@@ -73,6 +73,11 @@ with no `HandlerConfig.Audience` resolver answers 403 to every read.
 
 ### Enforcement point
 
+Snapshot cache keys must preserve tenant scope and the exact normalized audience set.
+Encode each audience identifier with its length before hashing the set.
+A delimiter alone is ambiguous when an identifier contains that delimiter.
+Regression evidence must include disjoint audiences through cached HTTP reads.
+
 Name where the audience is actually enforced, and prefer the one place that
 covers both halves of the read path:
 

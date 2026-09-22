@@ -255,6 +255,7 @@ func (p *partition) upsertLocked(registry *partitionRegistry, publisher *indexPu
 		bytes:     recBytes,
 		expiresAt: expires,
 	}
+	registry.trackColumnarOrder(rec.UpdatedAt, version)
 	cell.ptr.Store(entry)
 	p.bytes.Store(nextBytes)
 	p.addIndexesLocked(publisher, registry, key, rec, version)
@@ -302,6 +303,7 @@ func (p *partition) patchLocked(registry *partitionRegistry, publisher *indexPub
 		bytes:     recBytes,
 		expiresAt: expires,
 	}
+	registry.trackColumnarOrder(next.UpdatedAt, version)
 	cell.ptr.Store(entry)
 	p.bytes.Store(nextBytes)
 	p.addIndexesLocked(publisher, registry, key, next, version)

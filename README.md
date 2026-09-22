@@ -18,7 +18,7 @@ disclosure rather than becoming prerequisites for ordinary feature work.
 It is a full-stack substrate that compounds the strengths of Go, Rust/WASM, and TypeScript into a single, cohesive "nervous system":
 
 - **Single-Contract Architecture**: Define mutations once (Protobuf/Cap'n Proto), and the schema generates the Go routes, TypeScript types, and zero-copy binary layouts across all boundaries.
-- **Extreme Performance**: Serves node-local read models via **Hermes** in microseconds. Predicate filter benchmarks show Hermes columnar bitmap merges executing in ~34 µs with 2 allocations, compared to ~7.8 ms and 10,000+ allocations on standard record-chasing paths (a 229× speedup).
+- **Measured Performance**: Hermes serves bounded node-local reads. Resident columnar filtering takes about 30 µs in its reference fixture. Updated batch construction and filtering take about 4.7 ms. See the [benchmark boundaries and evidence](docs/foundation_benchmarks.md#implementation-capture-2026-09-22).
 - **Agent & Human Synergy**: The codebase is designed as an agent-executable environment. With 40+ automated enforcement checks—**Practice Controls**, contract drift, concurrency safety—running on every commit, both humans and agents can refactor and add features with confidence.
 
 ---

@@ -305,10 +305,27 @@ while keeping borrowed views internal to Hermes-owned callbacks.
 The current `server-kit/go/hermes` slice uses writer-owned apply locks plus
 segmented atomic snapshots for records and indexes. Public reads copy
 `database.DomainRecord` values. Internal `ForEachView` reads return
-callback-lifetime borrowed views and are allocation-free in the current
-benchmark baseline. A bounded atomic publish gate prevents readers from seeing
+callback-lifetime borrowed views. Limited iteration still allocates batch storage.
+A bounded atomic publish gate prevents readers from seeing
 partially published record/index state without putting readers on the writer
 mutex.
+
+Columnar assembly retains pointers to immutable published entries during selection and sorting.
+The pointers remain internal. Materialized vectors retain their existing ownership rules.
+This removes temporary record copies without adding a persistent cache.
+
+Limited selection uses reverse publication order only while timestamps and versions prove that order matches the canonical order.
+Writers invalidate that proof before publishing decreasing timestamps or repeated or decreasing versions.
+Readers verify the proof after traversal and repeat selection once if a concurrent publication invalidated it.
+The fallback inspects matching candidates with a bounded heap, then applies canonical sorting.
+Heap selection costs O(N log K) time and retains O(K) pointers for limit K across N candidates.
+Existing bitmap and delta-index traversal can allocate O(N) keys separately.
+Unlimited selection retains O(N) pointers and sorts them.
+The proof adds fixed registry metadata; it adds no per-record index.
+A registry rebuild can establish the proof again.
+
+Regression tests cover timestamp disorder, version ties, concurrent replacement, tenant filtering, expiry, and cancellation.
+The [implementation benchmark](foundation_benchmarks.md#implementation-capture-2026-09-22) includes read, write, and rebuild comparisons.
 
 Recommended partition structure:
 
