@@ -6,7 +6,7 @@ Owner: Platform Architecture
 
 ## Purpose
 
-`gpu_practices.md` section 247 and `performance_practices.md` section 335.7 specify the browser rendering rule:
+`gpu_practices.md` and `performance_practices.md` specify the browser rendering rule:
 
 > Browser WebGPU remains optional and worker-owned. React render paths receive state and results. They do not create devices, compile pipelines, dispatch workgroups, or map readback buffers.
 
@@ -15,7 +15,7 @@ The Render Surface Lane provides the missing canvas rasterization and 2D stage e
 
 ## Components and Responsibilities
 
-The lane consists of four core primitives in `@ovasabi/runtime-browser`:
+The lane exposes these primitives in `@ovasabi/runtime-browser`:
 
 | Module | Thread | Responsibility |
 | :--- | :--- | :--- |
@@ -27,7 +27,8 @@ The lane consists of four core primitives in `@ovasabi/runtime-browser`:
 
 ## Execution Cadence and Clock Ownership
 
-Dedicated workers lack native `requestAnimationFrame` support.
+Dedicated workers can support `requestAnimationFrame` when their owner chain includes a window.
+Check capability before selecting that clock. See the [HTML animation specification](https://html.spec.whatwg.org/multipage/imagebitmap-and-animations.html#animation-frames).
 Decorative and simulation passes require targeted execution cadence rather than raw display refresh rates.
 `serveRenderSurface` paces execution against the current ladder tier `cadenceMs` and corrects for cumulative drift.
 Driving frame updates from the main thread would overload the main queue and introduce unwanted coupling.
@@ -58,7 +59,7 @@ Measured on real hardware: 101 frames queued and seconds of latency while the lo
 - A pass that sets `settled` (for WebGPU, `() => device.queue.onSubmittedWorkDone()`) keeps at most one frame in flight.
 - A tick that finds the previous frame unsettled draws nothing and counts as a miss, so GPU overload demotes like CPU overload.
 - The loop stops waiting after 2 s, so a promise that never resolves cannot freeze the surface.
-- WebGL2 has no working barrier yet; see `gpu_practices.md`, *One frame in flight*.
+- WebGL2 fence completion is verified in the lab. Production backpressure still requires a pass-owned `settled` callback.
 
 ## Graceful Degradation
 

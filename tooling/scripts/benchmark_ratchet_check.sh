@@ -8,9 +8,9 @@
 #   * Ceilings only ever FALL. Improving a path lowers its ceiling permanently.
 #
 # What is gated, and why:
-#   allocs/op is an exact per-iteration count of allocation events. It is a
-#   property of the code, not the machine: it does not move with CPU model,
-#   thermal state, or CI neighbour noise. It is gated exactly, zero tolerance.
+#   allocs/op is the integer average of allocation events over measured iterations.
+#   Selected serial workloads must be stable under the recorded toolchain and fixture.
+#   Compiler changes and amortized work can change that average. The gate permits no increase.
 #
 #   B/op is an average — total bytes divided by iterations — so it absorbs
 #   amortized capacity growth and rounds. Measured jitter across consecutive
@@ -42,8 +42,8 @@ mode="${2:-check}"
 baseline="$target/tooling/benchmark_baseline.psv"
 packages="$target/tooling/benchmark_ratchet_packages.tsv"
 
-# 200x is enough for allocs/op and B/op to be exact (they are per-iteration
-# counters, not timings) while keeping the whole gate well under a minute.
+# Use 200 iterations for the selected stable workloads, keeping the gate under a minute.
+# These averages do not prove that every operation has the same cost.
 BENCHTIME="${BENCH_RATCHET_BENCHTIME:-200x}"
 # B/op tolerance: the larger of a percentage and an absolute byte floor, so
 # small ceilings (including 0) are not tripped by rounding.
@@ -80,15 +80,26 @@ if [[ ! -f "$packages" ]]; then
   exit 1
 fi
 
+measurements="$(mktemp "${TMPDIR:-/tmp}/foundation-ratchet-measurements.XXXXXX")"
+command_output="$(mktemp "${TMPDIR:-/tmp}/foundation-ratchet-command.XXXXXX")"
+trap 'rm -f "$measurements" "$command_output"' EXIT
+
 # Measure every configured (module, package, regex) triple.
 # Emits "package<TAB>benchmark<TAB>ns<TAB>bytes<TAB>allocs" lines.
 measure() {
   local module_dir pkg regex
   while IFS=$'\t' read -r module_dir pkg regex; do
     [[ -z "$module_dir" || "$module_dir" == \#* ]] && continue
-    [[ -f "$target/$module_dir/go.mod" ]] || continue
-    ( cd "$target/$module_dir" && \
-      go test "$pkg" -run='^$' -bench="$regex" -benchmem -benchtime="$BENCHTIME" -count=1 2>/dev/null ) | \
+    if [[ ! -f "$target/$module_dir/go.mod" ]]; then
+      echo "[FAIL] configured benchmark module missing: $module_dir" >&2
+      return 1
+    fi
+    if ! ( cd "$target/$module_dir" && \
+      go test "$pkg" -run='^$' -bench="$regex" -benchmem -benchtime="$BENCHTIME" -count=1 ) > "$command_output" 2>&1; then
+      cat "$command_output" >&2
+      echo "[FAIL] benchmark command failed: $module_dir $pkg" >&2
+      return 1
+    fi
     awk -v pkg="$pkg" '
       /^Benchmark/ {
         name=$1
@@ -102,9 +113,15 @@ measure() {
         # Only rows carrying allocation data are gateable.
         if (name != "" && allocs != "" && bytes != "")
           printf "%s\t%s\t%s\t%s\t%s\n", pkg, name, ns, bytes, allocs
-      }'
+      }' "$command_output"
   done < "$packages"
 }
+
+# Process substitution hides producer failures. Finish measurement before reading rows.
+if ! measure > "$measurements"; then
+  echo "benchmark ratchet check failed; baseline unchanged"
+  exit 1
+fi
 
 typeset -A cur_allocs cur_bytes cur_ns
 while IFS=$'\t' read -r pkg name ns bytes allocs; do
@@ -113,12 +130,28 @@ while IFS=$'\t' read -r pkg name ns bytes allocs; do
   cur_allocs[$key]="$allocs"
   cur_bytes[$key]="$bytes"
   cur_ns[$key]="$ns"
-done < <(measure)
+done < "$measurements"
 
 if [[ "${#cur_allocs[@]}" -eq 0 ]]; then
   fail "benchmark measurement produced no rows" \
        "is the Go toolchain available, and do the configured regexes still match?"
   echo "benchmark ratchet check failed"
+  exit 1
+fi
+
+# Every existing ceiling needs evidence, including during a supervised update.
+if [[ -f "$baseline" ]]; then
+  while IFS='|' read -r pkg name max_allocs max_bytes ns_ref; do
+    [[ -z "$pkg" || "$pkg" == \#* ]] && continue
+    key="$pkg|$name"
+    if [[ -z "${cur_allocs[$key]:-}" ]]; then
+      fail "in baseline but not measured: $pkg $name" \
+           "Restore the benchmark or explicitly review its retirement before updating the baseline."
+    fi
+  done < "$baseline"
+fi
+if [[ "$failed" -ne 0 ]]; then
+  echo "benchmark ratchet check failed; baseline unchanged"
   exit 1
 fi
 
@@ -133,8 +166,9 @@ if [[ "$mode" == "--write" || "${UPDATE:-0}" == "1" ]]; then
   if [[ -f "$baseline" ]]; then
     while IFS='|' read -r pkg name a b n; do
       [[ -z "$pkg" || "$pkg" == \#* ]] && continue
-      old_allocs["$pkg|$name"]="$a"
-      old_bytes["$pkg|$name"]="$b"
+      key="$pkg|$name"
+      old_allocs[$key]="$a"
+      old_bytes[$key]="$b"
     done < "$baseline"
   fi
   tmp="$baseline.tmp"
@@ -172,10 +206,6 @@ while IFS='|' read -r pkg name max_allocs max_bytes ns_ref; do
   key="$pkg|$name"
   seen[$key]=1
   ca="${cur_allocs[$key]:-}"
-  if [[ -z "$ca" ]]; then
-    warn "in baseline but not measured: $name (renamed, deleted, or regex no longer matches?)"
-    continue
-  fi
   cb="${cur_bytes[$key]}"
   gated=$((gated + 1))
 

@@ -1,0 +1,112 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkNullLane_00_GoCall-8                       	102056496	         2.299 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_00_GoCall-8                       	100000000	         2.173 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_00_GoCall-8                       	100000000	         2.182 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_00_GoCall-8                       	100000000	         2.173 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_00_GoCall-8                       	100000000	         2.196 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_00_GoCall-8                       	100000000	         2.184 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_00_GoCall-8                       	100000000	         2.185 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_00_GoCall-8                       	100000000	         2.235 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_00_GoCall-8                       	100000000	         2.174 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_00_GoCall-8                       	100000000	         2.173 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_01_RouterFrameDispatch-8          	23289664	        10.28 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_01_RouterFrameDispatch-8          	22923456	        10.34 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_01_RouterFrameDispatch-8          	23010729	        10.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_01_RouterFrameDispatch-8          	23267462	        10.44 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_01_RouterFrameDispatch-8          	23455251	        10.30 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_01_RouterFrameDispatch-8          	23517500	        10.39 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_01_RouterFrameDispatch-8          	23090244	        10.35 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_01_RouterFrameDispatch-8          	22723326	        10.29 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_01_RouterFrameDispatch-8          	23053647	        10.38 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_01_RouterFrameDispatch-8          	23059924	        10.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_02_DirectFrameClient-8            	12956252	        18.51 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_02_DirectFrameClient-8            	13032823	        18.53 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_02_DirectFrameClient-8            	13003460	        18.49 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_02_DirectFrameClient-8            	12916188	        18.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_02_DirectFrameClient-8            	12859639	        18.76 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_02_DirectFrameClient-8            	12753181	        18.91 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_02_DirectFrameClient-8            	12626317	        18.60 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_02_DirectFrameClient-8            	12905827	        18.79 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_02_DirectFrameClient-8            	12970022	        18.60 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_02_DirectFrameClient-8            	12895483	        18.62 ns/op	       0 B/op	       0 allocs/op
+BenchmarkNullLane_03_HTTPDispatchBuild-8            	  121438	      1730 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_03_HTTPDispatchBuild-8            	  132054	      1747 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_03_HTTPDispatchBuild-8            	  135414	      1764 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_03_HTTPDispatchBuild-8            	  146337	      1702 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_03_HTTPDispatchBuild-8            	  122452	      1741 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_03_HTTPDispatchBuild-8            	  143626	      1665 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_03_HTTPDispatchBuild-8            	  146881	      1735 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_03_HTTPDispatchBuild-8            	  129979	      1767 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_03_HTTPDispatchBuild-8            	  134222	      1753 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_03_HTTPDispatchBuild-8            	  140590	      1713 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_04_HTTPRouteHandler-8             	  139617	      1816 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_04_HTTPRouteHandler-8             	  132576	      1791 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_04_HTTPRouteHandler-8             	  136351	      1714 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_04_HTTPRouteHandler-8             	  137391	      1712 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_04_HTTPRouteHandler-8             	  141703	      1743 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_04_HTTPRouteHandler-8             	  135474	      1773 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_04_HTTPRouteHandler-8             	  137839	      1710 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_04_HTTPRouteHandler-8             	  118096	      1866 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_04_HTTPRouteHandler-8             	  140534	      1708 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_04_HTTPRouteHandler-8             	  141607	      1733 ns/op	    2891 B/op	      14 allocs/op
+BenchmarkNullLane_05_HTTPRouteHandlerCorrelated-8   	  107137	      2243 ns/op	    3755 B/op	      22 allocs/op
+BenchmarkNullLane_05_HTTPRouteHandlerCorrelated-8   	  109765	      2221 ns/op	    3755 B/op	      22 allocs/op
+BenchmarkNullLane_05_HTTPRouteHandlerCorrelated-8   	  105795	      2240 ns/op	    3755 B/op	      22 allocs/op
+BenchmarkNullLane_05_HTTPRouteHandlerCorrelated-8   	  102922	      2236 ns/op	    3755 B/op	      22 allocs/op
+BenchmarkNullLane_05_HTTPRouteHandlerCorrelated-8   	  111102	      2228 ns/op	    3755 B/op	      22 allocs/op
+BenchmarkNullLane_05_HTTPRouteHandlerCorrelated-8   	  109975	      2354 ns/op	    3755 B/op	      22 allocs/op
+BenchmarkNullLane_05_HTTPRouteHandlerCorrelated-8   	  102985	      2227 ns/op	    3755 B/op	      22 allocs/op
+BenchmarkNullLane_05_HTTPRouteHandlerCorrelated-8   	  107566	      2205 ns/op	    3755 B/op	      22 allocs/op
+BenchmarkNullLane_05_HTTPRouteHandlerCorrelated-8   	  107558	      2202 ns/op	    3755 B/op	      22 allocs/op
+BenchmarkNullLane_05_HTTPRouteHandlerCorrelated-8   	  109328	      2237 ns/op	    3755 B/op	      22 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8             	   32426	      7166 ns/op	    6896 B/op	      76 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8             	   33360	      7206 ns/op	    6896 B/op	      76 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8             	   33076	      7153 ns/op	    6896 B/op	      76 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8             	   32006	      7343 ns/op	    6896 B/op	      76 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8             	   33792	      7114 ns/op	    6896 B/op	      76 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8             	   33400	      7177 ns/op	    6896 B/op	      76 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8             	   33283	      7199 ns/op	    6896 B/op	      76 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8             	   33304	      7126 ns/op	    6896 B/op	      76 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8             	   31842	      7271 ns/op	    6896 B/op	      76 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8             	   33165	      7127 ns/op	    6896 B/op	      76 allocs/op
+BenchmarkNullLane_07_JSONObjectMaterialization-8    	 6880749	        35.63 ns/op	      48 B/op	       1 allocs/op
+BenchmarkNullLane_07_JSONObjectMaterialization-8    	 7023362	        34.97 ns/op	      48 B/op	       1 allocs/op
+BenchmarkNullLane_07_JSONObjectMaterialization-8    	 7031421	        34.61 ns/op	      48 B/op	       1 allocs/op
+BenchmarkNullLane_07_JSONObjectMaterialization-8    	 6794808	        34.79 ns/op	      48 B/op	       1 allocs/op
+BenchmarkNullLane_07_JSONObjectMaterialization-8    	 6867247	        35.13 ns/op	      48 B/op	       1 allocs/op
+BenchmarkNullLane_07_JSONObjectMaterialization-8    	 6860800	        35.20 ns/op	      48 B/op	       1 allocs/op
+BenchmarkNullLane_07_JSONObjectMaterialization-8    	 6879024	        34.59 ns/op	      48 B/op	       1 allocs/op
+BenchmarkNullLane_07_JSONObjectMaterialization-8    	 6877233	        34.84 ns/op	      48 B/op	       1 allocs/op
+BenchmarkNullLane_07_JSONObjectMaterialization-8    	 6943815	        35.38 ns/op	      48 B/op	       1 allocs/op
+BenchmarkNullLane_07_JSONObjectMaterialization-8    	 6918777	        35.29 ns/op	      48 B/op	       1 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench	19.966s
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc
+cpu: Apple M1 Pro
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	10546939	        22.31 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	10894317	        21.00 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	11638196	        20.65 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	11618665	        20.80 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	11129530	        20.83 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	11677956	        20.66 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	11585410	        21.01 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	11429001	        20.74 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	11646998	        21.08 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBinaryFrameAppendViewRoundTrip-8         	11628046	        20.67 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	  624646	       370.8 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	  655498	       383.8 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	  639544	       375.2 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	  637682	       374.0 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	  661202	       383.6 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	  669152	       366.7 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	  638000	       384.0 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	  632410	       372.4 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	  663013	       376.8 ns/op	     152 B/op	       6 allocs/op
+BenchmarkGeneratedProtoMarshalAppendRoundTrip-8   	  665056	       371.4 ns/op	     152 B/op	       6 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc	5.518s

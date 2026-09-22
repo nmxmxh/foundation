@@ -18,6 +18,7 @@ Usage: ./update-project.sh <project-path> [options]
 
 Options:
   --dry-run           Show what would be updated without writing files
+  --skip-deps         Synchronize files without npm resolution or Go module tidy
   --force             Overwrite force-managed scaffold files
   --docs-only         Only update docs/foundation
   --tooling-only      Only update linting/tooling/check scripts
@@ -66,6 +67,7 @@ validate_profile() {
 
 PROJECT_PATH=""
 DRY_RUN="false"
+SKIP_DEPS="${SKIP_DEPS:-false}"
 FORCE="false"
 DOCS_ONLY="false"
 TOOLING_ONLY="false"
@@ -89,6 +91,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dry-run)
             DRY_RUN="true"
+            shift
+            ;;
+        --skip-deps)
+            SKIP_DEPS="true"
             shift
             ;;
         --force)
@@ -310,8 +316,9 @@ if [[ "$DRY_RUN" != "true" && -f "$PROJECT_PATH/go.mod" ]] && command -v go >/de
             | shasum -a 256 | awk '{print $1}'
     )"
     if [[ "$module_graph_before" != "$module_graph_after" ]]; then
-        foundation_log_info "Module manifests changed; tidying Go module graph..."
-        if (cd "$PROJECT_PATH" && go mod tidy); then
+        if [[ "$SKIP_DEPS" == "true" ]]; then
+            foundation_log_warn "Module manifests changed; --skip-deps requires a later 'go mod tidy' in $PROJECT_PATH"
+        elif (cd "$PROJECT_PATH" && foundation_run_dependency_command go mod tidy); then
             foundation_log_success "Go module graph tidied"
         else
             foundation_log_warn "go mod tidy failed (network or graph issue); run it manually in $PROJECT_PATH"

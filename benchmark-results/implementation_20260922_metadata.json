@@ -1,0 +1,60 @@
+{
+  "date": "2026-09-22",
+  "scope": "Core Hermes assembly, security response headers, and tooling follow-up",
+  "base_commit": "a670d3eb73cae9e9bc2817c18751d3fb92fd7b0f",
+  "worktree": "uncommitted implementation over the earlier cleanup pass",
+  "environment": {
+    "cpu": "Apple M1 Pro",
+    "os": "macOS-26.5.2-arm64-arm-64bit",
+    "arch": "arm64",
+    "go": "go1.26.6",
+    "gomaxprocs": 8
+  },
+  "hermes": {
+    "samples": 10,
+    "benchtime": "200ms",
+    "command": "GOCACHE=/tmp/ovasabi-foundation-go-build go test ./hermes -run='^$' -bench='^BenchmarkHermes(ColumnarAssembly|ColumnarBitmapFilterSum|GetRecordCopied|ForEachViewLimit50)$' -benchmem -benchtime=200ms -count=10",
+    "directory": "server-kit/go",
+    "before": "original production code with the added assembly benchmark",
+    "after": "final implementation"
+  },
+  "paired": {
+    "samples_per_binary": 10,
+    "benchtime": "400ms",
+    "order": "before/after on even samples, after/before on odd samples; each sample starts a fresh process",
+    "gomaxprocs": 8,
+    "baseline_build": "go test -overlay=<overlay.json> -c; overlay restores HEAD versions of hermes/{apply,columnar,columnar_pushdown,indexes,store}.go and security/middleware.go. Hide new columnar_candidates.go and columnar_candidates_test.go. Keep the assembly benchmark.",
+    "after_build": "go test -c with the final working tree",
+    "writes_regex": "^BenchmarkHermes(BulkLoad512|ApplyEventUpsert|ApplyBatch64)$",
+    "http_regex": "^Benchmark(AppLane_HTTPMiddleware_AuthSecurityRBAC|NullLane_06_HTTPSecuredChain)$",
+    "run_flags": [
+      "-test.run=^$",
+      "-test.bench=<regex>",
+      "-test.benchmem",
+      "-test.benchtime=400ms",
+      "-test.count=1"
+    ]
+  },
+  "initial_comparisons": {
+    "writes": "The initial 200ms series suggested a 6\u20137% batch/rebuild slowdown. Its baseline preceded order tracking but followed pointer lookup extraction. The full-HEAD alternating comparison supersedes that timing claim.",
+    "http": "The initial 200ms series suggested a 3% secured-chain slowdown. The alternating comparison supersedes that timing claim. Raw files remain available."
+  },
+  "limits": [
+    "No hardware performance counters or retained RSS capture.",
+    "Allocation bytes describe temporary work, not total resident memory.",
+    "Write benchmarks have amortized growth and are not allocation gates.",
+    "No service-backed, consumer application, or production latency claim."
+  ],
+  "audience_digest": {
+    "samples": 10,
+    "benchtime": "200ms",
+    "command": "go test ./projectiongw -run='^$' -bench='^BenchmarkAudienceDigest$' -benchmem -benchtime=200ms -count=10",
+    "change": "Length-prefixed audience identifiers replace delimiter framing.",
+    "public_contract": "No wire, persistence, or API change; internal process-local cache keys change."
+  },
+  "unordered": {
+    "command": "go test ./hermes -run='^$' -bench='^BenchmarkHermesColumnarUnorderedLimit50$' -benchmem -benchtime=200ms -count=10",
+    "fixture": "128 or 10000 rows, followed by one decreasing-timestamp patch. Limit 50.",
+    "result": "Heap retention is O(K); existing delta-index reconciliation can allocate O(N) keys. This is not the ordered fast-path workload."
+  }
+}

@@ -1,0 +1,80 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   58676	     20833 ns/op	   23030 B/op	      43 allocs/op
+BenchmarkHermesApplyBatch64-8       	    2428	    301716 ns/op	  270517 B/op	    1341 allocs/op
+BenchmarkHermesBulkLoad512-8        	     416	   1148656 ns/op	  976737 B/op	    5972 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   67062	     24720 ns/op	   26818 B/op	      43 allocs/op
+BenchmarkHermesApplyBatch64-8       	    2398	    312358 ns/op	  272344 B/op	    1342 allocs/op
+BenchmarkHermesBulkLoad512-8        	     415	   1142236 ns/op	  976750 B/op	    5972 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   66854	     23772 ns/op	   26886 B/op	      43 allocs/op
+BenchmarkHermesApplyBatch64-8       	    2397	    305455 ns/op	  272413 B/op	    1342 allocs/op
+BenchmarkHermesBulkLoad512-8        	     414	   1138965 ns/op	  976750 B/op	    5972 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   66634	     23814 ns/op	   26558 B/op	      43 allocs/op
+BenchmarkHermesApplyBatch64-8       	    2378	    304156 ns/op	  273600 B/op	    1342 allocs/op
+BenchmarkHermesBulkLoad512-8        	     409	   1134654 ns/op	  976758 B/op	    5972 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   57937	     20184 ns/op	   22443 B/op	      43 allocs/op
+BenchmarkHermesApplyBatch64-8       	    2454	    309366 ns/op	  268948 B/op	    1340 allocs/op
+BenchmarkHermesBulkLoad512-8        	     408	   1147589 ns/op	  976792 B/op	    5972 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   66398	     23785 ns/op	   26627 B/op	      43 allocs/op
+BenchmarkHermesApplyBatch64-8       	    2530	    308721 ns/op	  264592 B/op	    1338 allocs/op
+BenchmarkHermesBulkLoad512-8        	     414	   1139884 ns/op	  976709 B/op	    5972 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   66968	     23740 ns/op	   26803 B/op	      43 allocs/op
+BenchmarkHermesApplyBatch64-8       	    2396	    307093 ns/op	  272468 B/op	    1342 allocs/op
+BenchmarkHermesBulkLoad512-8        	     417	   1143630 ns/op	  976703 B/op	    5971 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   64096	     26320 ns/op	   25283 B/op	      43 allocs/op
+BenchmarkHermesApplyBatch64-8       	    2188	    319232 ns/op	  285240 B/op	    1348 allocs/op
+BenchmarkHermesBulkLoad512-8        	     404	   1194597 ns/op	  976788 B/op	    5972 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   66726	     25564 ns/op	   26886 B/op	      43 allocs/op
+BenchmarkHermesApplyBatch64-8       	    2550	    309220 ns/op	  263491 B/op	    1338 allocs/op
+BenchmarkHermesBulkLoad512-8        	     426	   1154530 ns/op	  976718 B/op	    5972 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   67564	     24209 ns/op	   27012 B/op	      43 allocs/op
+BenchmarkHermesApplyBatch64-8       	    2494	    300590 ns/op	  266621 B/op	    1339 allocs/op
+BenchmarkHermesBulkLoad512-8        	     416	   1150973 ns/op	  976727 B/op	    5972 allocs/op
+PASS

@@ -1,0 +1,62 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+                                         │ benchmark-results/cleanup_20260922_go.txt │
+                                         │                  sec/op                   │
+NullLane_00_GoCall-8                                                     2.183n ± 2%
+NullLane_01_RouterFrameDispatch-8                                        10.32n ± 1%
+NullLane_02_DirectFrameClient-8                                          18.61n ± 1%
+NullLane_03_HTTPDispatchBuild-8                                          1.738µ ± 2%
+NullLane_04_HTTPRouteHandler-8                                           1.738µ ± 4%
+NullLane_05_HTTPRouteHandlerCorrelated-8                                 2.232µ ± 1%
+NullLane_06_HTTPSecuredChain-8                                           7.172µ ± 1%
+NullLane_07_JSONObjectMaterialization-8                                  35.05n ± 1%
+geomean                                                                  170.4n
+
+                                         │ benchmark-results/cleanup_20260922_go.txt │
+                                         │                   B/op                    │
+NullLane_00_GoCall-8                                                    0.000 ± 0%
+NullLane_01_RouterFrameDispatch-8                                       0.000 ± 0%
+NullLane_02_DirectFrameClient-8                                         0.000 ± 0%
+NullLane_03_HTTPDispatchBuild-8                                       2.823Ki ± 0%
+NullLane_04_HTTPRouteHandler-8                                        2.823Ki ± 0%
+NullLane_05_HTTPRouteHandlerCorrelated-8                              3.667Ki ± 0%
+NullLane_06_HTTPSecuredChain-8                                        6.734Ki ± 0%
+NullLane_07_JSONObjectMaterialization-8                                 48.00 ± 0%
+geomean                                                                            ¹
+¹ summaries must be >0 to compute geomean
+
+                                         │ benchmark-results/cleanup_20260922_go.txt │
+                                         │                 allocs/op                 │
+NullLane_00_GoCall-8                                                    0.000 ± 0%
+NullLane_01_RouterFrameDispatch-8                                       0.000 ± 0%
+NullLane_02_DirectFrameClient-8                                         0.000 ± 0%
+NullLane_03_HTTPDispatchBuild-8                                         14.00 ± 0%
+NullLane_04_HTTPRouteHandler-8                                          14.00 ± 0%
+NullLane_05_HTTPRouteHandlerCorrelated-8                                22.00 ± 0%
+NullLane_06_HTTPSecuredChain-8                                          76.00 ± 0%
+NullLane_07_JSONObjectMaterialization-8                                 1.000 ± 0%
+geomean                                                                            ¹
+¹ summaries must be >0 to compute geomean
+
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc
+                                       │ benchmark-results/cleanup_20260922_go.txt │
+                                       │                  sec/op                   │
+BinaryFrameAppendViewRoundTrip-8                                       20.81n ± 1%
+GeneratedProtoMarshalAppendRoundTrip-8                                 374.6n ± 2%
+geomean                                                                88.30n
+
+                                       │ benchmark-results/cleanup_20260922_go.txt │
+                                       │                   B/op                    │
+BinaryFrameAppendViewRoundTrip-8                                      0.000 ± 0%
+GeneratedProtoMarshalAppendRoundTrip-8                                152.0 ± 0%
+geomean                                                                          ¹
+¹ summaries must be >0 to compute geomean
+
+                                       │ benchmark-results/cleanup_20260922_go.txt │
+                                       │                 allocs/op                 │
+BinaryFrameAppendViewRoundTrip-8                                      0.000 ± 0%
+GeneratedProtoMarshalAppendRoundTrip-8                                6.000 ± 0%
+geomean                                                                          ¹
+¹ summaries must be >0 to compute geomean

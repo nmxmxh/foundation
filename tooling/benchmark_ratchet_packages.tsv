@@ -30,5 +30,8 @@ server-kit/go	./extension	^Benchmark
 
 # Chain result inspection (ordered/unordered), excluding the parallel runners.
 server-kit/go	./chain	^BenchmarkHasCriticalFailure
+
+# Full columnar assembly and reduction include temporary selection memory.
+server-kit/go	./hermes	^BenchmarkHermesColumnarBitmapFilterSum$
 server-kit/go	./placement	^Benchmark(MirrorFrame(Encode|Decode)32|RemoteComputeRoundTrip)
 runtime-sdk/go	./runtimehost	^BenchmarkPlacementFullHostPath

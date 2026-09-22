@@ -17,6 +17,15 @@ move it into the owning practice document and, where possible, into tooling.
 
 ## Research Lanes To Track
 
+The [2026-09-22 cleanup review](foundation_cleanup_review_20260922.md) maps
+current research to measured Foundation costs and remaining work.
+Adopted changes repair benchmark gates, measurement boundaries, and frontend validation.
+Performance guidance now distinguishes resident filtering from batch construction.
+WebGL guidance corrects an invalid fence experiment. Worker animation guidance follows the HTML worker contract.
+The implementation follow-up reduces columnar assembly memory and secured HTTP allocations, with regression budgets.
+Updater dependency commands now have deadlines and an explicit skip option.
+Open priorities include consumer compatibility, bounded diagnostics, and representative service measurements.
+
 1. Agentic software engineering: task localization, patch validation, agent
    handoff, reproducible evals, contamination-resistant benchmarks, and
    multi-agent coordination.

@@ -248,6 +248,7 @@ func (a app) runUpdate(ctx context.Context, args []string) error {
 	foundationDir := fs.String("foundation-dir", "", "Foundation core checkout")
 	force := fs.Bool("force", false, "overwrite force-managed files")
 	dryRun := fs.Bool("dry-run", false, "preview without writing files")
+	skipDeps := fs.Bool("skip-deps", false, "synchronize files without dependency resolution")
 	docsOnly := fs.Bool("docs-only", false, "update docs only")
 	toolingOnly := fs.Bool("tooling-only", false, "update tooling only")
 	foundationOnly := fs.Bool("foundation-only", false, "update vendored foundation modules only")
@@ -281,6 +282,9 @@ func (a app) runUpdate(ctx context.Context, args []string) error {
 	}
 	if *dryRun {
 		scriptArgs = append(scriptArgs, "--dry-run")
+	}
+	if *skipDeps {
+		scriptArgs = append(scriptArgs, "--skip-deps")
 	}
 	if *docsOnly {
 		scriptArgs = append(scriptArgs, "--docs-only")
@@ -367,6 +371,7 @@ func (a app) runRefresh(ctx context.Context, args []string) error {
 	projectDir := fs.String("project-dir", "", "project directory")
 	foundationDir := fs.String("foundation-dir", "", "Foundation core checkout")
 	dryRun := fs.Bool("dry-run", false, "preview without writing files")
+	skipDeps := fs.Bool("skip-deps", false, "synchronize files without dependency resolution")
 	acknowledgeSeedDrift := fs.Bool("acknowledge-seed-drift", false, "re-baseline the seed ledger to current templates")
 	lic := bindLicenseFlags(fs)
 	if err := fs.Parse(args); err != nil {
@@ -388,6 +393,9 @@ func (a app) runRefresh(ctx context.Context, args []string) error {
 	scriptArgs := []string{*projectDir}
 	if *dryRun {
 		scriptArgs = append(scriptArgs, "--dry-run")
+	}
+	if *skipDeps {
+		scriptArgs = append(scriptArgs, "--skip-deps")
 	}
 	if *acknowledgeSeedDrift {
 		scriptArgs = append(scriptArgs, "--acknowledge-seed-drift")

@@ -73,54 +73,7 @@ strict_gopls_check() {
   is_truthy "${GOPLS_CHECK_STRICT:-}" || is_truthy "${FOUNDATION_STRICT_LINT:-}"
 }
 
-run_with_timeout() {
-  local timeout_sec="$1"
-  shift
-  if command -v perl >/dev/null 2>&1; then
-    perl -e '
-      use strict;
-      use warnings;
-      use POSIX ":sys_wait_h";
-
-      my $timeout = shift @ARGV;
-      my @cmd = @ARGV;
-      my $pid = fork();
-      die "fork failed: $!\n" unless defined $pid;
-
-      if ($pid == 0) {
-        setpgrp(0, 0) or die "setpgrp failed: $!\n";
-        exec @cmd or die "exec failed: $!\n";
-      }
-
-      my $deadline = time() + $timeout;
-      while (1) {
-        my $done = waitpid($pid, WNOHANG);
-        if ($done == $pid) {
-          my $status = $?;
-          if ($status & 127) {
-            exit 128 + ($status & 127);
-          }
-          exit($status >> 8);
-        }
-        if ($done == -1) {
-          print STDERR "waitpid failed: $!\n";
-          exit 1;
-        }
-        if (time() >= $deadline) {
-          kill "TERM", -$pid;
-          select(undef, undef, undef, 0.5);
-          kill "KILL", -$pid;
-          waitpid($pid, 0);
-          print STDERR "command timed out after ${timeout}s: @cmd\n";
-          exit 124;
-        }
-        select(undef, undef, undef, 0.2);
-      }
-    ' "$timeout_sec" "$@"
-  else
-    "$@"
-  fi
-}
+source "$(cd "$(dirname "$0")" && pwd)/command_timeout.sh"
 
 run_analysis_step() {
   local label="$1"

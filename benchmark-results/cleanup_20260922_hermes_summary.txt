@@ -1,0 +1,31 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+                                │ benchmark-results/cleanup_20260922_hermes.txt │
+                                │                    sec/op                     │
+HermesGetRecordCopied-8                                             286.7n ± 4%
+HermesForEachViewLimit50-8                                          12.75µ ± 2%
+HermesColumnarBitmapFilterSum-8                                     5.803m ± 5%
+HermesListRecordsFilterSum-8                                        7.500m ± 6%
+geomean                                                             112.3µ
+
+                                │ benchmark-results/cleanup_20260922_hermes.txt │
+                                │                     B/op                      │
+HermesGetRecordCopied-8                                              224.0 ± 0%
+HermesForEachViewLimit50-8                                         19.55Ki ± 0%
+HermesColumnarBitmapFilterSum-8                                    2.224Mi ± 0%
+HermesListRecordsFilterSum-8                                       7.446Mi ± 0%
+geomean                                                            92.84Ki
+
+                                │ benchmark-results/cleanup_20260922_hermes.txt │
+                                │                   allocs/op                   │
+HermesGetRecordCopied-8                                              2.000 ± 0%
+HermesForEachViewLimit50-8                                           12.00 ± 0%
+HermesColumnarBitmapFilterSum-8                                      14.00 ± 0%
+HermesListRecordsFilterSum-8                                        10.01k ± 0%
+geomean                                                              42.82
+
+                                │ benchmark-results/cleanup_20260922_hermes.txt │
+                                │               bytes_touched/op                │
+HermesColumnarBitmapFilterSum-8                                     179.7k ± 0%

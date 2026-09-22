@@ -1,0 +1,140 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+                                                     │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_hermes_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_hermes_after.txt │
+                                                     │                                                   sec/op                                                    │                                       sec/op                                        vs base                │
+HermesGetRecordCopied-8                                                                                                                                278.9n ± 3%                                                                          274.2n ± 2%   -1.69% (p=0.022 n=10)
+HermesForEachViewLimit50-8                                                                                                                             12.57µ ± 3%                                                                          10.52µ ± 1%  -16.27% (p=0.000 n=10)
+HermesColumnarAssembly/rows128/full-8                                                                                                                  42.49µ ± 1%                                                                          26.59µ ± 1%  -37.42% (p=0.000 n=10)
+HermesColumnarAssembly/rows128/limit50-8                                                                                                              11.533µ ± 4%                                                                          9.180µ ± 0%  -20.40% (p=0.000 n=10)
+HermesColumnarAssembly/rows128/predicate_limit50-8                                                                                                     8.442µ ± 1%                                                                          5.538µ ± 1%  -34.41% (p=0.000 n=10)
+HermesColumnarAssembly/rows10000/full-8                                                                                                                5.887m ± 4%                                                                          4.566m ± 5%  -22.45% (p=0.000 n=10)
+HermesColumnarAssembly/rows10000/limit50-8                                                                                                            11.625µ ± 1%                                                                          9.483µ ± 2%  -18.43% (p=0.000 n=10)
+HermesColumnarAssembly/rows10000/predicate_limit50-8                                                                                                   425.0µ ± 1%                                                                          313.3µ ± 2%  -26.29% (p=0.000 n=10)
+HermesColumnarBitmapFilterSum-8                                                                                                                        5.826m ± 2%                                                                          4.665m ± 4%  -19.93% (p=0.000 n=10)
+geomean                                                                                                                                                51.29µ                                                                               39.73µ       -22.54%
+
+                                                     │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_hermes_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_hermes_after.txt │
+                                                     │                                                    B/op                                                     │                                       B/op                                        vs base                  │
+HermesGetRecordCopied-8                                                                                                                                 224.0 ± 0%                                                                         224.0 ± 0%        ~ (p=1.000 n=10) ¹
+HermesForEachViewLimit50-8                                                                                                                           19.555Ki ± 0%                                                                       9.047Ki ± 0%  -53.74% (p=0.000 n=10)
+HermesColumnarAssembly/rows128/full-8                                                                                                                30.539Ki ± 0%                                                                       3.375Ki ± 0%  -88.95% (p=0.000 n=10)
+HermesColumnarAssembly/rows128/limit50-8                                                                                                             11.961Ki ± 0%                                                                       1.453Ki ± 0%  -87.85% (p=0.000 n=10)
+HermesColumnarAssembly/rows128/predicate_limit50-8                                                                                                     7096.0 ± 0%                                                                         864.0 ± 0%  -87.82% (p=0.000 n=10)
+HermesColumnarAssembly/rows10000/full-8                                                                                                              2275.0Ki ± 0%                                                                       242.7Ki ± 0%  -89.33% (p=0.000 n=10)
+HermesColumnarAssembly/rows10000/limit50-8                                                                                                           11.961Ki ± 0%                                                                       1.453Ki ± 0%  -87.85% (p=0.000 n=10)
+HermesColumnarAssembly/rows10000/predicate_limit50-8                                                                                                 425.34Ki ± 0%                                                                       17.05Ki ± 0%  -95.99% (p=0.000 n=10)
+HermesColumnarBitmapFilterSum-8                                                                                                                      2277.5Ki ± 0%                                                                       245.2Ki ± 0%  -89.23% (p=0.000 n=10)
+geomean                                                                                                                                               40.38Ki                                                                            6.122Ki       -84.84%
+¹ all samples are equal
+
+                                                     │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_hermes_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_hermes_after.txt │
+                                                     │                                                  allocs/op                                                  │                                    allocs/op                                      vs base                  │
+HermesGetRecordCopied-8                                                                                                                                 2.000 ± 0%                                                                         2.000 ± 0%        ~ (p=1.000 n=10) ¹
+HermesForEachViewLimit50-8                                                                                                                             12.000 ± 0%                                                                         9.000 ± 0%  -25.00% (p=0.000 n=10)
+HermesColumnarAssembly/rows128/full-8                                                                                                                  12.000 ± 0%                                                                         9.000 ± 0%  -25.00% (p=0.000 n=10)
+HermesColumnarAssembly/rows128/limit50-8                                                                                                               12.000 ± 0%                                                                         9.000 ± 0%  -25.00% (p=0.000 n=10)
+HermesColumnarAssembly/rows128/predicate_limit50-8                                                                                                     12.000 ± 0%                                                                         9.000 ± 0%  -25.00% (p=0.000 n=10)
+HermesColumnarAssembly/rows10000/full-8                                                                                                                12.000 ± 0%                                                                         9.000 ± 0%  -25.00% (p=0.000 n=10)
+HermesColumnarAssembly/rows10000/limit50-8                                                                                                             12.000 ± 0%                                                                         9.000 ± 0%  -25.00% (p=0.000 n=10)
+HermesColumnarAssembly/rows10000/predicate_limit50-8                                                                                                   12.000 ± 0%                                                                         9.000 ± 0%  -25.00% (p=0.000 n=10)
+HermesColumnarBitmapFilterSum-8                                                                                                                         14.00 ± 0%                                                                         11.00 ± 0%  -21.43% (p=0.000 n=10)
+geomean                                                                                                                                                 10.00                                                                              7.787       -22.16%
+¹ all samples are equal
+
+                                │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_hermes_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_hermes_after.txt │
+                                │                                              bytes_touched/op                                               │                                    bytes_touched/op                                     vs base            │
+HermesColumnarBitmapFilterSum-8                                                                                                   179.7k ± 0%                                                                              179.7k ± 0%  ~ (p=1.000 n=10) ¹
+¹ all samples are equal
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+                         │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_writes_paired_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_writes_paired_after.txt │
+                         │                                                       sec/op                                                       │                                           sec/op                                            vs base               │
+HermesApplyEventUpsert-8                                                                                                         23.80µ ± 12%                                                                                  23.68µ ± 7%       ~ (p=0.353 n=10)
+HermesApplyBatch64-8                                                                                                             307.9µ ±  2%                                                                                  304.6µ ± 1%       ~ (p=0.218 n=10)
+HermesBulkLoad512-8                                                                                                              1.146m ±  1%                                                                                  1.149m ± 1%       ~ (p=0.684 n=10)
+geomean                                                                                                                          203.2µ                                                                                        202.3µ       -0.44%
+
+                         │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_writes_paired_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_writes_paired_after.txt │
+                         │                                                        B/op                                                        │                                            B/op                                             vs base               │
+HermesApplyEventUpsert-8                                                                                                        26.09Ki ± 14%                                                                                 25.75Ki ± 6%       ~ (p=0.724 n=10)
+HermesApplyBatch64-8                                                                                                            265.1Ki ±  3%                                                                                 261.4Ki ± 2%       ~ (p=0.579 n=10)
+HermesBulkLoad512-8                                                                                                             953.9Ki ±  0%                                                                                 953.9Ki ± 0%       ~ (p=0.782 n=10)
+geomean                                                                                                                         187.5Ki                                                                                       185.9Ki       -0.90%
+
+                         │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_writes_paired_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_writes_paired_after.txt │
+                         │                                                     allocs/op                                                      │                                        allocs/op                                          vs base                 │
+HermesApplyEventUpsert-8                                                                                                           43.00 ± 0%                                                                                 43.00 ± 0%       ~ (p=1.000 n=10) ¹
+HermesApplyBatch64-8                                                                                                              1.341k ± 0%                                                                                1.340k ± 0%       ~ (p=0.665 n=10)
+HermesBulkLoad512-8                                                                                                               5.972k ± 0%                                                                                5.972k ± 0%       ~ (p=1.000 n=10)
+geomean                                                                                                                            701.0                                                                                      700.8       -0.04%
+¹ all samples are equal
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+                                          │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_http_paired_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_http_paired_after.txt │
+                                          │                                                      sec/op                                                      │                                          sec/op                                           vs base               │
+AppLane_HTTPMiddleware_AuthSecurityRBAC-8                                                                                                        8.083µ ± 2%                                                                                7.707µ ± 2%  -4.65% (p=0.000 n=10)
+NullLane_06_HTTPSecuredChain-8                                                                                                                   7.625µ ± 2%                                                                                7.258µ ± 2%  -4.81% (p=0.001 n=10)
+geomean                                                                                                                                          7.850µ                                                                                     7.479µ       -4.73%
+
+                                          │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_http_paired_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_http_paired_after.txt │
+                                          │                                                       B/op                                                       │                                          B/op                                           vs base                 │
+AppLane_HTTPMiddleware_AuthSecurityRBAC-8                                                                                                       11.08Ki ± 0%                                                                             11.08Ki ± 0%       ~ (p=1.000 n=10) ¹
+NullLane_06_HTTPSecuredChain-8                                                                                                                  6.734Ki ± 0%                                                                             6.734Ki ± 0%       ~ (p=1.000 n=10) ¹
+geomean                                                                                                                                         8.639Ki                                                                                  8.639Ki       +0.00%
+¹ all samples are equal
+
+                                          │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_http_paired_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_http_paired_after.txt │
+                                          │                                                    allocs/op                                                     │                                        allocs/op                                         vs base                │
+AppLane_HTTPMiddleware_AuthSecurityRBAC-8                                                                                                         82.00 ± 0%                                                                                74.00 ± 0%   -9.76% (p=0.000 n=10)
+NullLane_06_HTTPSecuredChain-8                                                                                                                    76.00 ± 0%                                                                                68.00 ± 0%  -10.53% (p=0.000 n=10)
+geomean                                                                                                                                           78.94                                                                                     70.94       -10.14%
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/projectiongw
+cpu: Apple M1 Pro
+                          │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_audience_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_audience_after.txt │
+                          │                                                    sec/op                                                     │                                        sec/op                                          vs base               │
+AudienceDigest/single-8                                                                                                       115.9n ± 1%                                                                             116.1n ± 2%       ~ (p=0.781 n=10)
+AudienceDigest/multiple-8                                                                                                     209.7n ± 1%                                                                             205.6n ± 1%  -1.98% (p=0.001 n=10)
+geomean                                                                                                                       155.9n                                                                                  154.5n       -0.93%
+
+                          │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_audience_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_audience_after.txt │
+                          │                                                     B/op                                                      │                                        B/op                                          vs base                 │
+AudienceDigest/single-8                                                                                                        64.00 ± 0%                                                                            64.00 ± 0%       ~ (p=1.000 n=10) ¹
+AudienceDigest/multiple-8                                                                                                      112.0 ± 0%                                                                            112.0 ± 0%       ~ (p=1.000 n=10) ¹
+geomean                                                                                                                        84.66                                                                                 84.66       +0.00%
+¹ all samples are equal
+
+                          │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_audience_before.txt │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_audience_after.txt │
+                          │                                                   allocs/op                                                   │                                      allocs/op                                       vs base                 │
+AudienceDigest/single-8                                                                                                        2.000 ± 0%                                                                            2.000 ± 0%       ~ (p=1.000 n=10) ¹
+AudienceDigest/multiple-8                                                                                                      3.000 ± 0%                                                                            3.000 ± 0%       ~ (p=1.000 n=10) ¹
+geomean                                                                                                                        2.449                                                                                 2.449       +0.00%
+¹ all samples are equal
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+                                           │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_unordered.txt │
+                                           │                                                 sec/op                                                  │
+HermesColumnarUnorderedLimit50/rows128-8                                                                                                 24.17µ ± 1%
+HermesColumnarUnorderedLimit50/rows10000-8                                                                                               1.674m ± 6%
+geomean                                                                                                                                  201.2µ
+
+                                           │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_unordered.txt │
+                                           │                                                  B/op                                                   │
+HermesColumnarUnorderedLimit50/rows128-8                                                                                                7.867Ki ± 0%
+HermesColumnarUnorderedLimit50/rows10000-8                                                                                              428.1Ki ± 0%
+geomean                                                                                                                                 58.03Ki
+
+                                           │ /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/implementation_20260922_unordered.txt │
+                                           │                                                allocs/op                                                │
+HermesColumnarUnorderedLimit50/rows128-8                                                                                                  12.00 ± 0%
+HermesColumnarUnorderedLimit50/rows10000-8                                                                                                42.00 ± 0%
+geomean                                                                                                                                   22.45

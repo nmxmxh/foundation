@@ -210,13 +210,22 @@ hardware can feed predictably.
 4. Use `sync.WaitGroup` or `WaitGroup.Go` where available for waiting on known finite goroutine sets. Do not use sleeps as synchronization.
 5. Use `sync.Once` for expensive lazy initialization that is safe to share.
 6. Reduce lock scope before replacing locks. In read-heavy shared state, consider `sync.RWMutex`; for counters and flags, consider `sync/atomic`; for maps under high contention, consider sharding (for example, 128/256 independent partitions using a fast hash).
-6a. **Lock-Free Reads**: For in-memory projection caches (for example, Hermes), reads must be completely lock-free. Leverage Copy-On-Write (COW) index snapshot swaps and atomic cell pointers to avoid read-blocking locks, protecting read latency from write batch pressure.
-6b. **Streaming Accumulator Projections**: For projections serving aggregate facets, distributions, or running metrics, attach an `AccumulatorStateStore`. Maintaining running state and reference counts on mutation and TTL eviction replaces O(N) sequential scans with instant O(1) constant-time memory lookups (<1.5 microseconds, zero allocations).
-6c. **Vectorized Inverted Bitmaps**: For multi-attribute candidate selection, map secondary attributes to stable record slots in packed bit-vectors. Intersect compound filters (`A AND B AND C`) using word-parallel bitwise AND to eliminate candidate pointer chasing and scale multi-tag filtering by >28x.
-6d. **Short-TTL Discovery Memoization**: For AI agent and MCP query endpoints with high read concurrency, memoize serialized catalogs, manifest trees, and multi-model fusions under 10-15s TTL mutex locks. Eliminates redundant JSON/string formatting and linear grouping overhead on repeated agent tool invocations.
+6a. **Lock-Free Reads**: Preserve the lock-free contract of existing Hermes read paths.
+    Before extending snapshot publication, measure writer copies, retained memory, and reader latency under concurrent writes.
+    Do not impose this design on unrelated shared state without contention evidence.
+6b. **Streaming Accumulator Projections**: Use `AccumulatorStateStore` when mutation and eviction can maintain the required aggregate correctly.
+    Measure update cost and recovery cost with read cost. Constant-time lookup does not imply constant-time maintenance.
+6c. **Vectorized Inverted Bitmaps**: Use packed bitmaps for suitable compound predicates over stable record slots.
+    Measure candidate collection and batch construction separately from resident bitmap operations.
+    Compare complete request paths before publishing a speedup.
+6d. **Discovery Memoization**: Follow the measured cache criteria in `database_practices.md` before adding a cache for serialized catalogs.
+    Derive expiration from freshness requirements. Bound keys and bytes, and include tenant scope and invalidation behavior in tests.
 7. Share immutable snapshots freely across goroutines. Mutable shared state needs explicit ownership, synchronization, or copy-on-write semantics.
 8. Every goroutine spawned from a request, socket, worker job, or ingestion batch must receive cancellation through `context.Context` or an equivalent lifecycle boundary.
-9. In containers, validate `GOMAXPROCS` against cgroup CPU limits. Prefer an automatic setting such as `automaxprocs` where deployment does not already enforce this.
+9. In Linux containers, prefer Go 1.25+ runtime handling of cgroup CPU limits.
+   Explicit `GOMAXPROCS` settings disable automatic updates. Validate existing
+   overrides before adding `automaxprocs`. See the
+   [Go runtime notes](https://go.dev/doc/go1.25#runtime).
 10. Prefer the primitive that matches ownership: locks for short critical sections, channels for handoff/order/ownership transfer, and atomics for narrow counters or flags.
 11. Use Foundation observability concurrency signals for long-lived owners: `RecordConcurrency`, `RecordConcurrencyGauge`, and `RecordConcurrencyDuration` with low-cardinality `component`, `primitive`, `operation`, and `state` values.
 12. Treat channel close, timer/ticker lifecycle, and shutdown select priority as performance concerns. Leaks and partial hangs show up as tail latency, queue lag, and failed drain behavior before they show up as obvious crashes.

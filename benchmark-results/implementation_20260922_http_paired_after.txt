@@ -1,0 +1,70 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   55885	      7905 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   67150	      7256 ns/op	    6896 B/op	      68 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   60304	      7696 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   67896	      7277 ns/op	    6896 B/op	      68 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   61027	      7730 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   66230	      7371 ns/op	    6896 B/op	      68 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   63420	      7626 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   64977	      7259 ns/op	    6896 B/op	      68 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   63296	      7656 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   67093	      7233 ns/op	    6896 B/op	      68 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   60421	      7670 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   67146	      7192 ns/op	    6896 B/op	      68 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   57488	      7858 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   54196	      7724 ns/op	    6896 B/op	      68 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   61410	      7598 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   67908	      7191 ns/op	    6896 B/op	      68 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   62629	      7718 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   67348	      7270 ns/op	    6896 B/op	      68 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   62392	      7756 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   65894	      7199 ns/op	    6896 B/op	      68 allocs/op
+PASS

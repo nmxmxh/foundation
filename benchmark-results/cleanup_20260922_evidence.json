@@ -1,0 +1,208 @@
+{
+  "schemaVersion": "1.0",
+  "objective": "Repair Foundation measurement and validation defects; refresh evidence and prioritize improvements.",
+  "risk": "tier2 tooling and lab changes; runtime APIs unchanged",
+  "filesTouched": [
+    ".github/workflows/core-ci.yml",
+    "AGENTS.md",
+    "Makefile",
+    "README.md",
+    "benchmark-results/cleanup_20260922_canvas.txt",
+    "benchmark-results/cleanup_20260922_evidence.json",
+    "benchmark-results/cleanup_20260922_go.txt",
+    "benchmark-results/cleanup_20260922_go_summary.txt",
+    "benchmark-results/cleanup_20260922_hermes.txt",
+    "benchmark-results/cleanup_20260922_hermes_alloc.txt",
+    "benchmark-results/cleanup_20260922_hermes_cpu.txt",
+    "benchmark-results/cleanup_20260922_hermes_resident.txt",
+    "benchmark-results/cleanup_20260922_hermes_resident_summary.txt",
+    "benchmark-results/cleanup_20260922_hermes_summary.txt",
+    "benchmark-results/cleanup_20260922_metadata.json",
+    "benchmark-results/cleanup_20260922_ratchet.txt",
+    "benchmark-results/cleanup_20260922_webgl.json",
+    "docs/README.md",
+    "docs/foundation_benchmarks.md",
+    "docs/foundation_cleanup_review_20260922.md",
+    "docs/foundation_glossary.md",
+    "docs/future_practices_research.md",
+    "docs/gpu_practices.md",
+    "docs/performance_lab.md",
+    "docs/performance_practices.md",
+    "docs/render_surface_lane.md",
+    "docs/ui_render_performance_research.md",
+    "frontend-lab/.gitignore",
+    "frontend-lab/.vitest/attachments/00acc382bd7df0df84cc57c7a312d2f91266ba6f.png",
+    "frontend-lab/.vitest/attachments/28e63f2118983a9a99935f45722d827e59a3fde6.png",
+    "frontend-lab/.vitest/attachments/2d0c6639c0162b561ce44053595f0d1a326dbe58.png",
+    "frontend-lab/.vitest/attachments/5d7ff3c9e10ab94d0207be2cee598393e5320379.png",
+    "frontend-lab/.vitest/attachments/636b07ae671c81bc00191dddc64cc12c6f9c7f16.png",
+    "frontend-lab/.vitest/attachments/68c62c8fdb717b6fbc0417335111300bb9e41e0f.png",
+    "frontend-lab/.vitest/attachments/864913316b533696458194ea8e482626bfd0ce11.png",
+    "frontend-lab/.vitest/attachments/8659dd27f1bdd5cea3f529b45004c96b8b87d5c7.png",
+    "frontend-lab/.vitest/attachments/9a748e8b736f9f6854ad95785559573b176d73e8.png",
+    "frontend-lab/.vitest/attachments/9b1f6e3586d3bd2ba7d2f094039ac8820a5a065e.png",
+    "frontend-lab/.vitest/attachments/9ddb3beca3fc5e66cf085d6fda14f42e9b7530be.png",
+    "frontend-lab/.vitest/attachments/a9bf926e687c382fca531e88666d6a4000390f01.png",
+    "frontend-lab/.vitest/attachments/c7dedfb1c69709d05265f724b959ee97481ef76f.png",
+    "frontend-lab/.vitest/attachments/e7855607782b304bdda3af75b1ee96e72d9712bf.png",
+    "frontend-lab/.vitest/attachments/f0bde58f69a1985395e499cd2e324eb334ae0fe3.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/cullSection.browser.test.tsx/MinimalCullSection--chromium----restores-a-section-when-it-is-scrolled-into-view.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/cullSection.browser.test.tsx/MinimalCullSection--chromium----skips-sections-far-outside-the-scroller-and-renders-the-ones-in-view.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/frameClockLane.browser.test.ts/frame-clock-lane--chromium--cross-origin-isolated----runs-on-the-worker-pulse-when-the-consumer-passes-createWorker.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/imageStability.browser.test.tsx/image-layout-stability--chromium----reveal-holds-the-image-transparent-until-it-has-decoded.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/pulseLatency.browser.test.ts/pulse-worker-first-tick-latency--chromium--cross-origin-isolated----delivers-ticks-from-the-worker--and-records-how-long-the-first-one-took.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/skeletonOffscreen.browser.test.tsx/MinimalSkeleton-off-screen-pausing--chromium----runs-the-sweep-on-screen-and-pauses-it-far-off-screen--then-resumes-on-scroll.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/surfaceLane.gpu.test.ts/render-surface-lane-on-the-real-GPU---measures-time-to-first-frame-cold-and-prewarmed--on-a-real-pipeline-compile.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/tierTokens.browser.test.tsx/quality-tier-tokens--chromium----draws-the-full-shadow--blur-and-shimmer-when-no-tier-is-set.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/tierTokens.browser.test.tsx/quality-tier-tokens--chromium----swaps-to-cheap-shadows--drops-blur-and-stops-the-shimmer-on-low_power.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/timeline.browser.test.ts/minimal-timeline--chromium----calls-back-when-the-playhead-passes-a-point.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/timeline.browser.test.ts/minimal-timeline--chromium----jumps-to-the-end-state-when-reduced-motion-applies.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/timeline.browser.test.ts/minimal-timeline--chromium----keeps-an-exit-s-end-state-by-committing-it--not-by-holding-a-fill.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/timeline.browser.test.ts/minimal-timeline--chromium----places-tweens-by-GSAP-style-position--append------------labels.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/timeline.browser.test.ts/minimal-timeline--chromium----reports-properties-the-compositor-cannot-run.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/timeline.browser.test.ts/minimal-timeline--chromium----staggers-across-targets--from-the-start-or-from-the-centre.png",
+    "frontend-lab/.vitest/attachments/failure-screenshots/timeline.browser.test.ts/minimal-timeline--chromium----writes-no-style-from-JavaScript-while-it-plays.png",
+    "frontend-lab/.vitest/attachments/ff2839f8020054fb17ff0881017894735309cd44.png",
+    "frontend-lab/README.md",
+    "frontend-lab/linaria/build.mjs",
+    "frontend-lab/linaria/patterns/build.mjs",
+    "frontend-lab/src/browser/tierTokens.browser.test.tsx",
+    "frontend-lab/src/dom/latencySummary.dom.test.ts",
+    "frontend-lab/src/gpu/fixtures/labSurfaces.worker.ts",
+    "frontend-lab/src/gpu/runtimeCost.gpu.test.tsx",
+    "frontend-lab/src/gpu/surfaceLane.gpu.test.ts",
+    "frontend-lab/src/latencySummary.ts",
+    "frontend-lab/src/ssr/buildKit.mjs",
+    "frontend-lab/tsconfig.json",
+    "frontend-lab/vitest.config.ts",
+    "runtime-sdk/ts/browser-host/src/renderSurface.bench.ts",
+    "templates/AGENTS.md",
+    "tests/benchmark_history_test.sh",
+    "tests/benchmark_ratchet_test.sh",
+    "tests/core_validation_contract_test.sh",
+    "tests/practice_controls_test.sh",
+    "tooling/enforcement_manifest.tsv",
+    "tooling/scripts/benchmark_history.sh",
+    "tooling/scripts/benchmark_ratchet_check.sh",
+    "tooling/scripts/enforcement_integrity_check.sh",
+    "tooling/scripts/practice_controls_check.sh"
+  ],
+  "contractsChanged": [
+    "Allocation and practice checks fail on missing evidence and duplicate controls.",
+    "Baseline updates preserve previous allocation and byte ceilings.",
+    "Benchmark history adds provenance, partial-run status, and an explicit TypeScript estimate source.",
+    "Core CI adds frontend lab rendering contracts."
+  ],
+  "invariants": [
+    "Allocation ceilings do not increase.",
+    "Failed or incomplete measurement cannot rewrite a baseline.",
+    "Every declared control remains mapped exactly once.",
+    "Runtime tenant, auth, correlation, ordering, and fallback contracts remain unchanged.",
+    "WebGL fixture polling has a deadline and disposal cleanup."
+  ],
+  "commandsRun": [
+    {
+      "command": "bash tests/benchmark_ratchet_test.sh",
+      "result": "passed; missing row/module, command failure, failed update, allocation/byte regression, decrease and attempted increase"
+    },
+    {
+      "command": "bash tests/benchmark_history_test.sh",
+      "result": "passed; Vitest 4/5 formats, labels, estimates, metadata, relative output, partial failure"
+    },
+    {
+      "command": "bash tests/practice_controls_test.sh",
+      "result": "passed; valid, duplicate, and unmapped control fixtures"
+    },
+    {
+      "command": "make test-frontend-lab-contracts",
+      "result": "passed; typecheck and 48 tests across 15 files"
+    },
+    {
+      "command": "tooling/scripts/run_vitest.sh frontend-lab run --project gpu src/gpu/surfaceLane.gpu.test.ts -t 'records completed WebGL2 fences'",
+      "result": "passed; one selected test, four other tests not selected"
+    },
+    {
+      "command": "tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host run src/canvasStage.test.ts src/renderSurface.test.ts src/renderSurfaceClient.test.ts src/renderSurfaceWorker.test.ts src/frameTelemetry.test.ts",
+      "result": "passed; 86 tests across five files"
+    },
+    {
+      "command": "tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host bench --run src/renderSurface.bench.ts",
+      "result": "passed; two tests, four benchmark rows"
+    },
+    {
+      "command": "make check-frontend-prototype-generator check-scaffold-manifest check-scaffold-smoke check-init-project",
+      "result": "passed; generated Go WASM compiled; generated frontend install/build skipped"
+    },
+    {
+      "command": "SKIP_DEPS=true GOPROXY=off GOSUMDB=off GOCACHE=/tmp/ovasabi-foundation-go-build make check-update-project",
+      "result": "passed; dependency installation intentionally skipped after original run stalled in npm lockfile resolution"
+    },
+    {
+      "command": "make check-core-validation-contract check-doc-references check-benchmark-evidence check-practice-controls check-agent-contract check-runtime-performance-contracts check-managed-patch-hygiene",
+      "result": "passed"
+    },
+    {
+      "command": "make check-enforcement-integrity",
+      "result": "passed after reviewed manifest refresh"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "tooling/scripts/benchmark_ratchet_check.sh .",
+      "result": "failed on two existing allocation ceilings; 47 benchmarks measured; same failures with original checker"
+    }
+  ],
+  "negativeEvidence": [
+    "Original missing-benchmark fixture accepted incomplete evidence.",
+    "Original history parser lost Vitest 5 fastest row.",
+    "Original WebGL fixture produced no completion samples.",
+    "Old ceiling key representation allowed an increase.",
+    "Old control key representation accepted a duplicate."
+  ],
+  "coverageBefore": {},
+  "coverageAfter": {},
+  "coverageNote": "No production runtime code changed. Lab statistics are tested; numerical coverage was not collected.",
+  "benchmarks": {
+    "metadata": "cleanup_20260922_metadata.json",
+    "reference": "../docs/foundation_benchmarks.md",
+    "interpretation": "Reference capture; no production speedup claim. Resident and construction workloads reported separately."
+  },
+  "fallback": "Preserve runtime adapters and allocation limits. Failed captures retain diagnostics. Fence fixture polling stops on timeout and disposal.",
+  "knownGaps": [
+    "Two pre-existing HTTP allocation ceiling failures remain.",
+    "No complete make verify: local Rust 1.92.0 differs from CI 1.95.0.",
+    "No service-backed, native release, mobile device, or consumer application tests.",
+    "Vite emits plugin lifecycle warnings; earlier combined runs also reported shutdown delays.",
+    "Hosted CI job has not executed in this pass."
+  ],
+  "requiredEvidence": [
+    "negative fixtures",
+    "lab typecheck",
+    "DOM/SSR/browser contracts",
+    "focused Chromium GPU test",
+    "repeat benchmark samples",
+    "profile",
+    "scaffold validation",
+    "documentation links",
+    "protected enforcement hashes"
+  ],
+  "nextReviewers": [
+    "Tooling reviewer: negative fixtures and enforcement hashes.",
+    "Rendering reviewer: WebGL enum, polling bounds, and disposal.",
+    "Performance reviewer: benchmark boundaries and Hermes experiment."
+  ],
+  "enforcementRefresh": {
+    "newlyProtected": [
+      "tests/benchmark_ratchet_test.sh",
+      "tests/benchmark_history_test.sh",
+      "tests/practice_controls_test.sh"
+    ],
+    "preexistingHashDrift": [
+      "tooling/scripts/generate_frontend_prototype_runtime.mjs",
+      "tooling/scripts/project_scaffold_check.sh"
+    ],
+    "reviewEvidence": "Inspected committed changes and passed prototype generator, scaffold smoke, init, and offline update tests."
+  }
+}

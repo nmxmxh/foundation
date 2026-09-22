@@ -1,0 +1,15 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+                                        │ benchmark-results/cleanup_20260922_hermes_resident.txt │
+                                        │                         sec/op                         │
+HermesColumnarBitmapFilterCachedBatch-8                                              30.44µ ± 3%
+
+                                        │ benchmark-results/cleanup_20260922_hermes_resident.txt │
+                                        │                          B/op                          │
+HermesColumnarBitmapFilterCachedBatch-8                                             2.500Ki ± 0%
+
+                                        │ benchmark-results/cleanup_20260922_hermes_resident.txt │
+                                        │                       allocs/op                        │
+HermesColumnarBitmapFilterCachedBatch-8                                               2.000 ± 0%

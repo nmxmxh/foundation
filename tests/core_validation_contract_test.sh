@@ -18,6 +18,7 @@ for contract in \
   'RUST_RUNTIME_LOOM: "1"' \
   'make install-ts-deps' \
   'make audit-ts-deps' \
+  'make test-frontend-lab-contracts' \
   'make verify'; do
   grep -Fq -- "$contract" "$workflow" || fail "Core CI is missing: $contract"
 done
@@ -51,5 +52,11 @@ printf '%s\n' "$modules" | grep -Fxq 'app' || fail "primary Go module was not di
 if printf '%s\n' "$modules" | grep -Fq 'worktrees'; then
   fail "nested worktree leaked into Go analysis discovery"
 fi
+
+bash "$ROOT/tests/benchmark_ratchet_test.sh"
+bash "$ROOT/tests/benchmark_history_test.sh"
+bash "$ROOT/tests/practice_controls_test.sh"
+bash "$ROOT/tests/command_timeout_test.sh"
+bash "$ROOT/tests/coverage_ratchet_test.sh"
 
 echo "Foundation Core validation contract passed"

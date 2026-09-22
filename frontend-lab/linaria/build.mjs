@@ -21,7 +21,6 @@ await build({
   plugins: [
     wyw({
       include: ["**/*.{ts,tsx}"],
-      babelOptions: { presets: ["@babel/preset-typescript", ["@babel/preset-react", { runtime: "automatic" }]] },
     }),
   ],
   build: { outDir: here("../results/linaria-spike"), emptyOutDir: true, minify: false },

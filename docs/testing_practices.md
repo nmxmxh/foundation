@@ -148,6 +148,10 @@ Enforcement:
   legacy module is the "approved exception" of requirement 4, made explicit.
 - Reviewer gate on untested critical branches.
 
+The coverage gate rejects failed test commands and missing recorded packages.
+It preserves diagnostics and leaves the baseline unchanged when evidence is incomplete.
+Package retirement requires explicit baseline review; absent output cannot retire a floor.
+
 ### TE-07: Test loops and retries at zero, one, two, many, and exhausted
 
 Level: `Mandatory`

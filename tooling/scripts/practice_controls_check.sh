@@ -77,7 +77,8 @@ add_expected_from_doc() {
   local id
   while IFS= read -r id; do
     [[ -n "$id" ]] || continue
-    expected_ids["${id:u}"]=1
+    id="${id:u}"
+    expected_ids[$id]=1
   done < <(rg -o "^### ${prefix}-[0-9A-Za-z]+" "$doc" 2>/dev/null | awk '{print $2}')
 }
 
@@ -107,8 +108,8 @@ if [[ -f "$matrix" ]]; then
       fail "duplicate control id" "$control_id at line $line_no"
       continue
     fi
-    seen_ids["$control_id"]=1
-    matrix_ids["$control_id"]=1
+    seen_ids[$control_id]=1
+    matrix_ids[$control_id]=1
 
     if [[ -n "${rest:-}" ]]; then
       fail "extra matrix columns" "$control_id line $line_no"
@@ -152,16 +153,15 @@ add_expected_from_doc "$docs_dir/coding_practices.md" "CP"
 add_expected_from_doc "$docs_dir/testing_practices.md" "TE"
 
 for required in CTRL-01 AOC-01 EVID-01 FPR-01 AISEC-01 PERFLAB-01 RUNTIME-01 FORMAL-01 OPS-01 PROJFRESH-01 MATH-01; do
-  expected_ids["$required"]=1
+  expected_ids[$required]=1
 done
 
 id=""
 for id in "${(@k)expected_ids}"; do
-  display_id="${id//\"/}"
   if [[ -n "${matrix_ids[$id]:-}" ]]; then
-    ok "control mapped $display_id"
+    ok "control mapped $id"
   else
-    fail "control mapped $display_id" "missing from $(relative_path "$matrix")"
+    fail "control mapped $id" "missing from $(relative_path "$matrix")"
   fi
 done
 

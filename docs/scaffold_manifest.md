@@ -90,6 +90,25 @@ write no project asks for, so it is never silent.
 
 ## Tooling
 
+Synchronize project files without dependency resolution:
+
+```bash
+scripts/update-project.sh /path/to/project --skip-deps
+# The CLI accepts the same option.
+ovasabi update --project-dir /path/to/project --skip-deps
+ovasabi refresh --project-dir /path/to/project --skip-deps
+```
+
+This option skips npm lockfile resolution and Go module tidy.
+Run dependency synchronization later before building the updated application.
+The updater reports changed manifests that still require synchronization.
+
+Without this option, each updater dependency command has a 120-second deadline.
+Set `FOUNDATION_DEPENDENCY_TIMEOUT_SEC` to an integer from 1 through 86400 to change that deadline.
+The shared deadline helper requires Perl and terminates the command group on timeout.
+An npm failure stops the update. A Go tidy failure preserves the existing warning and manual recovery path.
+Source synchronization can already have completed when a dependency command fails.
+
 List files by profile:
 
 ```bash

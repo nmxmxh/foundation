@@ -470,9 +470,15 @@ several seconds late.
 5. **A shared-worker wrapper forwards `settled`.** One that rebuilds the pass
    object without it removes backpressure from every surface on the device,
    silently.
-6. **WebGL2 has no equivalent yet.** `gl.finish()` read ~0 ms under the same
-   load on ANGLE/Metal, and a fence sync did not signal in the lab; a WebGL2 pass
-   stays exposed until a working barrier is measured.
+6. **WebGL2 requires an explicit fence adapter.** The earlier lab fixture used
+   the invalid `SYNC_OBJECT_TYPE` constant. Its missing samples did not prove
+   that fences failed. The corrected fixture uses `SYNC_GPU_COMMANDS_COMPLETE`,
+   flushes commands, and polls with a two-second deadline. Disposal cancels
+   polling and deletes the fence. A Chromium regression test verifies completion
+   and disposal. These measurements include queue and polling delays.
+   They do not measure shader execution alone. Production WebGL2 passes still
+   need a bounded `settled` adapter before they provide GPU backpressure.
+   See the [WebGL specification](https://registry.khronos.org/webgl/specs/latest/2.0/#3.7.14).
 
 ## Releasing what you allocated
 

@@ -1,0 +1,17 @@
+File: hermes.test
+Type: alloc_space
+Time: 2026-09-22 14:10:04 WAT
+Showing nodes accounting for 795.72MB, 97.58% of 815.43MB total
+Dropped 59 nodes (cum <= 4.08MB)
+Showing top 10 nodes out of 31
+      flat  flat%   sum%        cum   cum%
+  702.29MB 86.12% 86.12%   702.29MB 86.12%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.(*partition).collectRecordEntries
+   27.54MB  3.38% 89.50%    28.55MB  3.50%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.newFloat64Vector
+   25.38MB  3.11% 92.62%    25.38MB  3.11%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.newInt64Vector
+   12.77MB  1.57% 94.18%    14.78MB  1.81%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.(*indexPublisher).add
+    8.50MB  1.04% 95.22%       10MB  1.23%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/database.RecordData.Normalize
+    7.51MB  0.92% 96.15%     7.51MB  0.92%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.newBitmap (inline)
+    4.22MB  0.52% 96.66%    11.73MB  1.44%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.(*scopeBitmapIndex).AddRecordLocked.func1
+    3.50MB  0.43% 97.09%     6.50MB   0.8%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.normalizeRecordDataWithOrganization
+    2.50MB  0.31% 97.40%     9.50MB  1.17%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/database.RecordDataFromPairs
+    1.50MB  0.18% 97.58%    35.27MB  4.33%  github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.(*partition).upsertLocked

@@ -19,6 +19,11 @@ the build flags that make a binary symbolizable at all — is owned by
 
 ## Measurement Lanes
 
+The [2026-09-22 implementation capture](foundation_benchmarks.md#implementation-capture-2026-09-22)
+demonstrates read improvements with write and rebuild comparisons.
+Its allocation gates cover full Hermes batch assembly and secured HTTP requests.
+Preserve before-and-after artifacts when a controlled comparison supersedes an initial timing result.
+
 | Lane | Minimum evidence |
 | --- | --- |
 | CPU hot path | `go test -bench`, Criterion, or Vitest bench with allocation counts and repeated runs. |
@@ -141,6 +146,26 @@ the sweep, not the point.
 4. Investigate fixture allocation, timer placement, GC, scheduler pressure,
    lock contention, thermal state, cold/warm cache, and hidden filesystem or
    network work.
+
+### Evidence capture and guard failures
+
+`make test-bench-history` stores a log, TSV summary, and metadata sidecar.
+The sidecar records revision, working-tree state, tool versions, options, and
+exit status. Default profile directories are unique to each capture.
+
+Vitest table summaries retain displayed precision. Rows marked
+`ts-throughput-estimate` use reciprocal throughput because the displayed mean
+rounded to zero. Do not use those estimates for latency comparisons. Preserve
+raw output and use structured measurements for precise comparisons.
+
+The allocation guard fails when a configured module, command, or recorded
+benchmark is missing. Failed measurements cannot rewrite the baseline.
+Benchmark retirement requires explicit review of the corresponding ceiling.
+The regression fixtures run through `make check-core-validation-contract`.
+
+Separate construction, resident-data execution, and complete request costs.
+A cached columnar filter does not include the cost of constructing its batch.
+A cadence-skipped frame does not measure eligible frame work.
 
 ## Staged Load Research
 

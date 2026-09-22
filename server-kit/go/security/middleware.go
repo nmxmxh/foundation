@@ -27,15 +27,22 @@ const DefaultOrganizationID = "org_default"
 // SecurityHeaders adds baseline hardening headers including CSP and HSTS.
 func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content")
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-		w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
-		w.Header().Set("Cross-Origin-Embedder-Policy", "require-corp")
-		w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
-		w.Header().Set("Origin-Agent-Cluster", "?1")
+		// Each response owns one backing array. Capacity limits prevent headers from sharing writable slice capacity.
+		values := [...]string{
+			"default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content",
+			"nosniff", "DENY", "strict-origin-when-cross-origin",
+			"geolocation=(), microphone=(), camera=()", "same-origin", "require-corp", "same-origin", "?1",
+		}
+		headers := w.Header()
+		headers["Content-Security-Policy"] = values[0:1:1]
+		headers["X-Content-Type-Options"] = values[1:2:2]
+		headers["X-Frame-Options"] = values[2:3:3]
+		headers["Referrer-Policy"] = values[3:4:4]
+		headers["Permissions-Policy"] = values[4:5:5]
+		headers["Cross-Origin-Opener-Policy"] = values[5:6:6]
+		headers["Cross-Origin-Embedder-Policy"] = values[6:7:7]
+		headers["Cross-Origin-Resource-Policy"] = values[7:8:8]
+		headers["Origin-Agent-Cluster"] = values[8:9:9]
 
 		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
 			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")

@@ -15,6 +15,10 @@ before any project is asked to adopt it.
 
 ## Lanes
 
+`make test-frontend-lab-contracts` typechecks the lab and runs the DOM, SSR,
+and Chromium lanes. Foundation Core CI runs this target in a separate job.
+The Metal GPU lane remains an explicit hardware test.
+
 | Lane | Environment | Proves | Command |
 | --- | --- | --- | --- |
 | `ssr` | Node, styled-components SSR | Styling regression eval: every `Minimal*` component across a ~2,200-case prop sweep, reduced to the styles that win on each element, must hash to `baselines/ui-minimal-cascade.digests.json`. | `npx vitest run --project ssr` |
@@ -42,6 +46,26 @@ pass while testing a fallback.
   explained style by style. Browser tests write measurements there through
   `commands.writeFile` from `vitest/browser` — paths resolve from this
   directory, and browser mode does not forward console output.
+- `.vitest/` contains local attachments and failure screenshots. CI retains
+  these files with lab results after failures.
+- `profile/apps/` contains adapters that require their external application
+  workspace. The standalone typecheck excludes those adapters. It checks the
+  shared fixtures and resolves Vite types from the lab installation.
+
+### Evidence repairs, 2026-09-22
+
+Vitest 5 inherits root plugins in inline projects. The lab now configures its
+CSS transform once. Removed `babelOptions` settings are unsupported by the
+installed WyW types. SSR cascade baselines remain unchanged.
+
+The WebGL fixture now uses `SYNC_GPU_COMMANDS_COMPLETE` and flushes commands.
+Its bounded poll records failures and releases fences on disposal. The earlier
+invalid constant produced no samples. Those samples could not establish that
+WebGL fences were unsupported.
+
+GPU summaries use nearest-rank percentiles. Results with fewer than 100 samples
+carry `p95UnderSampled: true`. Queue completion includes polling delay and must
+not be presented as shader execution time.
 
 ### Profiling
 

@@ -7,7 +7,7 @@ writeFileSync(here("entry.tsx"), `import { renderToStaticMarkup } from "react-do
 await build({
   root: here("."), logLevel: "warn", configFile: false,
   resolve: { alias: [{ find: /^@ovasabi\/ui-minimal\/tokens$/, replacement: here("../../../ui-minimal/ts/src/tokens.ts") }] },
-  plugins: [wyw({ include: ["**/*.{ts,tsx}"], babelOptions: { presets: ["@babel/preset-typescript", ["@babel/preset-react", { runtime: "automatic" }]] } })],
+  plugins: [wyw({ include: ["**/*.{ts,tsx}"] })],
   build: { outDir: here("../../results/linaria-patterns"), emptyOutDir: true, minify: false, ssr: false, lib: { entry: here("entry.tsx"), formats: ["es"], fileName: "entry" }, rollupOptions: { external: [/^react/] } },
 });
 const dir = here("../../results/linaria-patterns/");

@@ -25,7 +25,6 @@ const shared = {
     wyw({
       include: ["**/ui-minimal/ts/src/**/*.{ts,tsx}", "**/frontend-lab/linaria/**/*.{ts,tsx}"],
       prefixer: false,
-      babelOptions: { presets: ["@babel/preset-typescript", ["@babel/preset-react", { runtime: "automatic" }]] },
     }),
   ],
   resolve: {
@@ -59,7 +58,6 @@ export default defineConfig({
   test: {
     projects: [
       {
-        ...shared,
         test: {
           name: "ssr",
           environment: "node",
@@ -72,7 +70,6 @@ export default defineConfig({
         },
       },
       {
-        ...shared,
         test: {
           name: "dom",
           environment: "jsdom",
@@ -80,7 +77,6 @@ export default defineConfig({
         },
       },
       {
-        ...shared,
         test: {
           name: "browser",
           include: ["src/browser/**/*.test.{ts,tsx}"],
@@ -93,7 +89,6 @@ export default defineConfig({
         },
       },
       {
-        ...shared,
         test: {
           name: "gpu",
           include: ["src/gpu/**/*.test.{ts,tsx}"],

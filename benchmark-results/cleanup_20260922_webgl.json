@@ -1,0 +1,14 @@
+{
+  "measuredAt": "2026-09-22T13:14:39.331Z",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/151.0.7922.34 Safari/537.36",
+  "completionMs": {
+    "n": 2,
+    "p50": 2.2,
+    "p95": 2.3,
+    "max": 2.3,
+    "p95UnderSampled": true
+  },
+  "disposed": 1,
+  "waitFailures": 0,
+  "note": "Queue completion plus timer polling; not GPU kernel time."
+}

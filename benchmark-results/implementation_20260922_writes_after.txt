@@ -1,0 +1,36 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesApplyEventUpsert-8   	   29582	     12625 ns/op	   13513 B/op	      42 allocs/op
+BenchmarkHermesApplyEventUpsert-8   	   32163	     13160 ns/op	   14725 B/op	      42 allocs/op
+BenchmarkHermesApplyEventUpsert-8   	   32252	     13141 ns/op	   14689 B/op	      42 allocs/op
+BenchmarkHermesApplyEventUpsert-8   	   32737	     13391 ns/op	   14912 B/op	      42 allocs/op
+BenchmarkHermesApplyEventUpsert-8   	   32611	     13117 ns/op	   14938 B/op	      42 allocs/op
+BenchmarkHermesApplyEventUpsert-8   	   31627	     12905 ns/op	   14514 B/op	      42 allocs/op
+BenchmarkHermesApplyEventUpsert-8   	   31548	     12971 ns/op	   14515 B/op	      42 allocs/op
+BenchmarkHermesApplyEventUpsert-8   	   28507	     12588 ns/op	   13041 B/op	      42 allocs/op
+BenchmarkHermesApplyEventUpsert-8   	   32520	     13251 ns/op	   14945 B/op	      42 allocs/op
+BenchmarkHermesApplyEventUpsert-8   	   32995	     13716 ns/op	   15391 B/op	      42 allocs/op
+BenchmarkHermesApplyBatch64-8       	    1174	    276297 ns/op	  282229 B/op	    1372 allocs/op
+BenchmarkHermesApplyBatch64-8       	    1194	    275623 ns/op	  282392 B/op	    1373 allocs/op
+BenchmarkHermesApplyBatch64-8       	    1196	    272808 ns/op	  282383 B/op	    1373 allocs/op
+BenchmarkHermesApplyBatch64-8       	    1191	    273019 ns/op	  282353 B/op	    1372 allocs/op
+BenchmarkHermesApplyBatch64-8       	    1156	    272402 ns/op	  279582 B/op	    1373 allocs/op
+BenchmarkHermesApplyBatch64-8       	    1237	    274689 ns/op	  282848 B/op	    1372 allocs/op
+BenchmarkHermesApplyBatch64-8       	    1231	    273185 ns/op	  282739 B/op	    1372 allocs/op
+BenchmarkHermesApplyBatch64-8       	    1201	    270975 ns/op	  282413 B/op	    1372 allocs/op
+BenchmarkHermesApplyBatch64-8       	    1171	    278990 ns/op	  282245 B/op	    1373 allocs/op
+BenchmarkHermesApplyBatch64-8       	    1182	    273822 ns/op	  282281 B/op	    1372 allocs/op
+BenchmarkHermesBulkLoad512-8        	     202	   1179352 ns/op	  976871 B/op	    5973 allocs/op
+BenchmarkHermesBulkLoad512-8        	     204	   1172795 ns/op	  976663 B/op	    5971 allocs/op
+BenchmarkHermesBulkLoad512-8        	     200	   1184189 ns/op	  976732 B/op	    5972 allocs/op
+BenchmarkHermesBulkLoad512-8        	     201	   1186800 ns/op	  976805 B/op	    5972 allocs/op
+BenchmarkHermesBulkLoad512-8        	     201	   1183876 ns/op	  976772 B/op	    5972 allocs/op
+BenchmarkHermesBulkLoad512-8        	     207	   1169424 ns/op	  976790 B/op	    5972 allocs/op
+BenchmarkHermesBulkLoad512-8        	     204	   1179745 ns/op	  976738 B/op	    5972 allocs/op
+BenchmarkHermesBulkLoad512-8        	     202	   1175593 ns/op	  976821 B/op	    5972 allocs/op
+BenchmarkHermesBulkLoad512-8        	     202	   1185163 ns/op	  976754 B/op	    5972 allocs/op
+BenchmarkHermesBulkLoad512-8        	     202	   1177335 ns/op	  976773 B/op	    5972 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	10.393s

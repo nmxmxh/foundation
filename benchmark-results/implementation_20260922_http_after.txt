@@ -1,0 +1,26 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench
+cpu: Apple M1 Pro
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   27577	      8079 ns/op	   11348 B/op	      74 allocs/op
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   30186	      7963 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   30121	      8576 ns/op	   11348 B/op	      74 allocs/op
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   26576	      8342 ns/op	   11348 B/op	      74 allocs/op
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   30622	      7996 ns/op	   11349 B/op	      74 allocs/op
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   29160	      8024 ns/op	   11348 B/op	      74 allocs/op
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   30223	      7946 ns/op	   11348 B/op	      74 allocs/op
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   29391	      8109 ns/op	   11348 B/op	      74 allocs/op
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   30486	      8011 ns/op	   11348 B/op	      74 allocs/op
+BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC-8   	   30067	      7987 ns/op	   11348 B/op	      74 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   32458	      7442 ns/op	    6896 B/op	      68 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   32106	      7518 ns/op	    6896 B/op	      68 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   32452	      7357 ns/op	    6896 B/op	      68 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   31750	      7592 ns/op	    6896 B/op	      68 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   32016	      7505 ns/op	    6896 B/op	      68 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   31222	      7535 ns/op	    6896 B/op	      68 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   32272	      7478 ns/op	    6896 B/op	      68 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   32672	      7459 ns/op	    6896 B/op	      68 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   32395	      7430 ns/op	    6896 B/op	      68 allocs/op
+BenchmarkNullLane_06_HTTPSecuredChain-8              	   31708	      7519 ns/op	    6896 B/op	      68 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/appbench	5.508s
