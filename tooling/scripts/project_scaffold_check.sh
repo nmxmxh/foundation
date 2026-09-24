@@ -695,6 +695,13 @@ fi
 if [[ "${WITH_DOCKER:-}" == "true" ]]; then
   check_exists "Dockerfile" "$target/Dockerfile"
   check_exists "docker-compose.yml" "$target/docker-compose.yml"
+  docker_retirement_check="$(dirname "$0")/retire_go_wasm_patch.mjs"
+  if command -v node >/dev/null 2>&1 && node "$docker_retirement_check" "$target" --check-docker; then
+    echo "[OK] Dockerfiles exclude retired Go WASM inputs"
+  else
+    echo "[FAIL] Dockerfiles exclude retired Go WASM inputs"
+    failed=1
+  fi
   if [[ -n "$(find "$target" \
     \( -type d \( -name .git \
       -o -name foundation \

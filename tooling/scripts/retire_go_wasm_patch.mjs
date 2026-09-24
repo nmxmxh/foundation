@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /** Retire recognized Go browser shims without changing Rust WASM modules. */
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, readdirSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, rmdirSync, unlinkSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -20,6 +20,50 @@ const retiredFiles = new Map([
 ]);
 const legacyConsumer = /\b(?:sendWasmMessage|wasmReady|onWasmMessage|__WASM_GLOBAL_METADATA|emitWasmCompatMessage)\b|wasm_exec\.js|[/'"]main\.wasm/;
 const ciStep = "      - name: Compile WASM runtime shim\n        if: hashFiles('wasm/main.go') != ''\n        run: make build-wasm\n";
+const dockerStageDigest = '31fe6352b0b14775151c94de0df243888df2bca2aa5c02329d7c783116c01109';
+const dockerReference = /\bgo-wasm-builder\b|\bGOARCH\s*=\s*["']?wasm\b|wasm_exec\.js|^[ \t]*(?:COPY|ADD)[ \t]+(?:--\S+[ \t]+)*(?:\[[ \t]*)?["']?(?:\.\/|\/)?wasm(?:\/|["'\s]|$)/im;
+const withoutComments = (code) => code.replace(/^[ \t]*#.*$/gm, '');
+
+function dockerPaths(root) {
+  return ['.', 'frontend', 'docker'].flatMap((directory) => {
+    const path = join(root, directory);
+    if (!existsSync(path)) return [];
+    if (lstatSync(path).isSymbolicLink()) throw new Error(`review directory: ${path}`);
+    const entries = readdirSync(path);
+    if (entries.length > 4096) throw new Error(`directory exceeds 4096 entries: ${path}`);
+    return entries.filter((name) => /^Dockerfile(?:\..+)?$/.test(name)).map((name) => join(directory, name));
+  });
+}
+
+function assertDockerRetired(code, path) {
+  if (dockerReference.test(withoutComments(code))) throw new Error(`review remaining Docker Go WASM references: ${path}`);
+}
+
+function retireDockerfile(code) {
+  if (!dockerReference.test(withoutComments(code))) return code;
+  const newline = code.includes('\r\n') ? '\r\n' : '\n';
+  let next = code.replaceAll('\r\n', '\n');
+  const stages = [...next.matchAll(/^FROM[ \t]+.*$/gmi)];
+  const legacy = stages.filter(([line]) => /^FROM go-base AS go-wasm-builder$/.test(line));
+  if (legacy.length !== 1) throw new Error('review unrecognized Docker Go WASM stage');
+  // Removing a stage changes numeric references, including references in cache mounts.
+  if (/(?:--from[= \t]+|\bfrom=|^FROM[ \t]+(?:--\S+[ \t]+)*)["']?\d+(?=["'\s,]|$)/im.test(withoutComments(next))) {
+    throw new Error('review numeric Docker stage references before Go WASM retirement');
+  }
+  const start = legacy[0].index;
+  const end = stages[stages.indexOf(legacy[0]) + 1]?.index ?? next.length;
+  const body = next.slice(start, end);
+  // Preserve comments that introduce the following project stage.
+  const trailing = body.match(/(?:\n[ \t]*(?:#[^\n]*)?)*$/)[0];
+  if (digest(body.slice(0, body.length - trailing.length).trim()) !== dockerStageDigest) {
+    throw new Error('review custom Docker Go WASM stage');
+  }
+  next = next.slice(0, start) + trailing.trimStart() + next.slice(end);
+  next = next.replace(/^COPY --from=go-wasm-builder \/out\/(?:main\.wasm\*|wasm_exec\.js) \.\/frontend\/public\/\n/gm, '');
+  next = next.replace(/^# (?:--- Go WASM Builder Stage ---|Copy Go WASM artifacts)\n\n?/gm, '');
+  assertDockerRetired(next, 'Dockerfile');
+  return next.replaceAll('\n', newline);
+}
 
 function read(file) {
   const info = lstatSync(file);
@@ -129,6 +173,7 @@ export function planRetirement(root) {
     }
   }
   const edits = [
+    ...dockerPaths(root).map((path) => [path, retireDockerfile]),
     ['Makefile', retireMakefile],
     ['go.work', (code) => code.replace(/^\s*\.\/wasm\s*\n/gm, '')],
     ['.github/workflows/ci.yml', (code) => {
@@ -155,10 +200,15 @@ function removeEmpty(directory, depth = 0) {
   if (readdirSync(directory).length === 0) rmdirSync(directory);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const root = process.argv[2];
     if (!root || !existsSync(root)) process.exit(0);
+    if (process.argv.includes('--check-docker')) {
+      for (const path of dockerPaths(root)) assertDockerRetired(read(join(root, path)).toString(), path);
+      console.log('Dockerfiles contain no retired Go WASM references');
+      process.exit(0);
+    }
     const changes = planRetirement(root);
     if (process.argv.includes('--dry-run')) {
       console.log(JSON.stringify(changes.map(({ path, beforeHash, after }) => ({ path, beforeHash, action: after === null ? 'remove' : 'update' })), null, 2));

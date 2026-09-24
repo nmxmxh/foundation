@@ -2002,7 +2002,7 @@ patch_retire_go_wasm() {
   local output line
   if ! output=$(node "$foundation_root/tooling/scripts/retire_go_wasm_patch.mjs" "$target"); then
     printf '[PATCH] %s\n' "$output"
-    return 0
+    return 1
   fi
   while IFS= read -r line; do
     case "$line" in
