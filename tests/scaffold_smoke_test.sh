@@ -30,14 +30,6 @@ assert_file "frontend/src/generated/prototypeRuntime.ts"
 assert_contains "frontend/src/generated/prototypeRuntime.ts" "prototypeDomains"
 assert_contains "frontend/src/generated/prototypeRuntime.ts" "createPrototypeTenantStores"
 
-if [[ -f "$PROJECT_DIR/wasm/main.go" ]]; then
-    echo "== scaffold smoke: compiling generated Go WASM shim =="
-    (
-        cd "$PROJECT_DIR"
-        GOOS=js GOARCH=wasm go build -o "$TMP_DIR/main.wasm" ./wasm
-    )
-fi
-
 should_run_frontend=0
 if [[ "${SCAFFOLD_SMOKE_FRONTEND:-auto}" == "1" || "${CI:-}" == "true" ]]; then
     should_run_frontend=1

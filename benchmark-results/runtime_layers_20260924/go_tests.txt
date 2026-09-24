@@ -1,0 +1,1 @@
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	5.393s	coverage: 88.3% of statements

@@ -12,3 +12,12 @@ path = "src/lib.rs"
 ovrt-native = { path = "../ovrt-native" }
 ovrt-core = { path = "../ovrt-core" }
 ovrt-unit = { path = "../ovrt-unit" }
+
+[dev-dependencies]
+ovrt-dispatch = { path = "../ovrt-dispatch" }
+ovrt-network = { path = "../ovrt-network" }
+tempfile = "3"
+
+[[bench]]
+name = "runtime_layers"
+harness = false

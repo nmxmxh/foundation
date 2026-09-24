@@ -359,6 +359,26 @@ scaffold_copy_tree() {
     \) -delete 2>/dev/null || true
 }
 
+scaffold_sync_rust_unit_locks() {
+    local manifest stale_locks
+    stale_locks="$(python3 "$FOUNDATION_DIR/tooling/scripts/rust_unit_output_patch.py" "$PROJECT_PATH" --stale-locks)" || return 1
+    while IFS= read -r manifest; do
+        [[ -n "$manifest" ]] || continue
+        if [[ "${SKIP_DEPS:-false}" == "true" ]]; then
+            foundation_log_warn "Rust lock requires 'cargo update --manifest-path $manifest -p ovrt-unit'"
+            continue
+        fi
+        command -v cargo >/dev/null 2>&1 || {
+            foundation_log_error "Rust output migration requires cargo to update $manifest"
+            return 1
+        }
+        foundation_log_info "Synchronizing Rust unit dependencies: $manifest"
+        if ! foundation_run_dependency_command cargo update --offline --manifest-path "$manifest" -p ovrt-unit; then
+            foundation_run_dependency_command cargo update --manifest-path "$manifest" -p ovrt-unit || return 1
+        fi
+    done <<< "$stale_locks"
+}
+
 scaffold_sync_frontend_manifest_contract() {
     [[ "$PROFILE" == "full" || "$PROFILE" == "frontend" ]] || return 0
 

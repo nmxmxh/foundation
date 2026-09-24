@@ -1,0 +1,27 @@
+{
+  "captured_at": "2026-09-24T18:26:03.821596+00:00",
+  "machine": "macOS-26.5.2-arm64-arm-64bit",
+  "processor": "Apple M1 Pro",
+  "revision": "2714dbea38d7db86ab36f36d56405404ba1f1b49",
+  "working_tree": "uncommitted; includes earlier browser, database, and Linaria work",
+  "go": "go version go1.26.6 darwin/arm64",
+  "rust": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+  "rust_baseline": "Private SDK copy restored to HEAD for core diagnostics, unit registry, dispatch block and decision types, native host, network dedup and race. Current benchmark retained with allocation ceilings disabled and the former stats Vec assembly.",
+  "rust_sampling": "1000 warmup operations; seven timed batches per row, three alternating before/after process runs. Parallel rows warm 200 requests per thread, then 20000 requests per thread. Allocation counters run separately for 1000 requests per thread.",
+  "parallel_metric": "elapsed wall nanoseconds divided by all completed operations; not per-request latency",
+  "go_sampling": "three runs per row, 200ms each; separate rate-1 heap, CPU, block, and mutex profiles",
+  "profile_workload": "BenchmarkProcessPoolExecuteInto1KB, 2s; profiling timings are excluded from comparisons",
+  "hardware_counters": "Not captured. macOS portable timing and allocator counters, Go pprof cumulative/live/CPU/block/mutex profiles provide the fallback.",
+  "retired_projects": 12,
+  "retired_bytes": 26349593,
+  "rust_artifact_sha256": {
+    "before": "57624f26f7ff68b05ec31e1c426dac42c86d55cc0bc817eb1a0d8090e6f00ff7",
+    "after": "10f473ee8697d5854f1190bbf2b776485d8a2eaaf6d2cd1cd48370bfb3f70817"
+  },
+  "post_publication_capture": true,
+  "long_payload_sampling": "Three alternating runs; seven timed batches of 50000 operations; standalone --large benchmark selects 64KiB and 1MiB direct output copies.",
+  "long_payload_artifact_sha256": {
+    "before": "1be558c2cde8a7c8862f228f09766876b0c0153ab4faa78b466ba40007b9b4d2",
+    "after": "7075e47854f8fd9c1080ddbfdfa9a8493bc73be947d0ffd6e83712ad998eea60"
+  }
+}

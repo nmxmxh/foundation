@@ -115,9 +115,6 @@ jobs:
           make test-coverage
           make test-integration
 
-      - name: Compile WASM runtime shim
-        if: hashFiles('wasm/main.go') != ''
-        run: make build-wasm
 
       - name: Build and test frontend
         if: hashFiles('frontend/package.json') != ''

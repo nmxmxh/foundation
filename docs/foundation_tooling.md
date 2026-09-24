@@ -44,7 +44,7 @@ To eliminate API drift across different languages, the Foundation defines all cr
     * **Rust**: `runtime-sdk/rust/crates/ovrt-core/src/generated.rs`
     * **Go**: `runtime-sdk/go/runtimehost/generated/runtime_buffer_gen.go`
     * **TypeScript**: `runtime-sdk/ts/browser-host/src/generated/runtimeBuffer.ts`
-  * As a result, the JS event loop, Go WASM runner, and Rust kernel operate on the exact same physical byte slots.
+  * As a result, the JS event loop, native Go host, and Rust kernel operate on the exact same physical byte slots.
 
 ---
 

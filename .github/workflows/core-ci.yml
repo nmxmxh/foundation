@@ -77,10 +77,15 @@ jobs:
       - name: Verify Core
         run: make verify
 
+      - name: Verify runtime allocation budgets
+        run: make test-bench-runtime-layers
+
   frontend-lab:
     name: Verify frontend rendering contracts
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      RUST_WASM_TOOLCHAIN: nightly-2025-12-29
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -93,6 +98,12 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           package-manager-cache: false
+      - name: Configure Rust browser targets
+        uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Configure shared Rust standard library
+        run: rustup toolchain install "$RUST_WASM_TOOLCHAIN" --profile minimal --component rust-src
       - name: Install locked TypeScript dependencies
         run: |
           make install-ts-deps

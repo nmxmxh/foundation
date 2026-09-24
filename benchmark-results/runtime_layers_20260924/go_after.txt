@@ -1,0 +1,96 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkColumnarDescriptorValidate/1K-8 	 7043131	        33.38 ns/op	      24 B/op	       1 allocs/op
+BenchmarkColumnarDescriptorValidate/1K-8 	 7773499	        30.81 ns/op	      24 B/op	       1 allocs/op
+BenchmarkColumnarDescriptorValidate/1K-8 	 7701049	        31.19 ns/op	      24 B/op	       1 allocs/op
+BenchmarkColumnarDescriptorValidate/64K-8         	 7655838	        31.33 ns/op	      24 B/op	       1 allocs/op
+BenchmarkColumnarDescriptorValidate/64K-8         	 7701130	        31.86 ns/op	      24 B/op	       1 allocs/op
+BenchmarkColumnarDescriptorValidate/64K-8         	 7491464	        31.52 ns/op	      24 B/op	       1 allocs/op
+BenchmarkColumnarDescriptorValidate/1M-8          	 8055583	        30.18 ns/op	      24 B/op	       1 allocs/op
+BenchmarkColumnarDescriptorValidate/1M-8          	 7801473	        30.85 ns/op	      24 B/op	       1 allocs/op
+BenchmarkColumnarDescriptorValidate/1M-8          	 8112470	        30.52 ns/op	      24 B/op	       1 allocs/op
+BenchmarkColumnarReadThenSum/1K-8                 	   54571	      4444 ns/op	 921.78 MB/s	    4096 B/op	       1 allocs/op
+BenchmarkColumnarReadThenSum/1K-8                 	   51894	      4591 ns/op	 892.25 MB/s	    4096 B/op	       1 allocs/op
+BenchmarkColumnarReadThenSum/1K-8                 	   54277	      4436 ns/op	 923.40 MB/s	    4096 B/op	       1 allocs/op
+BenchmarkColumnarReadThenSum/64K-8                	     895	    270449 ns/op	 969.29 MB/s	  262144 B/op	       1 allocs/op
+BenchmarkColumnarReadThenSum/64K-8                	     844	    268150 ns/op	 977.60 MB/s	  262144 B/op	       1 allocs/op
+BenchmarkColumnarReadThenSum/64K-8                	     900	    266654 ns/op	 983.09 MB/s	  262144 B/op	       1 allocs/op
+BenchmarkColumnarReadThenSum/1M-8                 	      52	   4135742 ns/op	1014.16 MB/s	 4194310 B/op	       1 allocs/op
+BenchmarkColumnarReadThenSum/1M-8                 	      57	   4113187 ns/op	1019.72 MB/s	 4194304 B/op	       1 allocs/op
+BenchmarkColumnarReadThenSum/1M-8                 	      56	   4158790 ns/op	1008.54 MB/s	 4194308 B/op	       1 allocs/op
+BenchmarkColumnarSumColumn/1K-8                   	  702309	       341.1 ns/op	12008.78 MB/s	       0 B/op	       0 allocs/op
+BenchmarkColumnarSumColumn/1K-8                   	  707920	       343.3 ns/op	11930.22 MB/s	       0 B/op	       0 allocs/op
+BenchmarkColumnarSumColumn/1K-8                   	  703700	       341.2 ns/op	12004.94 MB/s	       0 B/op	       0 allocs/op
+BenchmarkColumnarSumColumn/64K-8                  	   10000	     20590 ns/op	12731.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkColumnarSumColumn/64K-8                  	   10000	     20703 ns/op	12662.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkColumnarSumColumn/64K-8                  	   10000	     21248 ns/op	12337.07 MB/s	       0 B/op	       0 allocs/op
+BenchmarkColumnarSumColumn/1M-8                   	     706	    335575 ns/op	12498.84 MB/s	       0 B/op	       0 allocs/op
+BenchmarkColumnarSumColumn/1M-8                   	     726	    331762 ns/op	12642.49 MB/s	       0 B/op	       0 allocs/op
+BenchmarkColumnarSumColumn/1M-8                   	     720	    332657 ns/op	12608.49 MB/s	       0 B/op	       0 allocs/op
+BenchmarkColumnarReadOnly/1K-8                    	  235640	      1035 ns/op	3956.91 MB/s	    4096 B/op	       1 allocs/op
+BenchmarkColumnarReadOnly/1K-8                    	  167089	      1245 ns/op	3289.15 MB/s	    4096 B/op	       1 allocs/op
+BenchmarkColumnarReadOnly/1K-8                    	  191188	      1216 ns/op	3368.39 MB/s	    4096 B/op	       1 allocs/op
+BenchmarkColumnarReadOnly/64K-8                   	    4857	     54267 ns/op	4830.65 MB/s	  262145 B/op	       1 allocs/op
+BenchmarkColumnarReadOnly/64K-8                   	    3445	     64275 ns/op	4078.47 MB/s	  262144 B/op	       1 allocs/op
+BenchmarkColumnarReadOnly/64K-8                   	    4486	     57290 ns/op	4575.70 MB/s	  262144 B/op	       1 allocs/op
+BenchmarkColumnarReadOnly/1M-8                    	     458	    523062 ns/op	8018.76 MB/s	 4194305 B/op	       1 allocs/op
+BenchmarkColumnarReadOnly/1M-8                    	     456	    583918 ns/op	7183.04 MB/s	 4194307 B/op	       1 allocs/op
+BenchmarkColumnarReadOnly/1M-8                    	     433	    517240 ns/op	8109.01 MB/s	 4194304 B/op	       1 allocs/op
+BenchmarkPlacementFullHostPath-8                  	  475376	       593.3 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPlacementFullHostPath-8                  	  483670	       503.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPlacementFullHostPath-8                  	  488776	       505.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDispatchClaimFAA-8                       	 3368227	        65.90 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDispatchClaimFAA-8                       	 4298698	        61.61 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDispatchClaimFAA-8                       	 3844123	        65.15 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDispatchReleaseCAS-8                     	  766926	       267.8 ns/op	         0.1030 giveups/op	       0 B/op	       0 allocs/op
+BenchmarkDispatchReleaseCAS-8                     	  864462	       265.1 ns/op	         0.1014 giveups/op	       0 B/op	       0 allocs/op
+BenchmarkDispatchReleaseCAS-8                     	 1000000	       273.1 ns/op	         0.09959 giveups/op	       0 B/op	       0 allocs/op
+BenchmarkDispatchAdvanceTick-8                    	 3409624	        70.84 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDispatchAdvanceTick-8                    	 3377528	        68.98 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDispatchAdvanceTick-8                    	 3446170	        65.87 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetInputBytes1KB-8                 	 8558398	        28.23 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetInputBytes1KB-8                 	 8398766	        28.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetInputBytes1KB-8                 	 8491929	        28.32 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetInputBytesFast1KB-8             	15354553	        15.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetInputBytesFast1KB-8             	15795752	        15.32 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetInputBytesFast1KB-8             	15521338	        15.73 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferInputBytesOwned1KB-8               	 1320204	       179.0 ns/op	    1024 B/op	       1 allocs/op
+BenchmarkBufferInputBytesOwned1KB-8               	 1371686	       174.4 ns/op	    1024 B/op	       1 allocs/op
+BenchmarkBufferInputBytesOwned1KB-8               	 1000000	       253.0 ns/op	    1024 B/op	       1 allocs/op
+BenchmarkBufferInputBytesView1KB-8                	70249035	         3.259 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferInputBytesView1KB-8                	75025390	         3.233 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferInputBytesView1KB-8                	71121646	         3.234 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetOutputBytes2KB-8                	 4044976	        59.38 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetOutputBytes2KB-8                	 4056297	        59.27 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetOutputBytes2KB-8                	 4057375	        59.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetOutputBytesFast2KB-8            	 8368054	        28.70 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetOutputBytesFast2KB-8            	 8326454	        29.02 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferSetOutputBytesFast2KB-8            	 8195298	        29.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferOutputBytesOwned2KB-8              	  727538	       332.7 ns/op	    2048 B/op	       1 allocs/op
+BenchmarkBufferOutputBytesOwned2KB-8              	  758302	       334.9 ns/op	    2048 B/op	       1 allocs/op
+BenchmarkBufferOutputBytesOwned2KB-8              	  767763	       333.3 ns/op	    2048 B/op	       1 allocs/op
+BenchmarkBufferOutputBytesView2KB-8               	72204880	         3.314 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferOutputBytesView2KB-8               	68316860	         3.421 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferOutputBytesView2KB-8               	72793448	         3.296 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferEpochAdd-8                         	34087276	         6.998 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferEpochAdd-8                         	34606651	         6.955 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferEpochAdd-8                         	34636407	         7.079 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBufferDiagnosticsText-8                  	  921098	       264.4 ns/op	      48 B/op	       1 allocs/op
+BenchmarkBufferDiagnosticsText-8                  	  933534	       264.7 ns/op	      48 B/op	       1 allocs/op
+BenchmarkBufferDiagnosticsText-8                  	  915345	       262.8 ns/op	      48 B/op	       1 allocs/op
+BenchmarkProcessPoolExecuteOwned1KB-8             	  130131	      1868 ns/op	    1257 B/op	       5 allocs/op
+BenchmarkProcessPoolExecuteOwned1KB-8             	  139560	      1802 ns/op	    1257 B/op	       5 allocs/op
+BenchmarkProcessPoolExecuteOwned1KB-8             	  128582	      1807 ns/op	    1257 B/op	       5 allocs/op
+BenchmarkProcessPoolExecuteInto1KB-8              	  143535	      1689 ns/op	     232 B/op	       4 allocs/op
+BenchmarkProcessPoolExecuteInto1KB-8              	  140931	      1667 ns/op	     232 B/op	       4 allocs/op
+BenchmarkProcessPoolExecuteInto1KB-8              	  146624	      1671 ns/op	     232 B/op	       4 allocs/op
+BenchmarkBufferReadFrameAllocCopy4KB-8            	  308688	       825.5 ns/op	    4100 B/op	       2 allocs/op
+BenchmarkBufferReadFrameAllocCopy4KB-8            	  241185	       948.1 ns/op	    4100 B/op	       2 allocs/op
+BenchmarkBufferReadFrameAllocCopy4KB-8            	  249529	       952.4 ns/op	    4100 B/op	       2 allocs/op
+BenchmarkBufferReadFrameInto4KB-8                 	 3309322	        74.05 ns/op	       4 B/op	       1 allocs/op
+BenchmarkBufferReadFrameInto4KB-8                 	 3280861	        73.56 ns/op	       4 B/op	       1 allocs/op
+BenchmarkBufferReadFrameInto4KB-8                 	 3246528	        77.18 ns/op	       4 B/op	       1 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	22.853s

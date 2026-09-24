@@ -21,6 +21,57 @@ last patch:
 3. How does a fix reach a project scaffolded two years ago, and when does that
    fix get deleted?
 
+## Browser runtime and Linaria delivery: 2026-09-24
+
+Ordinary module synchronization delivers the Rust/browser SDK source changes.
+The existing project Makefile needs a managed patch because ordinary updates preserve its force-managed baseline.
+`browser_wasm_build_patch.mjs` replaces only the known Foundation `build-rust-wasm` target.
+The patch preserves other targets and reports custom WASM recipes for review.
+Projects receive this patch during their normal Foundation update.
+
+The Linaria patch updates existing plugin configuration, including projects that already import WyW.
+It accepts Vite query strings and excludes the source kit from dependency prebundling.
+Both corrections are required for development rendering and HMR.
+
+For a focused Linaria correction, use:
+
+```bash
+bash tooling/scripts/scaffold_managed_patches.sh /path/to/project --only frontend_linaria
+```
+
+The selector also supports `browser_wasm_build`. Synchronize the runtime SDK before selecting that build patch independently.
+Every applied edit enters the project's `.foundation-patches.tsv` ledger.
+Run `make check-update-project` to verify patch idempotency, custom configuration preservation, and normal update delivery.
+
+Public contracts remain the browser ABI version 2 contract and the existing Linaria source API.
+These delivery changes preserve project domain code and unrelated build configuration.
+Unsupported configuration remains unchanged and produces a review message.
+
+## Go browser WASM retirement: 2026-09-24
+
+The template no longer contains the Go browser shim or its build targets.
+The managed `retire_go_wasm` patch removes recognized shim sources, artifacts, and build wiring from existing projects.
+It validates the complete plan before mutation and rejects custom sources, recipes, or active frontend consumers.
+Each applied operation enters the project patch ledger.
+
+```bash
+bash tooling/scripts/scaffold_managed_patches.sh /path/to/project --only retire_go_wasm
+```
+
+Normal updates apply retirement before the Rust build patch.
+Rust modules remain supported. The retired Go shim has no opt-in compatibility path.
+Four retirement tests and normal update integration verify removal, custom input refusal, artifact discovery, and idempotency.
+See the [runtime layer report](info/runtime_layers_20260924.md) for the twelve-project rollout audit.
+
+## Rust unit output migration: 2026-09-24
+
+Normal updates require `RuntimeUnit::execute(input, output)` in project units.
+The managed `rust_unit_output` patch changes method boundaries while preserving algorithm bodies and early returns.
+It refuses unknown signatures, conflicting methods, and sources outside the project.
+The updater resolves stale Rust locks for `ovrt-unit` through bounded Cargo commands.
+`--skip-deps` defers that resolution and reports the required command.
+See the [finalization report](info/runtime_finalize_20260924.md) for contract and validation evidence.
+
 ## 1. The axis is reversibility, not language
 
 The instinct is to split "Foundation code" from "project code". That is the

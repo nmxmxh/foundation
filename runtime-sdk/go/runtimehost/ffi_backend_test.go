@@ -236,6 +236,7 @@ type scriptedFFIBackend struct {
 	processMessage string
 	closeErr       error
 	calls          int
+	closeCalls     int
 }
 
 func (b *scriptedFFIBackend) Process(unitID string, buffer []byte, errBuf []byte) (int32, string) {
@@ -250,5 +251,6 @@ func (b *scriptedFFIBackend) Process(unitID string, buffer []byte, errBuf []byte
 }
 
 func (b *scriptedFFIBackend) Close() error {
+	b.closeCalls++
 	return b.closeErr
 }

@@ -119,6 +119,19 @@ mod unix {
             unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
         }
 
+        /// Borrows only the requested region, without creating a reference over adjacent writable slabs.
+        /// The caller must observe publication and prevent writes to this region during the borrow.
+        pub fn read_at(&self, offset: usize, length: usize) -> Result<&[u8], String> {
+            let end =
+                offset.checked_add(length).ok_or_else(|| "read region overflow".to_string())?;
+            if end > self.len {
+                return Err(format!("read region [{offset}, {end}) exceeds {} bytes", self.len));
+            }
+            // SAFETY: The checked byte region stays inside this live mapping, including an empty slice at its end.
+            // Publication and exclusive ownership prevent writes to the borrowed region while other slabs remain independently writable.
+            unsafe { Ok(std::slice::from_raw_parts(self.ptr.add(offset), length)) }
+        }
+
         /// Borrows the mapping mutably.
         ///
         /// The exclusivity `&mut` promises holds within this process only. The
@@ -285,6 +298,20 @@ mod tests {
             Err(error) => panic!("read back: {error}"),
         };
         assert_eq!(&from_file[..4], &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn bounded_reads_allow_disjoint_writes_and_reject_overflow() {
+        let file = temp_file(4096);
+        let mapping = SharedMapping::open(file.path(), 4096).expect("mapping");
+        mapping.write_at(0, b"input").expect("initialize");
+        let input = mapping.read_at(0, 5).expect("input");
+        mapping.write_at(64, b"output").expect("disjoint write");
+        assert_eq!(input, b"input");
+        assert_eq!(mapping.read_at(64, 6).expect("result"), b"output");
+        assert_eq!(mapping.read_at(4096, 0).expect("empty end"), b"");
+        assert!(mapping.read_at(4096, 1).is_err());
+        assert!(mapping.read_at(usize::MAX, 2).is_err());
     }
 
     #[test]

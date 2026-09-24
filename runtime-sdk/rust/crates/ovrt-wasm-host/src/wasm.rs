@@ -9,8 +9,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -28,7 +27,6 @@ pub const GUEST_ENTRY: &str = "ovrt_unit_run";
 /// Handle assigned to the control buffer inside the guest handle table.
 pub const CONTROL_BUFFER_HANDLE: u32 = 1;
 const LOG_CAP: usize = 64;
-const WATCHDOG_POLL: Duration = Duration::from_millis(5);
 
 /// Result of one guest exchange beyond the buffer state itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,7 +109,7 @@ impl GuestState {
 /// buffer, refuels the store, and re-arms the deadline watchdog, so outcomes
 /// are independent of history.
 pub struct WasmGuest {
-    engine: Engine,
+    watchdog: DeadlineWatchdog,
     store: Store<GuestState>,
     run: TypedFunc<u32, i32>,
     max_fuel: u64,
@@ -150,7 +148,7 @@ impl WasmGuest {
             .map_err(|_| format!("guest does not export {GUEST_ENTRY}(u32) -> i32"))?;
 
         Ok(Self {
-            engine,
+            watchdog: DeadlineWatchdog::start(engine),
             store,
             run,
             max_fuel: limits.max_fuel,
@@ -175,9 +173,9 @@ impl WasmGuest {
             .map_err(|error| format!("fuel setup failed: {error}"))?;
         self.store.set_epoch_deadline(1);
 
-        let watchdog = DeadlineWatchdog::start(self.engine.clone(), self.timeout_ms);
+        self.watchdog.arm(self.timeout_ms);
         let called = self.run.call(&mut self.store, CONTROL_BUFFER_HANDLE);
-        watchdog.stop();
+        self.watchdog.disarm();
         let guest_status = called.map_err(map_guest_trap)?;
 
         let raw = self
@@ -244,36 +242,76 @@ fn map_guest_trap(error: Error) -> String {
     format!("guest trapped: {text}")
 }
 
-/// Increments the engine epoch once the deadline passes, trapping the guest.
+/// Increments the engine epoch once an armed deadline passes.
 struct DeadlineWatchdog {
-    cancel: Arc<AtomicBool>,
+    state: Arc<(Mutex<WatchdogState>, Condvar)>,
     handle: Option<JoinHandle<()>>,
 }
 
+struct WatchdogState {
+    deadline: Option<Instant>,
+    shutdown: bool,
+}
+
 impl DeadlineWatchdog {
-    fn start(engine: Engine, timeout_ms: u64) -> Self {
-        let cancel = Arc::new(AtomicBool::new(false));
-        let flag = Arc::clone(&cancel);
-        let handle = thread::spawn(move || {
-            // Bounded poll: at most timeout/POLL iterations, each sleep capped
-            // by the remaining budget.
-            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-            while !flag.load(Ordering::Acquire) {
-                let now = Instant::now();
-                if now >= deadline {
-                    break;
-                }
-                thread::sleep(WATCHDOG_POLL.min(deadline - now));
-            }
-            if !flag.load(Ordering::Acquire) {
-                engine.increment_epoch();
-            }
-        });
-        Self { cancel, handle: Some(handle) }
+    fn start(engine: Engine) -> Self {
+        let state = Arc::new((
+            Mutex::new(WatchdogState { deadline: None, shutdown: false }),
+            Condvar::new(),
+        ));
+        let thread_state = Arc::clone(&state);
+        let handle = thread::spawn(move || Self::run(engine, thread_state));
+        Self { state, handle: Some(handle) }
     }
 
-    fn stop(mut self) {
-        self.cancel.store(true, Ordering::Release);
+    fn run(engine: Engine, state: Arc<(Mutex<WatchdogState>, Condvar)>) {
+        let (lock, wake) = &*state;
+        let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        loop {
+            if guard.shutdown {
+                return;
+            }
+            match guard.deadline {
+                Some(deadline) if Instant::now() >= deadline => {
+                    guard.deadline = None;
+                    engine.increment_epoch();
+                }
+                Some(deadline) => {
+                    let wait = deadline.saturating_duration_since(Instant::now());
+                    guard = wake
+                        .wait_timeout(guard, wait)
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .0;
+                }
+                None => {
+                    guard = wake.wait(guard).unwrap_or_else(|poisoned| poisoned.into_inner());
+                }
+            }
+        }
+    }
+
+    fn arm(&self, timeout_ms: u64) {
+        let (lock, wake) = &*self.state;
+        let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.deadline = Some(Instant::now() + Duration::from_millis(timeout_ms));
+        wake.notify_one();
+    }
+
+    fn disarm(&self) {
+        let (lock, wake) = &*self.state;
+        let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.deadline = None;
+        wake.notify_one();
+    }
+}
+
+impl Drop for DeadlineWatchdog {
+    fn drop(&mut self) {
+        let (lock, wake) = &*self.state;
+        let mut guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.shutdown = true;
+        wake.notify_one();
+        drop(guard);
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
         }
@@ -603,11 +641,32 @@ mod tests {
     }
 
     #[test]
-    fn watchdog_stops_without_firing_when_cancelled() {
+    fn watchdog_disarms_and_rearms_without_retaining_old_deadlines() {
         let engine = build_engine().expect("engine");
-        let watchdog = DeadlineWatchdog::start(engine.clone(), 60_000);
-        watchdog.stop();
-        // The engine stays usable and manually incrementable after a clean stop.
+        let watchdog = DeadlineWatchdog::start(engine.clone());
+        watchdog.arm(1);
+        watchdog.disarm();
+        watchdog.arm(60_000);
+        watchdog.disarm();
+        drop(watchdog);
         engine.increment_epoch();
+    }
+
+    #[test]
+    fn watchdog_fires_one_armed_deadline() {
+        let engine = build_engine().expect("engine");
+        let watchdog = DeadlineWatchdog::start(engine);
+        watchdog.arm(1);
+        let wait_until = Instant::now() + Duration::from_secs(1);
+        loop {
+            let (lock, _) = &*watchdog.state;
+            let guard = lock.lock().expect("watchdog state");
+            if guard.deadline.is_none() {
+                break;
+            }
+            assert!(Instant::now() < wait_until, "watchdog did not fire");
+            drop(guard);
+            thread::sleep(Duration::from_millis(1));
+        }
     }
 }

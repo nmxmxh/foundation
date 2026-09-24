@@ -427,10 +427,7 @@ func TestExecuteOnWorkerAlwaysRunsOnTheNamedWorker(t *testing.T) {
 			{logger: testLogger(t), mode: ProcessTransportStdio, testExchange: second},
 		},
 	}
-	pool.bufferPool.New = func() any {
-		buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
-		return &buffer
-	}
+	pool.bufferPool.New = newPooledBuffer
 
 	const calls = 6
 	for range calls {

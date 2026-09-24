@@ -242,32 +242,4 @@ for mod_dir in "${go_modules[@]}"; do
   echo "[OK] Go static analysis: $rel"
 done
 
-wasm_compile() {
-  local module_dir="$1"
-  local package_path="$2"
-  local output_name="$3"
-
-  if [[ ! -d "$module_dir" ]]; then
-    return 0
-  fi
-
-  (
-    cd "$module_dir"
-    export GOCACHE="$go_cache"
-    GOWORK=off GOOS=js GOARCH=wasm go test -c -o "${TMPDIR:-/tmp}/${output_name}.wasm" "$package_path"
-  )
-}
-
-if (( is_foundation_repo )); then
-  echo "[RUN] Go js/wasm portability compile checks"
-  wasm_compile "$target/server-kit/go" "./healthcheck" "ovasabi-healthcheck"
-  wasm_compile "$target/runtime-sdk/go" "./runtimehost" "ovasabi-runtimehost"
-  echo "[OK] Go js/wasm portability compile checks"
-elif [[ -d "$target/foundation/server-kit/go" || -d "$target/foundation/runtime-sdk/go" ]]; then
-  echo "[RUN] vendored Foundation Go js/wasm portability compile checks"
-  wasm_compile "$target/foundation/server-kit/go" "./healthcheck" "ovasabi-vendored-healthcheck"
-  wasm_compile "$target/foundation/runtime-sdk/go" "./runtimehost" "ovasabi-vendored-runtimehost"
-  echo "[OK] vendored Foundation Go js/wasm portability compile checks"
-fi
-
 echo "Go static analysis check passed"

@@ -1,0 +1,1075 @@
+{
+  "applied_at": "2026-09-24T18:09:56.294955+00:00",
+  "backup": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-retired-go-wasm-5nhtn0_9",
+  "projects": [
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "0cc4f93d60a1d540ce27a5181c365051c7fdf73ffb42dac9d41b05de68d5f4b9",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/main.wasm",
+          "beforeHash": "2c27556c5fd58dbf0d95ea7a4279be164e8c2b4d5043b07c6a3356eab32d94c9",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/main.wasm.br",
+          "beforeHash": "e0761d185c19faafd0c2064a28dfc3bd660ff4ba3012483929eb3e0391d2f396",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/wasm_exec.js",
+          "beforeHash": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/runtime/wasm-manifest.json",
+          "beforeHash": "ed0bbd883ef620f4c9983b15cfd681323838d926fc1e39981b4df90e535d9c91",
+          "action": "update",
+          "afterHash": "79dbe89a6bdecd270f6aec32ef93d591aed34385892aaf3892995f397ef00d7e"
+        },
+        {
+          "path": "frontend/dist/main.wasm",
+          "beforeHash": "2c27556c5fd58dbf0d95ea7a4279be164e8c2b4d5043b07c6a3356eab32d94c9",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/main.wasm.br",
+          "beforeHash": "e0761d185c19faafd0c2064a28dfc3bd660ff4ba3012483929eb3e0391d2f396",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/wasm_exec.js",
+          "beforeHash": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/runtime/wasm-manifest.json",
+          "beforeHash": "ed0bbd883ef620f4c9983b15cfd681323838d926fc1e39981b4df90e535d9c91",
+          "action": "update",
+          "afterHash": "79dbe89a6bdecd270f6aec32ef93d591aed34385892aaf3892995f397ef00d7e"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "985cc240d46ade77610929d05a40dc7e467f4f831049d0b72b999b48e71a52d4",
+          "action": "update",
+          "afterHash": "0a4ff65446fa2d785d86a85f9ed6a32edf9cd5810e3272591ebbdf74f733d4f7"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "58d38ff18566a289b3a16b466e5227d6ac5e4fb06a76dda1ca943dd5868ff7bd",
+          "action": "update",
+          "afterHash": "03cbe78b66df7468ddb977c01e3303e93063ee1aeb2d67fd1cea619f4a2e6724"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "1d82c56d055db8ec0232b9456e46510a56b075d6faf66559ff2ac68fe69e67bb",
+          "action": "update",
+          "afterHash": "47795f7f3d00da8d5a964f0c4d46a13cf681e48e8afbd89757a401dcad0eff62"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "97f2ee76a609ec32e68f39dfe37c2bee5cc8518259ab1dce68819b1999a27af8",
+          "action": "update",
+          "afterHash": "f96eab44f09317b3bc694cb10063aa6fb40b832974cb553dd8b923830642024c"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "532da0ca24795dc2ab1b8518effdea3cc13ec7f6f6949ad99ad1e96fb71f0a4d",
+          "action": "update",
+          "afterHash": "bb674ead76741a8e97179b6efea4244fa438a3c5a6b53e8dbb3c7bcd056c40e4"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 5281713,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/main.wasm removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/main.wasm.br removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/wasm_exec.js removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/runtime/wasm-manifest.json retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: frontend/dist/main.wasm removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/main.wasm.br removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/wasm_exec.js removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/runtime/wasm-manifest.json retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "4b53a2dd8dd30086897e812f643704a6e6096f92c5efd21f043808ad74ac6f8e",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/main.wasm",
+          "beforeHash": "5cc0b211286ca60af2cb6984a050176851bf716837cf07e488e75cabed4950ee",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/main.wasm.br",
+          "beforeHash": "259cdf8d5967d2e3041ada6e0d4fb3782acc4641284bef835b5979eb82f0c4ed",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/wasm_exec.js",
+          "beforeHash": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/runtime/wasm-manifest.json",
+          "beforeHash": "fa029737d30d3202c9d15c2086901ddac9c04ad6b6f3330f2d303d14a0555e11",
+          "action": "update",
+          "afterHash": "0c0902537c88509b3e035072d96715dc959f699b3caf117c924ee3f646265ead"
+        },
+        {
+          "path": "frontend/dist/main.wasm",
+          "beforeHash": "5cc0b211286ca60af2cb6984a050176851bf716837cf07e488e75cabed4950ee",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/main.wasm.br",
+          "beforeHash": "259cdf8d5967d2e3041ada6e0d4fb3782acc4641284bef835b5979eb82f0c4ed",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/wasm_exec.js",
+          "beforeHash": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/runtime/wasm-manifest.json",
+          "beforeHash": "fa029737d30d3202c9d15c2086901ddac9c04ad6b6f3330f2d303d14a0555e11",
+          "action": "update",
+          "afterHash": "0c0902537c88509b3e035072d96715dc959f699b3caf117c924ee3f646265ead"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "985cc240d46ade77610929d05a40dc7e467f4f831049d0b72b999b48e71a52d4",
+          "action": "update",
+          "afterHash": "0a4ff65446fa2d785d86a85f9ed6a32edf9cd5810e3272591ebbdf74f733d4f7"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "44341a2c1bc37a6dcd13553a10fec17ec44a564bbbdef2131566e381a71851e2",
+          "action": "update",
+          "afterHash": "7baf98aea358536bdfd56d856e0e4172718d74fc0f34b23a9591e1aa194992bb"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "1d82c56d055db8ec0232b9456e46510a56b075d6faf66559ff2ac68fe69e67bb",
+          "action": "update",
+          "afterHash": "47795f7f3d00da8d5a964f0c4d46a13cf681e48e8afbd89757a401dcad0eff62"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "df6039ebacf15d7eaaa908bd62100f8f73644063bc47497d6d6c61318552e1ed",
+          "action": "update",
+          "afterHash": "bd8336179dde6720b86d2c6d673104fbc0a3760cc04f5499bcb59e2efe8ed1cd"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "532da0ca24795dc2ab1b8518effdea3cc13ec7f6f6949ad99ad1e96fb71f0a4d",
+          "action": "update",
+          "afterHash": "bb674ead76741a8e97179b6efea4244fa438a3c5a6b53e8dbb3c7bcd056c40e4"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 4824098,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/main.wasm removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/main.wasm.br removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/wasm_exec.js removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/runtime/wasm-manifest.json retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: frontend/dist/main.wasm removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/main.wasm.br removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/wasm_exec.js removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/runtime/wasm-manifest.json retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "c8225ba5d9bb5f9797aab70976a261b4f3fdae839900c67d03c799c9d4318012",
+          "action": "remove"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "985cc240d46ade77610929d05a40dc7e467f4f831049d0b72b999b48e71a52d4",
+          "action": "update",
+          "afterHash": "0a4ff65446fa2d785d86a85f9ed6a32edf9cd5810e3272591ebbdf74f733d4f7"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "51df1ac14ba5b84556ae7d5deca8b3a0f330cd174f5dc8ce0d6d0a4dd04b7015",
+          "action": "update",
+          "afterHash": "7a761d3ca96729589b2000224606490a08b2199e22a055a89a2ec396e1fe4627"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "1d82c56d055db8ec0232b9456e46510a56b075d6faf66559ff2ac68fe69e67bb",
+          "action": "update",
+          "afterHash": "47795f7f3d00da8d5a964f0c4d46a13cf681e48e8afbd89757a401dcad0eff62"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "df6039ebacf15d7eaaa908bd62100f8f73644063bc47497d6d6c61318552e1ed",
+          "action": "update",
+          "afterHash": "bd8336179dde6720b86d2c6d673104fbc0a3760cc04f5499bcb59e2efe8ed1cd"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "532da0ca24795dc2ab1b8518effdea3cc13ec7f6f6949ad99ad1e96fb71f0a4d",
+          "action": "update",
+          "afterHash": "bb674ead76741a8e97179b6efea4244fa438a3c5a6b53e8dbb3c7bcd056c40e4"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 4388,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "aa865f76dbeeb7b9d8a4b1543ccd681b5a020ed2dd6dbb2fe7ce96afe9e3eece",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/main.wasm",
+          "beforeHash": "0813169c27679e89a42e2928268e8f33aec006c2ae31c2be41b0869cab2ba8bc",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/wasm_exec.js",
+          "beforeHash": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/main.wasm",
+          "beforeHash": "0813169c27679e89a42e2928268e8f33aec006c2ae31c2be41b0869cab2ba8bc",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/wasm_exec.js",
+          "beforeHash": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14",
+          "action": "remove"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "985cc240d46ade77610929d05a40dc7e467f4f831049d0b72b999b48e71a52d4",
+          "action": "update",
+          "afterHash": "0a4ff65446fa2d785d86a85f9ed6a32edf9cd5810e3272591ebbdf74f733d4f7"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "2854e2e905d52a15199f31a273f2f3806e8bc00ce5857e02be005e999b8570ae",
+          "action": "update",
+          "afterHash": "6746a68ae1e771b644abbe600e79e0c83618972fa1375f837658c5b100dfb626"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "1d82c56d055db8ec0232b9456e46510a56b075d6faf66559ff2ac68fe69e67bb",
+          "action": "update",
+          "afterHash": "47795f7f3d00da8d5a964f0c4d46a13cf681e48e8afbd89757a401dcad0eff62"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "df6039ebacf15d7eaaa908bd62100f8f73644063bc47497d6d6c61318552e1ed",
+          "action": "update",
+          "afterHash": "bd8336179dde6720b86d2c6d673104fbc0a3760cc04f5499bcb59e2efe8ed1cd"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "532da0ca24795dc2ab1b8518effdea3cc13ec7f6f6949ad99ad1e96fb71f0a4d",
+          "action": "update",
+          "afterHash": "bb674ead76741a8e97179b6efea4244fa438a3c5a6b53e8dbb3c7bcd056c40e4"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 6616194,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/main.wasm removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/wasm_exec.js removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/main.wasm removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/wasm_exec.js removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "616c98ee3277044f43e3cc79a01b465d0f1a1f2ece49cee9168355a39a1ac925",
+          "action": "remove"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "985cc240d46ade77610929d05a40dc7e467f4f831049d0b72b999b48e71a52d4",
+          "action": "update",
+          "afterHash": "0a4ff65446fa2d785d86a85f9ed6a32edf9cd5810e3272591ebbdf74f733d4f7"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "38ecd303cfd38ea5e4f7e9f376b1f992a2967948c1b9d78bf65219537f9ae688",
+          "action": "update",
+          "afterHash": "32257cf9c17aeac886a6a6aff832a1eb309ae127a0afcdd22c65c2225875a073"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "1d82c56d055db8ec0232b9456e46510a56b075d6faf66559ff2ac68fe69e67bb",
+          "action": "update",
+          "afterHash": "47795f7f3d00da8d5a964f0c4d46a13cf681e48e8afbd89757a401dcad0eff62"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "df6039ebacf15d7eaaa908bd62100f8f73644063bc47497d6d6c61318552e1ed",
+          "action": "update",
+          "afterHash": "bd8336179dde6720b86d2c6d673104fbc0a3760cc04f5499bcb59e2efe8ed1cd"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "532da0ca24795dc2ab1b8518effdea3cc13ec7f6f6949ad99ad1e96fb71f0a4d",
+          "action": "update",
+          "afterHash": "bb674ead76741a8e97179b6efea4244fa438a3c5a6b53e8dbb3c7bcd056c40e4"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 4407,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "2b3efe4efad143a507bba4b3303b330f532b20e212e87c02a0f3048ca4e7de1a",
+          "action": "remove"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "985cc240d46ade77610929d05a40dc7e467f4f831049d0b72b999b48e71a52d4",
+          "action": "update",
+          "afterHash": "0a4ff65446fa2d785d86a85f9ed6a32edf9cd5810e3272591ebbdf74f733d4f7"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "431255624fdb1f95b2c4f30b0f5773141f427c3eecbc720db541afc9ebfe2972",
+          "action": "update",
+          "afterHash": "f3d195cdafd3a9b923566cb63c789cd02296cfd0d52263e74481c23b452c284e"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "1d82c56d055db8ec0232b9456e46510a56b075d6faf66559ff2ac68fe69e67bb",
+          "action": "update",
+          "afterHash": "47795f7f3d00da8d5a964f0c4d46a13cf681e48e8afbd89757a401dcad0eff62"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "df6039ebacf15d7eaaa908bd62100f8f73644063bc47497d6d6c61318552e1ed",
+          "action": "update",
+          "afterHash": "bd8336179dde6720b86d2c6d673104fbc0a3760cc04f5499bcb59e2efe8ed1cd"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "532da0ca24795dc2ab1b8518effdea3cc13ec7f6f6949ad99ad1e96fb71f0a4d",
+          "action": "update",
+          "afterHash": "bb674ead76741a8e97179b6efea4244fa438a3c5a6b53e8dbb3c7bcd056c40e4"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 4390,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "feb75f75d9a5a115fb29786053d7f11163284a7d76bf24d8ade3802ed567f9cb",
+          "action": "remove"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "dcf7b94adabbbfd17bc2b25b7a3f0066d518352c9696efce30dfe934efe94372",
+          "action": "update",
+          "afterHash": "1f80a5ed352d8978296c0ecc58cef8f329960f923951364d31a040dfa48f29fb"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "07bdaf7dc54bb0c4200874a61bac0a7a9d2a3eedb214013984cca62a28596736",
+          "action": "update",
+          "afterHash": "d7dd1f8b1f32a1bdffe95c507b3f934dca001db4c97dd4e7a132b58d725e5ba9"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "964a8b20272a7859e0b48ef0da918ef287b16af67651212103478705e5ed7367",
+          "action": "update",
+          "afterHash": "71973ec675fc8047cbc49b129b6f238d3db57bae128c1664be373641af4de8a2"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "97f2ee76a609ec32e68f39dfe37c2bee5cc8518259ab1dce68819b1999a27af8",
+          "action": "update",
+          "afterHash": "f96eab44f09317b3bc694cb10063aa6fb40b832974cb553dd8b923830642024c"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "532da0ca24795dc2ab1b8518effdea3cc13ec7f6f6949ad99ad1e96fb71f0a4d",
+          "action": "update",
+          "afterHash": "bb674ead76741a8e97179b6efea4244fa438a3c5a6b53e8dbb3c7bcd056c40e4"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 4389,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "fa5ab4c911d405fdcb3d8c4f3983c3ac6b4dd40d2f11410bd59bd4f14030a8d2",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/main.wasm",
+          "beforeHash": "a447364865812f5083eee65e89866891b1ef3ee7f1dfd7228a410242774d25c5",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/main.wasm.br",
+          "beforeHash": "553d87a24d4bb6f25be7e7f454d78b5aa9925e2beac1c0a9ab84563213aa4f06",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/wasm_exec.js",
+          "beforeHash": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/public/runtime/wasm-manifest.json",
+          "beforeHash": "769cda6e5cc18852a08b39395199503f2b24cdbebd46f3cdb161cfdb5f9e9e1c",
+          "action": "update",
+          "afterHash": "1a7d65e66c3c7d19491199698b692d806e0c9c5f797dbec37aa83fbad48641c5"
+        },
+        {
+          "path": "frontend/dist/main.wasm",
+          "beforeHash": "a447364865812f5083eee65e89866891b1ef3ee7f1dfd7228a410242774d25c5",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/main.wasm.br",
+          "beforeHash": "553d87a24d4bb6f25be7e7f454d78b5aa9925e2beac1c0a9ab84563213aa4f06",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/main.wasm.gz",
+          "beforeHash": "0e3d67a3686c3563556378efa11e4cea5ec294480944b0f7f233b8a25067cd5f",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/wasm_exec.js",
+          "beforeHash": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14",
+          "action": "remove"
+        },
+        {
+          "path": "frontend/dist/runtime/wasm-manifest.json",
+          "beforeHash": "769cda6e5cc18852a08b39395199503f2b24cdbebd46f3cdb161cfdb5f9e9e1c",
+          "action": "update",
+          "afterHash": "1a7d65e66c3c7d19491199698b692d806e0c9c5f797dbec37aa83fbad48641c5"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "c5cc64b4dc56739b44a71c05bbb0a6e0e92387c4fa771b1b5e4bf2ba9c505335",
+          "action": "update",
+          "afterHash": "9e6e20b3860a20a4043950aa65bd2981397c204fed3854d73d05a4c977a334c4"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "3fb046eed7a26fa93525e83db97405b7518d277b097d2812cba81fc990feaa89",
+          "action": "update",
+          "afterHash": "96bd758b4828b1862e4bb601aed599f5d9d8a791a98a38178c9ae65b6b817a36"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "964a8b20272a7859e0b48ef0da918ef287b16af67651212103478705e5ed7367",
+          "action": "update",
+          "afterHash": "71973ec675fc8047cbc49b129b6f238d3db57bae128c1664be373641af4de8a2"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "97f2ee76a609ec32e68f39dfe37c2bee5cc8518259ab1dce68819b1999a27af8",
+          "action": "update",
+          "afterHash": "f96eab44f09317b3bc694cb10063aa6fb40b832974cb553dd8b923830642024c"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "9af2095c653623eabbdfa6ae5e50c7901e2e0d3bf39b43979ff2830563d70eb7",
+          "action": "update",
+          "afterHash": "8542e33baf42cf041836ef2d0368d4bbb9abb33ff33a853f54d47e5c2cbf008a"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 5930780,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/main.wasm removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/main.wasm.br removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/wasm_exec.js removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/public/runtime/wasm-manifest.json retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: frontend/dist/main.wasm removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/main.wasm.br removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/main.wasm.gz removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/wasm_exec.js removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: frontend/dist/runtime/wasm-manifest.json retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "9f88b5ad5b340150c4bddceaf7454fefef4fa01ed59843098d91f9157ad20524",
+          "action": "remove"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "0d1363f7a0c7df9fbcdf0aae7add17ee6b41dbcadeb1f10cf348f231fea4ff0f",
+          "action": "update",
+          "afterHash": "58b6080abf30b88a2ce3940ab350a08ec0a5b1bd1b0f8c719aa9ebf33da6a4cd"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "e3851939f73e1f15becb676100b27b7f38f5b1f0065c5fe7b5b5bf7093ff85d2",
+          "action": "update",
+          "afterHash": "aca8f37533b8e301333bf8c3ff1a56e6ad2b5ab8b2a0a6c3cbcd9c53d1ed5cd0"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "964a8b20272a7859e0b48ef0da918ef287b16af67651212103478705e5ed7367",
+          "action": "update",
+          "afterHash": "71973ec675fc8047cbc49b129b6f238d3db57bae128c1664be373641af4de8a2"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "97f2ee76a609ec32e68f39dfe37c2bee5cc8518259ab1dce68819b1999a27af8",
+          "action": "update",
+          "afterHash": "f96eab44f09317b3bc694cb10063aa6fb40b832974cb553dd8b923830642024c"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "9af2095c653623eabbdfa6ae5e50c7901e2e0d3bf39b43979ff2830563d70eb7",
+          "action": "update",
+          "afterHash": "8542e33baf42cf041836ef2d0368d4bbb9abb33ff33a853f54d47e5c2cbf008a"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 4388,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "11c7df27e1f1248a22045c3756c965e3f61ee371b7ada01320fdb153fca72587",
+          "action": "remove"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "c47091d7e00486e5a75df8ca446ad7fd9ec2f52f5109acbaa12959335b5a41f7",
+          "action": "update",
+          "afterHash": "b30e6970c85b82706100f7b454f01be63e9ca1235a2375cdd258d5db0b278c69"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "59267b2c6d38e3b796eee4533eccf7db8e56f3be1b5f6bf5d2c69e64e6201977",
+          "action": "update",
+          "afterHash": "2ce4de94901b11ec2eb02668c70c1a8be613aacbae4dc80123ce279291a90b10"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "1d82c56d055db8ec0232b9456e46510a56b075d6faf66559ff2ac68fe69e67bb",
+          "action": "update",
+          "afterHash": "47795f7f3d00da8d5a964f0c4d46a13cf681e48e8afbd89757a401dcad0eff62"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "df6039ebacf15d7eaaa908bd62100f8f73644063bc47497d6d6c61318552e1ed",
+          "action": "update",
+          "afterHash": "bd8336179dde6720b86d2c6d673104fbc0a3760cc04f5499bcb59e2efe8ed1cd"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "532da0ca24795dc2ab1b8518effdea3cc13ec7f6f6949ad99ad1e96fb71f0a4d",
+          "action": "update",
+          "afterHash": "bb674ead76741a8e97179b6efea4244fa438a3c5a6b53e8dbb3c7bcd056c40e4"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 4389,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1",
+      "changes": [
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "e45b8893a203bbcde30df21715a26e4daf875dee3ae961b117eefde3c1aebea1",
+          "action": "remove"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "985cc240d46ade77610929d05a40dc7e467f4f831049d0b72b999b48e71a52d4",
+          "action": "update",
+          "afterHash": "0a4ff65446fa2d785d86a85f9ed6a32edf9cd5810e3272591ebbdf74f733d4f7"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "d0ff1521129c53d6ba19ba9e22540fd1a256dfff82329ea16f8a5ce254d7a023",
+          "action": "update",
+          "afterHash": "978a060d7db0bf4ceda806bd2f2971c1643339cf9533e3d313cb4cb48b420c88"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "1d82c56d055db8ec0232b9456e46510a56b075d6faf66559ff2ac68fe69e67bb",
+          "action": "update",
+          "afterHash": "47795f7f3d00da8d5a964f0c4d46a13cf681e48e8afbd89757a401dcad0eff62"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "df6039ebacf15d7eaaa908bd62100f8f73644063bc47497d6d6c61318552e1ed",
+          "action": "update",
+          "afterHash": "bd8336179dde6720b86d2c6d673104fbc0a3760cc04f5499bcb59e2efe8ed1cd"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "532da0ca24795dc2ab1b8518effdea3cc13ec7f6f6949ad99ad1e96fb71f0a4d",
+          "action": "update",
+          "afterHash": "bb674ead76741a8e97179b6efea4244fa438a3c5a6b53e8dbb3c7bcd056c40e4"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 4388,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1",
+      "changes": [
+        {
+          "path": "wasm/.DS_Store",
+          "beforeHash": "4605ecf1edfbcc9788dfd02264a5a3c8ddae7b9ed044b8ea7d59bc9a1b456486",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/Makefile",
+          "beforeHash": "3b965009857d11af6d373d246d2b69220ee900af28cc139323b3154963e882ad",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/README.md",
+          "beforeHash": "033e1796f264546f31ada59495295f2dbc7f84773b290e020f6830cc060221e5",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/build/trotters.wasm",
+          "beforeHash": "8030ceb45322601caff5fc19e24b6f0d97587b8bf2dabf94463e6b33b5c682d1",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/build/wasm_exec.js",
+          "beforeHash": "0c949f4996f9a89698e4b5c586de32249c3b69b7baadb64d220073cc04acba14",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/go.mod",
+          "beforeHash": "10efa223a0365f4784474bc7fc987cfccb49a7bd660fb314c0b29cc171d6d620",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/internal/bridge/bridge.go",
+          "beforeHash": "7c2e103f3f09a8433c14b9d79b215c979dd124b312c7fba0cedb9bb824f0c0d6",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/internal/compress/compress.go",
+          "beforeHash": "d22a2dd3d46ffeec31dd733e76942cbfaac2ce6b6a56fc12f85c39c9d68dd75a",
+          "action": "remove"
+        },
+        {
+          "path": "wasm/main.go",
+          "beforeHash": "eb6a49e04faa5d0a589a690923f6f767608163349392d37356a071cf973abbbb",
+          "action": "remove"
+        },
+        {
+          "path": "Makefile",
+          "beforeHash": "36e5acaffbee2d4b498a2fedd2bfefef930275ead279d58e9765bb582847510c",
+          "action": "update",
+          "afterHash": "4cb40bfeb7435965fbac5a09ede4e9a295cffeb260af1efa473f584ae817e245"
+        },
+        {
+          "path": "go.work",
+          "beforeHash": "d8ecc38478ed62d62340bcb516a8dfc292aa4190a908d6de04497bffb04ae7eb",
+          "action": "update",
+          "afterHash": "a1afb63482add0802e656b4905d97f12b0978af517c7bce66181136e4046bb67"
+        },
+        {
+          "path": ".github/workflows/ci.yml",
+          "beforeHash": "f2a955ed6b95ead15d9621b0203a6369445da8623a4150a6eea76763532e4b27",
+          "action": "update",
+          "afterHash": "f6d2fcc5cd4c2a241f86776d617385c46bad59a6fb55f3f93f1a0ed3b9718f78"
+        },
+        {
+          "path": "scripts/checks/wasm_manifest.mjs",
+          "beforeHash": "e110486d038a38721b03e4ba53b0da992e7db1b13c31bbe4b89ad736b1f7ff2c",
+          "action": "update",
+          "afterHash": "67354bfc05e43a088d9b8258c89a026c5b8777692df5f61e8a7d83f698367acb"
+        },
+        {
+          "path": "scripts/checks/scaffold_managed_patches.sh",
+          "beforeHash": "1d82c56d055db8ec0232b9456e46510a56b075d6faf66559ff2ac68fe69e67bb",
+          "action": "update",
+          "afterHash": "47795f7f3d00da8d5a964f0c4d46a13cf681e48e8afbd89757a401dcad0eff62"
+        },
+        {
+          "path": "scripts/checks/project_scaffold_check.sh",
+          "beforeHash": "df6039ebacf15d7eaaa908bd62100f8f73644063bc47497d6d6c61318552e1ed",
+          "action": "update",
+          "afterHash": "bd8336179dde6720b86d2c6d673104fbc0a3760cc04f5499bcb59e2efe8ed1cd"
+        },
+        {
+          "path": "scripts/checks/go_static_analysis_check.sh",
+          "beforeHash": "532da0ca24795dc2ab1b8518effdea3cc13ec7f6f6949ad99ad1e96fb71f0a4d",
+          "action": "update",
+          "afterHash": "bb674ead76741a8e97179b6efea4244fa438a3c5a6b53e8dbb3c7bcd056c40e4"
+        },
+        {
+          "path": "scripts/checks/dynamic_payload_practices_check.sh",
+          "beforeHash": "b67fe9bcd429f590ba4a8773d9fbeae93e305836627c85c493a1603c927726be",
+          "action": "update",
+          "afterHash": "f032c8b85822deeb5450a0428fc411ee76819c7cae467c4aeae708fbc45ef85f"
+        }
+      ],
+      "retired_bytes": 3666069,
+      "output": [
+        "[PATCH] Go WASM retirement: wasm/.DS_Store removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/Makefile removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/README.md removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/build/trotters.wasm removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/build/wasm_exec.js removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/go.mod removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/internal/bridge/bridge.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/internal/compress/compress.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: wasm/main.go removed retired Go WASM file",
+        "[PATCH] Go WASM retirement: Makefile retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: go.work retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: .github/workflows/ci.yml retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/wasm_manifest.mjs retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/scaffold_managed_patches.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/project_scaffold_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/go_static_analysis_check.sh retired Go WASM wiring",
+        "[PATCH] Go WASM retirement: scripts/checks/dynamic_payload_practices_check.sh retired Go WASM wiring"
+      ],
+      "idempotent": true
+    }
+  ]
+}

@@ -111,10 +111,9 @@ impl RuntimeUnit for ScoringUnit {
         }
     }
 
-    fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-        // input arrives pre-bounded from the 4KB control buffer (or arena
-        // descriptor); return controlled errors, never panic.
-        score(input)
+    fn execute(&self, input: &[u8], output: &mut dyn ovrt_unit::RuntimeOutput) -> Result<(), String> {
+        // Stream encoded bytes into the checked destination when possible.
+        output.write_owned(score(input)?)
     }
 }
 ```
@@ -289,7 +288,7 @@ A unit is integrated when all of these exist (this mirrors
 
 | I want… | Use |
 | --- | --- |
-| The trait to implement | `ovrt_unit::RuntimeUnit` (`descriptor()` + `run()`) |
+| The trait to implement | `ovrt_unit::RuntimeUnit` (`descriptor()` + `execute()`) |
 | The descriptor contract | `ovrt_core::RuntimeUnitDescriptor` (+ `RuntimeRole`) |
 | A native host with my units | `NativeRuntimeHost::new(role_limits)` + `register_unit` |
 | Portable process lane | `ovrt_native::serve_stdio` + `runtimehost.NewProcessPool` |

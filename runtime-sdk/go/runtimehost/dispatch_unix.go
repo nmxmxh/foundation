@@ -283,33 +283,26 @@ func (b *DispatchBlock) SnapshotStatRow(lane int) (DispatchLaneStats, error) {
 	return row.Snapshot()
 }
 
-// SnapshotStats reads every lane's statistics in one pass without
-// materializing per-row handles.
-//
-// The per-row handle API pays one escaped allocation per lane because each
-// call wraps a new struct; placement sweeps run once per decision, so this
-// batch form reads the same words directly and keeps the sweep at a single
-// slice allocation. Semantics are identical: every field is an atomic acquire
-// load from the same fixed offsets.
-func (b *DispatchBlock) SnapshotStats() ([]DispatchLaneStats, error) {
-	out := make([]DispatchLaneStats, generated.DISPATCH_MAX_LANES)
+// SnapshotStats reads atomic lane fields into a fixed table without allocating.
+func (b *DispatchBlock) SnapshotStats() (DispatchStats, error) {
+	var out DispatchStats
 	for lane := range out {
 		base := int(generated.DISPATCH_STATS_OFFSET) + lane*int(generated.DISPATCH_LANE_ROW_BYTES)
 		ewma, err := b.dispatchWord(base)
 		if err != nil {
-			return nil, err
+			return DispatchStats{}, err
 		}
 		inflight, err := b.dispatchWord32(base + statInflightOffset)
 		if err != nil {
-			return nil, err
+			return DispatchStats{}, err
 		}
 		maxConcurrency, err := b.dispatchWord32(base + statMaxConcurrency)
 		if err != nil {
-			return nil, err
+			return DispatchStats{}, err
 		}
 		lastSeen, err := b.dispatchWord(base + statLastTickSeen)
 		if err != nil {
-			return nil, err
+			return DispatchStats{}, err
 		}
 		out[lane] = DispatchLaneStats{
 			EwmaNs:         atomic.LoadUint64(ewma),
@@ -390,25 +383,25 @@ func (b *DispatchBlock) PublishDescriptors(rows []DispatchLaneDescriptor, genera
 //
 // Rows are plain reads taken after the flip index Acquire load, which orders
 // them after every write of that generation.
-func (b *DispatchBlock) SnapshotDescriptors() ([]DispatchLaneDescriptor, error) {
+func (b *DispatchBlock) SnapshotDescriptors() (DispatchDescriptors, error) {
 	active, err := b.FlipIndex()
 	if err != nil {
-		return nil, err
+		return DispatchDescriptors{}, err
 	}
 	if active >= 2 {
-		return nil, fmt.Errorf("flip index %d selects no buffer", active)
+		return DispatchDescriptors{}, fmt.Errorf("flip index %d selects no buffer", active)
 	}
 	base := int(generated.DISPATCH_BUFFERS_OFFSET) + int(active)*int(generated.DISPATCH_BUFFER_BYTES)
-	out := make([]DispatchLaneDescriptor, generated.DISPATCH_MAX_LANES)
+	var out DispatchDescriptors
 	for slot := range out {
 		start := base + slot*dispatchSlotBytes
 		end := start + dispatchSlotBytes
 		if end > len(b.raw) {
-			return nil, fmt.Errorf("descriptor slot %d runs past the %d byte region", slot, len(b.raw))
+			return DispatchDescriptors{}, fmt.Errorf("descriptor slot %d runs past the %d byte region", slot, len(b.raw))
 		}
 		descriptor, err := decodeDescriptor(b.raw[start:end])
 		if err != nil {
-			return nil, err
+			return DispatchDescriptors{}, err
 		}
 		out[slot] = descriptor
 	}

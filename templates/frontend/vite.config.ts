@@ -9,10 +9,8 @@ export default defineConfig({
   plugins: [
     react(),
     wyw({
-      // Styles are Linaria, extracted at build time — ui-minimal's and this app's own
-      // (Foundation research doc 14.8). The kit is reached through node_modules,
-      // hence transformLibraries.
-      include: [/ui-minimal[\\/](ts[\\/])?src[\\/].*\.[jt]sx?$/, /[\\/]src[\\/].*\.[jt]sx?$/],
+      // Vite adds query strings during development. Transform application and linked kit sources.
+      include: [/ui-minimal[\\/](ts[\\/])?src[\\/].*\.[jt]sx?(?:\?.*)?$/, /[\\/]src[\\/].*\.[jt]sx?(?:\?.*)?$/],
       transformLibraries: true,
       prefixer: false,
     }),
@@ -25,6 +23,8 @@ export default defineConfig({
     // (Foundation research doc §15.5).
     prerenderShell({ entry: 'src/entry-server.tsx', routes: ['/'], criticalCss: 'subset' }),
   ],
+  // The dependency optimizer cannot extract Linaria styles. Keep kit sources in the plugin pipeline.
+  optimizeDeps: { exclude: ['@ovasabi/ui-minimal'] },
   resolve: {
     preserveSymlinks: true,
     alias: {

@@ -28,7 +28,7 @@ pub const MAX_LANES: usize = ovrt_core::DISPATCH_MAX_LANES as usize;
 
 /// Immutable membership row for one lane, decoded from a published buffer.
 /// Field order mirrors runtime_dispatch.capnp.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DispatchLaneDescriptor {
     pub unit_class_mask: u64,
     pub affinity_bloom: u64,

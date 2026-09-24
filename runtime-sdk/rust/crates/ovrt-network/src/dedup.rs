@@ -100,8 +100,14 @@ impl DedupRing {
             // Acquire, not Relaxed: a caller that reads FirstSeen goes on to
             // process the frame, and the caller that lost the race must observe
             // everything the winner published before claiming the slot.
-            if slot.load(Ordering::Acquire) == fingerprint {
+            let observed = slot.load(Ordering::Acquire);
+            if observed == fingerprint {
                 return Observation::Duplicate;
+            }
+
+            // Occupied slots cannot accept this key. Avoid an unnecessary atomic write attempt.
+            if observed != EMPTY {
+                continue;
             }
 
             match slot.compare_exchange(EMPTY, fingerprint, Ordering::AcqRel, Ordering::Acquire) {

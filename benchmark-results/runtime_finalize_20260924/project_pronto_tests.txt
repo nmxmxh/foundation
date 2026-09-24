@@ -1,0 +1,217 @@
+   Compiling rustversion v1.0.22
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling arc-swap v1.9.2
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+   Compiling ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/runtime-sdk/rust/crates/ovrt-native)
+   Compiling ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+   Compiling pronto-math v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-math)
+   Compiling pronto-geo v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-geo)
+   Compiling pronto-vector-graph v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-vector-graph)
+   Compiling pronto-fusion v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-fusion)
+   Compiling pronto-rss-kernel v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-rss-kernel)
+   Compiling pronto-archive-surprise v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-archive-surprise)
+   Compiling pronto-ranker v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-ranker)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 7.55s
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_archive_surprise-31c5d11f96b999fa)
+
+running 7 tests
+test surprise_tests::a_collapsed_prior_variance_is_floored ... ok
+test surprise_tests::rejects_a_request_too_short_for_a_vector ... ok
+test surprise_tests::an_ordinary_vector_is_not_a_catastrophe ... ok
+test surprise_tests::surprise_score_is_bounded_on_zero_to_one ... ok
+test tests::computes_kl_divergence_and_wave_detection ... ok
+test surprise_tests::a_learned_vector_is_less_surprising_than_a_novel_one ... ok
+test surprise_tests::a_host_supplied_prior_is_used_rather_than_the_default ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/bin/runtime_stdio.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_archive_surprise_runtime_stdio-af190388fb4e42c7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_fusion-628117e54726d444)
+
+running 13 tests
+test ops::tests::epa_aqi_matches_the_published_worked_example ... ok
+test ops::tests::seismic_energy_follows_gutenberg_richter ... ok
+test wire::tests::refuses_an_over_long_vector_rather_than_truncating ... ok
+test tests::a_bad_request_returns_a_status_not_a_transport_error ... ok
+test ops::tests::sahm_gap_reaches_the_published_trigger ... ok
+test ops::tests::every_declared_op_has_an_implementation_and_an_arity ... ok
+test wire::tests::rejects_a_mismatched_schema_version ... ok
+test wire::tests::rejects_an_unknown_op_rather_than_guessing ... ok
+test tests::both_transports_are_registered_and_agree ... ok
+test ops::parity::matches_the_shared_parity_vectors ... ok
+test wire::tests::rejects_too_few_scalars_instead_of_indexing_past_the_end ... ok
+test wire::tests::round_trips_a_scalar_op ... ok
+test wire::tests::round_trips_a_vector_op_with_multiple_outputs ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/runtime_stdio.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_fusion_runtime_stdio-5bd687e6f3794d3d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_geo-fee77e8603fc13ea)
+
+running 2 tests
+test tests::computes_haversine_distance ... ok
+test tests::resolves_country_geolocations ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/runtime_stdio.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_geo_runtime_stdio-6fcbde106a82b8db)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_math-dddc3d0f49ddbd73)
+
+running 7 tests
+test tests::collinear_axes_do_not_inflate_the_residual ... ok
+test tests::computes_cosine_similarity ... ok
+test tests::computes_gowers_u2_norm ... ok
+test tests::gowers_u2_is_zero_below_the_minimum_window ... ok
+test tests::residual_is_orthogonal_to_both_axes ... ok
+test tests::gowers_u2_matches_the_naive_definition ... ok
+test tests::benchmark_vector_similarity_100k_iterations ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+
+     Running unittests src/bin/runtime_stdio.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_math_runtime_stdio-fe6d00c685c2a604)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/reduction_probe.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/reduction_probe-c807e29f63ab8bba)
+
+running 1 test
+test reduction_styles ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.73s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_ranker-ffe9ea76080c19b0)
+
+running 2 tests
+test tests::keeps_only_top_k_with_stable_ties ... ok
+test tests::ranks_top_k_signals_with_decay ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/runtime_stdio.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_ranker_runtime_stdio-c88af017834bcae3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_rss_kernel-72d71c86fcdd66df)
+
+running 42 tests
+test arena_unit::tests::rejects_a_truncated_request ... ok
+test arena_unit::tests::rejects_a_request_with_the_wrong_magic ... ok
+test boilerplate::tests::ignores_a_batch_too_small_to_be_evidence ... ok
+test boilerplate::tests::finds_the_outlet_name_every_headline_carries ... ok
+test boilerplate::tests::ignores_a_feed_republishing_one_identical_title ... ok
+test boilerplate::tests::does_not_strip_a_shared_word_that_is_part_of_the_sentence ... ok
+test boilerplate::tests::finds_a_leading_section_label ... ok
+test boilerplate::tests::keeps_the_original_when_stripping_would_leave_nothing ... ok
+test boilerplate::tests::recognises_titles_with_no_subject ... ok
+test observed::tests::date_only_is_midnight ... ok
+test observed::tests::future_date_is_skewed_not_trusted ... ok
+test observed::tests::epoch_anchor ... ok
+test observed::tests::numeric_epochs_and_slashed_dates ... ok
+test observed::tests::iso_variants_agree ... ok
+test observed::tests::old_date_is_reported_not_rewritten ... ok
+test observed::tests::rfc1123_with_numeric_zone ... ok
+test observed::tests::small_clock_drift_is_tolerated ... ok
+test observed::tests::unparseable_is_absent ... ok
+test observed::tests::zone_offset_is_applied ... ok
+test parser::bound_tests::leaves_short_text_alone ... ok
+test parser::bound_tests::truncates_text_that_is_entirely_multibyte ... ok
+test parser::bound_tests::truncates_multibyte_text_without_panicking ... ok
+test parser::sanitize_tests::clean_feed_needs_no_rewrite ... ok
+test parser::sanitize_tests::does_not_attempt_to_repair_mismatched_tags ... ok
+test parser::sanitize_tests::latin1_bytes_decode_instead_of_becoming_boxes ... ok
+test parser::sanitize_tests::opens_valid_entity_recognises_the_five_named_and_numeric_forms ... ok
+test parser::sanitize_tests::leaves_valid_entities_alone ... ok
+test parser::sanitize_tests::reads_cdata_wrapped_fields ... ok
+test parser::sanitize_tests::parses_a_namespace_prefixed_atom_feed ... ok
+test parser::sanitize_tests::reads_namespaced_body_tags ... ok
+test parser::sanitize_tests::recovers_a_bare_ampersand_in_a_link ... ok
+test parser::sanitize_tests::recovers_a_bare_ampersand_in_text ... ok
+test parser::sanitize_tests::valid_utf8_survives_whatever_the_feed_declares ... ok
+test parser::sanitize_tests::windows_1252_punctuation_decodes ... ok
+test parser::sanitize_tests::recovers_invalid_utf8 ... ok
+test parser::text_tests::decodes_entities_without_leaving_a_stray_semicolon ... ok
+test parser::text_tests::preserves_multibyte_text ... ok
+test parser::text_tests::strips_markup_around_multibyte_text ... ok
+test tests::parses_and_enriches_rss_xml ... ok
+test tests::enriches_single_endpoint_signal ... ok
+test arena_unit::tests::transforms_a_body_the_control_payload_cannot_carry ... ok
+test tests::benchmark_rss_kernel_pipeline_10k_iterations ... ok
+
+test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.57s
+
+     Running unittests src/bin/runtime_stdio.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_rss_kernel_runtime_stdio-857ede8c30cf9eac)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_vector_graph-05e7f832f7943fec)
+
+running 17 tests
+test reserve_tests::an_already_diverse_selection_is_untouched ... ok
+test reserve_tests::a_cross_domain_edge_survives_more_similar_neighbours ... ok
+test hnsw::tests::tiny_corpora_are_safe ... ok
+test reserve_tests::no_cross_domain_candidates_leaves_the_top_k_alone ... ok
+test reserve_tests::same_place_edges_are_never_displaced ... ok
+test tests::alpha_envelope_round_trips ... ok
+test tests::options_from_the_envelope_are_honoured ... ok
+test tests::alpha_discounts_a_syndicated_corpus ... ok
+test tests::out_degree_is_capped_per_node ... ok
+test tests::resolved_place_identity_links_across_languages ... ok
+test tests::stale_envelope_magic_is_rejected ... ok
+test tests::pair_budget_does_not_starve_late_nodes ... ok
+test hnsw::tests::exact_lane_matches_brute_force ... ok
+test hnsw::tests::query_excludes_itself_and_honours_k ... ok
+test hnsw::tests::builds_are_deterministic ... ok
+test hnsw::tests::dispatcher_uses_exact_lane_below_threshold ... ok
+test hnsw::tests::recall_at_16_clears_ninety_percent ... ok
+
+test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.89s
+
+     Running unittests src/bin/runtime_stdio.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/pronto_vector_graph_runtime_stdio-41e736ca0990dcca)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/timing_probe.rs (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/target/debug/deps/timing_probe-3cb4950dde2353c8)
+
+running 1 test
+test lane_timings ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.44s
+
+    Checking ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/runtime-sdk/rust/crates/ovrt-core)
+    Checking arc-swap v1.9.2
+    Checking ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/runtime-sdk/rust/crates/ovrt-unit)
+    Checking ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+    Checking ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/runtime-sdk/rust/crates/ovrt-native)
+    Checking ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+    Checking pronto-math v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-math)
+    Checking pronto-geo v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-geo)
+    Checking pronto-fusion v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-fusion)
+    Checking pronto-vector-graph v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-vector-graph)
+    Checking pronto-rss-kernel v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-rss-kernel)
+    Checking pronto-archive-surprise v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-archive-surprise)
+    Checking pronto-ranker v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/rust/crates/pronto-ranker)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.01s

@@ -172,17 +172,32 @@ coordination substrate.
 ## Browser WASM build and binding flow
 
 1. `make runtime-bindings` regenerates the shared runtime buffer constants from `foundation/runtime-sdk/protocols/system/v1/*` into the Rust, Go, and TypeScript runtime-sdk packages.
-2. `make build-wasm` builds the scaffolded Go WASM compatibility shim from `wasm/`, copies the matching `wasm_exec.js`, optionally optimizes/compresses the artifact, and emits `frontend/public/main.wasm`.
-3. `make build-rust-wasm` builds app-owned Rust compute modules from `rust/Cargo.toml` for `wasm32-unknown-unknown`, then copies emitted `.wasm` files into `frontend/public/modules/`. Foundation does not put app-domain compute crates in `runtime-sdk`.
-4. `make wasm-manifest` writes `frontend/public/runtime/wasm-manifest.json` so frontend code can discover runtime artifacts through `@ovasabi/frontend-kit` instead of hard-coded paths.
-5. Frontend code loads the manifest with `loadWasmManifest(...)`, selects the relevant kernel/module artifact, and instantiates compute units through `BrowserRuntimeHost.instantiate(...)` from `foundation/runtime-sdk/ts/browser-host`.
-6. `BrowserRuntimeHost` provides the low-level `env` imports:
-   - copy bytes from wasm linear memory into the shared runtime buffer
-   - copy bytes back out of the shared runtime buffer
-   - atomic epoch operations
-   - logging and timing hooks
-7. Workers run compute units off the UI thread. The main thread owns the `SharedArrayBuffer`, the worker writes the input contract, Rust/WASM executes the exported compute function, and the UI reads the output Cap'n Proto payload through generated readers.
-8. Frontend production builds should consume already-emitted artifacts from `frontend/public`. Rust/WASM generation belongs in Makefile targets (`build-runtime`, `build-rust-wasm`, `wasm-manifest`) so CI and local dev use the same propagation path.
+2. `make build-rust-wasm` builds scalar and shared artifacts through `runtime-sdk/scripts/build_browser_wasm.sh`. App-owned modules remain in `rust/Cargo.toml`. Both artifacts enter `frontend/public/modules/`.
+3. `make wasm-manifest` writes `frontend/public/runtime/wasm-manifest.json` so frontend code can discover runtime artifacts through `@ovasabi/frontend-kit` instead of hard-coded paths.
+4. `RuntimeModuleLoader.load(name)` selects `.shared.wasm` automatically when shared WASM capability exists. Scalar artifacts provide the fallback. `BrowserRuntimeHost.instantiate(...)` remains available for explicit artifact URLs.
+5. ABI version 2 allocates control regions inside guest memory. Rust accesses those regions directly. Legacy guests retain `ovrt_copy_*` imports. Logging and timing remain host imports.
+6. Each worker owns one Rust guest and allocator memory. The UI shares checked region views and publishes epochs. Parallel workers use separate guest memories.
+7. Frontend production builds should consume already-emitted artifacts from `frontend/public`. Rust/WASM generation belongs in Makefile targets (`build-runtime`, `build-rust-wasm`, `wasm-manifest`) so CI and local dev use the same propagation path.
+
+The Go browser compatibility shim and its build targets were retired on 2026-09-24.
+Browser communication uses `@ovasabi/runtime-transport` directly. `WITH_WASM` now selects the Rust runtime SDK.
+
+The shared build requires nightly Rust with `rust-src` to rebuild allocator synchronization with atomics.
+`RUST_WASM_TOOLCHAIN` selects the build toolchain. Pin it in CI for reproducible artifacts.
+The scalar build uses the normal project toolchain.
+Commit the application lockfile before the locked build.
+
+```bash
+rustup toolchain install nightly --component rust-src
+rustup target add wasm32-unknown-unknown
+bash runtime-sdk/scripts/build_browser_wasm.sh
+cd runtime-sdk/ts/browser-host && npm run test:abi
+```
+
+The script accepts a manifest, output directory, profile, and optional package name, in that order.
+Without arguments, it builds the Foundation parity fixture.
+The default project target builds both artifacts. Shared build failure stops the target.
+See [Runtime SAB contracts](runtime_sab_capnp_contracts.md) for region migration, memory limits, publication, and copy budgets.
 
 ## Frontend boot and recovery posture
 
@@ -243,6 +258,25 @@ coordination substrate.
     tests. Scaffolded applications receive the same scripts under
     `scripts/checks/`; their `lint-foundation` target checks app-owned `rust/`,
     `native/src-tauri/`, and vendored `foundation/runtime-*` Rust manifests.
+
+### Native allocation and lifecycle contract
+
+Runtime placement snapshots use fixed arrays in Go and Rust.
+Go slice consumers use `descriptors[:]` and `stats[:]`.
+The shared region layout and C ABI version 1 remain unchanged.
+
+Unit registration stores validated metadata. Queued work retains its selected implementation across replacement registration.
+Each role permits one queued request per worker, in addition to active work.
+Queue saturation returns a controlled error. Response waits retain their configured timeout.
+Response channels contain one result slot.
+
+Go process pools reuse complete buffer wrappers and reset their contents before each request.
+FFI closure stops admission and waits for active native calls before unloading the library.
+Native units must bound their execution because synchronous FFI cannot interrupt arbitrary unit code.
+Process transports retain their timeout and termination behavior.
+
+Run `make test-bench-runtime-layers` to verify allocation budgets.
+See the [runtime layer report](info/runtime_layers_20260924.md) for measurements and project retirement evidence.
 
 ## Go SIMD posture
 

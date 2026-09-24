@@ -1,0 +1,34 @@
+File: foundation-runtimehost-profile.test
+Type: delay
+Time: 2026-09-24 19:09:23 WAT
+Showing nodes accounting for 5135.20ms, 100% of 5135.20ms total
+Dropped 6 nodes (cum <= 25.68ms)
+      flat  flat%   sum%        cum   cum%
+ 2810.80ms 54.74% 54.74%  2810.80ms 54.74%  runtime.chanrecv1
+ 2324.39ms 45.26%   100%  2324.39ms 45.26%  runtime.selectgo
+         0     0%   100%   410.09ms  7.99%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).ExecuteInto
+         0     0%   100%   410.09ms  7.99%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).execute
+         0     0%   100%   410.09ms  7.99%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).executeOnSelectedWorker
+         0     0%   100%  1914.31ms 37.28%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).ensureExchangeLoop.gowrap2
+         0     0%   100%   410.09ms  7.99%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeHeld
+         0     0%   100%   410.09ms  7.99%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeWithContext
+         0     0%   100%  1914.31ms 37.28%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).runExchangeLoop
+         0     0%   100%   410.09ms  7.99%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).tryExecute
+         0     0%   100%   410.09ms  7.99%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.BenchmarkProcessPoolExecuteInto1KB
+         0     0%   100%  2810.80ms 54.74%  main.main
+         0     0%   100%  2810.80ms 54.74%  runtime.main
+         0     0%   100%   168.43ms  3.28%  runtime/pprof.StopCPUProfile
+         0     0%   100%   168.43ms  3.28%  sync.(*Once).Do (inline)
+         0     0%   100%   168.43ms  3.28%  sync.(*Once).doSlow
+         0     0%   100%  2642.36ms 51.46%  testing.(*B).Run
+         0     0%   100%  2642.36ms 51.46%  testing.(*B).run1
+         0     0%   100%   410.09ms  7.99%  testing.(*B).run1.func1
+         0     0%   100%  3052.46ms 59.44%  testing.(*B).runN
+         0     0%   100%  2810.80ms 54.74%  testing.(*M).Run
+         0     0%   100%   168.43ms  3.28%  testing.(*M).Run.deferwrap1
+         0     0%   100%   168.43ms  3.28%  testing.(*M).after
+         0     0%   100%   168.43ms  3.28%  testing.(*M).after.func1
+         0     0%   100%   168.43ms  3.28%  testing.(*M).writeProfiles
+         0     0%   100%  2642.37ms 51.46%  testing.runBenchmarks
+         0     0%   100%  2642.36ms 51.46%  testing.runBenchmarks.func1
+         0     0%   100%   168.43ms  3.28%  testing/internal/testdeps.TestDeps.StopCPUProfile

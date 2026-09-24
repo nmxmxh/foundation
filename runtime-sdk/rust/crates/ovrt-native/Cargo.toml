@@ -5,7 +5,11 @@ edition = "2021"
 license-file.workspace = true
 rust-version.workspace = true
 
+[features]
+loom = ["dep:loom"]
+
 [dependencies]
+loom = { version = "0.7", optional = true }
 ovrt-core = { path = "../ovrt-core" }
 ovrt-dispatch = { path = "../ovrt-dispatch" }
 ovrt-unit = { path = "../ovrt-unit" }

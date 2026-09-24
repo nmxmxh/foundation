@@ -1,0 +1,21 @@
+File: foundation-runtimehost-profile.test
+Type: alloc_objects
+Time: 2026-09-24 19:09:23 WAT
+Showing nodes accounting for 1159861, 99.89% of 1161173 total
+Dropped 218 nodes (cum <= 5805)
+      flat  flat%   sum%        cum   cum%
+    463908 39.95% 39.95%     463908 39.95%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.NewBuffer
+    231957 19.98% 59.93%     463914 39.95%  context.WithCancel
+    231957 19.98% 79.90%     231957 19.98%  context.withCancel (inline)
+    231954 19.98% 99.88%     231954 19.98%  context.(*cancelCtx).Done
+        60 0.0052% 99.88%     696135 59.95%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeWithContext
+        14 0.0012% 99.89%     231968 19.98%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).runExchangeLoop
+         9 0.00078% 99.89%     928212 79.94%  testing.(*B).runN
+         2 0.00017% 99.89%     928156 79.93%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.BenchmarkProcessPoolExecuteInto1KB
+         0     0% 99.89%     928151 79.93%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).ExecuteInto
+         0     0% 99.89%     928151 79.93%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).execute
+         0     0% 99.89%     696135 59.95%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).executeOnSelectedWorker
+         0     0% 99.89%     696135 59.95%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeHeld
+         0     0% 99.89%     696135 59.95%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).tryExecute
+         0     0% 99.89%     231954 19.98%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.benchmarkProcessExchange.Exchange
+         0     0% 99.89%     928162 79.93%  testing.(*B).run1.func1

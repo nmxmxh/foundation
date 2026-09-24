@@ -39,6 +39,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -505,14 +514,18 @@ name = "ovrt-ffi"
 version = "0.1.0"
 dependencies = [
  "ovrt-core",
+ "ovrt-dispatch",
  "ovrt-native",
+ "ovrt-network",
  "ovrt-unit",
+ "tempfile",
 ]
 
 [[package]]
 name = "ovrt-native"
 version = "0.1.0"
 dependencies = [
+ "loom",
  "ovrt-core",
  "ovrt-dispatch",
  "ovrt-unit",
@@ -524,6 +537,7 @@ name = "ovrt-network"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "loom",
 ]
 
 [[package]]
@@ -539,6 +553,7 @@ dependencies = [
 name = "ovrt-unit"
 version = "0.1.0"
 dependencies = [
+ "arc-swap",
  "ovrt-core",
 ]
 

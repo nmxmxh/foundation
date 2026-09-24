@@ -90,7 +90,26 @@ runtime-specific Rust risks.
    `overflow-checks` choices in the benchmark note or PR. Do not rely on
    dependency manifests for profile settings.
 
+
+## Required unit output and registry ownership
+
+Implement `RuntimeUnit::execute(input, output)` and write through `RuntimeOutput`.
+Use its provided `run` adapter only when the caller requires owned output.
+Prefer bounded chunk writes when an encoder can write into an existing destination.
+FFI and arena adapters select their destination before execution.
+Do not restore intermediate result vectors in these adapters.
+
+Direct dispatch pins an immutable registry snapshot through `arc-swap` 1.9.2.
+Registration is a cold operation that serializes writers and clones the map.
+Diagnostics use bounded shards; source changes and failures retain a mutex.
+See the [finalization report](info/runtime_finalize_20260924.md) for ownership rules, measured tradeoffs, and migration evidence.
+
 ## Required automation
+
+`make test-bench-runtime-layers` measures unit lookup, native dispatch, FFI, placement, and network rejection.
+Its allocation counters run separately from timing. Stable allocation ceilings fail the command on regression.
+Core CI runs this command. Timing remains informational because machine and scheduler variation affect these short operations.
+The [runtime layer report](info/runtime_layers_20260924.md) records queue bounds, registration lifetime, and snapshot API migration.
 
 Run the combined Rust issue check before merging runtime Rust changes:
 

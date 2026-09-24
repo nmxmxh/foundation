@@ -26,8 +26,12 @@ impl RuntimeUnit for EchoUnit {
         }
     }
 
-    fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-        Ok(input.to_vec())
+    fn execute(
+        &self,
+        input: &[u8],
+        __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+    ) -> Result<(), String> {
+        __ovrt_output.write(input)
     }
 }
 

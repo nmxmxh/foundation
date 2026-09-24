@@ -8,7 +8,7 @@
 //! 1. **pure decide** — cached descriptor tables, one Acquire tick read plus
 //!    the argmin scan. This is the floor for any caller that keeps a snapshot
 //!    between table generations.
-//! 2. **full placement** — tick advance plus a fresh 32-row descriptor
+//! 2. **full placement** — tick read plus a fresh 32-row descriptor
 //!    snapshot and stats sweep per call, which is what the native host pays
 //!    today before any caching.
 //!
@@ -22,6 +22,7 @@ fn main_real() -> Result<(), String> {
         decide, DispatchBlock, DispatchLaneDescriptor, DispatchLaneStats, DispatchRequest,
         MAX_LANES,
     };
+    use std::hint::black_box;
     use std::sync::Arc;
     use std::time::Instant;
     use tempfile::NamedTempFile;
@@ -47,7 +48,8 @@ fn main_real() -> Result<(), String> {
     }
     block.publish_descriptors(&rows, 1).map_err(|error| error.to_string())?;
 
-    let seed_tick = block.advance_tick().map_err(|error| error.to_string())?;
+    block.advance_tick()?;
+    let seed_tick = block.tick_now()?;
     for lane in 0..MAX_LANES {
         let live = lane < 8;
         block
@@ -70,14 +72,11 @@ fn main_real() -> Result<(), String> {
         affinity_key: 2,
     };
     let descriptors = block.snapshot_descriptors().map_err(|error| error.to_string())?;
-    let build_stats = || -> Vec<Option<DispatchLaneStats>> {
-        (0..MAX_LANES).map(|lane| block.stat_row(lane).ok().map(|row| row.snapshot())).collect()
-    };
+    let build_stats = || block.snapshot_stats();
 
     // Warm caches and clocks.
     for _ in 0..20_000_u32 {
-        let _ = block.advance_tick();
-        let _ = decide(block.tick_now().unwrap_or(0), &descriptors, &build_stats(), &request);
+        black_box(decide(block.tick_now()?, &descriptors, &build_stats(), &request));
     }
 
     const PURE_ITERS: usize = 200_000;
@@ -86,8 +85,16 @@ fn main_real() -> Result<(), String> {
     for _ in 0..PURE_ITERS {
         let started = Instant::now();
         let now = block.tick_now()?;
-        let _ = decide(now, &descriptors, &cached_stats, &request);
+        let selected = black_box(decide(
+            now,
+            black_box(&descriptors),
+            black_box(&cached_stats),
+            black_box(&request),
+        ));
         pure.push(started.elapsed().as_nanos());
+        if selected.is_none() {
+            return Err("benchmark lost all eligible lanes".to_owned());
+        }
     }
     report("pure decide", pure, 500)?;
 
@@ -96,10 +103,19 @@ fn main_real() -> Result<(), String> {
     for _ in 0..FULL_ITERS {
         let started = Instant::now();
         let measured = (|| -> Result<(), String> {
-            let now = block.advance_tick()?;
+            let now = block.tick_now()?;
             let descriptors = block.snapshot_descriptors()?;
             let stats = build_stats();
-            let _ = decide(now, &descriptors, &stats, &request);
+            if black_box(decide(
+                now,
+                black_box(&descriptors),
+                black_box(&stats),
+                black_box(&request),
+            ))
+            .is_none()
+            {
+                return Err("benchmark lost all eligible lanes".to_owned());
+            }
             Ok(())
         })();
         full.push(started.elapsed().as_nanos());

@@ -35,7 +35,7 @@ browser WASM), Go integration, and the evidence checklist — lives in
 ### Rust Implementation
 
 A unit is a `Send + Sync` type implementing `ovrt_unit::RuntimeUnit`: a
-validated descriptor plus a `run` body. A crate without a descriptor is a
+validated descriptor plus an `execute` body. A crate without a descriptor is a
 library, not a unit — the descriptor is what makes it selectable by the lane
 planner and registrable in `UnitRegistry`/`NativeRuntimeHost`.
 
@@ -55,10 +55,9 @@ impl RuntimeUnit for MyUnit {
         }
     }
 
-    fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-        // Input is pre-validated and pulled from the 4KB buffer region.
-        // Return controlled errors; never panic.
-        Ok(vec![])
+    fn execute(&self, input: &[u8], output: &mut dyn ovrt_unit::RuntimeOutput) -> Result<(), String> {
+        // Stream encoded bytes into the checked destination when possible.
+        output.write(input)
     }
 }
 ```

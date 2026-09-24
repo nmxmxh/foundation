@@ -1,0 +1,136 @@
+File: foundation-runtimehost-profile.test
+Type: inuse_objects
+Time: 2026-09-24 19:09:23 WAT
+Showing nodes accounting for 158, 100% of 158 total
+      flat  flat%   sum%        cum   cum%
+        57 36.08% 36.08%         57 36.08%  runtime.mallocgc
+        54 34.18% 70.25%         61 38.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeWithContext
+        14  8.86% 79.11%         14  8.86%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).runExchangeLoop
+         4  2.53% 81.65%          4  2.53%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).ensureExchangeLoop
+         3  1.90% 83.54%          3  1.90%  os.newFile
+         2  1.27% 84.81%          6  3.80%  fmt.Sprintf
+         2  1.27% 86.08%          3  1.90%  internal/godebug.lookup
+         2  1.27% 87.34%          8  5.06%  regexp.compile
+         2  1.27% 88.61%          2  1.27%  regexp/syntax.(*compiler).inst (inline)
+         2  1.27% 89.87%          2  1.27%  sync.(*Pool).pinSlow
+         1  0.63% 90.51%          1  0.63%  fmt.(*buffer).writeString (inline)
+         1  0.63% 91.14%          1  0.63%  fmt.init.func1
+         1  0.63% 91.77%          1  0.63%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.benchmarkProcessPool (inline)
+         1  0.63% 92.41%          1  0.63%  internal/sync.newEntryNode[go.shape.interface {},go.shape.interface {}] (inline)
+         1  0.63% 93.04%          1  0.63%  internal/sync.newIndirectNode[go.shape.interface {},go.shape.interface {}] (inline)
+         1  0.63% 93.67%          1  0.63%  regexp/syntax.(*Regexp).CapNames
+         1  0.63% 94.30%          1  0.63%  regexp/syntax.(*compiler).init (inline)
+         1  0.63% 94.94%          1  0.63%  regexp/syntax.(*parser).maybeConcat
+         1  0.63% 95.57%          1  0.63%  runtime/pprof.(*profileBuilder).emitLocation
+         1  0.63% 96.20%          1  0.63%  runtime/pprof.StartCPUProfile
+         1  0.63% 96.84%          1  0.63%  syscall.Sysctl
+         1  0.63% 97.47%          1  0.63%  testing.(*B).run1
+         1  0.63% 98.10%          2  1.27%  testing.(*M).startAlarm
+         1  0.63% 98.73%          1  0.63%  testing.rewrite
+         1  0.63% 99.37%          1  0.63%  time.newTimer
+         1  0.63%   100%          1  0.63%  unicode/utf8.AppendRune (inline)
+         0     0%   100%          1  0.63%  fmt.(*fmt).fmtS
+         0     0%   100%          1  0.63%  fmt.(*fmt).padString
+         0     0%   100%          1  0.63%  fmt.(*pp).doPrintf
+         0     0%   100%          1  0.63%  fmt.(*pp).fmtString
+         0     0%   100%          1  0.63%  fmt.(*pp).printArg
+         0     0%   100%          3  1.90%  fmt.newPrinter
+         0     0%   100%         61 38.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).ExecuteInto
+         0     0%   100%         61 38.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).execute
+         0     0%   100%         61 38.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).executeOnSelectedWorker
+         0     0%   100%         61 38.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeHeld
+         0     0%   100%         61 38.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).tryExecute
+         0     0%   100%         62 39.24%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.BenchmarkProcessPoolExecuteInto1KB
+         0     0%   100%          3  1.90%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.acquireExchangeTimer
+         0     0%   100%          3  1.90%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.init.func2
+         0     0%   100%          1  0.63%  google.golang.org/protobuf/internal/encoding/json.init
+         0     0%   100%          3  1.90%  internal/godebug.(*Setting).Value
+         0     0%   100%          3  1.90%  internal/godebug.(*Setting).Value.func1
+         0     0%   100%          1  0.63%  internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).Delete (inline)
+         0     0%   100%          1  0.63%  internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).LoadAndDelete
+         0     0%   100%          1  0.63%  internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).LoadOrStore
+         0     0%   100%          1  0.63%  internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).init (inline)
+         0     0%   100%          1  0.63%  internal/sync.(*HashTrieMap[go.shape.interface {},go.shape.interface {}]).initSlow
+         0     0%   100%          1  0.63%  internal/sysinfo.init.OnceValue[go.shape.string].func2
+         0     0%   100%          1  0.63%  internal/sysinfo.init.OnceValue[go.shape.string].func2.1
+         0     0%   100%          1  0.63%  internal/sysinfo.init.func1
+         0     0%   100%          1  0.63%  internal/sysinfo.osCPUInfoName (inline)
+         0     0%   100%         23 14.56%  main.main
+         0     0%   100%          3  1.90%  os.Create (inline)
+         0     0%   100%          3  1.90%  os.OpenFile
+         0     0%   100%          3  1.90%  os.openFileNolog
+         0     0%   100%          8  5.06%  regexp.Compile (inline)
+         0     0%   100%          1  0.63%  regexp.MustCompile
+         0     0%   100%          1  0.63%  regexp/syntax.(*Prog).Prefix
+         0     0%   100%          2  1.27%  regexp/syntax.(*compiler).compile
+         0     0%   100%          1  0.63%  regexp/syntax.(*compiler).empty (inline)
+         0     0%   100%          1  0.63%  regexp/syntax.(*compiler).quest
+         0     0%   100%          1  0.63%  regexp/syntax.(*parser).literal
+         0     0%   100%          1  0.63%  regexp/syntax.(*parser).push
+         0     0%   100%          3  1.90%  regexp/syntax.Compile
+         0     0%   100%          1  0.63%  regexp/syntax.Parse (inline)
+         0     0%   100%          1  0.63%  regexp/syntax.parse
+         0     0%   100%          1  0.63%  runtime.allgadd
+         0     0%   100%         36 22.78%  runtime.allocm
+         0     0%   100%          1  0.63%  runtime.doInit (inline)
+         0     0%   100%          1  0.63%  runtime.doInit1
+         0     0%   100%          8  5.06%  runtime.gcBgMarkWorker
+         0     0%   100%          7  4.43%  runtime.gcStart.func4
+         0     0%   100%          1  0.63%  runtime.growslice
+         0     0%   100%         10  6.33%  runtime.mProfStackInit (inline)
+         0     0%   100%         24 15.19%  runtime.main
+         0     0%   100%         10  6.33%  runtime.makeProfStackFP (inline)
+         0     0%   100%         10  6.33%  runtime.makeslice
+         0     0%   100%         22 13.92%  runtime.malg
+         0     0%   100%         28 17.72%  runtime.mcall
+         0     0%   100%         25 15.82%  runtime.mcommoninit
+         0     0%   100%          5  3.16%  runtime.mpreinit
+         0     0%   100%          1  0.63%  runtime.mstart
+         0     0%   100%          1  0.63%  runtime.mstart0
+         0     0%   100%          1  0.63%  runtime.mstart1
+         0     0%   100%          5  3.16%  runtime.newMWeakPointer (inline)
+         0     0%   100%         36 22.78%  runtime.newm
+         0     0%   100%         46 29.11%  runtime.newobject
+         0     0%   100%         13  8.23%  runtime.newproc.func1
+         0     0%   100%         13  8.23%  runtime.newproc1
+         0     0%   100%         28 17.72%  runtime.park_m
+         0     0%   100%         29 18.35%  runtime.resetspinning
+         0     0%   100%         29 18.35%  runtime.schedule
+         0     0%   100%          7  4.43%  runtime.startTheWorldWithSema
+         0     0%   100%         36 22.78%  runtime.startm
+         0     0%   100%         20 12.66%  runtime.systemstack
+         0     0%   100%         36 22.78%  runtime.wakep
+         0     0%   100%          1  0.63%  runtime/pprof.(*profileBuilder).appendLocsForStack
+         0     0%   100%          1  0.63%  runtime/pprof.(*profileBuilder).build
+         0     0%   100%          1  0.63%  runtime/pprof.profileWriter
+         0     0%   100%          1  0.63%  strings.(*Builder).WriteRune
+         0     0%   100%          1  0.63%  sync.(*Map).Delete (inline)
+         0     0%   100%          1  0.63%  sync.(*Map).LoadOrStore (inline)
+         0     0%   100%         11  6.96%  sync.(*Once).Do (partial-inline)
+         0     0%   100%         11  6.96%  sync.(*Once).doSlow
+         0     0%   100%          6  3.80%  sync.(*Pool).Get
+         0     0%   100%          2  1.27%  sync.(*Pool).pin
+         0     0%   100%          2  1.27%  testing.(*B).Run
+         0     0%   100%          1  0.63%  testing.(*B).run
+         0     0%   100%          1  0.63%  testing.(*B).run.func1
+         0     0%   100%         62 39.24%  testing.(*B).run1.func1
+         0     0%   100%         64 40.51%  testing.(*B).runN
+         0     0%   100%         23 14.56%  testing.(*M).Run
+         0     0%   100%          7  4.43%  testing.(*M).after
+         0     0%   100%          7  4.43%  testing.(*M).after.func1
+         0     0%   100%          3  1.90%  testing.(*M).before
+         0     0%   100%          7  4.43%  testing.(*M).writeProfiles
+         0     0%   100%          8  5.06%  testing.newMatcher
+         0     0%   100%         10  6.33%  testing.runBenchmarks
+         0     0%   100%          2  1.27%  testing.runBenchmarks.func1
+         0     0%   100%          1  0.63%  testing.runTests
+         0     0%   100%          8  5.06%  testing.simpleMatch.verify
+         0     0%   100%          1  0.63%  testing.tRunner
+         0     0%   100%          1  0.63%  testing.tRunner.func1
+         0     0%   100%          1  0.63%  testing.tRunner.func1.1
+         0     0%   100%          6  3.80%  testing.toOutputDir
+         0     0%   100%          7  4.43%  testing/internal/testdeps.TestDeps.MatchString
+         0     0%   100%          1  0.63%  testing/internal/testdeps.TestDeps.StartCPUProfile
+         0     0%   100%          1  0.63%  time.AfterFunc
+         0     0%   100%          3  1.90%  time.NewTimer
+         0     0%   100%          3  1.90%  time.syncTimer

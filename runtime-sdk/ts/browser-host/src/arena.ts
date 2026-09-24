@@ -75,6 +75,7 @@ import {
 } from "./generated/runtimeBuffer";
 import { getRuntimeCapabilities } from "./pulse/runtimeCaps";
 import type { RuntimeCapabilities } from "./types";
+import { RuntimeMemoryRegion } from "./memoryRegion";
 
 export type RuntimeSharedMemoryMode = "off" | "auto" | "required";
 export type RuntimeTransportLane = "postMessage" | "transferable" | "sab" | "ws" | "http";
@@ -242,7 +243,7 @@ const optionalDescriptorId = (value: number | undefined): number => {
   return value;
 };
 
-const arenaBytesForProfile = (profile: RuntimeArenaProfile | undefined): number => {
+export const arenaBytesForProfile = (profile: RuntimeArenaProfile | undefined): number => {
   switch (profile) {
     case "minimal":
       return ARENA_MIN_BYTES;
@@ -273,11 +274,20 @@ export const clampRuntimeArenaBytes = (bytes: number): number => {
 };
 
 export class RuntimeSharedArena {
-  readonly buffer: SharedArrayBuffer;
-  private readonly header: Int32Array;
-  private readonly epochs: Int32Array;
-  private readonly bytes: Uint8Array;
-  private readonly view: DataView;
+  readonly region: RuntimeMemoryRegion;
+  private cachedEpochs: Int32Array | null = null;
+  get buffer(): SharedArrayBuffer { return this.region.buffer as SharedArrayBuffer; }
+  get byteOffset(): number { return this.region.byteOffset; }
+  private get header(): Int32Array { return this.region.ints; }
+  private get bytes(): Uint8Array { return this.region.bytes; }
+  private get view(): DataView { return this.region.view; }
+  private get epochs(): Int32Array {
+    const buffer = this.region.buffer;
+    if (this.cachedEpochs?.buffer !== buffer) {
+      this.cachedEpochs = new Int32Array(buffer, this.region.byteOffset + ARENA_OFFSET_EPOCHS, 64);
+    }
+    return this.cachedEpochs;
+  }
   private readonly descriptorFreeList: number[] = [];
 
   static create(options: Pick<RuntimeMemoryOptions, "arenaBytes" | "arenaProfile"> = {}): RuntimeSharedArena {
@@ -288,22 +298,19 @@ export class RuntimeSharedArena {
     return new RuntimeSharedArena(new SharedArrayBuffer(size));
   }
 
-  constructor(buffer: SharedArrayBuffer) {
+  constructor(buffer: SharedArrayBuffer | RuntimeMemoryRegion) {
     if (buffer.byteLength < ARENA_MIN_BYTES) {
       throw new Error(`runtime shared arena too small: ${buffer.byteLength} < ${ARENA_MIN_BYTES}`);
     }
-    this.buffer = buffer;
-    this.header = new Int32Array(buffer, 0, 8);
-    this.epochs = new Int32Array(buffer, ARENA_OFFSET_EPOCHS, 64);
-    this.bytes = new Uint8Array(buffer);
-    this.view = new DataView(buffer);
+    this.region = buffer instanceof RuntimeMemoryRegion ? buffer : new RuntimeMemoryRegion(buffer, 0, buffer.byteLength);
+    if (!this.region.shared) throw new Error("runtime shared arena requires shared memory");
     this.initialize();
   }
 
   initialize(): void {
     this.header[ARENA_HEADER_IDX_MAGIC] = ARENA_HEADER_MAGIC;
     this.header[ARENA_HEADER_IDX_SCHEMA_VERSION] = ARENA_SCHEMA_VERSION;
-    this.header[ARENA_HEADER_IDX_CAPACITY_BYTES] = this.buffer.byteLength;
+    this.header[ARENA_HEADER_IDX_CAPACITY_BYTES] = this.region.byteLength;
     this.header[ARENA_HEADER_IDX_ALLOCATED_BYTES] = ARENA_OFFSET_PAGES;
     this.header[ARENA_HEADER_IDX_DESCRIPTOR_COUNT] = ARENA_DESCRIPTOR_COUNT;
     this.header[ARENA_HEADER_IDX_QUEUE_DROPPED] = 0;
@@ -318,7 +325,7 @@ export class RuntimeSharedArena {
   }
 
   capacity(): number {
-    return this.buffer.byteLength;
+    return this.region.byteLength;
   }
 
   epochView(): Int32Array {
@@ -336,15 +343,15 @@ export class RuntimeSharedArena {
     const canReuseRegion =
       reusableCapacity >= capacity &&
       offset >= ARENA_OFFSET_PAGES &&
-      offset + reusableCapacity <= this.buffer.byteLength;
+      offset + reusableCapacity <= this.region.byteLength;
     if (canReuseRegion) {
       capacity = reusableCapacity;
     } else {
       offset = Atomics.add(this.epochs, ARENA_IDX_ALLOC_HEAD, capacity);
-      if (offset + capacity > this.buffer.byteLength) {
+      if (offset + capacity > this.region.byteLength) {
         Atomics.add(this.epochs, ARENA_IDX_BACKPRESSURE, 1);
         this.descriptorFreeList.push(id);
-        throw new Error(`runtime shared arena capacity exceeded: ${offset + capacity} > ${this.buffer.byteLength}`);
+        throw new Error(`runtime shared arena capacity exceeded: ${offset + capacity} > ${this.region.byteLength}`);
       }
       this.header[ARENA_HEADER_IDX_ALLOCATED_BYTES] = offset + capacity;
     }
@@ -391,7 +398,7 @@ export class RuntimeSharedArena {
     if (data.byteLength > capacity) {
       throw new Error(`runtime arena slab too small: ${data.byteLength} > ${capacity}`);
     }
-    if (offset + data.byteLength > this.buffer.byteLength) {
+    if (offset + data.byteLength > this.region.byteLength) {
       throw new Error(`runtime arena descriptor ${descriptorId} exceeds arena capacity`);
     }
     this.bytes.set(data, offset);
@@ -415,7 +422,7 @@ export class RuntimeSharedArena {
     const offset = this.view.getUint32(descriptorTableOffset + 4, true);
     const length = this.view.getUint32(descriptorTableOffset + 8, true);
     const capacity = this.view.getUint32(descriptorTableOffset + 12, true);
-    if (length > capacity || offset + length > this.buffer.byteLength) {
+    if (length > capacity || offset + length > this.region.byteLength) {
       throw new Error(`runtime arena descriptor ${descriptorId} has invalid length ${length}`);
     }
     return this.bytes.subarray(offset, offset + length);
@@ -748,7 +755,7 @@ export class RuntimeSharedArena {
     let invalidDescriptors = 0;
     for (let id = 0; id < ARENA_DESCRIPTOR_COUNT; id += 1) {
       const descriptor = this.readDescriptor(id);
-      const validBounds = descriptor.offset + descriptor.capacity <= this.buffer.byteLength &&
+      const validBounds = descriptor.offset + descriptor.capacity <= this.region.byteLength &&
         descriptor.length <= descriptor.capacity;
       const validState =
         descriptor.state === ARENA_DESCRIPTOR_STATE_FREE ||
@@ -760,7 +767,7 @@ export class RuntimeSharedArena {
       }
     }
     return {
-      capacityBytes: this.buffer.byteLength,
+      capacityBytes: this.region.byteLength,
       allocatedBytes: Atomics.load(this.header, ARENA_HEADER_IDX_ALLOCATED_BYTES),
       queueDepth: Math.max(0, tail - head),
       queueDropped: Atomics.load(this.header, ARENA_HEADER_IDX_QUEUE_DROPPED),
@@ -772,14 +779,14 @@ export class RuntimeSharedArena {
 
   writeDiagnostics(message: string): void {
     const encoded = textEncoder.encode(message);
-    const view = new Uint8Array(this.buffer, ARENA_OFFSET_DIAGNOSTICS, ARENA_DIAGNOSTIC_BYTES);
+    const view = this.region.subarray(ARENA_OFFSET_DIAGNOSTICS, ARENA_DIAGNOSTIC_BYTES);
     view.fill(0);
     view.set(encoded.slice(0, ARENA_DIAGNOSTIC_BYTES));
     Atomics.add(this.epochs, ARENA_IDX_DIAGNOSTICS_EPOCH, 1);
   }
 
   readDiagnostics(): string {
-    const view = new Uint8Array(this.buffer, ARENA_OFFSET_DIAGNOSTICS, ARENA_DIAGNOSTIC_BYTES);
+    const view = this.region.subarray(ARENA_OFFSET_DIAGNOSTICS, ARENA_DIAGNOSTIC_BYTES);
     const end = view.findIndex((value) => value === 0);
     return textDecoder.decode(end >= 0 ? view.subarray(0, end) : view);
   }
@@ -897,7 +904,7 @@ export class RuntimeSharedArena {
     if (byteLength > descriptor.length || byteLength > descriptor.capacity) {
       throw new Error(`runtime arena descriptor ${descriptor.id} byte length exceeds snapshot bounds`);
     }
-    if (descriptor.offset + byteLength > this.buffer.byteLength) {
+    if (descriptor.offset + byteLength > this.region.byteLength) {
       throw new Error(`runtime arena descriptor ${descriptor.id} exceeds arena capacity`);
     }
   }
@@ -913,7 +920,7 @@ export class RuntimeSharedArena {
     if (byteLength > descriptor.capacity) {
       throw new Error(`runtime arena descriptor ${descriptor.id} byte length exceeds snapshot capacity`);
     }
-    if (descriptor.offset + byteLength > this.buffer.byteLength) {
+    if (descriptor.offset + byteLength > this.region.byteLength) {
       throw new Error(`runtime arena descriptor ${descriptor.id} exceeds arena capacity`);
     }
   }

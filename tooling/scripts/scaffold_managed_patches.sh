@@ -4,7 +4,7 @@ set -euo pipefail
 
 target="${1:-}"
 if [[ -z "$target" ]]; then
-  echo "usage: scaffold_managed_patches.sh <project-path>" >&2
+  echo "usage: scaffold_managed_patches.sh <project-path> [--only patch_name,...]" >&2
   exit 2
 fi
 
@@ -601,21 +601,25 @@ patch_runtime_native_dockerfile() {
   local file="$target/Dockerfile"
   local package_json="$target/frontend/package.json"
   [[ -f "$file" && -f "$package_json" ]] || return 0
-  grep -Fq '"@ovasabi/runtime-native"' "$package_json" || return 0
-
-  if ! grep -Fq 'COPY foundation/runtime-native/ts/package.json ./foundation/runtime-native/ts/' "$file"; then
-    PATCH_SEARCH='COPY foundation/ui-minimal/ts/package.json ./foundation/ui-minimal/ts/'
-    PATCH_REPLACE='COPY foundation/ui-minimal/ts/package.json ./foundation/ui-minimal/ts/
-COPY foundation/runtime-native/ts/package.json ./foundation/runtime-native/ts/'
-    replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "runtime-native Docker package manifest"
-  fi
-
-  if ! grep -Fq 'COPY foundation/runtime-native/ts ./foundation/runtime-native/ts' "$file"; then
-    PATCH_SEARCH='COPY foundation/ui-minimal/ts ./foundation/ui-minimal/ts'
-    PATCH_REPLACE='COPY foundation/ui-minimal/ts ./foundation/ui-minimal/ts
-COPY foundation/runtime-native/ts ./foundation/runtime-native/ts'
-    replace_in_file "$file" "$PATCH_SEARCH" "$PATCH_REPLACE" "runtime-native Docker source"
-  fi
+  local entry package_path package_name search replace
+  for entry in 'runtime-native/ts|@ovasabi/runtime-native' 'config-contracts/ts|@ovasabi/config-contracts' 'runtime-sdk/ts/browser-host|@ovasabi/runtime-browser'; do
+    package_path="${entry%%|*}"
+    package_name="${entry#*|}"
+    grep -Fq "\"$package_name\"" "$package_json" || continue
+    grep -Fq "file:../foundation/$package_path" "$package_json" || continue
+    if ! grep -Fq "COPY foundation/$package_path/package.json ./foundation/$package_path/" "$file"; then
+      search='COPY foundation/ui-minimal/ts/package.json ./foundation/ui-minimal/ts/'
+      replace="$search
+COPY foundation/$package_path/package.json ./foundation/$package_path/"
+      replace_in_file "$file" "$search" "$replace" "runtime Docker package manifest: $package_path"
+    fi
+    if ! grep -Fq "COPY foundation/$package_path ./foundation/$package_path" "$file"; then
+      search='COPY foundation/ui-minimal/ts ./foundation/ui-minimal/ts'
+      replace="$search
+COPY foundation/$package_path ./foundation/$package_path"
+      replace_in_file "$file" "$search" "$replace" "runtime Docker source: $package_path"
+    fi
+  done
 }
 
 # @since 0.0.1
@@ -1881,7 +1885,6 @@ sync_go_work() {
     "./foundation/runtime-sdk/go"
     "./foundation/runtime-transport/go"
     "./foundation/server-kit/go"
-    "./wasm"
   )
 
   local module
@@ -1976,6 +1979,48 @@ patch_frontend_tsconfig_baseurl() {
     log_patch "frontend tsconfig drops removed baseUrl for TS7: ${file#$target/}"
   fi
   rm -f "$before"
+}
+
+# @since 0.0.1
+patch_rust_unit_output() {
+  command -v python3 >/dev/null 2>&1 || { echo "Rust unit migration requires python3" >&2; return 1; }
+  local output line
+  if ! output=$(python3 "$foundation_root/tooling/scripts/rust_unit_output_patch.py" "$target"); then
+    printf '[PATCH] %s\n' "$output"
+    return 1
+  fi
+  while IFS= read -r line; do
+    case "$line" in
+      patched\ *) log_patch "Rust unit output contract: ${line#patched }" ;;
+    esac
+  done <<< "$output"
+}
+
+# @since 0.0.1
+patch_retire_go_wasm() {
+  command -v node >/dev/null 2>&1 || return 0
+  local output line
+  if ! output=$(node "$foundation_root/tooling/scripts/retire_go_wasm_patch.mjs" "$target"); then
+    printf '[PATCH] %s\n' "$output"
+    return 0
+  fi
+  while IFS= read -r line; do
+    case "$line" in
+      patched\ *) log_patch "Go WASM retirement: ${line#patched }" ;;
+    esac
+  done <<< "$output"
+}
+
+# @since 0.0.1
+patch_browser_wasm_build() {
+  command -v node >/dev/null 2>&1 || return 0
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      patched\ *) log_patch "browser WASM build: ${line#patched }" ;;
+      manual\ *) printf '[PATCH] manual step: %s\n' "${line#manual }" ;;
+    esac
+  done < <(node "$foundation_root/tooling/scripts/browser_wasm_build_patch.mjs" "$target")
 }
 
 # @since 0.0.1
@@ -3315,6 +3360,24 @@ DEPSEOF
 
 export PATCH_SEARCH PATCH_REPLACE
 
+if [[ "${2:-}" == "--only" ]]; then
+  IFS=',' read -r -a selected_patches <<< "${3:-}"
+  [[ ${#selected_patches[@]} -gt 0 && ${#selected_patches[@]} -le 32 ]] || exit 2
+  for name in "${selected_patches[@]}"; do
+    case "$name" in
+      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile) ;;
+      *) printf 'unsupported selected patch: %s\n' "$name" >&2; exit 2 ;;
+    esac
+  done
+  for name in "${selected_patches[@]}"; do "patch_$name"; done
+  [[ "$patched" -gt 0 ]] || printf '[PATCH] no selected patch drift found\n'
+  exit 0
+fi
+if [[ -n "${2:-}" ]]; then
+  printf 'usage: scaffold_managed_patches.sh <project-path> [--only patch_name,...]\n' >&2
+  exit 2
+fi
+
 patch_agent_native_guides
 replace_go_version_defaults "$target/.env.example"
 replace_go_version_defaults "$target/Dockerfile"
@@ -3358,6 +3421,9 @@ patch_postgres_config_baseline
 patch_startup_dependencies_double_close_redis
 patch_frontend_tsconfig_baseurl
 patch_frontend_linaria
+patch_retire_go_wasm
+patch_rust_unit_output
+patch_browser_wasm_build
 patch_frontend_prerender
 patch_native_shell
 patch_remove_base_ui_dependency

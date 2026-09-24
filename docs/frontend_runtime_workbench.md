@@ -269,12 +269,9 @@ Fully offline operation is defined as:
 - backend integration tests still require the project test environment
   configured by Docker/Postgres/Redis.
 
-The scaffolded Go WASM module is only a compatibility shim that forwards to
-runtime-transport. Low-latency shared-memory compute is the Rust
-`runtime-sdk` path: generated Cap'n Proto contracts, host-managed SAB, worker
-ownership, exported entrypoints, and runtime benchmarks. Performance claims are
-evidence-based, not absolute guarantees: projects should use the generated
-benchmarks for their schemas and device/browser mix before setting SLOs.
+Browser communication uses `@ovasabi/runtime-transport` directly. The former Go browser shim has been retired.
+Shared-memory compute uses Rust `runtime-sdk`, checked guest regions, worker ownership, and exported entrypoints.
+Measure generated contracts on the project browser and device matrix before defining performance budgets.
 
 ## Benchmark And Profile Evidence
 

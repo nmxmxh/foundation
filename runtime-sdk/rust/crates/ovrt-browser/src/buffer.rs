@@ -9,7 +9,7 @@ use ovrt_core::{
     OFFSET_OUTPUT_BYTES,
 };
 
-use crate::js_interop;
+use crate::{js_interop, linear_buffer};
 
 #[derive(Clone, Copy, Debug)]
 pub struct SafeBuffer {
@@ -19,7 +19,11 @@ pub struct SafeBuffer {
 
 impl SafeBuffer {
     pub fn new(handle: u32) -> Result<Self, String> {
-        let capacity = js_interop::get_byte_length(handle) as usize;
+        let capacity = if handle >= linear_buffer::LINEAR_HANDLE_START {
+            linear_buffer::capacity(handle)?
+        } else {
+            js_interop::get_byte_length(handle) as usize
+        };
         validate_buffer_size(capacity)?;
         Ok(Self { handle, capacity })
     }
@@ -46,13 +50,35 @@ impl SafeBuffer {
 
     pub fn read_at(&self, offset: u32, length: u32) -> Result<Vec<u8>, String> {
         validate_region(offset, length, self.capacity)?;
+        if self.handle >= linear_buffer::LINEAR_HANDLE_START {
+            return linear_buffer::with_bytes(self.handle, offset, length, |bytes| bytes.to_vec());
+        }
         let mut bytes = vec![0; length as usize];
         js_interop::copy_from_buffer(self.handle, offset, &mut bytes);
         Ok(bytes)
     }
 
+    /// Borrows published bytes until the callback returns. Nested buffer calls return a busy error.
+    pub fn with_bytes<T>(
+        &self,
+        offset: u32,
+        length: u32,
+        read: impl FnOnce(&[u8]) -> T,
+    ) -> Result<T, String> {
+        validate_region(offset, length, self.capacity)?;
+        if self.handle >= linear_buffer::LINEAR_HANDLE_START {
+            return linear_buffer::with_bytes(self.handle, offset, length, read);
+        }
+        let bytes = self.read_at(offset, length)?;
+        Ok(read(&bytes))
+    }
+
     pub fn write_at(&self, offset: u32, bytes: &[u8]) -> Result<(), String> {
-        validate_region(offset, bytes.len() as u32, self.capacity)?;
+        let length = u32::try_from(bytes.len()).map_err(|_| "buffer write length exceeds u32")?;
+        validate_region(offset, length, self.capacity)?;
+        if self.handle >= linear_buffer::LINEAR_HANDLE_START {
+            return linear_buffer::write(self.handle, offset, bytes);
+        }
         js_interop::copy_to_buffer(self.handle, offset, bytes);
         Ok(())
     }
@@ -61,11 +87,9 @@ impl SafeBuffer {
         if index >= ovrt_core::HEADER_INT_COUNT {
             return Err(format!("invalid header index: {}", index));
         }
-        let bytes = self.read_at(header_byte_offset(index), 4)?;
-        let array: [u8; 4] = bytes
-            .try_into()
-            .map_err(|_| "header integer region must be exactly four bytes".to_string())?;
-        Ok(i32::from_le_bytes(array))
+        self.with_bytes(header_byte_offset(index), 4, |bytes| {
+            i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+        })
     }
 
     pub fn set_header_int(&self, index: u32, value: i32) -> Result<(), String> {
@@ -76,39 +100,56 @@ impl SafeBuffer {
     }
 
     pub fn write_input_bytes(&self, bytes: &[u8]) -> Result<(), String> {
-        validate_input_length(bytes.len() as u32)?;
+        validate_input_length(u32::try_from(bytes.len()).map_err(|_| "input length exceeds u32")?)?;
         self.write_at(OFFSET_INPUT_BYTES, bytes)?;
         self.set_header_int(INT_IDX_INPUT_LENGTH, bytes.len() as i32)?;
         Ok(())
     }
 
     pub fn read_input_bytes(&self) -> Result<Vec<u8>, String> {
-        let length = self.header_int(INT_IDX_INPUT_LENGTH)?.max(0) as u32;
+        let length = u32::try_from(self.header_int(INT_IDX_INPUT_LENGTH)?)
+            .map_err(|_| "negative input length")?;
         validate_input_length(length)?;
         self.read_at(OFFSET_INPUT_BYTES, length)
     }
 
+    /// Borrows input without a payload copy on the linear-memory ABI.
+    pub fn with_input_bytes<T>(&self, read: impl FnOnce(&[u8]) -> T) -> Result<T, String> {
+        let length = u32::try_from(self.header_int(INT_IDX_INPUT_LENGTH)?)
+            .map_err(|_| "negative input length")?;
+        validate_input_length(length)?;
+        self.with_bytes(OFFSET_INPUT_BYTES, length, read)
+    }
+
     pub fn write_output_bytes(&self, bytes: &[u8]) -> Result<(), String> {
-        validate_output_length(bytes.len() as u32)?;
+        validate_output_length(
+            u32::try_from(bytes.len()).map_err(|_| "output length exceeds u32")?,
+        )?;
         self.write_at(OFFSET_OUTPUT_BYTES, bytes)?;
         self.set_header_int(INT_IDX_OUTPUT_LENGTH, bytes.len() as i32)?;
         Ok(())
     }
 
     pub fn read_output_bytes(&self) -> Result<Vec<u8>, String> {
-        let length = self.header_int(INT_IDX_OUTPUT_LENGTH)?.max(0) as u32;
+        let length = u32::try_from(self.header_int(INT_IDX_OUTPUT_LENGTH)?)
+            .map_err(|_| "negative output length")?;
         validate_output_length(length)?;
         self.read_at(OFFSET_OUTPUT_BYTES, length)
     }
 
     pub fn write_diagnostic_bytes(&self, bytes: &[u8]) -> Result<(), String> {
-        validate_diagnostic_length(bytes.len() as u32)?;
+        validate_diagnostic_length(
+            u32::try_from(bytes.len()).map_err(|_| "diagnostic length exceeds u32")?,
+        )?;
         self.write_at(OFFSET_DIAGNOSTIC_BYTES, bytes)
     }
 
     pub fn load_epoch(&self, index: u32) -> i32 {
         if index >= EPOCH_SLOT_COUNT {
             return 0;
+        }
+        if self.handle >= linear_buffer::LINEAR_HANDLE_START {
+            return linear_buffer::load(self.handle, index);
         }
         js_interop::atomic_load(self.handle, index)
     }
@@ -117,6 +158,9 @@ impl SafeBuffer {
         if index >= EPOCH_SLOT_COUNT {
             return 0;
         }
+        if self.handle >= linear_buffer::LINEAR_HANDLE_START {
+            return linear_buffer::store(self.handle, index, value);
+        }
         js_interop::atomic_store(self.handle, index, value)
     }
 
@@ -124,12 +168,18 @@ impl SafeBuffer {
         if index >= EPOCH_SLOT_COUNT {
             return 0;
         }
+        if self.handle >= linear_buffer::LINEAR_HANDLE_START {
+            return linear_buffer::add(self.handle, index, delta);
+        }
         js_interop::atomic_add(self.handle, index, delta)
     }
 
     pub fn compare_exchange_epoch(&self, index: u32, expected: i32, replacement: i32) -> i32 {
         if index >= EPOCH_SLOT_COUNT {
             return 0;
+        }
+        if self.handle >= linear_buffer::LINEAR_HANDLE_START {
+            return linear_buffer::compare_exchange(self.handle, index, expected, replacement);
         }
         js_interop::atomic_compare_exchange(self.handle, index, expected, replacement)
     }

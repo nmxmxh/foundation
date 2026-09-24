@@ -77,6 +77,12 @@ type DispatchLaneStats struct {
 	LastTickSeen   uint64
 }
 
+// DispatchDescriptors holds the fixed membership table without heap storage.
+type DispatchDescriptors [generated.DISPATCH_MAX_LANES]DispatchLaneDescriptor
+
+// DispatchStats holds the fixed statistics table without heap storage.
+type DispatchStats [generated.DISPATCH_MAX_LANES]DispatchLaneStats
+
 // DispatchRequest carries what a caller needs from the table to place work.
 type DispatchRequest struct {
 	RequiredClassMask uint64

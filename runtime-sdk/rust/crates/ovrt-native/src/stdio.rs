@@ -103,15 +103,21 @@ pub fn process_runtime_buffer_unpublished(
 
     add_epoch_raw(raw_buffer, IDX_RUNTIME_TICK, 1)?;
 
+    let input_length = input_bytes_view_raw(raw_buffer)?.len();
+    clear_output_raw(raw_buffer)?;
     let result = {
-        let input = input_bytes_view_raw(raw_buffer)?;
-        catch_unwind(AssertUnwindSafe(|| host.dispatch_direct(unit_id, input)))
+        let (before_output, output) = raw_buffer.split_at_mut(OFFSET_OUTPUT_BYTES as usize);
+        let input =
+            &before_output[OFFSET_INPUT_BYTES as usize..OFFSET_INPUT_BYTES as usize + input_length];
+        catch_unwind(AssertUnwindSafe(|| {
+            host.dispatch_direct_into(unit_id, input, &mut output[..OUTPUT_MAX_BYTES as usize])
+        }))
     };
     match result {
-        Ok(Ok(output)) => {
+        Ok(Ok(written)) => {
             set_header_int_raw(raw_buffer, INT_IDX_STATUS_CODE, 0)?;
             set_diagnostics_text_raw(raw_buffer, "")?;
-            write_output_bytes_raw(raw_buffer, &output)?;
+            set_header_int_raw(raw_buffer, INT_IDX_OUTPUT_LENGTH, written as i32)?;
             Ok(BufferOutcome::Completed)
         }
         Ok(Err(error)) => {
@@ -156,16 +162,6 @@ fn input_bytes_view_raw(raw_buffer: &[u8]) -> Result<&[u8], String> {
         return Err(format!("invalid input length {length}"));
     }
     region_raw(raw_buffer, OFFSET_INPUT_BYTES, length as u32)
-}
-
-fn write_output_bytes_raw(raw_buffer: &mut [u8], bytes: &[u8]) -> Result<(), String> {
-    if bytes.len() > OUTPUT_MAX_BYTES as usize {
-        return Err(format!("output payload too large: {} > {}", bytes.len(), OUTPUT_MAX_BYTES));
-    }
-    clear_output_region_raw(raw_buffer)?;
-    let output = region_raw_mut(raw_buffer, OFFSET_OUTPUT_BYTES, bytes.len() as u32)?;
-    output.copy_from_slice(bytes);
-    set_header_int_raw(raw_buffer, INT_IDX_OUTPUT_LENGTH, bytes.len() as i32)
 }
 
 fn clear_output_raw(raw_buffer: &mut [u8]) -> Result<(), String> {

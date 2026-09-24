@@ -63,7 +63,7 @@ func BenchmarkPlacementFullHostPath(b *testing.B) {
 		if err != nil {
 			b.Fatalf("stats: %v", err)
 		}
-		sink, sunk = Decide(now, descriptors, table, request)
+		sink, sunk = Decide(now, descriptors[:], table[:], request)
 	}
 	if !sunk {
 		b.Fatalf("decision lost: %d,%v", sink, sunk)

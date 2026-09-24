@@ -1,0 +1,56 @@
+File: foundation-runtimehost-after-profile.test
+Type: delay
+Time: 2026-09-24 19:24:49 WAT
+Showing nodes accounting for 1.76ms, 100% of 1.76ms total
+Dropped 20 nodes (cum <= 0.01ms)
+      flat  flat%   sum%        cum   cum%
+    1.61ms 91.12% 91.12%     1.61ms 91.12%  runtime.unlock (inline)
+    0.16ms  8.88%   100%     0.16ms  8.88%  runtime._LostContendedRuntimeLock
+         0     0%   100%     0.04ms  2.44%  context.(*cancelCtx).Done
+         0     0%   100%     0.05ms  2.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).ExecuteInto
+         0     0%   100%     0.05ms  2.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).execute
+         0     0%   100%     0.05ms  2.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).executeOnSelectedWorker
+         0     0%   100%     0.05ms  2.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeHeld
+         0     0%   100%     0.05ms  2.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeWithContext
+         0     0%   100%     0.05ms  2.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).tryExecute
+         0     0%   100%     0.05ms  2.61%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.BenchmarkProcessPoolExecuteInto1KB
+         0     0%   100%     0.12ms  6.58%  runtime.(*mcache).prepareForSweep
+         0     0%   100%     0.12ms  6.58%  runtime.(*mcache).releaseAll
+         0     0%   100%     0.12ms  6.58%  runtime.(*mcentral).uncacheSpan
+         0     0%   100%     0.13ms  7.54%  runtime.(*sweepLocked).sweep
+         0     0%   100%     0.06ms  3.49%  runtime.acquirep
+         0     0%   100%     0.06ms  3.49%  runtime.acquirepNoTrace
+         0     0%   100%     0.04ms  2.42%  runtime.allocm
+         0     0%   100%     0.02ms  0.89%  runtime.bgsweep
+         0     0%   100%     0.04ms  2.55%  runtime.deductAssistCredit
+         0     0%   100%     0.14ms  7.72%  runtime.findRunnable
+         0     0%   100%     1.41ms 79.99%  runtime.forEachP (inline)
+         0     0%   100%     1.41ms 79.99%  runtime.forEachPInternal
+         0     0%   100%     0.13ms  7.54%  runtime.freeSpecial
+         0     0%   100%     0.04ms  2.55%  runtime.gcAssistAlloc
+         0     0%   100%     1.37ms 77.44%  runtime.gcBgMarkWorker
+         0     0%   100%     1.41ms 79.99%  runtime.gcMarkDone
+         0     0%   100%     1.41ms 79.99%  runtime.gcMarkTermination
+         0     0%   100%     1.41ms 79.99%  runtime.gcMarkTermination.forEachP.func7
+         0     0%   100%     0.05ms  3.10%  runtime.gcMarkTermination.func4
+         0     0%   100%     0.06ms  3.41%  runtime.gcstopm
+         0     0%   100%     0.08ms  4.80%  runtime.gopreempt_m (inline)
+         0     0%   100%     0.08ms  4.80%  runtime.goschedImpl
+         0     0%   100%     0.04ms  2.45%  runtime.makechan
+         0     0%   100%     0.05ms  2.61%  runtime.mallocgc
+         0     0%   100%     0.09ms  5.34%  runtime.mcall
+         0     0%   100%     0.04ms  2.42%  runtime.mcommoninit
+         0     0%   100%     0.08ms  4.80%  runtime.morestack
+         0     0%   100%     0.04ms  2.42%  runtime.newm
+         0     0%   100%     0.08ms  4.80%  runtime.newstack
+         0     0%   100%     0.09ms  5.34%  runtime.park_m
+         0     0%   100%     0.04ms  2.42%  runtime.resetspinning
+         0     0%   100%     0.05ms  2.81%  runtime.runSafePointFn
+         0     0%   100%     0.18ms 10.14%  runtime.schedule
+         0     0%   100%     0.04ms  2.42%  runtime.startm
+         0     0%   100%     0.07ms  3.86%  runtime.stopm
+         0     0%   100%     0.02ms  0.89%  runtime.sweepone
+         0     0%   100%     1.41ms 80.03%  runtime.systemstack
+         0     0%   100%     0.04ms  2.46%  runtime.wakep
+         0     0%   100%     0.05ms  2.61%  testing.(*B).run1.func1
+         0     0%   100%     0.05ms  2.61%  testing.(*B).runN

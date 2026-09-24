@@ -49,6 +49,45 @@ describe("runtime payload routing", () => {
     expect((await collectRuntimeStream(routeRuntimeStream([new Uint8Array([1])])))).toEqual(new Uint8Array([1]));
   });
 
+  it("keeps chunk order and owns output across mixed input sizes", async () => {
+    const first = new Uint8Array([1, 2]);
+    const second = new Uint8Array([3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    const third = new Uint8Array([12, 13]);
+    const output: Uint8Array[] = [];
+    for await (const chunk of routeRuntimeStream([first, second, third], { chunkBytes: 4 })) {
+      output.push(chunk);
+    }
+    expect(output).toEqual([
+      new Uint8Array([1, 2, 3, 4]),
+      new Uint8Array([5, 6, 7, 8]),
+      new Uint8Array([9, 10, 11, 12]),
+      new Uint8Array([13]),
+    ]);
+    first.fill(0);
+    second.fill(0);
+    third.fill(0);
+    expect(output[0]).toEqual(new Uint8Array([1, 2, 3, 4]));
+    expect(output[1]).toEqual(new Uint8Array([5, 6, 7, 8]));
+    expect(output[3]).toEqual(new Uint8Array([13]));
+  });
+
+  it("accepts asynchronous input without merging its backing buffers", async () => {
+    async function* input() {
+      yield new Uint8Array([1]);
+      yield new Uint8Array(0);
+      yield new Uint8Array([2, 3, 4, 5, 6, 7]);
+    }
+    const output: Uint8Array[] = [];
+    for await (const chunk of routeRuntimeStream(input(), { chunkBytes: 3 })) {
+      output.push(chunk);
+    }
+    expect(output).toEqual([
+      new Uint8Array([1, 2, 3]),
+      new Uint8Array([4, 5, 6]),
+      new Uint8Array([7]),
+    ]);
+  });
+
   it("normalizes empty chunks and minimum option bounds", async () => {
     const output = await collectRuntimeStream(
       routeRuntimeStream([new Uint8Array(0), new Uint8Array([1]), new Uint8Array([2, 3])], { chunkBytes: 0 })
@@ -57,6 +96,19 @@ describe("runtime payload routing", () => {
     const routed = routeRuntimePayload(new Uint8Array(1), { controlMaxBytes: 0, arenaMaxBytes: 0, chunkBytes: 0 });
     expect(routed.lane).toBe("stream");
     expect(await collectRuntimeStream(routed.chunks!)).toEqual(new Uint8Array(1));
+  });
+
+  it("rejects invalid chunk sizes before losing stream data", async () => {
+    for (const chunkBytes of [Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+      await expect(collectRuntimeStream(routeRuntimeStream([new Uint8Array([1])], { chunkBytes })))
+        .rejects.toThrow("finite safe integer");
+      const routed = routeRuntimePayload(new Uint8Array(2), {
+        controlMaxBytes: 1,
+        arenaMaxBytes: 1,
+        chunkBytes,
+      });
+      await expect(collectRuntimeStream(routed.chunks!)).rejects.toThrow("finite safe integer");
+    }
   });
 
   it("surfaces arena queue backpressure after descriptor publication", () => {

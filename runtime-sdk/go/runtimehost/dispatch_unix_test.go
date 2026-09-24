@@ -183,7 +183,7 @@ func TestDispatchEndToEndDecisionThroughRealBytes(t *testing.T) {
 		}
 	}
 
-	got, ok := Decide(mustTick(t, block), descriptors, table, request)
+	got, ok := Decide(mustTick(t, block), descriptors[:], table, request)
 	if !ok || got != 0 {
 		t.Fatalf("decide = %d,%v want 0,true", got, ok)
 	}
@@ -209,7 +209,7 @@ func TestDispatchEndToEndDecisionThroughRealBytes(t *testing.T) {
 			t.Fatalf("row %d snapshot: %v", lane, err)
 		}
 	}
-	if got, ok := Decide(mustTick(t, block), descriptors, table, request); !ok || got != 1 {
+	if got, ok := Decide(mustTick(t, block), descriptors[:], table, request); !ok || got != 1 {
 		t.Fatalf("pressured decide = %d,%v want 1,true", got, ok)
 	}
 
@@ -234,7 +234,7 @@ func TestDispatchEndToEndDecisionThroughRealBytes(t *testing.T) {
 			t.Fatalf("row %d snapshot: %v", lane, err)
 		}
 	}
-	if got, ok := Decide(now, descriptors, table, request); !ok || got != 1 {
+	if got, ok := Decide(now, descriptors[:], table, request); !ok || got != 1 {
 		t.Fatalf("stale-filtered decide = %d,%v want 1,true", got, ok)
 	}
 }

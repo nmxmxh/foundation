@@ -116,7 +116,7 @@ assert_file "migrations/000001_init.down.sql"
 assert_file "Dockerfile.postgres"
 assert_file "Dockerfile.redis"
 assert_file "config/pg_hba.conf"
-assert_file "wasm/main.go"
+[[ ! -e "$PROJECT_DIR/wasm/main.go" ]] || { echo "legacy Go WASM shim must be absent" >&2; exit 1; }
 assert_absent "pkg"
 
 test_step "run generated project scaffold checks"

@@ -286,6 +286,14 @@ single-row path. For Foundation state-store writes, compare:
 4. `SendBatch` for independent per-row diagnostics with fewer round trips;
 5. `CopyFromRows` for append/import workloads that do not need per-row upsert semantics.
 
+Bound active database writers separately from pool capacity. Start with a small CPU-aware writer budget and measure saturation.
+On an eight-core M1 Pro, six writers beat 96 with the same 96-connection pool.
+The staged-load default uses at most six database writers above one core; see `docs/foundation_benchmarks.md`.
+Use `UpsertRecordsBatch` when a batch needs state-store change detection and returned timestamps.
+Its bounded lateral lookup reads the base row only for unchanged records.
+Measure this richer operation separately from `SendBatch` statements that omit those results.
+If a database plan regresses, use bounded `UpsertRecord` calls while repairing the batch query.
+
 `DBTX` intentionally remains small so command-only fakes, transactional helpers,
 and state stores are easy to test. Repositories that need streamed rows should
 opt into `RowQueryer` instead of widening every fake and store. This keeps the

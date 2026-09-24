@@ -5,8 +5,8 @@ Owner: Platform Runtime
 
 ## Purpose
 
-Foundation runtime lanes should follow the INOS SDK pattern: host-managed
-memory, bounded epochs, Cap'n Proto descriptors, stable WASM exports, and
+Foundation runtime lanes use guest-owned linear memory,
+bounded epochs, Cap'n Proto descriptors, stable WASM exports, and
 TypeScript host orchestration.
 
 This document defines the intended contract so future implementation does not
@@ -43,8 +43,67 @@ stable exported entrypoints, and no main-thread blocking waits.
 
 ## SAB Contract
 
-The TypeScript host owns allocation and lifecycle of the shared buffer. Rust
-modules receive access through stable host imports and initialization globals.
+The Rust guest owns region allocations. The TypeScript host requests regions and controls their lifetime.
+`RuntimeModuleLoader.load(name)` selects shared WASM when capabilities permit it. No opt-in flag is required.
+Each guest has one allocator memory and one host. Other workers may view that memory.
+Never instantiate another Rust guest over the same allocator memory.
+
+Browser buffer ABI version 2 exports these functions:
+
+```text
+ovrt_buffer_abi_version() -> u32                  // Returns 2.
+ovrt_buffer_alloc(byte_length: u32) -> u32        // Returns a handle, or zero on failure.
+ovrt_buffer_ptr(handle: u32) -> u32              // Returns a byte offset, or zero on failure.
+ovrt_buffer_free(handle: u32) -> i32             // Returns 1 on success, or zero on failure.
+```
+
+Handles start at `0x80000000` and are never reused within an instance.
+The registry permits 64 regions, 64 MiB per region, and 96 MiB total.
+Allocations have eight-byte alignment. The shared artifact has a 128 MiB memory maximum.
+The existing 4 KiB layout and generated schema version remain unchanged.
+Arena descriptors retain offsets relative to their owning region.
+
+`BrowserRuntimeHost.createRuntimeBuffer()` now returns `RuntimeMemoryRegion`.
+Use `loaded.host` and `loaded.controlBuffer` from the loader result.
+A supplied loader host provides configuration. Each module receives its own host fork.
+Use `.bytes`, `.ints`, `.view`, or `.subarray(offset, length)` for region access.
+The `.buffer` property returns the whole backing memory.
+Worker messages must include `byteOffset`, `byteLength`, and the guest buffer handle.
+Handles belong to the guest that allocated them.
+Pulse and orchestrator messages carry the region offset automatically.
+
+Cached views refresh after `memory.grow`. Request a new view after any call that can grow memory.
+Previously retained typed arrays can become detached or retain the old shared memory length.
+The loader globals also expose the current memory buffer.
+
+### Publication and lifetime
+
+1. The producer writes payload and header bytes before it increments the input epoch atomically.
+2. The consumer observes publication before it reads those bytes.
+3. Rust uses `SafeBuffer.with_input_bytes` or `with_bytes` for a scoped payload borrow.
+4. The producer must not mutate borrowed bytes until guest execution returns.
+5. The guest writes output and status before it increments the output epoch atomically.
+6. The host consumes output before it permits the next input write.
+7. Stop workers and release all borrowed views before calling `region.release()` or `loader.clear()`.
+
+Nested byte access during a Rust borrow returns a busy error. Freeing a borrowed region fails.
+Released handles fail validation. Released host regions reject further view access.
+JavaScript cannot revoke previously escaped typed arrays. Callers must obey the view lifetime contract.
+Parallel jobs use separate workers and guest memories. A control region permits one exchange at a time.
+
+### Copy budget and fallback
+
+The direct ABI performs zero `ovrt_copy_*` calls for control headers, payload access, and epoch operations.
+Rust scoped reads borrow bytes without a payload allocation or copy.
+Writing an existing JavaScript input into a region still copies that input once.
+Rust output construction and writes can still allocate and copy.
+`read_at`, `read_input_bytes`, and `readOutputBytes` return owned results and therefore copy.
+
+Without shared capability, a scalar ABI version 2 guest still uses direct access within its owning thread.
+The loader tries `.shared.wasm` first, then existing compressed and raw scalar artifacts.
+Older guests retain the bounded copy imports automatically.
+Unshared regions cannot enter worker dispatch. Their owning thread executes them.
+No main-thread blocking wait is permitted.
 
 Required behavior:
 

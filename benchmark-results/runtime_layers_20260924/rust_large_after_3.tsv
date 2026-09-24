@@ -1,0 +1,3 @@
+name	min_ns	median_ns	max_ns	allocs/op	bytes/op
+native/direct/65536	1247.69	1283.45	1292.38	1.000	65536.000
+native/direct/1048576	18279.28	18443.74	19726.55	1.000	1048576.000

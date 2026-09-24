@@ -81,7 +81,6 @@ Foundation's shipped build paths strip symbols:
 - `templates/docker/Dockerfile` — `-ldflags="-s -w"`
 - `templates/Makefile.cicd` — `-ldflags="-s -w"`
 - `templates/github/workflows/ci.yml` — `-ldflags="-s -w"`
-- `templates/Makefile` (Go/WASM target) — `-ldflags="-s -w"`
 
 That is the correct default for an image you ship and the wrong default for an
 image you profile. `-s` drops the symbol table; `-w` drops DWARF. A stripped
@@ -130,10 +129,8 @@ bridges the gap by writing `/tmp/perf-$PID.map`:
 node --perf-basic-prof scripts/whatever.mjs
 ```
 
-That covers Foundation's Node-side tooling. It does **not** cover browser work
-or the Go/WASM bundle: `main.wasm` runs inside a JS engine, so perf sees the
-engine, not the module. Browser and WASM performance claims belong to
-`frontend_runtime_workbench.md` and the workbench profile lane, not to perf.
+This covers Foundation Node tooling. Browser WASM modules execute inside a browser engine.
+Use `frontend_runtime_workbench.md` for browser profiles and module attribution.
 
 ### Kernel and platform matching
 

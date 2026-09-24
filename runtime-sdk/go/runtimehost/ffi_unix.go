@@ -62,6 +62,9 @@ type FFIPool struct {
 	bufferPool sync.Pool
 	errorPool  sync.Pool
 	backend    ffiBackend
+	active     sync.WaitGroup
+	closeDone  chan struct{}
+	closeErr   error
 }
 
 type ffiBackend interface {
@@ -173,10 +176,11 @@ func (p *FFIPool) executeInto(ctx context.Context, req ProcessRequest, dst []byt
 		return ProcessResponse{}, err
 	}
 
-	backend := p.currentBackend()
+	backend := p.acquireBackend()
 	if backend == nil {
 		return ProcessResponse{}, errors.New("ffi runtime host is closed")
 	}
+	defer p.active.Done()
 
 	// Pooled, not per-call. This buffer only carries a message when the ABI
 	// call fails, so allocating 4 KiB on every successful call was paying the
@@ -243,19 +247,37 @@ func (p *FFIPool) Close() error {
 	}
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
+	if p.closeDone != nil {
+		done := p.closeDone
+		p.mu.Unlock()
+		<-done
+		return p.closeErr
+	}
 	if p.backend == nil {
+		p.mu.Unlock()
 		return nil
 	}
-	err := p.backend.Close()
+	backend := p.backend
 	p.backend = nil
+	p.closeDone = make(chan struct{})
+	p.mu.Unlock()
+
+	// Admission ends before waiting. Native code runs without the lifecycle lock.
+	p.active.Wait()
+	err := backend.Close()
+	p.mu.Lock()
+	p.closeErr = err
+	close(p.closeDone)
+	p.mu.Unlock()
 	return err
 }
 
-func (p *FFIPool) currentBackend() ffiBackend {
+func (p *FFIPool) acquireBackend() ffiBackend {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
+	if p.backend != nil {
+		p.active.Add(1)
+	}
 	return p.backend
 }
 

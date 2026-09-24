@@ -1,0 +1,67 @@
+   Compiling libc v0.2.189
+   Compiling reframe-media-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-media-core)
+   Compiling arc-swap v1.9.2
+   Compiling reframe-capnp v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-capnp)
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling reframe-quality-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-quality-core)
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+   Compiling ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-native)
+   Compiling reframe-image-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-image-core)
+   Compiling reframe-media-runtime v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-media-runtime)
+   Compiling ovrt-browser v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-browser)
+   Compiling ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+   Compiling reframe-media-runtime-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-media-runtime-ffi)
+   Compiling reframe-preview-wasm v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-preview-wasm)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.32s
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_audio_core-41d2132c8bdbf4eb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_capnp-44435d30a3830f78)
+
+running 6 tests
+test tests::round_trips_preview_layout ... ok
+test tests::round_trips_quality_report ... ok
+test tests::round_trips_asset_descriptor ... ok
+test tests::round_trips_probe_report ... ok
+test tests::round_trips_render_variant_request ... ok
+test tests::round_trips_render_variant_result ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_image_core-7ad767a3aaa02bbb)
+
+running 4 tests
+test tests::generates_expected_demo_layout ... ok
+test tests::renders_variant_contract_summary ... ok
+test tests::renders_native_image_artifact_when_ffmpeg_is_available ... FAILED
+test tests::renders_native_video_artifact_when_ffmpeg_is_available ... FAILED
+
+failures:
+
+---- tests::renders_native_image_artifact_when_ffmpeg_is_available stdout ----
+
+thread 'tests::renders_native_image_artifact_when_ffmpeg_is_available' (16373890) panicked at crates/reframe-image-core/src/lib.rs:368:9:
+assertion `left == right` failed
+  left: "image/svg+xml"
+ right: "image/webp"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- tests::renders_native_video_artifact_when_ffmpeg_is_available stdout ----
+
+thread 'tests::renders_native_video_artifact_when_ffmpeg_is_available' (16373891) panicked at crates/reframe-image-core/src/lib.rs:434:9:
+assertion `left == right` failed
+  left: "application/vnd.ovasabi.video-render-package"
+ right: "video/mp4"
+
+
+failures:
+    tests::renders_native_image_artifact_when_ffmpeg_is_available
+    tests::renders_native_video_artifact_when_ffmpeg_is_available
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.23s
+
+error: test failed, to rerun pass `-p reframe-image-core --lib`

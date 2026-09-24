@@ -100,6 +100,25 @@ pub struct Arena {
 static GLOBAL: OnceLock<Option<Arena>> = OnceLock::new();
 
 impl Arena {
+    /// Validates disjoint input and output slabs before exposing a bounded result writer.
+    pub fn output_for(&self, input_id: u32, output_id: u32) -> Result<ArenaOutput<'_>, String> {
+        let input = self.descriptor(input_id)?;
+        let output = self.descriptor(output_id)?;
+        self.slab(input_id)?;
+        self.slab(output_id)?;
+        let input_end = u64::from(input.offset) + u64::from(input.length);
+        let output_end = u64::from(output.offset) + u64::from(output.length);
+        if u64::from(input.offset) < output_end && u64::from(output.offset) < input_end {
+            return Err("arena input and output slabs overlap".to_string());
+        }
+        Ok(ArenaOutput {
+            arena: self,
+            offset: output.offset as usize,
+            capacity: output.length as usize,
+            written: 0,
+        })
+    }
+
     /// Opens the process-wide arena, or `None` when the host did not provide one.
     ///
     /// Cached: the mapping is per process and immutable in identity, so a unit
@@ -165,17 +184,7 @@ impl Arena {
     fn bytes_at(&self, offset: u64, len: usize) -> Result<&[u8], String> {
         let start = usize::try_from(offset)
             .map_err(|_| format!("arena offset {offset} does not fit an address"))?;
-        let end = start
-            .checked_add(len)
-            .ok_or_else(|| format!("arena region overflow at {offset}+{len}"))?;
-        let raw = self.mapping.as_slice();
-        if end > raw.len() {
-            return Err(format!(
-                "arena region [{start}, {end}) runs past the {}-byte mapping",
-                raw.len()
-            ));
-        }
-        Ok(&raw[start..end])
+        self.mapping.read_at(start, len)
     }
 
     fn u32_at(&self, offset: u64) -> Result<u32, String> {
@@ -328,6 +337,35 @@ impl Arena {
     }
 }
 
+/// A bounded writer into a caller-owned arena slab. The host retains descriptor ownership until completion.
+pub struct ArenaOutput<'a> {
+    arena: &'a Arena,
+    offset: usize,
+    capacity: usize,
+    written: usize,
+}
+
+impl ArenaOutput<'_> {
+    pub fn written(&self) -> usize {
+        self.written
+    }
+}
+
+impl ovrt_unit::RuntimeOutput for ArenaOutput<'_> {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
+        if bytes.len() > self.capacity - self.written {
+            return Err(format!(
+                "arena output requires {} bytes; {} remain",
+                bytes.len(),
+                self.capacity - self.written
+            ));
+        }
+        self.arena.mapping.write_at(self.offset + self.written, bytes)?;
+        self.written += bytes.len();
+        Ok(())
+    }
+}
+
 impl Arena {
     /// Writes bytes into a slab the host pre-allocated.
     ///
@@ -367,6 +405,22 @@ impl Arena {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn output_writer_rejects_aliases_and_preserves_bytes_after_overflow() {
+        use ovrt_unit::RuntimeOutput;
+        let (file, _) = write_test_arena(&[1.0, 2.0]);
+        let arena = Arena::open(file.path().to_str().expect("path")).expect("arena");
+        assert!(arena.output_for(0, 0).is_err());
+        assert!(arena.output_for(999_999, 0).is_err());
+        assert!(arena.output_for(0, 999_999).is_err());
+        let mut output = arena.output_for(0, 1).expect("disjoint output");
+        output.write(b"test").expect("prefix");
+        let before = arena.slab(1).expect("output").to_vec();
+        assert!(output.write(&vec![0; before.len()]).is_err());
+        assert_eq!(output.written(), 4);
+        assert_eq!(arena.slab(1).expect("unchanged"), before);
+    }
 
     /// Builds an arena byte-for-byte the way the Go host writes one.
     ///

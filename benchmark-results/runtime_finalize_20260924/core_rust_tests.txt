@@ -1,0 +1,323 @@
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-network v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-network)
+   Compiling ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+   Compiling ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-native)
+   Compiling ovrt-parity-fixture v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-parity-fixture)
+   Compiling ovrt-wasm-host v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-wasm-host)
+   Compiling ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.65s
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_browser-b8dde0fbbae7b58a)
+
+running 7 tests
+test buffer::tests::rejects_payloads_that_exceed_region_capacity ... ok
+test ring_buffer::tests::rejects_oversized_messages ... ok
+test linear_buffer::tests::validates_lifetimes_bounds_borrowing_and_epochs ... ok
+test buffer::tests::round_trips_control_regions ... ok
+test signal::tests::detects_epoch_changes ... ok
+test ring_buffer::tests::wraps_around_buffer_end ... ok
+test ring_buffer::tests::round_trips_messages ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_core-16c35418817c32ac)
+
+running 23 tests
+test epoch::tests::a_result_published_before_the_peer_died_is_still_returned ... ok
+test epoch::tests::a_waiter_that_already_missed_the_change_does_not_block ... ok
+test epoch::tests::a_lost_peer_ends_the_wait_before_the_timeout ... ok
+test epoch::tests::epochs_wrap_rather_than_stopping ... ok
+test layout::tests::test_offsets ... ok
+test layout::tests::test_validations ... ok
+test layout::tests::test_columnar_descriptor_contract ... ok
+test diagnostics::tests::source_updates_reuse_capacity_and_replace_visible_text ... ok
+test mapping::tests::mapping_more_than_the_file_holds_is_refused ... ok
+test mapping::tests::an_unaligned_or_out_of_bounds_atomic_is_refused ... ok
+test mapping::tests::an_atomic_word_is_shared_between_mappings_of_one_file ... ok
+test native_gpu::tests::maps_all_native_gpu_enums_to_contract_codes ... ok
+test mapping::tests::a_write_through_the_mapping_is_visible_through_the_file ... ok
+test native_gpu::tests::validates_native_gpu_buffer_descriptors ... ok
+test mapping::tests::two_mappings_of_one_file_observe_each_others_stores ... ok
+test native_gpu::tests::checks_native_gpu_descriptor_boundaries ... ok
+test native_gpu::tests::rejects_incomplete_native_gpu_descriptors ... ok
+test native_gpu::tests::validates_native_gpu_texture_descriptors ... ok
+test unit::tests::validates_required_descriptor_fields ... ok
+test log_ring::loom_verification::acquire_release_publishes_complete_slab ... ok
+test log_ring::loom_verification::sequential_publications_stay_monotonic ... ok
+test epoch::tests::a_wait_gives_up_rather_than_hanging ... ok
+test epoch::tests::a_waiter_returns_as_soon_as_the_epoch_moves ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.01s
+
+     Running tests/binding_contract.rs (runtime-sdk/rust/target/debug/deps/binding_contract-e2432ad35622394b)
+
+running 1 test
+test compiler_vectors_preserve_native_identity ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_dispatch-9a8850e33490c6e1)
+
+running 27 tests
+test block::tests::descriptor_codec_roundtrips_every_field ... ok
+test block::tests::decode_rejects_short_rows ... ok
+test decide::tests::ewma_blend_matches_the_fixed_alpha ... ok
+test decide::tests::deadline_feasibility_gates_selection ... ok
+test decide::tests::global_lanes_serve_any_jurisdiction ... ok
+test decide::tests::locality_bonus_breaks_near_ties ... ok
+test decide::tests::mismatched_jurisdiction_is_never_served ... ok
+test decide::tests::missing_required_classes_select_nothing ... ok
+test decide::tests::picks_the_only_lane_covering_the_request ... ok
+test decide::tests::queue_pressure_flips_the_choice ... ok
+test decide::tests::retired_slots_never_serve_unconstrained_requests ... ok
+test decide::tests::stale_heartbeats_are_excluded ... ok
+test decide::tests::unsampled_lanes_do_not_look_free ... ok
+test decide::tests::ties_keep_the_lower_lane_id ... ok
+test block::tests::stat_row_bounds_are_enforced ... ok
+test block::tests::open_refuses_a_short_region ... ok
+test block::tests::tick_advances_monotonically ... ok
+test block::tests::completion_blends_with_the_fixed_alpha_and_tracks_inflight ... ok
+test sample::tests::bad_lane_configuration_fails_before_execution ... ok
+test publisher::tests::publish_rejects_oversized_tables ... ok
+test publisher::tests::publish_roundtrips_and_alternates_buffers ... ok
+test publisher::tests::end_to_end_selection_over_a_real_region ... ok
+test sample::tests::failed_runs_still_sample_so_degradation_shows ... ok
+test sample::tests::sampled_runs_feed_the_lane_row_and_rebalance_inflight ... ok
+test publisher::loom_verification::flip_publishes_a_complete_table ... ok
+test sample::tests::unwinding_a_unit_releases_the_placement_slot ... ok
+test publisher::loom_verification::every_fetch_add_returns_a_unique_click ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_ffi-dab23b530e189ecc)
+
+running 5 tests
+test tests::write_error_truncates_at_utf8_boundary ... ok
+test tests::a_panic_payload_always_produces_a_message ... ok
+test tests::creates_and_processes_runtime_buffers ... ok
+test tests::handles_parallel_process_buffer_calls_on_shared_host ... ok
+test tests::a_panicking_unit_is_reported_rather_than_unwinding_into_the_abi ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_native-492bdfc3c561554b)
+
+running 31 tests
+test arena_blob::tests::decodes_slab_ids_in_order ... ok
+test arena_blob::tests::fails_when_no_arena_is_configured ... ok
+test arena_blob::tests::rejects_a_truncated_request ... ok
+test arena::tests::rejects_a_mapping_that_is_not_an_arena ... ok
+test arena_blob::tests::rejects_a_request_with_the_wrong_magic ... ok
+test arena_blob::tests::wrapping_takes_the_new_id_and_declares_shared_memory ... ok
+test buffer::tests::fast_writes_update_lengths_without_clearing_full_regions ... ok
+test buffer::tests::rejects_negative_runtime_payload_lengths ... ok
+test buffer::tests::round_trips_buffer_regions_and_epochs ... ok
+test arena::tests::rejects_a_descriptor_pointing_into_the_control_region ... ok
+test epoch_transport::tests::a_non_utf8_route_is_refused ... ok
+test arena::tests::a_write_larger_than_its_slab_is_refused ... ok
+test arena::tests::output_writer_rejects_aliases_and_preserves_bytes_after_overflow ... ok
+test arena::tests::a_written_slab_is_visible_through_another_mapping_of_the_arena ... ok
+test diagnostics::tests::concurrent_completions_count_exactly_and_errors_clear_without_losing_degradation ... ok
+test epoch_transport::tests::a_route_filling_the_whole_region_still_reads ... ok
+test epoch_transport::tests::a_route_is_read_back_without_its_padding ... ok
+test diagnostics::tests::epochs_saturate_and_active_calls_restore_during_unwind ... ok
+test epoch_transport::tests::an_empty_route_is_refused_rather_than_dispatched ... ok
+test stdio::tests::read_frame_rejects_declared_lengths_before_allocating_payload ... ok
+test arena::tests::reads_a_columnar_batch_larger_than_the_control_buffer ... ok
+test tests::dispatch_direct_uses_registered_units_without_role_pool ... ok
+test tests::direct_destinations_refuse_truncation_and_clear_failed_results ... ok
+test tests::converts_panics_into_runtime_errors ... ok
+test tests::dispatches_registered_units_via_role_pool ... ok
+test tests::panicked_destinations_are_cleared_without_touching_adjacent_bytes ... ok
+test tests::serves_runtime_buffers_over_framed_io ... ok
+test tests::saturated_queue_rejects_work_and_pins_the_accepted_implementation ... ok
+test tests::placement_table_routes_and_samples_completions ... ok
+test tests::dispatch_times_out_instead_of_waiting_unbounded ... ok
+test diagnostics::loom_verification::source_and_error_remain_coherent_during_recovery ... ok
+
+test result: ok. 31 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running unittests src/bin/buffer_bench.rs (runtime-sdk/rust/target/debug/deps/buffer_bench-7c95424ea560d2a5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/reference_kernel.rs (runtime-sdk/rust/target/debug/deps/reference_kernel-9120d6c9807a2c81)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/shm_exchange_bench.rs (runtime-sdk/rust/target/debug/deps/shm_exchange_bench-e6bd3433296f4b8f)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_network-37ae9781913a3053)
+
+running 29 tests
+test dedup::tests::clearing_the_window_readmits_previously_seen_keys ... ok
+test dedup::tests::a_key_is_new_once_and_a_duplicate_after ... ok
+test dedup::tests::distinct_keys_do_not_suppress_each_other ... ok
+test dedup::tests::an_immediate_second_copy_is_suppressed_even_under_pressure ... ok
+test interface::tests::every_host_reports_a_loopback_interface ... ok
+test dedup::tests::capacity_must_be_a_power_of_two_and_leave_room_to_probe ... ok
+test interface::tests::every_reported_interface_has_a_nonzero_index ... ok
+test interface::tests::loopback_is_never_offered_as_a_race_path ... ok
+test interface::tests::interfaces_are_deduplicated_by_name ... ok
+test dedup::tests::the_ring_never_rejects_a_first_arrival ... ok
+test race::tests::a_race_needs_at_least_one_path ... ok
+test interface::tests::the_binding_probe_is_stable_across_calls ... ok
+test interface::tests::the_probe_agrees_with_a_real_bind ... ok
+test race::tests::counters_separate_delivered_from_undeliverable ... ok
+test race::tests::dropping_the_racer_joins_every_worker ... ok
+test race::loom_verification::received_success_publishes_path_availability ... ok
+test race::tests::every_path_failing_reports_every_reason ... ok
+test race::tests::frames_above_the_control_rung_are_refused ... ok
+test race::tests::one_live_path_still_wins_against_a_dead_one ... ok
+test dedup::tests::the_fingerprint_never_collides_with_the_empty_marker ... ok
+test tests::every_error_renders_its_cause ... ok
+test tests::the_oversized_frame_error_names_the_remedy ... ok
+test race::tests::a_busy_path_is_skipped_rather_than_queued ... ok
+test dedup::tests::exactly_one_thread_wins_a_contended_key ... ok
+test race::tests::all_paths_busy_is_backpressure_not_breakage ... ok
+test race::tests::the_race_returns_without_waiting_for_the_slow_path ... ok
+test race::tests::a_deadline_yields_an_outcome_rather_than_an_error ... ok
+test race::tests::a_stale_report_is_never_claimed_by_a_later_race ... ok
+test race::tests::the_race_collapses_the_tail ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.13s
+
+     Running unittests src/bin/network_sim.rs (runtime-sdk/rust/target/debug/deps/network_sim-4dc135a64f04da53)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/parity_fixture-524a429d2892c9c1)
+
+running 4 tests
+test tests::clock_marker_stamps_the_observed_instant ... ok
+test tests::leading_marker_takes_the_error_path ... ok
+test tests::descriptor_declares_both_lanes ... ok
+test tests::compute_is_deterministic_and_reversible ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_unit-69b29283bb99d6fb)
+
+running 6 tests
+test output::tests::owned_output_moves_allocations_and_appends_later_chunks ... ok
+test output::tests::bounded_output_preserves_adjacent_bytes_and_refuses_partial_writes ... ok
+test tests::a_pinned_generation_allows_reentrant_replacement ... ok
+test tests::registers_and_reads_units ... ok
+test tests::metadata_is_evaluated_once_and_resolved_units_survive_replacement ... ok
+test tests::concurrent_registration_preserves_every_generation_update ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_wasm_host-7c2aa00d5b6322cf)
+
+running 19 tests
+test limits::tests::presets_satisfy_validation ... ok
+test limits::tests::admission_follows_declared_budgets ... ok
+test limits::tests::validation_rejects_zero_and_oversized_bounds ... ok
+test native::tests::oversized_input_is_rejected_before_execution ... ok
+test native::tests::error_path_is_controlled_and_recorded ... ok
+test native::tests::success_path_records_contract_state ... ok
+test snapshot::tests::identical_states_produce_no_divergences ... ok
+test wasm::tests::atomic_slots_read_and_write_little_endian_u32 ... ok
+test wasm::tests::compare_exchange_only_moves_on_match ... ok
+test wasm::tests::limiter_rejects_growth_beyond_the_ceiling ... ok
+test wasm::tests::pinned_clock_is_reported_to_guests ... ok
+test snapshot::tests::policy_exclusions_silence_only_the_named_fields ... ok
+test wasm::tests::unknown_handles_are_trapped_not_panicked ... ok
+test wasm::tests::out_of_bounds_atomic_indexes_trap ... ok
+test snapshot::tests::length_mismatch_is_reported_at_the_boundary ... ok
+test snapshot::tests::every_field_class_is_checked ... ok
+test wasm::tests::watchdog_disarms_and_rearms_without_retaining_old_deadlines ... ok
+test wasm::tests::watchdog_fires_one_armed_deadline ... ok
+test tests::compare_units_reports_lane_configuration ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/parity.rs (runtime-sdk/rust/target/debug/deps/parity-92259962949472d8)
+
+running 12 tests
+test budgets_reject_oversized_payloads_before_execution ... ok
+test native_lane_meets_the_contract_on_both_paths ... ok
+test wasm_lane::epoch_exclusions_silence_only_declared_slots ... ok
+test snapshot_comparison_flags_any_drift ... ok
+   Compiling rustversion v1.0.22
+   Compiling arc-swap v1.9.2
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-parity-fixture v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-parity-fixture)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.11s
+test wasm_lane::watchdog_does_not_trip_fast_exchanges ... ok
+test wasm_lane::fuel_bound_stops_runaway_guests_without_hanging ... ok
+test wasm_lane::volatile_clock_unit_matches_when_both_lanes_are_pinned ... ok
+test wasm_lane::memory_ceiling_rejects_guests_above_the_limit ... ok
+test wasm_lane::clock_drift_between_lanes_is_detected_not_hidden ... ok
+test wasm_lane::controlled_error_path_matches_across_lanes ... ok
+test wasm_lane::both_lanes_produce_identical_state ... ok
+test wasm_lane::a_warm_guest_matches_the_one_shot_path_across_repeated_exchanges ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.86s
+
+   Doc-tests ovrt_browser
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_dispatch
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_ffi
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_native
+
+running 1 test
+test crates/ovrt-native/src/arena_blob.rs - arena_blob (line 20) ... ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_network
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests parity_fixture
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_unit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_wasm_host
+
+running 1 test
+test crates/ovrt-wasm-host/src/lib.rs - (line 44) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s
+

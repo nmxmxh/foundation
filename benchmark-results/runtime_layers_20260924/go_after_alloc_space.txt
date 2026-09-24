@@ -1,0 +1,32 @@
+File: foundation-runtimehost-after-profile.test
+Type: alloc_space
+Time: 2026-09-24 19:24:49 WAT
+Showing nodes accounting for 58130.73kB, 99.13% of 58639.05kB total
+Dropped 228 nodes (cum <= 293.19kB)
+      flat  flat%   sum%        cum   cum%
+27035.31kB 46.10% 46.10% 27035.31kB 46.10%  context.(*cancelCtx).Done
+19311.17kB 32.93% 79.04% 19311.17kB 32.93%  context.withCancel (inline)
+ 5793.28kB  9.88% 88.92%  5793.28kB  9.88%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.NewBuffer
+ 3862.23kB  6.59% 95.50% 23173.41kB 39.52%  context.WithCancel
+ 1152.30kB  1.97% 97.47%  1152.30kB  1.97%  runtime/pprof.StartCPUProfile
+     648kB  1.11% 98.57%  1171.88kB  2.00%  compress/flate.NewWriter (inline)
+     320kB  0.55% 99.12%   523.88kB  0.89%  compress/flate.(*compressor).init
+    4.69kB 0.008% 99.13% 50284.47kB 85.75%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeWithContext
+    2.02kB 0.0034% 99.13% 50322.29kB 85.82%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.BenchmarkProcessPoolExecuteInto1KB
+    1.42kB 0.0024% 99.13%  5794.70kB  9.88%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).runExchangeLoop
+    0.23kB 0.0004% 99.13% 50329.19kB 85.83%  testing.(*B).runN
+    0.07kB 0.00012% 99.13%  1181.29kB  2.01%  testing.(*M).Run
+         0     0% 99.13%  1171.88kB  2.00%  compress/gzip.(*Writer).Write
+         0     0% 99.13% 50319.69kB 85.81%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).ExecuteInto
+         0     0% 99.13% 50319.69kB 85.81%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).execute
+         0     0% 99.13% 50284.47kB 85.75%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).executeOnSelectedWorker
+         0     0% 99.13% 50284.47kB 85.75%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeHeld
+         0     0% 99.13% 50284.47kB 85.75%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).tryExecute
+         0     0% 99.13%  5793.28kB  9.88%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.benchmarkProcessExchange.Exchange
+         0     0% 99.13%  1181.29kB  2.01%  main.main
+         0     0% 99.13%  1181.49kB  2.01%  runtime.main
+         0     0% 99.13%  1281.09kB  2.18%  runtime/pprof.(*profileBuilder).build
+         0     0% 99.13%  1299.31kB  2.22%  runtime/pprof.profileWriter
+         0     0% 99.13% 50323.34kB 85.82%  testing.(*B).run1.func1
+         0     0% 99.13%  1152.91kB  1.97%  testing.(*M).before
+         0     0% 99.13%  1152.30kB  1.97%  testing/internal/testdeps.TestDeps.StartCPUProfile

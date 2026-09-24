@@ -23,6 +23,32 @@ sed "s|{{MODULE_PATH}}|github.com/ovasabi/foundation_update_fixture|g" \
     "$FOUNDATION_DIR/templates/backend/go.mod.template" > "$PROJECT_DIR/go.mod"
 printf '{"scripts":{"build":"vite build","lint":"eslint .","test":"vitest run"}}\n' > "$PROJECT_DIR/frontend/package.json"
 
+python3 - "$FOUNDATION_DIR" "$PROJECT_DIR" <<'PY'
+from pathlib import Path
+import re
+import sys
+foundation, project = map(Path, sys.argv[1:])
+target = re.compile(r'^build-rust-wasm:[\s\S]*?(?=^[\w-]+:|\Z)', re.M)
+current = (foundation / 'templates/Makefile').read_text()
+legacy = target.search((foundation / 'tests/fixtures/browser_wasm_legacy.mk').read_text())[0]
+(project / 'Makefile').write_text(target.sub(lambda match: legacy, current))
+makefile = (project / 'Makefile').read_text()
+retired = (foundation / 'tests/fixtures/retired_go_wasm.mk').read_text()
+makefile = makefile.replace('build-runtime: runtime-bindings ', 'build-runtime: runtime-bindings build-wasm ')
+(project / 'Makefile').write_text(makefile + '\n' + retired)
+(project / 'wasm').mkdir()
+(project / 'wasm/main.go').write_text((foundation / 'tests/fixtures/retired_go_wasm.go.txt').read_text())
+(project / 'rust/src').mkdir(parents=True)
+(project / 'rust/src/unit.rs').write_text('''impl RuntimeUnit for Echo {
+    fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> { Ok(input.to_vec()) }
+}
+''')
+vite = (foundation / 'templates/frontend/vite.config.ts').read_text()
+vite = vite.replace(r'(?:\?.*)?', '')
+vite = re.sub(r'^  optimizeDeps:.*\n', '', vite, flags=re.M)
+(project / 'frontend/vite.config.ts').write_text(vite)
+PY
+
 cat > "$PROJECT_DIR/.foundation" <<EOF
 FOUNDATION_VERSION=0.0.0
 FOUNDATION_PATH=$(printf '%q' "$FOUNDATION_DIR")
@@ -47,6 +73,8 @@ chmod +x "$PROJECT_DIR/dependency-spies/npm" "$PROJECT_DIR/dependency-spies/go"
 DEPENDENCY_SPY_LOG="$PROJECT_DIR/dependency-spy.log" PATH="$PROJECT_DIR/dependency-spies:$PATH" \
     "$FOUNDATION_DIR/scripts/update-project.sh" "$PROJECT_DIR" --skip-deps >/dev/null
 assert_absent "dependency-spy.log"
+assert_contains "rust/src/unit.rs" "fn execute"
+assert_not_contains "rust/src/unit.rs" "fn run"
 
 assert_contains ".foundation" "^WITH_WASM=true$"
 assert_contains ".foundation" "^BASELINE_GENERATION=manifest-v4$"
@@ -70,7 +98,7 @@ assert_absent "api/protos/common"
 assert_absent "api/schemas/common"
 assert_file "tests/integration/hermes_test.go"
 assert_file "tests/integration/setup_helpers_test.go"
-assert_file "wasm/main.go"
+[[ ! -e "$PROJECT_DIR/wasm/main.go" ]] || { echo "legacy Go WASM shim must be absent" >&2; exit 1; }
 assert_file "foundation/runtime-sdk/go/go.mod"
 assert_file "foundation/runtime-transport/go/generated/foundation/v1/envelope.pb.go"
 assert_file "foundation/runtime-transport/go/generated/foundation/v1/metadata.pb.go"
@@ -102,6 +130,12 @@ assert_file "docker-compose.yml"
 assert_file "docker-compose.dev.yml"
 assert_file "frontend/tsconfig.json"
 assert_file "frontend/vite.config.ts"
+assert_contains "frontend/vite.config.ts" "optimizeDeps"
+assert_contains "Makefile" "build_browser_wasm.sh"
+assert_file "foundation/runtime-sdk/scripts/build_browser_wasm.sh"
+assert_contains ".foundation-patches.tsv" "browser WASM build"
+assert_contains ".foundation-patches.tsv" "frontend Linaria build"
+assert_contains ".foundation-patches.tsv" "Go WASM retirement"
 
 if [[ -e "$PROJECT_DIR/pkg" ]]; then
     echo "expected empty pkg/ to be removed" >&2

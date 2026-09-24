@@ -1,8 +1,9 @@
 //! Generic arena adapter for units that take bytes and return bytes.
 //!
-//! Most compute units have the shape `&[u8] -> Vec<u8>`, and most of them were
-//! written against the control payload because that is the obvious place to put
-//! an input. The control payload holds `INPUT_MAX_BYTES`, which is 1 KiB — sized
+//! Units receive an input slice and a checked output destination.
+//! This adapter writes results directly into the output slab.
+//! Units that construct owned results can transfer them through `write_owned`.
+//! The control payload holds `INPUT_MAX_BYTES`, which is 1 KiB — sized
 //! for control, not for workloads — so any unit whose real input is a ranking
 //! batch, an embedding, or a document fails on every call in production while
 //! passing its own tests on a small fixture.
@@ -54,7 +55,7 @@ pub fn decode_arena_blob_request(input: &[u8]) -> Result<(u32, u32), String> {
     Ok((read_u32(input, 4)?, read_u32(input, 8)?))
 }
 
-/// Wraps a `&[u8] -> Vec<u8>` unit so its payload travels through the arena.
+/// Runs a unit with arena input and a checked slab destination.
 pub struct ArenaBlobUnit<U: RuntimeUnit> {
     unit_id: String,
     inner: U,
@@ -90,32 +91,18 @@ impl<U: RuntimeUnit> RuntimeUnit for ArenaBlobUnit<U> {
         }
     }
 
-    fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
+    fn execute(
+        &self,
+        input: &[u8],
+        output: &mut dyn ovrt_unit::RuntimeOutput,
+    ) -> Result<(), String> {
         let (input_slab, output_slab) = decode_arena_blob_request(input)?;
         let arena = Arena::global().ok_or_else(|| {
             "arena is not available; host did not provide OVRT_SHM_ARENA_PATH".to_string()
         })?;
-
-        let payload = arena.slab(input_slab)?;
-        let produced = self.inner.run(payload)?;
-
-        // Refused rather than truncated. Every one of these units returns a
-        // packed binary record stream, and a short one decodes as a valid,
-        // shorter result — so truncation would surface as quietly missing data
-        // instead of an error.
-        let descriptor = arena.descriptor(output_slab)?;
-        if produced.len() > descriptor.length as usize {
-            return Err(format!(
-                "result is {} bytes, output slab {output_slab} holds {}",
-                produced.len(),
-                descriptor.length
-            ));
-        }
-        let written = produced.len() as u32;
-        arena.write_slab(output_slab, &produced)?;
-
-        // The control buffer carries the length only; the result is in the arena.
-        Ok(written.to_le_bytes().to_vec())
+        let mut destination = arena.output_for(input_slab, output_slab)?;
+        self.inner.execute(arena.slab(input_slab)?, &mut destination)?;
+        output.write(&(destination.written() as u32).to_le_bytes())
     }
 }
 
@@ -140,8 +127,12 @@ mod tests {
             }
         }
 
-        fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-            Ok(input.to_vec())
+        fn execute(
+            &self,
+            input: &[u8],
+            __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+        ) -> Result<(), String> {
+            __ovrt_output.write(input)
         }
     }
 

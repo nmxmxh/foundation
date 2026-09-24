@@ -221,15 +221,21 @@ impl DispatchBlock {
     /// Rows are read as plain bytes: the publisher's Release store on the
     /// flip index happens-before this function's Acquire load, which orders
     /// every prior write into the buffer. See `publisher` for the other half.
-    pub fn snapshot_descriptors(&self) -> Result<Vec<DispatchLaneDescriptor>, String> {
+    pub fn snapshot_descriptors(&self) -> Result<[DispatchLaneDescriptor; MAX_LANES], String> {
         let active = self.active_buffer_index()?;
         let base = DISPATCH_BUFFERS_OFFSET as usize + active * DISPATCH_BUFFER_BYTES as usize;
         let bytes = self.mapping.as_slice();
-        (0..MAX_LANES)
-            .map(|lane| {
-                decode_descriptor(&bytes[base + lane * 64..][..DISPATCH_LANE_ROW_BYTES as usize])
-            })
-            .collect()
+        let mut rows = [DispatchLaneDescriptor::default(); MAX_LANES];
+        for (lane, row) in rows.iter_mut().enumerate() {
+            let start = base + lane * DISPATCH_LANE_ROW_BYTES as usize;
+            *row = decode_descriptor(&bytes[start..][..DISPATCH_LANE_ROW_BYTES as usize])?;
+        }
+        Ok(rows)
+    }
+
+    /// Reads every lane into a fixed table without allocating request storage.
+    pub fn snapshot_stats(&self) -> [Option<DispatchLaneStats>; MAX_LANES] {
+        std::array::from_fn(|lane| self.stat_row(lane).ok().map(|row| row.snapshot()))
     }
 
     fn active_buffer_index(&self) -> Result<usize, String> {

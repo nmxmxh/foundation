@@ -18,7 +18,7 @@ Usage: ./update-project.sh <project-path> [options]
 
 Options:
   --dry-run           Show what would be updated without writing files
-  --skip-deps         Synchronize files without npm resolution or Go module tidy
+  --skip-deps         Synchronize files without npm, Go, or Rust dependency resolution
   --force             Overwrite force-managed scaffold files
   --docs-only         Only update docs/foundation
   --tooling-only      Only update linting/tooling/check scripts
@@ -27,8 +27,8 @@ Options:
   --go-module <path>  Override inferred Go module path
   --with-docker       Enable Docker scaffold and metadata
   --no-docker         Disable Docker scaffold and metadata
-  --with-wasm         Enable WASM scaffold and runtime-sdk metadata
-  --no-wasm           Disable WASM scaffold and runtime-sdk metadata
+  --with-wasm         Enable Rust WASM runtime-sdk metadata
+  --no-wasm           Disable Rust WASM runtime-sdk metadata
   --with-native       Enable native/Tauri scaffold and runtime-native metadata
   --no-native         Disable native/Tauri scaffold and runtime-native metadata
   --acknowledge-seed-drift  Re-baseline the seed ledger to current templates
@@ -216,7 +216,7 @@ fi
 WITH_DOCKER="${WITH_DOCKER_OVERRIDE:-$(foundation_infer_flag WITH_DOCKER "$docker_default")}"
 
 wasm_default="false"
-if [[ "$PROFILE" == "full" || -d "$PROJECT_PATH/wasm" || -d "$PROJECT_PATH/foundation/runtime-sdk" ]]; then
+if [[ "$PROFILE" == "full" || -d "$PROJECT_PATH/foundation/runtime-sdk" ]]; then
     wasm_default="true"
 fi
 WITH_WASM="${WITH_WASM_OVERRIDE:-$(foundation_infer_flag WITH_WASM "$wasm_default")}"
@@ -302,6 +302,10 @@ else
             foundation_log_success "Managed scaffold patches applied"
         fi
     fi
+fi
+
+if [[ "$DRY_RUN" != "true" && "$DOCS_ONLY" != "true" && "$TOOLING_ONLY" != "true" ]]; then
+    scaffold_sync_rust_unit_locks
 fi
 
 # Module sync replaces vendored go.mod/go.sum manifests, which can leave the

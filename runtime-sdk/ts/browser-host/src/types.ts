@@ -19,6 +19,9 @@ export type RuntimeWorkerRequest<TInput = Record<string, unknown>> = {
   role: RuntimeRole;
   input: TInput;
   buffer: SharedArrayBuffer;
+  byteOffset?: number;
+  byteLength?: number;
+  bufferHandle?: number;
 };
 
 export type RuntimeWorkerResponse<TOutput = Record<string, unknown>> = {

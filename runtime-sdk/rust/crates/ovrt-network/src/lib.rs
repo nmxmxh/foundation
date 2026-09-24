@@ -20,12 +20,8 @@
 //!
 //! # What is deliberately not here
 //!
-//! **QUIC.** Racing and striping do not need it. It buys stream multiplexing,
-//! 0-RTT resumption, and connection migration, none of which the rungs above
-//! depend on — and it costs this workspace its single most unusual property,
-//! which is that it has one non-optional third-party dependency. That trade may
-//! be worth making; it is not worth making by accident, as a side effect of
-//! wanting multipath.
+//! **QUIC.** Racing and striping do not require a QUIC stack.
+//! Adding one requires measured transport benefits and a separate dependency review.
 //!
 //! **Striping with erasure repair.** The rung above racing, for payloads where
 //! sending twice is a bandwidth bill rather than a rounding error. [`race`]

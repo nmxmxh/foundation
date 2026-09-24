@@ -1,0 +1,105 @@
+   Compiling rustversion v1.0.22
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling arc-swap v1.9.2
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+   Compiling ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/runtime-sdk/rust/crates/ovrt-native)
+   Compiling orbit-sim v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/crates/orbit-sim)
+   Compiling ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+   Compiling voice-dsp v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/crates/voice-dsp)
+   Compiling waitingroom-sim v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/crates/waitingroom-sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.50s
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/target/debug/deps/orbit_sim-178e2a4d15443849)
+
+running 27 tests
+test orbit::tests::a_step_is_a_pure_function_of_its_input ... ok
+test orbit::tests::a_circular_orbit_stays_circular ... ok
+test orbit::tests::advancing_is_substepped_and_capped ... ok
+test orbit::tests::gamma_matches_the_velocity_it_reports ... ok
+test orbit::tests::a_bound_orbit_precesses ... ok
+test orbit::tests::nonsense_elapsed_time_moves_nothing ... ok
+test orbit::tests::orbital_speed_near_the_isco_is_relativistic ... ok
+test orbit::tests::the_isco_is_where_the_theory_says_it_is ... ok
+test orbit::tests::the_narrative_loops_without_a_jump ... ok
+test orbit::tests::the_opening_orbit_is_actually_circular ... ok
+test orbit::tests::energy_is_conserved_while_coasting ... ok
+test orbit::tests::the_playback_rate_is_the_one_the_twin_carries ... ok
+test orbit::tests::the_position_stays_on_its_own_sphere ... ok
+test orbit::tests::the_narrative_never_asks_for_an_orbit_that_does_not_exist ... ok
+test orbit::tests::the_view_is_finite_everywhere_the_observer_can_be ... ok
+test orbit::tests::time_runs_slower_closer_in ... ok
+test tests::a_frame_of_the_wrong_length_is_refused ... ok
+test tests::a_frame_with_the_wrong_magic_is_refused ... ok
+test tests::a_state_inside_the_horizon_is_refused ... ok
+test tests::a_step_round_trips_through_the_protocol ... ok
+test tests::a_state_carrying_a_nan_is_refused_rather_than_propagated ... ok
+test orbit::tests::a_full_narrative_run_stays_outside_the_photon_sphere ... ok
+test fixture::tests::the_checked_in_fixture_matches_this_build ... ok
+test fixture::tests::the_fixture_visits_every_act ... ok
+test fixture::tests::the_fixture_carries_no_non_finite_numbers ... ok
+test orbit::tests::the_graze_goes_inside_the_isco_without_falling_in ... ok
+test orbit::tests::the_story_stays_bounded_over_many_loops ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.27s
+
+     Running unittests examples/profile.rs (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/target/debug/examples/profile-e6891f35d6c5534a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/target/debug/deps/voice_dsp-e46cf0db6a3028d8)
+
+running 22 tests
+test dsp::tests::a_take_of_nothing_is_not_a_division_by_zero ... ok
+test dsp::tests::a_plosive_is_turned_down_rather_than_flattened ... ok
+test dsp::tests::non_finite_input_does_not_poison_the_chain ... ok
+test dsp::tests::low_band_noise_does_not_duck_the_high_band ... ok
+test dsp::tests::block_and_whole_agree ... ok
+test dsp::tests::near_silence_is_not_dragged_up_without_bound ... ok
+test dsp::tests::the_biquad_filter_removes_rumble_and_passes_speech ... ok
+test dsp::tests::no_stage_is_ever_gained_above_its_floor_or_below_it ... ok
+test dsp::tests::the_filter_removes_a_constant_offset ... ok
+test dsp::tests::smooth_expander_has_no_step_discontinuities ... ok
+test dsp::tests::the_de_esser_ducks_a_sibilant_and_leaves_a_vowel_alone ... ok
+test dsp::tests::the_de_esser_never_removes_a_sibilant_entirely ... ok
+test tests::a_frame_shorter_than_its_header_is_refused ... ok
+test dsp::tests::the_limiter_passes_a_quiet_signal_through_untouched ... ok
+test dsp::tests::the_limiter_holds_its_ceiling ... ok
+test tests::a_frame_that_disagrees_with_itself_is_refused ... ok
+test tests::a_frame_with_the_wrong_magic_is_refused ... ok
+test tests::a_take_round_trips_through_the_protocol ... ok
+test dsp::tests::fan_noise_is_attenuated_during_pauses ... ok
+test dsp::tests::quiet_speech_is_lifted ... ok
+test dsp::tests::nothing_leaves_the_chain_above_full_scale ... ok
+test dsp::tests::a_loud_take_and_a_quiet_one_converge ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/target/debug/deps/waitingroom_sim-acb4eab760f018e5)
+
+running 5 tests
+test drift::tests::motion_is_continuous_across_small_ticks ... ok
+test drift::tests::seeds_change_the_choreography_not_the_contract ... ok
+test drift::tests::output_is_deterministic_and_inside_bounds ... ok
+test drift::tests::rejects_bad_input_with_controlled_errors ... ok
+test drift::tests::round_trips_one_frame ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/runtime_stdio.rs (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/target/debug/deps/waitingroom_sim_runtime_stdio-2ec50c3189dbb57c)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/runtime-sdk/rust/crates/ovrt-core)
+    Checking arc-swap v1.9.2
+    Checking ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/runtime-sdk/rust/crates/ovrt-unit)
+    Checking ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+    Checking orbit-sim v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/crates/orbit-sim)
+    Checking ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/runtime-sdk/rust/crates/ovrt-native)
+    Checking voice-dsp v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/crates/voice-dsp)
+    Checking ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+    Checking waitingroom-sim v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/rust/crates/waitingroom-sim)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.01s

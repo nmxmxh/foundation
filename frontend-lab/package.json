@@ -7,6 +7,7 @@
   "scripts": {
     "test": "vitest run --project dom",
     "test:browser": "vitest run --project browser",
+    "test:linaria-dev": "node profile/linariaDev.mjs",
     "test:all": "vitest run",
     "profile": "node profile/scrollProfile.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"

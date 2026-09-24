@@ -274,7 +274,6 @@ impl Racer {
         }
 
         let started = Instant::now();
-        let shared: Arc<[u8]> = Arc::from(frame);
 
         // Taken before dispatch, held until the race concludes. See the field's
         // documentation: this is what stops two races from stealing each other's
@@ -291,6 +290,7 @@ impl Racer {
         let mut dispatched = 0;
         let mut busy = 0;
         let mut dead = 0;
+        let mut shared: Option<Arc<[u8]>> = None;
         for worker in &self.workers {
             // Claim the path. Losing means it is mid-send, so it is not a path
             // for this frame.
@@ -303,7 +303,9 @@ impl Racer {
                 continue;
             }
 
-            let job = Job { frame: Arc::clone(&shared), seq };
+            // Allocate frame ownership only after a path accepts work.
+            let frame = Arc::clone(shared.get_or_insert_with(|| Arc::from(frame)));
+            let job = Job { frame, seq };
             // A closed channel means that worker's thread is gone. The other
             // paths are still live, so this is a degraded race, not a failure —
             // but the claim has to be released or the path is busy forever.
@@ -413,15 +415,14 @@ fn collect_first_success(
     RaceOutcome { winner: None, elapsed: started.elapsed(), dispatched, attempts }
 }
 
-/// One path's worker loop: take a job, send it, report, release the claim,
-/// repeat until the racer closes the channel.
+/// Sends each job, releases its path, and publishes the result.
 ///
 /// A failed report is ignored on purpose. It means the race already concluded
 /// and the receiver is gone — this path lost — which is the expected outcome for
 /// roughly half of all sends and not something to log.
 ///
-/// The claim is released *after* reporting, not before, so a path is never
-/// offered a second frame while its first result is still in flight.
+/// Release precedes publication so a received result guarantees that the path can accept another frame.
+/// Sequence numbers isolate late reports. Each worker finishes reporting before it processes its next job.
 fn run_worker(
     path: &Arc<dyn Path>,
     inbox: &Receiver<Job>,
@@ -432,13 +433,37 @@ fn run_worker(
     while let Ok(job) = inbox.recv() {
         let started = Instant::now();
         let error = path.send(&job.frame).err();
+        busy.store(false, Ordering::Release);
         let _ = results.send(Attempt {
             label: Arc::clone(label),
             elapsed: started.elapsed(),
             error,
             seq: job.seq,
         });
-        busy.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "loom")]
+mod loom_verification {
+    #[test]
+    fn received_success_publishes_path_availability() {
+        loom::model(|| {
+            use loom::sync::atomic::{AtomicBool, Ordering};
+            use loom::sync::{mpsc, Arc};
+            let busy = Arc::new(AtomicBool::new(true));
+            let worker_busy = Arc::clone(&busy);
+            let (results, inbox) = mpsc::channel();
+            let worker = loom::thread::spawn(move || {
+                worker_busy.store(false, Ordering::Release);
+                results.send(()).expect("publish completion");
+            });
+            inbox.recv().expect("receive completion");
+            assert!(busy
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok());
+            worker.join().expect("worker");
+        });
     }
 }
 
@@ -689,7 +714,11 @@ mod tests {
                 "blocking"
             }
             fn send(&self, _frame: &[u8]) -> Result<(), String> {
+                let deadline = Instant::now() + Duration::from_secs(2);
                 while !self.release.load(Ordering::Acquire) {
+                    if Instant::now() >= deadline {
+                        return Err("test path release timed out".to_owned());
+                    }
                     std::thread::sleep(Duration::from_millis(1));
                 }
                 Ok(())
@@ -710,7 +739,7 @@ mod tests {
 
         // The blocking path is still busy, so the next frames must go to the
         // fast path alone rather than piling up behind it.
-        for _ in 0..5 {
+        for _ in 0..1_000 {
             let next =
                 racer.race(b"frame", Duration::from_secs(1)).expect("a 5 byte frame is raceable");
             assert_eq!(
@@ -786,7 +815,11 @@ mod tests {
                 "blocking"
             }
             fn send(&self, _frame: &[u8]) -> Result<(), String> {
+                let deadline = Instant::now() + Duration::from_secs(2);
                 while !self.release.load(Ordering::Acquire) {
+                    if Instant::now() >= deadline {
+                        return Err("test path release timed out".to_owned());
+                    }
                     std::thread::sleep(Duration::from_millis(1));
                 }
                 Ok(())

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { BrowserRuntimeHost } from "./host";
+import { RuntimeMemoryRegion } from "./memoryRegion";
 import { createRuntimeOrchestrator } from "./orchestrator";
 import type { PulseManager } from "./pulse/pulseManager";
 import type { RuntimeWorkerRequest, RuntimeWorkerResponse } from "./types";
@@ -28,6 +29,19 @@ const descriptor = (requiresSharedMemory: boolean) => ({
 });
 
 describe("createRuntimeOrchestrator", () => {
+  it("preserves guest region offsets and rejects unshared worker memory", async () => {
+    const worker = new OrchestratorWorker();
+    const orchestrator = createRuntimeOrchestrator({ host: new BrowserRuntimeHost(), createWorker: () => worker as unknown as Worker, pulseManager: pulse() });
+    orchestrator.registerUnit(descriptor(true));
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2, shared: true });
+    const region = new RuntimeMemoryRegion(memory, 64, 4096, 0x80000000);
+    const pending = orchestrator.runUnit({ unitId: "echo", input: null, buffer: region });
+    expect(worker.sent[0]).toMatchObject({ buffer: memory.buffer, byteOffset: 64, byteLength: 4096, bufferHandle: region.handle });
+    worker.resolve();
+    await pending;
+    await expect(orchestrator.runUnit({ unitId: "echo", input: null, buffer: new ArrayBuffer(4096) })).rejects.toThrow("owning thread");
+    orchestrator.shutdown();
+  });
   it("runs registered units and publishes diagnostics", async () => {
     const worker = new OrchestratorWorker();
     const pulseManager = pulse();

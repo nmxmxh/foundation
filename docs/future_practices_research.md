@@ -1,7 +1,7 @@
 # Future Practices Research Ledger
 
 Status: baseline
-Date: 2026-06-01
+Date: 2026-09-24
 Owner: Platform Architecture
 
 ## Purpose
@@ -14,6 +14,15 @@ thread.
 
 Use this file for research-backed deltas. Once a delta becomes an adopted rule,
 move it into the owning practice document and, where possible, into tooling.
+
+## Adopted native dispatch primitives: 2026-09-24
+
+Foundation now uses required output destinations and immutable registry snapshots for native dispatch.
+[ArcSwap 1.9.2](https://docs.rs/arc-swap/1.9.2/arc_swap/) provides the snapshot primitive and its memory-order corrections.
+The registry replaces its read lock with this pinned dependency.
+Bounded diagnostic shards remove the shared counter from steady-state successful dispatch.
+The [measured report](info/runtime_finalize_20260924.md) records large-output gains, concurrency gains, allocation budgets, and small owned-result regressions.
+The owning rules reside in `rust_runtime_practices.md`.
 
 ## Research Lanes To Track
 
@@ -150,6 +159,36 @@ Open priorities include consumer compatibility, bounded diagnostics, and represe
      processing, batch scoring, columnar transforms). Re-evaluate cuda-oxide
      when it ships on stable Rust or when Foundation needs SIMT-level
      control (shared memory, warp-level programming, TMA).
+
+## 2026-09-24 Performance Candidates
+
+These items track performance research and promotion evidence.
+
+1. Browser WASM memory: promoted into browser buffer ABI version 2 on 2026-09-24.
+   Guest-owned regions now replace control-buffer copy imports by default.
+   Shared builds use imported memory. Scalar builds also support direct access in their owning thread.
+   The build emits both artifacts. The loader selects shared memory automatically and preserves legacy artifact fallback.
+   Tests cover full-buffer parity, region bounds, lifetime, memory growth, and two independent Chromium workers.
+   Benchmarks compare identical Rust scans from 4 KiB through 4 MiB and full control requests.
+   Sources: [WebAssembly JavaScript API](https://webassembly.org/getting-started/js-api/),
+   [WebAssembly threads proposal](https://github.com/WebAssembly/threads/blob/main/proposals/threads/Overview.md),
+   [Rust WASM target guidance](https://doc.rust-lang.org/nightly/rustc/platform-support/wasm32-unknown-unknown.html).
+   Contract: `runtime_sab_capnp_contracts.md`. Evidence: `foundation_benchmarks.md`.
+2. WASM SIMD: test `simd128` and bulk memory on contiguous, bounded batch kernels.
+   Compare generated artifacts with the scalar kernel, including tails, numerical error, and unsupported hosts.
+   Rust portable SIMD remains experimental; use target-specific features only behind capability checks.
+   Source: [Rust WASM target guidance](https://doc.rust-lang.org/rustc/platform-support/wasm32-unknown-unknown.html).
+   Promotion target: `rust_runtime_practices.md` and the runtime benchmark suite.
+3. Go SIMD: keep `GOEXPERIMENT=simd` optional and limited to measured `amd64` batch kernels.
+   Preserve scalar and Rust/WASM paths for other platforms, including this ARM machine.
+   Source: [Go 1.26 release notes](https://go.dev/doc/go1.26).
+   Promotion target: the existing `bench-simd` gate after a service-scale win.
+4. PostgreSQL 18 I/O: compare `io_method=worker` and supported `io_uring` deployments under staged reads.
+   Capture `EXPLAIN (ANALYZE, BUFFERS, WAL)`, `pg_stat_io`, pool waits, WAL bytes, and p95/p99 latency.
+   Keep query shape and batch boundaries fixed across runs. Do not infer write gains from read-only AIO results.
+   Sources: [PostgreSQL 18 resource settings](https://www.postgresql.org/docs/18/runtime-config-resource.html),
+   [PostgreSQL 18 release notes](https://www.postgresql.org/docs/18/release-18.html).
+   Promotion target: `database_practices.md` and service-backed load research.
 
 ## Per-Document Gap Map
 

@@ -1,0 +1,89 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_audio_core-41d2132c8bdbf4eb)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_capnp-44435d30a3830f78)
+
+running 6 tests
+test tests::round_trips_quality_report ... ok
+test tests::round_trips_preview_layout ... ok
+test tests::round_trips_asset_descriptor ... ok
+test tests::round_trips_render_variant_result ... ok
+test tests::round_trips_render_variant_request ... ok
+test tests::round_trips_probe_report ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_image_core-7ad767a3aaa02bbb)
+
+running 3 tests
+test tests::generates_expected_demo_layout ... ok
+test tests::renders_variant_contract_summary ... ok
+test tests::renders_native_video_artifact_when_ffmpeg_is_available ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.41s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_media_core-61cd0b8e9359d9f4)
+
+running 2 tests
+test tests::probe_defaults_video_shape ... ok
+test tests::probe_reads_real_media_with_ffprobe_when_available ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_media_runtime-3a2654d0a1d19b17)
+
+running 4 tests
+test tests::native_quality_unit_produces_quality_contract ... ok
+test tests::native_preview_unit_produces_layout_contract ... ok
+test tests::native_probe_unit_produces_probe_contract ... ok
+test tests::native_render_unit_produces_render_contract ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running unittests src/bin/reframe-media-runtime-host.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_media_runtime_host-b1b00d9e4dcadb1b)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_media_runtime_ffi-912706f06126bba7)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_preview_wasm-31bf105283d59978)
+
+running 1 test
+test tests::generates_expected_demo_layout ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/target/debug/deps/reframe_quality_core-52cf61907da4fbb2)
+
+running 1 test
+test tests::evaluate_quality_flags_low_resolution_assets ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Checking libc v0.2.189
+    Checking reframe-media-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-media-core)
+   Compiling reframe-capnp v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-capnp)
+    Checking ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-core)
+    Checking arc-swap v1.9.2
+    Checking reframe-quality-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-quality-core)
+    Checking ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-unit)
+    Checking ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+    Checking reframe-image-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-image-core)
+    Checking ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-native)
+    Checking ovrt-browser v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-browser)
+    Checking ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+    Checking reframe-media-runtime v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-media-runtime)
+    Checking reframe-media-runtime-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-media-runtime-ffi)
+    Checking reframe-preview-wasm v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-preview-wasm)
+    Checking reframe-audio-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/rust/crates/reframe-audio-core)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.25s

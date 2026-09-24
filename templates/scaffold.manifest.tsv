@@ -111,5 +111,3 @@ templates/native/src-tauri/capabilities/main.json	native/src-tauri/capabilities/
 templates/native/src-tauri/capabilities/examples.md	native/src-tauri/capabilities/examples.md	full,frontend	native	create
 templates/native/src-tauri/src/main.rs	native/src-tauri/src/main.rs	full,frontend	native	create
 templates/native/src-tauri/src/lib.rs	native/src-tauri/src/lib.rs	full,frontend	native	create
-templates/wasm/main.go	wasm/main.go	all	wasm	force
-templates/wasm/README.md	wasm/README.md	all	wasm	force

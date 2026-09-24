@@ -1,0 +1,80 @@
+{
+  "date": "2026-09-24",
+  "base_commit": "2714dbea38d7db86ab36f36d56405404ba1f1b49",
+  "scope": "Browser buffer ABI version 2, guest regions, build defaults, worker region offsets",
+  "machine": {
+    "reported_cpu": "Apple M1 Pro",
+    "architecture": "arm64",
+    "os": "macOS",
+    "node": "24.1.0",
+    "chromium": "151.0.7922.34"
+  },
+  "toolchains": {
+    "scalar": "rustc 1.92.0 (ded5c06cf 2025-12-08)",
+    "shared": "rustc 1.94.0-nightly (21cf7fb3f 2025-12-28)",
+    "shared_channel_date": "2025-12-29"
+  },
+  "artifact_hashes": {
+    "parity_fixture.shared.wasm": {
+      "sha256": "95afd82efb0dad409f6f603783d1ebba680cbc7f3f1d81dd1b22ecca1b4a1785",
+      "bytes": 73997
+    },
+    "parity_fixture.wasm": {
+      "sha256": "6e6fba9762755dbd129651b718679023cc7df39d3fa8a5e9b60bac9bdc807960",
+      "bytes": 68414
+    }
+  },
+  "samples": "browser_abi_20260924_chromium.json",
+  "method": "200 warmup operations per lane; five samples with alternating lane order; timings exclude worker messages; browser and Node runs recorded separately",
+  "limits": {
+    "control_bytes": 4096,
+    "regions_per_guest": 64,
+    "bytes_per_region": 67108864,
+    "region_bytes_per_guest": 100663296,
+    "shared_memory_max_bytes": 134217728
+  },
+  "copy_budget": {
+    "direct_scoped_read_payload_copies": 0,
+    "copied_scoped_read_payload_copies": 1,
+    "owned_output_read_copies": 1,
+    "input_publication_copies": 1
+  },
+  "validation": {
+    "browser_host_unit_tests": 280,
+    "compiled_browser_abi_tests": 9,
+    "chromium_tests": 2,
+    "rust_unit_tests": 11,
+    "wasmtime_native_parity_tests": 12,
+    "new_region_statement_coverage_percent": {
+      "memoryRegion.ts": 100.0,
+      "host.ts": 96.18,
+      "runtimeModuleLoader.ts": 95.45
+    },
+    "typechecks": [
+      "browser-host",
+      "frontend-lab"
+    ],
+    "static_checks": [
+      "Rust clippy with unsafe lint gates",
+      "Rust format",
+      "documentation references",
+      "runtime performance contract",
+      "agent contract",
+      "git diff whitespace"
+    ],
+    "template_build": "Passed a temporary application build with both scalar/shared artifacts and manifest generation"
+  },
+  "replay": [
+    "make test-browser-abi",
+    "cd runtime-sdk/ts/browser-host && npm run bench -- --run src/linearAbi.bench.ts",
+    "cd frontend-lab && npm run test:browser -- src/browser/browserAbi.browser.test.ts --reporter=json --outputFile=../benchmark-results/browser_abi_report.json"
+  ],
+  "limitations": [
+    "Shared artifact compilation currently requires nightly and rust-src.",
+    "Shared browser execution requires cross-origin isolation.",
+    "Each allocator memory has one guest instance.",
+    "Borrowed typed arrays require explicit caller lifetime discipline.",
+    "Node full-request benchmarks include Vitest getter overhead; browser samples are authoritative here.",
+    "No claim about HTTP, database, production contention, or concurrent throughput."
+  ]
+}

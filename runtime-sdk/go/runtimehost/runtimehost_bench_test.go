@@ -198,10 +198,7 @@ func benchmarkProcessPool() *ProcessPool {
 		allWorkers: []*processWorker{{
 			testExchange: benchmarkProcessExchange{},
 		}},
-		bufferPool: sync.Pool{New: func() any {
-			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
-			return &buffer
-		}},
+		bufferPool: sync.Pool{New: newPooledBuffer},
 	}
 }
 

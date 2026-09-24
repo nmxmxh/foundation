@@ -17,7 +17,7 @@ Ovasabi Foundation Initializer
 Usage: ./init.sh <project-name> [full|backend|frontend|minimal] [options]
 
 Profiles:
-  full       Go backend + React frontend + WASM baseline (default)
+  full       Go backend + React frontend + Rust WASM baseline (default)
   backend    Go backend only
   frontend   React frontend only
   minimal    Metadata, docs, agents, and checks only
@@ -27,8 +27,8 @@ Options:
   --go-module <path>    Custom Go module path
   --no-docker           Skip Docker scaffold
   --with-docker         Include Docker scaffold
-  --no-wasm             Skip WASM scaffold and runtime-sdk
-  --with-wasm           Include WASM scaffold and runtime-sdk
+  --no-wasm             Skip Rust WASM runtime-sdk
+  --with-wasm           Include Rust WASM runtime-sdk
   --no-native           Skip native/Tauri scaffold and runtime-native
   --with-native         Include native/Tauri scaffold and runtime-native
   --dry-run             Preview without creating files
@@ -53,7 +53,7 @@ Layer 1: platform modules
   server-kit, runtime-transport, runtime-sdk, and config-contracts are shared, tested contracts.
 
 Layer 2: managed scaffold
-  Makefile, Docker, workflows, checks, cmd/worker, cmd/docgen, baseline frontend config, and WASM are synchronized from templates/scaffold.manifest.tsv.
+  Makefile, Docker, workflows, checks, cmd/worker, cmd/docgen, baseline frontend config, and runtime checks are synchronized from templates/scaffold.manifest.tsv.
 
 Layer 3: project-owned architecture
   Domain services, handlers, route registration, business workers, and app-specific startup wiring belong to the application.

@@ -1,0 +1,9 @@
+
+Managed patch hygiene:
+  patches:            58
+  missing @since:     0
+  retirable:          0
+  defined not called: 0
+  min supported:      0.0.1
+
+Managed patch hygiene check passed

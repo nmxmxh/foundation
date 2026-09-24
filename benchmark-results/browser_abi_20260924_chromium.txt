@@ -1,0 +1,7 @@
+
+> @ovasabi/frontend-lab@0.0.0 test:browser
+> vitest run --project browser src/browser/browserAbi.browser.test.ts --reporter=json --outputFile=../benchmark-results/browser_abi_20260924_chromium_report.json
+
+Plugin "vitest:mocks:interceptor" defines Vite-specific hooks (configureServer) in a plugin returned from applyToEnvironment. These hooks will be ignored.
+Plugin "vitest:mocks:interceptor" defines Vite-specific hooks (configureServer) in a plugin returned from applyToEnvironment. These hooks will be ignored.
+JSON report written to /Users/okhai/Desktop/OVASABI STUDIOS/foundation/benchmark-results/browser_abi_20260924_chromium_report.json

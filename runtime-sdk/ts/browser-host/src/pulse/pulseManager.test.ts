@@ -9,6 +9,7 @@ vi.mock("./runtimeCaps", () => ({
 
 import { IDX_RUNTIME_TICK } from "../generated/runtimeBuffer";
 import { createPulseManager } from "./pulseManager";
+import { RuntimeMemoryRegion } from "../memoryRegion";
 
 class PulseWorker {
   onmessage: ((event: MessageEvent<{ type: string; payload: { index: number; value: number } }>) => void) | null = null;
@@ -84,6 +85,21 @@ describe("createPulseManager", () => {
     const manager = createPulseManager({ createWorker: () => worker as unknown as Worker });
     manager.start(new SharedArrayBuffer(4096));
     expect(manager.getMode()).toBe("worker");
+    manager.shutdown();
+  });
+
+  it("addresses shared epochs at the guest offset and falls back for scalar memory", () => {
+    const worker = new PulseWorker();
+    const manager = createPulseManager({ createWorker: () => worker as unknown as Worker });
+    const memory = new WebAssembly.Memory({ initial: 1, maximum: 2, shared: true });
+    manager.start(new RuntimeMemoryRegion(memory, 64, 4096));
+    expect(worker.sent).toContainEqual({ type: "INIT", payload: { buffer: memory.buffer, byteOffset: 64 } });
+    const scalar = new RuntimeMemoryRegion(new WebAssembly.Memory({ initial: 1 }), 64, 4096);
+    manager.start(scalar);
+    expect(worker.terminated).toBe(true);
+    expect(manager.getMode()).toBe("main-thread");
+    expect(scalar.ints[IDX_RUNTIME_TICK]).toBe(1);
+    expect(new Int32Array(scalar.buffer)[IDX_RUNTIME_TICK]).toBe(0);
     manager.shutdown();
   });
 });

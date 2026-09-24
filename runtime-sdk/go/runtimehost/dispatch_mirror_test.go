@@ -170,7 +170,7 @@ func TestApplyMirrorRestampsHeartbeatWithLocalClick(t *testing.T) {
 			t.Fatalf("row %d snapshot: %v", laneIdx, err)
 		}
 	}
-	got, ok := Decide(now, descriptors, table, DispatchRequest{RequiredClassMask: 0b01, DeadlineNs: ^uint64(0)})
+	got, ok := Decide(now, descriptors[:], table, DispatchRequest{RequiredClassMask: 0b01, DeadlineNs: ^uint64(0)})
 	if !ok || got != 2 {
 		t.Fatalf("fresh mirrored lane = %d,%v want 2,true", got, ok)
 	}

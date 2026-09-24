@@ -95,8 +95,14 @@ impl RuntimeUnit for ParityUnit {
         descriptor()
     }
 
-    fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-        compute_with_env(input, self.now_ms)
+    fn execute(
+        &self,
+        input: &[u8],
+        __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+    ) -> Result<(), String> {
+        let __ovrt_run = || -> Result<Vec<u8>, String> { compute_with_env(input, self.now_ms) };
+        let __ovrt_result = __ovrt_run()?;
+        __ovrt_output.write_owned(__ovrt_result)
     }
 }
 
@@ -113,14 +119,14 @@ pub extern "C" fn ovrt_unit_run(handle: u32) -> i32 {
         Ok(buffer) => buffer,
         Err(_) => return STATUS_BAD_HANDLE,
     };
-    let input = match buffer.read_input_bytes() {
-        Ok(input) => input,
-        Err(_) => return STATUS_BAD_HANDLE,
-    };
     // The guest observes the clock through the host import, which a parity
     // harness pins and a browser fills with real time.
     let now_ms = ovrt_browser::js_interop::get_now();
-    match compute_with_env(&input, now_ms) {
+    let computed = match buffer.with_input_bytes(|input| compute_with_env(input, now_ms)) {
+        Ok(result) => result,
+        Err(_) => return STATUS_BAD_HANDLE,
+    };
+    match computed {
         Ok(output) => write_success(&buffer, &output),
         Err(message) => write_failure(&buffer, &message),
     }
@@ -147,6 +153,21 @@ fn write_failure(buffer: &ovrt_browser::SafeBuffer, message: &str) -> i32 {
     }
     ovrt_browser::signal::mark_output_written(*buffer);
     1
+}
+
+/// Scans every byte through the same API on direct and copied browser lanes.
+#[allow(unsafe_code)]
+#[unsafe(no_mangle)]
+pub extern "C" fn ovrt_buffer_checksum(handle: u32, offset: u32, length: u32) -> u32 {
+    let buffer = match ovrt_browser::SafeBuffer::new(handle) {
+        Ok(buffer) => buffer,
+        Err(_) => return u32::MAX,
+    };
+    buffer
+        .with_bytes(offset, length, |bytes| {
+            bytes.iter().fold(0u32, |sum, byte| sum.wrapping_add(*byte as u32))
+        })
+        .unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
