@@ -38,6 +38,13 @@ makefile = makefile.replace('build-runtime: runtime-bindings ', 'build-runtime: 
 (project / 'Makefile').write_text(makefile + '\n' + retired)
 (project / 'wasm').mkdir()
 (project / 'wasm/main.go').write_text((foundation / 'tests/fixtures/retired_go_wasm.go.txt').read_text())
+docker = (foundation / 'templates/docker/Dockerfile').read_text()
+legacy_docker = (foundation / 'tests/fixtures/retired_go_wasm.Dockerfile').read_text()
+legacy_stage = legacy_docker[legacy_docker.index('# --- Go WASM Builder Stage ---'):legacy_docker.index('# --- Rust WASM Builder Stage ---')]
+docker = docker.replace('# --- Frontend Builder ---', legacy_stage + '# --- Frontend Builder ---')
+legacy_copies = legacy_docker[legacy_docker.index('# Copy Go WASM artifacts'):legacy_docker.index('# Copy Rust WASM modules')]
+docker = docker.replace('COPY frontend/ ./frontend/\n', 'COPY frontend/ ./frontend/\n\n' + legacy_copies)
+(project / 'Dockerfile').write_text(docker)
 (project / 'rust/src').mkdir(parents=True)
 (project / 'rust/src/unit.rs').write_text('''impl RuntimeUnit for Echo {
     fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> { Ok(input.to_vec()) }
@@ -123,6 +130,8 @@ assert_contains "README.md" "Agent-Native Workflow"
 assert_file "migrations/000001_init.up.sql"
 assert_file "migrations/000001_init.down.sql"
 assert_file "Dockerfile"
+assert_not_contains "Dockerfile" "go-wasm-builder"
+assert_not_contains "Dockerfile" "COPY wasm/"
 assert_file "Dockerfile.postgres"
 assert_file "Dockerfile.redis"
 assert_file "config/pg_hba.conf"
@@ -156,5 +165,13 @@ test_step "run updated project scaffold checks"
 "$PROJECT_DIR/scripts/checks/operational_excellence_check.sh" "$PROJECT_DIR"
 "$PROJECT_DIR/scripts/checks/logging_practices_check.sh" "$PROJECT_DIR"
 "$PROJECT_DIR/scripts/checks/river_practices_check.sh" "$PROJECT_DIR"
+
+test_step "reject retired Docker inputs during scaffold validation"
+printf '\nCOPY wasm/ ./wasm/\n' >> "$PROJECT_DIR/Dockerfile"
+if "$PROJECT_DIR/scripts/checks/project_scaffold_check.sh" "$PROJECT_DIR" > "$PROJECT_DIR/docker-guard.log" 2>&1; then
+    echo "scaffold validation must reject retired Go WASM context inputs" >&2
+    exit 1
+fi
+assert_contains "docker-guard.log" "FAIL.*Dockerfiles exclude retired Go WASM inputs"
 
 echo "foundation update-project test passed"
