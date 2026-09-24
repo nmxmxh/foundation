@@ -712,7 +712,7 @@ Requirements:
 
 1. `make lint` must remain structural and fast enough for frequent local use.
 2. `make verify` and CI must run stronger generated-scaffold smoke checks.
-3. Generated-scaffold smoke must compile the Go WASM shim when present.
+3. Generated-scaffold tests must reject retired Go browser shims and retain the Rust WASM build contract.
 4. CI must install generated frontend dependencies and run generated frontend build/test when a frontend exists.
 5. Local scaffold smoke may skip frontend install/build/test unless dependencies already exist or the caller opts in.
 

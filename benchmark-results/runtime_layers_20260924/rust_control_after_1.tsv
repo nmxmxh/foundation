@@ -1,0 +1,17 @@
+name	min_ns	median_ns	max_ns	allocs/op	bytes/op
+core/validate_region	1.24	1.24	1.26	0.000	0.000
+unit/lookup	13.53	13.76	14.61	0.000	0.000
+unit/descriptor	74.16	75.86	77.38	3.000	32.000
+native/direct/0	23.33	24.26	25.03	0.000	0.000
+native/direct/1024	67.39	69.08	73.58	1.000	1024.000
+native/direct/65536	1237.11	1271.09	1312.67	1.000	65536.000
+native/direct/1048576	20957.93	22565.65	44024.95	1.000	1048576.000
+native/queued/1024	7906.62	8103.88	14656.04	5.999	3967.904
+ffi/process/1024	118.24	130.17	133.70	1.000	1024.000
+native/parallel/1	66.45	68.71	82.78	1.000	1024.000
+native/parallel/4	233.64	257.84	268.39	1.000	1024.000
+native/parallel/8	288.89	331.88	345.21	1.000	1024.000
+dispatch/snapshot/32	454.11	461.86	800.27	0.000	0.000
+network/dedup/hit	3.80	3.85	4.63	0.000	0.000
+network/dedup/pressure	6.76	6.80	7.27	0.000	0.000
+network/race/busy/4096	52.19	52.77	55.05	0.000	0.000

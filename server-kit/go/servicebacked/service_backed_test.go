@@ -721,6 +721,27 @@ func BenchmarkServiceBackedPostgresSendBatchUpsert64(b *testing.B) {
 	b.ReportMetric(64, "rows/op")
 }
 
+func BenchmarkServiceBackedPostgresUpsertRecordsBatch64(b *testing.B) {
+	env := requireServiceEnv(b)
+	ctx := context.Background()
+	store := openPostgres(b, env, serviceBackedPoolOptions(8))
+	defer store.Close()
+	db := requirePostgresDB(b, store)
+	applyStateSchema(b, ctx, store)
+	orgID := uniqueName(env.prefix, "bench-unnest-org")
+	cleanupOrganization(b, ctx, store, orgID)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := db.UpsertRecordsBatch(ctx, stateStoreBatchRecords(orgID, i*64, 64))
+		if err != nil {
+			b.Fatalf("postgres set-based upsert failed: %v", err)
+		}
+	}
+	b.ReportMetric(64, "rows/op")
+}
+
 func BenchmarkServiceBackedPostgresCopyFrom64(b *testing.B) {
 	env := requireServiceEnv(b)
 	ctx := context.Background()
@@ -922,6 +943,18 @@ func queueStateStoreBatch(batch *pgx.Batch, orgID string, startID, count int) {
 	for i := 0; i < count; i++ {
 		batch.Queue(query, orgID, fmt.Sprintf("record-%d", startID+i))
 	}
+}
+
+func stateStoreBatchRecords(orgID string, startID, count int) []database.DomainRecord {
+	records := make([]database.DomainRecord, count)
+	data := serviceRecordData(map[string]any{"state": "ready"})
+	for i := range records {
+		records[i] = database.DomainRecord{
+			Domain: "orders", Collection: "benchmark-batch",
+			OrganizationID: orgID, RecordID: fmt.Sprintf("record-%d", startID+i), Data: data,
+		}
+	}
+	return records
 }
 
 func consumeBatchExecs(count int) func(pgx.BatchResults) error {

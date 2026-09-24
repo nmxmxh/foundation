@@ -27,11 +27,11 @@ describe("BrowserRuntimeHost", () => {
 
     host.setInputBytes(buffer, new Uint8Array([1, 2, 3]), 4);
     expect(host.getHeaderInt(buffer, INT_IDX_INPUT_LENGTH)).toBe(3);
-    expect(new Uint8Array(buffer, OFFSET_INPUT_BYTES, 3)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(buffer.subarray(OFFSET_INPUT_BYTES, 3)).toEqual(new Uint8Array([1, 2, 3]));
     host.clearInput(buffer);
     expect(host.getHeaderInt(buffer, INT_IDX_INPUT_LENGTH)).toBe(0);
 
-    new Uint8Array(buffer, OFFSET_OUTPUT_BYTES, 2).set([8, 9]);
+    buffer.subarray(OFFSET_OUTPUT_BYTES, 2).set([8, 9]);
     host.setHeaderInt(buffer, INT_IDX_OUTPUT_LENGTH, 2);
     expect(host.readOutputBytes(buffer)).toEqual(new Uint8Array([8, 9]));
     expect(host.markOutputConsumed(buffer)).toBe(1);
@@ -59,8 +59,8 @@ describe("BrowserRuntimeHost", () => {
     new Uint8Array(memory.buffer, 16, 3).set([4, 5, 6]);
     const imports = host.getImportObject({ env: { custom: () => 1 } }).env as Record<string, (...args: number[]) => unknown>;
     imports.ovrt_copy_to_buffer(handle, 32, 16, 3);
-    expect(new Uint8Array(buffer, 32, 3)).toEqual(new Uint8Array([4, 5, 6]));
-    new Uint8Array(buffer, 40, 2).set([7, 8]);
+    expect(buffer.subarray(32, 3)).toEqual(new Uint8Array([4, 5, 6]));
+    buffer.subarray(40, 2).set([7, 8]);
     imports.ovrt_copy_from_buffer(handle, 40, 24, 2);
     expect(new Uint8Array(memory.buffer, 24, 2)).toEqual(new Uint8Array([7, 8]));
     expect(imports.custom()).toBe(1);
@@ -99,7 +99,7 @@ describe("BrowserRuntimeHost", () => {
     expect(host.createSharedArena({ arenaProfile: "minimal" }).capacity()).toBeGreaterThan(BUFFER_TOTAL_BYTES);
     vi.stubGlobal("SharedArrayBuffer", undefined);
     try {
-      expect(() => host.createRuntimeBuffer()).toThrow("SharedArrayBuffer is unavailable");
+      expect(host.createRuntimeBuffer().buffer).toBeInstanceOf(ArrayBuffer);
       expect(() => host.createSharedArena()).toThrow("SharedArrayBuffer is unavailable");
     } finally {
       vi.unstubAllGlobals();

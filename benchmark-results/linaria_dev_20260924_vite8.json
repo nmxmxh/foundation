@@ -1,0 +1,33 @@
+{
+  "vite": "8.3.0",
+  "results": [
+    {
+      "name": "original",
+      "result": "expected failure",
+      "errors": [
+        "Using the \"styled\" tag in runtime is not supported. Make sure you have set up the Babel plugin correctly. See https://github.com/callstack/linaria#setup"
+      ]
+    },
+    {
+      "name": "exclude-only",
+      "result": "expected failure",
+      "errors": [
+        "Using the \"css\" tag in runtime is not supported. Make sure you have set up the Babel plugin correctly."
+      ]
+    },
+    {
+      "name": "query-only",
+      "result": "expected failure",
+      "errors": [
+        "Using the \"styled\" tag in runtime is not supported. Make sure you have set up the Babel plugin correctly. See https://github.com/callstack/linaria#setup"
+      ]
+    },
+    {
+      "name": "corrected",
+      "result": "passed",
+      "coldRender": true,
+      "hmr": true,
+      "pageReload": false
+    }
+  ]
+}

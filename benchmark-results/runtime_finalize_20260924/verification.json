@@ -1,0 +1,58 @@
+{
+  "rust_test_counts": {
+    "core_rust_tests": 165,
+    "native_rust_tests": 25,
+    "arena_integration": 1
+  },
+  "browser_abi_tests": 9,
+  "go_coverage_percent": 88.5,
+  "logs": [
+    "core_rust_tests",
+    "native_rust_tests",
+    "arena_integration",
+    "browser_abi",
+    "go_race_vet",
+    "rust_clippy",
+    "arena_clippy",
+    "runtime_contracts",
+    "scaffold_tests",
+    "updater_tests"
+  ],
+  "core_mapping_followup": "6 mapping tests and concurrent 1 MiB arena integration passed; Clippy passed",
+  "fleet": {
+    "succeeded": 11,
+    "total": 11,
+    "validation": "passed",
+    "idempotence": "passed",
+    "methods_migrated": 20,
+    "sdk_files_compared_per_project": 104
+  },
+  "projects": {
+    "global": {
+      "tests_passed": 5,
+      "test_failures": false,
+      "clippy_finished": true,
+      "excluded_tests": []
+    },
+    "ovasabi": {
+      "tests_passed": 54,
+      "test_failures": false,
+      "clippy_finished": true,
+      "excluded_tests": []
+    },
+    "pronto": {
+      "tests_passed": 92,
+      "test_failures": false,
+      "clippy_finished": true,
+      "excluded_tests": []
+    },
+    "reframe": {
+      "tests_passed": 17,
+      "test_failures": false,
+      "clippy_finished": true,
+      "excluded_tests": [
+        "tests::renders_native_image_artifact_when_ffmpeg_is_available"
+      ]
+    }
+  }
+}

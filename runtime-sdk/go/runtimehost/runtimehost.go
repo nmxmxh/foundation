@@ -13,6 +13,10 @@ type Buffer struct {
 	raw []byte
 }
 
+func newPooledBuffer() any {
+	return &Buffer{raw: make([]byte, generated.BUFFER_TOTAL_BYTES)}
+}
+
 func NewBuffer(raw []byte) (*Buffer, error) {
 	if len(raw) < int(generated.BUFFER_TOTAL_BYTES) {
 		return nil, fmt.Errorf("runtime buffer too small: %d < %d", len(raw), generated.BUFFER_TOTAL_BYTES)

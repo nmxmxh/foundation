@@ -1,0 +1,4 @@
+# benchmark	ns_per_op	bytes_per_op	allocs_per_op	unit_per_op	source
+BenchmarkServiceBackedPostgresUpsertRecordsBatch64-8	2844177	231168	1802	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresUpsertRecordsBatch64-8	3201901	231171	1802	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresUpsertRecordsBatch64-8	3372913	231126	1801	64.00 rows/op	service-backed

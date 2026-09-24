@@ -1,0 +1,60 @@
+[OK] low-level performance lab doc
+[OK] performance practices doc
+[OK] GPU practices doc
+[OK] Rust runtime practices doc
+[OK] performance lab names CPU counter taxonomy
+[OK] performance lab names Go pprof and trace
+[OK] performance lab names Rust Miri and Loom
+[OK] performance lab names WebGPU/WGSL
+[OK] performance lab names CUDA and capture tools
+[OK] performance practices separates hard bounds from statistics
+[OK] GPU practices require capture bundle schema
+[OK] performance runner supports profile directory
+[OK] performance runner emits machine metadata
+[OK] performance runner supports runtime trace capture
+[OK] performance runner captures Go traces
+[OK] performance runner captures block profiles
+[OK] performance runner captures mutex profiles
+[OK] performance runner supports hardware counter lane
+[OK] performance runner resolves generated app module layout
+[OK] performance runner resolves runtime-sdk module path
+[OK] performance runner resolves Vitest runner
+[OK] performance runner resolves frontend-kit module path
+[OK] performance runner captures frontend workbench profile
+[OK] frontend profile captures PROFILE metrics
+[OK] frontend profile writes benchmark results
+[OK] Vitest runner supports GC-exposed profile runs
+[OK] benchmark history captures frontend profile metrics
+[OK] Rust runtime script exposes Miri opt-in
+[OK] Rust runtime script exposes Loom opt-in
+[OK] Makefile defines -race test gate
+[OK] race gate runs the detector
+[OK] verify enforces the -race gate
+[OK] Makefile defines Loom interleaving gate
+runtime performance contract check passed
+[OK] RP production Rust runtime paths avoid unwrap/expect/panic/todo/dbg
+[OK] RP runtime-native crate forbids unsafe code
+[OK] RP runtime-native native GPU registry avoids unsafe/unwrap/todo/dbg
+[OK] RP native GPU registry tests fd-backed private handles
+[OK] RP native GPU registry tests opaque plugin private handles
+[OK] RP native GPU benchmark reports descriptor lifecycle
+[OK] RP native GPU benchmark reports registry lifecycle
+[OK] RP native GPU benchmark reports plugin opaque lifecycle
+[OK] RP native runtime dispatch has bounded worker response waits
+[OK] RP stdio transport bounds frame allocation before payload read
+[OK] RP native buffer rejects negative declared payload lengths
+[OK] RP ovrt-core native GPU contract forbids unsafe code
+[OK] RP ovrt-core native GPU contract avoids unwrap/todo/dbg
+[OK] RP ovrt-core native GPU tests enum contract mapping
+[OK] scaffolded app Rust roots absent
+[OK] Miri runtime UB check is opt-in with RUST_RUNTIME_MIRI=1
+[OK] Loom concurrency model tests are opt-in with RUST_RUNTIME_LOOM=1
+[OK] rust runtime practices self-test (tests/ excluded, src still guarded)
+rust runtime practices check passed
+[OK] PERFLAB-05 stripping sites registered (4 site(s))
+[OK] PERFLAB-06 sample frequency pinned
+[OK] PERFLAB-06 system-wide capture bounded
+[OK] PERFLAB-07 observer overhead acknowledged
+[OK] PERFLAB-08 profile artifacts ignored
+[OK] PERFLAB-08 no committed captures
+system profiling check passed

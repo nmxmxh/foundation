@@ -7,7 +7,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: test-frontend-lab test-frontend-lab-browser test-frontend-lab-contracts
+.PHONY: test-frontend-lab test-frontend-lab-browser test-frontend-lab-contracts build-browser-wasm test-browser-abi
 
 FOUNDATION_LINT_CHECKS := \
 	check-scaffold-manifest \
@@ -166,11 +166,20 @@ test-service-backed-load:
 test-frontend-lab:
 	@cd frontend-lab && npm run test
 
-test-frontend-lab-browser:
+build-browser-wasm:
+	@bash runtime-sdk/scripts/build_browser_wasm.sh
+
+test-browser-abi: build-browser-wasm
+	@cd runtime-sdk/ts/browser-host && npx --no-install vitest run --config vitest.abi.config.ts
+	@cd frontend-lab && npm run test:browser -- src/browser/browserAbi.browser.test.ts
+
+test-frontend-lab-browser: build-browser-wasm
 	@cd frontend-lab && npm run test:browser
 
-test-frontend-lab-contracts:
+test-frontend-lab-contracts: build-browser-wasm
 	@npm --prefix frontend-lab run typecheck
+	@cd runtime-sdk/ts/browser-host && npx --no-install vitest run --config vitest.abi.config.ts
+	@npm --prefix frontend-lab run test:linaria-dev
 	@tooling/scripts/run_vitest.sh frontend-lab run --project dom --project ssr --project browser
 
 test-load-research:
@@ -192,12 +201,12 @@ test-native-rust:
 # the same invocation enforced by RUST_RUNTIME_LOOM=1 in the runtime checks.
 test-rust-loom:
 	@echo "Running runtime-sdk loom interleaving model tests..."
-	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo test --manifest-path runtime-sdk/rust/Cargo.toml -p ovrt-core -p ovrt-dispatch --features ovrt-core/loom,ovrt-dispatch/loom loom_verification -j "$(FOUNDATION_CARGO_TEST_JOBS)"
+	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo test --manifest-path runtime-sdk/rust/Cargo.toml -p ovrt-core -p ovrt-dispatch -p ovrt-network -p ovrt-native --features ovrt-core/loom,ovrt-dispatch/loom,ovrt-network/loom,ovrt-native/loom loom_verification -j "$(FOUNDATION_CARGO_TEST_JOBS)"
 
 check-rust:
 	@scripts/check-rust.sh .
 
-test-bench: test-bench-go test-bench-native-rust test-bench-dispatch test-bench-frontend
+test-bench: test-bench-go test-bench-native-rust test-bench-dispatch test-bench-runtime-layers test-bench-frontend
 
 profile-render-surface:
 	@tooling/scripts/render_surface_profile.sh .
@@ -231,6 +240,11 @@ test-bench-native-rust:
 test-bench-dispatch:
 	@echo "Running dispatch decision cost benchmark..."
 	@CARGO_CACHE_AUTO_CLEAN_FREQUENCY="$(FOUNDATION_CARGO_CACHE_AUTO_CLEAN_FREQUENCY)" cargo run --release --manifest-path runtime-sdk/rust/Cargo.toml -p ovrt-dispatch --example ns_bench
+
+.PHONY: test-bench-runtime-layers
+test-bench-runtime-layers:
+	@cargo bench --locked --manifest-path runtime-sdk/rust/Cargo.toml -p ovrt-ffi --bench runtime_layers
+	@cd runtime-sdk/go && go test ./runtimehost -run 'Test(DispatchSnapshotsAllocateNothing|ProcessPoolBufferAllocationBudget|FFIPoolExecuteIntoAllocatesNothing)' -bench 'Benchmark(PlacementFullHostPath|ProcessPoolExecute)' -benchmem -count=3
 
 test-bench-frontend:
 	@echo "Running frontend workbench benchmarks and allocation profile..."
@@ -275,6 +289,9 @@ check-init-project:
 	@tests/init_project_test.sh
 
 check-update-project:
+	@python3 tests/rust_unit_output_patch_test.py
+	@node --test tests/browser_frontend_patches.test.mjs
+	@node --test tests/retire_go_wasm.test.mjs
 	@tests/update_project_test.sh
 
 check-scaffold-smoke:

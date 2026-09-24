@@ -1,0 +1,37 @@
+   Compiling rustversion v1.0.22
+   Compiling libc v0.2.189
+   Compiling arc-swap v1.9.2
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+   Compiling ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/runtime-sdk/rust/crates/ovrt-native)
+   Compiling ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+   Compiling gve-financial v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/rust/crates/gve-financial)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.73s
+     Running unittests src/lib.rs (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/rust/target/debug/deps/gve_financial-648e3c7071cd75fa)
+
+running 5 tests
+test tests::computes_basis_points_with_integer_semantics ... ok
+test tests::parses_minor_units_without_float_rounding ... ok
+test tests::performs_checked_integer_arithmetic ... ok
+test tests::exposes_runtime_unit_contract ... ok
+test tests::rejects_ambiguous_or_lossy_inputs ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/runtime_stdio.rs (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/rust/target/debug/deps/gve_financial_runtime_stdio-2153aa91b21799d3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Blocking waiting for file lock on package cache
+    Checking libc v0.2.189
+    Checking arc-swap v1.9.2
+    Checking ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/runtime-sdk/rust/crates/ovrt-core)
+    Checking ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/runtime-sdk/rust/crates/ovrt-unit)
+    Checking ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+    Checking ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/runtime-sdk/rust/crates/ovrt-native)
+    Checking ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+    Checking gve-financial v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/rust/crates/gve-financial)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.90s

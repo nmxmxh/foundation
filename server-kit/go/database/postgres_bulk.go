@@ -133,8 +133,15 @@ const upsertRecordsUnnestSQL = `
 	FROM input i
 	LEFT JOIN upsert u ON u.domain = i.domain AND u.collection_name = i.collection_name
 		AND u.organization_id = i.organization_id AND u.record_id = i.record_id
-	LEFT JOIN governance_state_records g ON g.domain = i.domain AND g.collection_name = i.collection_name
-		AND g.organization_id = i.organization_id AND g.record_id = i.record_id
+	-- Read the base row only when the upsert left its data unchanged.
+	LEFT JOIN LATERAL (
+		SELECT g.created_at, g.updated_at
+		FROM governance_state_records g
+		WHERE u.domain IS NULL
+			AND g.domain = i.domain AND g.collection_name = i.collection_name
+			AND g.organization_id = i.organization_id AND g.record_id = i.record_id
+		LIMIT 1
+	) g ON TRUE
 	ORDER BY i.ord`
 
 // batchUpsertInput is the validated, deduplicated array form of a record batch

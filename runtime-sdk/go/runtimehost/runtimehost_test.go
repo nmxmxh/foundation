@@ -721,10 +721,7 @@ func TestProcessPoolDiagnosticsAndErrorPaths(t *testing.T) {
 	}
 	pool := &ProcessPool{
 		exchangeTimeout: DefaultProcessExchangeTimeout,
-		bufferPool: sync.Pool{New: func() any {
-			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
-			return &buffer
-		}},
+		bufferPool:      sync.Pool{New: newPooledBuffer},
 	}
 	if _, err := pool.Execute(context.Background(), ProcessRequest{}); err == nil {
 		t.Fatal("expected missing unit id to fail")
@@ -773,10 +770,7 @@ func TestProcessPoolExecuteIntoUsesCallerOwnedOutput(t *testing.T) {
 	pool := &ProcessPool{
 		exchangeTimeout: DefaultProcessExchangeTimeout,
 		allWorkers:      []*processWorker{worker},
-		bufferPool: sync.Pool{New: func() any {
-			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
-			return &buffer
-		}},
+		bufferPool:      sync.Pool{New: newPooledBuffer},
 	}
 	dst := make([]byte, generated.OUTPUT_MAX_BYTES)
 	response, err := pool.ExecuteInto(context.Background(), ProcessRequest{UnitID: "runtime.echo", Input: []byte("owned")}, dst)

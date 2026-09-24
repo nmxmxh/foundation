@@ -5,6 +5,7 @@ import {
 } from "../generated/runtimeBuffer";
 import { type PulseDiagnostics, type PulseMode } from "../types";
 import { getRuntimeCapabilities } from "./runtimeCaps";
+import { RuntimeMemoryRegion, type RuntimeBuffer } from "../memoryRegion";
 
 type EpochHandler = (value: number, index: number) => void;
 
@@ -15,7 +16,7 @@ type PulseManagerOptions = {
 };
 
 type PulseMessage =
-  | { type: "INIT"; payload: { buffer: SharedArrayBuffer } }
+  | { type: "INIT"; payload: { buffer: SharedArrayBuffer; byteOffset: number } }
   | { type: "STOP" }
   | { type: "SET_TPS"; payload: { tps: number } }
   | { type: "SET_VISIBILITY"; payload: { visible: boolean } }
@@ -54,7 +55,7 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
   let visible = true;
   let worker: Worker | null = null;
   let mainThreadTimer: number | null = null;
-  let buffer: SharedArrayBuffer | null = null;
+  let buffer: RuntimeMemoryRegion | null = null;
   let visibilityHandlersInstalled = false;
 
   const emitDiagnostics = () => {
@@ -74,7 +75,7 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
     if (!buffer) {
       return null;
     }
-    return new Int32Array(buffer, 0, EPOCH_SLOT_COUNT);
+    return buffer.ints.subarray(0, EPOCH_SLOT_COUNT);
   };
 
   const notifyHandlers = (index: number, value: number) => {
@@ -187,8 +188,8 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
   };
 
   return {
-    start(nextBuffer: SharedArrayBuffer) {
-      buffer = nextBuffer;
+    start(nextBuffer: RuntimeBuffer) {
+      buffer = nextBuffer instanceof RuntimeMemoryRegion ? nextBuffer : new RuntimeMemoryRegion(nextBuffer, 0, nextBuffer.byteLength);
       const epochs = epochView();
       if (epochs) {
         for (const index of handlers.keys()) {
@@ -197,7 +198,9 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
       }
       installVisibilityHandlers();
 
-      if (!capabilities.supportsWorkerPulse) {
+      if (!capabilities.supportsWorkerPulse || !buffer.shared) {
+        worker?.terminate();
+        worker = null;
         degraded = true;
         mode = "main-thread";
         startMainThreadLoop();
@@ -221,7 +224,7 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
       if (worker) {
         const initMessage: PulseMessage = {
           type: "INIT",
-          payload: { buffer: nextBuffer },
+          payload: { buffer: buffer.buffer as SharedArrayBuffer, byteOffset: buffer.byteOffset },
         };
         worker.postMessage(initMessage);
 

@@ -300,10 +300,7 @@ func NewProcessPool(opts ProcessPoolOptions) (*ProcessPool, error) {
 		logger:          opts.Logger,
 		exchangeTimeout: opts.ExchangeTimeout,
 		transport:       transportSupport,
-		bufferPool: sync.Pool{New: func() any {
-			buffer := make([]byte, generated.BUFFER_TOTAL_BYTES)
-			return &buffer
-		}},
+		bufferPool:      sync.Pool{New: newPooledBuffer},
 	}
 	if transportSupport.Fallback {
 		opts.Logger.Warn("native runtime transport fallback enabled", "reason", transportSupport.Reason)
@@ -380,20 +377,18 @@ func (p *ProcessPool) execute(ctx context.Context, req ProcessRequest, dst []byt
 		ctx = context.Background()
 	}
 
-	rawPtr := p.bufferPool.Get().(*[]byte)
-	raw := *rawPtr
+	buffer, _ := p.bufferPool.Get().(*Buffer)
+	if buffer == nil {
+		return ProcessResponse{}, errors.New("process runtime buffer pool is not initialized")
+	}
+	raw := buffer.RawBytes()
 	recycleBuffer := true
 	defer func() {
 		if !recycleBuffer {
 			return
 		}
-		*rawPtr = raw
-		p.bufferPool.Put(rawPtr)
+		p.bufferPool.Put(buffer)
 	}()
-	buffer, err := NewBuffer(raw)
-	if err != nil {
-		return ProcessResponse{}, err
-	}
 	buffer.Reset()
 	buffer.Initialize(req.ModuleVersion)
 	if err := buffer.SetHeaderInt(generated.INT_IDX_CONTEXT_HASH, req.ContextHash); err != nil {

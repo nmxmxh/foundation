@@ -1,0 +1,48 @@
+     Locking 2 packages to latest compatible versions
+      Adding arc-swap v1.9.2
+      Adding rustversion v1.0.22
+   Compiling rustversion v1.0.22
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling arc-swap v1.9.2
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+   Compiling ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-native)
+   Compiling ovasabi-runtime-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-native/rust)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.42s
+     Running unittests src/lib.rs (runtime-native/rust/target/debug/deps/ovasabi_runtime_native-8cbb676ac4d3dfad)
+
+running 25 tests
+test native_gpu::tests::owner_scope_is_bounded ... ok
+test native_gpu::tests::platform_handle_must_match_descriptor_platform ... ok
+test native_gpu::tests::record_limit_is_enforced ... ok
+test native_gpu::tests::invalid_descriptor_is_rejected_before_registry_insert ... ok
+test native_gpu::tests::pending_fence_blocks_final_release_until_signaled ... ok
+test native_gpu::tests::duplicate_descriptor_id_is_rejected ... ok
+test native_gpu::tests::materialization_plan_returns_public_fallback_only ... ok
+test native_gpu::tests::acquire_and_release_preserve_owner_scope_and_ref_counts ... ok
+test native_gpu::tests::registers_descriptor_without_exposing_platform_handle ... ok
+test native_gpu::tests::registers_plugin_opaque_handle_without_exposing_token ... ok
+test native_gpu::tests::rejects_invalid_unix_fd_plane_count ... ok
+test native_gpu::tests::registers_unix_fd_handle_without_exposing_fd ... ok
+test native_gpu::tests::rejects_owner_scope_mismatch ... ok
+test tests::app_declared_backends_are_reported_honestly ... ok
+test tests::native_frame_rejects_oversized_inputs ... ok
+test tests::native_capabilities_report_runtime_lanes ... ok
+test tests::native_frame_rejects_mismatched_metadata_length ... ok
+test tests::native_frame_rejects_unsupported_encoding ... ok
+test tests::native_frame_rejects_unsupported_schema_version ... ok
+test tests::native_frame_roundtrips_without_json_materialization ... ok
+test tests::runtime_bridge_dispatches_allowlisted_units ... ok
+test tests::runtime_bridge_enforces_unit_allowlist ... ok
+test tests::secure_store_rejects_invalid_keys ... ok
+test tests::secure_store_roundtrips_without_frontend_storage ... ok
+test tests::secure_store_rejects_oversized_values_and_entry_exhaustion ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovasabi_runtime_native
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

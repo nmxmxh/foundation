@@ -1,0 +1,851 @@
+.......
+----------------------------------------------------------------------
+Ran 7 tests in 0.115s
+
+OK
+✔ upgrades existing Vite and Vitest plugins and remains idempotent (297.992417ms)
+✔ installs a missing plugin and preserves custom optimizer dependencies (285.859833ms)
+✔ preserves both existing project fixes and configuration factories (426.934833ms)
+✔ reports dynamic or conflicting configuration without partial edits (1272.168666ms)
+✔ upgrades only the known Rust build target and preserves unrelated targets (116.154708ms)
+✔ targeted managed patches record their changes and avoid unrelated patches (265.84325ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2716.694833
+✔ retires the shim, build wiring, and Go artifacts while preserving Rust (200.068833ms)
+✔ custom sources, recipes, and remaining consumers prevent partial retirement (164.015583ms)
+✔ new scaffolds never include the retired source or build targets (0.557ms)
+✔ artifact manifests omit retired Go artifacts (42.526416ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 458.426834
+[STEP] update legacy fixture from current foundation
+[STEP] run updated project scaffold checks
+[OK] foundation metadata
+[OK] manifest baseline generation
+[OK] native project identifier format
+[OK] foundation directory is local
+[OK] cursor rules
+[OK] agents guide
+[OK] post-init checklist
+[OK] foundation guide
+[OK] foundation architecture contract
+[OK] foundation tour
+[OK] agent operating contract
+[OK] practice controls doc
+[OK] AI threat model doc
+[OK] performance lab doc
+[OK] projection freshness contract doc
+[OK] future practices research ledger
+[OK] TLA worker retry queue template
+[OK] TLA cache projection freshness template
+[OK] TLA WebSocket backpressure template
+[OK] foundation scaffold manifest guide
+[OK] coding practices
+[OK] testing practices
+[OK] post quantum security posture
+[OK] agents guide references agent contract
+[OK] project README references agent-native workflow
+[OK] project Makefile exposes docs reference check
+[OK] project Makefile exposes lifecycle manifest check
+[OK] project Makefile exposes app security profile check
+[OK] project Makefile exposes docker-redeploy target
+[OK] project Makefile sources project-owned Makefile.local
+[OK] project-owned Makefile.local seed
+[OK] golangci baseline
+[OK] golangci resource lint baseline
+[OK] agent contract check
+[OK] docs reference check
+[OK] practice controls check
+[OK] lifecycle manifest check
+[OK] lifecycle manifest generator
+[OK] app security profile check
+[OK] app-owned security profile
+[OK] runtime performance contract check
+[OK] formal methods check
+[OK] operational excellence check
+[OK] coding practices check
+[OK] testing practices check
+[OK] go fix modernization check
+[OK] go static analysis check
+[OK] local toolchain environment check helper
+[OK] go concurrency practices check
+[OK] frontend script runner
+[OK] logging practices check
+[OK] metadata practices check
+[OK] dynamic payload practices check
+[OK] river practices check
+[OK] server-kit module contract check
+[OK] server-kit usage check
+[OK] project scaffold check
+[OK] ci workflow
+[OK] security workflow
+[OK] operations bootstrap
+[OK] incident record template
+[OK] migration log template
+[OK] ci uses Go 1.26 baseline
+[OK] security workflow uses Go 1.26 baseline
+[OK] ci runs Go coverage gate
+[OK] ci captures delivery metrics
+[OK] ci uploads delivery metrics artifact
+[OK] stale vendored foundation initializer
+[OK] stale vendored foundation updater
+[OK] unowned root pkg directory
+[OK] legacy internal domain directory
+[OK] stale root server-kit module
+[OK] stale root runtime-sdk module
+[OK] stale root runtime-transport module
+[OK] stale root config-contracts module
+[OK] service repositories avoid database/sql
+[OK] service handlers avoid embedded SQL
+[OK] service folders map to domain proto contracts
+[OK] server-kit module surface matches foundation manifest
+[OK] server command
+[OK] server command uses foundation httpserver
+[OK] project carries no divergent internal/server
+[OK] project carries no divergent backend/internal/server
+[OK] Go workspace
+[OK] Go workspace includes project module
+[OK] Go workspace includes foundation server-kit
+[OK] Go workspace includes foundation runtime transport
+[OK] Go workspace includes foundation config contracts
+[OK] worker command
+[OK] docgen command
+[OK] docgen helper tests
+[OK] Makefile exposes OpenAPI generation
+[OK] server serves API docs through Foundation
+[OK] server stores API docs handler
+[OK] server registers API docs endpoints
+[OK] server makes OpenAPI spec public
+[OK] server makes API docs UI public
+[OK] Docker server image generates OpenAPI spec
+[OK] Docker server image embeds OpenAPI spec
+[OK] Docker frontend build copies linked package foundation/runtime-transport/ts
+[OK] Docker frontend build copies linked package foundation/frontend-kit/ts
+[OK] Docker frontend build copies linked package foundation/ui-minimal/ts
+[OK] Docker frontend build copies linked package foundation/runtime-native/ts
+[OK] bootstrap declares the HTTP route catalogue
+[OK] server command installs the route catalogue
+[OK] server command sources routes from bootstrap catalogue
+[OK] docgen consumes the route catalogue
+[OK] docgen avoids empty route catalogue
+[OK] docgen avoids route TODO scaffold
+[OK] docgen avoids hand-maintained route collector
+[OK] server avoids hand-registering service routes
+[OK] worker helper tests
+[OK] startup package
+[OK] startup smoke tests
+[OK] bootstrap services container
+[OK] config scaffold tests
+[OK] server scaffold tests
+[OK] server middleware scaffold tests
+[OK] river worker registry
+[OK] river worker helper tests
+[OK] river worker registry tests
+[OK] river periodic jobs
+[OK] integration infra test
+[OK] integration Hermes hotplane test
+[OK] integration test DB helper
+[OK] Hermes integration covers Postgres rebuild
+[OK] Hermes integration covers Redis stream envelope
+[OK] Hermes integration uses typed record values
+[OK] Hermes integration uses typed Redis stream values
+[OK] Hermes integration avoids removed RecordDataFromMap helper
+[OK] Hermes integration avoids removed RecordQueryFromMap helper
+[OK] managed test env defaults
+[OK] managed test infra required flag
+[OK] testutil scaffold tests
+[OK] managed recurring load test harness
+[OK] load tests are opt-in
+[OK] load tests cover Redis path
+[OK] load tests cover DB write path
+[OK] load tests expose River queue state
+[OK] load tests report latency distribution
+[OK] load tests prewarm measured steps
+[OK] load tests prepare write table outside hot loop
+[OK] load tests avoid nolint suppressions
+[OK] load tests avoid weak random traffic mix
+[OK] load tests avoid hot-loop temp table DDL
+[OK] make integration target
+[OK] make local full target
+[OK] make local services target
+[OK] make local full covers infrastructure
+[OK] make local services marks opt-in evidence
+[OK] make coverage target
+[OK] make coverage threshold
+[OK] make load target
+[OK] make benchmark target
+[OK] make test database URL
+[OK] make test Redis URL
+[OK] make auto-selects PostGIS test image when migrations need it
+[OK] make supports service-scoped PostGIS test image platform
+[OK] env test database URL
+[OK] env test Redis URL
+[OK] env DB pool budget
+[OK] env Hermes scope record bound
+[OK] env Hermes scope byte bound
+[OK] env DB query budget
+[OK] migration includes durable event log
+[OK] migration keeps event log typed
+[OK] migration includes event log publish claim lease
+[OK] migration separates logs from durable facts
+[OK] env Postgres 18 baseline
+[OK] env Redis pool budget
+[OK] env Redis shard extension
+[OK] env Redis read timeout
+[OK] env runtime shared memory mode
+[OK] env post quantum TLS mode
+[OK] foundation server-kit
+[OK] foundation service-backed core harness
+[OK] foundation metrics module
+[OK] foundation grpc service module
+[OK] foundation direct frame dispatch client
+[OK] foundation binary frame registration
+[OK] foundation borrowed frame view
+[OK] foundation typed frame handler projection
+[OK] foundation runtime initializes frame router
+[OK] foundation lane-aware DB pool defaults
+[OK] foundation Redis sharded client options
+[OK] foundation worker cascades use bounded detached context
+[OK] foundation worker bridge injects correlation
+[OK] foundation pgx pool options helper
+[OK] foundation trace handler
+[OK] foundation delivery metrics practice
+[OK] delivery metrics collector
+[OK] foundation River job metadata cascades with jobs
+[OK] foundation performance check script
+[OK] foundation practice controls matrix
+[OK] foundation practice controls check script
+[OK] foundation runtime performance contract check script
+[OK] foundation formal methods check script
+[OK] foundation operational excellence check script
+[OK] foundation Rust static analysis script
+[OK] foundation Rust runtime practices script
+[OK] project combined Rust check script
+[OK] project Rust static analysis script
+[OK] project Rust runtime practices script
+[OK] foundation Vitest Node runtime runner
+[OK] foundation lifecycle contract generator
+[OK] foundation hermes snapshot tier
+[OK] foundation hermes snapshot writer
+[OK] foundation objectstore snapshot store
+[OK] foundation parallel chain module
+[OK] foundation chaos module
+[OK] foundation contract testing module
+[OK] foundation profiling module
+[OK] foundation SLO module
+[OK] foundation portable disk health check
+[OK] foundation healthcheck avoids common syscall statfs
+[OK] make agent contract check target
+[OK] make practice controls check target
+[OK] make runtime performance contract target
+[OK] make formal methods target
+[OK] make operational excellence target
+[OK] make server-kit usage check target
+[OK] make Go concurrency review target
+[OK] make logging practices target
+[OK] make testing practices target
+[OK] coding check enforces internal frame/protobuf lane
+[OK] testing check blocks focused TypeScript tests
+[OK] agent check enforces evidence ledger
+[OK] practice controls check maps CP rules
+[OK] runtime performance check maps pprof and trace
+[OK] formal methods check maps TLA templates
+[OK] operational excellence check maps DORA SPACE SLSA
+[OK] logging check blocks raw slog drift
+[OK] logging check requires Foundation declarative logger install
+[OK] dynamic payload check blocks map any in product hot paths
+[OK] lint-foundation includes go fix modernization
+[OK] make exposes combined Rust check target
+[OK] lint-foundation includes Go static analysis
+[OK] lint-foundation includes Rust static analysis
+[OK] lint-foundation includes Rust runtime practices
+[OK] lint-foundation includes logging practices
+[OK] lint-foundation includes metadata practices
+[OK] lint-foundation includes dynamic payload practices
+[OK] lint-foundation includes server-kit module contract
+[OK] make resolves Docker CLI centrally
+[OK] make isolates test Compose project
+[OK] make uses isolated test Compose project
+[OK] integration tests clean started Docker test env
+[OK] test env cleanup removes orphan containers
+[OK] make delegates frontend scripts to Foundation runner
+[OK] make leaves Vitest worker count unforced by default
+[OK] make serializes frontend tests by default
+[OK] server-kit check rejects internal JSON grpc dispatch
+[OK] server-kit check rejects legacy map handler bridges
+[OK] server-kit check rejects map-return object handlers
+[OK] server-kit check rejects ObjectResult bridges
+[OK] server-kit check rejects generated typed wrappers
+[OK] server-kit check rejects app adapter shapes
+[OK] startup installs Foundation logger
+[OK] startup installs Foundation runtime logger
+[OK] startup declares Foundation runtime logger scope
+[OK] server uses Foundation logger type
+[OK] middleware injects log metadata
+[OK] middleware propagates correlation header
+[OK] startup logs database and Hermes readiness
+[OK] startup logs Redis event bus readiness
+[OK] startup initializes server-kit resilience
+[OK] startup registers server-kit resilience dependencies
+[OK] startup initializes mandatory Hermes
+[OK] startup exposes Hermes dependency
+[OK] startup registers Hermes health
+[OK] server logs listening state
+[OK] server logs route registration
+[OK] server-kit usage check in foundation lint
+[OK] make lifecycle contract generation target
+[OK] make delivery metrics target
+[OK] worker uses foundation pool options
+[OK] worker uses background DB lane
+[OK] worker propagates DB acquire timeout
+[OK] worker default queue concurrency is configurable
+[OK] worker processing queue concurrency is configurable
+[OK] worker scheduled queue concurrency is configurable
+[OK] server exposes correlation trace endpoint
+[OK] server wires CORS middleware
+[OK] server uses configured CORS origins
+[OK] server avoids wildcard CORS default
+[OK] server protects operational endpoints
+[OK] websocket reserves capacity before upgrade
+[OK] websocket registration uses reserved capacity slots
+[OK] websocket queue full records failed message metric
+[OK] server tests cover websocket capacity rejection
+[OK] server tests cover reserved websocket registration
+[OK] server tests cover websocket backpressure metric
+[OK] load tests bound pre/post infrastructure probes
+[OK] config loads allowed origins
+[OK] config loads explicit Redis URL
+[OK] config defaults auth on in production
+[OK] env documents operational endpoint protection
+[OK] foundation runtime transport
+[OK] foundation proto envelope
+[OK] foundation proto projection
+[OK] foundation proto metadata
+[OK] foundation shared types proto
+[OK] foundation projection proto supports patch
+[OK] foundation config contracts
+[OK] foundation tooling
+[OK] api README
+[OK] proto README
+[OK] scaffolded Foundation proto envelope
+[OK] scaffolded Foundation proto metadata
+[OK] scaffolded Foundation proto projection
+[OK] scaffolded Foundation shared types proto
+[OK] Foundation metadata owns actor type
+[OK] Foundation metadata owns policy snapshot
+[OK] Foundation metadata owns legal basis
+[OK] Foundation metadata owns requested timestamp
+[OK] Foundation shared types own pagination
+[OK] Foundation shared types own money
+[OK] scaffolded projection proto supports patch
+[OK] scaffolded Foundation Cap'n Proto envelope schema
+[OK] legacy scaffolded transport proto directory
+[OK] legacy scaffolded Hermes proto directory
+[OK] app-local common proto namespace
+[OK] app-local common schema namespace
+[OK] proto README documents lifecycle generator
+[OK] Dockerfile
+[OK] docker-compose.yml
+[OK] Dockerfiles avoid removed nginx-brotli image
+[OK] Redis config image baseline is Redis 8
+[OK] compose Postgres service
+[OK] compose avoids bare postgres service alias
+[OK] compose Postgres 18 mounts parent data directory
+[OK] compose Postgres 18 avoids legacy data mount
+[OK] compose server receives DB host
+[OK] compose migrate defaults to Compose Postgres host
+[OK] compose migrate waits for Postgres
+[OK] compose migrate rejects container-local DATABASE_URL
+[OK] compose frontend avoids direct Postgres dependency
+[OK] docker-compose.dev.yml
+[OK] dev Postgres 18 mounts parent data directory
+[OK] dev Postgres 18 avoids legacy data mount
+[OK] docker ignore
+[OK] compose Docker cache namespace
+[OK] nginx template
+[OK] nginx config
+[OK] nginx COOP header
+[OK] nginx COEP header
+[OK] nginx CORP header
+[OK] nginx wasm compression types
+[OK] Dockerfile.migrate
+[OK] docker-compose.test.yml
+[OK] test Postgres image override
+[OK] test Postgres service-scoped platform override
+[OK] test Redis image override
+[OK] test Postgres host port defaults to Docker ephemeral allocation
+[OK] test Redis host port defaults to Docker ephemeral allocation
+[OK] test compose avoids fixed container names
+[OK] test Postgres 18 mounts parent data directory
+[OK] test Postgres 18 avoids legacy data mount
+[OK] Makefile test DB port defaults to ephemeral allocation
+[OK] Makefile test Redis port defaults to ephemeral allocation
+[OK] Makefile records resolved test Postgres port
+[OK] Makefile records resolved test Redis port
+[OK] shared Docker Go module cache
+[OK] shared Docker Go build cache
+[OK] Docker dependency stage
+[OK] Postgres config image Dockerfile
+[OK] Redis config image Dockerfile
+[OK] Postgres Dockerfile bakes config
+[OK] Postgres Dockerfile bakes hba
+[OK] Redis Dockerfile bakes config
+[OK] Compose supplies a configured Postgres image
+[OK] Compose builds Redis config image
+[OK] Compose uses baked Postgres hba
+[OK] Compose migration fails auth after grace window
+[OK] Compose avoids Postgres config bind
+[OK] Compose avoids Redis config bind
+[OK] Compose avoids default CA bind
+[OK] Docker deps copy runtime-sdk go.mod
+[OK] Docker copies runtime-native package manifest
+[OK] Docker copies runtime-native source
+[OK] frontend lock absent before npm install
+[OK] postgresql config
+[OK] Postgres hba config
+[OK] redis config
+[OK] postgres timeout guardrail
+[OK] postgres WAL headroom baseline
+[OK] postgres WAL floor baseline
+[OK] postgres checkpoint cadence baseline
+[OK] postgres autovacuum guardrail
+[OK] postgres autovacuum work memory baseline
+[OK] postgres async I/O baseline
+[OK] postgres I/O observability baseline
+[OK] Postgres hba supports local operator recovery
+[OK] Postgres hba permits Compose network SCRAM clients
+[OK] redis LFU eviction guardrail
+[OK] redis io thread baseline
+[OK] redis ephemeral persistence baseline
+[OK] frontend package
+[OK] frontend tsconfig
+[OK] frontend app tsconfig
+[OK] frontend node tsconfig
+[OK] frontend eslint
+[OK] frontend vite config
+[OK] vite COOP header
+[OK] vite COEP header
+[OK] vite websocket proxy
+[OK] frontend vitest config
+[OK] vite preserves workspace package symlinks
+[OK] vitest preserves workspace package symlinks
+[OK] tsconfig preserves workspace package symlinks
+[OK] vite does not alias ui-minimal source
+[OK] vite does not alias runtime-transport source
+[OK] vitest does not alias ui-minimal source
+[OK] vitest does not alias runtime-transport source
+[OK] frontend vite env
+[OK] frontend test setup
+[OK] frontend prototype store bootstrap
+[OK] frontend prototype context factory
+[OK] frontend prototype generated stores
+[OK] frontend prototype persistence binding
+[OK] frontend prototype persistence hydrate
+[OK] frontend preview script
+[OK] frontend test script
+[OK] frontend test watch script
+[OK] frontend router dependency
+[OK] frontend Linaria dependency
+[OK] frontend zustand dependency
+[OK] frontend jsdom dependency
+[OK] frontend testing library react
+[OK] frontend testing library jest dom
+[OK] frontend testing library user event
+[OK] frontend runtime transport package
+[OK] frontend kit package
+[OK] frontend ui minimal package
+[OK] make proto-ts target
+[OK] make frontend prototype runtime target
+[OK] build frontend depends on prototype runtime
+[OK] test frontend depends on prototype runtime
+[OK] lint frontend depends on prototype runtime
+[OK] frontend benchmark target depends on prototype runtime
+[OK] frontend benchmark target captures workbench profile
+[OK] make wasm test target rebuilds runtime
+[OK] wasm optimizer enables non-trapping float-to-int
+[OK] make e2e target regenerates contracts
+[OK] make e2e target supports explicit frontend script
+[OK] make e2e target supports test e2e script
+[OK] make foundation transport proto target
+[OK] make communication contract aggregate
+[OK] communication contracts include frontend prototype runtime
+[OK] proto-ts writes generated app contracts
+[OK] rust clippy baseline
+[OK] rustfmt baseline
+[OK] runtime sdk
+[OK] runtime shared arena schema
+[OK] runtime shared arena host API
+[OK] runtime payload router API
+[OK] runtime ffi portable string helpers
+[OK] runtime ffi macro exports ovrt-core
+[OK] runtime ffi pool reuses fixed buffer
+[OK] runtime ffi pool uses backend seam
+[OK] runtime transport compression API
+[OK] runtime offline queue API
+[OK] foundation runtime-native Rust crate
+[OK] foundation runtime-native TS package
+[OK] runtime transport supports native lane
+[OK] native package
+[OK] native Tauri config
+[OK] native Tauri dev config
+[OK] native Tauri prod config
+[OK] native Tauri icon asset
+[OK] native Tauri Rust manifest
+[OK] native Tauri capability
+[OK] native capability examples
+[OK] native active capability list is explicit
+[OK] native dev uses config overlay
+[OK] native build uses prod config overlay
+[OK] native package exposes tauri script for mobile build phases
+[OK] native tauri.conf.json hook resolves frontend from native/
+[OK] native tauri.dev.conf.json hook resolves frontend from native/
+[OK] native tauri.prod.conf.json hook resolves frontend from native/
+[OK] native dev CSP allows Vite websocket
+[OK] native dev CSP allows inline styles
+[OK] native prod CSP forbids Vite websocket
+[OK] native shell sets Cross-Origin-Opener-Policy
+[OK] native shell sets Cross-Origin-Embedder-Policy
+[OK] native prod CSP forbids inline scripts
+[OK] native prod CSP forbids inline styles
+[OK] native README documents frontend layout
+[OK] native command dispatch
+[OK] native command ACL manifest
+[OK] native capability allows runtime dispatch explicitly
+[OK] native capability avoids broad core defaults
+[OK] native scaffold does not expose ephemeral storage as a vault
+[OK] native scaffold avoids startup expect
+[OK] native uses runtime-native crate
+[OK] native scaffold pins Tauri exactly
+[OK] make native dev target
+[OK] make native benchmark target
+[OK] native benchmark script
+[OK] frontend vitest config honors worker cap
+[OK] frontend vitest config honors serial mode
+[OK] frontend runtime native package
+project scaffold check passed
+[OK] agent operating contract doc
+[OK] foundation quick start doc
+[OK] future practices research doc
+[OK] foundation docs index
+[OK] docs index links quick start
+[OK] docs index links agent contract
+[OK] docs index links future practices research
+[OK] quick start names common mistakes
+[OK] quick start names typed payload regression
+[OK] agent contract defines definition of done
+[OK] agent contract defines evidence ledger
+[OK] agent contract defines memory sources
+[OK] agent contract defines succession continuity
+[OK] agent contract names lifecycle manifest
+[OK] agent contract names app security profile
+[OK] research ledger maps document gaps
+[OK] architecture contract defines profiles
+[OK] coding practices require JSON compatibility regression guard
+[OK] agents guide
+[OK] agents guide links agent contract
+[OK] agents guide carries definition of done
+[OK] Claude guide links agent contract
+[OK] root README
+[OK] root README describes agent-native workflow
+[OK] Makefile
+[OK] Makefile exposes agent contract check
+[OK] domain guide links agent contract
+[OK] post-init checklist links agent contract
+[OK] references README index
+[OK] references animation directory
+[OK] references lifecycle directory
+[OK] lifecycle contract json
+[OK] lifecycle contract guide
+[OK] foundation docs avoid product security postures
+[OK] scaffolded agent contract check
+agent contract check passed
+[OK] practice controls matrix exists
+[OK] practice controls matrix header
+[OK] control mapped TE-19
+[OK] control mapped CP-35
+[OK] control mapped CP-13
+[OK] control mapped CP-36
+[OK] control mapped CP-14
+[OK] control mapped CP-37
+[OK] control mapped CP-15
+[OK] control mapped AISEC-01
+[OK] control mapped CP-38
+[OK] control mapped CP-16
+[OK] control mapped CP-39
+[OK] control mapped CP-17
+[OK] control mapped CP-18
+[OK] control mapped CP-19
+[OK] control mapped FORMAL-01
+[OK] control mapped CTRL-01
+[OK] control mapped TE-40
+[OK] control mapped TE-41
+[OK] control mapped TE-42
+[OK] control mapped TE-20
+[OK] control mapped TE-21
+[OK] control mapped TE-22
+[OK] control mapped TE-23
+[OK] control mapped TE-01
+[OK] control mapped TE-24
+[OK] control mapped TE-02
+[OK] control mapped CP-40
+[OK] control mapped TE-25
+[OK] control mapped TE-03
+[OK] control mapped CP-41
+[OK] control mapped PERFLAB-01
+[OK] control mapped EVID-01
+[OK] control mapped TE-26
+[OK] control mapped TE-04
+[OK] control mapped CP-42
+[OK] control mapped CP-20
+[OK] control mapped TE-27
+[OK] control mapped TE-05
+[OK] control mapped CP-43
+[OK] control mapped CP-21
+[OK] control mapped OPS-01
+[OK] control mapped TE-28
+[OK] control mapped TE-06
+[OK] control mapped CP-44
+[OK] control mapped CP-22
+[OK] control mapped TE-29
+[OK] control mapped TE-07
+[OK] control mapped CP-01
+[OK] control mapped CP-23
+[OK] control mapped RUNTIME-01
+[OK] control mapped TE-08
+[OK] control mapped CP-02
+[OK] control mapped CP-10A
+[OK] control mapped CP-24
+[OK] control mapped TE-09
+[OK] control mapped CP-03
+[OK] control mapped CP-25
+[OK] control mapped CP-04
+[OK] control mapped CP-26
+[OK] control mapped CP-05
+[OK] control mapped CP-27
+[OK] control mapped CP-06
+[OK] control mapped CP-28
+[OK] control mapped CP-07
+[OK] control mapped CP-29
+[OK] control mapped CP-08
+[OK] control mapped CP-09
+[OK] control mapped FPR-01
+[OK] control mapped TE-30
+[OK] control mapped TE-31
+[OK] control mapped TE-32
+[OK] control mapped TE-10
+[OK] control mapped TE-33
+[OK] control mapped TE-11
+[OK] control mapped AOC-01
+[OK] control mapped TE-34
+[OK] control mapped TE-12
+[OK] control mapped CP-07B
+[OK] control mapped TE-35
+[OK] control mapped TE-13
+[OK] control mapped TE-36
+[OK] control mapped TE-14
+[OK] control mapped CP-30
+[OK] control mapped MATH-01
+[OK] control mapped TE-37
+[OK] control mapped TE-15
+[OK] control mapped CP-31
+[OK] control mapped PROJFRESH-01
+[OK] control mapped TE-38
+[OK] control mapped TE-16
+[OK] control mapped CP-32
+[OK] control mapped CP-10
+[OK] control mapped TE-39
+[OK] control mapped TE-17
+[OK] control mapped CP-33
+[OK] control mapped CP-11
+[OK] control mapped TE-18
+[OK] control mapped CP-34
+[OK] control mapped CP-11A
+[OK] control mapped CP-12
+practice controls check passed
+[OK] low-level performance lab doc
+[OK] performance practices doc
+[OK] GPU practices doc
+[OK] Rust runtime practices doc
+[OK] performance lab names CPU counter taxonomy
+[OK] performance lab names Go pprof and trace
+[OK] performance lab names Rust Miri and Loom
+[OK] performance lab names WebGPU/WGSL
+[OK] performance lab names CUDA and capture tools
+[OK] performance practices separates hard bounds from statistics
+[OK] GPU practices require capture bundle schema
+[OK] performance runner supports profile directory
+[OK] performance runner emits machine metadata
+[OK] performance runner supports runtime trace capture
+[OK] performance runner captures Go traces
+[OK] performance runner captures block profiles
+[OK] performance runner captures mutex profiles
+[OK] performance runner supports hardware counter lane
+[OK] performance runner resolves generated app module layout
+[OK] performance runner resolves runtime-sdk module path
+[OK] performance runner resolves Vitest runner
+[OK] performance runner resolves frontend-kit module path
+[OK] performance runner captures frontend workbench profile
+[OK] frontend profile captures PROFILE metrics
+[OK] frontend profile writes benchmark results
+[OK] Vitest runner supports GC-exposed profile runs
+[OK] benchmark history captures frontend profile metrics
+[OK] Rust runtime script exposes Miri opt-in
+[OK] Rust runtime script exposes Loom opt-in
+[OK] Makefile defines -race test gate
+[OK] race gate runs the detector
+[OK] verify enforces the -race gate
+[OK] Makefile defines Loom interleaving gate
+runtime performance contract check passed
+[OK] TLA architecture practices doc
+[OK] formal doc names PlusCal
+[OK] formal doc names Alloy
+[OK] formal doc names P state machines
+[OK] formal doc names deterministic simulation
+[OK] formal doc requires queue spec template
+[OK] formal doc requires cache/projection spec template
+[OK] formal doc requires WebSocket spec template
+[OK] TLA spec template directory
+[OK] TLA spec template index
+[OK] TLA spec WorkerRetryQueue
+[OK] WorkerRetryQueue defines Init
+[OK] WorkerRetryQueue defines Next
+[OK] WorkerRetryQueue defines TypeOK
+[OK] WorkerRetryQueue defines Spec
+[OK] WorkerRetryQueue declares theorem/invariant
+[OK] TLA spec CacheProjectionFreshness
+[OK] CacheProjectionFreshness defines Init
+[OK] CacheProjectionFreshness defines Next
+[OK] CacheProjectionFreshness defines TypeOK
+[OK] CacheProjectionFreshness defines Spec
+[OK] CacheProjectionFreshness declares theorem/invariant
+[OK] TLA spec WebSocketBackpressure
+[OK] WebSocketBackpressure defines Init
+[OK] WebSocketBackpressure defines Next
+[OK] WebSocketBackpressure defines TypeOK
+[OK] WebSocketBackpressure defines Spec
+[OK] WebSocketBackpressure declares theorem/invariant
+[OK] TLA spec FrontendLiveProjection
+[OK] FrontendLiveProjection defines Init
+[OK] FrontendLiveProjection defines Next
+[OK] FrontendLiveProjection defines TypeOK
+[OK] FrontendLiveProjection defines Spec
+[OK] FrontendLiveProjection declares theorem/invariant
+[OK] TLA spec HermesProjectionPublish
+[OK] HermesProjectionPublish defines Init
+[OK] HermesProjectionPublish defines Next
+[OK] HermesProjectionPublish defines TypeOK
+[OK] HermesProjectionPublish defines Spec
+[OK] HermesProjectionPublish declares theorem/invariant
+[OK] TLA spec MetadataMerge
+[OK] MetadataMerge defines Init
+[OK] MetadataMerge defines Next
+[OK] MetadataMerge defines TypeOK
+[OK] MetadataMerge defines Spec
+[OK] MetadataMerge declares theorem/invariant
+[OK] WorkerRetryQueue has a runnable TLC config
+[OK] WorkerRetryQueue has a negative control
+[OK] CacheProjectionFreshness has a runnable TLC config
+[OK] CacheProjectionFreshness has a negative control
+[OK] WebSocketBackpressure has a runnable TLC config
+[OK] WebSocketBackpressure has a negative control
+[OK] FrontendLiveProjection has a runnable TLC config
+[OK] FrontendLiveProjection has a negative control
+[OK] HermesProjectionPublish has a runnable TLC config
+[OK] HermesProjectionPublish has a negative control
+[OK] MetadataMerge has a runnable TLC config
+[OK] MetadataMerge has a negative control
+[OK] Hermes spec asserts tear-free read invariant
+[OK] Hermes spec maps to atomic.Pointer publish
+[OK] MetadataMerge asserts Strong Eventual Consistency
+[OK] TLC execution is opt-in with FORMAL_RUN_TLC=1
+formal methods check passed
+[OK] delivery metrics practices doc
+[OK] delivery doc names DORA
+[OK] delivery doc names SPACE
+[OK] delivery doc names OpenTelemetry semantic conventions
+[OK] delivery doc names SLSA
+[OK] delivery doc names SBOM
+[OK] delivery doc names provenance
+[OK] metrics collector emits DORA block
+[OK] metrics collector emits SPACE block
+[OK] metrics collector emits observability block
+[OK] metrics collector emits supply-chain block
+[OK] metrics collector records OTel semconv version
+[OK] metrics collector records SBOM path
+[OK] metrics collector records SLSA provenance path
+[OK] security workflow generates SBOM
+[OK] security workflow emits SPDX JSON
+[OK] CI captures delivery metrics
+[OK] CI uploads delivery metrics artifact
+operational excellence check passed
+[OK] application code avoids raw slog imports
+[OK] application code avoids raw stdlib log imports
+[OK] application code avoids Zap imports
+[OK] application code avoids package-level raw logging calls
+[OK] application code avoids fallback logger construction
+[OK] application startup avoids unscoped default logger construction
+[OK] startup installs Foundation logger facade
+[OK] startup installs process default logger
+[OK] startup declares app runtime logger scope
+[OK] dependencies expose Foundation logger
+[OK] server uses Foundation logger facade
+[OK] middleware uses Foundation logger facade
+[OK] middleware writes correlation header
+[OK] middleware injects Foundation metadata
+[OK] middleware logs with request context
+[OK] Foundation logger facade
+[OK] Foundation logger handler
+[OK] Foundation logger async handler
+[OK] Foundation logger console handler
+[OK] Foundation logger compact wire handler
+[OK] logger exposes compact wire format
+[OK] logger exposes declarative runtime config
+[OK] logger exposes declarative installer
+[OK] logger exposes context-aware methods
+[OK] logger tracks async drops
+[OK] logger enriches metadata context
+[OK] logger redacts sensitive keys
+[OK] logger redacts authorization
+[OK] logger redacts password
+[OK] logger bounds string payloads
+[OK] logger tests redaction and context enrichment
+[OK] logger tests compact wire output
+[OK] Foundation durable event log package
+[OK] event log stores binary envelopes
+[OK] event log publishes pending facts
+[OK] event log writes Redis stream envelope field
+[OK] event log does not import operational logging packages
+[OK] Hermes consumes typed projection facts
+[OK] Hermes rejects text log payloads
+[OK] Hermes accepts terminal facts only
+[OK] Hermes does not import operational logging packages
+logging practices check passed
+[OK] worker command
+[OK] worker registry
+[OK] periodic job registry
+[OK] river module dependency
+[OK] river pgx driver dependency
+[OK] worker initializes River client
+[OK] worker uses pgx River driver
+[OK] worker has bounded shutdown
+[OK] worker registry exposes RegisterAll
+[OK] worker registry exposes DefaultQueueConfig
+[OK] queue limits are configurable
+[OK] no sleep-based worker polling
+[OK] avoid raw client.InsertMany for unique jobs
+[OK] no hand-rolled river_job deletion
+[OK] recurring UniqueOpts scope ByState explicitly
+river practices check passed
+foundation update-project test passed
+docs reference check passed

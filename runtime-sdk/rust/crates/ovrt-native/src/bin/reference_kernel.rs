@@ -57,8 +57,16 @@ impl RuntimeUnit for EchoUnit {
         }
     }
 
-    fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-        Ok(input.iter().map(|byte| byte.to_ascii_uppercase()).collect())
+    fn execute(
+        &self,
+        input: &[u8],
+        __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+    ) -> Result<(), String> {
+        let __ovrt_run = || -> Result<Vec<u8>, String> {
+            Ok(input.iter().map(|byte| byte.to_ascii_uppercase()).collect())
+        };
+        let __ovrt_result = __ovrt_run()?;
+        __ovrt_output.write_owned(__ovrt_result)
     }
 }
 
@@ -84,23 +92,31 @@ impl RuntimeUnit for BusyUnit {
         }
     }
 
-    fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-        let micros = if input.len() >= 4 {
-            u32::from_le_bytes([input[0], input[1], input[2], input[3]])
-        } else {
-            0
-        };
-        if micros > 0 {
-            let deadline =
-                std::time::Instant::now() + std::time::Duration::from_micros(u64::from(micros));
-            // A spin, not a sleep. A kernel that slept would yield its core to
-            // the host's own spin and measure a contention pattern that does
-            // not occur when the kernel is actually computing.
-            while std::time::Instant::now() < deadline {
-                std::hint::spin_loop();
+    fn execute(
+        &self,
+        input: &[u8],
+        __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+    ) -> Result<(), String> {
+        let __ovrt_run = || -> Result<Vec<u8>, String> {
+            let micros = if input.len() >= 4 {
+                u32::from_le_bytes([input[0], input[1], input[2], input[3]])
+            } else {
+                0
+            };
+            if micros > 0 {
+                let deadline =
+                    std::time::Instant::now() + std::time::Duration::from_micros(u64::from(micros));
+                // A spin, not a sleep. A kernel that slept would yield its core to
+                // the host's own spin and measure a contention pattern that does
+                // not occur when the kernel is actually computing.
+                while std::time::Instant::now() < deadline {
+                    std::hint::spin_loop();
+                }
             }
-        }
-        Ok(input.to_vec())
+            Ok(input.to_vec())
+        };
+        let __ovrt_result = __ovrt_run()?;
+        __ovrt_output.write_owned(__ovrt_result)
     }
 }
 

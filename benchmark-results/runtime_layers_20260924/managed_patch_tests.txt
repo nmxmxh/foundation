@@ -1,0 +1,18 @@
+✔ upgrades existing Vite and Vitest plugins and remains idempotent (328.194333ms)
+✔ installs a missing plugin and preserves custom optimizer dependencies (264.535875ms)
+✔ preserves both existing project fixes and configuration factories (394.249083ms)
+✔ reports dynamic or conflicting configuration without partial edits (1163.177583ms)
+✔ upgrades only the known Rust build target and preserves unrelated targets (109.642375ms)
+✔ targeted managed patches record their changes and avoid unrelated patches (262.047083ms)
+✔ retires the shim, build wiring, and Go artifacts while preserving Rust (158.892667ms)
+✔ custom sources, recipes, and remaining consumers prevent partial retirement (176.183583ms)
+✔ new scaffolds never include the retired source or build targets (0.441ms)
+✔ artifact manifests omit retired Go artifacts (42.918083ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2575.463083

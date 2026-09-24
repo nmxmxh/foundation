@@ -9,16 +9,15 @@ rust-version.workspace = true
 # asks for by name; nothing in the runtime reaches for it implicitly, and a
 # build that does not want a network lane does not compile one.
 #
-# The dependency list is the point of this crate, not an accident of it. The
-# workspace holds one non-optional third-party dependency and this crate does
-# not add a second: interface enumeration, socket binding, racing and
-# deduplication are syscalls, atomics and threads, all of which std and libc
-# already reach. A QUIC adapter would be the first thing to change that, which
-# is why racing and striping were built first: neither needs it, so the decision
-# to take on a second dependency can be made on its own merits rather than
-# arriving as a side effect of wanting multipath.
+# This crate uses std and libc for sockets, bounded racing, and deduplication.
+# The unit registry separately uses arc-swap for immutable dispatch snapshots.
+# A future QUIC dependency requires its own performance and maintenance evidence.
+
+[features]
+loom = ["dep:loom"]
 
 [dependencies]
+loom = { version = "0.7", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

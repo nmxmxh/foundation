@@ -3,6 +3,7 @@
 package runtimehost
 
 import (
+	"encoding/binary"
 	"strings"
 	"testing"
 
@@ -89,9 +90,28 @@ func TestApplyMirrorUpdateRefusesOutOfRangeLane(t *testing.T) {
 }
 
 func TestSnapshotStatsRefusesShortRegions(t *testing.T) {
-	block := &DispatchBlock{raw: make([]byte, 16)}
-	if _, err := block.SnapshotStats(); err == nil || !strings.Contains(err.Error(), "past the") {
-		t.Fatalf("err = %v want bounds refusal", err)
+	base := int(generated.DISPATCH_STATS_OFFSET)
+	for _, size := range []int{16, base + 8, base + 12, base + 16} {
+		block := &DispatchBlock{raw: make([]byte, size)}
+		stats, err := block.SnapshotStats()
+		if err == nil || !strings.Contains(err.Error(), "past the") || stats != (DispatchStats{}) {
+			t.Fatalf("size %d: stats = %v, err = %v; want empty table and bounds refusal", size, stats, err)
+		}
+	}
+}
+
+func TestSnapshotDescriptorsRefusesInvalidRegions(t *testing.T) {
+	for _, size := range []int{0, int(generated.DISPATCH_BUFFERS_OFFSET) + dispatchSlotBytes} {
+		block := &DispatchBlock{raw: make([]byte, size)}
+		descriptors, err := block.SnapshotDescriptors()
+		if err == nil || descriptors != (DispatchDescriptors{}) {
+			t.Fatalf("size %d: expected an empty table and bounds refusal", size)
+		}
+	}
+	block := &DispatchBlock{raw: make([]byte, generated.DISPATCH_REGION_BYTES)}
+	binary.LittleEndian.PutUint32(block.raw[generated.DISPATCH_FLIP_INDEX_OFFSET:], 2)
+	if _, err := block.SnapshotDescriptors(); err == nil || !strings.Contains(err.Error(), "selects no buffer") {
+		t.Fatalf("invalid flip: %v", err)
 	}
 }
 

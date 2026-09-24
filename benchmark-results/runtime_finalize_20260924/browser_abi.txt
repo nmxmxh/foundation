@@ -1,0 +1,34 @@
+
+> @ovasabi/runtime-browser@0.1.0 test:abi
+> bash ../../scripts/build_browser_wasm.sh && vitest run --config vitest.abi.config.ts
+
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling arc-swap v1.9.2
+   Compiling ovrt-browser v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-browser)
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-parity-fixture v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-parity-fixture)
+    Finished `release` profile [optimized] target(s) in 0.82s
+   Compiling rustversion v1.0.22
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-core)
+warning: unstable feature specified for `-Ctarget-feature`: `atomics`
+  |
+  = note: this feature is not stably supported; its behavior can change in the future
+
+   Compiling ovrt-browser v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-browser)
+warning: `ovrt-core` (lib) generated 1 warning
+warning: `ovrt-browser` (lib) generated 1 warning (1 duplicate)
+   Compiling arc-swap v1.9.2
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+warning: `ovrt-unit` (lib) generated 1 warning (1 duplicate)
+   Compiling ovrt-parity-fixture v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-parity-fixture)
+warning: `ovrt-parity-fixture` (lib) generated 1 warning (1 duplicate)
+    Finished `release` profile [optimized] target(s) in 3.72s
+
+ RUN  v5.0.0 /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host
+
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  19:54:14
+   Duration  540ms (transform 46%, tests 38%, import 11%, worker 4%)
+

@@ -107,6 +107,39 @@ Existing apps whose own code still uses styled-components keep working through
 `MinimalStyledThemeBridge` (`@ovasabi/ui-minimal/styled-components`, mounted by
 `AppThemeProvider`); migrate a module to the format above when it is touched.
 
+### Development extraction
+
+Vite development requires two controls together:
+
+1. Linaria filters must accept query strings, including `?v=` and HMR timestamps.
+2. Exclude `@ovasabi/ui-minimal` from dependency prebundling so WyW receives the original source.
+
+```ts
+wyw({
+  include: [/ui-minimal[\\/](ts[\\/])?src[\\/].*\.[jt]sx?(?:\?.*)?$/, /[\\/]src[\\/].*\.[jt]sx?(?:\?.*)?$/],
+  transformLibraries: true,
+  prefixer: false,
+})
+// This property belongs in the Vite configuration object.
+optimizeDeps: { exclude: ['@ovasabi/ui-minimal'] }
+```
+
+Keep React and its CommonJS entrypoints eligible for optimization.
+The package exclusion also covers `ui-minimal` subpaths. Existing explicit subpath exclusions can remain.
+Do not disable the whole dependency optimizer or replace styled components with runtime fallbacks.
+
+The managed patch upgrades existing WyW configurations in both Vite and Vitest files.
+It preserves custom plugins, aliases, optimizer entries, and established project fixes.
+Dynamic configuration receives a manual review message. The patch does not execute configuration files.
+
+Regression: `npm --prefix frontend-lab run test:linaria-dev` checks cold rendering and CSS HMR in Chromium.
+Its three negative cases prove that either partial fix still fails.
+Vite 7.3.6 and 8.3.0 passed this test with WyW 2.5.1 on 2026-09-24.
+Evidence: `benchmark-results/linaria_dev_20260924_vite7.json` and `benchmark-results/linaria_dev_20260924_vite8.json`.
+
+References: [Vite optimizer exclusions](https://github.com/vitejs/vite/blob/main/docs/config/dep-optimization-options.md)
+and [WyW library transforms](https://wyw-in-js.dev/bundlers/vite).
+
 Allowed inline style exceptions:
 
 1. runtime positioning for portals, popovers, and anchored overlays

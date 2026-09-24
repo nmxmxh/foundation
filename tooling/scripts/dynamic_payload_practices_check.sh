@@ -37,14 +37,12 @@ for path in \
   "$target/cmd" \
   "$target/api" \
   "$target/frontend/src" \
-  "$target/wasm" \
   "$target/runtime-transport" \
   "$target/runtime-sdk" \
   "$target/runtime-native" \
   "$target/templates/backend/internal" \
   "$target/templates/backend/cmd" \
-  "$target/templates/frontend/src" \
-  "$target/templates/wasm"; do
+  "$target/templates/frontend/src"; do
   [[ -e "$path" ]] && product_paths+=("$path")
 done
 

@@ -1,0 +1,90 @@
+File: foundation-runtimehost-profile.test
+Type: cpu
+Time: 2026-09-24 19:09:20 WAT
+Duration: 2.80s, Total samples = 3.03s (108.06%)
+Showing nodes accounting for 2.97s, 98.02% of 3.03s total
+Dropped 22 nodes (cum <= 0.02s)
+      flat  flat%   sum%        cum   cum%
+     2.35s 77.56% 77.56%      2.35s 77.56%  runtime.pthread_cond_signal
+     0.39s 12.87% 90.43%      0.39s 12.87%  runtime.pthread_cond_wait
+     0.04s  1.32% 91.75%      0.04s  1.32%  runtime.usleep
+     0.03s  0.99% 92.74%      0.03s  0.99%  runtime.madvise
+     0.03s  0.99% 93.73%      0.07s  2.31%  runtime.pcvalue
+     0.03s  0.99% 94.72%      0.03s  0.99%  runtime.pthread_kill
+     0.02s  0.66% 95.38%      0.02s  0.66%  runtime.(*mspan).specialFindSplicePoint (inline)
+     0.02s  0.66% 96.04%      0.04s  1.32%  runtime.lock2
+     0.02s  0.66% 96.70%      0.02s  0.66%  runtime.readvarint (inline)
+     0.01s  0.33% 97.03%      0.02s  0.66%  runtime.mProf_Free
+     0.01s  0.33% 97.36%      0.06s  1.98%  runtime.newInlineUnwinder
+     0.01s  0.33% 97.69%      0.03s  0.99%  runtime.step
+     0.01s  0.33% 98.02%      0.02s  0.66%  runtime.unlockWithRank (inline)
+         0     0% 98.02%      0.02s  0.66%  context.(*cancelCtx).Done
+         0     0% 98.02%      0.05s  1.65%  context.WithCancel
+         0     0% 98.02%      0.03s  0.99%  context.withCancel (inline)
+         0     0% 98.02%      0.12s  3.96%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).ExecuteInto
+         0     0% 98.02%      0.12s  3.96%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).execute
+         0     0% 98.02%      0.08s  2.64%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).executeOnSelectedWorker
+         0     0% 98.02%      0.08s  2.64%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeHeld
+         0     0% 98.02%      0.08s  2.64%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeWithContext
+         0     0% 98.02%      0.08s  2.64%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).tryExecute
+         0     0% 98.02%      0.12s  3.96%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.BenchmarkProcessPoolExecuteInto1KB
+         0     0% 98.02%      0.04s  1.32%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.NewBuffer
+         0     0% 98.02%      0.05s  1.65%  runtime.(*inlineUnwinder).resolveInternal (inline)
+         0     0% 98.02%      0.03s  0.99%  runtime.(*mheap).alloc.func1
+         0     0% 98.02%      0.03s  0.99%  runtime.(*mheap).allocSpan
+         0     0% 98.02%      0.04s  1.32%  runtime.(*sweepLocked).sweep
+         0     0% 98.02%      0.02s  0.66%  runtime.(*unwinder).next
+         0     0% 98.02%      0.02s  0.66%  runtime.(*unwinder).resolveInternal
+         0     0% 98.02%      0.02s  0.66%  runtime.addspecial
+         0     0% 98.02%      0.05s  1.65%  runtime.bgsweep
+         0     0% 98.02%      0.08s  2.64%  runtime.callers
+         0     0% 98.02%      0.08s  2.64%  runtime.callers.func1
+         0     0% 98.02%      0.42s 13.86%  runtime.findRunnable
+         0     0% 98.02%      0.02s  0.66%  runtime.forEachPInternal
+         0     0% 98.02%      0.04s  1.32%  runtime.freeSpecial
+         0     0% 98.02%      0.02s  0.66%  runtime.funcspdelta (inline)
+         0     0% 98.02%      0.02s  0.66%  runtime.gcBgMarkWorker.func2
+         0     0% 98.02%      0.02s  0.66%  runtime.gcDrain
+         0     0% 98.02%      0.02s  0.66%  runtime.gcMarkDone.forEachP.func5
+         0     0% 98.02%      0.04s  1.32%  runtime.lock (inline)
+         0     0% 98.02%      0.04s  1.32%  runtime.lockWithRank (inline)
+         0     0% 98.02%      0.39s 12.87%  runtime.mPark (inline)
+         0     0% 98.02%      0.11s  3.63%  runtime.mProf_Malloc
+         0     0% 98.02%      0.04s  1.32%  runtime.mProf_Malloc.func1
+         0     0% 98.02%      0.02s  0.66%  runtime.makechan
+         0     0% 98.02%      0.11s  3.63%  runtime.mallocgc
+         0     0% 98.02%      0.02s  0.66%  runtime.mallocgcSmallNoscan
+         0     0% 98.02%      0.09s  2.97%  runtime.mallocgcSmallScanNoHeader
+         0     0% 98.02%      0.02s  0.66%  runtime.markroot
+         0     0% 98.02%      0.42s 13.86%  runtime.mcall
+         0     0% 98.02%      0.09s  2.97%  runtime.newobject
+         0     0% 98.02%      0.39s 12.87%  runtime.notesleep
+         0     0% 98.02%      2.35s 77.56%  runtime.notewakeup
+         0     0% 98.02%      0.02s  0.66%  runtime.osyield (inline)
+         0     0% 98.02%      0.42s 13.86%  runtime.park_m
+         0     0% 98.02%      0.05s  1.65%  runtime.pcdatavalue1
+         0     0% 98.02%      0.03s  0.99%  runtime.preemptM
+         0     0% 98.02%      0.02s  0.66%  runtime.preemptall
+         0     0% 98.02%      0.02s  0.66%  runtime.preemptone
+         0     0% 98.02%      0.11s  3.63%  runtime.profilealloc
+         0     0% 98.02%      2.35s 77.56%  runtime.ready
+         0     0% 98.02%      0.02s  0.66%  runtime.runqgrab
+         0     0% 98.02%      0.02s  0.66%  runtime.runqsteal
+         0     0% 98.02%      0.42s 13.86%  runtime.schedule
+         0     0% 98.02%      0.39s 12.87%  runtime.semasleep
+         0     0% 98.02%      2.35s 77.56%  runtime.semawakeup
+         0     0% 98.02%      2.35s 77.56%  runtime.send.goready.func1
+         0     0% 98.02%      0.04s  1.32%  runtime.setprofilebucket
+         0     0% 98.02%      0.03s  0.99%  runtime.signalM (inline)
+         0     0% 98.02%      2.35s 77.56%  runtime.startm
+         0     0% 98.02%      0.02s  0.66%  runtime.stealWork
+         0     0% 98.02%      0.39s 12.87%  runtime.stopm
+         0     0% 98.02%      0.05s  1.65%  runtime.sweepone
+         0     0% 98.02%      0.03s  0.99%  runtime.sysUsed (inline)
+         0     0% 98.02%      0.03s  0.99%  runtime.sysUsedOS (inline)
+         0     0% 98.02%      2.54s 83.83%  runtime.systemstack
+         0     0% 98.02%      0.08s  2.64%  runtime.tracebackPCs
+         0     0% 98.02%      0.02s  0.66%  runtime.unlock (inline)
+         0     0% 98.02%      2.35s 77.56%  runtime.wakep
+         0     0% 98.02%      0.12s  3.96%  testing.(*B).run1.func1
+         0     0% 98.02%      0.12s  3.96%  testing.(*B).runN

@@ -1,0 +1,182 @@
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling ovrt-network v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-network)
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-browser v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-browser)
+   Compiling ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+   Compiling ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-native)
+   Compiling ovrt-parity-fixture v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-parity-fixture)
+   Compiling ovrt-wasm-host v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-wasm-host)
+   Compiling ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.79s
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_browser-b8dde0fbbae7b58a)
+
+running 7 tests
+test ring_buffer::tests::rejects_oversized_messages ... ok
+test buffer::tests::rejects_payloads_that_exceed_region_capacity ... ok
+test ring_buffer::tests::round_trips_messages ... ok
+test signal::tests::detects_epoch_changes ... ok
+test buffer::tests::round_trips_control_regions ... ok
+test linear_buffer::tests::validates_lifetimes_bounds_borrowing_and_epochs ... ok
+test ring_buffer::tests::wraps_around_buffer_end ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_core-16c35418817c32ac)
+
+running 23 tests
+test epoch::tests::epochs_wrap_rather_than_stopping ... ok
+test epoch::tests::a_lost_peer_ends_the_wait_before_the_timeout ... ok
+test epoch::tests::a_waiter_that_already_missed_the_change_does_not_block ... ok
+test epoch::tests::a_result_published_before_the_peer_died_is_still_returned ... ok
+test layout::tests::test_offsets ... ok
+test layout::tests::test_columnar_descriptor_contract ... ok
+test diagnostics::tests::source_updates_reuse_capacity_and_replace_visible_text ... ok
+test layout::tests::test_validations ... ok
+test mapping::tests::an_atomic_word_is_shared_between_mappings_of_one_file ... ok
+test mapping::tests::mapping_more_than_the_file_holds_is_refused ... ok
+test mapping::tests::an_unaligned_or_out_of_bounds_atomic_is_refused ... ok
+test mapping::tests::a_write_through_the_mapping_is_visible_through_the_file ... ok
+test native_gpu::tests::maps_all_native_gpu_enums_to_contract_codes ... ok
+test native_gpu::tests::validates_native_gpu_buffer_descriptors ... ok
+test native_gpu::tests::checks_native_gpu_descriptor_boundaries ... ok
+test native_gpu::tests::rejects_incomplete_native_gpu_descriptors ... ok
+test native_gpu::tests::validates_native_gpu_texture_descriptors ... ok
+test unit::tests::validates_required_descriptor_fields ... ok
+test mapping::tests::two_mappings_of_one_file_observe_each_others_stores ... ok
+test log_ring::loom_verification::acquire_release_publishes_complete_slab ... ok
+test log_ring::loom_verification::sequential_publications_stay_monotonic ... ok
+test epoch::tests::a_wait_gives_up_rather_than_hanging ... ok
+test epoch::tests::a_waiter_returns_as_soon_as_the_epoch_moves ... ok
+
+test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.01s
+
+     Running tests/binding_contract.rs (runtime-sdk/rust/target/debug/deps/binding_contract-e2432ad35622394b)
+
+running 1 test
+test compiler_vectors_preserve_native_identity ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_dispatch-303634f77b86345d)
+
+running 26 tests
+test decide::tests::ewma_blend_matches_the_fixed_alpha ... ok
+test block::tests::descriptor_codec_roundtrips_every_field ... ok
+test decide::tests::deadline_feasibility_gates_selection ... ok
+test block::tests::decode_rejects_short_rows ... ok
+test decide::tests::global_lanes_serve_any_jurisdiction ... ok
+test decide::tests::locality_bonus_breaks_near_ties ... ok
+test decide::tests::mismatched_jurisdiction_is_never_served ... ok
+test block::tests::open_refuses_a_short_region ... ok
+test decide::tests::missing_required_classes_select_nothing ... ok
+test decide::tests::picks_the_only_lane_covering_the_request ... ok
+test decide::tests::queue_pressure_flips_the_choice ... ok
+test decide::tests::retired_slots_never_serve_unconstrained_requests ... ok
+test block::tests::completion_blends_with_the_fixed_alpha_and_tracks_inflight ... ok
+test decide::tests::stale_heartbeats_are_excluded ... ok
+test block::tests::stat_row_bounds_are_enforced ... ok
+test block::tests::tick_advances_monotonically ... ok
+test decide::tests::ties_keep_the_lower_lane_id ... ok
+test decide::tests::unsampled_lanes_do_not_look_free ... ok
+test publisher::tests::publish_rejects_oversized_tables ... ok
+test publisher::tests::end_to_end_selection_over_a_real_region ... ok
+test sample::tests::bad_lane_configuration_fails_before_execution ... ok
+test publisher::tests::publish_roundtrips_and_alternates_buffers ... ok
+test sample::tests::failed_runs_still_sample_so_degradation_shows ... ok
+test sample::tests::sampled_runs_feed_the_lane_row_and_rebalance_inflight ... ok
+test publisher::loom_verification::flip_publishes_a_complete_table ... ok
+test publisher::loom_verification::every_fetch_add_returns_a_unique_click ... ok
+
+test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_ffi-c046cd5860cc7350)
+
+running 5 tests
+test tests::a_panic_payload_always_produces_a_message ... ok
+test tests::write_error_truncates_at_utf8_boundary ... ok
+test tests::creates_and_processes_runtime_buffers ... ok
+test tests::a_panicking_unit_is_reported_rather_than_unwinding_into_the_abi ... ok
+test tests::handles_parallel_process_buffer_calls_on_shared_host ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_native-0de5f46383e2b320)
+
+running 25 tests
+test arena_blob::tests::decodes_slab_ids_in_order ... ok
+test arena_blob::tests::rejects_a_request_with_the_wrong_magic ... ok
+test arena_blob::tests::rejects_a_truncated_request ... ok
+test arena_blob::tests::fails_when_no_arena_is_configured ... ok
+test arena_blob::tests::wrapping_takes_the_new_id_and_declares_shared_memory ... ok
+test buffer::tests::fast_writes_update_lengths_without_clearing_full_regions ... ok
+test buffer::tests::rejects_negative_runtime_payload_lengths ... ok
+test buffer::tests::round_trips_buffer_regions_and_epochs ... ok
+test epoch_transport::tests::a_non_utf8_route_is_refused ... ok
+test epoch_transport::tests::a_route_filling_the_whole_region_still_reads ... ok
+test epoch_transport::tests::a_route_is_read_back_without_its_padding ... ok
+test epoch_transport::tests::an_empty_route_is_refused_rather_than_dispatched ... ok
+test stdio::tests::read_frame_rejects_declared_lengths_before_allocating_payload ... ok
+test arena::tests::rejects_a_mapping_that_is_not_an_arena ... ok
+test tests::dispatch_direct_uses_registered_units_without_role_pool ... ok
+test tests::dispatches_registered_units_via_role_pool ... ok
+test arena::tests::a_write_larger_than_its_slab_is_refused ... ok
+test tests::converts_panics_into_runtime_errors ... ok
+test arena::tests::rejects_a_descriptor_pointing_into_the_control_region ... ok
+test arena::tests::reads_a_columnar_batch_larger_than_the_control_buffer ... ok
+test arena::tests::a_written_slab_is_visible_through_another_mapping_of_the_arena ... ok
+test tests::serves_runtime_buffers_over_framed_io ... ok
+test tests::saturated_queue_rejects_work_and_pins_the_accepted_implementation ... ok
+test tests::placement_table_routes_and_samples_completions ... ok
+test tests::dispatch_times_out_instead_of_waiting_unbounded ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/buffer_bench.rs (runtime-sdk/rust/target/debug/deps/buffer_bench-49f661410bbf33a8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/reference_kernel.rs (runtime-sdk/rust/target/debug/deps/reference_kernel-96a67c02092bcb07)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/shm_exchange_bench.rs (runtime-sdk/rust/target/debug/deps/shm_exchange_bench-d2b9bd88ca29684e)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_network-7d49c1383f05148d)
+
+running 28 tests
+test dedup::tests::clearing_the_window_readmits_previously_seen_keys ... ok
+test dedup::tests::a_key_is_new_once_and_a_duplicate_after ... ok
+test dedup::tests::distinct_keys_do_not_suppress_each_other ... ok
+test dedup::tests::an_immediate_second_copy_is_suppressed_even_under_pressure ... ok
+test dedup::tests::capacity_must_be_a_power_of_two_and_leave_room_to_probe ... ok
+test interface::tests::every_reported_interface_has_a_nonzero_index ... ok
+test interface::tests::interfaces_are_deduplicated_by_name ... ok
+test interface::tests::loopback_is_never_offered_as_a_race_path ... ok
+test interface::tests::every_host_reports_a_loopback_interface ... ok
+test race::tests::a_race_needs_at_least_one_path ... ok
+test dedup::tests::the_ring_never_rejects_a_first_arrival ... ok
+test interface::tests::the_binding_probe_is_stable_across_calls ... ok
+test interface::tests::the_probe_agrees_with_a_real_bind ... ok
+test race::tests::dropping_the_racer_joins_every_worker ... ok
+test dedup::tests::the_fingerprint_never_collides_with_the_empty_marker ... ok
+test race::tests::counters_separate_delivered_from_undeliverable ... ok
+test race::tests::frames_above_the_control_rung_are_refused ... ok
+test race::tests::one_live_path_still_wins_against_a_dead_one ... ok
+test race::tests::every_path_failing_reports_every_reason ... ok
+test tests::every_error_renders_its_cause ... ok
+test tests::the_oversized_frame_error_names_the_remedy ... ok
+test dedup::tests::exactly_one_thread_wins_a_contended_key ... ok
+test race::tests::all_paths_busy_is_backpressure_not_breakage ... ok
+test race::tests::the_race_returns_without_waiting_for_the_slow_path ... ok
+test race::tests::a_deadline_yields_an_outcome_rather_than_an_error ... ok
+test race::tests::a_stale_report_is_never_claimed_by_a_later_race ... ok
+test race::tests::the_race_collapses_the_tail ... ok
+test race::tests::a_busy_path_is_skipped_rather_than_queued has been running for over 60 seconds

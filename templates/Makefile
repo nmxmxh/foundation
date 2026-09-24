@@ -1,4 +1,4 @@
-.PHONY: all setup deps install-tools dev run-local dev-local build build-server build-profiling build-frontend build-runtime test-go-race test-rust-loom communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime frontend-commands runtime-bindings foundation-transport-proto build-wasm build-wasm-dev build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-redeploy docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-markdown-frontmatter check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-sql-prepare check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-projection-audience check-server-kit-module-contract check-server-kit-usage check-system-profiling check-project-scaffold check-frontend-surface-practices
+.PHONY: all setup deps install-tools dev run-local dev-local build build-server build-profiling build-frontend build-runtime test-go-race test-rust-loom communication-contracts lifecycle-contracts lifecycle-manifest frontend-prototype-runtime frontend-commands runtime-bindings foundation-transport-proto build-rust-wasm wasm-manifest native-dev native-build native-mobile-init native-bench native-doctor delivery-metrics docgen test test-local-full test-local-services test-wasm test-e2e test-unit test-coverage test-integration test-load test-bench test-bench-frontend test-all test-frontend test-env-up test-env-down test-env-logs migrate-test migrate-test-down migrate-test-reset lint lint-go lint-rust lint-frontend lint-foundation verify clean help proto proto-ts docker-build docker-up docker-redeploy docker-down docker-logs migrate-up migrate-down migrate-create foundation-update foundation-status check-rust check-go-fix check-go-static-analysis check-rust-static-analysis check-rust-runtime-practices check-doc-references check-markdown-frontmatter check-agent-contract check-practice-controls check-runtime-performance-contracts check-formal-methods check-operational-excellence check-coding-practices check-testing-practices check-go-concurrency-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-sql-prepare check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-lifecycle-manifest check-app-security-profile check-domain-contract-consistency check-contract-drift check-projection-audience check-server-kit-module-contract check-server-kit-usage check-system-profiling check-project-scaffold check-frontend-surface-practices
 
 PROJECT_NAME := $(shell basename "$(CURDIR)" | sed 's/_v[0-9]*$$//')
 GO_MODULE := $(shell grep -m1 "^module " go.mod 2>/dev/null | cut -d' ' -f2)
@@ -312,7 +312,7 @@ build-frontend: frontend-prototype-runtime
 		echo "No frontend package; skipping frontend build"; \
 	fi
 
-build-runtime: runtime-bindings build-wasm build-rust-wasm wasm-manifest
+build-runtime: runtime-bindings build-rust-wasm wasm-manifest
 
 runtime-bindings:
 	@if [ -x foundation/runtime-sdk/scripts/generate_system_bindings.sh ]; then \
@@ -323,46 +323,16 @@ runtime-bindings:
 		echo "Runtime SDK binding generator not found; skipping"; \
 	fi
 
-build-wasm:
-	@if [ -d wasm ]; then \
-		echo "Building WASM..."; \
-		mkdir -p "$(WASM_PUBLIC_DIR)"; \
-		GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" GOOS=js GOARCH=wasm $(GOBUILD) -ldflags="-s -w" -o "$(WASM_PUBLIC_DIR)/main.wasm" ./wasm; \
-		goroot=$$(go env GOROOT); \
-		if [ -f "$$goroot/lib/wasm/wasm_exec.js" ]; then cp "$$goroot/lib/wasm/wasm_exec.js" "$(WASM_PUBLIC_DIR)/wasm_exec.js"; \
-		elif [ -f "$$goroot/misc/wasm/wasm_exec.js" ]; then cp "$$goroot/misc/wasm/wasm_exec.js" "$(WASM_PUBLIC_DIR)/wasm_exec.js"; fi; \
-		if command -v "$(WASM_OPT)" >/dev/null 2>&1; then tmp="$(WASM_PUBLIC_DIR)/main.wasm.opt"; if "$(WASM_OPT)" $(WASM_OPT_FLAGS) -o "$$tmp" "$(WASM_PUBLIC_DIR)/main.wasm"; then mv "$$tmp" "$(WASM_PUBLIC_DIR)/main.wasm"; else rm -f "$$tmp"; echo "wasm-opt failed; keeping unoptimized main.wasm"; fi; fi; \
-		if command -v "$(BROTLI)" >/dev/null 2>&1; then "$(BROTLI)" -f "$(WASM_PUBLIC_DIR)/main.wasm"; fi; \
-	fi
-	@$(MAKE) wasm-manifest
-
-build-wasm-dev:
-	@if [ -d wasm ]; then \
-		echo "Building WASM (development)..."; \
-		mkdir -p "$(WASM_PUBLIC_DIR)"; \
-		GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" GOOS=js GOARCH=wasm $(GOBUILD) -o "$(WASM_PUBLIC_DIR)/main.wasm" ./wasm; \
-		goroot=$$(go env GOROOT); \
-		if [ -f "$$goroot/lib/wasm/wasm_exec.js" ]; then cp "$$goroot/lib/wasm/wasm_exec.js" "$(WASM_PUBLIC_DIR)/wasm_exec.js"; \
-		elif [ -f "$$goroot/misc/wasm/wasm_exec.js" ]; then cp "$$goroot/misc/wasm/wasm_exec.js" "$(WASM_PUBLIC_DIR)/wasm_exec.js"; fi; \
-	fi
-	@$(MAKE) wasm-manifest
-
 build-rust-wasm:
 	@if [ -f "$(RUST_WASM_DIR)/Cargo.toml" ]; then \
-		echo "Building Rust WASM modules..."; \
+		set -eu; \
+		echo "Building scalar and shared Rust WASM modules..."; \
 		mkdir -p "$(WASM_MODULE_DIR)"; \
-		if [ "$(RUST_WASM_PROFILE)" = "release" ]; then \
-			cargo build --manifest-path "$(RUST_WASM_DIR)/Cargo.toml" --target "$(RUST_TARGET)" --release; \
-			src_dir="$(RUST_WASM_DIR)/target/$(RUST_TARGET)/release"; \
-		else \
-			cargo build --manifest-path "$(RUST_WASM_DIR)/Cargo.toml" --target "$(RUST_TARGET)"; \
-			src_dir="$(RUST_WASM_DIR)/target/$(RUST_TARGET)/debug"; \
-		fi; \
-		if ls "$$src_dir"/*.wasm >/dev/null 2>&1; then \
-			cp "$$src_dir"/*.wasm "$(WASM_MODULE_DIR)/"; \
-			if command -v "$(WASM_OPT)" >/dev/null 2>&1; then for wasm in "$(WASM_MODULE_DIR)"/*.wasm; do tmp="$$wasm.opt"; if "$(WASM_OPT)" $(WASM_OPT_FLAGS) -o "$$tmp" "$$wasm"; then mv "$$tmp" "$$wasm"; else rm -f "$$tmp"; echo "wasm-opt failed; keeping unoptimized $$wasm"; fi; done; fi; \
-			if command -v "$(BROTLI)" >/dev/null 2>&1; then for wasm in "$(WASM_MODULE_DIR)"/*.wasm; do "$(BROTLI)" -f "$$wasm"; done; fi; \
-		fi; \
+		builder="foundation/runtime-sdk/scripts/build_browser_wasm.sh"; \
+		if [ ! -f "$$builder" ]; then builder="$(FOUNDATION_PATH)/runtime-sdk/scripts/build_browser_wasm.sh"; fi; \
+		bash "$$builder" "$(RUST_WASM_DIR)/Cargo.toml" "$(WASM_MODULE_DIR)" "$(RUST_WASM_PROFILE)"; \
+		if command -v "$(WASM_OPT)" >/dev/null 2>&1; then for wasm in "$(WASM_MODULE_DIR)"/*.wasm; do tmp="$$wasm.opt"; if "$(WASM_OPT)" $(WASM_OPT_FLAGS) -o "$$tmp" "$$wasm"; then mv "$$tmp" "$$wasm"; else rm -f "$$tmp"; echo "wasm-opt failed; keeping unoptimized $$wasm"; fi; done; fi; \
+		if command -v "$(BROTLI)" >/dev/null 2>&1; then for wasm in "$(WASM_MODULE_DIR)"/*.wasm; do "$(BROTLI)" -f "$$wasm"; done; fi; \
 	else \
 		echo "No $(RUST_WASM_DIR)/Cargo.toml; skipping Rust WASM modules"; \
 	fi
@@ -939,7 +909,7 @@ check-frontend-surface-practices:
 check-project-scaffold:
 	@zsh ./scripts/checks/project_scaffold_check.sh .
 
-verify: lint test test-go-race build build-wasm
+verify: lint test test-go-race build
 	@echo "Verification complete"
 
 docker-build:
@@ -1008,7 +978,7 @@ foundation-status:
 clean:
 	rm -rf bin coverage dist coverage.out coverage.html .cache/go-build
 	@rm -rf frontend/dist frontend/coverage
-	@rm -f "$(WASM_PUBLIC_DIR)/main.wasm" "$(WASM_PUBLIC_DIR)/main.wasm.br" "$(WASM_PUBLIC_DIR)/kernel.wasm" "$(WASM_PUBLIC_DIR)/kernel.wasm.br" "$(WASM_PUBLIC_DIR)/wasm_exec.js" "$(WASM_MANIFEST)"
+	@rm -f "$(WASM_PUBLIC_DIR)/kernel.wasm" "$(WASM_PUBLIC_DIR)/kernel.wasm.br" "$(WASM_MANIFEST)"
 	@rm -rf "$(WASM_MODULE_DIR)"
 	@find $(PROTO_PATH) -name "*.pb.go" -delete 2>/dev/null || true
 	@find $(PROTO_PATH) -name "*_grpc.pb.go" -delete 2>/dev/null || true

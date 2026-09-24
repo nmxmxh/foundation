@@ -48,6 +48,10 @@ func (b *DispatchBlock) PublishDescriptors([]DispatchLaneDescriptor, uint32) (ui
 	return 0, errDispatchUnsupported
 }
 
-func (b *DispatchBlock) SnapshotDescriptors() ([]DispatchLaneDescriptor, error) {
-	return nil, errDispatchUnsupported
+func (b *DispatchBlock) SnapshotDescriptors() (DispatchDescriptors, error) {
+	return DispatchDescriptors{}, errDispatchUnsupported
+}
+
+func (b *DispatchBlock) SnapshotStats() (DispatchStats, error) {
+	return DispatchStats{}, errDispatchUnsupported
 }

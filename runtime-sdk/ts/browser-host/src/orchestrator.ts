@@ -1,5 +1,6 @@
 import { type BrowserRuntimeHost } from "./host";
 import { createPulseManager, type PulseManager } from "./pulse/pulseManager";
+import { RuntimeMemoryRegion, type RuntimeBuffer } from "./memoryRegion";
 import {
   type RuntimeDiagnosticsSnapshot,
   type RuntimeRole,
@@ -23,7 +24,7 @@ type RuntimeOrchestratorOptions = {
 type RunUnitInput<TInput> = {
   unitId: string;
   input: TInput;
-  buffer: SharedArrayBuffer;
+  buffer: RuntimeBuffer;
   timeoutMs?: number;
 };
 
@@ -155,6 +156,8 @@ export const createRuntimeOrchestrator = (options: RuntimeOrchestratorOptions) =
       if (!descriptor) {
         throw new Error(`runtime unit ${input.unitId} is not registered`);
       }
+      const region = input.buffer instanceof RuntimeMemoryRegion ? input.buffer : new RuntimeMemoryRegion(input.buffer, 0, input.buffer.byteLength);
+      if (!region.shared) throw new Error("worker dispatch requires shared memory; execute this module in its owning thread");
 
       if (descriptor.requiresSharedMemory) {
         pulseManager.start(input.buffer);
@@ -197,7 +200,10 @@ export const createRuntimeOrchestrator = (options: RuntimeOrchestratorOptions) =
         unitId: descriptor.unitId,
         role: descriptor.role,
         input: input.input,
-        buffer: input.buffer,
+        buffer: region.buffer as SharedArrayBuffer,
+        byteOffset: region.byteOffset,
+        byteLength: region.byteLength,
+        bufferHandle: region.handle || undefined,
       };
       worker.postMessage(message);
       emitDiagnostics();

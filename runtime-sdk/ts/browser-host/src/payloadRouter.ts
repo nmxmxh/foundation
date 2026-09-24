@@ -21,6 +21,14 @@ const DEFAULT_CONTROL_MAX_BYTES = BUFFER_TOTAL_BYTES;
 const DEFAULT_ARENA_MAX_BYTES = 1024 * 1024;
 const DEFAULT_CHUNK_BYTES = 64 * 1024;
 
+const normalizeChunkBytes = (value: number): number => {
+  const size = Math.max(1, value);
+  if (!Number.isSafeInteger(size)) {
+    throw new Error("runtime chunk size must be a finite safe integer");
+  }
+  return size;
+};
+
 export const routeRuntimePayload = (
   payload: Uint8Array,
   options: RuntimePayloadRouterOptions = {}
@@ -52,22 +60,33 @@ export async function* routeRuntimeStream(
   chunks: AsyncIterable<Uint8Array<ArrayBufferLike>> | Iterable<Uint8Array<ArrayBufferLike>>,
   options: Pick<RuntimePayloadRouterOptions, "chunkBytes"> = {}
 ): AsyncIterable<Uint8Array> {
-  const chunkBytesTarget = Math.max(1, options.chunkBytes ?? DEFAULT_CHUNK_BYTES);
-  let carry: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+  const chunkBytesTarget = normalizeChunkBytes(options.chunkBytes ?? DEFAULT_CHUNK_BYTES);
+  let carry: Uint8Array<ArrayBufferLike> | null = null;
+  let carryLength = 0;
 
   for await (const chunk of chunks) {
-    if (chunk.byteLength === 0) {
-      continue;
-    }
-    carry = concat(carry, chunk);
-    while (carry.byteLength >= chunkBytesTarget) {
-      yield carry.slice(0, chunkBytesTarget);
-      carry = carry.slice(chunkBytesTarget);
+    let offset = 0;
+    while (offset < chunk.byteLength) {
+      if (carryLength === 0 && chunk.byteLength - offset >= chunkBytesTarget) {
+        yield chunk.slice(offset, offset + chunkBytesTarget);
+        offset += chunkBytesTarget;
+        continue;
+      }
+      carry ??= new Uint8Array(chunkBytesTarget);
+      const length = Math.min(chunkBytesTarget - carryLength, chunk.byteLength - offset);
+      carry.set(chunk.subarray(offset, offset + length), carryLength);
+      carryLength += length;
+      offset += length;
+      if (carryLength === chunkBytesTarget) {
+        yield carry;
+        carry = null;
+        carryLength = 0;
+      }
     }
   }
 
-  if (carry.byteLength > 0) {
-    yield carry;
+  if (carryLength > 0) {
+    yield carry!.slice(0, carryLength);
   }
 }
 
@@ -88,21 +107,8 @@ export const collectRuntimeStream = async (chunks: AsyncIterable<Uint8Array>): P
 };
 
 async function* chunkBytes(payload: Uint8Array, chunkBytesTarget: number): AsyncIterable<Uint8Array> {
-  const size = Math.max(1, chunkBytesTarget);
+  const size = normalizeChunkBytes(chunkBytesTarget);
   for (let offset = 0; offset < payload.byteLength; offset += size) {
     yield payload.slice(offset, Math.min(payload.byteLength, offset + size));
   }
 }
-
-const concat = (
-  left: Uint8Array<ArrayBufferLike>,
-  right: Uint8Array<ArrayBufferLike>
-): Uint8Array<ArrayBufferLike> => {
-  if (left.byteLength === 0) {
-    return right;
-  }
-  const output = new Uint8Array(left.byteLength + right.byteLength);
-  output.set(left, 0);
-  output.set(right, left.byteLength);
-  return output;
-};

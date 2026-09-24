@@ -1,0 +1,41 @@
+    Finished `bench` profile [optimized] target(s) in 0.10s
+     Running benches/runtime_layers.rs (runtime-sdk/rust/target/release/deps/runtime_layers-518132c24a0f0892)
+name	min_ns	median_ns	max_ns	allocs/op	bytes/op
+core/validate_region	1.24	1.24	1.50	0.000	0.000
+unit/lookup	13.50	14.04	15.21	0.000	0.000
+unit/descriptor	79.26	80.72	84.48	3.000	32.000
+native/direct/0	22.62	24.16	25.52	0.000	0.000
+native/direct/1024	67.58	70.50	113.82	1.000	1024.000
+native/direct/65536	1362.64	1401.94	1655.48	1.000	65536.000
+native/direct/1048576	18833.33	20552.35	23856.61	1.000	1048576.000
+native/queued/1024	8696.02	9937.52	11881.29	6.011	2888.608
+ffi/process/1024	147.40	149.48	185.06	1.000	1024.000
+native/parallel/1	67.10	68.82	72.56	1.000	1024.000
+native/parallel/4	208.75	270.34	295.03	1.000	1024.000
+native/parallel/8	274.03	336.68	367.94	1.000	1024.000
+dispatch/snapshot/32	446.87	448.65	460.51	0.000	0.000
+network/dedup/hit	3.83	3.83	3.84	0.000	0.000
+network/dedup/pressure	6.83	6.83	7.07	0.000	0.000
+network/race/busy/4096	51.93	52.55	52.89	0.000	0.000
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8        	 2368935	       504.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPlacementFullHostPath-8        	 2409942	       495.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPlacementFullHostPath-8        	 2436776	       493.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkProcessPoolExecuteOwned1KB-8   	  565128	      2001 ns/op	    1257 B/op	       5 allocs/op
+BenchmarkProcessPoolExecuteOwned1KB-8   	  663246	      1761 ns/op	    1257 B/op	       5 allocs/op
+BenchmarkProcessPoolExecuteOwned1KB-8   	  679125	      1771 ns/op	    1257 B/op	       5 allocs/op
+BenchmarkProcessPoolExecuteInto1KB-8    	  741570	      1644 ns/op	     232 B/op	       4 allocs/op
+BenchmarkProcessPoolExecuteInto1KB-8    	  744967	      1644 ns/op	     232 B/op	       4 allocs/op
+BenchmarkProcessPoolExecuteInto1KB-8    	  742897	      1649 ns/op	     232 B/op	       4 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	11.336s
+Running dispatch decision cost benchmark...
+   Compiling ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+    Finished `release` profile [optimized] target(s) in 0.60s
+     Running `runtime-sdk/rust/target/release/examples/ns_bench`
+pure decide: min=0ns p50=83ns p99=125ns (gate 500ns)
+full placement: min=417ns p50=583ns p99=667ns (gate 5000ns)
+[OK] dispatch decision stays nanosecond-class

@@ -3,6 +3,7 @@
 pub mod buffer;
 pub mod context;
 pub mod js_interop;
+pub mod linear_buffer;
 pub mod logging;
 pub mod ring_buffer;
 pub mod signal;

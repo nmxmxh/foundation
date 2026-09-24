@@ -281,8 +281,16 @@ mod tests {
             }
         }
 
-        fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-            Ok(input.iter().map(|value| value.to_ascii_uppercase()).collect())
+        fn execute(
+            &self,
+            input: &[u8],
+            __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+        ) -> Result<(), String> {
+            let __ovrt_run = || -> Result<Vec<u8>, String> {
+                Ok(input.iter().map(|value| value.to_ascii_uppercase()).collect())
+            };
+            let __ovrt_result = __ovrt_run()?;
+            __ovrt_output.write_owned(__ovrt_result)
         }
     }
 
@@ -310,8 +318,14 @@ mod tests {
             }
         }
 
-        fn run(&self, _input: &[u8]) -> Result<Vec<u8>, String> {
-            panic!("unit came apart")
+        fn execute(
+            &self,
+            _input: &[u8],
+            __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+        ) -> Result<(), String> {
+            let __ovrt_run = || -> Result<Vec<u8>, String> { panic!("unit came apart") };
+            let __ovrt_result = __ovrt_run()?;
+            __ovrt_output.write_owned(__ovrt_result)
         }
     }
 

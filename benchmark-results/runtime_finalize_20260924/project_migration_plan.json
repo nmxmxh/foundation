@@ -1,0 +1,87 @@
+{
+  "chowdash_rider_v1": [],
+  "civic_watch_ng_v1": [],
+  "docuos_v1": [],
+  "forest_v1": [],
+  "global_value_exchange_net_v1": [
+    {
+      "path": "rust/crates/gve-financial/src/lib.rs",
+      "methods": 1,
+      "beforeHash": "c926b415ed5c1a83539f200f3e9fe9d29320a967afbb4ff59e8bfcac76b1bb95"
+    }
+  ],
+  "marketer_v1": [],
+  "ovasabi_v1": [
+    {
+      "path": "rust/crates/orbit-sim/src/lib.rs",
+      "methods": 1,
+      "beforeHash": "a82d1810c91c418d8482e8fd110a64e24f2f0e233533c2d3a6fd0c879f721806"
+    },
+    {
+      "path": "rust/crates/voice-dsp/src/lib.rs",
+      "methods": 1,
+      "beforeHash": "08b6a9cede82aa7342deb767d9c2eb5423b87cbacd3b377aca9f0fea813fbf06"
+    },
+    {
+      "path": "rust/crates/waitingroom-sim/src/lib.rs",
+      "methods": 1,
+      "beforeHash": "5e7f4e9eac446ddb6534ea620089f9cd5cc0707f782d0b0108ea511aa7a2a155"
+    }
+  ],
+  "pronto_v1": [
+    {
+      "path": "rust/crates/pronto-archive-surprise/src/lib.rs",
+      "methods": 1,
+      "beforeHash": "bed6a493855d977db0e8ce73bd05b8d581e0af7d7db9368e8b69d33d29fefb70"
+    },
+    {
+      "path": "rust/crates/pronto-fusion/src/lib.rs",
+      "methods": 1,
+      "beforeHash": "ede37f6a90a3edd89ef82c024b63565fa2b13a2d53f86f08d6837ea129e96ed6"
+    },
+    {
+      "path": "rust/crates/pronto-geo/src/lib.rs",
+      "methods": 1,
+      "beforeHash": "cbb62708ffeefdb0dc90e8518d6117b0cfdc705e6d510a13d2b80a4af6cc3882"
+    },
+    {
+      "path": "rust/crates/pronto-math/src/lib.rs",
+      "methods": 1,
+      "beforeHash": "b6f6387e9327c56e220059a0424dd880eb675139865ce250f79a8ed1d8e660f5"
+    },
+    {
+      "path": "rust/crates/pronto-ranker/src/lib.rs",
+      "methods": 1,
+      "beforeHash": "d68fef7823eb63c61dbabb1b1848b90dbf0b5679193e07e2c2ae5d1639664634"
+    },
+    {
+      "path": "rust/crates/pronto-rss-kernel/src/arena_unit.rs",
+      "methods": 1,
+      "beforeHash": "35f4dc6c0dd42a9e744005387116390aed460e7db3a7e70415e0dc218283f8b0"
+    },
+    {
+      "path": "rust/crates/pronto-rss-kernel/src/lib.rs",
+      "methods": 2,
+      "beforeHash": "a56ee1fc24517df935d7364882da02d237d03c758259ca43f4cb02267110ca17"
+    },
+    {
+      "path": "rust/crates/pronto-vector-graph/src/arena_unit.rs",
+      "methods": 2,
+      "beforeHash": "d31ddc8a8c2fda5a81f69b078bd129cc779e8bca161c1f055c0eba3ec35053a6"
+    },
+    {
+      "path": "rust/crates/pronto-vector-graph/src/lib.rs",
+      "methods": 2,
+      "beforeHash": "b11b2a8ac09016bb9c7f6bd13942f960e673d1f9d7040bd68513118e0fe0be1e"
+    }
+  ],
+  "reframe_v1": [
+    {
+      "path": "rust/crates/reframe-media-runtime/src/lib.rs",
+      "methods": 4,
+      "beforeHash": "249fb30a98d0c5ccc8b00ed5f79409487bf3e7aeb1dc93ff5d6bf326b949358e"
+    }
+  ],
+  "trader_v1": [],
+  "trotters_v1": []
+}

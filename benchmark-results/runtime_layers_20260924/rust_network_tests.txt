@@ -1,0 +1,49 @@
+   Compiling ovrt-network v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-network)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.49s
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_network-232c50848276fc37)
+
+running 29 tests
+test dedup::tests::a_key_is_new_once_and_a_duplicate_after ... ok
+test dedup::tests::clearing_the_window_readmits_previously_seen_keys ... ok
+test dedup::tests::distinct_keys_do_not_suppress_each_other ... ok
+test dedup::tests::an_immediate_second_copy_is_suppressed_even_under_pressure ... ok
+test interface::tests::interfaces_are_deduplicated_by_name ... ok
+test interface::tests::every_host_reports_a_loopback_interface ... ok
+test dedup::tests::capacity_must_be_a_power_of_two_and_leave_room_to_probe ... ok
+test interface::tests::every_reported_interface_has_a_nonzero_index ... ok
+test interface::tests::loopback_is_never_offered_as_a_race_path ... ok
+test dedup::tests::the_ring_never_rejects_a_first_arrival ... ok
+test race::tests::a_race_needs_at_least_one_path ... ok
+test interface::tests::the_binding_probe_is_stable_across_calls ... ok
+test interface::tests::the_probe_agrees_with_a_real_bind ... ok
+test race::tests::counters_separate_delivered_from_undeliverable ... ok
+test race::loom_verification::received_success_publishes_path_availability ... ok
+test race::tests::dropping_the_racer_joins_every_worker ... ok
+test race::tests::every_path_failing_reports_every_reason ... ok
+test race::tests::frames_above_the_control_rung_are_refused ... ok
+test race::tests::one_live_path_still_wins_against_a_dead_one ... ok
+test dedup::tests::the_fingerprint_never_collides_with_the_empty_marker ... ok
+test tests::every_error_renders_its_cause ... ok
+test tests::the_oversized_frame_error_names_the_remedy ... ok
+test race::tests::a_busy_path_is_skipped_rather_than_queued ... ok
+test dedup::tests::exactly_one_thread_wins_a_contended_key ... ok
+test race::tests::all_paths_busy_is_backpressure_not_breakage ... ok
+test race::tests::the_race_returns_without_waiting_for_the_slow_path ... ok
+test race::tests::a_deadline_yields_an_outcome_rather_than_an_error ... ok
+test race::tests::a_stale_report_is_never_claimed_by_a_later_race ... ok
+test race::tests::the_race_collapses_the_tail ... ok
+
+test result: ok. 29 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.63s
+
+     Running unittests src/bin/network_sim.rs (runtime-sdk/rust/target/debug/deps/network_sim-75c87fde9b2be0a5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_network
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

@@ -32,3 +32,28 @@ impl Default for RuntimeDiagnostics {
         }
     }
 }
+
+impl RuntimeDiagnostics {
+    /// Reuses source storage across completed requests.
+    pub fn set_runtime_source(&mut self, source: &str) {
+        self.last_runtime_source.clear();
+        self.last_runtime_source.push_str(source);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RuntimeDiagnostics;
+
+    #[test]
+    fn source_updates_reuse_capacity_and_replace_visible_text() {
+        let mut diagnostics = RuntimeDiagnostics::default();
+        diagnostics.set_runtime_source("native-ffi-error");
+        let pointer = diagnostics.last_runtime_source.as_ptr();
+        diagnostics.set_runtime_source("native-ffi");
+        assert_eq!(diagnostics.last_runtime_source, "native-ffi");
+        assert_eq!(diagnostics.last_runtime_source.as_ptr(), pointer);
+        diagnostics.set_runtime_source("");
+        assert!(diagnostics.last_runtime_source.is_empty());
+    }
+}

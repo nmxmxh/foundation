@@ -1,0 +1,73 @@
+File: foundation-runtimehost-profile.test
+Type: inuse_space
+Time: 2026-09-24 19:09:23 WAT
+Showing nodes accounting for 54.47kB, 97.14% of 56.07kB total
+Dropped 64 nodes (cum <= 0.28kB)
+      flat  flat%   sum%        cum   cum%
+   39.10kB 69.74% 69.74%    39.10kB 69.74%  runtime.mallocgc
+       6kB 10.70% 80.44%        6kB 10.70%  regexp/syntax.(*compiler).inst (inline)
+    5.42kB  9.67% 90.11%     5.92kB 10.56%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeWithContext
+    1.53kB  2.73% 92.84%     1.53kB  2.73%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).runExchangeLoop
+    1.13kB  2.02% 94.86%     1.13kB  2.02%  sync.(*Pool).pinSlow
+    0.41kB  0.72% 95.58%     0.41kB  0.72%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.benchmarkProcessPool (inline)
+    0.39kB   0.7% 96.28%     0.39kB   0.7%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).ensureExchangeLoop
+    0.28kB   0.5% 96.78%     1.76kB  3.14%  fmt.Sprintf
+    0.20kB  0.36% 97.14%     6.58kB 11.73%  regexp.compile
+         0     0% 97.14%     1.34kB  2.38%  fmt.newPrinter
+         0     0% 97.14%     5.92kB 10.56%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).ExecuteInto
+         0     0% 97.14%     5.92kB 10.56%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).execute
+         0     0% 97.14%     5.92kB 10.56%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*ProcessPool).executeOnSelectedWorker
+         0     0% 97.14%     5.92kB 10.56%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).executeHeld
+         0     0% 97.14%     5.92kB 10.56%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.(*processWorker).tryExecute
+         0     0% 97.14%     6.33kB 11.29%  github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost.BenchmarkProcessPoolExecuteInto1KB
+         0     0% 97.14%        3kB  5.35%  google.golang.org/protobuf/internal/encoding/json.init
+         0     0% 97.14%     6.09kB 10.87%  main.main
+         0     0% 97.14%     6.58kB 11.73%  regexp.Compile (inline)
+         0     0% 97.14%        3kB  5.35%  regexp.MustCompile
+         0     0% 97.14%        6kB 10.70%  regexp/syntax.(*compiler).compile
+         0     0% 97.14%        3kB  5.35%  regexp/syntax.(*compiler).empty (inline)
+         0     0% 97.14%        3kB  5.35%  regexp/syntax.(*compiler).quest
+         0     0% 97.14%     6.05kB 10.78%  regexp/syntax.Compile
+         0     0% 97.14%    29.23kB 52.12%  runtime.allocm
+         0     0% 97.14%        3kB  5.35%  runtime.doInit (inline)
+         0     0% 97.14%        3kB  5.35%  runtime.doInit1
+         0     0% 97.14%        4kB  7.13%  runtime.gcBgMarkWorker
+         0     0% 97.14%     5.45kB  9.71%  runtime.gcStart.func4
+         0     0% 97.14%    11.25kB 20.06%  runtime.mProfStackInit (inline)
+         0     0% 97.14%     9.09kB 16.22%  runtime.main
+         0     0% 97.14%    11.25kB 20.06%  runtime.makeProfStackFP (inline)
+         0     0% 97.14%    11.25kB 20.06%  runtime.makeslice
+         0     0% 97.14%    10.31kB 18.39%  runtime.malg
+         0     0% 97.14%    21.78kB 38.85%  runtime.mcall
+         0     0% 97.14%    14.88kB 26.54%  runtime.mcommoninit
+         0     0% 97.14%     2.34kB  4.18%  runtime.mpreinit
+         0     0% 97.14%        2kB  3.57%  runtime.mstart
+         0     0% 97.14%        2kB  3.57%  runtime.mstart0
+         0     0% 97.14%        2kB  3.57%  runtime.mstart1
+         0     0% 97.14%    29.23kB 52.12%  runtime.newm
+         0     0% 97.14%    27.60kB 49.23%  runtime.newobject
+         0     0% 97.14%     5.88kB 10.48%  runtime.newproc.func1
+         0     0% 97.14%     5.88kB 10.48%  runtime.newproc1
+         0     0% 97.14%    21.78kB 38.85%  runtime.park_m
+         0     0% 97.14%    23.78kB 42.41%  runtime.resetspinning
+         0     0% 97.14%    23.78kB 42.41%  runtime.schedule
+         0     0% 97.14%     5.45kB  9.71%  runtime.startTheWorldWithSema
+         0     0% 97.14%    29.23kB 52.12%  runtime.startm
+         0     0% 97.14%    11.32kB 20.19%  runtime.systemstack
+         0     0% 97.14%    29.23kB 52.12%  runtime.wakep
+         0     0% 97.14%     1.84kB  3.29%  sync.(*Once).Do (inline)
+         0     0% 97.14%     1.84kB  3.29%  sync.(*Once).doSlow
+         0     0% 97.14%     1.45kB  2.58%  sync.(*Pool).Get
+         0     0% 97.14%     1.13kB  2.02%  sync.(*Pool).pin
+         0     0% 97.14%     6.33kB 11.29%  testing.(*B).run1.func1
+         0     0% 97.14%     6.45kB 11.51%  testing.(*B).runN
+         0     0% 97.14%     6.09kB 10.87%  testing.(*M).Run
+         0     0% 97.14%     1.72kB  3.07%  testing.(*M).after
+         0     0% 97.14%     1.72kB  3.07%  testing.(*M).after.func1
+         0     0% 97.14%     0.34kB  0.61%  testing.(*M).before
+         0     0% 97.14%     1.72kB  3.07%  testing.(*M).writeProfiles
+         0     0% 97.14%     3.62kB  6.47%  testing.newMatcher
+         0     0% 97.14%     3.75kB  6.69%  testing.runBenchmarks
+         0     0% 97.14%     3.62kB  6.47%  testing.simpleMatch.verify
+         0     0% 97.14%     1.76kB  3.14%  testing.toOutputDir
+         0     0% 97.14%     3.58kB  6.38%  testing/internal/testdeps.TestDeps.MatchString

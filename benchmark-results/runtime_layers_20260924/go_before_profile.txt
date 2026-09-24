@@ -1,0 +1,7 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkProcessPoolExecuteInto1KB-8   	  231954	     11389 ns/op	     256 B/op	       5 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	3.746s

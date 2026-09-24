@@ -48,4 +48,4 @@
 ./placement|BenchmarkMirrorFrameEncode32|1|1900|405
 ./placement|BenchmarkMirrorFrameDecode32|3|1950|487
 ./placement|BenchmarkRemoteComputeRoundTrip|4|185|133
-./runtimehost|BenchmarkPlacementFullHostPath|2|1900|654
+./runtimehost|BenchmarkPlacementFullHostPath|0|0|654

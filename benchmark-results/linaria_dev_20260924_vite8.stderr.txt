@@ -1,0 +1,12 @@
+6:54:05 PM [vite] (client) [Unhandled error] Error: Using the "styled" tag in runtime is not supported. Make sure you have set up the Babel plugin correctly. See https://github.com/callstack/linaria#setup
+ > Proxy.<anonymous> ../../../node_modules/@linaria/react/dist/index.mjs:50:14
+ > node_modules/@ovasabi/ui-minimal/src/primitives.tsx:851:53
+
+6:54:06 PM [vite] (client) [Unhandled error] Error: Using the "css" tag in runtime is not supported. Make sure you have set up the Babel plugin correctly.
+ > css node_modules/@ovasabi/ui-minimal/node_modules/@linaria/core/src/css.ts:19:8
+ > node_modules/@ovasabi/ui-minimal/src/globalStyles.ts?v=59873847:32:43
+
+6:54:07 PM [vite] (client) [Unhandled error] Error: Using the "styled" tag in runtime is not supported. Make sure you have set up the Babel plugin correctly. See https://github.com/callstack/linaria#setup
+ > Proxy.<anonymous> ../../../node_modules/@linaria/react/dist/index.mjs:50:14
+ > node_modules/@ovasabi/ui-minimal/src/primitives.tsx:851:53
+

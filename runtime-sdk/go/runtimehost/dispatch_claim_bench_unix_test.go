@@ -34,21 +34,17 @@ func BenchmarkDispatchClaimFAA(b *testing.B) {
 	block, row := benchStatRow(b)
 	defer func() { _ = block.Close() }()
 	b.ReportAllocs()
-	// Sunk so the compiler cannot delete the claim as dead (TE-18).
-	var sink atomic.Uint32
 	b.RunParallel(func(pb *testing.PB) {
-		var last uint32
 		for pb.Next() {
-			count, err := row.Claim()
+			_, err := row.Claim()
 			if err != nil {
 				b.Fatalf("claim: %v", err)
 			}
-			last = count
 		}
-		sink.Store(last)
 	})
-	if sink.Load() == 0 {
-		b.Fatal("claim count sank to zero; the benchmark measured nothing")
+	stats, err := row.Snapshot()
+	if err != nil || stats.Inflight != uint32(b.N) {
+		b.Fatalf("claim count: got %d, want %d: %v", stats.Inflight, b.N, err)
 	}
 }
 
@@ -101,19 +97,16 @@ func BenchmarkDispatchAdvanceTick(b *testing.B) {
 	}
 	defer func() { _ = block.Close() }()
 	b.ReportAllocs()
-	var sink atomic.Uint64
 	b.RunParallel(func(pb *testing.PB) {
-		var last uint64
 		for pb.Next() {
-			previous, err := block.AdvanceTick()
+			_, err := block.AdvanceTick()
 			if err != nil {
 				b.Fatalf("tick: %v", err)
 			}
-			last = previous
 		}
-		sink.Store(last)
 	})
-	if sink.Load() == 0 {
-		b.Fatal("tick sank to zero; the benchmark measured nothing")
+	tick, err := block.TickNow()
+	if err != nil || tick != uint64(b.N) {
+		b.Fatalf("tick count: got %d, want %d: %v", tick, b.N, err)
 	}
 }

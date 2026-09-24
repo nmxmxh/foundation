@@ -44,7 +44,6 @@ async function artifactFor(filePath, role) {
 
 const artifacts = [];
 for (const [fileName, role] of [
-  ["main.wasm", "go-compat"],
   ["kernel.wasm", "kernel"],
 ]) {
   const filePath = path.join(publicDir, fileName);

@@ -1,7 +1,7 @@
 import * as runtimeBuffer from "../generated/runtimeBuffer";
 
 type PulseMessage =
-  | { type: "INIT"; payload: { buffer: SharedArrayBuffer } }
+  | { type: "INIT"; payload: { buffer: SharedArrayBuffer; byteOffset?: number } }
   | { type: "STOP"; payload?: undefined }
   | { type: "SET_TPS"; payload: { tps: number } }
   | { type: "SET_VISIBILITY"; payload: { visible: boolean } }
@@ -97,7 +97,7 @@ self.onmessage = (event: MessageEvent<PulseMessage>) => {
   const message = event.data;
   switch (message.type) {
     case "INIT":
-      epochs = new Int32Array(message.payload.buffer, 0, EPOCH_SLOT_COUNT);
+      epochs = new Int32Array(message.payload.buffer, message.payload.byteOffset ?? 0, EPOCH_SLOT_COUNT);
       active = true;
       for (const index of watchers) {
         watchIndex(index);

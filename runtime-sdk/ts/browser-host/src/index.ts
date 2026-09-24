@@ -3,6 +3,7 @@ export * from "./generated/runtimeContracts";
 export * from "./generated/bindingContracts";
 export * from "./arena";
 export * from "./host";
+export * from "./memoryRegion";
 export * from "./runtimeBridge";
 export * from "./runtimeModuleLoader";
 export * from "./runtimeDispatcher";

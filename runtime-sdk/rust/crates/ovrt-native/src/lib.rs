@@ -3,6 +3,7 @@
 pub mod arena;
 pub mod arena_blob;
 mod buffer;
+mod diagnostics;
 #[cfg(unix)]
 pub mod epoch_transport;
 mod shared_memory;
@@ -11,13 +12,14 @@ mod stdio;
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-use ovrt_core::{RuntimeDiagnostics, RuntimeMode, RuntimeRole};
-use ovrt_unit::{RuntimeUnit, UnitRegistry};
+use diagnostics::{NativeDiagnostics, Source};
+use ovrt_core::{RuntimeDiagnostics, RuntimeRole};
+use ovrt_unit::{RegisteredUnit, RuntimeOutput, RuntimeUnit, SliceOutput, UnitRegistry};
 
 #[cfg(unix)]
 use ovrt_dispatch::{
@@ -36,15 +38,15 @@ type TaskResult = Result<Vec<u8>, String>;
 const DEFAULT_DISPATCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct Task {
-    unit_id: String,
+    unit: Arc<RegisteredUnit>,
     input: Vec<u8>,
-    respond_to: Sender<TaskResult>,
+    respond_to: SyncSender<TaskResult>,
 }
 
 pub struct NativeRuntimeHost {
     registry: UnitRegistry,
-    diagnostics: Arc<RwLock<RuntimeDiagnostics>>,
-    senders: BTreeMap<RuntimeRole, Sender<Task>>,
+    diagnostics: Arc<NativeDiagnostics>,
+    senders: BTreeMap<RuntimeRole, SyncSender<Task>>,
     in_flight: Arc<AtomicU32>,
     dispatch_timeout: Duration,
     /// Placement table consulted ahead of the static role pools.
@@ -62,32 +64,23 @@ pub struct NativeRuntimeHost {
 impl NativeRuntimeHost {
     pub fn new(role_limits: BTreeMap<RuntimeRole, usize>) -> Self {
         let registry = UnitRegistry::default();
-        let diagnostics = Arc::new(RwLock::new(RuntimeDiagnostics {
-            mode: RuntimeMode::Native,
-            ..RuntimeDiagnostics::default()
-        }));
+        let diagnostics = Arc::new(NativeDiagnostics::default());
         let in_flight = Arc::new(AtomicU32::new(0));
         let mut senders = BTreeMap::new();
         let mut startup_errors = Vec::new();
 
         for (role, workers) in role_limits {
-            let (sender, receiver) = mpsc::channel::<Task>();
+            // Each worker permits one queued request in addition to its active request.
+            let (sender, receiver) = mpsc::sync_channel::<Task>(workers.max(1));
             let shared_receiver = Arc::new(Mutex::new(receiver));
             let mut spawned_workers = 0;
             for worker_index in 0..workers.max(1) {
-                let worker_registry = registry.clone();
                 let worker_receiver = Arc::clone(&shared_receiver);
                 let worker_diagnostics = Arc::clone(&diagnostics);
-                let worker_in_flight = Arc::clone(&in_flight);
                 match thread::Builder::new()
                     .name(format!("ovrt-native-{role}-{worker_index}"))
                     .spawn(move || {
-                        worker_loop(
-                            worker_registry,
-                            worker_receiver,
-                            worker_diagnostics,
-                            worker_in_flight,
-                        );
+                        worker_loop(worker_receiver, worker_diagnostics);
                     }) {
                     Ok(_) => {
                         spawned_workers += 1;
@@ -107,11 +100,7 @@ impl NativeRuntimeHost {
         }
 
         if !startup_errors.is_empty() {
-            if let Ok(mut guard) = diagnostics.write() {
-                guard.degraded = true;
-                guard.last_error = Some(startup_errors.join("; "));
-                guard.last_runtime_source = "native-startup-error".to_string();
-            }
+            diagnostics.failure(Source::StartupError, &startup_errors.join("; "));
         }
 
         Self {
@@ -170,19 +159,15 @@ impl NativeRuntimeHost {
                 _ => unit,
             };
         self.registry.register(unit)?;
-        let count = self.registry.descriptors()?.len() as u32;
-        let mut guard = self
-            .diagnostics
-            .write()
-            .map_err(|_| "runtime diagnostics lock poisoned".to_string())?;
-        guard.active_units = count;
+        let count = self.registry.len()? as u32;
+        self.diagnostics.active_units.fetch_max(count, Ordering::Relaxed);
         Ok(())
     }
 
     pub fn dispatch(&self, unit_id: &str, input: Vec<u8>) -> Result<Vec<u8>, String> {
         let unit = self
             .registry
-            .get(unit_id)?
+            .resolve(unit_id)?
             .ok_or_else(|| format!("runtime unit {unit_id} is not registered"))?;
         let descriptor = unit.descriptor();
         // Placement first: the table decides which mapped pool serves this
@@ -199,10 +184,13 @@ impl NativeRuntimeHost {
         })?;
 
         let in_flight = InFlightGuard::new(Arc::clone(&self.in_flight));
-        let (respond_to, response) = mpsc::channel();
-        sender
-            .send(Task { unit_id: descriptor.unit_id, input, respond_to })
-            .map_err(|_| "native runtime queue is unavailable".to_string())?;
+        let (respond_to, response) = mpsc::sync_channel(1);
+        sender.try_send(Task { unit, input, respond_to }).map_err(|error| match error {
+            mpsc::TrySendError::Full(_) => "native runtime queue is saturated".to_string(),
+            mpsc::TrySendError::Disconnected(_) => {
+                "native runtime queue is unavailable".to_string()
+            }
+        })?;
 
         let result = match response.recv_timeout(self.dispatch_timeout) {
             Ok(result) => result,
@@ -210,83 +198,78 @@ impl NativeRuntimeHost {
                 let error =
                     format!("native runtime dispatch timed out after {:?}", self.dispatch_timeout);
                 in_flight.finish();
-                self.record_dispatch_failure("native-timeout", &error);
+                self.record_dispatch_failure(Source::Timeout, &error);
                 return Err(error);
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let error = "native runtime worker stopped unexpectedly".to_string();
                 in_flight.finish();
-                self.record_dispatch_failure("native-disconnected", &error);
+                self.record_dispatch_failure(Source::Disconnected, &error);
                 return Err(error);
             }
         };
         in_flight.finish();
 
-        let mut guard = self
-            .diagnostics
-            .write()
-            .map_err(|_| "runtime diagnostics lock poisoned".to_string())?;
-        guard.in_flight = self.in_flight.load(Ordering::SeqCst);
         match &result {
-            Ok(_) => {
-                guard.last_error = None;
-                guard.last_runtime_source = "native".to_string();
-                guard.last_epoch = guard.last_epoch.saturating_add(1);
-            }
-            Err(error) => {
-                guard.degraded = true;
-                guard.last_error = Some(error.clone());
-                guard.last_runtime_source = "native-error".to_string();
-            }
+            Ok(_) => self.diagnostics.success(Source::Native)?,
+            Err(error) => self.diagnostics.failure(Source::NativeError, error),
         }
 
         result
     }
 
     pub fn dispatch_direct(&self, unit_id: &str, input: &[u8]) -> Result<Vec<u8>, String> {
-        let unit = self
-            .registry
-            .get(unit_id)?
-            .ok_or_else(|| format!("runtime unit {unit_id} is not registered"))?;
-        let result = match catch_unwind(AssertUnwindSafe(|| unit.run(input))) {
-            Ok(result) => result,
-            Err(payload) => Err(panic_payload_message(payload)),
-        };
+        let mut output = Vec::new();
+        self.dispatch_to(unit_id, input, &mut output)?;
+        Ok(output)
+    }
 
-        let mut guard = self
-            .diagnostics
-            .write()
-            .map_err(|_| "runtime diagnostics lock poisoned".to_string())?;
-        guard.in_flight = self.in_flight.load(Ordering::SeqCst);
-        match &result {
-            Ok(_) => {
-                guard.last_error = None;
-                guard.last_runtime_source = "native-ffi".to_string();
-                guard.last_epoch = guard.last_epoch.saturating_add(1);
-            }
-            Err(error) => {
-                guard.degraded = true;
-                guard.last_error = Some(error.clone());
-                guard.last_runtime_source = "native-ffi-error".to_string();
-            }
+    /// Executes directly into a caller-owned result region. Errors clear the entire destination.
+    pub fn dispatch_direct_into(
+        &self,
+        unit_id: &str,
+        input: &[u8],
+        destination: &mut [u8],
+    ) -> Result<usize, String> {
+        let mut output = SliceOutput::new(destination);
+        let result = self.dispatch_to(unit_id, input, &mut output);
+        let written = output.written();
+        if let Err(error) = result {
+            destination.fill(0);
+            return Err(error);
         }
+        Ok(written)
+    }
 
+    fn dispatch_to(
+        &self,
+        unit_id: &str,
+        input: &[u8],
+        output: &mut dyn RuntimeOutput,
+    ) -> Result<(), String> {
+        let _active = self.diagnostics.begin();
+        let result = self
+            .registry
+            .with_unit(unit_id, |unit| {
+                match catch_unwind(AssertUnwindSafe(|| unit.execute(input, output))) {
+                    Ok(result) => result,
+                    Err(payload) => Err(panic_payload_message(payload)),
+                }
+            })
+            .ok_or_else(|| format!("runtime unit {unit_id} is not registered"))?;
+        match &result {
+            Ok(_) => self.diagnostics.success(Source::Ffi)?,
+            Err(error) => self.diagnostics.failure(Source::FfiError, error),
+        }
         result
     }
 
     pub fn diagnostics(&self) -> Result<RuntimeDiagnostics, String> {
-        let guard =
-            self.diagnostics.read().map_err(|_| "runtime diagnostics lock poisoned".to_string())?;
-        Ok(guard.clone())
+        self.diagnostics.snapshot(self.in_flight.load(Ordering::SeqCst))
     }
 
-    fn record_dispatch_failure(&self, source: &str, error: &str) {
-        if let Ok(mut guard) = self.diagnostics.write() {
-            guard.in_flight = self.in_flight.load(Ordering::SeqCst);
-            guard.degraded = true;
-            guard.last_error = Some(error.to_string());
-            guard.last_runtime_source = source.to_string();
-        }
+    fn record_dispatch_failure(&self, source: Source, error: &str) {
+        self.diagnostics.failure(source, error);
     }
 
     /// Consults the placement table and returns the local pool that should
@@ -323,9 +306,7 @@ impl NativeRuntimeHost {
         let Ok(descriptors) = block.snapshot_descriptors() else {
             return fallback;
         };
-        let stats: Vec<_> = (0..descriptors.len())
-            .map(|lane| block.stat_row(lane).ok().map(|row| row.snapshot()))
-            .collect();
+        let stats = block.snapshot_stats();
 
         match decide_from_table(now, &descriptors, &stats, &request) {
             Some(lane_slot) => self
@@ -368,12 +349,7 @@ impl Drop for InFlightGuard {
     }
 }
 
-fn worker_loop(
-    registry: UnitRegistry,
-    receiver: Arc<Mutex<Receiver<Task>>>,
-    diagnostics: Arc<RwLock<RuntimeDiagnostics>>,
-    in_flight: Arc<AtomicU32>,
-) {
+fn worker_loop(receiver: Arc<Mutex<Receiver<Task>>>, diagnostics: Arc<NativeDiagnostics>) {
     loop {
         let task = {
             let guard = match receiver.lock() {
@@ -386,21 +362,13 @@ fn worker_loop(
             }
         };
 
-        let result = match registry.get(&task.unit_id) {
-            Ok(Some(unit)) => match catch_unwind(AssertUnwindSafe(|| unit.run(&task.input))) {
-                Ok(result) => result,
-                Err(payload) => Err(panic_payload_message(payload)),
-            },
-            Ok(None) => Err(format!("runtime unit {} is missing", task.unit_id)),
-            Err(error) => Err(error),
+        let result = match catch_unwind(AssertUnwindSafe(|| task.unit.run(&task.input))) {
+            Ok(result) => result,
+            Err(payload) => Err(panic_payload_message(payload)),
         };
 
-        if let Ok(mut guard) = diagnostics.write() {
-            guard.in_flight = in_flight.load(Ordering::SeqCst);
-            if let Err(error) = &result {
-                guard.degraded = true;
-                guard.last_error = Some(error.clone());
-            }
+        if let Err(error) = &result {
+            diagnostics.failure(Source::NativeError, error);
         }
 
         let _ = task.respond_to.send(result);
@@ -419,6 +387,7 @@ fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use ovrt_core::RuntimeMode;
     use std::collections::BTreeMap;
     use std::io::Cursor;
     use std::sync::Arc;
@@ -432,6 +401,125 @@ mod tests {
     use super::*;
 
     struct UppercaseUnit;
+
+    struct PartialFailure;
+
+    impl RuntimeUnit for PartialFailure {
+        fn descriptor(&self) -> RuntimeUnitDescriptor {
+            UppercaseUnit.descriptor()
+        }
+        fn execute(&self, _: &[u8], output: &mut dyn RuntimeOutput) -> Result<(), String> {
+            output.write(b"private")?;
+            Err("unit rejected output".to_owned())
+        }
+    }
+
+    #[test]
+    fn direct_destinations_refuse_truncation_and_clear_failed_results() {
+        let host = NativeRuntimeHost::new(BTreeMap::new());
+        host.register_unit(Arc::new(UppercaseUnit)).expect("register");
+        let mut output = [99; 8];
+        let length = host
+            .dispatch_direct_into("text.compute", b"hello", &mut output)
+            .expect("direct output");
+        assert_eq!(&output[..length], b"HELLO");
+        assert_eq!(&output[length..], &[99; 3]);
+        assert!(host.dispatch_direct_into("text.compute", b"too large", &mut output).is_err());
+        assert_eq!(output, [0; 8]);
+        host.register_unit(Arc::new(PartialFailure)).expect("replace");
+        assert!(host.dispatch_direct_into("text.compute", b"ignored", &mut output).is_err());
+        assert_eq!(output, [0; 8]);
+        assert!(host.dispatch_direct_into("missing", b"", &mut output).is_err());
+        assert_eq!(host.diagnostics().expect("diagnostics").in_flight, 0);
+    }
+
+    #[test]
+    fn panicked_destinations_are_cleared_without_touching_adjacent_bytes() {
+        struct PartialPanic;
+        impl RuntimeUnit for PartialPanic {
+            fn descriptor(&self) -> RuntimeUnitDescriptor {
+                UppercaseUnit.descriptor()
+            }
+            fn execute(&self, _: &[u8], output: &mut dyn RuntimeOutput) -> Result<(), String> {
+                output.write(b"secret")?;
+                panic!("failed after writing");
+            }
+        }
+        let host = NativeRuntimeHost::new(BTreeMap::new());
+        host.register_unit(Arc::new(PartialPanic)).expect("register");
+        let mut bytes = [99; 10];
+        assert!(host.dispatch_direct_into("text.compute", b"", &mut bytes[1..9]).is_err());
+        assert_eq!(bytes, [99, 0, 0, 0, 0, 0, 0, 0, 0, 99]);
+        let state = host.diagnostics().expect("diagnostics");
+        assert_eq!(state.in_flight, 0);
+        assert!(state.degraded);
+    }
+
+    struct BlockingUnit {
+        entered: mpsc::SyncSender<()>,
+        release: Arc<(Mutex<bool>, std::sync::Condvar)>,
+    }
+
+    impl RuntimeUnit for BlockingUnit {
+        fn descriptor(&self) -> RuntimeUnitDescriptor {
+            UppercaseUnit.descriptor()
+        }
+
+        fn execute(
+            &self,
+            _: &[u8],
+            __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+        ) -> Result<(), String> {
+            let __ovrt_run = || -> Result<Vec<u8>, String> {
+                self.entered.send(()).map_err(|error| error.to_string())?;
+                let (lock, condition) = &*self.release;
+                let ready = lock.lock().map_err(|error| error.to_string())?;
+                let (ready, _) = condition
+                    .wait_timeout_while(ready, Duration::from_secs(2), |ready| !*ready)
+                    .map_err(|error| error.to_string())?;
+                if !*ready {
+                    return Err("test release timed out".to_owned());
+                }
+                Ok(b"old".to_vec())
+            };
+            let __ovrt_result = __ovrt_run()?;
+            __ovrt_output.write_owned(__ovrt_result)
+        }
+    }
+
+    #[test]
+    fn saturated_queue_rejects_work_and_pins_the_accepted_implementation() {
+        let (entered, starts) = mpsc::sync_channel(2);
+        let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let host = Arc::new(NativeRuntimeHost::new(BTreeMap::from([(RuntimeRole::Compute, 1)])));
+        host.register_unit(Arc::new(BlockingUnit { entered, release: Arc::clone(&release) }))
+            .expect("register");
+        let caller = Arc::clone(&host);
+        let running = thread::spawn(move || caller.dispatch("text.compute", vec![]));
+        starts.recv_timeout(Duration::from_secs(2)).expect("active request");
+        let (respond_to, queued) = mpsc::sync_channel(1);
+        let unit = host.registry.resolve("text.compute").expect("resolve").expect("unit");
+        assert!(host.senders[&RuntimeRole::Compute]
+            .try_send(Task { unit, input: vec![], respond_to })
+            .is_ok());
+        assert_eq!(
+            host.dispatch("text.compute", vec![]).expect_err("queue must reject"),
+            "native runtime queue is saturated"
+        );
+        host.register_unit(Arc::new(UppercaseUnit)).expect("replace while executing");
+        *release.0.lock().expect("release lock") = true;
+        release.1.notify_all();
+        assert_eq!(running.join().expect("caller").expect("active output"), b"old");
+        assert_eq!(
+            queued
+                .recv_timeout(Duration::from_secs(2))
+                .expect("queued response")
+                .expect("queued output"),
+            b"old"
+        );
+        assert_eq!(host.dispatch("text.compute", b"new".to_vec()).expect("replacement"), b"NEW");
+        assert_eq!(host.diagnostics().expect("diagnostics").in_flight, 0);
+    }
 
     impl RuntimeUnit for UppercaseUnit {
         fn descriptor(&self) -> RuntimeUnitDescriptor {
@@ -448,8 +536,16 @@ mod tests {
             }
         }
 
-        fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-            Ok(input.iter().map(|byte| byte.to_ascii_uppercase()).collect())
+        fn execute(
+            &self,
+            input: &[u8],
+            __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+        ) -> Result<(), String> {
+            let __ovrt_run = || -> Result<Vec<u8>, String> {
+                Ok(input.iter().map(|byte| byte.to_ascii_uppercase()).collect())
+            };
+            let __ovrt_result = __ovrt_run()?;
+            __ovrt_output.write_owned(__ovrt_result)
         }
     }
 
@@ -498,8 +594,14 @@ mod tests {
             }
         }
 
-        fn run(&self, _input: &[u8]) -> Result<Vec<u8>, String> {
-            panic!("panic compute")
+        fn execute(
+            &self,
+            _input: &[u8],
+            __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+        ) -> Result<(), String> {
+            let __ovrt_run = || -> Result<Vec<u8>, String> { panic!("panic compute") };
+            let __ovrt_result = __ovrt_run()?;
+            __ovrt_output.write_owned(__ovrt_result)
         }
     }
 
@@ -533,9 +635,17 @@ mod tests {
             }
         }
 
-        fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-            std::thread::sleep(Duration::from_millis(25));
-            Ok(input.to_vec())
+        fn execute(
+            &self,
+            input: &[u8],
+            __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+        ) -> Result<(), String> {
+            let __ovrt_run = || -> Result<Vec<u8>, String> {
+                std::thread::sleep(Duration::from_millis(25));
+                Ok(input.to_vec())
+            };
+            let __ovrt_result = __ovrt_run()?;
+            __ovrt_output.write_owned(__ovrt_result)
         }
     }
 
@@ -611,8 +721,12 @@ mod tests {
                 }
             }
 
-            fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-                Ok(input.to_vec())
+            fn execute(
+                &self,
+                input: &[u8],
+                __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+            ) -> Result<(), String> {
+                __ovrt_output.write(input)
             }
         }
 

@@ -204,15 +204,17 @@ Hermes, or WebSocket-routing coordination. The default ramp is the same:
 ```
 
 This is not a "spawn one million goroutines" harness. Foundation's scalable
-shape is bounded workers plus batched lanes. The runner therefore treats each
-step as a target unit count and chooses bounded worker concurrency from the
-CPU-aware scaling config unless `SERVICE_BACKED_LOAD_RESEARCH_MAX_WORKERS`
-overrides it.
+shape is bounded workers plus batched lanes. The runner treats each step as a
+target unit count. Database lanes use a CPU-aware writer budget of at most six
+above one core. `SERVICE_BACKED_LOAD_RESEARCH_DB_WORKERS` overrides that budget.
+`SERVICE_BACKED_LOAD_RESEARCH_MAX_WORKERS` and pool size remain hard caps.
 
 Interpretation rules:
 
-1. `postgres_send_batch64` describes semantic write throughput when many
-   independent mutations must cross the database boundary.
+1. `postgres_send_batch64` measures independent upsert statements without
+   unchanged-data checks or returned timestamps. Select
+   `postgres_upsert_records_batch64` for state-store change detection and
+   returned timestamps.
 2. `postgres_copy_from1024` describes append/import throughput. Do not use its
    number to justify replacing semantic command writes with COPY.
 3. `redis_set_get_many64` describes multi-key cache pressure. Sequential

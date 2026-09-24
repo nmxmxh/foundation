@@ -863,7 +863,7 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then
   check_file_contains "frontend benchmark target depends on prototype runtime" "$target/Makefile" "test-bench-frontend: frontend-prototype-runtime"
   check_file_contains "frontend benchmark target captures workbench profile" "$target/Makefile" "frontend_workbench_profile.sh"
   check_file_contains "make wasm test target rebuilds runtime" "$target/Makefile" "test-wasm: build-runtime"
-  check_file_contains "wasm optimizer enables Go non-trapping float-to-int" "$target/Makefile" "--enable-nontrapping-float-to-int"
+  check_file_contains "wasm optimizer enables non-trapping float-to-int" "$target/Makefile" "--enable-nontrapping-float-to-int"
   check_file_contains "make e2e target regenerates contracts" "$target/Makefile" "test-e2e: communication-contracts"
   check_file_contains "make e2e target supports explicit frontend script" "$target/Makefile" 'zsh $(FRONTEND_SCRIPT_RUNNER) . e2e'
   check_file_contains "make e2e target supports test e2e script" "$target/Makefile" 'zsh $(FRONTEND_SCRIPT_RUNNER) . test:e2e'
@@ -886,8 +886,6 @@ if [[ "${WITH_WASM:-false}" == "true" ]]; then
   check_file_contains "runtime ffi pool uses backend seam" "$target/foundation/runtime-sdk/go/runtimehost/ffi_unix.go" "type ffiBackend interface"
   check_exists "runtime transport compression API" "$target/foundation/runtime-transport/ts/src/compression.ts"
   check_exists "runtime offline queue API" "$target/foundation/runtime-transport/ts/src/offlineQueue.ts"
-  check_exists "wasm entry" "$target/wasm/main.go"
-  check_file_contains "wasm runtime-transport shim" "$target/wasm/main.go" "__OVASABI_RUNTIME_TRANSPORT"
 fi
 
 if [[ "${WITH_NATIVE:-false}" == "true" ]]; then

@@ -16,7 +16,15 @@ use std::time::Instant;
 use ovrt_core::RuntimeUnitDescriptor;
 use ovrt_unit::RuntimeUnit;
 
-use crate::block::DispatchBlock;
+use crate::block::{DispatchBlock, StatRowHandle};
+
+struct InFlightClaim<'a>(StatRowHandle<'a>);
+
+impl Drop for InFlightClaim<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.release_one();
+    }
+}
 
 /// Capability bit for a role ordinal, shared by descriptor publication and
 /// placement requests so both sides speak one vocabulary.
@@ -45,11 +53,16 @@ impl RuntimeUnit for SampledUnit {
         self.inner.descriptor()
     }
 
-    fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
+    fn execute(
+        &self,
+        input: &[u8],
+        __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+    ) -> Result<(), String> {
         let stats = self.block.stat_row(self.lane)?;
         stats.claim();
+        let claim = InFlightClaim(stats);
         let started = Instant::now();
-        let result = self.inner.run(input);
+        let result = self.inner.execute(input, __ovrt_output);
 
         let elapsed = started.elapsed().as_nanos();
         // Clamp instead of panicking: a clock jump past u64 nanoseconds
@@ -60,11 +73,7 @@ impl RuntimeUnit for SampledUnit {
         // work; reading without advancing would stamp the stale sentinel.
         let _ = self.block.advance_tick()?;
         let tick = self.block.tick_now()?;
-        stats.record_completion(sample_ns, tick);
-        // The single-owner invariant keeps claim and release balanced; the
-        // boolean only guards against a bookkeeping bug somewhere else, and
-        // compute results must never depend on that bookkeeping.
-        let _ = stats.release_one();
+        claim.0.record_completion(sample_ns, tick);
         result
     }
 }
@@ -92,8 +101,12 @@ mod tests {
             }
         }
 
-        fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
-            Ok(input.to_vec())
+        fn execute(
+            &self,
+            input: &[u8],
+            __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+        ) -> Result<(), String> {
+            __ovrt_output.write(input)
         }
     }
 
@@ -125,8 +138,14 @@ mod tests {
             fn descriptor(&self) -> RuntimeUnitDescriptor {
                 SlowEcho.descriptor()
             }
-            fn run(&self, _input: &[u8]) -> Result<Vec<u8>, String> {
-                Err("boom".to_string())
+            fn execute(
+                &self,
+                _input: &[u8],
+                __ovrt_output: &mut dyn ovrt_unit::RuntimeOutput,
+            ) -> Result<(), String> {
+                let __ovrt_run = || -> Result<Vec<u8>, String> { Err("boom".to_string()) };
+                let __ovrt_result = __ovrt_run()?;
+                __ovrt_output.write_owned(__ovrt_result)
             }
         }
 
@@ -137,6 +156,29 @@ mod tests {
         let stats = block.stat_row(1).expect("stats").snapshot();
         assert!(stats.ewma_ns > 0, "failures must feed the estimate");
         assert_eq!(stats.inflight, 0);
+    }
+
+    #[test]
+    fn unwinding_a_unit_releases_the_placement_slot() {
+        struct Panics;
+        impl RuntimeUnit for Panics {
+            fn descriptor(&self) -> RuntimeUnitDescriptor {
+                SlowEcho.descriptor()
+            }
+
+            fn execute(
+                &self,
+                _: &[u8],
+                _: &mut dyn ovrt_unit::RuntimeOutput,
+            ) -> Result<(), String> {
+                panic!("unit panic");
+            }
+        }
+        let (_file, block) = temp_block();
+        let unit = SampledUnit::new(Arc::new(Panics), Arc::clone(&block), 1);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unit.run(b"x")));
+        assert!(result.is_err());
+        assert_eq!(block.stat_row(1).expect("row").snapshot().inflight, 0);
     }
 
     #[test]

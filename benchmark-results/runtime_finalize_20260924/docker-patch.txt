@@ -1,0 +1,15 @@
+✔ Docker migration copies linked browser packages before installation and stays idempotent (264.387166ms)
+✔ upgrades existing Vite and Vitest plugins and remains idempotent (384.483042ms)
+✔ installs a missing plugin and preserves custom optimizer dependencies (481.505708ms)
+✔ preserves both existing project fixes and configuration factories (470.909667ms)
+✔ reports dynamic or conflicting configuration without partial edits (2043.661ms)
+✔ upgrades only the known Rust build target and preserves unrelated targets (177.092583ms)
+✔ targeted managed patches record their changes and avoid unrelated patches (270.699458ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4162.626834

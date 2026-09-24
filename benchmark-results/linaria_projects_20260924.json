@@ -1,0 +1,363 @@
+{
+  "stage": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8",
+  "projects": [
+    {
+      "project": "chowdash_rider_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "81e853650b64b9d0cf5afe8bdef08cdcb9047dcc7ba04727d50138fb1d4f19a0",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/chowdash_rider_v1/frontend/vite.config.ts",
+          "after_sha256": "81e853650b64b9d0cf5afe8bdef08cdcb9047dcc7ba04727d50138fb1d4f19a0",
+          "changed": false
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "7fd34194525675f8bc7e087e18d32d0f6cfa93836de2e49245ba786fb6d166db",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/chowdash_rider_v1/frontend/vitest.config.ts",
+          "after_sha256": "ed0b8e658cf3dc8f84aef8c3c25df923e5166439adaa8035caae6362f3b35df6",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "civic_watch_ng_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "205aa13ec125e9b3d988576a5097410040be3a6dfa6a3f57f0a7ef845b3efc27",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/civic_watch_ng_v1/frontend/vite.config.ts",
+          "after_sha256": "e909c1f488dc5e8540e11907bde1cf92a94afe920c2f674234f7e14d63b10ade",
+          "changed": true
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "0a5a115b78c01cf025ebc5891cfa7f21022ea771ac1df306243ee170efe7cff3",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/civic_watch_ng_v1/frontend/vitest.config.ts",
+          "after_sha256": "232a319010d395fe793edcceec768c9575dda1bbe34c3754cbe70d44fd7164a6",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "docuos_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "205aa13ec125e9b3d988576a5097410040be3a6dfa6a3f57f0a7ef845b3efc27",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/docuos_v1/frontend/vite.config.ts",
+          "after_sha256": "e909c1f488dc5e8540e11907bde1cf92a94afe920c2f674234f7e14d63b10ade",
+          "changed": true
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "0a5a115b78c01cf025ebc5891cfa7f21022ea771ac1df306243ee170efe7cff3",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/docuos_v1/frontend/vitest.config.ts",
+          "after_sha256": "232a319010d395fe793edcceec768c9575dda1bbe34c3754cbe70d44fd7164a6",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "forest_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "205aa13ec125e9b3d988576a5097410040be3a6dfa6a3f57f0a7ef845b3efc27",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/forest_v1/frontend/vite.config.ts",
+          "after_sha256": "e909c1f488dc5e8540e11907bde1cf92a94afe920c2f674234f7e14d63b10ade",
+          "changed": true
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "0a5a115b78c01cf025ebc5891cfa7f21022ea771ac1df306243ee170efe7cff3",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/forest_v1/frontend/vitest.config.ts",
+          "after_sha256": "232a319010d395fe793edcceec768c9575dda1bbe34c3754cbe70d44fd7164a6",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "global_value_exchange_net_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "205aa13ec125e9b3d988576a5097410040be3a6dfa6a3f57f0a7ef845b3efc27",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/global_value_exchange_net_v1/frontend/vite.config.ts",
+          "after_sha256": "e909c1f488dc5e8540e11907bde1cf92a94afe920c2f674234f7e14d63b10ade",
+          "changed": true
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "0a5a115b78c01cf025ebc5891cfa7f21022ea771ac1df306243ee170efe7cff3",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/global_value_exchange_net_v1/frontend/vitest.config.ts",
+          "after_sha256": "232a319010d395fe793edcceec768c9575dda1bbe34c3754cbe70d44fd7164a6",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "marketer_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "205aa13ec125e9b3d988576a5097410040be3a6dfa6a3f57f0a7ef845b3efc27",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/marketer_v1/frontend/vite.config.ts",
+          "after_sha256": "e909c1f488dc5e8540e11907bde1cf92a94afe920c2f674234f7e14d63b10ade",
+          "changed": true
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "0a5a115b78c01cf025ebc5891cfa7f21022ea771ac1df306243ee170efe7cff3",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/marketer_v1/frontend/vitest.config.ts",
+          "after_sha256": "232a319010d395fe793edcceec768c9575dda1bbe34c3754cbe70d44fd7164a6",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "metered_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "64515d8f675bd10b1592314df72672fe491793842bbba0ab81dfd1eae28182a5",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/metered_v1/frontend/vite.config.ts",
+          "after_sha256": "ca68378206faa8fdc473a0cf5b3e0a87ad6d9b661886761cb25f8ed200bab23f",
+          "changed": true
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "0a5a115b78c01cf025ebc5891cfa7f21022ea771ac1df306243ee170efe7cff3",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/metered_v1/frontend/vitest.config.ts",
+          "after_sha256": "232a319010d395fe793edcceec768c9575dda1bbe34c3754cbe70d44fd7164a6",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "ovasabi_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "a5f8bd3ecbec8942862ab802a37d3be30a8f60d02b8ada18cfb4fa816083d176",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/ovasabi_v1/frontend/vite.config.ts",
+          "after_sha256": "a5f8bd3ecbec8942862ab802a37d3be30a8f60d02b8ada18cfb4fa816083d176",
+          "changed": false
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "0a5a115b78c01cf025ebc5891cfa7f21022ea771ac1df306243ee170efe7cff3",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/ovasabi_v1/frontend/vitest.config.ts",
+          "after_sha256": "232a319010d395fe793edcceec768c9575dda1bbe34c3754cbe70d44fd7164a6",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "pronto_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "48e96cdc4ef78260ff7310c21f11cf8901ea9e7661d2a5304e9eb2bcdd281322",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/pronto_v1/frontend/vite.config.ts",
+          "after_sha256": "23a7173aaa3cfd7037ca4629453ce5d980c42e8799246d62a1dd295484ed9ccc",
+          "changed": true
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "9552df1a9a00720658bd1389f8a416f3afbaf3908a96f7b919fcba5572b9b60f",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/pronto_v1/frontend/vitest.config.ts",
+          "after_sha256": "5914c4d86f5e58a833f614ad974f7ee95caf5fd6319adb15821136390ba3406d",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "reframe_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "a1fa76466d626cfd302486e0dd7198b5ba8344bec7e35550cf42c7c77ecf1b05",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/reframe_v1/frontend/vite.config.ts",
+          "after_sha256": "5de6bec1af5e95379f92896aab24aacdbbc338e582b01df01bc08ad643f6ceeb",
+          "changed": true
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "9552df1a9a00720658bd1389f8a416f3afbaf3908a96f7b919fcba5572b9b60f",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/reframe_v1/frontend/vitest.config.ts",
+          "after_sha256": "5914c4d86f5e58a833f614ad974f7ee95caf5fd6319adb15821136390ba3406d",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "trader_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "205aa13ec125e9b3d988576a5097410040be3a6dfa6a3f57f0a7ef845b3efc27",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/trader_v1/frontend/vite.config.ts",
+          "after_sha256": "e909c1f488dc5e8540e11907bde1cf92a94afe920c2f674234f7e14d63b10ade",
+          "changed": true
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "0a5a115b78c01cf025ebc5891cfa7f21022ea771ac1df306243ee170efe7cff3",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/trader_v1/frontend/vitest.config.ts",
+          "after_sha256": "232a319010d395fe793edcceec768c9575dda1bbe34c3754cbe70d44fd7164a6",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    },
+    {
+      "project": "trotters_v1",
+      "files": [
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1/frontend/vite.config.ts",
+          "name": "vite.config.ts",
+          "before_sha256": "a1fa76466d626cfd302486e0dd7198b5ba8344bec7e35550cf42c7c77ecf1b05",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/trotters_v1/frontend/vite.config.ts",
+          "after_sha256": "5de6bec1af5e95379f92896aab24aacdbbc338e582b01df01bc08ad643f6ceeb",
+          "changed": true
+        },
+        {
+          "path": "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1/frontend/vitest.config.ts",
+          "name": "vitest.config.ts",
+          "before_sha256": "9552df1a9a00720658bd1389f8a416f3afbaf3908a96f7b919fcba5572b9b60f",
+          "candidate": "/var/folders/kd/yg774vp52_l5py0bk7pwxct00000gn/T/foundation-linaria-rollout-4u5v2qp8/trotters_v1/frontend/vitest.config.ts",
+          "after_sha256": "5914c4d86f5e58a833f614ad974f7ee95caf5fd6319adb15821136390ba3406d",
+          "changed": true
+        }
+      ],
+      "patch_output": [
+        "patched frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "patched frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "applied_output": [
+        "[PATCH] frontend Linaria build: frontend/vite.config.ts keeps Linaria transforms active during development and dependency loading",
+        "[PATCH] frontend Linaria build: frontend/vitest.config.ts keeps Linaria transforms active during development and dependency loading"
+      ],
+      "idempotent": true
+    }
+  ],
+  "applied_at": "2026-09-24T17:51:28.903470+00:00",
+  "rust_delivery": "Managed build patch added to normal Foundation updates; project Rust/domain sources were not rewritten by this focused Linaria rollout."
+}

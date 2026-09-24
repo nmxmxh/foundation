@@ -1,7 +1,7 @@
 # Foundation Benchmarks
 
 Status: active reference
-Date: 2026-09-22
+Date: 2026-09-24
 Owner: Platform Architecture
 
 This document holds the current benchmark results for the main Foundation
@@ -38,6 +38,7 @@ From the repository root:
 ```bash
 make test-bench-history
 make test-bench
+make test-bench-runtime-layers
 FOUNDATION_NATIVE_SKIP_BASELINE=1 tooling/scripts/native_benchmark.sh .
 make test-service-backed
 make test-load-research
@@ -78,6 +79,188 @@ that break them are not comparable.
    associative.
 
 ## Results by lane
+
+### Native runtime allocations and Go WASM retirement: 2026-09-24
+
+The measured refactor removes placement allocations, reuses diagnostic storage, and bounds native queue admission.
+The host was an Apple M1 Pro with Go 1.26.6 and Rust 1.92.0.
+Rust results use three alternating runs, each with seven warmed batches.
+Go results use three runs of 200 milliseconds each.
+
+| Operation | Before | After | Allocation change |
+| --- | ---: | ---: | --- |
+| Native direct dispatch, 1 KiB | 83.91 ns | 63.27 ns | 2 → 1 |
+| Rust FFI processing, 1 KiB | 138.45 ns | 114.00 ns | 2 → 1 |
+| Rust snapshot and placement, 32 lanes | 592.67 ns | 443.57 ns | 5 → 0 |
+| Go snapshot and placement, 32 lanes | 660.2 ns | 505.1 ns | 2 → 0 |
+| Deduplication under pressure | 14.33 ns | 6.66 ns | Remains zero |
+| Busy-path rejection, 4 KiB | 140.50 ns | 51.50 ns | 1 → 0 |
+
+Queued Rust dispatch reduces allocated bytes from approximately 4,079 to 2,886 per request.
+Go process dispatch removes one wrapper allocation, without a measured latency improvement.
+The first pass left a 4.5% slowdown in longer owned 1 MiB runs.
+The [output and concurrency finalization](info/runtime_finalize_20260924.md) replaces that implementation with required destination output and immutable registry snapshots.
+Long destination output improved from 44.73 to 19.38 microseconds and removed its temporary allocation.
+Owned 1 MiB output improved 4.0% against the immediate baseline. Small owned results remain slower.
+Eight-caller dispatch improved from 395.79 to 41.02 nanoseconds per aggregate completion.
+
+The legacy Go browser shim was retired from Core and twelve managed projects.
+The rollout removed approximately 25.1 MiB across source and generated artifact copies.
+This footprint reduction does not establish a browser startup or download improvement.
+
+See the [runtime layer report](info/runtime_layers_20260924.md) for complete measurements, profile attribution, contract changes, and migration details.
+Raw results reside in `benchmark-results/runtime_layers_20260924/`.
+
+### Service-backed PostgreSQL writer budget: 2026-09-24
+
+Machine: Apple M1 Pro, eight cores. The isolated Docker service used PostgreSQL 18 on tmpfs.
+Each comparison used 100,000 rows and a fixed pool limit of 96 connections.
+
+| Lane | Writers | Throughput | p95 batch | p99 batch |
+| --- | ---: | ---: | ---: | ---: |
+| Simple `SendBatch` upsert with 64 rows | 6 | 77,062 rows/s | 7.8 ms | 13.6 ms |
+| Simple `SendBatch` upsert with 64 rows | 96 | 56,103 rows/s | 214 ms | 260.7 ms |
+| Append `CopyFrom` with 1,024 rows | 6 | 581,073 rows/s | 17.5 ms | 21.4 ms |
+| Append `CopyFrom` with 1,024 rows | 96 | 361,004 rows/s | 273.8 ms | 275.8 ms |
+
+These fixed-pool measurements are single runs. Separate `SendBatch` sweeps reproduced the lower tail latency with six writers.
+The new staged-load default limits active database writers to `min(cpu-2, 6)` above one core.
+`SERVICE_BACKED_LOAD_RESEARCH_DB_WORKERS` overrides this budget; the global worker and pool limits still apply.
+The change tunes the measurement harness. Production writer limits need their own workload evidence.
+`CopyFrom` applies to append and import work; it does not preserve per-row upsert semantics.
+
+The source files are `benchmark-results/service_backed_load_research_20260924T165704Z.tsv`,
+`benchmark-results/service_backed_load_research_20260924T165711Z.tsv`,
+`benchmark-results/service_backed_load_research_20260924T165718Z.tsv`, and
+`benchmark-results/service_backed_load_research_20260924T165723Z.tsv`.
+The service-backed microbenchmarks are in `benchmark-results/service_backed_20260924T165321Z.tsv`.
+They measured single upsert at 292–318 µs and 64-row COPY at 0.625–0.725 ms per batch.
+
+### Set-based PostgreSQL upsert lookup: 2026-09-24
+
+The `UpsertRecordsBatch` query returned timestamps by joining every input row to the base table.
+The revised query uses a bounded lateral lookup only when an upsert leaves the row unchanged.
+The service-backed parity test still covers insert, replay, update, and duplicate identity behavior.
+
+| Fresh service run | Rows | Writers | Throughput | p95 batch | p99 batch |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Original query | 100,000 | 6 | 8,606 rows/s | 154.2 ms | 298.6 ms |
+| Revised query | 100,000 | 6 | 74,737 rows/s | 7.7 ms | 11.4 ms |
+| Revised query repeat | 100,000 | 6 | 73,472 rows/s | 7.8 ms | 14.2 ms |
+| Revised query scale check | 250,000 | 6 | 78,715 rows/s | 7.0 ms | 10.4 ms |
+
+Each run used an isolated PostgreSQL 18 container and a 96-connection pool.
+The 250,000-row fixture used a larger tmpfs and write-ahead log budget.
+The 100,000-row results show about 8.6 times higher throughput after the query change.
+We did not capture an execution plan, so the exact planner cause remains unverified.
+The original and revised query files are `benchmark-results/service_backed_load_research_20260924T170312Z.tsv`,
+`benchmark-results/service_backed_load_research_20260924T170514Z.tsv`, and
+`benchmark-results/service_backed_load_research_20260924T170543Z.tsv`.
+The scale check is `benchmark-results/service_backed_load_research_20260924T170600Z.tsv`.
+
+The 64-row microbenchmark measured 3.20–3.69 ms before and 2.84–3.37 ms after.
+Its ranges overlap. The large-load result supports the change more strongly.
+The microbenchmark files are `benchmark-results/service_backed_20260924T170205Z.tsv`
+and `benchmark-results/service_backed_20260924T170442Z.tsv`.
+`UpsertRecordsBatch` validates and returns records; the simpler `SendBatch` fixture does less work.
+Do not treat their rates as an exact method comparison.
+
+### Browser stream and WASM host: 2026-09-24
+
+Machine: Apple M1 Pro, `darwin/arm64`, Node 24.1.0, Rust 1.92.0.
+These fixtures measure local runtime work without HTTP, database I/O, or production contention.
+
+| Operation | Before | After | Result |
+| --- | ---: | ---: | --- |
+| Rechunk 1 MiB from 1 KiB inputs into 64 KiB outputs | 3.57 ms | 0.22 ms | About 16 times faster. |
+| Rechunk 4 MiB with the same input and output sizes | 14.50 ms | 0.90 ms | About 16 times faster. |
+| Warm Wasmtime exchange with the parity fixture | 57–74 µs | 3.3–3.4 µs | Per-call thread creation and join are removed. |
+
+The stream benchmark consumes every output chunk. Vitest reported less than 4% relative error before the change.
+After the change, two runs reported less than 1% relative error at each size.
+The new rechunker retains at most one incomplete output chunk. Full chunks copy each byte once; the final partial chunk needs one extra copy.
+Invalid chunk sizes now fail before a stream can lose data.
+The former concatenation repeatedly copied pending bytes for every 1 KiB input.
+
+The WASM range uses three separate runs of each version on the same machine.
+An earlier 482 µs before run was a scheduling outlier and is excluded from the comparison.
+The benchmark uses fixed iterations and does not report a confidence interval.
+Each warm guest now owns one parked watchdog thread. The watchdog still enforces its deadline for each exchange.
+Fuel and memory limits, full-buffer parity, and the one-shot execution path remain available.
+
+Replay the browser measurement with `cd runtime-sdk/ts/browser-host && npm run bench -- --run src/payloadRouter.bench.ts`.
+Replay the WASM measurement with `cd runtime-sdk/rust && cargo bench -p ovrt-wasm-host --features wasm-runtime --bench parity_bench`.
+The browser stream tests and WASM parity tests guard bytes, ownership, bounds, epochs, and errors.
+
+### Browser linear-memory ABI: 2026-09-24
+
+Machine: Apple M1 Pro, `darwin/arm64`, Chromium 151.0.7922.34, cross-origin isolation enabled.
+The shared artifact used Rust 1.94.0-nightly, commit `21cf7fb3f`, from the 2025-12-29 toolchain.
+The scalar artifact used Rust 1.92.0. These are the installed toolchains, not a claim about current Rust releases.
+
+Both lanes execute the same compiled Rust guest. Only the buffer handle and storage differ.
+Each row uses 200 warmup exchanges and five measured samples, with lane order alternating between samples.
+The table reports median time and sample range. No confidence interval is claimed.
+
+| Operation | Copied ABI median (range) | Direct ABI median (range) | Time reduction |
+| --- | ---: | ---: | ---: |
+| Scan 4 KiB | 1.752 µs (1.682–2.171) | 1.370 µs (1.336–1.395) | 21.8% |
+| Scan 64 KiB | 24.414 µs (24.170–24.580) | 20.703 µs (20.586–20.781) | 15.2% |
+| Scan 1 MiB | 382.750 µs (382.350–394.150) | 332.500 µs (330.500–342.350) | 13.1% |
+| Scan 4 MiB | 1,535.850 µs (1,523.000–1,540.600) | 1,331.850 µs (1,325.500–1,337.800) | 13.3% |
+| Full control request, 128-byte payload | 1.520 µs (1.481–1.836) | 1.149 µs (1.038–1.243) | 24.4% |
+| Full control request, 1,024-byte payload | 1.986 µs (1.866–2.049) | 1.518 µs (1.478–1.586) | 23.5% |
+
+The scan reads every byte and verifies its checksum.
+Its copied lane imports N payload bytes per operation. Its direct lane imports zero payload bytes.
+The Rust direct read borrows the region and avoids the copied lane's payload allocation.
+The full request includes input publication, Rust transformation, an owned output read, validation, and output consumption.
+That path retains input publication and owned output copies.
+These results measure local processing. They exclude worker messaging latency, HTTP, database I/O, and production contention.
+
+Two concurrent Chromium workers also complete 20 exchanges each with independent allocator memories and checked output epochs.
+Compiled guest tests cover scalar/shared parity, malformed lengths, stale handles, growth, arena offsets, and allocation limits.
+The heavy arena test keeps a 64 MiB arena beside its control region and enforces the 96 MiB total budget.
+
+Raw browser samples: `benchmark-results/browser_abi_20260924_chromium.json`.
+Browser test report: `benchmark-results/browser_abi_20260924_chromium_report.json`.
+Node scan measurements: `benchmark-results/browser_abi_20260924.txt`.
+Toolchains, artifact hashes, limits, and validation: `benchmark-results/browser_abi_20260924_evidence.json`.
+The Node full-request fixture includes Vitest module-getter overhead. Use the browser table for full-request comparisons.
+
+Replay:
+
+```bash
+make test-browser-abi
+cd runtime-sdk/ts/browser-host
+npm run bench -- --run src/linearAbi.bench.ts
+```
+
+To retain browser samples, run this command after the fixture build:
+
+```bash
+cd frontend-lab
+npm run test:browser -- src/browser/browserAbi.browser.test.ts --reporter=json --outputFile=../benchmark-results/browser_abi_report.json
+```
+
+The JSON report stores samples under `testResults[].assertionResults[].meta.browserAbi`.
+
+Evidence ledger:
+
+- Public contract: browser buffer ABI version 2; `createRuntimeBuffer()` returns a region object.
+- Invariants: fixed layout, checked bounds, scoped borrowing, atomic publication, and one guest allocator per memory.
+- Fallback: automatic scalar artifact selection and bounded copy imports for legacy guests.
+- Scope: Core Rust/browser hosts, worker region messages, Foundation build templates, and browser CI.
+- Regression guards: compiled guest parity, Chromium worker exchanges, import copy counts, memory limits, and lifecycle tests.
+- Documentation: runtime SAB contracts, runtime build flow, and the research promotion record.
+
+### In-process database helper baseline: 2026-09-24
+
+The in-process database helper baseline used 100 fake rows and three 300 ms Go samples.
+`QueryEach` measured 2.61–2.63 µs, 2,472 B/op, and 202 allocations per operation.
+`QueryAll` measured 3.27–3.39 µs, 4,512 B/op, and 210 allocations per operation.
+These numbers exclude PostgreSQL, pool waits, query planning, and network I/O.
+Replay with `cd server-kit/go && go test ./database -run '^$' -bench 'Benchmark(QueryAllFakeRows100|QueryEachFakeRows100)$' -benchmem -benchtime=300ms -count=3`.
 
 ### Implementation capture: 2026-09-22
 

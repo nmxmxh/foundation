@@ -1,0 +1,8 @@
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling ovrt-network v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-network)
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+   Compiling ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-native)
+   Compiling ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+    Finished `bench` profile [optimized] target(s) in 2.11s
+  Executable benches/runtime_layers.rs (runtime-sdk/rust/target/release/deps/runtime_layers-518132c24a0f0892)

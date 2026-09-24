@@ -20,6 +20,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
+    "test:abi": "bash ../../scripts/build_browser_wasm.sh && vitest run --config vitest.abi.config.ts",
     "coverage": "vitest run --coverage",
     "bench": "vitest bench --reporter=verbose"
   },

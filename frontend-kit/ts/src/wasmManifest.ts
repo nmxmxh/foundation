@@ -1,6 +1,6 @@
 export interface WasmManifestArtifact {
   id: string;
-  role: "go-compat" | "kernel" | "rust-module" | string;
+  role: "kernel" | "rust-module" | string;
   kind: "wasm";
   url: string;
   brotliUrl?: string;

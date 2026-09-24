@@ -1,0 +1,22 @@
+# benchmark	ns_per_op	bytes_per_op	allocs_per_op	unit_per_op	source
+BenchmarkServiceBackedRecordProjectionHandle-8	549037	12997	143		service-backed
+BenchmarkServiceBackedRecordProjectionHandle-8	517159	12977	143		service-backed
+BenchmarkServiceBackedRecordProjectionHandle-8	522705	12970	143		service-backed
+BenchmarkServiceBackedRecordProjectionBatch64-8	2984826	359766	2507		service-backed
+BenchmarkServiceBackedRecordProjectionBatch64-8	3943182	360001	2513		service-backed
+BenchmarkServiceBackedRecordProjectionBatch64-8	4086797	359845	2511		service-backed
+BenchmarkServiceBackedPostgresUpsert-8	318144	3280	53		service-backed
+BenchmarkServiceBackedPostgresUpsert-8	317251	3279	54		service-backed
+BenchmarkServiceBackedPostgresUpsert-8	292074	3275	53		service-backed
+BenchmarkServiceBackedPostgresUpsertRawJSON-8	355041	2139	37		service-backed
+BenchmarkServiceBackedPostgresUpsertRawJSON-8	451600	2140	37		service-backed
+BenchmarkServiceBackedPostgresUpsertRawJSON-8	397341	2139	37		service-backed
+BenchmarkServiceBackedPostgresUpsertParallel-8	102878	3424	54		service-backed
+BenchmarkServiceBackedPostgresUpsertParallel-8	100942	3368	54		service-backed
+BenchmarkServiceBackedPostgresUpsertParallel-8	78653	3361	54		service-backed
+BenchmarkServiceBackedPostgresSendBatchUpsert64-8	2633917	73315	934	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresSendBatchUpsert64-8	2642287	73316	934	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresSendBatchUpsert64-8	2609808	73313	934	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresCopyFrom64-8	625308	35949	376	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresCopyFrom64-8	645893	36648	376	64.00 rows/op	service-backed
+BenchmarkServiceBackedPostgresCopyFrom64-8	724549	36366	376	64.00 rows/op	service-backed

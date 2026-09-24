@@ -87,6 +87,9 @@ func runServiceBackedLoadStep(
 	runIfServiceBackedLoadLane(t, lanes, "postgres_send_batch64", func() {
 		runServiceBackedLoadPostgresSendBatch(t, ctx, env, recorder, step, maxWorkers)
 	})
+	runIfServiceBackedLoadLane(t, lanes, "postgres_upsert_records_batch64", func() {
+		runServiceBackedLoadPostgresUpsertRecordsBatch(t, ctx, env, recorder, step, maxWorkers)
+	})
 	runIfServiceBackedLoadLane(t, lanes, "postgres_copy_from1024", func() {
 		runServiceBackedLoadPostgresCopyFrom(t, ctx, env, recorder, step, maxWorkers)
 	})
@@ -141,6 +144,7 @@ func prepareServiceBackedLoadSchemas(
 	t.Helper()
 	needsState := serviceBackedLoadLaneEnabled(lanes,
 		"postgres_send_batch64",
+		"postgres_upsert_records_batch64",
 		"hermes_rebuild_postgres_snapshot",
 		"hermes_warm_from_snapshot",
 		"hermes_hot_count",
@@ -195,7 +199,7 @@ func runServiceBackedLoadPostgresSendBatch(
 	orgID := uniqueName(env.prefix, "load-pg-batch")
 	cleanupOrganization(t, ctx, store, orgID)
 	setup := time.Since(setupStart)
-	workers := serviceBackedLoadDBWorkers(step, batchSize, maxWorkers, poolOptions)
+	workers := serviceBackedLoadDBWorkers(t, step, batchSize, maxWorkers, poolOptions)
 	stats, err := runServiceBackedLoadBatches(ctx, step, batchSize, workers, func(ctx context.Context, _ int, start, count int) error {
 		return db.SendBatch(ctx, func(batch *pgx.Batch) {
 			queueStateStoreBatch(batch, orgID, start, count)
@@ -220,6 +224,43 @@ func runServiceBackedLoadPostgresSendBatch(
 	cleanupOrganization(t, ctx, store, orgID)
 }
 
+func runServiceBackedLoadPostgresUpsertRecordsBatch(
+	t *testing.T,
+	ctx context.Context,
+	env serviceEnv,
+	recorder *serviceBackedLoadRecorder,
+	step int,
+	maxWorkers int,
+) {
+	t.Helper()
+	const lane = "postgres_upsert_records_batch64"
+	const batchSize = 64
+	before := serviceBackedLoadRuntimeSnapshot()
+	setupStart := time.Now()
+	poolOptions := serviceBackedLoadPoolOptions(t, maxWorkers)
+	store := openPostgres(t, env, poolOptions)
+	defer store.Close()
+	db := requirePostgresDB(t, store)
+	orgID := uniqueName(env.prefix, "load-pg-unnest")
+	cleanupOrganization(t, ctx, store, orgID)
+	setup := time.Since(setupStart)
+	workers := serviceBackedLoadDBWorkers(t, step, batchSize, maxWorkers, poolOptions)
+	stats, err := runServiceBackedLoadBatches(ctx, step, batchSize, workers, func(ctx context.Context, _ int, start, count int) error {
+		_, err := db.UpsertRecordsBatch(ctx, stateStoreBatchRecords(orgID, start, count))
+		return err
+	})
+	if err != nil {
+		t.Fatalf("%s failed: %v", lane, err)
+	}
+	recordServiceBackedLoadLane(t, recorder, serviceBackedLoadRow{
+		Step: step, Lane: lane, BatchSize: batchSize, Workers: workers,
+		Setup: setup, Stats: stats, Before: before,
+		After: serviceBackedLoadRuntimeSnapshot(), DBStats: store.Stats(),
+		Notes: "Postgres set-based upsert returns timestamps and preserves change detection",
+	})
+	cleanupOrganization(t, ctx, store, orgID)
+}
+
 func runServiceBackedLoadPostgresCopyFrom(
 	t *testing.T,
 	ctx context.Context,
@@ -239,7 +280,7 @@ func runServiceBackedLoadPostgresCopyFrom(
 	db := requirePostgresDB(t, store)
 	orgID := uniqueName(env.prefix, "load-pg-copy")
 	setup := time.Since(setupStart)
-	workers := serviceBackedLoadDBWorkers(step, batchSize, maxWorkers, poolOptions)
+	workers := serviceBackedLoadDBWorkers(t, step, batchSize, maxWorkers, poolOptions)
 	stats, err := runServiceBackedLoadBatches(ctx, step, batchSize, workers, func(ctx context.Context, _ int, start, count int) error {
 		_, err := db.CopyFromRows(ctx, []string{"service_backed_copy_records"}, copyColumns(), copyRows(orgID, start, count))
 		return err
@@ -410,7 +451,7 @@ func runServiceBackedLoadHermesRebuild(
 	db := requirePostgresDB(t, store)
 	orgID := uniqueName(env.prefix, "load-hermes-rebuild")
 	cleanupOrganization(t, ctx, store, orgID)
-	workers := serviceBackedLoadDBWorkers(step, seedBatchSize, maxWorkers, poolOptions)
+	workers := serviceBackedLoadDBWorkers(t, step, seedBatchSize, maxWorkers, poolOptions)
 	if _, err := runServiceBackedLoadBatches(ctx, step, seedBatchSize, workers, func(ctx context.Context, _ int, start, count int) error {
 		return db.SendBatch(ctx, func(batch *pgx.Batch) {
 			queueHermesStateBatch(batch, orgID, start, count)
@@ -469,7 +510,7 @@ func runServiceBackedLoadHermesWarmFromSnapshot(
 	db := requirePostgresDB(t, store)
 	orgID := uniqueName(env.prefix, "load-hermes-warm")
 	cleanupOrganization(t, ctx, store, orgID)
-	workers := serviceBackedLoadDBWorkers(step, seedBatchSize, maxWorkers, poolOptions)
+	workers := serviceBackedLoadDBWorkers(t, step, seedBatchSize, maxWorkers, poolOptions)
 	if _, err := runServiceBackedLoadBatches(ctx, step, seedBatchSize, workers, func(ctx context.Context, _ int, start, count int) error {
 		return db.SendBatch(ctx, func(batch *pgx.Batch) {
 			queueHermesStateBatch(batch, orgID, start, count)
@@ -554,7 +595,7 @@ func runServiceBackedLoadHermesColumnarFilter(
 	db := requirePostgresDB(t, store)
 	orgID := uniqueName(env.prefix, "load-hermes-colfilter")
 	cleanupOrganization(t, ctx, store, orgID)
-	seedWorkers := serviceBackedLoadDBWorkers(step, seedBatchSize, maxWorkers, poolOptions)
+	seedWorkers := serviceBackedLoadDBWorkers(t, step, seedBatchSize, maxWorkers, poolOptions)
 	if _, err := runServiceBackedLoadBatches(ctx, step, seedBatchSize, seedWorkers, func(ctx context.Context, _ int, start, count int) error {
 		return db.SendBatch(ctx, func(batch *pgx.Batch) {
 			queueHermesStateBatch(batch, orgID, start, count)
@@ -728,7 +769,7 @@ func runServiceBackedLoadHermesHotCount(
 	db := requirePostgresDB(t, store)
 	orgID := uniqueName(env.prefix, "load-hermes-count")
 	cleanupOrganization(t, ctx, store, orgID)
-	seedWorkers := serviceBackedLoadDBWorkers(step, seedBatchSize, maxWorkers, poolOptions)
+	seedWorkers := serviceBackedLoadDBWorkers(t, step, seedBatchSize, maxWorkers, poolOptions)
 	if _, err := runServiceBackedLoadBatches(ctx, step, seedBatchSize, seedWorkers, func(ctx context.Context, _ int, start, count int) error {
 		return db.SendBatch(ctx, func(batch *pgx.Batch) {
 			queueHermesStateBatch(batch, orgID, start, count)
@@ -806,7 +847,7 @@ func runServiceBackedLoadMixed(
 	hotplane := newServiceBackedLoadHermesStore(t, "svc_load_mixed", step)
 	ttl := serviceBackedLoadDurationEnv("SERVICE_BACKED_LOAD_RESEARCH_REDIS_TTL", 2*time.Minute)
 	setup := time.Since(setupStart)
-	workers := serviceBackedLoadDBWorkers(step, batchSize, maxWorkers, poolOptions)
+	workers := serviceBackedLoadDBWorkers(t, step, batchSize, maxWorkers, poolOptions)
 	stats, err := runServiceBackedLoadBatches(ctx, step, batchSize, workers, func(ctx context.Context, workerID int, start, count int) error {
 		if err := db.SendBatch(ctx, func(batch *pgx.Batch) {
 			queueStateStoreBatch(batch, orgID, start, count)
@@ -1929,9 +1970,12 @@ func serviceBackedLoadPipelineDBWorkers(t *testing.T, totalUnits, batchSize, max
 	return serviceBackedLoadWorkers(totalUnits, batchSize, min(requested, workerLimit))
 }
 
-func serviceBackedLoadDBWorkers(totalUnits, batchSize, maxWorkers int, opts database.PoolOptions) int {
-	poolWorkers := max(opts.MaxConns, 1)
-	return serviceBackedLoadWorkers(totalUnits, batchSize, min(maxWorkers, poolWorkers))
+func serviceBackedLoadDBWorkers(t *testing.T, totalUnits, batchSize, maxWorkers int, opts database.PoolOptions) int {
+	t.Helper()
+	defaultWorkers := serviceBackedLoadDefaultPipelineDBWorkersForCores(scaling.AutoTune().CPUCount)
+	requested := serviceBackedLoadPositiveIntEnv(t, "SERVICE_BACKED_LOAD_RESEARCH_DB_WORKERS", defaultWorkers)
+	workerLimit := min(maxWorkers, max(opts.MaxConns, 1))
+	return serviceBackedLoadWorkers(totalUnits, batchSize, min(requested, workerLimit))
 }
 
 func serviceBackedLoadWorkers(totalUnits, batchSize, maxWorkers int) int {

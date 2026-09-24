@@ -5,6 +5,7 @@ package servicebacked
 import (
 	"testing"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scaling"
 )
 
@@ -44,5 +45,25 @@ func TestServiceBackedLoadPipelineDBWorkerDefaultIsConservative(t *testing.T) {
 		if got := serviceBackedLoadDefaultPipelineDBWorkersForCores(tt.cores); got != tt.want {
 			t.Fatalf("cores=%d pipeline DB workers=%d, want %d", tt.cores, got, tt.want)
 		}
+	}
+}
+
+func TestServiceBackedLoadDBWorkersUseDedicatedBudget(t *testing.T) {
+	opts := database.PoolOptions{MaxConns: 96}
+	t.Setenv("SERVICE_BACKED_LOAD_RESEARCH_DB_WORKERS", "")
+	wantDefault := serviceBackedLoadDefaultPipelineDBWorkersForCores(scaling.AutoTune().CPUCount)
+	if got := serviceBackedLoadDBWorkers(t, 100000, 64, 96, opts); got != wantDefault {
+		t.Fatalf("default database workers = %d, want %d", got, wantDefault)
+	}
+	t.Setenv("SERVICE_BACKED_LOAD_RESEARCH_DB_WORKERS", "96")
+	if got := serviceBackedLoadDBWorkers(t, 100000, 64, 96, opts); got != 96 {
+		t.Fatalf("explicit database workers = %d, want 96", got)
+	}
+	if got := serviceBackedLoadDBWorkers(t, 100000, 64, 12, opts); got != 12 {
+		t.Fatalf("global worker limit = %d, want 12", got)
+	}
+	opts.MaxConns = 8
+	if got := serviceBackedLoadDBWorkers(t, 100000, 64, 96, opts); got != 8 {
+		t.Fatalf("pool worker limit = %d, want 8", got)
 	}
 }
