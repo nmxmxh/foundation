@@ -94,7 +94,9 @@ func TestValidateOutboundURLAllowsPublicResolvedHost(t *testing.T) {
 	policy := OutboundURLPolicy{
 		AllowedHosts: []string{"api.partner.example"},
 		Resolver: func(context.Context, string) ([]net.IP, error) {
-			return []net.IP{net.ParseIP("203.0.113.24")}, nil
+			// 93.184.216.34 is globally routable. Documentation ranges such as
+			// 203.0.113.0/24 are rejected by isPrivateOrLocalIP.
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
 		},
 	}
 	parsed, err := ValidateOutboundURL(context.Background(), "https://api.partner.example/events", policy)
@@ -142,6 +144,46 @@ func TestSafePathJoinRejectsAbsoluteAndControlPaths(t *testing.T) {
 	for _, unsafe := range []string{"", "/etc/passwd", "uploads/\x00secret"} {
 		if _, err := SafePathJoin(root, unsafe); !errors.Is(err, ErrUnsafePath) {
 			t.Fatalf("SafePathJoin(%q) error = %v, want ErrUnsafePath", unsafe, err)
+		}
+	}
+}
+
+func TestIsPrivateOrLocalIPBlocksSpecialRanges(t *testing.T) {
+	blocked := []string{
+		// CGNAT shared address space (RFC 6598).
+		"100.64.0.1", "100.127.255.255",
+		// Benchmarking (RFC 2544).
+		"198.18.0.1", "198.19.255.255",
+		// IETF protocol assignments and documentation (RFC 6890, RFC 5737).
+		"192.0.0.1", "192.0.2.1", "198.51.100.1", "203.0.113.1",
+		// Reserved and broadcast.
+		"240.0.0.1", "255.255.255.255",
+		// IPv4-mapped and transition mechanisms embedding a private IPv4.
+		"::ffff:127.0.0.1", "::ffff:169.254.169.254", "::a00:1", "2002:7f00:1::",
+		// IPv6 special-purpose.
+		"2001:db8::1", "fc00::1", "fd00::1", "fe80::1", "ff02::1",
+	}
+	for _, raw := range blocked {
+		if !isPrivateOrLocalIP(net.ParseIP(raw)) {
+			t.Errorf("isPrivateOrLocalIP(%s) = false, want true", raw)
+		}
+	}
+	allowed := []string{"8.8.8.8", "1.1.1.1", "93.184.216.34", "2606:4700::1111"}
+	for _, raw := range allowed {
+		if isPrivateOrLocalIP(net.ParseIP(raw)) {
+			t.Errorf("isPrivateOrLocalIP(%s) = true, want false", raw)
+		}
+	}
+}
+
+func TestValidateOutboundURLRejectsCGNATLiterals(t *testing.T) {
+	for _, raw := range []string{
+		"https://100.64.0.1/probe",
+		"https://198.18.0.1/probe",
+		"https://[::ffff:169.254.169.254]/probe",
+	} {
+		if _, err := ValidateOutboundURL(context.Background(), raw, OutboundURLPolicy{}); !errors.Is(err, ErrUnsafeURL) {
+			t.Errorf("ValidateOutboundURL(%s) error = %v, want ErrUnsafeURL", raw, err)
 		}
 	}
 }

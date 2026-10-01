@@ -63,10 +63,27 @@ func ServeObject(w http.ResponseWriter, r *http.Request, store Opener, key strin
 	}
 	// The stored type was checked at upload; never let a browser guess another.
 	h.Set("X-Content-Type-Options", "nosniff")
+
+	// Script-capable types must never render as a document in our origin. SniffUpload
+	// rejects them at upload because no signature covers them, so this guard covers
+	// objects that reached the store by another route: migration, direct bucket write,
+	// or a signature added later.
+	isExecutableType := strings.EqualFold(obj.ContentType, "image/svg+xml") ||
+		strings.EqualFold(obj.ContentType, "text/html") ||
+		strings.EqualFold(obj.ContentType, "text/xml") ||
+		strings.EqualFold(obj.ContentType, "application/xml")
+
+	if isExecutableType {
+		h.Set("Content-Disposition", "attachment")
+		h.Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	}
+
 	switch opts.Visibility {
 	case VisibilityPrivate:
 		h.Set("Cache-Control", "private, no-store, max-age=0")
-		h.Set("Content-Disposition", "inline")
+		if !isExecutableType {
+			h.Set("Content-Disposition", "inline")
+		}
 		h.Set("Referrer-Policy", "no-referrer")
 		// A private object must never run as a document in our origin.
 		h.Set("Content-Security-Policy", "default-src 'none'; sandbox")

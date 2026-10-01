@@ -68,6 +68,7 @@ CP-40|docs/coding_practices.md|contracts|medium|human|review|comment-behavior-te
 CP-41|docs/coding_practices.md|contracts|high|human|review|loud-failure-review|yes
 CP-42|docs/coding_practices.md|rust|medium|partial|script:tooling/scripts/rust_runtime_practices_check.sh;review|safety-comment-review|yes
 CP-43|docs/coding_practices.md|tooling|high|strong|script:tooling/scripts/coding_practices_check.sh;review|test-helper-isolation|yes
+CP-45|docs/coding_practices.md|security|critical|partial|script:tooling/scripts/practice_controls_check.sh;review|outbound-hop-guard-test|yes
 TE-01|docs/testing_practices.md|testing|high|partial|script:tooling/scripts/testing_practices_check.sh;review|architecture-test|yes
 TE-02|docs/testing_practices.md|testing|medium|human|review|black-box-case|contextual
 TE-03|docs/testing_practices.md|testing|high|human|review|oracle-statement|yes

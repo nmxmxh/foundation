@@ -1064,6 +1064,42 @@ Enforcement:
 
 - Compiler, once the helpers are correctly gated. Reviewer gate otherwise.
 
+### CP-45: An outbound URL guard must cover every hop, not only the first
+
+Level: `Mandatory`
+
+Requirements:
+
+1. A caller that applies an outbound URL policy must re-apply it to each redirect
+   hop. Use `http.Client.CheckRedirect`. Validating only the first hop is a defect.
+2. When a caller supplies its own `CheckRedirect`, keep it. Do not replace a policy
+   you cannot inspect.
+3. A response body limit must return a typed error when the body is longer than the
+   limit. A silently truncated body is a defect, because a short read is
+   indistinguishable from a malformed payload to the caller.
+4. The address guard blocks CGNAT, benchmarking, documentation, and reserved
+   ranges in addition to loopback, private, and link-local ranges. A cloud or
+   cluster egress range is usually CGNAT.
+
+Rationale:
+
+The `httpx` connector validated the first hop and then left `CheckRedirect` unset,
+so the standard client followed up to ten redirects unguarded. A public target
+could answer 302 to a metadata address and the guard never ran again. The same
+driver read at most `max_body_bytes` and returned the short read as a success, so
+an oversized JSON document surfaced to the caller as a parse error rather than as a
+bounded-response failure. Separately, the address guard relied only on `net.IP`
+predicates, which do not classify CGNAT as private, so a CGNAT egress address
+passed validation.
+
+Verification stops forgery; a re-check on every hop stops a validated host from
+routing somewhere unvalidated.
+
+Enforcement:
+
+- Unit tests for the redirect guard, the oversized-body error, and the blocked
+  ranges. Reviewer gate.
+
 ## Enforcement matrix
 
 | Rule ID | Primary enforcement | Automation | Merge gate |
@@ -1111,6 +1147,7 @@ Enforcement:
 | `CP-41` | Review + boundary tests | Partial | Yes |
 | `CP-42` | Clippy unsafe-doc lints + review | Strong | Yes |
 | `CP-43` | Compiler (cfg-gated helpers) + review | Strong | Yes |
+| `CP-45` | Unit tests (redirect guard, bounded body, blocked ranges) + review | Partial | Yes |
 
 ## Exception process and ADR linkage
 

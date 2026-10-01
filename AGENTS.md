@@ -201,6 +201,7 @@ make migrate-up              # Run DB migrations
 | `versioning` | Header/path/query API versioning with deprecation support. |
 | `resilience` | Coordinated health, circuit, retry, and degradation across dependencies. |
 | `connector` | HTTP and WebSocket connectors with health probing and streaming. |
+| `adapter` | Outbound external service adapters (push, OAuth, messaging, email, SMS). |
 
 ## Go SIMD Posture
 

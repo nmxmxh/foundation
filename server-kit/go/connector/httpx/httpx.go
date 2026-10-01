@@ -17,6 +17,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -25,27 +26,41 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 )
 
 func init() {
 	connector.Register("http", New)
 }
 
+const defaultMaxResponseBody = 16 * 1024 * 1024 // 16 MiB default max response body
+
+// ErrResponseTooLarge reports a response body above the configured cap. The body
+// is never returned truncated, because a short read is indistinguishable from a
+// malformed payload to the caller.
+var ErrResponseTooLarge = errors.New("httpx: response body exceeds limit")
+
+// ErrRedirectBlocked reports a redirect target rejected by the outbound policy.
+var ErrRedirectBlocked = errors.New("httpx: redirect target rejected")
+
 // Driver is the REST/HTTP transport.
 type Driver struct {
-	base       string
-	healthPath string
-	headers    map[string]string
-	client     *http.Client
+	base           string
+	healthPath     string
+	headers        map[string]string
+	client         *http.Client
+	maxBodyBytes   int64
+	outboundPolicy *security.OutboundURLPolicy
 }
 
 // New builds an HTTP driver. It satisfies connector.Factory.
 func New(endpoint string, options map[string]any) (connector.Driver, error) {
 	d := &Driver{
-		base:       strings.TrimRight(endpoint, "/"),
-		healthPath: "/healthz",
-		headers:    map[string]string{},
-		client:     &http.Client{Timeout: 30 * time.Second},
+		base:         strings.TrimRight(endpoint, "/"),
+		healthPath:   "/healthz",
+		headers:      map[string]string{},
+		client:       &http.Client{Timeout: 30 * time.Second},
+		maxBodyBytes: defaultMaxResponseBody,
 	}
 	if v, ok := options["health_path"].(string); ok && v != "" {
 		d.healthPath = v
@@ -59,7 +74,55 @@ func New(endpoint string, options map[string]any) (connector.Driver, error) {
 	if v, ok := options["client"].(*http.Client); ok && v != nil {
 		d.client = v
 	}
+	if v, ok := options["max_body_bytes"].(int64); ok && v > 0 {
+		d.maxBodyBytes = v
+	}
+	if v, ok := options["outbound_policy"].(*security.OutboundURLPolicy); ok {
+		d.outboundPolicy = v
+	} else if v, ok := options["outbound_policy"].(security.OutboundURLPolicy); ok {
+		d.outboundPolicy = &v
+	}
+	// ValidateOutboundURL vets the first hop only. Each redirect re-runs it so a
+	// public target cannot 302 to a private or non-routable address.
+	if d.client.CheckRedirect == nil {
+		d.client.CheckRedirect = d.redirectPolicy()
+	}
 	return d, nil
+}
+
+// redirectPolicy re-applies the outbound policy to every redirect hop. A caller
+// supplied CheckRedirect is preserved, because the driver cannot see whether it
+// already enforces the policy.
+func (d *Driver) redirectPolicy() func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return fmt.Errorf("%w: too many redirects", ErrRedirectBlocked)
+		}
+		if d.outboundPolicy == nil {
+			return nil
+		}
+		if _, err := security.ValidateOutboundURL(req.Context(), req.URL.String(), *d.outboundPolicy); err != nil {
+			return fmt.Errorf("%w: %w", ErrRedirectBlocked, err)
+		}
+		return nil
+	}
+}
+
+// readBounded reads at most limit bytes and fails when the body is longer. It
+// reads one byte past the limit to distinguish an exact-size body from a longer
+// one, then returns a typed error instead of a truncated payload.
+func readBounded(rc io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		return io.ReadAll(rc)
+	}
+	body, err := io.ReadAll(io.LimitReader(rc, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, fmt.Errorf("%w: limit %d bytes", ErrResponseTooLarge, limit)
+	}
+	return body, nil
 }
 
 // Transport returns "http".
@@ -68,7 +131,13 @@ func (d *Driver) Transport() string { return "http" }
 // Probe issues GET healthPath. 2xx/3xx/4xx<500 => serving (reachable), 5xx =>
 // not serving, transport error => not serving.
 func (d *Driver) Probe(ctx context.Context) (connector.Health, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.base+d.healthPath, nil)
+	targetURL := d.base + d.healthPath
+	if d.outboundPolicy != nil {
+		if _, err := security.ValidateOutboundURL(ctx, targetURL, *d.outboundPolicy); err != nil {
+			return connector.HealthNotServing, fmt.Errorf("httpx: probe url safety violation: %w", err)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return connector.HealthUnknown, err
 	}
@@ -110,7 +179,13 @@ func (d *Driver) Call(ctx context.Context, r connector.Request) (connector.Respo
 			method = http.MethodGet
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, method, d.url(r), bodyReader(r.Body))
+	targetURL := d.url(r)
+	if d.outboundPolicy != nil {
+		if _, err := security.ValidateOutboundURL(ctx, targetURL, *d.outboundPolicy); err != nil {
+			return connector.Response{}, fmt.Errorf("httpx: outbound url safety violation: %w", err)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, method, targetURL, bodyReader(r.Body))
 	if err != nil {
 		return connector.Response{}, err
 	}
@@ -126,7 +201,7 @@ func (d *Driver) Call(ctx context.Context, r connector.Request) (connector.Respo
 		return connector.Response{}, err
 	}
 	defer drain(resp.Body)
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBounded(resp.Body, d.maxBodyBytes)
 	if err != nil {
 		return connector.Response{}, err
 	}
@@ -145,7 +220,13 @@ func (d *Driver) Call(ctx context.Context, r connector.Request) (connector.Respo
 // Stream opens an SSE stream. resume, when set, is sent as Last-Event-ID so the
 // remote can replay from the watermark.
 func (d *Driver) Stream(ctx context.Context, r connector.Request, resume string) (connector.Stream, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, d.url(r), nil)
+	targetURL := d.url(r)
+	if d.outboundPolicy != nil {
+		if _, err := security.ValidateOutboundURL(ctx, targetURL, *d.outboundPolicy); err != nil {
+			return nil, fmt.Errorf("httpx: stream url safety violation: %w", err)
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +240,9 @@ func (d *Driver) Stream(ctx context.Context, r connector.Request, resume string)
 		req.Header.Set("Last-Event-ID", resume)
 	}
 	// Use a client without the per-call timeout so the stream can stay open.
-	client := &http.Client{Transport: d.client.Transport}
+	// The redirect policy is carried over so an SSE endpoint cannot redirect an
+	// unbounded stream to a private address.
+	client := &http.Client{Transport: d.client.Transport, CheckRedirect: d.client.CheckRedirect}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

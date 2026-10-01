@@ -26,6 +26,16 @@ func NormalizeContentType(value string) string {
 		return "image/jpeg"
 	case "video/x-m4v":
 		return "video/mp4"
+	case "audio/mp3":
+		return "audio/mpeg"
+	case "audio/x-wav":
+		return "audio/wav"
+	case "audio/opus":
+		return "audio/ogg"
+	case "audio/m4a", "audio/x-m4a":
+		return "audio/mp4"
+	case "application/x-zip-compressed":
+		return "application/zip"
 	}
 	return ct
 }
@@ -71,6 +81,17 @@ var signatures = map[string]func([]byte) bool{
 	"video/mp4":       isoBaseMedia,
 	"video/quicktime": func(b []byte) bool { return isoBaseMedia(b) || (len(b) >= 8 && string(b[4:8]) == "moov") },
 	"video/webm":      prefix("\x1A\x45\xDF\xA3"),
+	// Audio formats
+	"audio/ogg":  prefix("OggS"),
+	"audio/mpeg": func(b []byte) bool { return prefix("ID3")(b) || (len(b) >= 2 && b[0] == 0xFF && (b[1]&0xE0) == 0xE0) },
+	"audio/wav":  func(b []byte) bool { return len(b) >= 12 && string(b[0:4]) == "RIFF" && string(b[8:12]) == "WAVE" },
+	"audio/aac":  func(b []byte) bool { return len(b) >= 2 && b[0] == 0xFF && (b[1]&0xF6) == 0xF0 },
+	"audio/mp4":  isoBaseMedia,
+	// Zip & Office OpenXML documents
+	"application/zip": prefix("PK\x03\x04"),
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   prefix("PK\x03\x04"),
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         prefix("PK\x03\x04"),
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": prefix("PK\x03\x04"),
 }
 
 func prefix(sig string) func([]byte) bool {
