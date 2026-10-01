@@ -1,4 +1,5 @@
 # module	propagation	notes
+adapter	vendored	Unified external service adapters (push, oauth, messaging, email, sms)
 apidocs	vendored	
 appbench	vendored	
 auth	vendored	

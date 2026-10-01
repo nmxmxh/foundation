@@ -2,9 +2,17 @@
 set -euo pipefail
 
 target="${1:-.}"
-manifest="$target/tooling/enforcement_manifest.tsv"
 mode="${2:-check}"
 failed=0
+
+# Resolve target to an absolute path before any traversal. default_paths() strips
+# "$target/" from each find result, so a relative or bare-dot target yields
+# mismatched prefixes and can silently drop files from the manifest.
+if ! target="$(cd "$target" && pwd)"; then
+  echo "[FAIL] cannot resolve target: ${1:-.}" >&2
+  exit 2
+fi
+manifest="$target/tooling/enforcement_manifest.tsv"
 
 if [[ "$mode" == "--write" ]]; then
   if [[ "${HUMAN_SUPERVISED_CHECK_UPDATE:-0}" != "1" ]]; then

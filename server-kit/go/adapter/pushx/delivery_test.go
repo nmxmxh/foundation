@@ -1,4 +1,4 @@
-package pushdelivery
+package pushx
 
 import (
 	"context"
@@ -20,6 +20,7 @@ func (s *storeStub) Claim(ctx context.Context, limit int) ([]Delivery, error) {
 	s.limit = limit
 	return s.items, s.claimErr
 }
+
 func (s *storeStub) Complete(ctx context.Context, d Delivery, r Result) error {
 	s.completed = append(s.completed, r)
 	return s.completeErr
@@ -28,14 +29,29 @@ func (s *storeStub) Complete(ctx context.Context, d Delivery, r Result) error {
 type senderFunc func(context.Context, Delivery) Result
 
 func (f senderFunc) Send(c context.Context, d Delivery) Result { return f(c, d) }
+
 func item() Delivery {
-	return Delivery{ID: "delivery", TenantID: "org", RecipientID: "owner", CorrelationID: "trace", Attempt: 1, Payload: []byte("notice")}
+	return Delivery{
+		ID:            "delivery",
+		TenantID:      "org",
+		RecipientID:   "owner",
+		CorrelationID: "trace",
+		Attempt:       1,
+		Payload:       []byte("notice"),
+	}
 }
+
 func TestConfiguration(t *testing.T) {
 	for _, modify := range []func(*Options){
-		func(o *Options) { o.BatchSize = 0 }, func(o *Options) { o.BatchSize = 65 }, func(o *Options) { o.AttemptTimeout = 0 },
-		func(o *Options) { o.AttemptTimeout = time.Minute }, func(o *Options) { o.StoreTimeout = 0 }, func(o *Options) { o.StoreTimeout = time.Minute },
-		func(o *Options) { o.IdleMin = 0 }, func(o *Options) { o.IdleMax = 0 }, func(o *Options) { o.IdleMax = time.Hour },
+		func(o *Options) { o.BatchSize = 0 },
+		func(o *Options) { o.BatchSize = 65 },
+		func(o *Options) { o.AttemptTimeout = 0 },
+		func(o *Options) { o.AttemptTimeout = time.Minute },
+		func(o *Options) { o.StoreTimeout = 0 },
+		func(o *Options) { o.StoreTimeout = time.Minute },
+		func(o *Options) { o.IdleMin = 0 },
+		func(o *Options) { o.IdleMax = 0 },
+		func(o *Options) { o.IdleMax = time.Hour },
 	} {
 		o := DefaultOptions()
 		modify(&o)
@@ -50,6 +66,7 @@ func TestConfiguration(t *testing.T) {
 		t.Fatal("accepted nil sender")
 	}
 }
+
 func TestOnceAndBounds(t *testing.T) {
 	s := &storeStub{items: []Delivery{item()}}
 	observed := 0
@@ -91,11 +108,20 @@ func TestOnceAndBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
 func TestDeliveryPolicy(t *testing.T) {
 	called := 0
 	result := Result{Outcome: Retry}
 	r, _ := New(&storeStub{}, senderFunc(func(context.Context, Delivery) Result { called++; return result }), DefaultOptions())
-	for _, mutate := range []func(*Delivery){func(d *Delivery) { d.ID = "" }, func(d *Delivery) { d.TenantID = "" }, func(d *Delivery) { d.RecipientID = "" }, func(d *Delivery) { d.CorrelationID = "" }, func(d *Delivery) { d.Attempt = 0 }, func(d *Delivery) { d.Attempt = 6 }, func(d *Delivery) { d.Payload = make([]byte, 3001) }} {
+	for _, mutate := range []func(*Delivery){
+		func(d *Delivery) { d.ID = "" },
+		func(d *Delivery) { d.TenantID = "" },
+		func(d *Delivery) { d.RecipientID = "" },
+		func(d *Delivery) { d.CorrelationID = "" },
+		func(d *Delivery) { d.Attempt = 0 },
+		func(d *Delivery) { d.Attempt = 6 },
+		func(d *Delivery) { d.Payload = make([]byte, 3001) },
+	} {
 		d := item()
 		mutate(&d)
 		if r.deliver(context.Background(), d).Outcome != Rejected {
@@ -122,6 +148,7 @@ func TestDeliveryPolicy(t *testing.T) {
 		t.Fatal("unknown outcome")
 	}
 }
+
 func TestRunWakeCancellationAndErrors(t *testing.T) {
 	for _, failure := range []bool{false, true} {
 		s := &storeStub{}
@@ -164,6 +191,7 @@ func TestRunWakeCancellationAndErrors(t *testing.T) {
 		t.Fatalf("idle claims: %d", s.claimed)
 	}
 }
+
 func BenchmarkEmptyBatch(b *testing.B) {
 	r, _ := New(&storeStub{}, senderFunc(nil), DefaultOptions())
 	ctx := context.Background()

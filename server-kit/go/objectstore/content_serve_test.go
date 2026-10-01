@@ -21,6 +21,13 @@ func TestSniffUploadAcceptsRealSignatures(t *testing.T) {
 		"video/mp4":       "\x00\x00\x00\x18ftypmp42rest",
 		"video/quicktime": "\x00\x00\x00\x14ftypqt  rest",
 		"video/webm":      "\x1A\x45\xDF\xA3rest",
+		"audio/ogg":       "OggS\x00\x02\x00\x00\x00\x00\x00\x00\x00\x00",
+		"audio/mpeg":      "ID3\x03\x00\x00\x00\x00\x00\x00",
+		"audio/mp3":       "\xFF\xFB\x90\x64\x00\x00\x00\x00",
+		"audio/wav":       "RIFF\x24\x00\x00\x00WAVEfmt ",
+		"audio/aac":       "\xFF\xF1\x50\x80\x00\x00\x00\x00",
+		"application/zip": "PK\x03\x04\x14\x00\x00\x00\x08\x00",
+		"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "PK\x03\x04\x14\x00\x00\x00\x08\x00",
 	}
 	for declared, body := range cases {
 		reader, err := SniffUpload(strings.NewReader(body), declared)
@@ -124,5 +131,43 @@ func TestServeObjectHeadersFollowVisibility(t *testing.T) {
 	rec = httptest.NewRecorder()
 	if err := ServeObject(rec, req, missing, "k", ServeOptions{}); err == nil || rec.Code != http.StatusOK || rec.Body.Len() != 0 {
 		t.Fatal("a failed open must return an error and write nothing")
+	}
+}
+
+func TestServeObjectEnforcesSandboxOnExecutableTypes(t *testing.T) {
+	dangerousTypes := []string{"image/svg+xml", "text/html", "text/xml", "application/xml"}
+	for _, dt := range dangerousTypes {
+		store := stubOpener{body: "<svg></svg>", obj: Object{ContentType: dt, Size: 11}}
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/media/test", nil)
+
+		// Even if public visibility is requested, dangerous types must be sandboxed
+		if err := ServeObject(rec, req, store, "k", ServeOptions{Visibility: VisibilityPublic}); err != nil {
+			t.Fatalf("serve error: %v", err)
+		}
+
+		if got := rec.Header().Get("Content-Disposition"); got != "attachment" {
+			t.Errorf("type %s: expected attachment disposition, got %q", dt, got)
+		}
+		if got := rec.Header().Get("Content-Security-Policy"); !strings.Contains(got, "sandbox") {
+			t.Errorf("type %s: expected sandbox CSP, got %q", dt, got)
+		}
+	}
+}
+
+// TestSniffUploadRejectsScriptCapableTypes locks the accept/serve symmetry.
+// SniffUpload has no signature for script-capable types, so a caller cannot store
+// them through the upload path. ServeObject keeps its own guard for objects that
+// arrive by migration or a direct bucket write.
+func TestSniffUploadRejectsScriptCapableTypes(t *testing.T) {
+	for _, declared := range []string{
+		"image/svg+xml", "text/html", "text/xml", "application/xml",
+	} {
+		if _, err := SniffUpload(strings.NewReader("<svg onload=alert(1)></svg>"), declared); !errors.Is(err, ErrContentTypeUnsupported) {
+			t.Errorf("%s: error = %v, want ErrContentTypeUnsupported", declared, err)
+		}
+		if SniffSupported(declared) {
+			t.Errorf("%s: must not report sniff support", declared)
+		}
 	}
 }

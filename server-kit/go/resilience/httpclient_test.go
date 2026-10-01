@@ -191,7 +191,9 @@ func TestHTTPClientAppliesOutboundURLPolicy(t *testing.T) {
 	policy := security.OutboundURLPolicy{
 		AllowedHosts: []string{"api.partner.example"},
 		Resolver: func(context.Context, string) ([]net.IP, error) {
-			return []net.IP{net.ParseIP("203.0.113.10")}, nil
+			// 93.184.216.34 is globally routable. Documentation ranges such as
+			// 203.0.113.0/24 are rejected by isPrivateOrLocalIP.
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
 		},
 	}
 	client := NewHTTPClient(nil, HTTPClientConfig{

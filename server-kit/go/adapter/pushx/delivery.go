@@ -1,5 +1,5 @@
-// Package pushdelivery provides bounded delivery for durable notification outboxes.
-package pushdelivery
+// Package pushx provides bounded delivery for durable notification outboxes.
+package pushx
 
 import (
 	"context"
@@ -18,17 +18,20 @@ const (
 
 // Destination contains private transport credentials. Never log this value.
 type Destination struct{ Endpoint, PublicKey, AuthSecret string }
+
 type Delivery struct {
 	ID, TenantID, RecipientID, CorrelationID string
 	Attempt                                  int
 	Destination                              Destination
 	Payload                                  []byte
 }
+
 type Result struct {
 	Outcome    Outcome
 	StatusCode int
 	RetryAfter time.Duration
 }
+
 type Sender interface {
 	Send(context.Context, Delivery) Result
 }
@@ -46,6 +49,7 @@ type Observation struct {
 	Attempt                     int
 	Result                      Result
 }
+
 type Options struct {
 	BatchSize                                      int
 	AttemptTimeout, StoreTimeout, IdleMin, IdleMax time.Duration
@@ -53,8 +57,13 @@ type Options struct {
 }
 
 func DefaultOptions() Options {
-	return Options{BatchSize: 8, AttemptTimeout: 8 * time.Second, StoreTimeout: 5 * time.Second,
-		IdleMin: 250 * time.Millisecond, IdleMax: 30 * time.Second}
+	return Options{
+		BatchSize:      8,
+		AttemptTimeout: 8 * time.Second,
+		StoreTimeout:   5 * time.Second,
+		IdleMin:        250 * time.Millisecond,
+		IdleMax:        30 * time.Second,
+	}
 }
 
 type Runner struct {

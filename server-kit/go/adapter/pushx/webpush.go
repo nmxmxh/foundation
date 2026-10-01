@@ -1,4 +1,4 @@
-package pushdelivery
+package pushx
 
 import (
 	"context"
@@ -77,8 +77,15 @@ func NewWebPush(config WebPushConfig) (*WebPush, error) {
 	if !config.Valid() {
 		return nil, errors.New("invalid Web Push configuration")
 	}
-	return &WebPush{config, &http.Client{Timeout: 8 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &WebPush{
+		config: config,
+		client: &http.Client{
+			Timeout: 8 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+	}, nil
 }
 
 // Send encrypts one visible notification. Provider acceptance does not prove device receipt.
@@ -87,9 +94,16 @@ func (w *WebPush) Send(ctx context.Context, d Delivery) Result {
 		return Result{Outcome: Rejected}
 	}
 	response, err := webpush.SendNotificationWithContext(ctx, d.Payload, &webpush.Subscription{
-		Endpoint: d.Destination.Endpoint, Keys: webpush.Keys{P256dh: d.Destination.PublicKey, Auth: d.Destination.AuthSecret},
-	}, &webpush.Options{Subscriber: w.config.Subject, VAPIDPublicKey: w.config.PublicKey,
-		VAPIDPrivateKey: w.config.PrivateKey, TTL: 3600, Urgency: webpush.UrgencyNormal, HTTPClient: w.client})
+		Endpoint: d.Destination.Endpoint,
+		Keys:     webpush.Keys{P256dh: d.Destination.PublicKey, Auth: d.Destination.AuthSecret},
+	}, &webpush.Options{
+		Subscriber:      w.config.Subject,
+		VAPIDPublicKey:  w.config.PublicKey,
+		VAPIDPrivateKey: w.config.PrivateKey,
+		TTL:             3600,
+		Urgency:         webpush.UrgencyNormal,
+		HTTPClient:      w.client,
+	})
 	if err != nil {
 		return Result{Outcome: Retry}
 	}

@@ -3,6 +3,12 @@ github.com/nmxmxh/ovasabi_foundation/config-contracts/go/runtimeconfig|98.1|95.0
 github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/resultauth|97.4|95.0
 github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost|87.9|95.0
 github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/transport|95.7|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/adapter|97.4|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/adapter/emailx|67.8|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/adapter/oauthx|89.3|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/adapter/pushx|91.7|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/adapter/smsx|81.3|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/adapter/whatsappx|80.7|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/apidocs|72.1|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth|90.6|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/bootstrap|80.4|95.0

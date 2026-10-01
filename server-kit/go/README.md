@@ -4,7 +4,12 @@ The `server-kit` module provides the core primitives for Ovasabi backend service
 
 ## Core Components
 
-- [Push delivery](pushdelivery/README.md): bounded notification dispatch, Web Push encryption, retry policy, and background resource budgets.
+- [Adapter](adapter/README.md): unified external service integration framework.
+  - [Push](adapter/pushx/README.md): bounded notification dispatch, Web Push, FCM v1, and Apple APNs.
+  - [OAuth](adapter/oauthx/README.md): Google OAuth 2.0 (PKCE S256) and OpenID Connect validation.
+  - [WhatsApp](adapter/whatsappx/README.md): Meta WhatsApp Cloud API messaging and webhook verification.
+  - [Email](adapter/emailx/README.md): Transactional email with SMTP, Stalwart JMAP, and HTTP REST.
+  - [SMS](adapter/smsx/README.md): SMS text messaging via Twilio REST API.
 
 ## Scaffold Runtime Contract
 

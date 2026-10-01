@@ -13,7 +13,7 @@ Seed drift remains visible for customized files. Those files were not re-baselin
 
 The synchronized modules include the native binding contracts and the refined render scheduler.
 They also include prior Core improvements since the projects' September 16 update.
-The concurrent `pushdelivery` module was included. Its Core tests passed before compatibility validation.
+The concurrent `pushdelivery` module (migrated to `adapter/pushx`) was included. Its Core tests passed before compatibility validation.
 No push delivery service was activated by this adoption.
 
 Frontend dependencies resolve through existing local package links.
