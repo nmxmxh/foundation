@@ -3,8 +3,10 @@ package hermes
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -795,5 +797,223 @@ func TestRecordMatchesPlannedFilters(t *testing.T) {
 	noMatch := QueryWithFilters("org_1", 0, mustFilter(t, "symbol", "NOPE"))
 	if recordMatches(rec, spec, noMatch) {
 		t.Fatal("record must not match a differing planned filter")
+	}
+}
+
+// TestFastDecimalFloatMatchesStrconvExactly pins the fast path to strconv's
+// answer, bit for bit. strconv.ParseFloat returns the correctly rounded value;
+// the fast path reaches it through one exact division, and this test is what
+// proves the two agree rather than merely being close. A column built from a
+// different value than a row read would compare unequal.
+func TestFastDecimalFloatMatchesStrconvExactly(t *testing.T) {
+	fixed := []string{
+		"", " ", ".", "-", "+", "-.", "+.", "0", "-0", "+0", "0.0", "-0.0",
+		"1", "-1", "1.", "-1.", ".5", "-.5", "+.5", "1.5", "3.14159",
+		"1e5", "1E5", "1e-5", "1.5e3", "0x1p-2", "Inf", "-Inf", "NaN", "nan",
+		"Infinity", "0x1.8p1", "00001", "00001.000", "1_000", "1,5", "1.2.3",
+		" 1.5", "1.5 ", "1.5\n", "١٢٣", "123456789012345", "1234567890123456",
+		"12345678901234567890", "0.000000000000001", "1e", "e5", "--1", "1-",
+		"9007199254740993", "-9007199254740993", "1.7976931348623157e308",
+		"4.9406564584124654e-324", "18446744073709551616", "0.30000000000000004",
+	}
+	for s := 1; s <= 40; s++ {
+		fixed = append(fixed, strconv.Itoa(s), "-"+strconv.Itoa(s), strconv.Itoa(s)+".5")
+	}
+
+	t.Run("handles the cases it claims", func(t *testing.T) {
+		for _, s := range fixed {
+			want, wantErr := strconv.ParseFloat(s, 64)
+			got, err := parseColumnarFloat(s)
+			if (err != nil) != (wantErr != nil) {
+				t.Fatalf("parseColumnarFloat(%q) error = %v, strconv error = %v", s, err, wantErr)
+			}
+			if wantErr != nil {
+				continue
+			}
+			if math.Float64bits(got) != math.Float64bits(want) {
+				t.Fatalf("parseColumnarFloat(%q) = %v (%#x), strconv = %v (%#x)",
+					s, got, math.Float64bits(got), want, math.Float64bits(want))
+			}
+		}
+	})
+
+	t.Run("agrees bit for bit on generated decimals", func(t *testing.T) {
+		// Exercise carries, trailing zeros, and boundary digit counts, which is
+		// where a hand-rolled mantissa/scale split would drift from correct
+		// rounding if it were not exact.
+		for digits := 1; digits <= 17; digits++ {
+			for _, lead := range []string{"1", "9", "1234567890", "999999999999999", "100000000000000"} {
+				if len(lead) < digits {
+					continue
+				}
+				mantissa := lead[:digits]
+				for _, scale := range []int{0, 1, 2, 5, 9, digits, digits - 1} {
+					if scale < 0 {
+						continue
+					}
+					var b strings.Builder
+					if digits > scale {
+						b.WriteString(mantissa[:digits-scale])
+						b.WriteByte('.')
+						b.WriteString(mantissa[digits-scale:])
+					} else {
+						b.WriteString("0.")
+						b.WriteString(strings.Repeat("0", scale-digits))
+						b.WriteString(mantissa)
+					}
+					for _, candidate := range []string{b.String(), "-" + b.String()} {
+						want, wantErr := strconv.ParseFloat(candidate, 64)
+						if wantErr != nil {
+							continue
+						}
+						got, err := parseColumnarFloat(candidate)
+						if err != nil {
+							t.Fatalf("parseColumnarFloat(%q) unexpected error %v", candidate, err)
+						}
+						if math.Float64bits(got) != math.Float64bits(want) {
+							t.Fatalf("parseColumnarFloat(%q) = %v (%#x), strconv = %v (%#x)",
+								candidate, got, math.Float64bits(got), want, math.Float64bits(want))
+						}
+					}
+				}
+			}
+		}
+	})
+
+	t.Run("claims the common shapes it is there to speed up", func(t *testing.T) {
+		// Without this the two subtests above could both pass while
+		// fastDecimalFloat deferred every input and the fast path was dead code.
+		for _, s := range []string{"0", "-0.0", "1", "1.5", "-2.25", "3.14159", "0.1", "12345.6789", "-0.0009765625"} {
+			if _, ok := fastDecimalFloat(s); !ok {
+				t.Fatalf("fastDecimalFloat declined %q, want the fast path", s)
+			}
+		}
+	})
+
+	t.Run("deferrs shapes it must not claim", func(t *testing.T) {
+		for _, s := range []string{"1e5", "0x1p-2", "Inf", "NaN", "1_000", " 1.5", "1.5 ", "1e-300", "1.7976931348623157e308"} {
+			if _, ok := fastDecimalFloat(s); ok {
+				t.Fatalf("fastDecimalFloat claimed %q, want deferral to strconv", s)
+			}
+		}
+	})
+}
+
+// TestColumnarFloatColumnIsBitIdenticalToStrconv guards the caller: a float
+// column built through the fast parser must equal one built through strconv,
+// element for element.
+func TestColumnarFloatColumnIsBitIdenticalToStrconv(t *testing.T) {
+	values := []string{"0", "-0.0", "1", "1.5", "-2.25", "3.14159", "0.1", "1e-300", "1.7976931348623157e308", "1_000"}
+	entries := make([]*recordEntry, 0, len(values))
+	for i, text := range values {
+		entries = append(entries, &recordEntry{
+			version: uint64(i),
+			record: database.DomainRecord{
+				Domain: "signals", Collection: "ticks", OrganizationID: "org_1",
+				RecordID: "rec_" + strconv.Itoa(i),
+				Data:     database.RecordData{{Name: "price", Value: database.RecordValue{Kind: database.RecordValueFloat, Text: text}}},
+			},
+		})
+	}
+
+	vec, err := buildDataFieldVector("price", entries, len(entries))
+	if err != nil {
+		t.Fatalf("buildDataFieldVector: %v", err)
+	}
+	fv, ok := vec.(*Float64Vector)
+	if !ok {
+		t.Fatalf("vector type = %T, want *Float64Vector", vec)
+	}
+	for i, text := range values {
+		want, wantErr := strconv.ParseFloat(text, 64)
+		if wantErr != nil {
+			if fv.validity.get(i) {
+				t.Fatalf("row %d (%q) marked valid, want invalid", i, text)
+			}
+			continue
+		}
+		if !fv.validity.get(i) {
+			t.Fatalf("row %d (%q) marked invalid, want valid", i, text)
+		}
+		if math.Float64bits(fv.values[i]) != math.Float64bits(want) {
+			t.Fatalf("row %d (%q) = %v (%#x), want %v (%#x)",
+				i, text, fv.values[i], math.Float64bits(fv.values[i]), want, math.Float64bits(want))
+		}
+	}
+}
+
+// TestBitmapGrowPreservesShapeUnderIncrementalRaise guards the invariant the
+// geometric growth relies on. Consumers and the shape assertions all key off
+// len(words), never cap, and the word kernels reslice src to len(dst), so the
+// required invariant is len(words) == (n+63)/64 after every raise.
+//
+// It exercises the pattern that motivated the change: one bit raised at a time
+// into a fresh bitmap, which is what the inverted index does while a scope
+// fills. Under exact sizing that re-copied the whole slice per record.
+func TestBitmapGrowPreservesShapeUnderIncrementalRaise(t *testing.T) {
+	for _, final := range []int{1, 63, 64, 65, 127, 128, 129, 1000, 4096, 5000} {
+		b := newBitmap(0)
+		for i := range final {
+			b.set(i)
+			wantWords := (b.n + 63) / 64
+			if len(b.words) != wantWords {
+				t.Fatalf("final=%d after set(%d): len(words) = %d, want %d", final, i, len(b.words), wantWords)
+			}
+			if b.n < i+1 {
+				t.Fatalf("final=%d after set(%d): n = %d, want at least %d", final, i, b.n, i+1)
+			}
+		}
+		// Every raised bit reads back, and nothing outside the range reads set.
+		for i := range final {
+			if !b.get(i) {
+				t.Fatalf("final=%d: bit %d did not survive grow", final, i)
+			}
+		}
+		for i := final; i < final+130; i++ {
+			if b.get(i) {
+				t.Fatalf("final=%d: bit %d past the end read set", final, i)
+			}
+		}
+	}
+}
+
+// TestBitmapGrowSpareCapacityIsInvisible pins that reserving capacity does not
+// change what a clone, a count, or a merge observes. A clone must not inherit
+// the spare capacity, or the next grow would expose stale headroom.
+func TestBitmapGrowSpareCapacityIsInvisible(t *testing.T) {
+	b := newBitmap(0)
+	for i := range 5000 {
+		b.set(i)
+	}
+	clone := b.clone()
+	if len(clone.words) != len(b.words) {
+		t.Fatalf("clone len(words) = %d, want %d", len(clone.words), len(b.words))
+	}
+	if clone.count() != b.count() {
+		t.Fatalf("clone count = %d, want %d", clone.count(), b.count())
+	}
+	if clone.count() != 5000 {
+		t.Fatalf("count = %d, want 5000", clone.count())
+	}
+	for i := range 5000 {
+		if !clone.get(i) {
+			t.Fatalf("clone lost bit %d", i)
+		}
+	}
+
+	// A clone has no spare capacity, so growing it must still allocate cleanly.
+	clone.set(9000)
+	if len(clone.words) != (clone.n+63)/64 {
+		t.Fatalf("grown clone len(words) = %d, want %d", len(clone.words), (clone.n+63)/64)
+	}
+	if clone.count() != 5001 {
+		t.Fatalf("grown clone count = %d, want 5001 (5000 plus the newly set bit)", clone.count())
+	}
+	// Growing a clone past its headroom must not resurrect stale words.
+	other := b.clone()
+	other.set(9000)
+	other.grow(9001)
+	if other.count() != 5001 {
+		t.Fatalf("count after grow on a clone = %d, want 5001", other.count())
 	}
 }

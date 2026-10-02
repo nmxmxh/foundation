@@ -2157,12 +2157,6 @@ patch_nginx_edge_transport() {
     gzip_disable "msie6";' \
       "nginx skips gzip for a client that cannot decompress it"
 
-    nginx_replace_once "$global_conf" 'brotli_dynamic' \
-      '    brotli_min_length 256;' \
-'    brotli_min_length 256;
-    brotli_dynamic on;' \
-      "nginx enables brotli dynamic sizing"
-
     # More connections per worker. worker_rlimit_nofile is 8192, so a worker can
     # carry this many sockets plus the listener and upstream sockets.
     replace_in_file "$global_conf" '    worker_connections 1024;' \

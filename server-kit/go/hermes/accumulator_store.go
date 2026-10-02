@@ -44,6 +44,19 @@ type AccumulatorConfig struct {
 	NumericMetrics []string
 	// MaxDistinctPerDimension bounds distinct cardinality memory per dimension. Default is 10,000.
 	MaxDistinctPerDimension int
+	// MaxRecordsPerScope bounds how many record states one scope may retain.
+	// Default is 10,000.
+	//
+	// A record state is what makes an update reversible: it holds the previous
+	// dimension values and metric values so a later write can subtract them. So
+	// the map cannot be trimmed entry by entry without silently double counting
+	// whichever record lost its state. Exceeding the bound therefore drops the
+	// whole scope, which reports no data rather than wrong data.
+	MaxRecordsPerScope int
+	// TTL mirrors the projection TTL, so a record the projection retires is
+	// also released here. Default is 0, meaning no expiry, which suits an
+	// accumulator over a projection without a TTL.
+	TTL time.Duration
 }
 
 // recordAccumulatorState tracks the cached values and version of a single record for delta reversals.
@@ -134,10 +147,20 @@ func NewAccumulatorStateStore(cfg AccumulatorConfig) *AccumulatorStateStore {
 	if cfg.MaxDistinctPerDimension <= 0 {
 		cfg.MaxDistinctPerDimension = 10000
 	}
+	if cfg.MaxRecordsPerScope <= 0 {
+		cfg.MaxRecordsPerScope = defaultAccumulatorMaxRecordsPerScope
+	}
+	if cfg.TTL < 0 {
+		cfg.TTL = 0
+	}
 	return &AccumulatorStateStore{
 		cfg: cfg,
 	}
 }
+
+// defaultAccumulatorMaxRecordsPerScope bounds the per-record state that makes
+// delta reversal possible.
+const defaultAccumulatorMaxRecordsPerScope = 10000
 
 func (s *AccumulatorStateStore) getScope(scope string) *scopeAccumulator {
 	if val, ok := s.scopes.Load(scope); ok {
@@ -146,6 +169,13 @@ func (s *AccumulatorStateStore) getScope(scope string) *scopeAccumulator {
 	created := newScopeAccumulator(s.cfg.MaxDistinctPerDimension)
 	actual, _ := s.scopes.LoadOrStore(scope, created)
 	return actual.(*scopeAccumulator)
+}
+
+// dropScope retires a scope whose record count passed the bound. The scope is
+// removed rather than trimmed, because a partial trim would leave the surviving
+// records unable to reverse a later write.
+func (s *AccumulatorStateStore) dropScope(scope string) {
+	s.scopes.Delete(scope)
 }
 
 func (s *AccumulatorStateStore) extractDimensions(rec database.DomainRecord) map[string][]string {
@@ -269,7 +299,21 @@ func (s *AccumulatorStateStore) ApplyRecord(rec database.DomainRecord, version u
 		version:    version,
 		dimensions: dims,
 		metrics:    metrics,
+		expiresAt:  s.expiresAtLocked(),
 	}
+	if len(sc.records) > s.cfg.MaxRecordsPerScope {
+		s.dropScope(scopeKey)
+	}
+}
+
+// expiresAtLocked reports when a record state collected now stops being
+// reversible. It is zero when no TTL is configured, which is what makes
+// EvictExpired a no-op rather than a lie.
+func (s *AccumulatorStateStore) expiresAtLocked() time.Time {
+	if s.cfg.TTL <= 0 {
+		return time.Time{}
+	}
+	return time.Now().Add(s.cfg.TTL)
 }
 
 func (s *AccumulatorStateStore) removeStateLocked(sc *scopeAccumulator, state *recordAccumulatorState) {
@@ -305,8 +349,17 @@ func (s *AccumulatorStateStore) removeStateLocked(sc *scopeAccumulator, state *r
 	}
 }
 
-// EvictExpired removes expired records from the accumulator.
+// EvictExpired removes expired records from the accumulator and returns how
+// many it released.
+//
+// It only runs where AccumulatorConfig.TTL is set, because that is the only way
+// a record state can know it is stale. A projection TTL alone does not reach
+// here, but the projection now reports its own retirements as deletes, and
+// ApplyRecord reverses those exactly, so the two paths agree.
 func (s *AccumulatorStateStore) EvictExpired(now time.Time) int {
+	if s.cfg.TTL <= 0 {
+		return 0
+	}
 	evicted := 0
 	s.scopes.Range(func(key, val any) bool {
 		sc := val.(*scopeAccumulator)

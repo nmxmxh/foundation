@@ -32,7 +32,7 @@ func (p *partition) applyBatchObserving(ctx context.Context, events []Event, obs
 	result := ApplyResult{Epoch: p.epoch.Load()}
 	registry := p.activeRegistry()
 	publisher := newIndexPublisher()
-	p.evictExpiredLocked(registry, publisher)
+	p.evictExpiredLocked(registry, publisher, observe)
 	var eventErrs error
 	for _, event := range events {
 		if err := ctxErr(ctx); err != nil {
@@ -81,7 +81,7 @@ func (p *partition) applyRecords(ctx context.Context, sourcePrefix string, baseV
 	defer p.publishing.Store(false)
 	registry := p.activeRegistry()
 	publisher := newIndexPublisher()
-	p.evictExpiredLocked(registry, publisher)
+	p.evictExpiredLocked(registry, publisher, observe)
 	result := ApplyResult{Epoch: p.epoch.Load()}
 	var eventErrs error
 	for i, rec := range records {
@@ -351,14 +351,32 @@ func (p *partition) alreadyAppliedLocked(source string, version uint64) bool {
 	if _, ok := p.applied[source]; ok {
 		return true
 	}
-	parts := strings.Split(source, ":")
-	if len(parts) > 1 {
-		prefix := parts[0]
-		if wm, ok := p.watermarks[prefix]; ok && version > 0 && version <= wm {
+	prefix, scoped := sourceWatermarkPrefix(source)
+	if scoped {
+		if wm, ok := p.watermarks[prefix]; ok && version > 0 && version <= wm.version {
 			return true
 		}
 	}
 	return false
+}
+
+// watermarkFence is the replay fence for one source prefix, plus the number of
+// live sources that justify keeping it.
+type watermarkFence struct {
+	version uint64
+	refs    int
+}
+
+// sourceWatermarkPrefix returns the source prefix that the per-prefix watermark
+// gates, and whether the source carries one at all. It splits on the first
+// colon only, and returns a substring rather than a []string, so the apply path
+// does not allocate a slice per event to read a prefix.
+func sourceWatermarkPrefix(source string) (string, bool) {
+	at := strings.IndexByte(source, ':')
+	if at < 0 {
+		return "", false
+	}
+	return source[:at], true
 }
 
 func (p *partition) rememberAppliedLocked(source string, version uint64) {
@@ -370,16 +388,29 @@ func (p *partition) rememberAppliedLocked(source string, version uint64) {
 	}
 	p.applied[source] = struct{}{}
 	p.applyOrder = append(p.applyOrder, source)
+	if prefix, scoped := sourceWatermarkPrefix(source); scoped {
+		// One map, not two: the live-source count rides along with the fence so
+		// remembering and forgetting a source each cost a single map operation.
+		entry := p.watermarks[prefix]
+		entry.refs++
+		if version > entry.version {
+			entry.version = version
+		}
+		p.watermarks[prefix] = entry
+	}
 	for len(p.applyOrder) > p.spec.MaxAppliedEvents {
 		oldest := p.applyOrder[0]
 		p.applyOrder = p.applyOrder[1:]
 		delete(p.applied, oldest)
-	}
-	parts := strings.Split(source, ":")
-	if len(parts) > 1 {
-		prefix := parts[0]
-		if version > p.watermarks[prefix] {
-			p.watermarks[prefix] = version
+		if prefix, scoped := sourceWatermarkPrefix(oldest); scoped {
+			if entry, ok := p.watermarks[prefix]; ok {
+				entry.refs--
+				if entry.refs <= 0 {
+					delete(p.watermarks, prefix)
+				} else {
+					p.watermarks[prefix] = entry
+				}
+			}
 		}
 	}
 }
@@ -399,7 +430,15 @@ func (p *partition) rememberTombstoneLocked(key string, source string, version u
 	}
 }
 
-func (p *partition) evictExpiredLocked(registry *partitionRegistry, publisher *indexPublisher) {
+// evictExpiredLocked retires records whose TTL has passed.
+//
+// It reports each retirement to observe as a delete. Expiring a record silently
+// left every downstream aggregate counting a record the projection no longer
+// holds, and told no replica to drop it. The delete carries the record's own
+// version, so an observer can order it against a write it has already seen.
+//
+// The sweep is bounded by MaxRecords, not by any tenant-supplied length.
+func (p *partition) evictExpiredLocked(registry *partitionRegistry, publisher *indexPublisher, observe func(AppliedMutation)) {
 	if p.spec.TTL <= 0 {
 		return
 	}
@@ -416,7 +455,19 @@ func (p *partition) evictExpiredLocked(registry *partitionRegistry, publisher *i
 			cell.ptr.Store(nil)
 			p.records.Add(-1)
 			p.bytes.Add(-entry.bytes)
+			p.rememberTombstoneLocked(key, ttlExpirySource, entry.version)
+			if observe != nil {
+				observe(AppliedMutation{
+					Operation: OperationDelete,
+					Record:    copyRecord(entry.record),
+					Version:   entry.version,
+				})
+			}
 		}
 		return true
 	})
 }
+
+// ttlExpirySource marks a delete that hermes produced by retiring a record on
+// TTL rather than by accepting a source event.
+const ttlExpirySource = "hermes:ttl"

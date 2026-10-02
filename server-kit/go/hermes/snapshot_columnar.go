@@ -225,7 +225,7 @@ func decodeColumnarSnapshot(payload []byte, visit database.RecordVisitor) error 
 	if c.err != nil || (!fixedVectors && magic != columnarSnapshotMagic) {
 		return fmt.Errorf("%w: bad columnar snapshot magic", ErrSnapshotCorrupt)
 	}
-	n := int(c.u32())
+	n := c.count(int(c.u32()), "record")
 	domains := c.dictColumn(n)
 	collections := c.dictColumn(n)
 	organizations := c.dictColumn(n)
@@ -237,7 +237,7 @@ func decodeColumnarSnapshot(payload []byte, visit database.RecordVisitor) error 
 	if flag := c.bytes(1); c.err == nil && len(flag) == 1 && flag[0] == 1 {
 		vectors = make([][]float32, n)
 		if fixedVectors {
-			dimensions := int(c.u32())
+			dimensions := c.widthCount(int(c.u32()), 4, "vector dimension")
 			for i := 0; i < n && c.err == nil; i++ {
 				raw := c.bytes(dimensions * 4)
 				vec := make([]float32, dimensions)
@@ -248,7 +248,7 @@ func decodeColumnarSnapshot(payload []byte, visit database.RecordVisitor) error 
 			}
 		} else {
 			for i := 0; i < n && c.err == nil; i++ {
-				floats := int(c.u32())
+				floats := c.widthCount(int(c.u32()), 4, "vector length")
 				if floats == 0 {
 					continue
 				}
@@ -265,7 +265,7 @@ func decodeColumnarSnapshot(payload []byte, visit database.RecordVisitor) error 
 		}
 	}
 
-	fieldCount := int(c.u32())
+	fieldCount := c.count(int(c.u32()), "field")
 	type fieldColumn struct {
 		name     string
 		validity []byte
@@ -434,6 +434,39 @@ func (c *columnarCursor) bytes(n int) []byte {
 	return out
 }
 
+// count validates a declared element count against the bytes still unread in
+// the cursor. Every encoded column costs at least one byte per element, so a
+// count above the remaining length cannot describe a well-formed payload.
+//
+// Callers must run this before sizing an allocation from a declared count.
+// A raw u32 from the artifact is otherwise an unbounded allocation request:
+// fieldColumn is 88 bytes per element, so a 45-byte payload can ask for 352 GiB
+// and take the process down with an unrecoverable out-of-memory fatal error.
+func (c *columnarCursor) count(n int, what string) int {
+	if c.err != nil {
+		return 0
+	}
+	if n < 0 || n > len(c.buf)-c.at {
+		c.err = fmt.Errorf("columnar snapshot %s count %d exceeds remaining %d bytes", what, n, len(c.buf)-c.at)
+		return 0
+	}
+	return n
+}
+
+// widthCount validates a declared element count whose elements each occupy
+// width bytes in the payload. Callers must run this before sizing an allocation
+// from it, because bytes bounds the read but not the make that follows it.
+func (c *columnarCursor) widthCount(n, width int, what string) int {
+	if c.err != nil {
+		return 0
+	}
+	if n < 0 || width <= 0 || n > (len(c.buf)-c.at)/width {
+		c.err = fmt.Errorf("columnar snapshot %s count %d exceeds remaining %d bytes", what, n, len(c.buf)-c.at)
+		return 0
+	}
+	return n
+}
+
 func (c *columnarCursor) u32() uint32 {
 	raw := c.bytes(4)
 	if c.err != nil {
@@ -503,6 +536,10 @@ func (c *columnarCursor) stringColumnAny() []string {
 
 func (c *columnarCursor) dictColumn(n int) []string {
 	dict := c.stringColumnAny()
+	if c.err != nil {
+		return nil
+	}
+	n = c.count(n, "dict")
 	if c.err != nil {
 		return nil
 	}

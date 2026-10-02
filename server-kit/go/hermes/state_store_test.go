@@ -3,8 +3,11 @@ package hermes
 import (
 	"context"
 	"fmt"
-	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
 
 func TestProjectedRuntimeStoreUsesHermesForWarmStateScope(t *testing.T) {
@@ -324,4 +327,114 @@ func TestProjectedRuntimeStoreHealthTracksDegradation(t *testing.T) {
 		t.Fatal("Store() should expose the hot plane")
 	}
 	store.Close()
+}
+
+// TestTTLExpiryReachesObservers pins the drift fix. hermes retires records on
+// TTL inside the apply, and it used to do so silently, so every downstream
+// aggregate kept counting a record the projection no longer held and no replica
+// was told to drop it.
+func TestTTLExpiryReachesObservers(t *testing.T) {
+	store, err := NewStore(ProjectionSpec{
+		Name: "ttl_observe", Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"bucket"},
+		MaxRecords:    1024, MaxBytes: 8 << 20,
+		TTL: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	var mu sync.Mutex
+	var observed []AppliedMutation
+	cancel := store.Observe(func(_ string, mutations []AppliedMutation) {
+		mu.Lock()
+		observed = append(observed, mutations...)
+		mu.Unlock()
+	})
+	defer cancel()
+
+	rec := database.DomainRecord{
+		Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "r1",
+		Data: database.RecordData{{Name: "bucket", Value: database.IntValue(1)}},
+	}
+	if _, err := store.ApplyRecords(context.Background(), "ttl_observe", "src:1", 1, []database.DomainRecord{rec}); err != nil {
+		t.Fatalf("ApplyRecords: %v", err)
+	}
+	if _, _, err := store.GetRecord(context.Background(), "ttl_observe", Query{OrganizationID: "org_1"}, "r1", Fence{}); err != nil {
+		t.Fatalf("record should be live before expiry: %v", err)
+	}
+
+	time.Sleep(80 * time.Millisecond)
+
+	// The next apply sweeps the expired record, which must be reported.
+	if _, err := store.ApplyRecords(context.Background(), "ttl_observe", "src:2", 2, []database.DomainRecord{{
+		Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "r2",
+		Data: database.RecordData{{Name: "bucket", Value: database.IntValue(2)}},
+	}}); err != nil {
+		t.Fatalf("second ApplyRecords: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	var sawExpiry bool
+	for _, m := range observed {
+		if m.Operation == OperationDelete && m.Record.RecordID == "r1" {
+			sawExpiry = true
+			if m.Version != 1 {
+				t.Fatalf("expiry delete version = %d, want the record's own version 1", m.Version)
+			}
+			if m.Record.OrganizationID != "org_1" {
+				t.Fatalf("expiry delete org = %q, want org_1", m.Record.OrganizationID)
+			}
+		}
+	}
+	if !sawExpiry {
+		t.Fatalf("expiry was not reported to observers; observed %d mutations", len(observed))
+	}
+}
+
+// TestAccumulatorTracksHermesTTLRoundTrip checks the two expiry paths agree: an
+// accumulator attached to a TTL projection should lose the record's aggregate
+// when the projection retires it, without needing its own TTL configured.
+func TestAccumulatorTracksHermesTTLRoundTrip(t *testing.T) {
+	store, err := NewStore(ProjectionSpec{
+		Name: "ttl_acc", Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"country"},
+		MaxRecords:    1024, MaxBytes: 8 << 20,
+		TTL: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	acc := NewAccumulatorStateStore(AccumulatorConfig{Dimensions: []string{"country"}})
+	defer acc.AttachToStore(store)()
+
+	scope := ScopeKey("signals", "ticks", "org_1")
+	rec := database.DomainRecord{
+		Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "r1",
+		Data: database.RecordData{{Name: "country", Value: database.StringValue("C_1")}},
+	}
+	if _, err := store.ApplyRecords(context.Background(), "ttl_acc", "src:1", 1, []database.DomainRecord{rec}); err != nil {
+		t.Fatalf("ApplyRecords: %v", err)
+	}
+	if got := acc.GetDimensionSummary(scope, "country", 10).DistinctCount; got != 1 {
+		t.Fatalf("distinct count before expiry = %d, want 1", got)
+	}
+
+	time.Sleep(80 * time.Millisecond)
+	if _, err := store.ApplyRecords(context.Background(), "ttl_acc", "src:2", 2, []database.DomainRecord{{
+		Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "r2",
+		Data: database.RecordData{{Name: "country", Value: database.StringValue("C_2")}},
+	}}); err != nil {
+		t.Fatalf("second ApplyRecords: %v", err)
+	}
+
+	// r1 must be gone and only r2 counted. Before the fix the count would be 2.
+	if got := acc.GetDimensionSummary(scope, "country", 10).DistinctCount; got != 1 {
+		t.Fatalf("distinct count after expiry = %d, want 1 (only the live record)", got)
+	}
+	values := acc.GetDimensionSummary(scope, "country", 10).TopValues
+	if len(values) != 1 || values[0].Value != "C_2" {
+		t.Fatalf("top values = %+v, want only C_2", values)
+	}
 }
