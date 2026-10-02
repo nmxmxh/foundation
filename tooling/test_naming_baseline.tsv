@@ -1,0 +1,6 @@
+# path	reason
+# A test file belongs to one source file and is named for it. Exceptions
+# listed here predate the contract and are migration debt, not precedent.
+# Run: node tooling/scripts/test_naming_check.cjs .
+server-kit/go/metadata/aci_merge_test.go	CANNOT MERGE: external test package; contracttest imports events which imports metadata, so an internal test importing it is an import cycle
+server-kit/go/protoapi/testprotos/test_pb_test.go	CANNOT MERGE: the only source is generated (test.pb.go); the paired name test.pb_test.go is not a legal Go file name

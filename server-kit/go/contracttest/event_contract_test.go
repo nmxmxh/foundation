@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
 
 type producerFunc func(context.Context, string) (events.Envelope, error)
@@ -103,4 +104,16 @@ func TestVerifyProducerAndConsumerErrorPaths(t *testing.T) {
 	})); !errors.Is(err, consumeErr) {
 		t.Fatalf("consumer error = %v", err)
 	}
+}
+
+func contractObject(values map[string]any) extension.Object {
+	value, err := extension.FromJSON(values)
+	if err != nil {
+		panic(err)
+	}
+	object, ok := value.ObjectValue()
+	if !ok {
+		panic("contract test value is not object")
+	}
+	return object
 }

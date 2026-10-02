@@ -8,6 +8,19 @@ map $http_upgrade $upgrade_accept_encoding {
     websocket "";
 }
 
+# Upstream keepalive pool. nginx can only reuse an upstream socket through an
+# upstream block: a variable proxy_pass target bypasses the pool entirely, so
+# without this every request opens and closes a connection to the Go backend.
+#
+# Each idle socket costs a file descriptor in both nginx and the backend, so the
+# size is bounded and overridable per deploy through the environment.
+upstream foundation_backend {
+    server ${UPSTREAM_HOST}:${UPSTREAM_PORT};
+    keepalive ${UPSTREAM_KEEPALIVE_CONNECTIONS};
+    keepalive_requests ${UPSTREAM_KEEPALIVE_REQUESTS};
+    keepalive_timeout ${UPSTREAM_KEEPALIVE_TIMEOUT};
+}
+
 server {
     listen 80;
     listen [::]:80;
@@ -28,6 +41,9 @@ server {
 
     resolver 127.0.0.11 valid=30s ipv6=off;
     set $upstream_backend http://${UPSTREAM_HOST}:${UPSTREAM_PORT};
+    # Reused by every non-upgrade location so an idle upstream socket can be
+    # returned to the keepalive pool instead of being closed after one request.
+    set $upstream_keepalive "http://${UPSTREAM_HOST}:${UPSTREAM_PORT}";
 
     location = /nginx-health {
         access_log off;
@@ -85,10 +101,14 @@ server {
     # $connection_upgrade maps to "" for plain requests, so both traffic kinds
     # share the block.
     location ^~ /api/ {
-        proxy_pass $upstream_backend;
+        proxy_pass $upstream_keepalive;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection $connection_upgrade;
+        # Clear Connection on non-upgrade traffic so nginx can return the socket
+        # to the keepalive pool. An empty value is required; leaving
+        # $connection_upgrade here sent "close" to the backend on every request,
+        # which forced a fresh TCP and TLS handshake each time.
+        proxy_set_header Connection $api_connection;
         proxy_set_header Host $proxy_host;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -97,7 +117,14 @@ server {
         proxy_connect_timeout 60s;
         proxy_read_timeout 120s;
         proxy_send_timeout 120s;
+        # Stream the request body to the upstream instead of spooling the whole
+        # upload to disk first. Large transfers then cost no temp file.
+        proxy_request_buffering off;
+        # Let the upstream decide when bytes are ready. Set off for any route
+        # that returns a streamed body.
+        proxy_buffering on;
         limit_req zone=api_limit burst=60 nodelay;
+        limit_conn conn_limit 64;
     }
 
     location ^~ /v1/ {

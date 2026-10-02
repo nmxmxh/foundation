@@ -27,3 +27,27 @@ license-file = "../../LICENSE"
 # 1.85 is the floor because that is what the oldest consuming Dockerfile pins.
 # Raising it is a decision to make deliberately, in step with those images.
 rust-version = "1.85"
+
+# Release tuning for the runtime SDK.
+#
+# These crates are the performance lane, so the workspace is built to run fast
+# rather than to compile fast or ship small. Measured effect is reported in
+# docs/foundation_benchmarks.md; regenerate those numbers after changing a
+# setting here.
+[profile.release]
+opt-level = 3
+# Thin LTO across the ovrt-browser -> ovrt-core -> ovrt-unit call graph. The
+# workspace defaults to no LTO and 16 codegen units, which leaves the
+# boundary-crossing calls between these small crates un-inlined.
+lto = "thin"
+codegen-units = 1
+# panic stays "unwind" on purpose. catch_unwind guards the FFI and native host
+# boundaries so a guest panic cannot unwind into the host runtime. Setting
+# panic = "abort" would remove that boundary and is not safe while those guards
+# exist.
+panic = "unwind"
+# The WASM lane needs overflow checks off and no debug assertions in release;
+# both are already the release default, stated here so a future edit does not
+# change them by accident.
+debug-assertions = false
+overflow-checks = false

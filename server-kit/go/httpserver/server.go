@@ -206,12 +206,22 @@ func New(cfg *Config, reg *registry.ServiceRegistry, handler ...*graceful.Handle
 		wsUnauthenticatedAllowset: map[string]struct{}{
 			"identity:ping:v1:requested": {},
 		},
-		protectOperational:   cfg != nil && cfg.ProtectOperationalEndpoints,
-		allowedOrigins:       configuredAllowedOrigins(cfg),
-		ws:                   newWSRuntime(),
-		readHeaderTimeout:    5 * time.Second,
-		readTimeout:          15 * time.Second,
-		writeTimeout:         15 * time.Second,
+		protectOperational: cfg != nil && cfg.ProtectOperationalEndpoints,
+		allowedOrigins:     configuredAllowedOrigins(cfg),
+		ws:                 newWSRuntime(),
+		readHeaderTimeout:  5 * time.Second,
+		// ReadTimeout on http.Server starts at accept and covers the whole
+		// body read; it is not a per-read idle timeout. A 15s value therefore
+		// severed any upload slower than 15s regardless of progress, while the
+		// transfer lane exists to carry large bodies. The body bound belongs to
+		// http.MaxBytesReader, which the routes already apply, so the deadline
+		// is dropped here and ReadHeaderTimeout keeps the header-slowloris
+		// defence. Deployments that want a wall-clock ceiling set cfg.ReadTimeout.
+		readTimeout: 0,
+		// WriteTimeout is measured from the end of the header read, so a finite
+		// value also caps how long a streamed response may stay open. Streams
+		// bound themselves with their own context instead.
+		writeTimeout:         0,
 		idleTimeout:          120 * time.Second,
 		maxConcurrentStreams: 250,
 	}

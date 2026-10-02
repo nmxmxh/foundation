@@ -1100,6 +1100,96 @@ Enforcement:
 - Unit tests for the redirect guard, the oversized-body error, and the blocked
   ranges. Reviewer gate.
 
+### CP-46: A hot path must state its allocation budget and keep its interfaces
+
+Level: `Mandatory`
+
+Requirements:
+
+1. A `ResponseWriter` wrapper must implement `http.Flusher`, `http.Hijacker`,
+   `io.ReaderFrom`, and `Unwrap`. A wrapper that drops them silently converts a
+   streamed response into a buffered one.
+2. A wrapper that buffers must stop buffering when the handler flushes. The
+   buffered prefix is already on the wire, so compressing it afterwards would
+   emit a second body.
+3. A codec or compressor on the request path must be pooled and `Reset`. Building
+   one per request is a defect even when the state is small.
+4. A byte limit must return an error when the input is longer. A truncated result
+   reported as success is a defect.
+5. A buffer whose final length is already known must be sized from it. A read of a
+   known length must not start at 512 bytes and grow by doubling.
+6. An outbound client must set a transport with an explicit
+   `MaxIdleConnsPerHost`. A nil `Transport` falls back to a pool of two.
+7. A `ReadTimeout` on `http.Server` must be zero when large bodies are served.
+   It covers the whole body read, not one read.
+8. Every new request-path package carries an allocation ceiling test.
+
+Rationale:
+
+The compression middleware wrapped the response writer without `Flush`, so
+`http.Server` never flushed a streamed body. Measured time to first byte was the
+full producer duration: 701 ms against 1 ms for the same handler unwrapped, with
+no error and no log. The same middleware allocated a brotli writer per request,
+costing 1.1 MB for a 1 KB response. The connector drivers left `Transport` nil
+and inherited a two-connection idle pool, so probe traffic re-dialled constantly.
+`ReadTimeout` of 15 s severed any upload slower than that, while the transfer
+lane exists to carry large bodies.
+
+Each of these was invisible because the affected packages carried no benchmark
+and no allocation assertion.
+
+Enforcement:
+
+- Interface assertions and an allocation ceiling test per request-path package.
+- A time-to-first-byte test for the streaming path.
+- Reviewer gate.
+
+### CP-47: A test file names the source file it exercises
+
+Level: `Mandatory`
+
+Requirements:
+
+1. A test file for `foo.go` is named `foo_test.go`. One source, one test file.
+2. A test file name never carries a numeric suffix. `_2` marks a second file
+   created for a reason the name does not state.
+3. A file may deviate only when it is a benchmark, carries a build constraint,
+   or is listed in `tooling/test_naming_baseline.tsv`.
+4. Remove a baseline entry in the same change that moves the file.
+5. A consolidation must not change the set of tests. Record the package in
+   `check-test-preservation`, which compares test names against `HEAD`.
+
+Rationale:
+
+The `compress` package accumulated `pool_test.go`, `pool_coverage_test.go`, and
+`pool_coverage2_test.go`. Three files, two of them numbered, none naming the
+source they exercised, all testing `compress.go`. Nothing failed; the cost was
+that a reader could not tell which file owned a behaviour.
+
+A large test file is not the problem this rule addresses. Fragmentation is. The
+same consolidation moved roughly 40 test functions into `compress_test.go`,
+`middleware_test.go`, and `streaming_writer_test.go` and deleted four files.
+
+Consolidation also found a defect that the fragments had hidden: `put` created a
+pool whose constructor could not build a writer, and the first creator won, so
+one test poisoned a compression level for the whole binary. No filename rule
+catches that. The broken layout is what let it survive.
+
+Two files could not be merged and are baselined with the reason. An ACI test in
+`metadata` must stay an external test package, because `contracttest` imports
+`events`, which imports `metadata`, so an internal test importing it is an
+import cycle. The generated-proto test has no legal paired name, because
+`test.pb.go` would require `test.pb_test.go`, which Go will not compile.
+
+Enforcement:
+
+- `tooling/scripts/test_naming_check.cjs`, wired into the lint sweep as
+  `check-test-naming`.
+- `tooling/scripts/test_preservation_check.py`, wired as
+  `check-test-preservation`, which fails the build if a consolidation dropped a
+  test. The placement batch lost three tests to a badly formed `mv` before the
+  check existed; the same surgery now fails loudly instead.
+
 ## Enforcement matrix
 
 | Rule ID | Primary enforcement | Automation | Merge gate |
@@ -1148,6 +1238,8 @@ Enforcement:
 | `CP-42` | Clippy unsafe-doc lints + review | Strong | Yes |
 | `CP-43` | Compiler (cfg-gated helpers) + review | Strong | Yes |
 | `CP-45` | Unit tests (redirect guard, bounded body, blocked ranges) + review | Partial | Yes |
+| `CP-46` | Allocation and interface tests + benchmark | Partial | Yes |
+| `CP-47` | `test_naming_check.cjs` + `test_preservation_check.py` | Strong | Yes |
 
 ## Exception process and ADR linkage
 

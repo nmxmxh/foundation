@@ -283,3 +283,46 @@ func TestHTTPXPreservesCallerRedirectPolicy(t *testing.T) {
 		t.Fatalf("CheckRedirect = %v, want the caller sentinel", err)
 	}
 }
+
+// TestHTTPXDefaultClientUsesPooledTransport is the guard for the connection
+// pool. A nil Transport falls back to http.DefaultTransport, whose
+// MaxIdleConnsPerHost is 2, so probe traffic past the second concurrent request
+// re-dialled every time.
+func TestHTTPXDefaultClientUsesPooledTransport(t *testing.T) {
+	built, err := New("https://api.example.com", nil)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	driver, ok := built.(*Driver)
+	if !ok {
+		t.Fatalf("driver type = %T, want *Driver", built)
+	}
+
+	tr, ok := driver.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport = %T, want *http.Transport", driver.client.Transport)
+	}
+	if tr.MaxIdleConnsPerHost <= http.DefaultMaxIdleConnsPerHost {
+		t.Fatalf("MaxIdleConnsPerHost = %d, must exceed the Go default %d",
+			tr.MaxIdleConnsPerHost, http.DefaultMaxIdleConnsPerHost)
+	}
+	if tr.ResponseHeaderTimeout <= 0 {
+		t.Error("ResponseHeaderTimeout must be set on the driver transport")
+	}
+	if driver.client.Timeout != defaultCallTimeout {
+		t.Errorf("Timeout = %v, want %v", driver.client.Timeout, defaultCallTimeout)
+	}
+}
+
+// TestHTTPXCallerClientWins keeps the injection point working.
+func TestHTTPXCallerClientWins(t *testing.T) {
+	sentinel := &http.Client{Timeout: 1234 * time.Millisecond}
+	built, err := New("https://api.example.com", map[string]any{"client": sentinel})
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	driver := built.(*Driver)
+	if driver.client != sentinel {
+		t.Fatal("a caller-supplied client must be used as given")
+	}
+}

@@ -1,6 +1,9 @@
 package placement
 
 import (
+	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -182,4 +185,61 @@ func TestRemoteTicketValidation(t *testing.T) {
 	if err := broken.Validate(); err == nil {
 		t.Fatal("zero deadline must fail")
 	}
+}
+
+func TestMirrorFrameTruncationWalkNeverPanics(t *testing.T) {
+	frame, err := EncodeLaneMirrorFrame("node-9", "region-7", LaneClassSeed, benchLanes())
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	for cut := 1; cut < len(frame); cut++ {
+		decoded, err := DecodeLaneMirrorFrame(frame[:cut])
+		if err != nil {
+			continue
+		}
+		if len(decoded.Lanes) > 32 || decoded.NodeID != "node-9" {
+			t.Fatalf("cut %d produced implausible decode: %+v", cut, decoded)
+		}
+	}
+}
+
+func TestEncodeLaneMirrorFrameRejectsOversizedIdentity(t *testing.T) {
+	long := strings.Repeat("x", 300)
+	if _, err := EncodeLaneMirrorFrame(long, "r", LaneClassEdge, []LaneMirrorUpdate{{}}); err == nil ||
+		!strings.Contains(err.Error(), "node id") {
+		t.Fatalf("long node id err = %v", err)
+	}
+	if _, err := EncodeLaneMirrorFrame("n", long, LaneClassEdge, []LaneMirrorUpdate{{}}); err == nil ||
+		!strings.Contains(err.Error(), "region id") {
+		t.Fatalf("long region id err = %v", err)
+	}
+}
+
+var errTransport = errors.New("transport down")
+
+type failingPublishClient struct {
+	rediskit.Client
+}
+
+func (f *failingPublishClient) Publish(context.Context, string, []byte) error {
+	return errTransport
+}
+
+var errSubscribe = errors.New("subscribe refused")
+
+type failingSubscribeClient struct {
+	rediskit.Client
+}
+
+func (f *failingSubscribeClient) Subscribe(context.Context, string) (<-chan []byte, func(), error) {
+	return nil, nil, errSubscribe
+}
+
+type controlledChannelClient struct {
+	rediskit.Client
+	frames chan []byte
+}
+
+func (c *controlledChannelClient) Subscribe(context.Context, string) (<-chan []byte, func(), error) {
+	return c.frames, func() {}, nil
 }
