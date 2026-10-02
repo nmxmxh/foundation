@@ -85,9 +85,12 @@ func (s *Store) CheckDrift(ctx context.Context, projection string, source databa
 	if query.OrganizationID == "" {
 		return DriftReport{}, ErrInvalidEvent
 	}
+	// Clamp before the record query reads the bound. Reading it first leaves the
+	// source-side CountRecords and ListRecords to run with a caller-supplied or
+	// zero limit, which turns a bounded sample into an unbounded database read.
+	opts = normalizeDriftOptions(opts, part.spec)
 	recordQuery := query.RecordQuery()
 	recordQuery.Limit = opts.MaxRecords
-	opts = normalizeDriftOptions(opts, part.spec)
 	report := DriftReport{
 		Projection:     part.spec.Name,
 		Domain:         part.spec.Domain,

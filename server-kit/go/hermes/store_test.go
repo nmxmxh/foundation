@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1247,5 +1249,198 @@ func TestCountIndexedDoesNotAllocate(t *testing.T) {
 		}
 	}); got != 0 {
 		t.Fatalf("Count allocations = %g, want 0", got)
+	}
+}
+
+// TestRecordKeyIsInjectiveAcrossComponents guards the tenant-isolation
+// invariant that the composite record key encodes. Without escaping, these two
+// records are byte-identical in the partition map, so one tenant overwrites the
+// other on a projection shared by many organizations.
+func TestRecordKeyIsInjectiveAcrossComponents(t *testing.T) {
+	collisions := [][4]string{
+		{"signals", "ticks", "org_1", "a|b"},
+		{"signals", "ticks", "org_1|a", "b"},
+		{"signals", "ticks", "org_1", "a\\b"},
+		{"signals", "ticks", "org_1\\", "a|b"},
+		{"sig|nals", "ticks", "org_1", "a"},
+		{"signals", "t|icks", "org_1", "a"},
+	}
+	seen := map[string][4]string{}
+	for _, c := range collisions {
+		key := recordKey(c[0], c[1], c[2], c[3])
+		if prior, dup := seen[key]; dup {
+			t.Fatalf("recordKey%v collides with recordKey%v -> %q", c, prior, key)
+		}
+		seen[key] = c
+	}
+
+	// The plain shape must stay stable: escaping is a no-op when no component
+	// carries the separator, so existing keys are unchanged.
+	if got, want := recordKey("signals", "ticks", "org_1", "rec_1"), "signals|ticks|org_1|rec_1"; got != want {
+		t.Fatalf("recordKey on plain components = %q, want %q", got, want)
+	}
+}
+
+// TestBitmapIndexKeyIsInjectiveAcrossComponents covers the injection flaw the
+// struct key replaces. The joined-string key rendered field "a:s" with kind 'b'
+// and field "a" with kind 's' and value "b:" identically, so an indexed value
+// carrying the separator could match the wrong records. Struct equality cannot.
+func TestBitmapIndexKeyIsInjectiveAcrossComponents(t *testing.T) {
+	triples := []struct {
+		field string
+		kind  byte
+		value string
+	}{
+		{"a", 's', "b:c"},
+		{"a:s", 'c', "b"},
+		{"a", 's', "b:"},
+		{"a:s", 'b', ""},
+		{"a", 'b', "c"},
+		{"", 's', ""},
+	}
+	seen := map[bitmapIndexKey]string{}
+	for _, t3 := range triples {
+		key := newBitmapIndexKey(t3.field, t3.kind, t3.value)
+		desc := t3.field + "|" + string(t3.kind) + "|" + t3.value
+		if prior, dup := seen[key]; dup {
+			t.Fatalf("key for (%s) collides with (%s)", desc, prior)
+		}
+		seen[key] = desc
+	}
+}
+
+// TestPartitionWatermarksAreBounded proves the replay fence can no longer grow
+// without limit and that a poisoned prefix heals.
+//
+// Every sibling dedup structure is bounded by a spec field. The prefix watermark
+// was not, which made it both an unbounded map keyed by a caller-supplied prefix
+// and a way to blind one source prefix for the life of the process: a single
+// event carrying the highest possible version pinned the fence forever.
+func TestPartitionWatermarksAreBounded(t *testing.T) {
+	store, err := NewStore(ProjectionSpec{
+		Name: "wm", Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"bucket"},
+		MaxRecords:    1024, MaxBytes: 8 << 20, MaxAppliedEvents: 8,
+	})
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	part, err := store.partition("wm")
+	if err != nil {
+		t.Fatalf("partition: %v", err)
+	}
+	part.mu.Lock()
+	for i := range 64 {
+		part.rememberAppliedLocked("src"+strconv.Itoa(i)+":1", uint64(i+1))
+	}
+	part.mu.Unlock()
+
+	part.mu.Lock()
+	defer part.mu.Unlock()
+	if len(part.watermarks) > part.spec.MaxAppliedEvents {
+		t.Fatalf("watermarks holds %d entries, want at most MaxAppliedEvents=%d", len(part.watermarks), part.spec.MaxAppliedEvents)
+	}
+	// Every retained prefix must have a live source backing it, so no orphan
+	// fence outlives the sources that justified it.
+	for prefix, fence := range part.watermarks {
+		if fence.refs < 1 {
+			t.Fatalf("prefix %q has a fence with no live source", prefix)
+		}
+		if fence.version == 0 {
+			t.Fatalf("prefix %q has a zero fence version", prefix)
+		}
+	}
+}
+
+// TestPartitionWatermarkPoisonHeals shows the fence is self-healing: after the
+// poisoned source ages out of the bounded set, its prefix stops gating events.
+func TestPartitionWatermarkPoisonHeals(t *testing.T) {
+	store, err := NewStore(ProjectionSpec{
+		Name: "poison", Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"bucket"},
+		MaxRecords:    1024, MaxBytes: 8 << 20, MaxAppliedEvents: 4,
+	})
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	part, err := store.partition("poison")
+	if err != nil {
+		t.Fatalf("partition: %v", err)
+	}
+
+	part.mu.Lock()
+	part.rememberAppliedLocked("evil:x", math.MaxUint64)
+	if _, gated := part.watermarks["evil"]; !gated {
+		part.mu.Unlock()
+		t.Fatal("expected the poisoned prefix to be gated immediately")
+	}
+	if !part.alreadyAppliedLocked("evil:y", 1) {
+		part.mu.Unlock()
+		t.Fatal("expected a normal version on the poisoned prefix to be dropped")
+	}
+	// Push the poisoned source out of the bounded set.
+	for i := range 8 {
+		part.rememberAppliedLocked("other"+strconv.Itoa(i)+":1", uint64(i+1))
+	}
+	if _, still := part.watermarks["evil"]; still {
+		part.mu.Unlock()
+		t.Fatal("poisoned watermark outlived its source")
+	}
+	if part.alreadyAppliedLocked("evil:y", 1) {
+		part.mu.Unlock()
+		t.Fatal("prefix stayed blinded after the poisoned source aged out")
+	}
+	part.mu.Unlock()
+}
+
+// TestStoreRefusesProjectionsPastItsBound checks the scope bound is enforced and
+// reported rather than silently allocating. Projection names on the projected
+// path embed the organization, so this is the tenant-count bound.
+func TestStoreRefusesProjectionsPastItsBound(t *testing.T) {
+	base := ProjectionSpec{
+		Domain: "signals", Collection: "ticks",
+		IndexedFields: []string{"bucket"},
+		MaxRecords:    1024, MaxBytes: 8 << 20,
+	}
+	store, err := NewStore()
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	store.SetMaxProjections(3)
+	if got := store.MaxProjections(); got != 3 {
+		t.Fatalf("MaxProjections = %d, want 3", got)
+	}
+	for i := range 5 {
+		spec := base
+		spec.Name = "p" + strconv.Itoa(i)
+		err := store.Register(spec)
+		if i < 3 && err != nil {
+			t.Fatalf("Register within the bound failed: %v", err)
+		}
+		if i >= 3 && !errors.Is(err, ErrProjectionLimit) {
+			t.Fatalf("Register past the bound = %v, want ErrProjectionLimit", err)
+		}
+	}
+	store.mu.RLock()
+	held := len(store.projections)
+	store.mu.RUnlock()
+	if held != 3 {
+		t.Fatalf("store holds %d projections, want 3", held)
+	}
+}
+
+// TestStoreMaxProjectionsDefaultIsBounded guards the default against a future
+// edit that leaves it unset.
+func TestStoreMaxProjectionsDefaultIsBounded(t *testing.T) {
+	store, err := NewStore()
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	if got := store.MaxProjections(); got != defaultMaxProjections {
+		t.Fatalf("MaxProjections = %d, want %d", got, defaultMaxProjections)
+	}
+	store.SetMaxProjections(0)
+	if got := store.MaxProjections(); got != defaultMaxProjections {
+		t.Fatalf("MaxProjections after reset = %d, want %d", got, defaultMaxProjections)
 	}
 }

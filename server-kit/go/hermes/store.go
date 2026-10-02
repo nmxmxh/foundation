@@ -3,6 +3,7 @@ package hermes
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -16,9 +17,47 @@ type Store struct {
 	mu          sync.RWMutex
 	projections map[string]*partition
 
+	// maxProjections bounds how many projections the store will hold.
+	maxProjections int
+
 	obsMu     sync.RWMutex
 	observers map[int]AppliedBatchObserver
 	obsSeq    int
+}
+
+// defaultMaxProjections bounds the number of projections one store retains.
+//
+// Each projection owns four 128-shard maps, an index registry, and a bitmap
+// registry, so a projection is tens of kilobytes before it holds a single
+// record. Projection names on the projected-store path embed the organization,
+// so they grow with tenant count rather than with configuration, and nothing
+// pruned them. Past the bound Register reports ErrProjectionLimit, which the
+// projected store already treats as a degradation signal.
+const defaultMaxProjections = 4096
+
+// SetMaxProjections overrides how many projections this store will hold.
+// A value below one restores the default.
+func (s *Store) SetMaxProjections(max int) {
+	if max < 1 {
+		max = defaultMaxProjections
+	}
+	s.mu.Lock()
+	s.maxProjections = max
+	s.mu.Unlock()
+}
+
+// MaxProjections reports the projection bound.
+func (s *Store) MaxProjections() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.maxProjectionsLocked()
+}
+
+func (s *Store) maxProjectionsLocked() int {
+	if s.maxProjections < 1 {
+		return defaultMaxProjections
+	}
+	return s.maxProjections
 }
 
 // AppliedBatchObserver is notified, once per apply call, with the mutations the
@@ -95,7 +134,12 @@ type partition struct {
 	tombOrder  []string
 	applied    map[string]struct{}
 	applyOrder []string
-	watermarks map[string]uint64
+	// watermarks holds the per-prefix replay fence and counts the live sources
+	// carrying each prefix. It is bounded by MaxAppliedEvents through
+	// applyOrder: every sibling dedup structure has a bound, and an unbounded
+	// one let a single untrusted version blind a source prefix for the life of
+	// the process.
+	watermarks map[string]watermarkFence
 
 	bytes            atomic.Int64
 	records          atomic.Int64
@@ -202,7 +246,10 @@ type indexSnapshot struct {
 }
 
 func NewStore(specs ...ProjectionSpec) (*Store, error) {
-	store := &Store{projections: map[string]*partition{}}
+	store := &Store{
+		projections:    map[string]*partition{},
+		maxProjections: defaultMaxProjections,
+	}
 	for _, spec := range specs {
 		if err := store.Register(spec); err != nil {
 			return nil, err
@@ -220,6 +267,9 @@ func (s *Store) Register(spec ProjectionSpec) error {
 	defer s.mu.Unlock()
 	if _, exists := s.projections[normalized.Name]; exists {
 		return nil
+	}
+	if len(s.projections) >= s.maxProjectionsLocked() {
+		return fmt.Errorf("%w: store already holds the maximum of %d projections", ErrProjectionLimit, s.maxProjectionsLocked())
 	}
 	s.projections[normalized.Name] = newPartition(normalized)
 	return nil
@@ -420,7 +470,7 @@ func newPartition(spec ProjectionSpec) *partition {
 		spec:       spec,
 		tombstones: map[string]tombstoneEntry{},
 		applied:    map[string]struct{}{},
-		watermarks: map[string]uint64{},
+		watermarks: map[string]watermarkFence{},
 	}
 	part.registry.Store(newPartitionRegistry())
 	return part
@@ -523,9 +573,14 @@ func (p *partition) count(ctx context.Context, query Query, fence Fence) (int64,
 
 	registry := p.activeRegistry()
 	if keys, ok := p.bitmapCandidates(registry, query); ok {
+		// Re-check every candidate against the query, exactly as the scan below
+		// does. An existence test alone leaves Count and ListRecords answering
+		// the same query under two different validation regimes, so any future
+		// divergence between the bitmap index and the record state becomes a
+		// silent over-count instead of a miss.
 		var count int64
 		for _, key := range keys {
-			if _, exists := p.recordEntry(registry, key); exists {
+			if entry, exists := p.recordEntry(registry, key); exists && recordMatches(entry.record, p.spec, query) {
 				count++
 				if query.Limit > 0 && count >= int64(query.Limit) {
 					break

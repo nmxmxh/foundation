@@ -56,15 +56,29 @@ func (b *bitmap) clear(i int) {
 }
 
 // grow resizes the bitmap to at least newN bits.
+//
+// Capacity grows geometrically so that raising a single bit at a time stays
+// amortized O(1). Sizing each raise to exactly newN re-copies the whole word
+// slice on every new highest slot, which makes a bulk index build copy
+// O(n^2/64) bytes. The visible length stays exactly (newN+63)/64 so every
+// consumer and the shape assertions are unchanged; only the reserved capacity
+// grows.
 func (b *bitmap) grow(newN int) {
 	if newN <= b.n {
 		return
 	}
 	reqWords := (newN + 63) / 64
 	if reqWords > len(b.words) {
-		newWords := make([]uint64, reqWords)
-		copy(newWords, b.words)
-		b.words = newWords
+		if reqWords <= cap(b.words) {
+			// Reuse the headroom reserved by an earlier grow.
+			oldLen := len(b.words)
+			b.words = b.words[:reqWords]
+			clear(b.words[oldLen:reqWords])
+		} else {
+			grown := make([]uint64, reqWords, 2*reqWords)
+			copy(grown, b.words)
+			b.words = grown
+		}
 	}
 	b.n = newN
 }

@@ -135,12 +135,86 @@ func recordFromView(view RecordView) database.DomainRecord {
 	})
 }
 
+// recordKey builds the partition key for a record.
+//
+// Components are escaped so the join is injective. Without escaping,
+// organization "org_1" with record "a|b" and organization "org_1|a" with record
+// "b" both produce "signals|ticks|org_1|a|b", which lets one tenant overwrite
+// another tenant's record on a projection shared by many organizations. The
+// separator is escaped before the escape character itself, so the encoding
+// round-trips.
 func recordKey(domain, collection, organizationID, recordID string) string {
-	return strings.TrimSpace(domain) + "|" +
-		strings.TrimSpace(collection) + "|" +
-		strings.TrimSpace(organizationID) + "|" +
-		strings.TrimSpace(recordID)
+	domain = strings.TrimSpace(domain)
+	collection = strings.TrimSpace(collection)
+	organizationID = strings.TrimSpace(organizationID)
+	recordID = strings.TrimSpace(recordID)
+	// Test for the separator before building, not inside the concatenation.
+	// Calling a helper in the operand list pushes the result past the
+	// compiler's stack buffer, which cost two extra allocations per key.
+	if hasKeySeparator(domain) {
+		domain = escapeKeyComponent(domain)
+	}
+	if hasKeySeparator(collection) {
+		collection = escapeKeyComponent(collection)
+	}
+	if hasKeySeparator(organizationID) {
+		organizationID = escapeKeyComponent(organizationID)
+	}
+	if hasKeySeparator(recordID) {
+		recordID = escapeKeyComponent(recordID)
+	}
+	return recordKeyFromEscaped(domain, collection, organizationID, recordID)
 }
+
+func hasKeySeparator(value string) bool {
+	for i := range len(value) {
+		if value[i] == keySeparator || value[i] == keyEscape {
+			return true
+		}
+	}
+	return false
+}
+
+// escapeKeyComponent escapes the recordKey separator and the escape character.
+// The common case costs one scan and no allocation.
+func escapeKeyComponent(value string) string {
+	value = strings.TrimSpace(value)
+	needsEscape := false
+	for i := range len(value) {
+		if value[i] == keySeparator || value[i] == keyEscape {
+			needsEscape = true
+			break
+		}
+	}
+	if !needsEscape {
+		return value
+	}
+	var b strings.Builder
+	b.Grow(len(value) + 8)
+	for i := range len(value) {
+		switch value[i] {
+		case keyEscape:
+			b.WriteString(keyEscapeToken)
+		case keySeparator:
+			b.WriteString(keySeparatorToken)
+		default:
+			b.WriteByte(value[i])
+		}
+	}
+	return b.String()
+}
+
+// recordKeyFromEscaped joins already-escaped components.
+func recordKeyFromEscaped(domain, collection, organizationID, recordID string) string {
+	return domain + "|" + collection + "|" + organizationID + "|" + recordID
+}
+
+const (
+	keySeparator      = '|'
+	keyEscape         = '\\'
+	keyEscapeToken    = `\\`
+	keySeparatorToken = `\|`
+)
 
 func scopeKey(domain, collection, organizationID string) recordScope {
 	return recordScope{
@@ -154,7 +228,11 @@ func recordMatches(rec database.DomainRecord, spec ProjectionSpec, query Query) 
 	if rec.Domain != spec.Domain || rec.Collection != spec.Collection {
 		return false
 	}
-	if strings.TrimSpace(query.OrganizationID) != "" && rec.OrganizationID != strings.TrimSpace(query.OrganizationID) {
+	// Trim the wanted organization once. This runs per candidate record, so the
+	// previous two TrimSpace calls per record were the dominant cost of a
+	// filter-free columnar scan.
+	wantOrg := strings.TrimSpace(query.OrganizationID)
+	if wantOrg != "" && rec.OrganizationID != wantOrg {
 		return false
 	}
 	if query.Plan.count > 0 {

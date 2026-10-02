@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
@@ -284,5 +286,109 @@ func BenchmarkAccumulatorGetDimensionSummary(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		_ = acc.GetDimensionSummary(scope, "category", 10)
+	}
+}
+
+// TestAccumulatorEvictExpiredActuallyEvicts closes the dead-code hole.
+// recordAccumulatorState.expiresAt was declared and never assigned, so the
+// guard was never true and EvictExpired always returned 0 while appearing to
+// be the bound on this structure.
+func TestAccumulatorEvictExpiredActuallyEvicts(t *testing.T) {
+	acc := NewAccumulatorStateStore(AccumulatorConfig{
+		Dimensions: []string{"country"}, NumericMetrics: []string{"price"},
+		TTL: 40 * time.Millisecond,
+	})
+	rec := database.DomainRecord{
+		Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "r1",
+		Data: database.RecordData{
+			{Name: "country", Value: database.StringValue("C_1")},
+			{Name: "price", Value: database.FloatValue(10)},
+		},
+	}
+	acc.ApplyRecord(rec, 1, OperationUpsert)
+
+	if got := acc.GetDimensionSummary(ScopeKey("signals", "ticks", "org_1"), "country", 10).DistinctCount; got != 1 {
+		t.Fatalf("distinct count before expiry = %d, want 1", got)
+	}
+
+	// Nothing is due yet.
+	if got := acc.EvictExpired(time.Now()); got != 0 {
+		t.Fatalf("EvictExpired before the TTL = %d, want 0", got)
+	}
+
+	time.Sleep(60 * time.Millisecond)
+	if got := acc.EvictExpired(time.Now()); got != 1 {
+		t.Fatalf("EvictExpired after the TTL = %d, want 1", got)
+	}
+	// The aggregate must be released with the state, not left over-counted.
+	after := acc.GetDimensionSummary(ScopeKey("signals", "ticks", "org_1"), "country", 10)
+	if after.DistinctCount != 0 || after.TotalCount != 0 {
+		t.Fatalf("summary after eviction = %+v, want empty", after)
+	}
+	if m := acc.GetMetricSummary(ScopeKey("signals", "ticks", "org_1"), "price"); m.Count != 0 {
+		t.Fatalf("metric after eviction = %+v, want empty", m)
+	}
+}
+
+// TestAccumulatorWithoutTTLDoesNotClaimToEvict keeps the honest case explicit:
+// with no TTL configured there is nothing to expire, so the sweep must report
+// zero rather than pretend to sweep.
+func TestAccumulatorWithoutTTLDoesNotClaimToEvict(t *testing.T) {
+	acc := NewAccumulatorStateStore(AccumulatorConfig{Dimensions: []string{"country"}})
+	acc.ApplyRecord(database.DomainRecord{
+		Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "r1",
+		Data: database.RecordData{{Name: "country", Value: database.StringValue("C_1")}},
+	}, 1, OperationUpsert)
+
+	if got := acc.EvictExpired(time.Now().Add(time.Hour)); got != 0 {
+		t.Fatalf("EvictExpired with no TTL = %d, want 0", got)
+	}
+	if got := acc.GetDimensionSummary(ScopeKey("signals", "ticks", "org_1"), "country", 10).DistinctCount; got != 1 {
+		t.Fatalf("distinct count = %d, want 1 (no TTL means no eviction)", got)
+	}
+}
+
+// TestAccumulatorScopeIsBounded pins the record bound. Per-record state is what
+// makes an update reversible, so an over-budget scope is dropped whole: a
+// partial trim would leave survivors unable to reverse a later write and would
+// silently double count them.
+func TestAccumulatorScopeIsBounded(t *testing.T) {
+	acc := NewAccumulatorStateStore(AccumulatorConfig{
+		Dimensions:         []string{"country"},
+		MaxRecordsPerScope: 10,
+	})
+	scope := ScopeKey("signals", "ticks", "org_1")
+	for i := range 10 {
+		acc.ApplyRecord(database.DomainRecord{
+			Domain: "signals", Collection: "ticks", OrganizationID: "org_1",
+			RecordID: "r" + strconv.Itoa(i),
+			Data:     database.RecordData{{Name: "country", Value: database.StringValue("C_" + strconv.Itoa(i))}},
+		}, uint64(i+1), OperationUpsert)
+	}
+	if got := acc.GetDimensionSummary(scope, "country", 100).DistinctCount; got != 10 {
+		t.Fatalf("distinct count at the bound = %d, want 10", got)
+	}
+
+	acc.ApplyRecord(database.DomainRecord{
+		Domain: "signals", Collection: "ticks", OrganizationID: "org_1", RecordID: "r10",
+		Data: database.RecordData{{Name: "country", Value: database.StringValue("C_10")}},
+	}, 11, OperationUpsert)
+
+	if got := acc.GetDimensionSummary(scope, "country", 100).DistinctCount; got != 0 {
+		t.Fatalf("distinct count past the bound = %d, want 0 (scope dropped, not partially trimmed)", got)
+	}
+	scopeAccumulatorValue, ok := acc.scopes.Load(scope)
+	if ok {
+		if len(scopeAccumulatorValue.(*scopeAccumulator).records) > 10 {
+			t.Fatalf("retained %d record states, want at most 10", len(scopeAccumulatorValue.(*scopeAccumulator).records))
+		}
+	}
+}
+
+// TestAccumulatorScopeBoundIsDefaulted guards the default against a bad edit.
+func TestAccumulatorScopeBoundIsDefaulted(t *testing.T) {
+	acc := NewAccumulatorStateStore(AccumulatorConfig{})
+	if acc.cfg.MaxRecordsPerScope != defaultAccumulatorMaxRecordsPerScope {
+		t.Fatalf("MaxRecordsPerScope = %d, want %d", acc.cfg.MaxRecordsPerScope, defaultAccumulatorMaxRecordsPerScope)
 	}
 }

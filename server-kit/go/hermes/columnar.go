@@ -6,6 +6,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
@@ -514,11 +515,17 @@ func buildFieldVector(field string, entries []*recordEntry, rows int) (Vector, e
 // The column type is determined from the first valid scalar entry; an empty
 // string column is produced when no entry carries the field.
 func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vector, error) {
+	// RecordData.Get trims the wanted name on every call, and this function calls
+	// it once per row per column. Resolve the trimmed name once and scan for it
+	// directly; hermes normalizes record field names on the write path, so the
+	// stored names carry no surrounding space.
+	want := strings.TrimSpace(field)
+
 	// Determine column type from the first valid entry.
 	var kind byte
 	found := false
 	for _, entry := range entries {
-		if val, ok := entry.record.Data.Get(field); ok {
+		if val, ok := lookupRecordField(entry.record.Data, want); ok {
 			k, _, ok := val.ScalarIndex()
 			if ok {
 				kind = k
@@ -538,7 +545,7 @@ func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vecto
 	case 'i', 'u':
 		iv := newInt64Vector(rows)
 		for i, entry := range entries {
-			if val, ok := entry.record.Data.Get(field); ok {
+			if val, ok := lookupRecordField(entry.record.Data, want); ok {
 				if k, idxVal, ok := val.ScalarIndex(); ok && (k == 'i' || k == 'u') {
 					parsed, err2 := strconv.ParseInt(idxVal, 10, 64)
 					if err2 != nil {
@@ -553,9 +560,9 @@ func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vecto
 	case 'f':
 		fv := newFloat64Vector(rows)
 		for i, entry := range entries {
-			if val, ok := entry.record.Data.Get(field); ok {
+			if val, ok := lookupRecordField(entry.record.Data, want); ok {
 				if k, idxVal, ok := val.ScalarIndex(); ok && k == 'f' {
-					parsed, err2 := strconv.ParseFloat(idxVal, 64)
+					parsed, err2 := parseColumnarFloat(idxVal)
 					if err2 != nil {
 						return nil, fmt.Errorf("hermes: failed to parse float field %q value %q: %w", field, idxVal, err2)
 					}
@@ -568,7 +575,7 @@ func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vecto
 	case 'b':
 		iv := newInt64Vector(rows)
 		for i, entry := range entries {
-			if val, ok := entry.record.Data.Get(field); ok {
+			if val, ok := lookupRecordField(entry.record.Data, want); ok {
 				if k, idxVal, ok := val.ScalarIndex(); ok && k == 'b' {
 					if idxVal == "1" {
 						iv.values[i] = 1
@@ -582,7 +589,7 @@ func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vecto
 		ss := make([]string, rows)
 		vv := make([]bool, rows)
 		for i, entry := range entries {
-			if val, ok := entry.record.Data.Get(field); ok {
+			if val, ok := lookupRecordField(entry.record.Data, want); ok {
 				if _, idxVal, ok := val.ScalarIndex(); ok {
 					ss[i] = idxVal
 					vv[i] = true
@@ -594,4 +601,85 @@ func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vecto
 		}
 		return newStringVectorFromSlice(ss, vv)
 	}
+}
+
+// lookupRecordField resolves an already-trimmed field name. RecordData.Get does
+// the same scan but re-trims the name on every call, which is wasted work in a
+// per-row column build.
+func lookupRecordField(data database.RecordData, trimmed string) (database.RecordValue, bool) {
+	for _, field := range data {
+		if field.Name == trimmed {
+			return field.Value, true
+		}
+	}
+	return database.RecordValue{}, false
+}
+
+// parseColumnarFloat parses the plain decimal form that float record values
+// carry. strconv.ParseFloat spends most of its time on setup that this shape
+// never needs: Inf/NaN detection, base detection, and error construction. The
+// fast path handles short fixed-point decimals exactly and defers everything
+// else, including exponents and non-finite values, to strconv.
+//
+// The accumulated value must be exact, so the loop stays in int64 and only
+// scales once at the end. Digits are bounded at 15 because a longer run would
+// overflow int64 and belongs on the strconv path anyway.
+func parseColumnarFloat(s string) (float64, error) {
+	if fast, ok := fastDecimalFloat(s); ok {
+		return fast, nil
+	}
+	return strconv.ParseFloat(s, 64)
+}
+
+func fastDecimalFloat(s string) (float64, bool) {
+	if len(s) == 0 || len(s) > 24 {
+		return 0, false
+	}
+	neg := false
+	i := 0
+	if s[0] == '+' || s[0] == '-' {
+		neg = s[0] == '-'
+		i++
+	}
+	var mantissa int64
+	digits := 0
+	for ; i < len(s) && s[i] >= '0' && s[i] <= '9'; i++ {
+		mantissa = mantissa*10 + int64(s[i]-'0')
+		digits++
+		if digits > 15 {
+			return 0, false
+		}
+	}
+	if digits == 0 {
+		return 0, false
+	}
+	scale := 0
+	if i < len(s) && s[i] == '.' {
+		i++
+		for ; i < len(s) && s[i] >= '0' && s[i] <= '9'; i++ {
+			mantissa = mantissa*10 + int64(s[i]-'0')
+			digits++
+			scale++
+			if digits > 15 {
+				return 0, false
+			}
+		}
+	}
+	// Reject trailing bytes: an exponent, a second dot, or trailing space. Those
+	// shapes go to strconv so the returned value matches ParseFloat exactly.
+	if i != len(s) {
+		return 0, false
+	}
+	out := float64(mantissa)
+	if scale > 0 {
+		div := float64(int64(1))
+		for range scale {
+			div *= 10
+		}
+		out /= div
+	}
+	if neg {
+		out = -out
+	}
+	return out, true
 }

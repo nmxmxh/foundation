@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -228,5 +229,177 @@ func BenchmarkHermesWarmFromSnapshotFormats(b *testing.B) {
 			}
 			b.ReportMetric(float64(len(lane.payload)), "artifact_bytes")
 		})
+	}
+}
+
+// hostileColumnarPrefix builds a syntactically valid columnar snapshot header
+// that declares one absurd element count and nothing else. Every prefix column
+// is empty, so the declared count is the only thing left to size an allocation
+// with. The payload stays a few dozen bytes long.
+func hostileColumnarPrefix(magic [4]byte, recordCount, fieldCount, vectorFlag uint32) []byte {
+	buf := append([]byte(nil), magic[:]...)
+	buf = appendU32(buf, recordCount)
+	for range 3 {
+		buf = appendU32(buf, 0) // dict count
+		buf = appendU32(buf, 0) // dict blob length
+	}
+	buf = appendU32(buf, 0) // record_id string count
+	buf = appendU32(buf, 0) // record_id blob length
+	buf = appendU32(buf, fieldCount)
+	return buf
+}
+
+// TestColumnarSnapshotRejectsOversizedDeclaredCounts guards the decode
+// allocation bombs. A declared count is attacker-influenced bytes, so a bare
+// u32 becomes an unbounded allocation request: fieldColumn is 88 bytes per
+// element, and a dict column entry is 16, so the same 45-byte artifact asks
+// for hundreds of gigabytes. Go answers that with an out-of-memory fatal error
+// that no recover can catch, so the decoder must reject the count instead.
+func TestColumnarSnapshotRejectsOversizedDeclaredCounts(t *testing.T) {
+	const maxUint32 = ^uint32(0)
+
+	cases := []struct {
+		name    string
+		payload []byte
+	}{
+		{
+			name: "field count",
+			payload: func() []byte {
+				buf := hostileColumnarPrefix(columnarSnapshotMagic, 0, maxUint32, 0)
+				return append(buf, 0)
+			}(),
+		},
+		{
+			name: "record count",
+			payload: func() []byte {
+				buf := hostileColumnarPrefix(columnarSnapshotMagic, maxUint32, 0, 0)
+				return append(buf, 0)
+			}(),
+		},
+		{
+			name: "vector dimension count",
+			payload: func() []byte {
+				buf := append([]byte(nil), fixedWidthVectorSnapshotMagic[:]...)
+				buf = appendU32(buf, 0) // no records
+				for range 3 {           // domain, collection, organization
+					buf = appendU32(buf, 0)
+					buf = appendU32(buf, 0)
+				}
+				buf = appendU32(buf, 0) // record_id string count
+				buf = appendU32(buf, 0) // record_id blob length
+				buf = append(buf, 1)    // vector present
+				buf = appendU32(buf, maxUint32)
+				buf = appendU32(buf, 0) // field count
+				return buf
+			}(),
+		},
+		{
+			name: "field count just past the payload",
+			payload: func() []byte {
+				buf := hostileColumnarPrefix(columnarSnapshotMagic, 0, 4096, 0)
+				return append(buf, 0)
+			}(),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The artifact is tiny; a regression that trusts the declared count
+			// dies here rather than in the assert below.
+			if len(tc.payload) > 128 {
+				t.Fatalf("hostile payload grew to %d bytes", len(tc.payload))
+			}
+			err := decodeColumnarSnapshot(tc.payload, func(database.DomainRecord) error { return nil })
+			if err == nil {
+				t.Fatal("decode accepted an oversized declared count, want ErrSnapshotCorrupt")
+			}
+			if !errors.Is(err, ErrSnapshotCorrupt) {
+				t.Fatalf("decode error = %v, want ErrSnapshotCorrupt", err)
+			}
+			// The rejection must come from the declared-count guard. A decoder
+			// that allocates first and fails later also returns
+			// ErrSnapshotCorrupt, and on an overcommitting host that allocation
+			// is only a virtual reservation, so the error alone does not prove
+			// the bomb is defused. Naming the guard does.
+			if !strings.Contains(err.Error(), "exceeds remaining") {
+				t.Fatalf("decode error = %v, want the declared-count guard", err)
+			}
+		})
+	}
+}
+
+// TestColumnarCursorDeclaredCountBounds checks the guard on its own, with no
+// allocation involved. It is the host-independent half of the regression guard:
+// the end-to-end cases above cannot prove the allocation never happened,
+// because make on a large length may reserve address space and return.
+func TestColumnarCursorDeclaredCountBounds(t *testing.T) {
+	t.Run("count within the remaining bytes passes", func(t *testing.T) {
+		c := &columnarCursor{buf: make([]byte, 16)}
+		if got := c.count(16, "record"); got != 16 || c.err != nil {
+			t.Fatalf("count(16) on 16 remaining bytes = %d, %v; want 16, nil", got, c.err)
+		}
+	})
+
+	for _, tc := range []struct {
+		name  string
+		n     int
+		width int
+		call  func(c *columnarCursor) int
+	}{
+		{name: "count above the remaining bytes", n: 17, call: func(c *columnarCursor) int { return c.count(17, "record") }},
+		{name: "negative count", n: -1, call: func(c *columnarCursor) int { return c.count(-1, "record") }},
+		{name: "width count above the remaining bytes", n: 5, call: func(c *columnarCursor) int { return c.widthCount(5, 4, "vector dimension") }},
+		{name: "zero width", n: 0, call: func(c *columnarCursor) int { return c.widthCount(4, 0, "vector dimension") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &columnarCursor{buf: make([]byte, 16)}
+			if got := tc.call(c); got != 0 {
+				t.Fatalf("guard returned %d, want 0", got)
+			}
+			if c.err == nil || !strings.Contains(c.err.Error(), "exceeds remaining") {
+				t.Fatalf("guard error = %v, want a count-range failure", c.err)
+			}
+		})
+	}
+
+	t.Run("a failed guard is sticky", func(t *testing.T) {
+		c := &columnarCursor{buf: make([]byte, 4)}
+		c.count(99, "record")
+		if got := c.count(1, "record"); got != 0 {
+			t.Fatalf("guard after failure returned %d, want 0", got)
+		}
+	})
+}
+
+// TestColumnarSnapshotDeclaredCountBoundsAreReachable pins the boundary itself:
+// a count the payload can actually hold must decode, so the guard rejects only
+// impossible artifacts and not a dense-but-valid one.
+func TestColumnarSnapshotDeclaredCountBoundsAreReachable(t *testing.T) {
+	records := make([]database.DomainRecord, 64)
+	base := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	for i := range records {
+		records[i] = database.DomainRecord{
+			Domain: "signals", Collection: "ticks", OrganizationID: "org_1",
+			RecordID:  fmt.Sprintf("tick_%03d", i),
+			Data:      database.RecordData{{Name: "bucket", Value: database.IntValue(int64(i))}},
+			CreatedAt: base, UpdatedAt: base,
+		}
+	}
+	payload, err := encodeColumnarSnapshot(records)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	seen := 0
+	if err := decodeColumnarSnapshot(payload, func(rec database.DomainRecord) error {
+		seen++
+		if rec.RecordID == "" {
+			t.Fatal("decoded record lost its id")
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("decode of a well-formed artifact failed: %v", err)
+	}
+	if seen != len(records) {
+		t.Fatalf("decoded %d records, want %d", seen, len(records))
 	}
 }
