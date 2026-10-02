@@ -2,6 +2,7 @@ package hermes
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -418,3 +419,207 @@ func TestScopeSignalDoesNotCoalesceDistinctScopes(t *testing.T) {
 	bus.release <- struct{}{}
 	waitFor(t, "both scopes to announce", func() bool { return signal.Stats().Announced == 2 })
 }
+
+type commandLog struct {
+	mu      sync.Mutex
+	batches [][]database.DomainRecord
+	ops     []Operation
+}
+
+func (c *commandLog) record(_ context.Context, records []database.DomainRecord, op Operation) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.batches = append(c.batches, records)
+	c.ops = append(c.ops, op)
+}
+
+func (c *commandLog) count() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.batches)
+}
+
+func newCommandStore(t *testing.T) (*ProjectedRuntimeStore, *commandLog) {
+	t.Helper()
+	log := &commandLog{}
+	store, err := WrapRuntimeStore(database.NewMemoryDB(), RuntimeStoreOptions{
+		MaxRecordsPerScope: 32, MaxBytesPerScope: 1 << 20,
+		OnCommandWrite: log.record,
+	})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	return store, log
+}
+
+func seatRecord(id string) database.DomainRecord {
+	return database.DomainRecord{
+		Domain: "communication", Collection: "presence", OrganizationID: "org_1", RecordID: id,
+		Data: testRecordData(map[string]any{"room_id": "r1"}),
+	}
+}
+
+// A command is the thing worth telling other processes about.
+
+func TestCommandWritesAreAnnounced(t *testing.T) {
+	store, log := newCommandStore(t)
+	ctx := t.Context()
+
+	if _, err := store.UpsertRecord(ctx, seatRecord("seat_1")); err != nil {
+		t.Fatalf("UpsertRecord() error = %v", err)
+	}
+	if _, err := store.UpsertRecords(ctx, []database.DomainRecord{seatRecord("seat_2"), seatRecord("seat_3")}); err != nil {
+		t.Fatalf("UpsertRecords() error = %v", err)
+	}
+	if err := store.DeleteRecordWithFields(ctx, seatRecord("seat_1")); err != nil {
+		t.Fatalf("DeleteRecordWithFields() error = %v", err)
+	}
+
+	if log.count() != 3 {
+		t.Fatalf("announced %d command writes, want 3", log.count())
+	}
+	if log.ops[0] != OperationUpsert || log.ops[2] != OperationDelete {
+		t.Fatalf("announced operations %v, want upsert then delete", log.ops)
+	}
+	if len(log.batches[1]) != 2 {
+		t.Fatalf("batch upsert announced %d records, want 2", len(log.batches[1]))
+	}
+}
+
+// The sweeper's writes are this process catching up with news somebody else
+// already announced. Re-announcing them turns a fan-out lane into an echo
+// chamber whose traffic grows with the square of the fleet, so this is the
+// invariant the whole convergence design rests on.
+
+func TestSweeperWritesAreNotAnnounced(t *testing.T) {
+	store, log := newCommandStore(t)
+	ctx := t.Context()
+	at := time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)
+
+	sweeper, err := NewMirrorSweeper(store, MirrorSweepOptions{BatchSize: 4})
+	if err != nil {
+		t.Fatalf("NewMirrorSweeper() error = %v", err)
+	}
+	served := false
+	if err := sweeper.AddSource("presence", func(_ context.Context, cursor time.Time, visit func(database.DomainRecord, time.Time) error) error {
+		if served || !at.After(cursor) {
+			return nil
+		}
+		served = true
+		for _, id := range []string{"seat_a", "seat_b"} {
+			if err := visit(seatRecord(id), at); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("AddSource() error = %v", err)
+	}
+	if err := sweeper.AddDeleteRecordSource("presence_tombstones", func(_ context.Context, cursor time.Time, visit func(database.DomainRecord, time.Time) error) error {
+		if !at.After(cursor) {
+			return nil
+		}
+		return visit(seatRecord("seat_gone"), at)
+	}); err != nil {
+		t.Fatalf("AddDeleteRecordSource() error = %v", err)
+	}
+
+	if _, err := sweeper.SweepOnce(ctx); err != nil {
+		t.Fatalf("SweepOnce() error = %v", err)
+	}
+	if _, err := sweeper.SweepSource(ctx, "presence"); err != nil {
+		t.Fatalf("SweepSource() error = %v", err)
+	}
+
+	if got := log.count(); got != 0 {
+		t.Fatalf("sweeper announced %d command writes, want 0 — convergence would echo", got)
+	}
+}
+
+// A store with no hook configured must behave exactly as before.
+
+func TestCommandWriteHookIsOptional(t *testing.T) {
+	store, err := WrapRuntimeStore(database.NewMemoryDB(),
+		RuntimeStoreOptions{MaxRecordsPerScope: 8, MaxBytesPerScope: 1 << 20})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	if _, err := store.UpsertRecord(t.Context(), seatRecord("seat_1")); err != nil {
+		t.Fatalf("UpsertRecord() error = %v", err)
+	}
+	if err := store.DeleteRecordWithFields(t.Context(), seatRecord("seat_1")); err != nil {
+		t.Fatalf("DeleteRecordWithFields() error = %v", err)
+	}
+}
+
+func TestScopeBackfillMakesWarmSelfSufficient(t *testing.T) {
+	base := database.NewMemoryDB()
+	ctx := t.Context()
+	backfills := 0
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{
+		MaxRecordsPerScope: 16,
+		MaxBytesPerScope:   1 << 20,
+		ScopeBackfill: func(_ context.Context, domain, collection, organizationID string, visit database.RecordVisitor) error {
+			backfills++
+			// Simulates the app-side enumerator reading its normalized tables.
+			for i := range 3 {
+				if err := visit(database.DomainRecord{
+					Domain: domain, Collection: collection, OrganizationID: organizationID,
+					RecordID: fmt.Sprintf("dish_%d", i),
+					Data:     testRecordData(map[string]any{"state": "published"}),
+				}); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+
+	// Mirror empty + backfiller configured: warm self-backfills.
+	if err := store.WarmScope(ctx, "menu", "dishes", "org_1"); err != nil {
+		t.Fatalf("WarmScope() error = %v", err)
+	}
+	if backfills != 1 {
+		t.Fatalf("backfills = %d, want 1", backfills)
+	}
+	// Rows landed durably in the mirror AND in the hot partition.
+	if _, found, err := base.GetRecord(ctx, "menu", "dishes", "org_1", "dish_0"); err != nil || !found {
+		t.Fatalf("mirror after backfill: found=%v err=%v", found, err)
+	}
+	name := store.ProjectionName("menu", "dishes", "org_1")
+	if count, _ := store.Store().Count(ctx, name, Query{OrganizationID: "org_1"}, Fence{}); count != 3 {
+		t.Fatalf("hot count = %d, want 3", count)
+	}
+
+	// A fresh process generation over the now-populated mirror must NOT
+	// re-trigger the backfill: the mirror is the rebuild source from here on.
+	gen2, err := WrapRuntimeStore(base, RuntimeStoreOptions{
+		MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20,
+		ScopeBackfill: func(context.Context, string, string, string, database.RecordVisitor) error {
+			backfills++
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("gen2 WrapRuntimeStore() error = %v", err)
+	}
+	if err := gen2.WarmScope(ctx, "menu", "dishes", "org_1"); err != nil {
+		t.Fatalf("gen2 WarmScope() error = %v", err)
+	}
+	if backfills != 1 {
+		t.Fatalf("backfills after gen2 = %d, want 1 (non-empty mirror must not re-backfill)", backfills)
+	}
+	name2 := gen2.ProjectionName("menu", "dishes", "org_1")
+	if count, _ := gen2.Store().Count(ctx, name2, Query{OrganizationID: "org_1"}, Fence{}); count != 3 {
+		t.Fatalf("gen2 hot count = %d, want 3", count)
+	}
+}
+
+// TestMirrorSweeperPushesChangedRows pins the one-place projection seam: a
+// sweep pulls rows changed after the cursor from each source, pushes them
+// through the projected store (durable mirror + hot partition + fan-out), and
+// advances the cursor so unchanged rows are never re-read. A failing source is
+// counted and retried without advancing; other sources keep sweeping.

@@ -3,10 +3,12 @@ package hermes
 import (
 	"context"
 	"fmt"
-	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 )
 
 func TestGetColumnarBatch(t *testing.T) {
@@ -580,5 +582,218 @@ func TestGetColumnarBatch_StrictParsingErrors(t *testing.T) {
 	_, err = store2.GetColumnarBatch(ctx, "signals2", Query{OrganizationID: "org_1"}, []string{"price"}, Fence{})
 	if err == nil {
 		t.Fatal("expected error parsing malformed float, got nil")
+	}
+}
+
+func BenchmarkHermesColumnarAssembly(b *testing.B) {
+	for _, rows := range []int{128, 10000} {
+		store := buildSelectFixtureStore(b, rows)
+		for _, mode := range []string{"full", "limit50", "predicate_limit50"} {
+			b.Run(fmt.Sprintf("rows%d/%s", rows, mode), func(b *testing.B) {
+				query := Query{OrganizationID: "org_1"}
+				if mode != "full" {
+					query.Limit = 50
+				}
+				fields := []string{"price", "bucket"}
+				predicates := []ColumnPredicate{PredicateFloat64("price", CompareGe, float64(rows)*1.125)}
+				b.ReportAllocs()
+				for b.Loop() {
+					var batch *RecordBatch
+					var err error
+					if mode == "predicate_limit50" {
+						batch, err = store.GetColumnarBatchWhere(context.Background(), "ticks", query, fields, predicates, Fence{})
+					} else {
+						batch, err = store.GetColumnarBatch(context.Background(), "ticks", query, fields, Fence{})
+					}
+					if err != nil || batch.Rows == 0 {
+						b.Fatalf("assembly failed: %v", err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestColumnarLimitUsesCanonicalOrder(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{Name: "ticks", Domain: "signals", Collection: "ticks", IndexedFields: []string{"group", "side"}})
+	base := time.Unix(1700000000, 0).UTC()
+	records := make([]database.DomainRecord, 8)
+	for i := range records {
+		records[i] = database.DomainRecord{
+			Domain: "signals", Collection: "ticks", OrganizationID: "org_1",
+			RecordID: fmt.Sprintf("tick_%d", i), UpdatedAt: base.Add(-time.Duration(i) * time.Minute),
+			Data: database.RecordDataFromPairs(database.RecordField{Name: "group", Value: database.StringValue("same")},
+				database.RecordField{Name: "side", Value: database.StringValue("same")}),
+		}
+	}
+	if _, err := store.BulkLoad(t.Context(), "ticks", records); err != nil {
+		t.Fatal(err)
+	}
+	full, err := store.GetColumnarBatch(t.Context(), "ticks", Query{OrganizationID: "org_1"}, []string{"record_id"}, Fence{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := full.Columns[0].Data.StringValues()[:3]
+	group, _ := NewQueryFilter("group", "same")
+	side, _ := NewQueryFilter("side", "same")
+	for _, query := range []Query{QueryWithFilters("org_1", 3), QueryWithFilters("org_1", 3, group), QueryWithFilters("org_1", 3, group, side)} {
+		limited, err := store.GetColumnarBatch(t.Context(), "ticks", query, []string{"record_id"}, Fence{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := limited.Columns[0].Data.StringValues(); !slices.Equal(got, want) {
+			t.Fatalf("limited order = %v, want %v", got, want)
+		}
+	}
+}
+
+func BenchmarkHermesColumnarUnorderedLimit50(b *testing.B) {
+	for _, rows := range []int{128, 10000} {
+		b.Run(fmt.Sprintf("rows%d", rows), func(b *testing.B) {
+			store := buildSelectFixtureStore(b, rows)
+			_, err := store.Apply(b.Context(), "ticks", Event{
+				Operation: OperationPatch, SourceID: "out-of-order", Version: uint64(rows + 1),
+				Record: database.DomainRecord{Domain: "signals", Collection: "ticks", OrganizationID: "org_1",
+					RecordID: "tick_000000", UpdatedAt: time.Unix(1, 0)},
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			part, err := store.partition("ticks")
+			if err != nil || !part.activeRegistry().columnarUnordered.Load() {
+				b.Fatal("fixture must invalidate the publication order proof")
+			}
+			query := Query{OrganizationID: "org_1", Limit: 50}
+			fields := []string{"price", "bucket"}
+			b.ReportAllocs()
+			for b.Loop() {
+				batch, err := store.GetColumnarBatch(b.Context(), "ticks", query, fields, Fence{})
+				if err != nil || batch.Rows != 50 {
+					b.Fatalf("bounded selection failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestNewQueryFilterValidation(t *testing.T) {
+	if _, ok := NewQueryFilter("symbol", "OVS"); !ok {
+		t.Fatal("string filter should be accepted")
+	}
+	if _, ok := NewQueryFilter("  ", "OVS"); ok {
+		t.Fatal("blank field must be rejected")
+	}
+	if _, ok := NewQueryFilter("x", []string{"not", "scalar"}); ok {
+		t.Fatal("non-scalar value must be rejected")
+	}
+}
+
+func TestQueryFilterValueRoundTrip(t *testing.T) {
+	cases := map[string]any{
+		"string": "OVS",
+		"int":    int64(-42),
+		"uint":   uint64(42),
+		"bool":   true,
+		"float":  3.5,
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			filter, ok := NewQueryFilter("field", in)
+			if !ok {
+				t.Fatalf("NewQueryFilter(%v) not ok", in)
+			}
+			got := queryFilterValue(filter)
+			want, ok := database.RecordValueFromAny(in)
+			if !ok {
+				t.Fatalf("RecordValueFromAny(%v) not ok", in)
+			}
+			gk, gv, _ := got.ScalarIndex()
+			wk, wv, _ := want.ScalarIndex()
+			if gk != wk || gv != wv {
+				t.Fatalf("round trip drift: got (%c,%q) want (%c,%q)", gk, gv, wk, wv)
+			}
+		})
+	}
+
+	for _, kind := range []byte{'i', 'u', 'f'} {
+		v := queryFilterValue(QueryFilter{Field: "f", Kind: kind, Value: "not-a-number"})
+		if v.Kind != database.RecordValueString {
+			t.Fatalf("malformed %c value = kind %v, want string fallback", kind, v.Kind)
+		}
+	}
+}
+
+func TestQueryWithFiltersPlanShape(t *testing.T) {
+	sym, _ := NewQueryFilter("symbol", "OVS")
+	region, _ := NewQueryFilter("region", "us")
+	blank := QueryFilter{Field: "  ", Kind: 's', Value: "x"}
+
+	if q := QueryWithFilters("org_1", 10); q.Plan.count != 0 {
+		t.Fatalf("zero filters -> count %d, want 0", q.Plan.count)
+	}
+	if q := QueryWithFilters("org_1", 10, sym); q.Plan.count != 1 || q.Plan.first.Field != "symbol" {
+		t.Fatalf("one filter plan = %+v", q.Plan)
+	}
+
+	q := QueryWithFilters("org_1", 10, sym, region, blank)
+	if q.Plan.count != 2 {
+		t.Fatalf("two valid filters (one blank dropped) -> count %d, want 2", q.Plan.count)
+	}
+	if q.Plan.filters[0].Field != "region" || q.Plan.filters[1].Field != "symbol" {
+		t.Fatalf("filters not sorted by field: %+v", q.Plan.filters)
+	}
+
+	rf := q.Plan.RecordFilters()
+	if len(rf) != 2 {
+		t.Fatalf("RecordFilters len = %d, want 2", len(rf))
+	}
+}
+
+func TestQueryFromRecordQuery(t *testing.T) {
+
+	single := database.RecordQuery{Limit: 5, Filters: []database.RecordFilter{
+		{Field: "symbol", Value: database.StringValue("OVS")},
+	}}
+	if q := QueryFromRecordQuery("org_1", single); q.Plan.count != 1 || q.Limit != 5 {
+		t.Fatalf("single = %+v", q)
+	}
+
+	blank := database.RecordQuery{Limit: 1, Filters: []database.RecordFilter{
+		{Field: "  ", Value: database.StringValue("x")},
+	}}
+	if q := QueryFromRecordQuery("org_1", blank); q.Plan.count != 0 {
+		t.Fatalf("blank single -> count %d, want 0", q.Plan.count)
+	}
+
+	many := database.RecordQuery{Limit: 9, Filters: []database.RecordFilter{
+		{Field: "symbol", Value: database.StringValue("OVS")},
+		{Field: "", Value: database.StringValue("skip")},
+		{Field: "region", Value: database.StringValue("us")},
+	}}
+	if q := QueryFromRecordQuery("org_1", many); q.Plan.count != 2 {
+		t.Fatalf("many -> count %d, want 2", q.Plan.count)
+	}
+}
+
+func TestRecordMatchesPlannedFilters(t *testing.T) {
+	spec := driftSpec()
+	rec := testRecord("signals", "ticks", "org_1", "tick_1", map[string]any{"symbol": "OVS"})
+
+	if !recordMatches(rec, spec, Query{OrganizationID: "org_1"}) {
+		t.Fatal("record should match its own tenant with no filters")
+	}
+
+	if recordMatches(rec, spec, Query{OrganizationID: "org_other"}) {
+		t.Fatal("record must not match a different tenant")
+	}
+
+	match := QueryWithFilters("org_1", 0, mustFilter(t, "symbol", "OVS"))
+	if !recordMatches(rec, spec, match) {
+		t.Fatal("record should match an equal planned filter")
+	}
+
+	noMatch := QueryWithFilters("org_1", 0, mustFilter(t, "symbol", "NOPE"))
+	if recordMatches(rec, spec, noMatch) {
+		t.Fatal("record must not match a differing planned filter")
 	}
 }

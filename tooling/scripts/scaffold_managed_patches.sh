@@ -1937,6 +1937,259 @@ patch_startup_dependencies_double_close_redis() {
   rm -f "$before" "$after"
 }
 
+# nginx_replace_once applies a substitution unless the replacement's distinctive
+# marker is already present.
+#
+# replace_in_file compares before and after, which does not make a substitution
+# idempotent: where the search string also occurs inside the replacement, perl
+# re-matches it on the next run and appends a second copy every time. Guarding on
+# a marker that only the replacement introduces is what makes repeated
+# foundation-update runs converge instead of growing the file.
+nginx_replace_once() {
+  local file="$1" marker="$2" search="$3" replace="$4" label="$5"
+
+  [[ -f "$file" ]] || return 0
+  grep -Fq -- "$marker" "$file" && return 0
+  replace_in_file "$file" "$search" "$replace" "$label"
+}
+
+# @since 0.0.1
+patch_wasm_speed_profile() {
+  local makefile="$target/Makefile"
+  [[ -f "$makefile" ]] || return 0
+
+  # The shipped default optimized the WASM artifact for size (-Oz). This module
+  # is the compute lane: it is fetched once and then executed on every frame, so
+  # runtime speed outranks a few kilobytes of transfer. A project that serves it
+  # from a warm cache and prefers size overrides WASM_OPT_FLAGS in
+  # Makefile.local, which is read before this assignment.
+  if grep -Fq 'WASM_OPT_FLAGS ?= -Oz' "$makefile"; then
+    PATCH_SEARCH='WASM_OPT_FLAGS ?= -Oz --enable-bulk-memory-opt --enable-nontrapping-float-to-int'
+    PATCH_REPLACE='# -O3, not -Oz. This artifact is the compute lane: it is downloaded once and
+# then executed on every frame, so runtime speed outranks a few kilobytes of
+# transfer. Override WASM_OPT_FLAGS in Makefile.local to prefer size.
+WASM_OPT_FLAGS ?= -O3 --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext'
+    replace_in_file "$makefile" "$PATCH_SEARCH" "$PATCH_REPLACE" "Makefile optimizes WASM for speed"
+  fi
+
+  # A missing wasm-opt used to fall through silently, so a build could ship an
+  # unoptimized artifact with no sign anything was wrong.
+  if ! grep -Fq 'shipping the unoptimized artifact' "$makefile"; then
+    PATCH_SEARCH='for wasm in "$(WASM_MODULE_DIR)"/*.wasm; do tmp="$$wasm.opt"; if "$(WASM_OPT)" $(WASM_OPT_FLAGS) -o "$$tmp" "$$wasm"; then mv "$$tmp" "$$wasm"; else rm -f "$$tmp"; echo "wasm-opt failed; keeping unoptimized $$wasm"; fi; done; fi;'
+    PATCH_REPLACE='for wasm in "$(WASM_MODULE_DIR)"/*.wasm; do tmp="$$wasm.opt"; if "$(WASM_OPT)" $(WASM_OPT_FLAGS) -o "$$tmp" "$$wasm"; then mv "$$tmp" "$$wasm"; else rm -f "$$tmp"; echo "wasm-opt failed; keeping unoptimized $$wasm" >&2; fi; done; else echo "wasm-opt not found; shipping the unoptimized artifact. Install binaryen for a tuned build." >&2; fi;'
+    replace_in_file "$makefile" "$PATCH_SEARCH" "$PATCH_REPLACE" "Makefile reports a missing wasm-opt"
+  fi
+}
+
+# @since 0.0.1
+patch_nginx_edge_transport() {
+  local global_conf="$target/config/nginx.conf"
+  local server_conf="$target/config/default.conf.template"
+  local start_sh="$target/start.sh"
+
+  # Upstream keepalive pool.
+  #
+  # nginx reuses an upstream socket only through an upstream block. The scaffold
+  # used a variable proxy_pass target, which bypasses the pool, and it set
+  # Connection from $connection_upgrade — which maps an empty Upgrade header to
+  # "close". Every non-upgrade API request therefore told the Go backend to close
+  # the connection, so each one paid a fresh TCP and TLS handshake.
+  #
+  # The block lives in the server template, not the global one, because only the
+  # server template is rendered by start.sh. Putting it in the global file would
+  # mean templating the global file too, which changes how the image is built.
+  if [[ -f "$server_conf" ]] && ! grep -Fq 'upstream foundation_backend' "$server_conf"; then
+    local upstream='upstream foundation_backend {
+    server ${UPSTREAM_HOST}:${UPSTREAM_PORT};
+    keepalive ${UPSTREAM_KEEPALIVE_CONNECTIONS};
+    keepalive_requests ${UPSTREAM_KEEPALIVE_REQUESTS};
+    keepalive_timeout ${UPSTREAM_KEEPALIVE_TIMEOUT};
+}'
+    insert_before_marker_or_append "$server_conf" 'server {' "$upstream" \
+      "nginx adds an upstream keepalive pool"
+  fi
+
+  # Connection header value for upgrade-capable locations. An empty value is
+  # what returns the socket to the pool; "close" is what defeats it.
+  if [[ -f "$global_conf" ]] && ! grep -Fq 'api_connection' "$global_conf"; then
+    local map_comment='    # Connection value for locations that may carry an upgrade. A plain'
+    local map_open='    map $http_upgrade $api_connection {'
+    local map_upgrade='        default upgrade;'
+    local map_empty="        '' '';"
+    local map_close='    }'
+
+    local anchor='    map $http_x_forwarded_proto $proxy_forwarded_proto {'
+    if grep -Fq "$anchor" "$global_conf"; then
+      local before
+      before="$(mktemp)"
+      cp "$global_conf" "$before"
+      {
+        printf '%s\n' "$map_comment"
+        printf '%s\n' '    # request needs an empty header, not "close": an empty value is what lets'
+        printf '%s\n' '    # nginx keep the upstream socket alive for the next request.'
+        printf '%s\n' "$map_open"
+        printf '%s\n' "$map_upgrade"
+        printf '%s\n' "$map_empty"
+        printf '%s\n' "$map_close"
+        printf '%s\n' ''
+      } >"$global_conf.api_map"
+      PATCH_ANCHOR="$anchor" PATCH_BLOCK="$(cat "$global_conf.api_map")" perl -0pi -e '
+        my $anchor = $ENV{PATCH_ANCHOR};
+        my $block = $ENV{PATCH_BLOCK};
+        $block =~ s/\n\z//;
+        s/\Q$anchor\E/$block\n\n$anchor/;
+      ' "$global_conf"
+      rm -f "$global_conf.api_map"
+      if ! cmp -s "$before" "$global_conf"; then
+        log_patch "nginx adds an empty-Connection map: ${global_conf#$target/}"
+      fi
+      rm -f "$before"
+    fi
+  fi
+
+  # Point /api/ at the pool, clear Connection there, and stream request bodies.
+  if [[ -f "$server_conf" ]]; then
+    # The pool is named by the upstream block, and a location only reaches a
+    # named pool through a variable that names it. Without this variable the
+    # /api/ proxy_pass below has nothing to resolve and nginx refuses to start.
+    if ! grep -Fq '$upstream_keepalive' "$server_conf"; then
+      replace_in_file "$server_conf" '    set $upstream_backend http://${UPSTREAM_HOST}:${UPSTREAM_PORT};' \
+'    set $upstream_backend http://${UPSTREAM_HOST}:${UPSTREAM_PORT};
+    # Names the keepalive pool above. A named pool is reachable only through a
+    # variable, so this is what lets a location reuse an upstream socket.
+    set $upstream_keepalive "http://${UPSTREAM_HOST}:${UPSTREAM_PORT}";' \
+        "nginx defines the keepalive pool variable"
+    fi
+
+    replace_in_file "$server_conf" 'location ^~ /api/ {
+        proxy_pass $upstream_backend;' \
+'location ^~ /api/ {
+        proxy_pass $upstream_keepalive;' \
+      "nginx /api/ uses the keepalive pool"
+
+    replace_in_file "$server_conf" \
+      'location ^~ /api/ {
+        proxy_pass $upstream_keepalive;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;' \
+'location ^~ /api/ {
+        proxy_pass $upstream_keepalive;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        # An empty Connection header is what returns the socket to the pool.
+        proxy_set_header Connection $api_connection;' \
+      "nginx /api/ clears Connection on plain requests"
+
+    replace_in_file "$server_conf" \
+'        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        limit_req zone=api_limit burst=60 nodelay;' \
+'        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        # Stream an upload to the backend instead of spooling it to disk first.
+        proxy_request_buffering off;
+        # Buffer proxied JSON, sized in the global config. Turn this off for any
+        # /api/ route that returns a streamed body.
+        proxy_buffering on;
+        limit_req zone=api_limit burst=60 nodelay;
+        limit_conn conn_limit 64;' \
+      "nginx /api/ streams request bodies and bounds buffering"
+  fi
+
+  if [[ -f "$global_conf" ]]; then
+    # Cap the disk spill for an oversized proxied response. Unset, nginx
+    # defaults to 1024m, so one large response can fill the volume.
+    #
+    # Each guard below is explicit because replace_in_file cannot detect a
+    # no-op: where the search string is a substring of the replacement, the
+    # substitution re-matches on the next run and appends another copy.
+    nginx_replace_once "$global_conf" 'proxy_max_temp_file_size' \
+      '    proxy_temp_path /var/cache/nginx/proxy_temp;' \
+'    proxy_temp_path /var/cache/nginx/proxy_temp;
+
+    proxy_buffer_size 16k;
+    proxy_buffers 16 16k;
+    proxy_busy_buffers_size 32k;
+    proxy_max_temp_file_size 256m;' \
+      "nginx bounds the proxy temp-file spill"
+
+    nginx_replace_once "$global_conf" 'client_body_buffer_size' \
+      '    keepalive_timeout 65;' \
+'    keepalive_timeout 65s;
+    # Bound a slow client that is still sending a body, and a stalled response.
+    client_header_timeout 15s;
+    client_body_timeout 300s;
+    send_timeout 300s;
+    reset_timedout_connection on;
+    # Cap the keep-alive budget so one client cannot hold a worker connection
+    # for an unbounded stretch.
+    keepalive_requests 1000;
+    keepalive_time 1000s;
+    # Keep the first part of a large upload in memory rather than spooling the
+    # whole body to disk.
+    client_body_buffer_size 256k;
+    large_client_header_buffers 4 16k;' \
+      "nginx adds large-body and keepalive budgets"
+
+    nginx_replace_once "$global_conf" 'limit_conn_zone' \
+      '    limit_req_status 429;' \
+'    limit_req_status 429;
+    # Rate limiting alone does not stop a client holding many slow connections.
+    limit_conn_zone $binary_remote_addr zone=conn_limit:10m;' \
+      "nginx adds a connection limit zone"
+
+    nginx_replace_once "$global_conf" 'gzip_min_length' \
+      '    gzip_comp_level 6;' \
+'    gzip_comp_level 6;
+    gzip_min_length 256;' \
+      "nginx sets gzip_min_length"
+
+    nginx_replace_once "$global_conf" 'brotli_min_length' \
+      '    brotli_comp_level 6;' \
+'    brotli_comp_level 6;
+    brotli_min_length 256;' \
+      "nginx sets brotli_min_length"
+
+    nginx_replace_once "$global_conf" 'gzip_disable' \
+      '    gzip_min_length 256;' \
+'    gzip_min_length 256;
+    gzip_disable "msie6";' \
+      "nginx skips gzip for a client that cannot decompress it"
+
+    nginx_replace_once "$global_conf" 'brotli_dynamic' \
+      '    brotli_min_length 256;' \
+'    brotli_min_length 256;
+    brotli_dynamic on;' \
+      "nginx enables brotli dynamic sizing"
+
+    # More connections per worker. worker_rlimit_nofile is 8192, so a worker can
+    # carry this many sockets plus the listener and upstream sockets.
+    replace_in_file "$global_conf" '    worker_connections 1024;' \
+'    worker_connections 4096;
+    multi_accept on;' \
+      "nginx raises worker connections"
+  fi
+
+  # Export the keepalive sizes and add them to the substitution list. Without
+  # this the rendered upstream block carries empty values.
+  if [[ -f "$start_sh" ]]; then
+    if ! grep -Fq 'UPSTREAM_KEEPALIVE_CONNECTIONS' "$start_sh"; then
+      replace_in_file "$start_sh" 'export NGINX_CONFIG=${NGINX_CONFIG:-/etc/nginx/nginx.conf}' \
+'export UPSTREAM_KEEPALIVE_CONNECTIONS=${UPSTREAM_KEEPALIVE_CONNECTIONS:-64}
+export UPSTREAM_KEEPALIVE_REQUESTS=${UPSTREAM_KEEPALIVE_REQUESTS:-1000}
+export UPSTREAM_KEEPALIVE_TIMEOUT=${UPSTREAM_KEEPALIVE_TIMEOUT:-60s}
+export NGINX_CONFIG=${NGINX_CONFIG:-/etc/nginx/nginx.conf}' \
+        "start.sh exports the upstream keepalive sizes"
+    fi
+
+    replace_in_file "$start_sh" \
+      "envsubst '\${UPSTREAM_HOST} \${UPSTREAM_PORT}'" \
+      "envsubst '\${UPSTREAM_HOST} \${UPSTREAM_PORT} \${UPSTREAM_KEEPALIVE_CONNECTIONS} \${UPSTREAM_KEEPALIVE_REQUESTS} \${UPSTREAM_KEEPALIVE_TIMEOUT}'" \
+      "start.sh substitutes the keepalive variables"
+  fi
+}
+
 # @since 0.0.1
 patch_remove_base_ui_dependency() {
   local file="$target/frontend/package.json"
@@ -3365,7 +3618,7 @@ if [[ "${2:-}" == "--only" ]]; then
   [[ ${#selected_patches[@]} -gt 0 && ${#selected_patches[@]} -le 32 ]] || exit 2
   for name in "${selected_patches[@]}"; do
     case "$name" in
-      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile) ;;
+      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile|nginx_edge_transport|wasm_speed_profile) ;;
       *) printf 'unsupported selected patch: %s\n' "$name" >&2; exit 2 ;;
     esac
   done
@@ -3428,6 +3681,8 @@ patch_frontend_prerender
 patch_native_shell
 patch_remove_base_ui_dependency
 patch_frontend_nginx_security_headers
+patch_nginx_edge_transport
+patch_wasm_speed_profile
 patch_env_example_hermes_warm_scopes
 patch_startup_projection_warming
 patch_startup_envelope_fallback

@@ -90,11 +90,51 @@ func BenchmarkHTTPMiddlewareDispatch(b *testing.B) {
 		wrapped := HTTPMiddleware(true, 1024, 4)(handler(http.StatusOK, payload))
 		req := httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
 		req.Header.Set("Accept-Encoding", "br")
+		// The recorder is reused: allocating one per iteration measured the
+		// recorder rather than the middleware.
+		rec := httptest.NewRecorder()
 		b.ReportAllocs()
 		for b.Loop() {
-			wrapped.ServeHTTP(httptest.NewRecorder(), req)
+			rec.Body.Reset()
+			wrapped.ServeHTTP(rec, req)
 		}
 	})
+}
+
+// BenchmarkMiddlewareReusesWriter records the allocation cost of the buffered
+// writer and the encoder on one compressed response. It is the guard behind the
+// encoder-pool requirement in CP-46.
+func BenchmarkMiddlewareReusesWriter(b *testing.B) {
+	payload := compressionFixture()[:16*1024]
+	handler := func(status int, body []byte) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			if len(body) > 0 {
+				_, _ = w.Write(body)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		ae   string
+	}{
+		{"brotli", "br"},
+		{"gzip", "gzip"},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			wrapped := HTTPMiddleware(true, 1024, 4)(handler(http.StatusOK, payload))
+			req := httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
+			req.Header.Set("Accept-Encoding", tc.ae)
+			rec := httptest.NewRecorder()
+			b.ReportAllocs()
+			for b.Loop() {
+				rec.Body.Reset()
+				wrapped.ServeHTTP(rec, req)
+			}
+		})
+	}
 }
 
 func TestCompressionRatio(t *testing.T) {

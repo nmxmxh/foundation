@@ -1,9 +1,11 @@
 package compress
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 )
@@ -27,23 +29,35 @@ func HTTPMiddleware(enabled bool, minBytes, level int) func(http.Handler) http.H
 				next.ServeHTTP(w, r)
 				return
 			}
-			if PreferredEncoding(r.Header.Get("Accept-Encoding")) == "" {
+			// Resolve the encoding once. PreferredEncoding allocates a map, and
+			// Compress would otherwise parse the same header again.
+			encoding := PreferredEncoding(r.Header.Get("Accept-Encoding"))
+			if encoding == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
 
 			capture := newBufferedResponseWriter()
+			capture.downstream = w
 			next.ServeHTTP(capture, r)
 
-			payload := capture.body.Bytes()
-			if len(payload) < minBytes || !isCompressibleContentType(capture.Header().Get("Content-Type")) || capture.Header().Get("Content-Encoding") != "" {
-				capture.flushTo(w)
+			// A handler that flushed already put its prefix on the wire, so the
+			// response is finished. Compressing it now would emit a second body.
+			if capture.passthrough {
 				return
 			}
 
-			compressed, usedEncoding, err := Compress(payload, r.Header.Get("Accept-Encoding"), level)
+			payload := capture.body.Bytes()
+			if len(payload) < minBytes || !isCompressibleContentType(capture.header.Get("Content-Type")) || capture.header.Get("Content-Encoding") != "" {
+				capture.flushTo(w)
+				capture.reset()
+				return
+			}
+
+			compressed, usedEncoding, err := CompressWithEncoding(payload, encoding, level)
 			if err != nil || usedEncoding == "" || usedEncoding == EncodingIdentity || len(compressed) >= len(payload) {
 				capture.flushTo(w)
+				capture.reset()
 				return
 			}
 
@@ -62,6 +76,7 @@ func HTTPMiddleware(enabled bool, minBytes, level int) func(http.Handler) http.H
 			}
 			w.WriteHeader(status)
 			_, _ = w.Write(compressed)
+			capture.reset()
 		})
 	}
 }
@@ -85,7 +100,7 @@ func HTTPRequestDecompressionMiddleware(enabled bool, maxDecodedBytes int64) fun
 				http.Error(w, "request body is required", http.StatusBadRequest)
 				return
 			}
-			payload, err := io.ReadAll(io.LimitReader(r.Body, maxDecodedBytes+1))
+			payload, err := readAllLimited(r.Body, maxDecodedBytes+1, r.ContentLength)
 			_ = r.Body.Close()
 			if err != nil {
 				http.Error(w, "invalid request body", http.StatusBadRequest)
@@ -106,6 +121,18 @@ func HTTPRequestDecompressionMiddleware(enabled bool, maxDecodedBytes int64) fun
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// readAllLimited reads at most limit bytes, sizing the buffer from the declared
+// content length when the client supplied one. The bound is the important part;
+// the sizing only removes the doubling churn that io.ReadAll pays on a body of
+// known length.
+func readAllLimited(body io.Reader, limit int64, contentLength int64) ([]byte, error) {
+	buf := make([]byte, 0, 512)
+	if contentLength > 0 && contentLength <= limit {
+		buf = make([]byte, 0, contentLength)
+	}
+	return readAllInto(buf, io.LimitReader(body, limit))
 }
 
 // writeDecodeError separates "too big" from "malformed": both are refusals,
@@ -173,40 +200,134 @@ func joinVary(existing, value string) string {
 	return existing + ", " + value
 }
 
+// bufferedResponseWriter captures a response so it can be compressed as one
+// unit. It stays transparent to the optional interfaces of the writer it wraps:
+// a handler that flushes, hijacks, or writes through io.ReaderFrom must keep
+// working, and a handler that flushes has opted out of buffering.
+//
+// A flush mid-response switches the writer into pass-through mode. The buffered
+// prefix is emitted, and later writes go straight to the downstream writer
+// without compression, because the head is already on the wire. This keeps
+// time-to-first-byte honest for streamed responses.
 type bufferedResponseWriter struct {
 	header http.Header
 	body   bytes.Buffer
 	status int
+	// downstream is set once the response is in pass-through mode.
+	downstream http.ResponseWriter
+	// passthrough reports that the buffered prefix has already been emitted.
+	passthrough bool
 }
 
 func newBufferedResponseWriter() *bufferedResponseWriter {
 	return &bufferedResponseWriter{
-		header: make(http.Header),
+		header: make(http.Header, 8),
 	}
 }
 
 func (b *bufferedResponseWriter) Header() http.Header {
+	if b.passthrough {
+		return b.downstream.Header()
+	}
 	return b.header
 }
 
 func (b *bufferedResponseWriter) Write(data []byte) (int, error) {
+	if b.passthrough {
+		return b.downstream.Write(data)
+	}
 	return b.body.Write(data)
 }
 
+// ReadFrom forwards large copies to the downstream writer when the response has
+// left buffering, which lets net/http use sendfile-style paths.
+func (b *bufferedResponseWriter) ReadFrom(src io.Reader) (int64, error) {
+	if !b.passthrough {
+		// Buffer first so the response stays compressible as one unit.
+		return b.body.ReadFrom(src)
+	}
+	if rf, ok := b.downstream.(io.ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+	return io.Copy(b.downstream, src)
+}
+
 func (b *bufferedResponseWriter) WriteHeader(statusCode int) {
-	b.status = statusCode
+	if b.passthrough {
+		b.downstream.WriteHeader(statusCode)
+		return
+	}
+	if b.status == 0 {
+		b.status = statusCode
+	}
+}
+
+// Flush emits the buffered prefix and switches to pass-through mode. A handler
+// that calls Flush wants bytes on the wire now, so buffering stops.
+func (b *bufferedResponseWriter) Flush() {
+	if b.passthrough {
+		if flusher, ok := b.downstream.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		return
+	}
+	b.flushTo(b.downstream)
+	b.passthrough = true
+	b.body.Reset()
+}
+
+// Hijack passes a protocol upgrade through to the downstream writer. Without it
+// a handler that upgrades after the first write would fail with a 500.
+func (b *bufferedResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := b.downstream.(http.Hijacker)
+	if !ok {
+		return nil, nil, errNotHijackable
+	}
+	if !b.passthrough {
+		b.flushTo(b.downstream)
+		b.passthrough = true
+	}
+	return hijacker.Hijack()
+}
+
+// Unwrap exposes the downstream writer to middleware that needs the original.
+func (b *bufferedResponseWriter) Unwrap() http.ResponseWriter {
+	return b.downstream
+}
+
+var errNotHijackable = errors.New("compress: underlying ResponseWriter is not an http.Hijacker")
+
+// reset returns the capture buffers to the pool and must run after the buffered
+// body has been written out.
+func (b *bufferedResponseWriter) reset() {
+	b.header = nil
+	b.body.Reset()
+	b.status = 0
+	b.downstream = nil
+	b.passthrough = false
 }
 
 func (b *bufferedResponseWriter) flushTo(w http.ResponseWriter) {
+	if b.status == 0 {
+		b.status = http.StatusOK
+	}
+	// Assign the whole header map in one step instead of copying key by key.
+	dst := w.Header()
+	for key := range dst {
+		dst.Del(key)
+	}
 	for key, values := range b.header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
+		dst[key] = values
 	}
-	status := b.status
-	if status == 0 {
-		status = http.StatusOK
+	w.WriteHeader(b.status)
+	if b.body.Len() > 0 {
+		_, _ = w.Write(b.body.Bytes())
 	}
-	w.WriteHeader(status)
-	_, _ = w.Write(b.body.Bytes())
 }
+
+var (
+	_ http.ResponseWriter = (*bufferedResponseWriter)(nil)
+	_ http.Flusher        = (*bufferedResponseWriter)(nil)
+	_ http.Hijacker       = (*bufferedResponseWriter)(nil)
+	_ io.ReaderFrom       = (*bufferedResponseWriter)(nil)
+)

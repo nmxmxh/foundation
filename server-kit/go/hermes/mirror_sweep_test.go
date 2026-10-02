@@ -2,6 +2,7 @@ package hermes
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -303,5 +304,267 @@ func TestRegisteringADuplicateSourceNameFails(t *testing.T) {
 			return nil
 		}); err == nil {
 		t.Fatal("AddDeleteSource() reused a registered name without error")
+	}
+}
+
+// TestMirrorSweeperDeleteRecordSourceCarriesAudienceFields pins the addressed
+// delete lane end to end through the sweeper: a DeletedRecordsSince source
+// streams the deleted row's audience-bearing fields, the sweep projects the
+// delete carrying them, and the observer — which is what the projection gateway
+// subscribes to — sees a delete it can address. An identity-only DeleteSince
+// source is unchanged and yields a delete with no fields, which is exactly the
+// difference the two registration methods exist to express.
+
+func TestMirrorSweeperDeleteRecordSourceCarriesAudienceFields(t *testing.T) {
+	base := database.NewMemoryDB()
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	ctx := t.Context()
+
+	seed := func(recordID string) database.DomainRecord {
+		return database.DomainRecord{
+			Domain: "marketplace", Collection: "orders", OrganizationID: "org_1", RecordID: recordID,
+			Data: testRecordData(map[string]any{"customer_id": "cust_alice"}),
+		}
+	}
+	for _, id := range []string{"order_addressed", "order_anonymous"} {
+		if _, upsertErr := store.UpsertRecord(ctx, seed(id)); upsertErr != nil {
+			t.Fatalf("UpsertRecord(%s) error = %v", id, upsertErr)
+		}
+	}
+
+	var deletes []AppliedMutation
+	cancel := store.Store().Observe(func(_ string, mutations []AppliedMutation) {
+		for _, mutation := range mutations {
+			if mutation.Operation == OperationDelete {
+				deletes = append(deletes, mutation)
+			}
+		}
+	})
+	defer cancel()
+
+	deletedAt := time.Date(2026, 9, 8, 10, 0, 0, 0, time.UTC)
+	addressed, anonymous := tombstoneSources(deletedAt)
+
+	sweeper, err := NewMirrorSweeper(store, MirrorSweepOptions{BatchSize: 4})
+	if err != nil {
+		t.Fatalf("NewMirrorSweeper() error = %v", err)
+	}
+	if err := sweeper.AddDeleteRecordSource("orders_tombstones", addressed); err != nil {
+		t.Fatalf("AddDeleteRecordSource() error = %v", err)
+	}
+	if err := sweeper.AddDeleteSource("orders_legacy_tombstones", anonymous); err != nil {
+		t.Fatalf("AddDeleteSource() error = %v", err)
+	}
+
+	if n, err := sweeper.SweepOnce(ctx); err != nil || n != 2 {
+		t.Fatalf("SweepOnce() = %d err=%v, want 2", n, err)
+	}
+	// The cursor advances for both source kinds, so a swept deletion is not
+	// re-applied on the next pass.
+	if n, err := sweeper.SweepOnce(ctx); err != nil || n != 0 {
+		t.Fatalf("idle SweepOnce() = %d err=%v, want 0", n, err)
+	}
+
+	assertDeleteAudience(t, deletes)
+
+	// Both rows are gone from the durable mirror regardless of addressing.
+	for _, id := range []string{"order_addressed", "order_anonymous"} {
+		if _, found, getErr := base.GetRecord(ctx, "marketplace", "orders", "org_1", id); getErr != nil || found {
+			t.Fatalf("mirror still holds %s: found=%v err=%v", id, found, getErr)
+		}
+	}
+}
+
+// assertDeleteAudience requires that the record-bearing source produced a
+// tombstone carrying the audience field, and the identity-only source one
+// carrying nothing — the whole difference between the two registrations.
+
+func assertDeleteAudience(t *testing.T, deletes []AppliedMutation) {
+	t.Helper()
+	byRecord := map[string]database.RecordData{}
+	for _, mutation := range deletes {
+		byRecord[mutation.Record.RecordID] = mutation.Record.Data
+	}
+	if len(byRecord) != 2 {
+		t.Fatalf("observed deletes for %v, want both records", byRecord)
+	}
+	addressed, ok := byRecord["order_addressed"]
+	if !ok {
+		t.Fatal("no delete observed for order_addressed")
+	}
+	value, found := addressed.Get("customer_id")
+	if !found || !value.Equal(database.StringValue("cust_alice")) {
+		t.Fatalf("addressed delete carried %v, want customer_id=cust_alice", addressed)
+	}
+	if anonymous := byRecord["order_anonymous"]; len(anonymous) != 0 {
+		t.Fatalf("identity-only delete carried %v, want no fields", anonymous)
+	}
+}
+
+// tombstoneSources returns one delete source of each kind over the same
+// deletion instant: the record-bearing one carries the audience field, the
+// identity-only one cannot.
+
+func tombstoneSources(deletedAt time.Time) (DeletedRecordsSince, DeletedSince) {
+	addressed := func(_ context.Context, cursor time.Time, visit func(database.DomainRecord, time.Time) error) error {
+		if !deletedAt.After(cursor) {
+			return nil
+		}
+		// The tombstone carries only the audience field, not a copy of the row.
+		return visit(database.DomainRecord{
+			Domain: "marketplace", Collection: "orders", OrganizationID: "org_1", RecordID: "order_addressed",
+			Data: testRecordData(map[string]any{"customer_id": "cust_alice"}),
+		}, deletedAt)
+	}
+	anonymous := func(_ context.Context, cursor time.Time, visit func(string, string, string, string, time.Time) error) error {
+		if !deletedAt.After(cursor) {
+			return nil
+		}
+		return visit("marketplace", "orders", "org_1", "order_anonymous", deletedAt)
+	}
+	return addressed, anonymous
+}
+
+func TestMirrorSweeperPushesChangedRows(t *testing.T) {
+	base := database.NewMemoryDB()
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	ctx := t.Context()
+
+	// A fake source table: rows with updated_at, served incrementally.
+	type row struct {
+		id string
+		at time.Time
+	}
+	t0 := time.Date(2026, 7, 11, 10, 0, 0, 0, time.UTC)
+	rows := []row{{"dish_1", t0}, {"dish_2", t0.Add(time.Second)}}
+	polls := 0
+	source := func(_ context.Context, cursor time.Time, visit func(database.DomainRecord, time.Time) error) error {
+		polls++
+		for _, r := range rows {
+			if !r.at.After(cursor) {
+				continue
+			}
+			if err := visit(database.DomainRecord{
+				Domain: "menu", Collection: "dishes", OrganizationID: "org_1", RecordID: r.id,
+				Data: testRecordData(map[string]any{"state": "published"}),
+			}, r.at); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	failing := func(context.Context, time.Time, func(database.DomainRecord, time.Time) error) error {
+		return errors.New("source down")
+	}
+
+	sweeper, err := NewMirrorSweeper(store, MirrorSweepOptions{BatchSize: 1})
+	if err != nil {
+		t.Fatalf("NewMirrorSweeper() error = %v", err)
+	}
+	if err := sweeper.AddSource("menu_dishes", source); err != nil {
+		t.Fatalf("AddSource() error = %v", err)
+	}
+	if err := sweeper.AddSource("broken", failing); err != nil {
+		t.Fatalf("AddSource(broken) error = %v", err)
+	}
+
+	// First sweep from zero cursor = full sync.
+	n, err := sweeper.SweepOnce(ctx)
+	if err != nil || n != 2 {
+		t.Fatalf("SweepOnce() = %d err=%v, want 2", n, err)
+	}
+	if _, found, err := base.GetRecord(ctx, "menu", "dishes", "org_1", "dish_2"); err != nil || !found {
+		t.Fatalf("mirror after sweep: found=%v err=%v", found, err)
+	}
+	name := store.ProjectionName("menu", "dishes", "org_1")
+	if count, _ := store.Store().Count(ctx, name, Query{OrganizationID: "org_1"}, Fence{}); count != 2 {
+		t.Fatalf("hot count = %d, want 2", count)
+	}
+
+	// Second sweep: cursor advanced, nothing re-read.
+	if n, _ := sweeper.SweepOnce(ctx); n != 0 {
+		t.Fatalf("idle sweep swept %d, want 0", n)
+	}
+
+	// A change after the cursor is picked up.
+	rows = append(rows, row{"dish_3", t0.Add(2 * time.Second)})
+	if n, _ := sweeper.SweepOnce(ctx); n != 1 {
+		t.Fatalf("incremental sweep swept %d, want 1", n)
+	}
+
+	stats := sweeper.Stats()
+	if stats.Swept != 3 || stats.Errors != 3 {
+		t.Fatalf("stats = %+v, want Swept=3 Errors=3 (one failing source per pass)", stats)
+	}
+}
+
+// TestMirrorSweeperConvergesHardDeletes pins the delete lane: identities
+// announced by a tombstone source are removed from the mirror and the hot
+// partition (with live fan-out via the store observer), the cursor advances,
+// and replays are safe because DeleteRecord is idempotent.
+
+func TestMirrorSweeperConvergesHardDeletes(t *testing.T) {
+	base := database.NewMemoryDB()
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{MaxRecordsPerScope: 16, MaxBytesPerScope: 1 << 20})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	ctx := t.Context()
+	for _, id := range []string{"dish_1", "dish_2"} {
+		if _, err := store.UpsertRecord(ctx, database.DomainRecord{
+			Domain: "menu", Collection: "dishes", OrganizationID: "org_1", RecordID: id,
+			Data: testRecordData(map[string]any{"state": "published"}),
+		}); err != nil {
+			t.Fatalf("seed %s error = %v", id, err)
+		}
+	}
+
+	t0 := time.Date(2026, 7, 11, 12, 0, 0, 0, time.UTC)
+	type tomb struct {
+		id string
+		at time.Time
+	}
+	tombs := []tomb{}
+	source := func(_ context.Context, cursor time.Time, visit func(string, string, string, string, time.Time) error) error {
+		for _, tb := range tombs {
+			if !tb.at.After(cursor) {
+				continue
+			}
+			if err := visit("menu", "dishes", "org_1", tb.id, tb.at); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	sweeper, err := NewMirrorSweeper(store, MirrorSweepOptions{})
+	if err != nil {
+		t.Fatalf("NewMirrorSweeper() error = %v", err)
+	}
+	if err := sweeper.AddDeleteSource("tombstones", source); err != nil {
+		t.Fatalf("AddDeleteSource() error = %v", err)
+	}
+
+	// Hard delete announced by tombstone: swept away from mirror + hot.
+	tombs = append(tombs, tomb{"dish_1", t0})
+	if n, err := sweeper.SweepOnce(ctx); err != nil || n != 1 {
+		t.Fatalf("SweepOnce() = %d err=%v, want 1", n, err)
+	}
+	if _, found, _ := base.GetRecord(ctx, "menu", "dishes", "org_1", "dish_1"); found {
+		t.Fatal("mirror row survived delete sweep")
+	}
+	name := store.ProjectionName("menu", "dishes", "org_1")
+	if count, _ := store.Store().Count(ctx, name, Query{OrganizationID: "org_1"}, Fence{}); count != 1 {
+		t.Fatalf("hot count = %d, want 1 (dish_2 only)", count)
+	}
+
+	// Cursor advanced: the same tombstone is not re-swept.
+	if n, _ := sweeper.SweepOnce(ctx); n != 0 {
+		t.Fatalf("idle delete sweep swept %d, want 0", n)
 	}
 }

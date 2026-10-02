@@ -2,10 +2,12 @@ package hermes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 
+	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	redispkg "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 )
@@ -310,3 +312,127 @@ func intFromAny(value any) int {
 		return 0
 	}
 }
+
+func TestTailerQuarantinesPoisonMessage(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name:       "quarantine_ticks",
+		Domain:     "signals",
+		Collection: "ticks",
+		MaxRecords: 10,
+		MaxBytes:   1 << 20,
+	})
+	client := redispkg.NewMemoryClient("test")
+	ctx := t.Context()
+	for i := range 2 {
+		if _, err := client.XAdd(ctx, "hermes:poison", redispkg.Values{
+			redispkg.Field("organization_id", "org_1"),
+			redispkg.Field("record_id", fmt.Sprintf("tick_%d", i)),
+			redispkg.Field("version", i+1),
+		}); err != nil {
+			t.Fatalf("XAdd() error = %v", err)
+		}
+	}
+	source, err := NewRedisStreamSource(client, "hermes:poison", "hermes", "node_1")
+	if err != nil {
+		t.Fatalf("NewRedisStreamSource() error = %v", err)
+	}
+	decode := func(_ context.Context, message SourceMessage) ([]Event, error) {
+		rawID, _ := message.Values.Get("record_id")
+		recordID, _ := rawID.(string)
+		if recordID == "tick_0" {
+			return nil, errors.New("poison payload")
+		}
+		rawVersion, _ := message.Values.Get("version")
+		return []Event{{
+			Operation: OperationUpsert,
+			Version:   uint64(intFromAny(rawVersion)),
+			Record:    testRecord("signals", "ticks", "org_1", recordID, nil),
+		}}, nil
+	}
+	tailer, err := NewTailer(store, "quarantine_ticks", source, decode, TailerOptions{MaxBatch: 8})
+	if err != nil {
+		t.Fatalf("NewTailer() error = %v", err)
+	}
+
+	result, err := tailer.PollOnce(ctx)
+	if err != nil {
+		t.Fatalf("PollOnce() error = %v (poison must not fail the poll)", err)
+	}
+	if result.Read != 2 || result.Quarantined != 1 || result.Decoded != 1 || result.Acked != 2 || result.Apply.Applied != 1 {
+		t.Fatalf("PollOnce() result = %+v, want Read=2 Quarantined=1 Decoded=1 Acked=2 Applied=1", result)
+	}
+	// The poison message was acked: nothing redelivers.
+	result, err = tailer.PollOnce(ctx)
+	if err != nil || result.Read != 0 {
+		t.Fatalf("second PollOnce() result=%+v err=%v, want no redelivery", result, err)
+	}
+}
+
+// TestUpsertRecordsBatchGroupsScopesAndStaysCoherent pins the batch write
+// path: UpsertRecords lands every record in the base store and the hot
+// partitions (grouped per scope), fans accepted mutations out to observers,
+// and allocates versions from the same counter as single-record upserts so a
+// later UpsertRecord still wins LWW over the batch. MemoryDB has no batch
+// capability, so this also covers the per-record fallback lane.
+
+func TestEnvelopeTailerQuarantinesPoisonEnvelope(t *testing.T) {
+	store := newTestStore(t, ProjectionSpec{
+		Name:       "quarantine_stream",
+		Domain:     "signals",
+		Collection: "ticks",
+		MaxRecords: 10,
+		MaxBytes:   1 << 20,
+	})
+	ctx := t.Context()
+	client := redispkg.NewMemoryClient("test")
+	// poison 1: envelope field missing entirely
+	if _, err := client.XAdd(ctx, "hermes:qstream", redispkg.Values{redispkg.Field("other", "x")}); err != nil {
+		t.Fatalf("XAdd() error = %v", err)
+	}
+	// poison 2: envelope field holds garbage bytes
+	if _, err := client.XAdd(ctx, "hermes:qstream", redispkg.Values{redispkg.Field("envelope", []byte("not an envelope"))}); err != nil {
+		t.Fatalf("XAdd() error = %v", err)
+	}
+	// healthy canonical projection envelope
+	envelope, err := NewProjectionEnvelope([]*foundationpb.RecordMutation{
+		MutationFromRecord(testRecord("signals", "ticks", "org_1", "tick_ok", nil), OperationUpsert, 3),
+	}, "corr_q")
+	if err != nil {
+		t.Fatalf("NewProjectionEnvelope() error = %v", err)
+	}
+	raw, err := envelope.ToBinary()
+	if err != nil {
+		t.Fatalf("ToBinary() error = %v", err)
+	}
+	if _, err := client.XAdd(ctx, "hermes:qstream", redispkg.Values{redispkg.Field("envelope", raw)}); err != nil {
+		t.Fatalf("XAdd() error = %v", err)
+	}
+
+	source, err := NewRedisStreamEnvelopeSource(client, "hermes:qstream", "hermes", "node_1", "")
+	if err != nil {
+		t.Fatalf("NewRedisStreamEnvelopeSource() error = %v", err)
+	}
+	tailer, err := NewEnvelopeTailer(store, "quarantine_stream", source, TailerOptions{MaxBatch: 8})
+	if err != nil {
+		t.Fatalf("NewEnvelopeTailer() error = %v", err)
+	}
+
+	result, err := tailer.PollOnce(ctx)
+	if err != nil {
+		t.Fatalf("PollOnce() error = %v (poison must not fail the poll)", err)
+	}
+	if result.Read != 3 || result.Quarantined != 2 || result.Decoded != 1 || result.Acked != 3 || result.Apply.Applied != 1 {
+		t.Fatalf("PollOnce() result = %+v, want Read=3 Quarantined=2 Decoded=1 Acked=3 Applied=1", result)
+	}
+	// Poison messages were acked: nothing redelivers.
+	result, err = tailer.PollOnce(ctx)
+	if err != nil || result.Read != 0 {
+		t.Fatalf("second PollOnce() result=%+v err=%v, want no redelivery", result, err)
+	}
+}
+
+// TestRecordWorkerProcessorUpsertsThroughProjectedStore pins the canonical
+// projection path: the processor writes through ProjectedRuntimeStore, so one
+// job buys the durable record-store row (cold-start rebuildable) AND the hot
+// partition apply — unlike WorkerProcessor, which applies to the in-memory
+// store only and leaves nothing to rebuild from after a restart.

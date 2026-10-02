@@ -123,6 +123,25 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 1. Preallocate slices and maps when the expected size is known.
 2. Use `strings.Builder`, `bytes.Buffer`, or append-style byte builders for repeated accumulation.
 3. Reuse temporary buffers with `sync.Pool` only for stateless, recreatable, high-churn objects. Always reset before reuse.
+
+   Two rules follow from "stateless" and "always reset".
+
+   - Detach the sink before returning the object to the pool. A writer left
+     pointing at a finished request body keeps that body reachable from the pool.
+     Reset to `io.Discard` on release and to the new destination on acquire.
+   - Normalize a pool key once and reuse that one value for both the acquire and
+     the release. A codec cannot change level after construction, so a writer
+     belongs to exactly one level. Normalizing separately at the two sites is
+     correct only while both normalizers happen to agree.
+
+3a. Do not assert an allocation ceiling under `-race`. The race detector drains
+    `sync.Pool` per-P caches and instruments every allocation, so a pooled object
+    that costs about 1.5 KB per call in a production build measures around 210 KB
+    per call under the detector. That difference is a property of the detector,
+    not a regression in the pool, and a budget asserted in both modes will fail
+    for the wrong reason. Gate the budget on a build-tagged constant, and keep
+    the interface and correctness tests running in both modes.
+
 4. Copy small retained subslices out of large buffers so long-lived records do not keep large backing arrays alive.
 5. Keep hot communication payloads as bytes until the owning handler validates and decodes them. Avoid `map[string]any` materialization in routing, observability, and registry dispatch.
 6. Treat JSON encode/decode as a compatibility boundary cost. Product hot paths should use generated protobuf, Cap'n Proto, typed structs, borrowed binary frame views, raw JSON bytes where preservation is required, or shared-memory descriptors.

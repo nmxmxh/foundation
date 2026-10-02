@@ -3,6 +3,8 @@ package cache
 import (
 	"context"
 	"errors"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -170,3 +172,79 @@ type patternFailingBackend struct {
 func (p *patternFailingBackend) DeletePattern(context.Context, string) ([]string, error) {
 	return nil, errStub
 }
+
+func TestInvalidationBus_BroadcastRejectsOversizedTagList(t *testing.T) {
+	client := rediskit.NewMemoryClient("bustest")
+	backend := NewMemoryBackend()
+	t.Cleanup(func() { _ = backend.Close() })
+	bus := NewInvalidationBus(client, "", New(Config{Backend: backend}))
+
+	tags := make([]string, 0, maxBroadcastTags+1)
+	for index := range maxBroadcastTags + 1 {
+		tags = append(tags, "tag-"+strconv.Itoa(index))
+	}
+	if err := bus.BroadcastTag(context.Background(), tags...); err == nil {
+		t.Fatalf("BroadcastTag(%d tags) err=nil, want a bound error", len(tags))
+	}
+	// The bound is on the trimmed list, so exactly the maximum is accepted.
+	if err := bus.BroadcastTag(context.Background(), tags[:maxBroadcastTags]...); err != nil {
+		t.Fatalf("BroadcastTag(%d tags) err=%v", maxBroadcastTags, err)
+	}
+}
+
+// stopWatchingClient counts calls to a subscription's stop func. Close calls it
+// once; the listener goroutine's own deferred call is the second, which makes
+// "the goroutine has returned" an observable event instead of a sleep.
+
+func TestInvalidationBus_ListenIsExclusiveAndClosable(t *testing.T) {
+	client := &stopWatchingClient{Client: rediskit.NewMemoryClient("bustest"), exited: make(chan struct{})}
+	backend := NewMemoryBackend()
+	t.Cleanup(func() { _ = backend.Close() })
+	bus := NewInvalidationBus(client, "", New(Config{Backend: backend}))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := bus.Listen(ctx); err != nil {
+		t.Fatalf("Listen() err=%v", err)
+	}
+	if err := bus.Listen(ctx); err == nil {
+		t.Fatal("second Listen() err=nil, want an already-listening error")
+	}
+
+	bus.Close()
+	bus.Close() // idempotent
+	// Close shuts the subscription channel; the listener observes that and
+	// returns. Waiting for its deferred stop keeps the assertion off the clock.
+	select {
+	case <-client.exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("listener did not return after Close")
+	}
+
+	if err := bus.Listen(ctx); err == nil {
+		t.Fatal("Listen() after Close err=nil, want a closed error")
+	}
+}
+
+type stopWatchingClient struct {
+	rediskit.Client
+	calls  atomic.Int32
+	exited chan struct{}
+}
+
+func (c *stopWatchingClient) Subscribe(ctx context.Context, channel string) (<-chan []byte, func(), error) {
+	messages, stop, err := c.Client.Subscribe(ctx, channel)
+	if err != nil {
+		return messages, stop, err
+	}
+	return messages, func() {
+		stop()
+		if c.calls.Add(1) == 2 {
+			close(c.exited)
+		}
+	}, nil
+}
+
+// Listen is single-flight per bus: a second call would install a second stop
+// func over the first, leaking the original subscription. Closing the bus ends
+// the listener, and a closed bus refuses to listen again.

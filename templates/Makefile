@@ -17,7 +17,10 @@ WASM_PUBLIC_DIR ?= frontend/public
 WASM_MODULE_DIR ?= $(WASM_PUBLIC_DIR)/modules
 WASM_MANIFEST ?= $(WASM_PUBLIC_DIR)/runtime/wasm-manifest.json
 WASM_OPT ?= wasm-opt
-WASM_OPT_FLAGS ?= -Oz --enable-bulk-memory-opt --enable-nontrapping-float-to-int
+# -O3, not -Oz. This artifact is the compute lane: it is fetched once and then
+# executed on every frame, so runtime speed outranks a few kilobytes of transfer.
+# Override WASM_OPT_FLAGS in Makefile.local to prefer size.
+WASM_OPT_FLAGS ?= -O3 --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext
 BROTLI ?= brotli
 RUST_TARGET ?= wasm32-unknown-unknown
 RUST_WASM_PROFILE ?= release
@@ -331,7 +334,7 @@ build-rust-wasm:
 		builder="foundation/runtime-sdk/scripts/build_browser_wasm.sh"; \
 		if [ ! -f "$$builder" ]; then builder="$(FOUNDATION_PATH)/runtime-sdk/scripts/build_browser_wasm.sh"; fi; \
 		bash "$$builder" "$(RUST_WASM_DIR)/Cargo.toml" "$(WASM_MODULE_DIR)" "$(RUST_WASM_PROFILE)"; \
-		if command -v "$(WASM_OPT)" >/dev/null 2>&1; then for wasm in "$(WASM_MODULE_DIR)"/*.wasm; do tmp="$$wasm.opt"; if "$(WASM_OPT)" $(WASM_OPT_FLAGS) -o "$$tmp" "$$wasm"; then mv "$$tmp" "$$wasm"; else rm -f "$$tmp"; echo "wasm-opt failed; keeping unoptimized $$wasm"; fi; done; fi; \
+		if command -v "$(WASM_OPT)" >/dev/null 2>&1; then for wasm in "$(WASM_MODULE_DIR)"/*.wasm; do tmp="$$wasm.opt"; if "$(WASM_OPT)" $(WASM_OPT_FLAGS) -o "$$tmp" "$$wasm"; then mv "$$tmp" "$$wasm"; else rm -f "$$tmp"; echo "wasm-opt failed; keeping unoptimized $$wasm" >&2; fi; done; else echo "wasm-opt not found; shipping the unoptimized artifact. Install binaryen for a tuned build." >&2; fi; \
 		if command -v "$(BROTLI)" >/dev/null 2>&1; then for wasm in "$(WASM_MODULE_DIR)"/*.wasm; do "$(BROTLI)" -f "$$wasm"; done; fi; \
 	else \
 		echo "No $(RUST_WASM_DIR)/Cargo.toml; skipping Rust WASM modules"; \

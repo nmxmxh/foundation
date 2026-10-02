@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector/httptransport"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 )
 
@@ -34,6 +35,9 @@ func init() {
 }
 
 const defaultMaxResponseBody = 16 * 1024 * 1024 // 16 MiB default max response body
+
+// defaultCallTimeout bounds one non-streaming exchange end to end.
+const defaultCallTimeout = 30 * time.Second
 
 // ErrResponseTooLarge reports a response body above the configured cap. The body
 // is never returned truncated, because a short read is indistinguishable from a
@@ -59,7 +63,7 @@ func New(endpoint string, options map[string]any) (connector.Driver, error) {
 		base:         strings.TrimRight(endpoint, "/"),
 		healthPath:   "/healthz",
 		headers:      map[string]string{},
-		client:       &http.Client{Timeout: 30 * time.Second},
+		client:       httptransport.NewClient(defaultCallTimeout),
 		maxBodyBytes: defaultMaxResponseBody,
 	}
 	if v, ok := options["health_path"].(string); ok && v != "" {

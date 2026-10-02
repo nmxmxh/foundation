@@ -9,6 +9,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
@@ -48,54 +49,207 @@ func CompressZstd(data []byte) ([]byte, error) {
 	return zstdEncoder.EncodeAll(data, make([]byte, 0, len(data))), nil
 }
 
+// Encoder pools keep per-codec state off the request path. A brotli writer at
+// quality 5 carries roughly 1 MB of internal tables; allocating one per request
+// made a 1 KB response cost more than a megabyte of garbage. gzip and flate
+// carry smaller state but the same per-call cost.
+//
+// Writers are keyed by level because the codec rejects a level change after
+// construction. Reset returns the writer to a clean state and rebinds its sink.
+
+// writerPools holds one pool per codec. Each pool stores a *sync.Pool keyed by
+// compression level, because a codec cannot change level after construction.
+type writerPools struct {
+	byLevel sync.Map // int -> *sync.Pool
+}
+
+func (p *writerPools) pool(level int, newFn func(io.Writer) any) *sync.Pool {
+	if v, ok := p.byLevel.Load(level); ok {
+		return v.(*sync.Pool)
+	}
+	pool := &sync.Pool{New: func() any { return newFn(nil) }}
+	actual, _ := p.byLevel.LoadOrStore(level, pool)
+	return actual.(*sync.Pool)
+}
+
+// put returns a writer to the pool for the level it was created with. Callers
+// must Reset the writer to io.Discard first so it holds no reference to the
+// destination buffer.
+//
+// put never creates a pool. The first call to pool fixes the level's constructor,
+// so a pool created here would carry a constructor that cannot build a writer,
+// and every later acquire at that level would fail. Dropping the writer is the
+// correct outcome: the next request builds a fresh one, which is exactly what
+// the pre-pool code always did.
+func put[T any](p *writerPools, level int, w T) {
+	if v, ok := p.byLevel.Load(level); ok {
+		v.(*sync.Pool).Put(w)
+	}
+}
+
+var (
+	gzipPools   writerPools
+	flatePools  writerPools
+	brotliPools writerPools
+)
+
+// The three getters below take an already-normalized level. Normalizing once in
+// the caller is deliberate: the level keys the pool on the way in and on the way
+// out, so normalizing in both places would be correct only while both call sites
+// happened to agree. Holding one normalized value makes a future change to a
+// normalizer unable to split the two.
+//
+// A pooled writer is reused for the same level only. A codec cannot change level
+// after construction, so a writer fetched at level 5 must never be handed to a
+// level 9 request.
+
+// newFlateWriter and newBrotliWriter adapt constructors whose signatures do not
+// fit the pool's func(io.Writer) any shape. They return a nil interface on
+// failure so the caller reports the refusal instead of storing a typed nil.
+
+func newFlateWriter(w io.Writer, level int) any {
+	zw, err := flate.NewWriter(w, level)
+	if err != nil {
+		return nil
+	}
+	return zw
+}
+
+func newBrotliWriter(w io.Writer, level int) any {
+	return brotli.NewWriterLevel(w, level)
+}
+
+func gzipWriter(dst io.Writer, level int) (*gzip.Writer, error) {
+	pool := gzipPools.pool(level, func(w io.Writer) any {
+		zw, err := gzip.NewWriterLevel(w, level)
+		if err != nil {
+			return nil
+		}
+		return zw
+	})
+	zw, ok := pool.Get().(*gzip.Writer)
+	if !ok || zw == nil {
+		// The pooled constructor refused this level. Report it rather than
+		// storing a typed nil and panicking on the next Reset.
+		return nil, fmt.Errorf("compress: gzip level %d rejected", level)
+	}
+	zw.Reset(dst)
+	return zw, nil
+}
+
+func flateWriter(dst io.Writer, level int) (*flate.Writer, error) {
+	pool := flatePools.pool(level, func(w io.Writer) any { return newFlateWriter(w, level) })
+	zw, ok := pool.Get().(*flate.Writer)
+	if !ok || zw == nil {
+		return nil, fmt.Errorf("compress: flate level %d rejected", level)
+	}
+	zw.Reset(dst)
+	return zw, nil
+}
+
+func brotliWriter(dst io.Writer, level int) *brotli.Writer {
+	pool := brotliPools.pool(level, func(w io.Writer) any { return newBrotliWriter(w, level) })
+	zw, ok := pool.Get().(*brotli.Writer)
+	if !ok || zw == nil {
+		return nil
+	}
+	zw.Reset(dst)
+	return zw
+}
+
+// The Compress* functions below normalize the level exactly once and then pass
+// that single value to both the pool fetch and the pool return. Each releases
+// the writer back to the pool only after Close and after detaching it from the
+// destination buffer, so a pooled writer never retains a reference to a finished
+// request body.
+
+func releaseGzip(level int, zw *gzip.Writer) {
+	zw.Reset(io.Discard)
+	put(&gzipPools, level, zw)
+}
+
+func releaseFlate(level int, zw *flate.Writer) {
+	zw.Reset(io.Discard)
+	put(&flatePools, level, zw)
+}
+
+func releaseBrotli(level int, zw *brotli.Writer) {
+	zw.Reset(io.Discard)
+	put(&brotliPools, level, zw)
+}
+
 // CompressGzip compresses data with gzip at the configured level.
 func CompressGzip(data []byte, level int) ([]byte, error) {
+	level = normalizeGzipLevel(level)
 	var buf bytes.Buffer
-	zw, err := gzip.NewWriterLevel(&buf, normalizeGzipLevel(level))
+	buf.Grow(len(data)/2 + 64)
+	zw, err := gzipWriter(&buf, level)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := zw.Write(data); err != nil {
+		_ = zw.Close()
 		return nil, err
 	}
 	if err := zw.Close(); err != nil {
 		return nil, err
 	}
+	releaseGzip(level, zw)
 	return buf.Bytes(), nil
 }
 
 // CompressBrotli compresses data with brotli at a balanced quality level.
 func CompressBrotli(data []byte, level int) ([]byte, error) {
+	level = normalizeBrotliLevel(level)
 	var buf bytes.Buffer
-	zw := brotli.NewWriterLevel(&buf, normalizeBrotliLevel(level))
+	buf.Grow(len(data)/2 + 64)
+	zw := brotliWriter(&buf, level)
+	if zw == nil {
+		return nil, fmt.Errorf("compress: brotli level %d rejected", level)
+	}
 	if _, err := zw.Write(data); err != nil {
+		_ = zw.Close()
 		return nil, err
 	}
 	if err := zw.Close(); err != nil {
 		return nil, err
 	}
+	releaseBrotli(level, zw)
 	return buf.Bytes(), nil
 }
 
 // CompressFlate compresses data with flate at the configured level.
 func CompressFlate(data []byte, level int) ([]byte, error) {
+	level = normalizeFlateLevel(level)
 	var buf bytes.Buffer
-	zw, err := flate.NewWriter(&buf, normalizeFlateLevel(level))
+	buf.Grow(len(data)/2 + 64)
+	zw, err := flateWriter(&buf, level)
 	if err != nil {
 		return nil, err
 	}
 	if _, err := zw.Write(data); err != nil {
+		_ = zw.Close()
 		return nil, err
 	}
 	if err := zw.Close(); err != nil {
 		return nil, err
 	}
+	releaseFlate(level, zw)
 	return buf.Bytes(), nil
 }
 
 // Compress negotiates the most suitable transport encoding.
+// Compress encodes data with the first encoding the client accepts.
 func Compress(data []byte, acceptEncoding string, level int) ([]byte, string, error) {
-	switch PreferredEncoding(acceptEncoding) {
+	return CompressWithEncoding(data, PreferredEncoding(acceptEncoding), level)
+}
+
+// CompressWithEncoding is Compress for a caller that already resolved the
+// encoding. It exists because the middleware must ask whether compression is
+// wanted before it buffers, then reuse that answer, and parsing Accept-Encoding
+// twice costs a map allocation per request.
+func CompressWithEncoding(data []byte, encoding string, level int) ([]byte, string, error) {
+	switch encoding {
 	case EncodingBrotli:
 		compressed, err := CompressBrotli(data, level)
 		return compressed, EncodingBrotli, err
@@ -208,8 +362,15 @@ func normalizeDecodeLimit(maxDecoded int64) int64 {
 // readLimited drains r one byte past the ceiling. Reading maxDecoded+1 is what
 // distinguishes "exactly at the limit" from "over it" without trusting any
 // length the payload declares about itself.
+// readLimited drains a decompressor under a byte ceiling. The buffer starts
+// from the encoded length, which is a lower bound on the decoded size for every
+// codec here, so a small body stops paying io.ReadAll's doubling ladder.
 func readLimited(r io.Reader, maxDecoded int64) ([]byte, error) {
-	out, err := io.ReadAll(io.LimitReader(r, maxDecoded+1))
+	out := make([]byte, 0, 512)
+	if size, ok := r.(interface{ Len() int }); ok && size.Len() > 0 {
+		out = make([]byte, 0, size.Len())
+	}
+	out, err := readAllInto(out, io.LimitReader(r, maxDecoded+1))
 	if err != nil {
 		return nil, err
 	}
@@ -217,6 +378,23 @@ func readLimited(r io.Reader, maxDecoded int64) ([]byte, error) {
 		return nil, ErrDecodedTooLarge
 	}
 	return out, nil
+}
+
+// readAllInto appends to buf instead of allocating a fresh one.
+func readAllInto(buf []byte, r io.Reader) ([]byte, error) {
+	for {
+		if len(buf) == cap(buf) {
+			buf = append(buf, 0)[:len(buf)]
+		}
+		n, err := r.Read(buf[len(buf):cap(buf)])
+		buf = buf[:len(buf)+n]
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return buf, nil
+			}
+			return buf, err
+		}
+	}
 }
 
 func decompressBrotli(data []byte, maxDecoded int64) ([]byte, error) {

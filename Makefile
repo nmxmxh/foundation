@@ -68,6 +68,8 @@ FOUNDATION_LINT_CHECKS := \
 	check-transport-ladder \
 	check-system-profiling \
 	check-benchmark-ratchet \
+	check-test-naming \
+	check-test-preservation \
 	check-github-workflows
 
 FOUNDATION_LINT_CHECK_TIMEOUT_SEC ?= 600
@@ -299,6 +301,7 @@ check-scaffold-smoke:
 
 check-scaffold-idempotency:
 	@tests/scaffold_idempotency_test.sh
+	@tests/nginx_edge_patch_test.sh
 
 check-scaffold-seed-drift:
 	@tests/scaffold_seed_drift_test.sh
@@ -388,6 +391,18 @@ check-ts-static-analysis:
 check-coding-practices:
 	@tooling/scripts/coding_practices_check.sh .
 	@tooling/scripts/check_managed_patches.sh tooling/scripts
+
+# A test file belongs to one source file and is named for it. Fragmenting one
+# source's coverage across numbered ad-hoc files is what this refuses; existing
+# exceptions are listed in tooling/test_naming_baseline.tsv.
+check-test-naming:
+	@node tooling/scripts/test_naming_check.cjs .
+
+# Consolidation moves test functions between files and deletes donors. A move
+# that drops a test is indistinguishable from one that worked, so the set of test
+# names is compared against HEAD. Add a package here when you consolidate it.
+check-test-preservation:
+	@python3 tooling/scripts/test_preservation_check.py HEAD server-kit/go runtime-sdk/go cmd
 
 check-rust-runtime-practices:
 	@tooling/scripts/rust_runtime_practices_check.sh .

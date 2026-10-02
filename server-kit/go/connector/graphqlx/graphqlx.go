@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/connector/httptransport"
 )
 
 func init() {
@@ -43,7 +44,7 @@ func New(endpoint string, options map[string]any) (connector.Driver, error) {
 	d := &Driver{
 		endpoint: endpoint,
 		headers:  map[string]string{},
-		client:   &http.Client{Timeout: 30 * time.Second},
+		client:   httptransport.NewClient(30 * time.Second),
 	}
 	if v, ok := options["timeout"].(time.Duration); ok && v > 0 {
 		d.client.Timeout = v

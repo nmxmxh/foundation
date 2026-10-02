@@ -288,3 +288,69 @@ func benchSnapshotRecords(org string, count int) []database.DomainRecord {
 	}
 	return records
 }
+
+func TestSnapshotShadowEvidenceCycle(t *testing.T) {
+	base := database.NewMemoryDB()
+	snaps := NewMemorySnapshotStore()
+	ctx := t.Context()
+	opts := RuntimeStoreOptions{MaxRecordsPerScope: 8, MaxBytesPerScope: 1 << 20, SnapshotStore: snaps}
+
+	seed := func(id string) {
+		t.Helper()
+		if _, err := base.UpsertRecord(ctx, database.DomainRecord{
+			Domain: "menu", Collection: "dishes", OrganizationID: "org_1", RecordID: id,
+			Data: testRecordData(map[string]any{"state": "published"}),
+		}); err != nil {
+			t.Fatalf("seed %s error = %v", id, err)
+		}
+	}
+	warmGen := func(label string) RuntimeStats {
+		t.Helper()
+		gen, err := WrapRuntimeStore(base, opts)
+		if err != nil {
+			t.Fatalf("%s WrapRuntimeStore() error = %v", label, err)
+		}
+		if err := gen.WarmScope(ctx, "menu", "dishes", "org_1"); err != nil {
+			t.Fatalf("%s WarmScope() error = %v", label, err)
+		}
+		return gen.HermesRuntimeStats()
+	}
+
+	seed("dish_1")
+	seed("dish_2")
+
+	// Gen 1: no artifact yet — neither match nor mismatch, one save.
+	stats := warmGen("gen1")
+	if stats.SnapshotShadowMatches != 0 || stats.SnapshotShadowMismatches != 0 || stats.SnapshotShadowErrors != 0 {
+		t.Fatalf("gen1 stats = %+v, want no shadow outcomes before an artifact exists", stats)
+	}
+	if stats.SnapshotSaves != 1 {
+		t.Fatalf("gen1 saves = %d, want 1 (rebuild must produce the first artifact)", stats.SnapshotSaves)
+	}
+
+	// Gen 2: artifact reproduces the rebuild exactly — clean match.
+	stats = warmGen("gen2")
+	if stats.SnapshotShadowMatches != 1 || stats.SnapshotShadowMismatches != 0 {
+		t.Fatalf("gen2 stats = %+v, want one clean shadow match", stats)
+	}
+
+	// Base mutates after the artifact: gen 3 must record the divergence.
+	seed("dish_3")
+	stats = warmGen("gen3")
+	if stats.SnapshotShadowMismatches != 1 || stats.SnapshotShadowErrors != 0 {
+		t.Fatalf("gen3 stats = %+v, want one shadow mismatch (artifact stale-behind)", stats)
+	}
+
+	// Gen 4: gen 3 refreshed the artifact to current truth — clean again.
+	stats = warmGen("gen4")
+	if stats.SnapshotShadowMatches != 1 || stats.SnapshotShadowMismatches != 0 {
+		t.Fatalf("gen4 stats = %+v, want the refreshed artifact to match", stats)
+	}
+}
+
+// TestEnvelopeTailerQuarantinesPoisonEnvelope proves the envelope fallback
+// path survives poison: a message with a missing envelope field and one with
+// undecodable envelope bytes are quarantined (acked, dropped, counted) while
+// the healthy envelope in the same batch still applies, and nothing
+// redelivers. Before this, RedisStreamEnvelopeSource failed the whole read on
+// the first bad message, so poison redelivered forever and Run halted.
