@@ -1,7 +1,7 @@
 import type { RenderSurfaceCommand, RenderSurfaceEvent } from "./renderSurface";
 import { renderRequirementsFailure, type RenderSurfaceEvidence } from "./renderRequirements";
 import { attachRenderStateReader, type RenderStateReader } from "./renderStateChannel";
-import type { RenderSurfaceQualityTier } from "./types";
+import type { RenderSurfaceDetailValue, RenderSurfaceQualityTier } from "./types";
 
 /**
  * The worker half of a render surface.
@@ -96,6 +96,24 @@ export type RenderSurfacePass<TState> = {
    */
   settled?: () => Promise<unknown>;
   /**
+   * Publish per-frame numbers for the diagnostics channel. Optional.
+   *
+   * `draw` returns `void`, so a pass cannot report anything about the frame it
+   * just drew, and everything it measured stayed inside the worker where no
+   * page-side reader could reach it. This is the way out that keeps the hot
+   * path alone: `draw` is still fire-and-forget, and the numbers are collected
+   * on the diagnostics cadence instead.
+   *
+   * Read on the diagnostics cadence, never per frame, so it must be cheap and
+   * must not allocate a fresh object each call when it can hand back a record
+   * it overwrites in place. Returning the same mutated record is the intended
+   * shape; the channel structured-clones it on the way out either way.
+   *
+   * Anything this throws is swallowed. A diagnostics accessor is not allowed to
+   * stop a surface from drawing or from reporting.
+   */
+  detail?: () => Readonly<Record<string, RenderSurfaceDetailValue>>;
+  /**
    * Release everything the pass created. **Required.**
    *
    * Required, and not optional as it was, because the resources a pass holds
@@ -181,6 +199,58 @@ export type RenderSurfaceScope = {
  * both cases rather than "catastrophic" in one and "unreachable" in the other.
  */
 const MISS_FACTOR = 1.35;
+/**
+ * Most keys one publish may carry.
+ *
+ * A cap rather than a type, because the type already says "scalars" and a type
+ * cannot stop a caller from putting four thousand of them in the object. The
+ * channel structured-clones whatever it is handed, so an unbounded record is an
+ * unbounded message on the worker-to-page path. Extra keys are dropped and the
+ * first `DETAIL_MAX_KEYS` are kept, in the order the pass listed them.
+ */
+const DETAIL_MAX_KEYS = 32;
+
+/**
+ * Read a pass's detail record defensively.
+ *
+ * Everything here is a failure the surface must survive. The accessor is
+ * application code on a shared cadence, so it may throw, return something that
+ * is not a record, or return a record holding something a structured clone
+ * refuses. None of those may stop the diagnostics message going out, and none
+ * may throw out of here into the ladder's own control flow.
+ *
+ * Values are copied rather than forwarded: the pass is free to overwrite the
+ * same record on its next frame, and the message has to describe the sample it
+ * was built from, not whatever the record says by the time it is cloned.
+ */
+const readPassDetail = <TState>(
+  pass: RenderSurfacePass<TState>,
+): Readonly<Record<string, RenderSurfaceDetailValue>> => {
+  let raw: unknown;
+  try {
+    raw = pass.detail?.();
+  } catch {
+    return {};
+  }
+  if (typeof raw !== "object" || raw === null) {
+    return {};
+  }
+  const detail: Record<string, RenderSurfaceDetailValue> = {};
+  let kept = 0;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (kept >= DETAIL_MAX_KEYS) break;
+    if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      detail[key] = value;
+      kept += 1;
+    }
+  }
+  return detail;
+};
 /** How many missed frames before the ladder drops a rung. ~150 ms at 40 Hz. */
 const DEMOTE_AFTER = 6;
 /** How many clean frames before it climbs one. Slow, so it settles. */
@@ -250,6 +320,8 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
    */
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let diagnosticsTimer: ReturnType<typeof setTimeout> | null = null;
+  let diagnosticsIntervalMs = 0;
   let overBudget = 0;
   let underBudget = 0;
   let startedAt = 0;
@@ -287,6 +359,41 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
 
   const emit = (event: RenderSurfaceEvent) => scope.postMessage(event);
 
+  /**
+   * Arm the diagnostics refresh, or disarm it.
+   *
+   * Re-armed rather than started once, because the floor is the settled
+   * cadence and the settled cadence moves with the ladder: a timer set at the
+   * best rung's interval would out-report a surface that has since demoted to
+   * 4 Hz.
+   *
+   * The floor is `rung().cadenceMs` as well as the requested interval. Without
+   * it, `diagnosticsIntervalMs: 1` against a 40 Hz surface would post a message
+   * every millisecond of a frame that is still being drawn, which is neither
+   * cheap nor what "on the diagnostics cadence" was ever claiming.
+   */
+  const scheduleDiagnostics = () => {
+    if (diagnosticsTimer !== null) {
+      clearTimeout(diagnosticsTimer);
+      diagnosticsTimer = null;
+    }
+    if (!diagnosticsIntervalMs || !pass) return;
+    const interval = Math.max(diagnosticsIntervalMs, rung().cadenceMs);
+    diagnosticsTimer = setTimeout(() => {
+      diagnosticsTimer = null;
+      /*
+       * `stop` clears this timer, so in a single-threaded test this cannot be
+       * reached — which is exactly why it is here. In a browser the callback can
+       * already be sitting in the task queue when `stop` runs, and clearTimeout
+       * does not recall it. Without this guard an unmounted surface posts at a
+       * page nobody is reading.
+       */
+      if (!running || stopped) return;
+      report();
+      scheduleDiagnostics();
+    }, interval);
+  };
+
   const report = () => {
     const current = rung();
     emit({
@@ -301,6 +408,7 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
         scale: current.scale,
         visible,
         issues: [],
+        ...(pass?.detail ? { detail: readPassDetail(pass) } : {}),
       },
     });
   };
@@ -338,12 +446,16 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
       overBudget = 0;
       underBudget = 0;
       applySize();
+      // The settled cadence just moved, and it is the floor the diagnostics
+      // timer runs at, so the timer is re-armed rather than left on the old one.
+      scheduleDiagnostics();
       report();
     } else if (underBudget >= PROMOTE_AFTER && tier > 0) {
       tier -= 1;
       overBudget = 0;
       underBudget = 0;
       applySize();
+      scheduleDiagnostics();
       report();
     }
   };
@@ -463,6 +575,7 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
     lastDrawAt = 0;
     targetNextFrame = 0;
     overBudget = 0;
+    scheduleDiagnostics();
     step();
   };
 
@@ -478,6 +591,10 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
     if (timer !== null) {
       clearTimeout(timer);
       timer = null;
+    }
+    if (diagnosticsTimer !== null) {
+      clearTimeout(diagnosticsTimer);
+      diagnosticsTimer = null;
     }
   };
 
@@ -516,6 +633,16 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
      * state from `STATE` messages exactly as before.
      */
     stateReader = message.stateBuffer ? attachRenderStateReader(message.stateBuffer) : null;
+    /*
+     * Normalised once, here, for the same reason `tier` is: the value is read
+     * on every re-arm of the diagnostics timer, and a caller that sends a
+     * negative number or a NaN should get the pre-existing behaviour rather
+     * than a `setTimeout` that fires immediately or never.
+     */
+    diagnosticsIntervalMs =
+      typeof message.diagnosticsIntervalMs === "number" && Number.isFinite(message.diagnosticsIntervalMs)
+        ? Math.max(0, message.diagnosticsIntervalMs)
+        : 0;
     maxBackingPixels = message.requirements?.maxBackingPixels;
     requireGpuCompletion = message.requirements?.gpuCompletion === "required";
     frameDescriptor.shared = null;
@@ -607,6 +734,11 @@ export const serveRenderSurface = <TState, TWarm = unknown>(
       case "TIER_FLOOR": {
         tierFloor = Math.max(0, message.tier);
         applySize();
+        // A floor change moves the settled cadence, which is the floor the
+        // diagnostics timer runs at. Re-armed with the ladder transitions,
+        // otherwise pinning a surface to a slower rung would leave it
+        // reporting at the rate of the rung it was pinned away from.
+        scheduleDiagnostics();
         report();
         return;
       }

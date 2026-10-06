@@ -9,6 +9,9 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -21,417 +24,304 @@ import (
 
 const (
 	defaultGraphBaseURL = "https://graph.facebook.com"
-	defaultAPIVersion   = "v21.0"
-	maxGraphResponse    = 64 * 1024         // 64 KiB
-	maxMediaUploadBytes = 100 * 1024 * 1024 // 100 MiB Meta Cloud API limit
+	maxGraphResponse    = 64 << 10
+	maxMediaUploadBytes = 100 << 20
 )
 
-// Client executes calls against the WhatsApp Cloud API.
+// Client executes bounded calls; mutations are never automatically retried.
 type Client struct {
 	config  Config
 	baseURL string
 	http    *http.Client
 	cb      *circuitbreaker.CircuitBreaker
+	uploads chan struct{}
 }
 
-// NewClient initializes a WhatsApp Cloud API client.
 func NewClient(cfg Config) (*Client, error) {
 	if err := cfg.Valid(); err != nil {
 		return nil, err
 	}
-
-	version := cfg.GraphAPIVersion
-	if version == "" {
-		version = defaultAPIVersion
+	if cfg.MaxMediaBytes == 0 {
+		cfg.MaxMediaBytes = 8 << 20
 	}
-
+	if cfg.MaxConcurrentUploads == 0 {
+		cfg.MaxConcurrentUploads = 2
+	}
 	base := cfg.BaseURL
 	if base == "" {
 		base = defaultGraphBaseURL
 	}
-	base = fmt.Sprintf("%s/%s", strings.TrimRight(base, "/"), version)
-
-	return &Client{
-		config:  cfg,
-		baseURL: base,
-		http: &http.Client{
-			Timeout: 10 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		},
-		cb: circuitbreaker.New("whatsapp-api", circuitbreaker.DefaultConfig()),
-	}, nil
+	parsed, err := url.Parse(base)
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Scheme != "https" && parsed.Scheme != "http") {
+		return nil, errors.New("whatsappx: invalid Graph base URL")
+	}
+	return &Client{config: cfg, baseURL: strings.TrimRight(base, "/") + "/" + cfg.GraphAPIVersion, http: &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, cb: circuitbreaker.New("whatsapp-api", circuitbreaker.DefaultConfig()), uploads: make(chan struct{}, cfg.MaxConcurrentUploads)}, nil
 }
 
-type graphSendMessagePayload struct {
-	MessagingProduct string           `json:"messaging_product"`
-	RecipientType    string           `json:"recipient_type,omitempty"`
-	To               string           `json:"to,omitempty"`
-	Type             MessageType      `json:"type,omitempty"`
-	Status           string           `json:"status,omitempty"`
-	MessageID        string           `json:"message_id,omitempty"`
-	Text             *TextBody        `json:"text,omitempty"`
-	Template         *TemplateBody    `json:"template,omitempty"`
-	Image            *MediaBody       `json:"image,omitempty"`
-	Audio            *AudioBody       `json:"audio,omitempty"`
-	Document         *DocumentBody    `json:"document,omitempty"`
-	Interactive      *InteractiveBody `json:"interactive,omitempty"`
-	Reaction         *ReactionBody    `json:"reaction,omitempty"`
-	Location         *LocationBody    `json:"location,omitempty"`
-	Contacts         []ContactCard    `json:"contacts,omitempty"`
+// graphCall decodes bounded evidence, without including raw provider text in errors.
+func (c *Client) graphCall(ctx context.Context, operation, method, path, contentType string, body io.Reader, out any) error {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/"+path, body)
+	if err != nil {
+		return err
+	}
+	if sized, ok := body.(interface{ Size() int64 }); ok {
+		req.ContentLength = sized.Size()
+	}
+	req.Header.Set("Authorization", "Bearer "+c.config.AccessToken)
+	req.Header.Set("Content-Type", contentType)
+	c.applyCorrelation(ctx, req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		class := OutcomeTransient
+		if method != http.MethodGet {
+			class = OutcomeUnknown
+		}
+		return &ProviderError{Operation: operation, Class: class}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxGraphResponse+1))
+	if err != nil || len(raw) > maxGraphResponse {
+		return providerFailure(operation, resp, nil, method != http.MethodGet)
+	}
+	var envelope struct {
+		Error *ProviderFailure `json:"error"`
+	}
+	decodeErr := json.Unmarshal(raw, &envelope)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || envelope.Error != nil {
+		return providerFailure(operation, resp, envelope.Error, false)
+	}
+	if decodeErr != nil || json.Unmarshal(raw, out) != nil {
+		return providerFailure(operation, resp, nil, method != http.MethodGet)
+	}
+	return nil
 }
 
-type graphResponse struct {
-	MessagingProduct string `json:"messaging_product"`
-	Contacts         []struct {
-		Input string `json:"input"`
-		WaID  string `json:"wa_id"`
-	} `json:"contacts"`
-	Messages []struct {
-		ID string `json:"id"`
-	} `json:"messages"`
-	Error *struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-		Code    int    `json:"code"`
-	} `json:"error,omitempty"`
-}
-
-// Send delivers one message to a recipient through WhatsApp Cloud API.
+// Send validates every modeled variant before dispatch.
 func (c *Client) Send(ctx context.Context, msg Message) (*SendResult, error) {
-	if msg.To == "" {
-		return nil, errors.New("whatsappx: recipient 'To' is required")
+	if err := msg.Validate(); err != nil {
+		return nil, err
 	}
-
-	payload := graphSendMessagePayload{
-		MessagingProduct: "whatsapp",
-		RecipientType:    "individual",
-		To:               msg.To,
-		Type:             msg.Type,
-		Text:             msg.Text,
-		Template:         msg.Template,
-		Image:            msg.Media,
-		Audio:            msg.Audio,
-		Document:         msg.Document,
-		Interactive:      msg.Interactive,
-		Reaction:         msg.Reaction,
-		Location:         msg.Location,
-		Contacts:         msg.Contacts,
-	}
-
+	payload := struct {
+		MessagingProduct string `json:"messaging_product"`
+		RecipientType    string `json:"recipient_type"`
+		Message
+	}{"whatsapp", "individual", msg}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("whatsappx: marshal payload: %w", err)
+		return nil, err
 	}
-
-	url := fmt.Sprintf("%s/%s/messages", c.baseURL, c.config.PhoneNumberID)
-
+	if len(data) > 256<<10 {
+		return nil, errInvalidMessage
+	}
 	out, err := c.cb.Execute(ctx, func() (any, error) {
-		req, rerr := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
-		if rerr != nil {
-			return nil, rerr
+		var response struct {
+			Messages []struct {
+				ID string `json:"id"`
+			} `json:"messages"`
+			Contacts []struct {
+				WaID string `json:"wa_id"`
+			} `json:"contacts"`
 		}
-
-		req.Header.Set("Authorization", "Bearer "+c.config.AccessToken)
-		req.Header.Set("Content-Type", "application/json")
-		c.applyCorrelation(ctx, req)
-
-		resp, derr := c.http.Do(req)
-		if derr != nil {
-			return nil, derr
+		if err := c.graphCall(ctx, "send", http.MethodPost, c.config.PhoneNumberID+"/messages", "application/json", bytes.NewReader(data), &response); err != nil {
+			return nil, err
 		}
-		defer func() {
-			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-			_ = resp.Body.Close()
-		}()
-
-		body, rderr := io.ReadAll(io.LimitReader(resp.Body, maxGraphResponse))
-		if rderr != nil {
-			return nil, rderr
+		if len(response.Messages) == 0 || response.Messages[0].ID == "" {
+			return nil, &ProviderError{Operation: "send", Class: OutcomeUnknown}
 		}
-
-		var gResp graphResponse
-		if uerr := json.Unmarshal(body, &gResp); uerr != nil {
-			return nil, fmt.Errorf("decode response: %w", uerr)
+		result := &SendResult{MessageID: response.Messages[0].ID}
+		if len(response.Contacts) > 0 {
+			result.Contact = response.Contacts[0].WaID
 		}
-
-		if resp.StatusCode >= 400 || gResp.Error != nil {
-			msg := "unknown error"
-			if gResp.Error != nil {
-				msg = gResp.Error.Message
-			}
-			return nil, fmt.Errorf("whatsappx api error (status %d): %s", resp.StatusCode, msg)
-		}
-
-		if len(gResp.Messages) == 0 {
-			return nil, errors.New("whatsappx: empty message list in response")
-		}
-
-		waID := ""
-		if len(gResp.Contacts) > 0 {
-			waID = gResp.Contacts[0].WaID
-		}
-
-		return &SendResult{
-			MessageID: gResp.Messages[0].ID,
-			Contact:   waID,
-		}, nil
+		return result, nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
 	return out.(*SendResult), nil
 }
-
-// MarkRead sends a read receipt to Meta, updating message status with blue checkmarks.
 func (c *Client) MarkRead(ctx context.Context, messageID string) error {
-	if messageID == "" {
-		return errors.New("whatsappx: message ID cannot be empty")
+	if !boundedText(messageID, 256, true) {
+		return errInvalidMessage
 	}
-
-	payload := graphSendMessagePayload{
-		MessagingProduct: "whatsapp",
-		Status:           "read",
-		MessageID:        messageID,
-	}
-
-	data, err := json.Marshal(payload)
+	data, err := json.Marshal(map[string]string{"messaging_product": "whatsapp", "status": "read", "message_id": messageID})
 	if err != nil {
 		return err
 	}
-
-	url := fmt.Sprintf("%s/%s/messages", c.baseURL, c.config.PhoneNumberID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
-	if err != nil {
+	var response struct {
+		Success bool `json:"success"`
+	}
+	if err := c.graphCall(ctx, "mark-read", http.MethodPost, c.config.PhoneNumberID+"/messages", "application/json", bytes.NewReader(data), &response); err != nil {
 		return err
 	}
-
-	req.Header.Set("Authorization", "Bearer "+c.config.AccessToken)
-	req.Header.Set("Content-Type", "application/json")
-	c.applyCorrelation(ctx, req)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("whatsappx: mark read returned status %d", resp.StatusCode)
+	if !response.Success {
+		return &ProviderError{Operation: "mark-read", Class: OutcomeUnknown}
 	}
 	return nil
 }
 
-// UploadMedia uploads binary media and returns the Meta media ID.
-// It verifies content magic bytes via objectstore.SniffUpload, sanitizes the filename,
-// and enforces bounded streaming upload to protect against memory exhaustion.
-func (c *Client) UploadMedia(ctx context.Context, mediaType string, data io.Reader, filename string) (string, error) {
-	if data == nil {
-		return "", errors.New("whatsappx: media data cannot be nil")
+// UploadMedia spools a bounded multipart object; only validated complete input is sent.
+func (c *Client) UploadMedia(ctx context.Context, mediaType string, data io.Reader, filename string) (id string, err error) {
+	if data == nil || !objectstore.SniffSupported(mediaType) {
+		return "", errors.New("whatsappx: unsupported or missing media data")
 	}
-
-	// 1. Sanitize filename against path traversal and control characters
-	cleanFilename := filepath.Base(filepath.Clean(filename))
-	cleanFilename = strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f || r == '"' || r == '\\' {
+	select {
+	case c.uploads <- struct{}{}:
+		defer func() { <-c.uploads }()
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	data, err = objectstore.SniffUpload(contextReader{ctx, data}, mediaType)
+	if err != nil {
+		return "", err
+	}
+	spool, err := os.CreateTemp("", "whatsapp-upload-*")
+	if err != nil {
+		return "", err
+	}
+	defer func() { err = errors.Join(err, spool.Close(), os.Remove(spool.Name())) }()
+	writer := multipart.NewWriter(spool)
+	if err = writer.WriteField("messaging_product", "whatsapp"); err != nil {
+		return "", err
+	}
+	if err = writer.WriteField("type", mediaType); err != nil {
+		return "", err
+	}
+	filename = filepath.Base(filepath.Clean(filename))
+	filename = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 || r == '"' || r == '\\' {
 			return -1
 		}
 		return r
-	}, cleanFilename)
-	if cleanFilename == "" || cleanFilename == "." {
-		cleanFilename = "attachment.bin"
+	}, filename)
+	if filename == "" || filename == "." {
+		filename = "attachment.bin"
 	}
-
-	// 2. Validate content type using objectstore sniffing when supported
-	if objectstore.SniffSupported(mediaType) {
-		sniffed, err := objectstore.SniffUpload(data, mediaType)
-		if err != nil {
-			return "", fmt.Errorf("whatsappx: media content validation failed: %w", err)
-		}
-		data = sniffed
-	}
-
-	// 3. Bound upload size to prevent unbounded memory consumption
-	boundedData := io.LimitReader(data, maxMediaUploadBytes+1)
-
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-
-	if err := writer.WriteField("messaging_product", "whatsapp"); err != nil {
-		return "", err
-	}
-	if err := writer.WriteField("type", mediaType); err != nil {
-		return "", err
-	}
-
-	part, err := writer.CreateFormFile("file", cleanFilename)
+	filename = truncateString(filename, 240)
+	header := make(textproto.MIMEHeader)
+	header.Set("Content-Disposition", fmt.Sprintf("form-data; name=\"file\"; filename=\"%s\"", filename))
+	header.Set("Content-Type", objectstore.NormalizeContentType(mediaType))
+	part, err := writer.CreatePart(header)
 	if err != nil {
 		return "", err
 	}
-	copied, err := io.Copy(part, boundedData)
+	n, err := io.Copy(part, io.LimitReader(contextReader{ctx, data}, c.config.MaxMediaBytes+1))
 	if err != nil {
 		return "", err
 	}
-	if copied > maxMediaUploadBytes {
-		return "", fmt.Errorf("whatsappx: media size exceeds maximum allowed (%d bytes)", maxMediaUploadBytes)
+	if n == 0 || n > c.config.MaxMediaBytes {
+		return "", errors.New("whatsappx: media size exceeds product limit")
 	}
-	if err := writer.Close(); err != nil {
+	if err = writer.Close(); err != nil {
 		return "", err
 	}
-
-	url := fmt.Sprintf("%s/%s/media", c.baseURL, c.config.PhoneNumberID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
+	if _, err = spool.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	info, err := spool.Stat()
 	if err != nil {
 		return "", err
 	}
-
-	req.Header.Set("Authorization", "Bearer "+c.config.AccessToken)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	c.applyCorrelation(ctx, req)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
+	var response struct {
+		ID string `json:"id"`
+	}
+	if err = c.graphCall(ctx, "upload", http.MethodPost, c.config.PhoneNumberID+"/media", writer.FormDataContentType(), io.NewSectionReader(spool, 0, info.Size()), &response); err != nil {
 		return "", err
 	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-	}()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxGraphResponse))
-	if err != nil {
-		return "", err
+	if response.ID == "" {
+		return "", &ProviderError{Operation: "upload", Class: OutcomeUnknown}
 	}
-
-	var res struct {
-		ID    string `json:"id"`
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(respBody, &res); err != nil {
-		return "", err
-	}
-	if resp.StatusCode >= 400 || res.Error != nil {
-		return "", fmt.Errorf("upload media failed: status %d", resp.StatusCode)
-	}
-	return res.ID, nil
+	return response.ID, nil
 }
-
-// GetMediaURL retrieves the temporary download URL for a media ID.
 func (c *Client) GetMediaURL(ctx context.Context, mediaID string) (string, error) {
-	if mediaID == "" {
-		return "", errors.New("whatsappx: media ID cannot be empty")
+	if !validPathID(mediaID) {
+		return "", errors.New("whatsappx: invalid media ID")
 	}
-
-	url := fmt.Sprintf("%s/%s", c.baseURL, mediaID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-
-	req.Header.Set("Authorization", "Bearer "+c.config.AccessToken)
-	c.applyCorrelation(ctx, req)
-
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-	}()
-
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxGraphResponse))
-	if err != nil {
-		return "", err
-	}
-
-	var res struct {
+	var response struct {
 		URL string `json:"url"`
 	}
-	if err := json.Unmarshal(respBody, &res); err != nil {
+	if err := c.graphCall(ctx, "media-url", http.MethodGet, mediaID, "", nil, &response); err != nil {
 		return "", err
 	}
-	return res.URL, nil
+	parsed, err := url.Parse(response.URL)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return "", &ProviderError{Operation: "media-url", Class: OutcomePermanent}
+	}
+	return response.URL, nil
 }
 
-// DownloadMedia securely downloads media from a temporary Meta URL.
-// It verifies the URL against SSRF, rejects private networks, validates Meta domains,
-// and streams directly into dst up to maxBytes without unbounded buffering.
-func (c *Client) DownloadMedia(ctx context.Context, mediaURL string, dst io.Writer, maxBytes int64) (int64, error) {
-	if mediaURL == "" {
-		return 0, errors.New("whatsappx: media URL cannot be empty")
-	}
-	if dst == nil {
-		return 0, errors.New("whatsappx: destination writer cannot be nil")
+// DownloadMedia validates the complete bounded source before publishing to dst.
+// A destination write failure can still leave partial output: its owner must abort it.
+func (c *Client) DownloadMedia(ctx context.Context, mediaURL string, dst io.Writer, maxBytes int64) (written int64, err error) {
+	if mediaURL == "" || dst == nil {
+		return 0, errors.New("whatsappx: missing media URL or destination")
 	}
 	if maxBytes <= 0 {
-		maxBytes = maxMediaUploadBytes
+		maxBytes = c.config.MaxMediaBytes
 	}
-
-	// 1. SSRF and outbound URL safety check
+	if maxBytes > maxMediaUploadBytes {
+		return 0, errors.New("whatsappx: invalid media byte limit")
+	}
 	policy := c.config.OutboundPolicy
 	if policy == nil {
-		policy = &security.OutboundURLPolicy{
-			AllowedSchemes:       []string{"https"},
-			AllowPrivateNetworks: false,
-		}
+		policy = &security.OutboundURLPolicy{AllowedSchemes: []string{"https"}}
 	}
-	parsedURL, err := security.ValidateOutboundURL(ctx, mediaURL, *policy)
+	parsed, err := security.ValidateOutboundURL(ctx, mediaURL, *policy)
 	if err != nil {
 		return 0, fmt.Errorf("whatsappx: media download url safety violation: %w", err)
 	}
-
-	// 2. Validate that destination host is an authorized Meta / Facebook CDN host
-	host := strings.ToLower(parsedURL.Hostname())
-	isMetaHost := host == "lookaside.fbsbx.com" ||
-		host == "graph.facebook.com" ||
-		strings.HasSuffix(host, ".fbcdn.net") ||
-		strings.HasSuffix(host, ".facebook.com") ||
-		strings.HasSuffix(host, ".whatsapp.net")
-
-	if !isMetaHost {
-		return 0, fmt.Errorf("whatsappx: media download host %q is not an authorized Meta domain", host)
+	host := strings.ToLower(parsed.Hostname())
+	if parsed.Scheme != "https" || !(host == "lookaside.fbsbx.com" || host == "graph.facebook.com" || strings.HasSuffix(host, ".fbcdn.net") || strings.HasSuffix(host, ".facebook.com") || strings.HasSuffix(host, ".whatsapp.net")) {
+		return 0, errors.New("whatsappx: not an authorized Meta domain")
 	}
-
-	// 3. Perform authenticated download request
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, mediaURL, nil)
 	if err != nil {
 		return 0, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.config.AccessToken)
 	c.applyCorrelation(ctx, req)
-
 	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, &ProviderError{Operation: "download", Class: OutcomeTransient}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return 0, providerFailure("download", resp, nil, false)
+	}
+	spool, err := os.CreateTemp("", "whatsapp-download-*")
 	if err != nil {
 		return 0, err
 	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("whatsappx: media download failed with status %d", resp.StatusCode)
-	}
-
-	// 4. Bounded streaming directly into target writer
-	written, err := io.Copy(dst, io.LimitReader(resp.Body, maxBytes))
+	defer func() { err = errors.Join(err, spool.Close(), os.Remove(spool.Name())) }()
+	n, err := io.Copy(spool, io.LimitReader(contextReader{ctx, resp.Body}, maxBytes+1))
 	if err != nil {
-		return written, err
+		return 0, err
 	}
-	return written, nil
+	if n > maxBytes {
+		return 0, errors.New("whatsappx: media exceeds byte limit")
+	}
+	if resp.ContentLength >= 0 && n != resp.ContentLength {
+		return 0, io.ErrUnexpectedEOF
+	}
+	if _, err = spool.Seek(0, io.SeekStart); err != nil {
+		return 0, err
+	}
+	return io.Copy(dst, spool)
 }
-
 func (c *Client) applyCorrelation(ctx context.Context, req *http.Request) {
-	corr := metadata.FromContext(ctx).CorrelationID
-	if corr != "" {
+	if corr := metadata.FromContext(ctx).CorrelationID; corr != "" {
 		req.Header.Set("X-Correlation-ID", corr)
 	}
+}
+
+// Reader owners must unblock an already running Read on cancellation.
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }

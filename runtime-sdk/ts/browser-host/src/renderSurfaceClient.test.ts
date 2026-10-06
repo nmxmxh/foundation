@@ -937,3 +937,330 @@ describe("a surface warmed before its canvas arrives", () => {
     expect(sent.find((event) => event.kind === "READY")).toBeDefined();
   });
 });
+
+describe("surface detail channel", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const diagnostics = (sent: RenderSurfaceEvent[]) =>
+    sent.filter((event) => event.kind === "DIAGNOSTICS");
+
+  it("omits detail entirely for a pass that does not publish one", async () => {
+    const { scope, send, sent } = makeScope();
+    serveRenderSurface(
+      "test",
+      { build: () => ({ lane: "2d", resize: () => undefined, draw: () => undefined, dispose: () => undefined }) },
+      scope,
+    );
+
+    send(init());
+    // The ladder reports on movement, not on a clock, so a surface holding its
+    // rung says nothing until something asks it to. `TIER_FLOOR` is the
+    // cheapest deterministic way to make it speak.
+    send({ kind: "TIER_FLOOR", surface: "test", tier: 0 });
+    await vi.advanceTimersByTimeAsync(200);
+
+    // Not an empty object: absent. A reader can tell "published nothing" from
+    // "published nothing measurable", and a pass that never opted in pays
+    // nothing at all.
+    expect(diagnostics(sent).length).toBeGreaterThan(0);
+    for (const event of diagnostics(sent)) {
+      expect("detail" in (event as { diagnostics: { detail?: unknown } }).diagnostics).toBe(false);
+    }
+  });
+
+  it("carries a pass's detail across the worker boundary", async () => {
+    const { scope, send, sent } = makeScope();
+    serveRenderSurface(
+      "test",
+      {
+        build: () => ({
+          lane: "webgpu",
+          resize: () => undefined,
+          draw: () => undefined,
+          dispose: () => undefined,
+          detail: () => ({ actorsProjected: 42, actorsCulled: 7, drawCalls: 3 }),
+        }),
+      },
+      scope,
+    );
+
+    send(init({ diagnosticsIntervalMs: 100 }));
+    await vi.advanceTimersByTimeAsync(150);
+
+    const last = diagnostics(sent).at(-1) as { diagnostics: { detail?: Record<string, unknown> } };
+    expect(last.diagnostics.detail).toEqual({
+      actorsProjected: 42,
+      actorsCulled: 7,
+      drawCalls: 3,
+    });
+  });
+
+  it("publishes on the timer only when an interval was asked for", async () => {
+    const build = () => ({
+      lane: "2d" as const,
+      resize: () => undefined,
+      draw: () => undefined,
+      dispose: () => undefined,
+      detail: () => ({ drawn: 1 }),
+    });
+
+    // Off by default: the ladder reports on movement only, so a surface holding
+    // its rung reports exactly once no matter how long it runs. This is the
+    // pre-existing behaviour and it must stay it.
+    const quiet = makeScope();
+    serveRenderSurface("test", { build }, quiet.scope);
+    quiet.send(init());
+    quiet.send({ kind: "TIER_FLOOR", surface: "test", tier: 0 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(diagnostics(quiet.sent).length).toBe(1);
+
+    const ticking = makeScope();
+    serveRenderSurface("test", { build }, ticking.scope);
+    ticking.send(init({ diagnosticsIntervalMs: 100 }));
+    await vi.advanceTimersByTimeAsync(350);
+    expect(diagnostics(ticking.sent).length).toBeGreaterThan(2);
+  });
+
+  it("never refreshes faster than the settled draw cadence", async () => {
+    const { scope, send, sent } = makeScope();
+    serveRenderSurface(
+      "test",
+      {
+        build: () => ({
+          lane: "2d",
+          resize: () => undefined,
+          draw: () => undefined,
+          dispose: () => undefined,
+          detail: () => ({ drawn: 1 }),
+        }),
+      },
+      scope,
+    );
+
+    // 1 ms against a 25 ms rung. Without the floor this becomes a per-frame
+    // message stream, which is the one thing "cheap on the diagnostics cadence"
+    // was never claiming.
+    send(init({ diagnosticsIntervalMs: 1 }));
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(diagnostics(sent).length).toBeLessThanOrEqual(11);
+  });
+
+  it("survives a detail accessor that throws, and keeps reporting the lane", async () => {
+    const { scope, send, sent } = makeScope();
+    serveRenderSurface(
+      "test",
+      {
+        build: () => ({
+          lane: "webgpu",
+          resize: () => undefined,
+          draw: () => undefined,
+          dispose: () => undefined,
+          detail: () => {
+            throw new Error("counter not ready");
+          },
+        }),
+      },
+      scope,
+    );
+
+    send(init({ diagnosticsIntervalMs: 100 }));
+    await vi.advanceTimersByTimeAsync(250);
+
+    // A diagnostics accessor is not allowed to stop a surface drawing, and not
+    // allowed to stop it reporting either.
+    const last = diagnostics(sent).at(-1) as { diagnostics: { lane: string; detail?: unknown } };
+    expect(last.diagnostics.lane).toBe("webgpu");
+    expect(last.diagnostics.detail).toEqual({});
+    expect(sent.find((event) => event.kind === "FAILED")).toBeUndefined();
+  });
+
+  it("drops values a structured clone would refuse, and bounds the key count", async () => {
+    const { scope, send, sent } = makeScope();
+    serveRenderSurface(
+      "test",
+      {
+        build: () => ({
+          lane: "2d",
+          resize: () => undefined,
+          draw: () => undefined,
+          dispose: () => undefined,
+          detail: () =>
+            ({
+              good: 1,
+              alsoGood: "text",
+              flag: true,
+              nothing: null,
+              nested: { not: "cloneable-by-contract" },
+              fn: () => undefined,
+              big: 10n,
+            }) as unknown as Record<string, never>,
+        }),
+      },
+      scope,
+    );
+
+    send(init({ diagnosticsIntervalMs: 100 }));
+    await vi.advanceTimersByTimeAsync(150);
+
+    const last = diagnostics(sent).at(-1) as { diagnostics: { detail?: Record<string, unknown> } };
+    expect(last.diagnostics.detail).toEqual({ good: 1, alsoGood: "text", flag: true, nothing: null });
+  });
+
+  it("caps how many keys one publish may carry", async () => {
+    const { scope, send, sent } = makeScope();
+    serveRenderSurface(
+      "test",
+      {
+        build: () => ({
+          lane: "2d",
+          resize: () => undefined,
+          draw: () => undefined,
+          dispose: () => undefined,
+          detail: () => {
+            const record: Record<string, number> = {};
+            for (let index = 0; index < 500; index += 1) record[`k${index}`] = index;
+            return record;
+          },
+        }),
+      },
+      scope,
+    );
+
+    send(init({ diagnosticsIntervalMs: 100 }));
+    await vi.advanceTimersByTimeAsync(150);
+
+    // An unbounded record is an unbounded message on the worker-to-page path.
+    const last = diagnostics(sent).at(-1) as { diagnostics: { detail?: Record<string, unknown> } };
+    expect(Object.keys(last.diagnostics.detail ?? {}).length).toBe(32);
+  });
+
+  it("snapshots the record rather than forwarding a mutable one", async () => {
+    const { scope, send, sent } = makeScope();
+    const record = { drawn: 1 };
+    serveRenderSurface(
+      "test",
+      {
+        build: () => ({
+          lane: "2d",
+          resize: () => undefined,
+          draw: () => undefined,
+          dispose: () => undefined,
+          detail: () => record,
+        }),
+      },
+      scope,
+    );
+
+    send(init({ diagnosticsIntervalMs: 100 }));
+    await vi.advanceTimersByTimeAsync(120);
+    const first = diagnostics(sent).at(-1) as { diagnostics: { detail?: Record<string, unknown> } };
+    expect(first.diagnostics.detail).toEqual({ drawn: 1 });
+
+    // The pass is free to overwrite its own record next frame; the message
+    // already sent must keep describing the sample it was built from.
+    record.drawn = 99;
+    expect(first.diagnostics.detail).toEqual({ drawn: 1 });
+  });
+
+  it("re-arms the timer when the settled cadence moves under it", async () => {
+    // The refresh interval is floored at the settled cadence, and the settled
+    // cadence moves. A timer left armed on the rung it started on keeps
+    // reporting at the old rate, which is the one case where the floor stops
+    // describing the frame rate.
+    //
+    // 40 ms is the interval that makes this observable: rung zero paces at 25 ms
+    // so the floor is the requested 40, and rung one paces at 50 ms so the floor
+    // becomes 50. An interval that no rung changes the floor for cannot tell a
+    // re-arm from a stale arming.
+    const { scope, send, sent } = makeScope();
+    serveRenderSurface(
+      "test",
+      {
+        build: () => ({
+          lane: "2d",
+          resize: () => undefined,
+          draw: () => undefined,
+          dispose: () => undefined,
+          detail: () => ({ drawn: 1 }),
+        }),
+      },
+      scope,
+    );
+
+    send(init({ diagnosticsIntervalMs: 40 }));
+    await vi.advanceTimersByTimeAsync(45);
+    const onRungZero = diagnostics(sent).length;
+    expect(onRungZero).toBe(1);
+
+    // Pin to rung one. `TIER_FLOOR` reports once itself, so the floor moves.
+    send({ kind: "TIER_FLOOR", surface: "test", tier: 1 });
+    const afterFloor = diagnostics(sent).length;
+    expect(afterFloor).toBe(onRungZero + 1);
+
+    // A stale arming would fire again inside this window, on the old 40 ms
+    // schedule. The re-armed timer is waiting for 50.
+    await vi.advanceTimersByTimeAsync(40);
+    expect(diagnostics(sent).length).toBe(afterFloor);
+
+    // And it does report, once the new floor elapses.
+    await vi.advanceTimersByTimeAsync(30);
+    expect(diagnostics(sent).length).toBe(afterFloor + 1);
+    // One outstanding timer, not one per re-arm: a leak here posts forever.
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(2);
+  });
+
+  it("promotes up the ladder after sustained clean frames and re-arms diagnostics", async () => {
+    const { scope, send, sent } = makeScope();
+    serveRenderSurface(
+      "test",
+      {
+        build: () => ({
+          lane: "2d",
+          resize: () => undefined,
+          draw: () => undefined,
+          dispose: () => undefined,
+          detail: () => ({ drawn: 1 }),
+        }),
+      },
+      scope,
+    );
+
+    send(init({ tier: 1, diagnosticsIntervalMs: 40 }));
+    // 240 frames at 50 ms cadence = 12,000 ms
+    await vi.advanceTimersByTimeAsync(12_050);
+
+    const promoted = diagnostics(sent).filter(
+      (entry) => (entry as { diagnostics: { tier: number } }).diagnostics.tier === 0,
+    );
+    expect(promoted.length).toBeGreaterThan(0);
+  });
+
+  it("stops refreshing once the surface stops", async () => {
+    const { scope, send, sent } = makeScope();
+    serveRenderSurface(
+      "test",
+      {
+        build: () => ({
+          lane: "2d",
+          resize: () => undefined,
+          draw: () => undefined,
+          dispose: () => undefined,
+          detail: () => ({ drawn: 1 }),
+        }),
+      },
+      scope,
+    );
+
+    send(init({ diagnosticsIntervalMs: 100 }));
+    await vi.advanceTimersByTimeAsync(150);
+    const whileRunning = diagnostics(sent).length;
+
+    send({ kind: "STOP", surface: "test" });
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // An unmounted surface must not keep posting at a page nobody is reading.
+    expect(diagnostics(sent).length).toBe(whileRunning);
+  });
+});

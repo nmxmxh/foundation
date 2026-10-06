@@ -6,6 +6,7 @@ import {
   ARENA_DESCRIPTOR_STATE_CONSUMED,
   ARENA_DESCRIPTOR_STATE_FREE,
   ARENA_DESCRIPTOR_STATE_READY,
+  ARENA_DESCRIPTOR_TABLE_BYTES,
   ARENA_DESCRIPTOR_TYPE_BYTES,
   ARENA_DESCRIPTOR_TYPE_COLUMNAR_BATCH,
   ARENA_DESCRIPTOR_TYPE_COLUMNAR_FIELD,
@@ -218,6 +219,9 @@ const descriptorOffset = (id: number): number =>
 const queueSlotOffset = (slot: number): number =>
   ARENA_OFFSET_QUEUE + slot * ARENA_QUEUE_SLOT_SIZE;
 
+/** Int32 elements per descriptor. ARENA_DESCRIPTOR_SIZE is 32 bytes. */
+const DESCRIPTOR_STATE_STRIDE = ARENA_DESCRIPTOR_SIZE / 4;
+
 const alignToPage = (value: number): number =>
   Math.ceil(value / ARENA_PAGE_BYTES) * ARENA_PAGE_BYTES;
 
@@ -276,6 +280,7 @@ export const clampRuntimeArenaBytes = (bytes: number): number => {
 export class RuntimeSharedArena {
   readonly region: RuntimeMemoryRegion;
   private cachedEpochs: Int32Array | null = null;
+  private cachedDescriptorStates: Int32Array | null = null;
   get buffer(): SharedArrayBuffer { return this.region.buffer as SharedArrayBuffer; }
   get byteOffset(): number { return this.region.byteOffset; }
   private get header(): Int32Array { return this.region.ints; }
@@ -287,6 +292,36 @@ export class RuntimeSharedArena {
       this.cachedEpochs = new Int32Array(buffer, this.region.byteOffset + ARENA_OFFSET_EPOCHS, 64);
     }
     return this.cachedEpochs;
+  }
+  /**
+   * The descriptor state word of every slot, one element per descriptor slot
+   * span.
+   *
+   * A descriptor is 32 bytes, so its state word is every eighth element of this
+   * view. The view spans the whole table so a claim can be a single atomic
+   * operation on shared memory; a DataView read-modify-write would not be
+   * atomic, which is the defect this view exists to remove.
+   */
+  private get descriptorStates(): Int32Array {
+    const buffer = this.region.buffer;
+    if (this.cachedDescriptorStates?.buffer !== buffer) {
+      const offset = this.region.byteOffset + ARENA_OFFSET_DESCRIPTOR_TABLE;
+      if (offset % 4 !== 0) {
+        throw new Error("descriptor table must be 4-byte aligned for atomic claims");
+      }
+      this.cachedDescriptorStates = new Int32Array(buffer, offset, ARENA_DESCRIPTOR_COUNT * DESCRIPTOR_STATE_STRIDE);
+    }
+    return this.cachedDescriptorStates;
+  }
+  /**
+   * Int32 elements between one descriptor's state word and the next.
+   *
+   * ARENA_DESCRIPTOR_SIZE is 32 bytes, so 8. Indexing the table view by this
+   * stride is what keeps a claim pointed at the state word rather than at the
+   * offset field eight bytes into the descriptor.
+   */
+  private descriptorStateIndex(id: number): number {
+    return id * DESCRIPTOR_STATE_STRIDE;
   }
   private readonly descriptorFreeList: number[] = [];
 
@@ -304,9 +339,48 @@ export class RuntimeSharedArena {
     }
     this.region = buffer instanceof RuntimeMemoryRegion ? buffer : new RuntimeMemoryRegion(buffer, 0, buffer.byteLength);
     if (!this.region.shared) throw new Error("runtime shared arena requires shared memory");
-    this.initialize();
+    this.attach();
   }
 
+  /**
+   * Join a region without destroying an arena another instance already owns.
+   *
+   * Every worker holds its own instance over the one shared buffer, so the
+   * constructor cannot reset the region: a second instance would clear the
+   * descriptor table out from under the first one's live slabs. A region that
+   * already carries the arena magic is therefore adopted as it stands. Only an
+   * uninitialized region is initialized here.
+   *
+   * The local free-list is rebuilt from scratch either way. It is a lookup fast
+   * path, and a fresh one simply misses and falls through to the shared table.
+   */
+  private attach(): void {
+    if (this.header[ARENA_HEADER_IDX_MAGIC] !== ARENA_HEADER_MAGIC) {
+      this.initialize();
+      return;
+    }
+    if (this.header[ARENA_HEADER_IDX_SCHEMA_VERSION] !== ARENA_SCHEMA_VERSION) {
+      throw new Error(
+        `runtime shared arena schema version ${this.header[ARENA_HEADER_IDX_SCHEMA_VERSION]}, this build understands ${ARENA_SCHEMA_VERSION}`
+      );
+    }
+    this.descriptorFreeList.length = 0;
+    for (let id = ARENA_DESCRIPTOR_COUNT - 1; id >= 0; id -= 1) {
+      this.descriptorFreeList.push(id);
+    }
+  }
+
+  /**
+   * Reset the region to an empty arena and take it over.
+   *
+   * This clears the descriptor table, so call it only for a region this owner
+   * is taking over: a fresh mapping, or one whose previous owner is done with
+   * it. Calling it on a region another instance still owns destroys that
+   * instance's live slabs.
+   *
+   * The Go host does the same in reset(), and for the same reason: a reused
+   * mapping must not present a stale slab as READY to the consumer.
+   */
   initialize(): void {
     this.header[ARENA_HEADER_IDX_MAGIC] = ARENA_HEADER_MAGIC;
     this.header[ARENA_HEADER_IDX_SCHEMA_VERSION] = ARENA_SCHEMA_VERSION;
@@ -318,6 +392,16 @@ export class RuntimeSharedArena {
     Atomics.store(this.epochs, ARENA_IDX_QUEUE_HEAD, 0);
     Atomics.store(this.epochs, ARENA_IDX_QUEUE_TAIL, 0);
     Atomics.store(this.epochs, ARENA_IDX_READY, 1);
+    // Clear the descriptor table so a reused mapping cannot present a stale
+    // slab as READY, and cannot leave a slot permanently unclaimable. The Go
+    // host does the same in reset(). Each state word is stored rather than
+    // written through the view so the clear agrees with the atomic claims that
+    // read it.
+    const table = ARENA_OFFSET_DESCRIPTOR_TABLE;
+    this.bytes.fill(0, table, table + ARENA_DESCRIPTOR_TABLE_BYTES);
+    for (let id = 0; id < ARENA_DESCRIPTOR_COUNT; id += 1) {
+      Atomics.store(this.descriptorStates, this.descriptorStateIndex(id), ARENA_DESCRIPTOR_STATE_FREE);
+    }
     this.descriptorFreeList.length = 0;
     for (let id = ARENA_DESCRIPTOR_COUNT - 1; id >= 0; id -= 1) {
       this.descriptorFreeList.push(id);
@@ -513,7 +597,11 @@ export class RuntimeSharedArena {
     if (!options.force && state === ARENA_DESCRIPTOR_STATE_READY) {
       throw new Error(`runtime arena descriptor ${descriptorId} is ready and must be consumed before release`);
     }
-    this.view.setUint32(descriptorTableOffset, ARENA_DESCRIPTOR_STATE_FREE, true);
+    // FREE is published last, and with a store rather than a compare-and-swap:
+    // every other field is already written, so a producer that claims the slot
+    // on this store reads a descriptor whose offset and capacity are already
+    // the ones this release kept for reuse. Publishing it earlier would let a
+    // claim observe the old length and flags.
     this.view.setUint32(descriptorTableOffset + 8, 0, true);
     this.view.setUint32(descriptorTableOffset + 20, 0, true);
     this.view.setUint32(
@@ -521,6 +609,7 @@ export class RuntimeSharedArena {
       this.view.getUint32(descriptorTableOffset + 28, true) + 1,
       true
     );
+    Atomics.store(this.descriptorStates, this.descriptorStateIndex(descriptorId), ARENA_DESCRIPTOR_STATE_FREE);
     this.descriptorFreeList.push(descriptorId);
     Atomics.add(this.epochs, ARENA_IDX_DESCRIPTOR_EPOCH, 1);
   }
@@ -807,20 +896,56 @@ export class RuntimeSharedArena {
     };
   }
 
+  /**
+   * Take exclusive ownership of one descriptor slot in the shared table.
+   *
+   * The descriptor table lives in a SharedArrayBuffer, so several producers
+   * may allocate from one arena. A claim is therefore published with a
+   * compare-and-swap on the state word: reading the slot, finding it FREE, and
+   * returning the id leaves the slot FREE until the caller writes the
+   * descriptor, and a second producer that reads it in that window is handed
+   * the same id and silently overwrites the first slab.
+   *
+   * Moving FREE to ALLOCATED in the same atomic step closes the window. The
+   * caller rewrites the remaining fields, which is safe because the slot is
+   * already reserved and no other producer can observe it as claimable.
+   *
+   * The local free-list is a fast path, not a guarantee. It is per-instance, so
+   * it cannot see what another producer released, and every claim is
+   * revalidated against the shared table before it is taken.
+   */
   private reserveDescriptor(): number {
     while (this.descriptorFreeList.length > 0) {
       const id = this.descriptorFreeList.pop() as number;
-      if (this.view.getUint32(descriptorOffset(id), true) === ARENA_DESCRIPTOR_STATE_FREE) {
+      if (this.claimDescriptorSlot(id)) {
         return id;
       }
     }
     for (let id = 0; id < ARENA_DESCRIPTOR_COUNT; id += 1) {
-      if (this.readDescriptor(id).state === ARENA_DESCRIPTOR_STATE_FREE) {
+      if (this.claimDescriptorSlot(id)) {
         return id;
       }
     }
     Atomics.add(this.epochs, ARENA_IDX_BACKPRESSURE, 1);
     throw new Error("runtime shared arena descriptor table is full");
+  }
+
+  /**
+   * Compare-and-swap a descriptor slot from FREE to ALLOCATED.
+   *
+   * Returns false when another producer holds the slot. The swap is the claim,
+   * so no separate write is needed to publish ownership.
+   */
+  private claimDescriptorSlot(id: number): boolean {
+    return (
+      Atomics.compareExchange(
+        this.descriptorStates,
+        this.descriptorStateIndex(id),
+        ARENA_DESCRIPTOR_STATE_FREE,
+        ARENA_DESCRIPTOR_STATE_ALLOCATED
+      ) ===
+      ARENA_DESCRIPTOR_STATE_FREE
+    );
   }
 
   private dequeueDescriptorReadyIdsInto(limit: number, target: number[]): RuntimeArenaDescriptorIdDrain {

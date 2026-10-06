@@ -1,6 +1,8 @@
 package whatsappx
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"strings"
 )
@@ -71,14 +73,11 @@ func NewQuickReply(to, bodyText string, buttons ...string) Message {
 		if i >= 3 {
 			break // Meta limit: maximum 3 buttons per interactive button message
 		}
-		truncated := title
-		if len(truncated) > 20 {
-			truncated = truncated[:20] // Meta limit: max 20 chars
-		}
+		truncated := truncateString(title, 20)
 		interactiveButtons = append(interactiveButtons, InteractiveButton{
 			Type: "reply",
 			Reply: ButtonReply{
-				ID:    fmt.Sprintf("btn_%d", i+1),
+				ID:    newActionID(),
 				Title: truncated,
 			},
 		})
@@ -103,14 +102,14 @@ func NewConfirmationPrompt(to, headerText, bodyText, confirmTitle, cancelTitle s
 		{
 			Type: "reply",
 			Reply: ButtonReply{
-				ID:    "btn_confirm",
+				ID:    newActionID(),
 				Title: truncateString(confirmTitle, 20),
 			},
 		},
 		{
 			Type: "reply",
 			Reply: ButtonReply{
-				ID:    "btn_cancel",
+				ID:    newActionID(),
 				Title: truncateString(cancelTitle, 20),
 			},
 		},
@@ -219,7 +218,7 @@ func NewSurveyFlow(to, flowID, flowToken, surveyTitle, surveyDesc string) Messag
 
 // NewContactCard creates a contact sharing message.
 func NewContactCard(to, formattedName, phone, email, company, title string) Message {
-	return Message{
+	m := Message{
 		To:   to,
 		Type: MessageTypeContacts,
 		Contacts: []ContactCard{
@@ -238,6 +237,13 @@ func NewContactCard(to, formattedName, phone, email, company, title string) Mess
 			},
 		},
 	}
+	if phone == "" {
+		m.Contacts[0].Phones = nil
+	}
+	if email == "" {
+		m.Contacts[0].Emails = nil
+	}
+	return m
 }
 
 // NewOTPPreset creates a secure one-time password message using an authentication template.
@@ -317,8 +323,27 @@ func NewLocation(to string, lat, long float64, name, address string) Message {
 }
 
 func truncateString(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	return s[:maxLen]
+	return string(runes[:maxLen])
+}
+
+// NewQuickReplyActions accepts opaque tokens already bound by the application to
+// a tenant, recipient, conversation, action version and expiry. Persist that binding
+// before Send; verify it atomically when handling the reply.
+func NewQuickReplyActions(to, body string, actions ...ButtonReply) (Message, error) {
+	m := Message{To: to, Type: MessageTypeInteractive, Interactive: &InteractiveBody{Type: "button", Body: InteractiveText{Text: body}}}
+	for _, a := range actions {
+		m.Interactive.Action.Buttons = append(m.Interactive.Action.Buttons, InteractiveButton{Type: "reply", Reply: a})
+	}
+	return m, m.Validate()
+}
+func newActionID() string {
+	var token [16]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(token[:])
 }

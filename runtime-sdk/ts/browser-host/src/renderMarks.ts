@@ -33,6 +33,23 @@ export interface LaneFacts {
   fallback?: boolean;
   /** Reason for state transition or fallback. */
   reason?: string;
+  /**
+   * Identifier of the read that caused this pass, when there was one.
+   *
+   * Declared here rather than carried as an undeclared extra field, because an
+   * extra field on a closed interface works only while nobody reorders the
+   * interface or projects the facts before publishing them. It then disappears
+   * and the marker still looks complete.
+   *
+   * Deliberately not folded into `reason`. `reason` answers why the lane
+   * changed, is already spoken for, and is the field a reader has to trust
+   * during an incident — the reader least able to guess which half of a string
+   * is an identifier. Two meanings in one string is worse than a missing field.
+   *
+   * `null` and absent mean the same thing: this pass ran on a fixture, or with
+   * no read behind it. Neither is an error.
+   */
+  correlation?: string | null;
 }
 
 const snapshot: Record<string, LaneFacts & { at: number }> = {};

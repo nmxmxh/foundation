@@ -46,6 +46,11 @@ const arenaOffsetDescriptorTable :UInt32 = 4096;
 const arenaDescriptorSize :UInt32 = 32;
 const arenaDescriptorCount :UInt32 = 512;
 const arenaDescriptorTableBytes :UInt32 = 16384;
+# Descriptor state transitions must be published atomically. The state word is
+# the first u32 of a 32-byte entry, so a claim is a compare-and-swap from
+# arenaDescriptorStateFree to arenaDescriptorStateAllocated. Reading a slot,
+# finding it free, and claiming it later is a race: two producers sharing one
+# shared arena both read the same slot and the second overwrites the first slab.
 const arenaDescriptorStateFree :UInt32 = 0;
 const arenaDescriptorStateAllocated :UInt32 = 1;
 const arenaDescriptorStateReady :UInt32 = 2;

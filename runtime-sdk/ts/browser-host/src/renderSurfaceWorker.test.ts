@@ -18,7 +18,7 @@ const makeScope = () => {
   return { scope, sent, send, listenerCount: () => listeners.size };
 };
 
-const init = (surface: string): RenderSurfaceCommand<unknown> => ({
+const init = (surface: string): Extract<RenderSurfaceCommand<unknown>, { kind: "INIT" }> => ({
   kind: "INIT",
   surface,
   canvas: {} as OffscreenCanvas,
@@ -371,5 +371,30 @@ describe("one worker serving several surfaces", () => {
 
     // Only the surface that was initialised is drawing.
     expect(new Set(drawn)).toEqual(new Set(["a"]));
+  });
+
+  it("forwards pass detail to diagnostics on a shared worker", async () => {
+    const { scope, send, sent } = makeScope();
+    const worker = createRenderSurfaceWorker({ acquire: () => ({ device: "shared" }), scope });
+
+    worker.serve("a", {
+      build: () => ({
+        ...pass(),
+        detail: () => ({ drawCalls: 42, actorsCulled: 5 }),
+      }),
+    });
+    send({ ...init("a"), diagnosticsIntervalMs: 100 });
+    await vi.advanceTimersByTimeAsync(150);
+
+    const diagnosticsEvents = sent.filter((e) => e.kind === "DIAGNOSTICS") as Array<{
+      kind: "DIAGNOSTICS";
+      surface: string;
+      diagnostics: { detail?: Record<string, unknown> };
+    }>;
+    expect(diagnosticsEvents.length).toBeGreaterThan(0);
+    expect(diagnosticsEvents.at(-1)?.diagnostics.detail).toEqual({
+      drawCalls: 42,
+      actorsCulled: 5,
+    });
   });
 });

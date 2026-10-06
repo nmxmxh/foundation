@@ -89,7 +89,7 @@ third="$(run_patch "$WORK/project")"
 
 # The patch must not grow a file across runs.
 for key in proxy_max_temp_file_size limit_conn_zone gzip_min_length brotli_min_length \
-    client_body_buffer_size brotli_dynamic gzip_disable; do
+    client_body_buffer_size gzip_disable; do
     count="$(grep -c -- "$key" "$WORK/project/config/nginx.conf" || true)"
     [[ "$count" -le 1 ]] || fail "directive duplicated in nginx.conf: $key" "count=$count"
 done

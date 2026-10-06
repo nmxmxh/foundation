@@ -273,6 +273,8 @@ export const createRenderSurfaceWorker = <TShared>(
             draw: (state: unknown, frame: RenderSurfaceFrame) => pass.draw(state, frame),
             // Forwarded, or a shared surface loses GPU backpressure without a sound.
             settled: pass.settled ? () => pass.settled!() : undefined,
+            // Forwarded, or a shared surface loses its detail slot without a sound.
+            detail: pass.detail ? () => pass.detail!() : undefined,
             dispose: () => {
               if (retired) return;
               retired = true;
