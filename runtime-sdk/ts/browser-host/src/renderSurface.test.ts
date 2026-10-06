@@ -6,6 +6,7 @@ import {
   type RenderSurfaceCommand,
   type RenderSurfaceEvent,
 } from "./renderSurface";
+import type { RenderSurfaceDiagnostics } from "./types";
 
 describe("render surface host", () => {
   const originalOffscreen = globalThis.OffscreenCanvas;
@@ -676,5 +677,122 @@ describe("prewarming a surface", () => {
     expect(
       prewarmRenderSurface({ surface: "figure", createWorker: () => makeWorker().worker }),
     ).toBeNull();
+  });
+});
+
+describe("render surface host diagnostics detail", () => {
+  const originalOffscreen = globalThis.OffscreenCanvas;
+  const originalWorker = globalThis.Worker;
+  const originalCanvas = globalThis.HTMLCanvasElement;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    (globalThis as unknown as { OffscreenCanvas: unknown }).OffscreenCanvas = class MockOffscreen {};
+    (globalThis as unknown as { Worker: unknown }).Worker = class MockWorker {};
+    (globalThis as unknown as { HTMLCanvasElement: unknown }).HTMLCanvasElement = class MockCanvas {
+      transferControlToOffscreen() {
+        return new (globalThis as unknown as { OffscreenCanvas: new () => OffscreenCanvas }).OffscreenCanvas();
+      }
+    };
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    (globalThis as unknown as { OffscreenCanvas: unknown }).OffscreenCanvas = originalOffscreen;
+    (globalThis as unknown as { Worker: unknown }).Worker = originalWorker;
+    (globalThis as unknown as { HTMLCanvasElement: unknown }).HTMLCanvasElement = originalCanvas;
+  });
+
+  it("forwards diagnosticsIntervalMs to the worker and relays detail to the page", () => {
+    // Two hops, and either one dropping silently leaves the numbers invisible:
+    // the host option has to reach INIT, and the worker's diagnostics object has
+    // to reach onDiagnostics with the slot intact.
+    const sentCommands: RenderSurfaceCommand<unknown>[] = [];
+    const listeners: Array<(event: MessageEvent) => void> = [];
+    const mockWorker = {
+      postMessage: vi.fn((command: RenderSurfaceCommand<unknown>) => sentCommands.push(command)),
+      addEventListener: vi.fn((_type: string, handler: (event: MessageEvent) => void) => {
+        listeners.push(handler);
+      }),
+      removeEventListener: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as Worker;
+
+    const canvas = {
+      clientWidth: 400,
+      clientHeight: 300,
+      transferControlToOffscreen: () => ({} as OffscreenCanvas),
+    } as unknown as HTMLCanvasElement;
+
+    const record = { actorsProjected: 12, actorsCulled: 3 };
+    const seen: RenderSurfaceDiagnostics[] = [];
+
+    const host = createRenderSurfaceHost({
+      canvas,
+      surface: "detail-host",
+      tiers: [{ scale: 1, cadenceMs: 25 }],
+      createWorker: () => mockWorker,
+      diagnosticsIntervalMs: 250,
+      onDiagnostics: (diagnostics) => seen.push(diagnostics),
+    });
+
+    // Hop one: the option reached the worker.
+    const init = sentCommands[0] as Extract<RenderSurfaceCommand<unknown>, { kind: "INIT" }>;
+    expect(init.kind).toBe("INIT");
+    expect(init.diagnosticsIntervalMs).toBe(250);
+
+    // Hop two: what the worker publishes reaches the page with the slot kept.
+    for (const handler of listeners) {
+      handler({
+      data: {
+        kind: "DIAGNOSTICS",
+        surface: "detail-host",
+        diagnostics: {
+          surface: "detail-host",
+          mode: "worker",
+          lane: "webgpu",
+          tier: 0,
+          cadenceMs: 25,
+          scale: 1,
+          visible: true,
+          issues: [],
+          detail: record,
+        },
+      },
+      } as MessageEvent);
+    }
+
+    expect(seen.at(-1)?.detail).toEqual(record);
+    host.dispose();
+  });
+
+  it("leaves the interval undefined when the caller sets nothing", () => {
+    // Absent, not zero: an older host and a new worker still agree, and a
+    // hand-built command keeps its pre-existing meaning.
+    const sentCommands: RenderSurfaceCommand<unknown>[] = [];
+    const mockWorker = {
+      postMessage: vi.fn((command: RenderSurfaceCommand<unknown>) => sentCommands.push(command)),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      terminate: vi.fn(),
+    } as unknown as Worker;
+
+    const canvas = {
+      clientWidth: 100,
+      clientHeight: 100,
+      transferControlToOffscreen: () => ({} as OffscreenCanvas),
+    } as unknown as HTMLCanvasElement;
+
+    const host = createRenderSurfaceHost({
+      canvas,
+      surface: "no-interval",
+      tiers: [{ scale: 1, cadenceMs: 25 }],
+      createWorker: () => mockWorker,
+    });
+
+    const init = sentCommands[0] as Extract<RenderSurfaceCommand<unknown>, { kind: "INIT" }>;
+    expect(init.diagnosticsIntervalMs).toBeUndefined();
+    host.dispose();
   });
 });

@@ -8,7 +8,7 @@ import (
 )
 
 func TestWhatsAppAdapter(t *testing.T) {
-	c, _ := NewClient(Config{
+	c, _ := NewClient(Config{GraphAPIVersion: "v21.0",
 		PhoneNumberID: "123",
 		AccessToken:   "tok",
 		AppSecret:     "sec",

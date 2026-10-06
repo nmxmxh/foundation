@@ -139,6 +139,17 @@ export type RenderSurfaceQualityTier = {
   detail?: number;
 };
 
+/**
+ * Values a surface may publish as per-frame detail.
+ *
+ * Scalars only, and deliberately so. This crosses a worker boundary by
+ * structured clone, so anything reachable has to be cloneable; a number, a
+ * string, a boolean and `null` all are, and none of them can carry a reference
+ * that outlives the frame. Free text at this rate is how a diagnostics channel
+ * becomes an accidental log transport, so the type will not accept it.
+ */
+export type RenderSurfaceDetailValue = string | number | boolean | null;
+
 /** What a render surface reports about itself. Low-cardinality by construction. */
 export type RenderSurfaceDiagnostics = {
   surface: string;
@@ -151,4 +162,21 @@ export type RenderSurfaceDiagnostics = {
   visible: boolean;
   /** Capability names that were missing, if any. Never free text at scale. */
   issues: readonly string[];
+  /**
+   * Per-frame numbers owned by the application, not by Foundation.
+   *
+   * Everything above this field is Foundation's: it describes the lane, and it
+   * is low-cardinality because Core owns it and cannot know what a surface
+   * draws. Nothing above it can carry what a *particular* surface measured —
+   * actors projected, actors culled, draw calls issued — so a surface that
+   * computed those numbers could only keep them, and a page-side reader had no
+   * channel to reach them. That is what this field is for.
+   *
+   * Read it as the latest published sample, not as a per-frame stream. It
+   * arrives on the diagnostics cadence, and a pass publishes it by overwriting
+   * a record rather than appending to one, so nothing accumulates. Publish a
+   * name and a number; see `RenderSurfaceDetailValue` for why that is the whole
+   * vocabulary.
+   */
+  detail?: Readonly<Record<string, RenderSurfaceDetailValue>>;
 };

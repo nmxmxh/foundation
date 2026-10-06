@@ -335,6 +335,76 @@ describe("RuntimeSharedArena", () => {
     expect(arena.readDescriptor(descriptor.id).state).toBe(ARENA_DESCRIPTOR_STATE_FREE);
   });
 
+  it("claims a descriptor id exactly once when several producers share one arena", () => {
+    // The arena is a SharedArrayBuffer, so the descriptor table is shared state.
+    // reserveDescriptor() used to read a slot, find it FREE, and return the id
+    // while leaving the slot FREE until allocate() wrote the descriptor. Two
+    // producers that both read the same slot as FREE were both handed the same
+    // id, and the second silently overwrote the first producer's slab.
+    //
+    // A data race cannot be provoked from one JavaScript thread, so this
+    // reproduces the window instead of the race: claim an id through the first
+    // producer without letting it finish, then let a second producer allocate.
+    // If the claim is published when it is taken, the second producer must skip
+    // that slot. reserveDescriptor is private, so it is reached through a cast:
+    // the test needs the interleaving point, not the API.
+    const buffer = new SharedArrayBuffer(ARENA_HEAVY_BYTES);
+    const [first, second] = [new RuntimeSharedArena(buffer), new RuntimeSharedArena(buffer)];
+
+    const claimed = (first as unknown as { reserveDescriptor(): number }).reserveDescriptor();
+    const next = second.allocate(4096);
+
+    expect(next.id).not.toBe(claimed);
+  });
+
+  it("releases a descriptor to every producer when they share one arena", () => {
+    // The mirror of the claim test: a descriptor freed by the producer that
+    // allocated it must become claimable again by any other producer. This fails
+    // if release is not published atomically, because the next claim spins on a
+    // state word that never became visible as FREE.
+    const buffer = new SharedArrayBuffer(ARENA_HEAVY_BYTES);
+    const [owner, other] = [new RuntimeSharedArena(buffer), new RuntimeSharedArena(buffer)];
+
+    for (let round = 0; round < 512; round += 1) {
+      const descriptor = owner.allocate(4096);
+      owner.releaseDescriptorById(descriptor.id, { force: true });
+      other.allocate(4096);
+    }
+
+    expect(other.invariantSnapshot().invalidDescriptors).toBe(0);
+  });
+
+  it("keeps another instance's live descriptors when a second instance attaches", () => {
+    // Each worker holds its own instance over the one shared buffer, so
+    // constructing an instance must not reset the region. It did: the
+    // constructor cleared the descriptor table, so the second instance
+    // destroyed the first one's live slabs and the owner read a freed slot.
+    const buffer = new SharedArrayBuffer(ARENA_HEAVY_BYTES);
+    const owner = new RuntimeSharedArena(buffer);
+    const live = owner.allocate(4096);
+    owner.writeSlabReady(live.id, new Uint8Array([1, 2, 3, 4]));
+
+    const joined = new RuntimeSharedArena(buffer);
+
+    expect(joined.readDescriptor(live.id).state).toBe(ARENA_DESCRIPTOR_STATE_READY);
+    expect(joined.readSlabView(live.id)).toEqual(new Uint8Array([1, 2, 3, 4]));
+  });
+
+  it("resets a region on an explicit initialize", () => {
+    // initialize() is the takeover path, so it does clear. A region whose
+    // previous owner is finished must not keep presenting a stale slab as
+    // READY to the next consumer.
+    const buffer = new SharedArrayBuffer(ARENA_HEAVY_BYTES);
+    const arena = new RuntimeSharedArena(buffer);
+    const stale = arena.allocate(4096);
+    arena.writeSlabReady(stale.id, new Uint8Array([9, 9, 9, 9]));
+
+    arena.initialize();
+
+    expect(arena.readDescriptor(stale.id).state).toBe(ARENA_DESCRIPTOR_STATE_FREE);
+    expect(arena.invariantSnapshot().invalidDescriptors).toBe(0);
+  });
+
   it("returns a 4KB control buffer even when shared arena mode is off", () => {
     const selection = negotiateRuntimeMemory({ sharedMemory: "off" });
     expect(selection.controlBuffer.byteLength).toBe(BUFFER_TOTAL_BYTES);

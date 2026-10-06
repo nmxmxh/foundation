@@ -61,6 +61,55 @@ Measured on real hardware: 101 frames queued and seconds of latency while the lo
 - The loop stops waiting after 2 s, so a promise that never resolves cannot freeze the surface.
 - WebGL2 fence completion is verified in the lab. Production backpressure still requires a pass-owned `settled` callback.
 
+### Reporting from a pass
+
+`draw` returns `void` by design. It is a fire-and-forget call on the frame's hot
+path, and a pass that returned a value would make every frame allocate and every
+caller decide what to do with it.
+
+A pass therefore has no way to report what it measured, and the diagnostics
+channel had no slot for it. Numbers a surface computes stayed inside the worker,
+where a page-side reader cannot reach them.
+
+- `RenderSurfaceDiagnostics.detail` is the application-owned slot.
+- `RenderSurfacePass.detail` is the optional accessor that fills it.
+- Both are optional. A pass that sets neither costs nothing and behaves exactly
+  as before.
+
+`detail` carries names, numbers, booleans and `null` only. Free text at frame
+rate turns a diagnostics channel into a log transport, so the type refuses it.
+The worker copies the record, drops values a structured clone would refuse, and
+keeps at most 32 keys, so a misbehaving accessor cannot grow a message without
+bound. An accessor that throws is swallowed: diagnostics never stop a surface
+from drawing or from reporting.
+
+### Diagnostics cadence
+
+By default the worker reports **on ladder movement only**: a rung change, or a
+new floor. That is the right frequency for a low-cardinality lane summary.
+
+`detail` is per-frame information, so it needs a clock rather than an event:
+
+- `diagnosticsIntervalMs` on the host asks the worker for periodic reports.
+- It is **off by default**. A host that sets nothing sees no extra messages.
+- The interval is floored at the settled cadence, so it can never become a
+  per-frame stream. `diagnosticsIntervalMs: 1` against a 25 ms rung refreshes at
+  25 ms.
+- The floor is re-read whenever the settled cadence moves, including a
+  `TIER_FLOOR` change, so a pinned surface does not keep reporting at the rate of
+  the rung it was pinned away from.
+- The timer is cleared on stop, so an unmounted surface stops posting.
+
+The cost per interval is one `postMessage` and one structured clone. It is not a
+redraw, and it does not touch the ladder.
+
+### Render marks and correlation
+
+`markLane` publishes lane facts to `performance.mark`, in-memory snapshots, and `window.__ovasabiRender`.
+`LaneFacts.correlation` holds an optional correlation identifier for the state read that caused the pass.
+The field is `null` or omitted when a pass executes without a backing state read.
+`correlation` remains distinct from `reason` to prevent overloaded strings during incident investigations.
+
 ## Graceful Degradation
 
 `OffscreenCanvas` and `transferControlToOffscreen` are one-way browser operations.

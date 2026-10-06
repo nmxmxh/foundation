@@ -122,6 +122,23 @@ export type RenderSurfaceHostOptions<TState> = {
   /** Diagnostics from the worker: lane taken, rung settled on, cadence held. */
   onDiagnostics?: (diagnostics: RenderSurfaceDiagnostics) => void;
   /**
+   * Ask the worker for fresh diagnostics on a timer, in milliseconds.
+   *
+   * Off by default, and the default is the whole point. Without it the worker
+   * reports only when the ladder moves — a rung change, or a new floor — which
+   * is the right frequency for a low-cardinality lane summary and the wrong one
+   * for anything per-frame. Set this when a surface publishes `detail` and a
+   * reader needs it to be current; leave it alone otherwise and the channel
+   * carries exactly what it always did.
+   *
+   * Every interval issues one more message per window on the worker-to-page
+   * path, so the cost is a postMessage and a structured clone, not a redraw.
+   * Clamped to at least one frame's worth of the settled cadence, so a value
+   * smaller than the draw interval cannot turn this into a per-frame stream —
+   * that is the case where "cheap on the diagnostics cadence" stops being true.
+   */
+  diagnosticsIntervalMs?: number;
+  /**
    * A surface that could not be built.
    *
    * Separate from `onDiagnostics` because it is not a quality report, it is a
@@ -223,6 +240,12 @@ export type RenderSurfaceCommand<TState> =
       canvas: OffscreenCanvas;
       requirements?: RenderSurfaceRequirements;
       tiers: readonly RenderSurfaceQualityTier[];
+      /**
+       * Milliseconds between diagnostics refreshes. See
+       * `RenderSurfaceHostOptions.diagnosticsIntervalMs`. Optional, and absent
+       * means the pre-existing behaviour: report on ladder movement only.
+       */
+      diagnosticsIntervalMs?: number;
       /**
        * Which rung to open on. Chosen by the host, because the signals it is
        * chosen from — `matchMedia` in particular — do not exist in a worker.
@@ -482,6 +505,7 @@ export const createRenderSurfaceHost = <TState,>(
       requirements,
       tiers,
       tier: openingTier,
+      diagnosticsIntervalMs: options.diagnosticsIntervalMs,
       stateBuffer: stateChannel?.buffer,
       ratio: ratio(),
       width,
