@@ -98,9 +98,9 @@ select case
 end
 $$;
 
-create index if not exists river_job_args_index on river_job using gin (args);
+-- NOTE: The baseline excludes GIN indexes to limit queue write costs.
+-- Inspect consumer predicates and query plans before removing existing indexes.
 create index if not exists river_job_kind on river_job (kind);
-create index if not exists river_job_metadata_index on river_job using gin (metadata);
 create index if not exists river_job_prioritized_fetching_index on river_job (state, priority, scheduled_at, id);
 create index if not exists river_job_state_and_finalized_at_index on river_job (state, finalized_at)
 where finalized_at is not null;

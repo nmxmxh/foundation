@@ -2796,6 +2796,7 @@ func initWorkerEngine(ctx context.Context, projected *hermes.ProjectedRuntimeSto
 	}
 
 	riverCfg := &river.Config{}
+	workerkit.ApplyRetentionPolicy(riverCfg, workerkit.RetentionPolicyForTier(workerkit.RetentionTierHighFrequency))
 	if registered {
 		workers := river.NewWorkers()
 		if err := engine.AddToWorkers(workers); err != nil {
@@ -2847,6 +2848,16 @@ GOEOF
 }
 
 # @since 0.0.1
+patch_river_retention_config() {
+  local changed
+  changed="$(python3 "$foundation_root/tooling/scripts/river_retention_patch.py" "$target")" || return 1
+  while IFS= read -r file; do
+    [[ -n "$file" ]] && log_patch "River retention configuration: $file"
+  done <<< "$changed"
+  return 0
+}
+
+# @since 0.0.1
 patch_compose_stop_grace_period() {
   local compose="$target/docker-compose.yml"
   [[ -f "$compose" ]] || return 0
@@ -2890,7 +2901,7 @@ patch_river_table_readiness_gate() {
 
   if [[ -f "$main" ]] && ! grep -Fq 'WaitForRiverTableReady' "$main" && grep -Fq 'riverClient.Start(ctx)' "$main"; then
     local logvar
-    logvar="$(perl -ne 'if (/(\w+)\.Error\("failed to start River client"/) { print $1; exit }' "$main")"
+    logvar="$(perl -ne 'if (/(\w+)\.Error(?:Context)?\((?:ctx,\s*)?"failed to start River client"/) { print $1; exit }' "$main")"
     [[ -n "$logvar" ]] || logvar="log"
     export LOGVAR="$logvar"
     export RIVERPOOL="$riverpool"
@@ -3389,6 +3400,21 @@ patch_startup_state_store_cache_and_river_lane() {
   [[ -f "$file" ]] || return 0
   grep -Fq 'server-kit/go/hermes"' "$file" || return 0
 
+  # Require configuration and supported aliases before changing startup references.
+  local cfg_file="$target/internal/config/config.go"
+  local field
+  for field in StateStore StateStoreCacheDriver StateStoreCacheTTL StateStoreCacheNegativeTTL RedisPrefix; do
+    if ! grep -Eq "^[[:space:]]*$field[[:space:]]+" "$cfg_file"; then
+      printf '[PATCH] manual step: startup cache migration requires config.%s\n' "$field"
+      return 0
+    fi
+  done
+  if ! grep -Eq '^[[:space:]]*"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"' "$file" \
+    || ! grep -Eq '^[[:space:]]*rediskit[[:space:]]+"github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"' "$file"; then
+    printf '[PATCH] manual step: startup cache migration requires supported database and Redis aliases\n'
+    return 0
+  fi
+
   if ! grep -Fq 'server-kit/go/cache"' "$file"; then
     replace_in_file "$file" '	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"' '	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"' "startup imports cache package"
@@ -3463,6 +3489,7 @@ patch_startup_state_store_cache_and_river_lane() {
 	storeOpts := hermes.RuntimeStoreOptions{' "startup wraps state store with cache layer"
   fi
 
+  if grep -Fq ':= wrapCachedStateStore(ctx, cfg, db, redisClient, log)' "$file"; then
   replace_in_file "$file" '			db.Close()
 			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", snapErr)' '			wrapped.Close()
 			return nil, nil, fmt.Errorf("init hermes snapshot store: %w", snapErr)' "startup closes wrapped store on snapshot error"
@@ -3477,6 +3504,7 @@ patch_startup_state_store_cache_and_river_lane() {
 		db.Close()' 'projected, err := hermes.WrapRuntimeStore(wrapped, storeOpts)
 	if err != nil {
 		wrapped.Close()' "startup projects over cached store"
+  fi
   fi
 
   if ! grep -Fq 'func wrapCachedStateStore' "$file"; then
@@ -3682,6 +3710,7 @@ patch_startup_projection_warming
 patch_startup_envelope_fallback
 patch_startup_snapshot_shadow
 patch_worker_engine_canonical
+patch_river_retention_config
 patch_river_table_readiness_gate
 patch_config_state_store_cache
 patch_config_weak_jwt_denylist

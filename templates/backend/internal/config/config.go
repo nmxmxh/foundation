@@ -48,10 +48,12 @@ type Config struct {
 	// RiverDirectURL points River at a session-mode Postgres endpoint that
 	// bypasses PgBouncer transaction pooling, restoring LISTEN/NOTIFY wakes.
 	// Empty reuses DATABASE_URL for deployments without a pooling proxy.
-	RiverDirectURL      string
-	HermesMaxRecords    int
-	HermesMaxBytes      int64
-	HermesIndexedFields []string
+	RiverDirectURL             string
+	RiverRetentionTier         string
+	RiverCompletedJobRetention time.Duration
+	HermesMaxRecords           int
+	HermesMaxBytes             int64
+	HermesIndexedFields        []string
 	// HermesWarmScopes OPTIONALLY pre-warms projection scopes at startup to cut
 	// first-request latency. It is NOT required for correctness: the projection
 	// gateway lazy-warms any cold scope on first read (rebuild from the record
@@ -145,6 +147,8 @@ func Load() (*Config, error) {
 		DBHotReadTimeout:                    getEnvDuration("DB_HOT_READ_TIMEOUT", 50*time.Millisecond),
 		DBShardCount:                        getEnvInt("DB_SHARD_COUNT", 1),
 		RiverDirectURL:                      getEnv("RIVER_DIRECT_URL", ""),
+		RiverRetentionTier:                  getEnv("RIVER_RETENTION_TIER", "high_frequency"),
+		RiverCompletedJobRetention:          getEnvDuration("RIVER_COMPLETED_JOB_RETENTION", 0),
 		StateStoreCacheDriver:               strings.ToLower(getEnv("STATE_STORE_CACHE", "off")),
 		StateStoreCacheTTL:                  getEnvDuration("STATE_STORE_CACHE_TTL", time.Minute),
 		StateStoreCacheNegativeTTL:          getEnvDuration("STATE_STORE_CACHE_NEG_TTL", 10*time.Second),

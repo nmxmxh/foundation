@@ -124,6 +124,24 @@ Evidence types:
    log.
 8. Research evidence: official docs, standards, papers, or vendor guides mapped
    to a concrete Foundation lane.
+9. Index utilization & swap audit: bounded profiler (`deep_resource_profiler.py`
+   or `scripts/db_diagnostics.sh`) measuring unused indexes, sequential scan to
+   index scan ratios, cache hit ratios, temp disk spills, and River queue retention.
+
+### Diagnostic Hygiene Standard
+
+Execute bounded resource profiling before and after database-affecting changes when a database is available.
+When service access is unavailable, record that limitation and preserve the validation requirement.
+
+1. **Non-Mutating Execution**: Use read-only transactions with a five-second statement timeout and a one-second lock timeout.
+   Queries still consume resources and acquire normal read locks.
+2. **Index Utilization Check**: Inspect zero-scan indexes against the observation window and query plans.
+   Do not infer that an index is unnecessary from counters alone.
+3. **Cache & Memory Verification**: Compare cache measurements with workload budgets and the statistics reset time.
+   Estimate available cache from shared buffers, operating system cache, and concurrent workloads.
+   Do not enforce a universal hit ratio or memory ratio.
+4. **Queue Retention Audit**: Inspect completed rows, arrival rate, finalized age, and configured retention together.
+   A completed count alone does not prove a missing retention policy.
 
 Benchmarks prove only the lane they measure. A memory benchmark does not prove
 Postgres/Redis behavior, a kernel-only GPU timing does not prove user-visible

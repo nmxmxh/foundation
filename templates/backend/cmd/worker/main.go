@@ -108,12 +108,18 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize River Client
-	riverClient, err := river.NewClient(riverpgxv5.New(riverPool), &river.Config{
+	// Initialize River Client with tier-aware retention defaults
+	riverCfg := &river.Config{
 		Workers:      workers,
 		Queues:       engine.RiverQueueConfig(worker.DefaultQueueConfig(cfg)),
 		PeriodicJobs: worker.PeriodicJobs(cfg),
-	})
+	}
+	workerkit.ApplyRetentionPolicy(riverCfg, workerkit.RetentionPolicyForTier(workerkit.RetentionTier(cfg.RiverRetentionTier)))
+	if cfg.RiverCompletedJobRetention > 0 {
+		riverCfg.CompletedJobRetentionPeriod = cfg.RiverCompletedJobRetention
+	}
+
+	riverClient, err := river.NewClient(riverpgxv5.New(riverPool), riverCfg)
 	if err != nil {
 		log.Error("failed to initialize River client", "error", err)
 		os.Exit(1)

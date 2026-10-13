@@ -179,9 +179,9 @@ END
 $$;
 
 -- River job indexes
-CREATE INDEX river_job_args_index ON river_job USING GIN (args);
+-- NOTE: The baseline excludes GIN indexes to limit queue write costs.
+-- Inspect consumer predicates and query plans before removing existing indexes.
 CREATE INDEX river_job_kind ON river_job (kind);
-CREATE INDEX river_job_metadata_index ON river_job USING GIN (metadata);
 CREATE INDEX river_job_prioritized_fetching_index ON river_job (state, priority, scheduled_at, id);
 CREATE INDEX river_job_state_and_finalized_at_index ON river_job (state, finalized_at) WHERE finalized_at IS NOT NULL;
 

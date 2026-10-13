@@ -291,6 +291,10 @@ check-init-project:
 	@tests/init_project_test.sh
 
 check-update-project:
+	@PYTHONDONTWRITEBYTECODE=1 python3 tests/startup_patch_guards_test.py
+	@PYTHONDONTWRITEBYTECODE=1 python3 tests/deep_resource_profiler_test.py
+	@PYTHONDONTWRITEBYTECODE=1 python3 tests/river_retention_patch_test.py
+	@PYTHONDONTWRITEBYTECODE=1 python3 tests/river_practices_check_test.py
 	@python3 tests/rust_unit_output_patch_test.py
 	@node --test tests/browser_frontend_patches.test.mjs
 	@node --test tests/retire_go_wasm.test.mjs

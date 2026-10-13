@@ -1,6 +1,31 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestRetentionOverrideIsOptional(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("STATE_STORE_DRIVER", "memory")
+	t.Setenv("RIVER_RETENTION_TIER", "human")
+	for _, value := range []string{"", "6h"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv("RIVER_COMPLETED_JOB_RETENTION", value)
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := time.Duration(0)
+			if value != "" {
+				want = 6 * time.Hour
+			}
+			if cfg.RiverRetentionTier != "human" || cfg.RiverCompletedJobRetention != want {
+				t.Fatalf("tier=%q override=%v, want human and %v", cfg.RiverRetentionTier, cfg.RiverCompletedJobRetention, want)
+			}
+		})
+	}
+}
 
 func TestConfigScaffoldPackageCompiles(t *testing.T) {
 	// This smoke test keeps configuration code in the unit-test set without

@@ -57,7 +57,10 @@ Translation rules:
 4. Page cache is part of the runtime contract. Measure cold-cache and
    warm-cache paths separately; avoid wide rows, unused indexes, and report
    scans that evict hot tenant/state pages. Treat `effective_cache_size` as a
-   planner estimate, not reserved memory.
+   planner estimate, not reserved memory. Set `effective_cache_size = 3 * shared_buffers`
+   only when that estimate matches available cache under concurrent workloads.
+   Include shared buffers and operating system cache without counting overlapping pages twice.
+   A fixed ratio does not prove available cache or index efficiency.
 5. Backpressure must happen before Postgres becomes an unbounded queue. Runtime
    pools must use conservative `max_conns`, explicit acquire budgets,
    statement budgets, lock budgets, and idle-transaction budgets. River worker
@@ -691,16 +694,58 @@ bypasses PgBouncer transaction pooling. Native `LISTEN/NOTIFY` then delivers
 cross-node wakes, and `FetchPollInterval` returns to being a safety net.
 Keep the default interval; do not relax it below the value of lost wakes.
 
-Backlog triage uses `scripts/db_diagnostics.sh`. It reports sequential-read
-leaders, river_job state counts, per-queue backlog, and oldest job age from
-environment-supplied connection details.
+Backlog triage uses `scripts/db_diagnostics.sh` and `scripts/deep_resource_profiler.py`.
+They report sequential-read leaders, index scan ratios, cache hit ratios,
+river_job state counts, and per-queue backlog from environment-supplied connection details.
 
-River core modules now pin v0.44.1 (upgraded from v0.35.0; full build and
-worker suites pass). One operator gate remains per deployment: version 0.40
-ships migration 7. Schedule a brief worker stop window, run
-`river migrate-up`, then restart. The upgrade brings PgBouncer protocol
-hardening, per-queue fetch intervals, full reindex coverage, and bounded
-backlog deletion tooling (`JobDeleteMany` filtered by queue and state).
+River core modules pin v0.44.1. The upgrade brings PgBouncer protocol hardening,
+per-queue fetch intervals, full reindex coverage, and bounded backlog deletion tooling.
+
+### River GIN Index Anti-Pattern
+
+The Foundation baseline excludes GIN indexes on `river_job (args)` and `river_job (metadata)`.
+GIN maintenance can increase writes and vacuum work on frequently updated queues.
+The pinned River API supports metadata containment filters in `JobListParams.Metadata`.
+Do not assume that every consumer avoids these predicates.
+Inspect actual queries, index sizes, and write costs before planning an index removal.
+Use the River B-tree indexes for its standard scheduling and retention paths.
+The gate warns about exact historical definitions in recognized baselines and rollback migrations.
+Recognized baselines are `000001_init.up.sql`, `0001_schema.up.sql`, `000001_schema.up.sql`, and `0007_river_job_queue.up.sql`.
+The gate rejects new queue GIN definitions in other forward migrations.
+The compatibility warning does not authorize retaining or removing a live index.
+
+### River Worker Retention Tiers
+
+The River `JobCleaner` deletes finalized jobs older than configured retention periods.
+24-hour job retention is acceptable for human-scale workflows like report or PDF generation.
+In high-throughput event architectures, 24 hours retains 100k+ completed rows in PostgreSQL.
+This dead-row accumulation bloats table heap and degrades index scans.
+Foundation defaults high-frequency worker queues to 2–4 hours retention:
+- `RetentionTierHuman`: 24 hours retention for human-scale tasks.
+- `RetentionTierStandard`: 4 hours retention for general application tasks.
+- `RetentionTierHighFrequency`: 2 hours retention for event processing, market data, and projections.
+
+Both template clients use `RIVER_RETENTION_TIER` with a `high_frequency` default.
+When `RIVER_COMPLETED_JOB_RETENTION` is absent, the selected tier controls completed retention.
+A positive duration overrides completed retention on both clients.
+The override does not change canceled or discarded retention.
+These template files use `create` ownership.
+The updater can reseed untouched files when template hashes change.
+Customized files require explicit adoption in existing projects.
+
+### Index Utilization and Swap Audit
+
+The scaffold manifest distributes `scripts/deep_resource_profiler.py` to every profile.
+Core maintains its tooling source and verifies copy parity.
+Each query uses an explicit read-only transaction with a 5-second statement timeout.
+Read locks use a 1-second timeout, and each client process has a 15-second deadline.
+SSH arguments use shell quoting, and SQL travels through standard input.
+The client ignores startup files and stops when SQL fails.
+Missing cache measurements remain unknown, and reports include the database statistics reset time.
+It identifies unused indexes, temp disk file spills, buffer cache hit ratios, and queue bloat.
+
+NOTE: Read-only diagnostics still consume database resources and acquire normal read locks.
+Zero scans alone do not prove that an index is unnecessary.
 
 ## The Queue Is Not A Scheduler Clock
 

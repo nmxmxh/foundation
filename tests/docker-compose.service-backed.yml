@@ -16,9 +16,9 @@ services:
       - -c
       - max_connections=${SERVICE_BACKED_POSTGRES_MAX_CONNECTIONS:-120}
       - -c
-      - shared_buffers=128MB
+      - shared_buffers=${SERVICE_BACKED_POSTGRES_SHARED_BUFFERS:-512MB}
       - -c
-      - effective_cache_size=512MB
+      - effective_cache_size=${SERVICE_BACKED_POSTGRES_EFFECTIVE_CACHE_SIZE:-1536MB}
       - -c
       - work_mem=8MB
       - -c

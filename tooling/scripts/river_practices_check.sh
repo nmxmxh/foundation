@@ -152,6 +152,15 @@ check_absent "no hand-rolled river_job deletion" \
   "River's JobCleaner owns job retention; a manual DELETE contends with River's job fetch and can destroy retry-state rows" \
   "$target/internal" "$target/cmd"
 
+# Keep the baseline queue free of GIN maintenance costs.
+# Inspect consumer predicates before planning removal of an existing index.
+if ! python3 "$(dirname "$0")/queue_gin_check.py" "$target"; then
+  fail "queue GIN policy" \
+    "Foundation excludes queue GIN indexes by default; review consumer predicates and measured write costs before an operational migration"
+else
+  pass "queue GIN policy"
+fi
+
 # An Insert with UniqueOpts reports a rejected duplicate through the *result*
 # (rivertype.JobInsertResult.UniqueSkippedAsDuplicate), not through an error.
 # Treating every result as enqueued reports work that was never scheduled — which

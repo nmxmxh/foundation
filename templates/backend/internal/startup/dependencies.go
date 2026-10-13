@@ -212,6 +212,10 @@ func initWorkerEngine(ctx context.Context, cfg *config.Config, projected *hermes
 	}
 
 	riverCfg := &river.Config{}
+	workerkit.ApplyRetentionPolicy(riverCfg, workerkit.RetentionPolicyForTier(workerkit.RetentionTier(cfg.RiverRetentionTier)))
+	if cfg.RiverCompletedJobRetention > 0 {
+		riverCfg.CompletedJobRetentionPeriod = cfg.RiverCompletedJobRetention
+	}
 	if registered {
 		workers := river.NewWorkers()
 		if err := engine.AddToWorkers(workers); err != nil {

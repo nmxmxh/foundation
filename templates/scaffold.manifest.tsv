@@ -6,6 +6,7 @@ templates/.clauderules	.clauderules	all	always	create
 templates/CLAUDE.md	CLAUDE.md	all	always	create
 templates/README.md	README.md	all	always	create
 templates/.dockerignore	.dockerignore	all	always	overwrite
+tooling/scripts/deep_resource_profiler.py	scripts/deep_resource_profiler.py	all	always	overwrite
 templates/.env.example	.env.example	all	always	force
 templates/Makefile	Makefile	all	always	force
 templates/Makefile.local	Makefile.local	all	always	create

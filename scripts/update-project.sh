@@ -356,6 +356,7 @@ if [[ "$VERIFY_IDEMPOTENCE" == "true" ]]; then
     else
         idempotence_before="$(git -C "$PROJECT_PATH" status --porcelain=v1 2>/dev/null | grep -v ' \.foundation$' | LC_ALL=C sort || true)"
         second_args=("$PROJECT_PATH")
+        [[ "$SKIP_DEPS" == "true" ]] && second_args+=(--skip-deps)
         [[ "$FORCE" == "true" ]] && second_args+=(--force)
         [[ "$AUTO_RESEED_UNTOUCHED" != "true" ]] && second_args+=(--no-auto-reseed)
         if ! "$0" "${second_args[@]}" >/dev/null; then
