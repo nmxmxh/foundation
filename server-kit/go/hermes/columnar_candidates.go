@@ -66,6 +66,7 @@ func (c *entryCandidates) restoreRoot() {
 
 // compareColumnarEntries orders newest timestamps first, then newest versions, then ascending record identifiers.
 func compareColumnarEntries(a, b *recordEntry) int {
+	movementRecord(movementSortComparisons, 1)
 	if order := b.record.UpdatedAt.Compare(a.record.UpdatedAt); order != 0 {
 		return order
 	}

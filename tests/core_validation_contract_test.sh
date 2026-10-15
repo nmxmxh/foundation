@@ -54,6 +54,7 @@ if printf '%s\n' "$modules" | grep -Fq 'worktrees'; then
 fi
 
 bash "$ROOT/tests/benchmark_ratchet_test.sh"
+bash "$ROOT/tests/benchmark_movement_test.sh"
 bash "$ROOT/tests/benchmark_history_test.sh"
 bash "$ROOT/tests/practice_controls_test.sh"
 bash "$ROOT/tests/command_timeout_test.sh"

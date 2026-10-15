@@ -1,0 +1,8 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkMovementHermesFullPath10K-8   	     200	   5009736 ns/op	      8792 bitmap_read_bytes/op	      8792 bitmap_write_bytes/op	     10000 candidates/op	         0 explicit_copy_bytes/op	     40007 field_probes/op	    175968 numeric_read_bytes/op	    144000 numeric_write_bytes/op	     55822 parse_input_bytes/op	     10000 rows_materialized/op	    252684 sort_comparisons/op	         0 unobserved_kernel_calls/op	  251130 B/op	      11 allocs/op
+BenchmarkMovementHermesResident10K-8   	     200	    201187 ns/op	      8792 bitmap_read_bytes/op	      6280 bitmap_write_bytes/op	         0 candidates/op	         0 explicit_copy_bytes/op	         0 field_probes/op	    175968 numeric_read_bytes/op	         0 numeric_write_bytes/op	         0 parse_input_bytes/op	         0 rows_materialized/op	         0 sort_comparisons/op	         0 unobserved_kernel_calls/op	    2560 B/op	       2 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	2.121s

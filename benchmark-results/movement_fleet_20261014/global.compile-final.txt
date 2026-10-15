@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/global_value_exchange_net/internal/startup	1.017s [no tests to run]
+ok  	github.com/ovasabi/global_value_exchange_net/cmd/worker	1.184s [no tests to run]

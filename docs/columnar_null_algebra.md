@@ -150,6 +150,10 @@ what lets `maskValidity` be a single bulk AND instead of a per-row test, and it
 means tail-word hygiene is written once rather than maintained in two places
 that can drift apart.
 
+Numeric constructors accumulate validity in local 64-row words, then store each nonempty word once.
+Fresh masks keep all-null words and unused tail bits zero.
+The [construction evidence](evidence/hermes_validity_words_2026-10-14.md) covers null groups, partial words, parsing failures, and ownership.
+
 ## 6. Crossing lanes
 
 Word width is where the null representation stops being a hermes concern and

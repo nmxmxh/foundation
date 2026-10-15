@@ -1,0 +1,136 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesNumericValidityFullPath/1-8 	     300	       842.5 ns/op	     280 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/64-8         	     300	     14794 ns/op	    1792 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/65-8         	     300	     14393 ns/op	    2016 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/1024-8       	     300	    315721 ns/op	   26592 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/10000-8      	     300	   4022848 ns/op	  251121 B/op	      11 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8            	     300	   4186509 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8      	     300	     31802 ns/op	    3456 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8   	     300	     10702 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	     300	      6549 ns/op	     864 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	     300	   5123973 ns/op	  248544 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	     300	     11853 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     300	    414041 ns/op	   17456 B/op	       9 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesNumericValidityFullPath/1-8 	     300	       881.9 ns/op	     280 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/64-8         	     300	     14978 ns/op	    1792 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/65-8         	     300	     14553 ns/op	    2016 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/1024-8       	     300	    320787 ns/op	   26609 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/10000-8      	     300	   4247338 ns/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8            	     300	   4765501 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8      	     300	     31759 ns/op	    3456 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8   	     300	     10787 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	     300	      6651 ns/op	     864 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	     300	   5264750 ns/op	  248544 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	     300	     12135 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     300	    407452 ns/op	   17456 B/op	       9 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesNumericValidityFullPath/1-8 	     300	       826.2 ns/op	     280 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/64-8         	     300	     15007 ns/op	    1792 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/65-8         	     300	     14534 ns/op	    2016 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/1024-8       	     300	    322030 ns/op	   26610 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/10000-8      	     300	   4710206 ns/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8            	     300	   4730072 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8      	     300	     31788 ns/op	    3456 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8   	     300	     10912 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	     300	      6656 ns/op	     864 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	     300	   4622883 ns/op	  248544 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	     300	     11620 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     300	    396849 ns/op	   17456 B/op	       9 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesNumericValidityFullPath/1-8 	     300	       992.2 ns/op	     280 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/64-8         	     300	     14355 ns/op	    1792 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/65-8         	     300	     15078 ns/op	    2016 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/1024-8       	     300	    318725 ns/op	   26609 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/10000-8      	     300	   4514834 ns/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8            	     300	   4761192 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8      	     300	     31792 ns/op	    3456 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8   	     300	     10721 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	     300	      6656 ns/op	     864 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	     300	   4565755 ns/op	  248544 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	     300	     11363 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     300	    397891 ns/op	   17456 B/op	       9 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesNumericValidityFullPath/1-8 	     300	       830.8 ns/op	     280 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/64-8         	     300	     14516 ns/op	    1792 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/65-8         	     300	     14760 ns/op	    2016 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/1024-8       	     300	    319724 ns/op	   26609 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/10000-8      	     300	   4648923 ns/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8            	     300	   4691397 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8      	     300	     31394 ns/op	    3456 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8   	     300	     10627 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	     300	      6629 ns/op	     864 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	     300	   4508811 ns/op	  248544 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	     300	     11433 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     300	    396311 ns/op	   17456 B/op	       9 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesNumericValidityFullPath/1-8 	     300	       894.4 ns/op	     280 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/64-8         	     300	     15118 ns/op	    1792 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/65-8         	     300	     15769 ns/op	    2016 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/1024-8       	     300	    328257 ns/op	   26592 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/10000-8      	     300	   4483886 ns/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8            	     300	   4620097 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8      	     300	     31685 ns/op	    3456 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8   	     300	     10850 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	     300	      6588 ns/op	     864 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	     300	   4591806 ns/op	  248544 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	     300	     11140 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     300	    400044 ns/op	   17456 B/op	       9 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesNumericValidityFullPath/1-8 	     300	       865.7 ns/op	     280 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/64-8         	     300	     14456 ns/op	    1792 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/65-8         	     300	     14566 ns/op	    2016 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/1024-8       	     300	    322468 ns/op	   26627 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/10000-8      	     300	   4627542 ns/op	  251121 B/op	      11 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8            	     300	   5609770 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8      	     300	     31869 ns/op	    3456 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8   	     300	     11283 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	     300	      6816 ns/op	     864 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	     300	   5154407 ns/op	  248544 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	     300	     11584 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     300	    405346 ns/op	   17456 B/op	       9 allocs/op
+PASS
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesNumericValidityFullPath/1-8 	     300	       901.5 ns/op	     280 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/64-8         	     300	     14711 ns/op	    1792 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/65-8         	     300	     14431 ns/op	    2016 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/1024-8       	     300	    315024 ns/op	   26610 B/op	      11 allocs/op
+BenchmarkHermesNumericValidityFullPath/10000-8      	     300	   4061897 ns/op	  251121 B/op	      11 allocs/op
+BenchmarkHermesColumnarBitmapFilterSum-8            	     300	   4159120 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/full-8      	     300	     31586 ns/op	    3456 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/limit50-8   	     300	     10806 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows128/predicate_limit50-8         	     300	      6527 ns/op	     864 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/full-8                    	     300	   4140291 ns/op	  248544 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/limit50-8                 	     300	     11671 ns/op	    1488 B/op	       9 allocs/op
+BenchmarkHermesColumnarAssembly/rows10000/predicate_limit50-8       	     300	    392167 ns/op	   17456 B/op	       9 allocs/op
+PASS

@@ -23,7 +23,7 @@ The lane exposes these primitives in `@ovasabi/runtime-browser`:
 | `renderSurfaceClient.ts` | Worker | Owns graphics context, executes loop, maintains quality ladder, calls pass draw function. |
 | `canvasStage.ts` | Main | Provides 2D canvas execution without layout thrashing, with observer culling and cadence gating. |
 | `frameClock.ts` | Main | Unifies multiple animation loops into one pulse-scheduled browser animation frame. |
-| `renderMarks.ts` | Main/Worker | Records performance marks and diagnostics under `game_runtime_practices.md` section 121. |
+| `renderMarks.ts` | Main/Worker | Records marks and diagnostics under the [instrumentation rules](game_runtime_practices.md#instrumentation-markers). |
 
 ## Execution Cadence and Clock Ownership
 
@@ -34,6 +34,19 @@ Decorative and simulation passes require targeted execution cadence rather than 
 Driving frame updates from the main thread would overload the main queue and introduce unwanted coupling.
 
 `frameClock.ts` provides the main-thread clock. It listens to the Foundation pulse worker and schedules a single browser frame.
+
+### State publication and movement
+
+Account for state production, publication, worker acquisition, uploads, and readback separately.
+A shared-state reader borrows its slot until the next acquisition.
+Computing into that slot writes payload bytes. Publishing existing state can require a copy into shared storage.
+Preserve the single-writer and single-reader contract, generations, and borrowed-view lifetimes.
+
+Track executed, unchanged-state, hidden, cadence-skipped, and backpressured frames separately.
+Verify that the measured loop executed before accepting an allocation or movement result.
+Observer messages and cloned diagnostics have their own costs.
+Use [movement budgets per frame](game_runtime_practices.md#movement-budgets-per-frame) and [RUNTIME-02](performance_lab.md) for new measurements.
+The Core movement gate does not automatically count render or GPU payload bytes.
 
 ## Quality Ladder
 

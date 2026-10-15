@@ -1,0 +1,27 @@
+{
+  "base": "b06f99fafd99e32bae973ec90b7fc056e1ccb324",
+  "toolchain": "go version go1.26.6 darwin/arm64",
+  "platform": "darwin/arm64, Apple M1 Pro",
+  "comparison": {
+    "warm_pairs_discarded": 1,
+    "retained_pairs": 8,
+    "iterations_per_sample": 300,
+    "alternating_order": true,
+    "benchtime": "300x",
+    "deadline": "90s"
+  },
+  "sources": {
+    "server-kit/go/hermes/columnar.go": "0f004262c02cb9e554727a4e86065513dcc0217f45a853dc9caa97bf88737310",
+    "server-kit/go/hermes/columnar_numeric.go": "9a3be2096735a44307e2a12317dce58d782a835be6d5ab63fe6e075c1da01790",
+    "server-kit/go/hermes/columnar_numeric_test.go": "4b4486644657ce36112c3d0533837123feb75ac1622b513ffe09985e7427038e",
+    "server-kit/go/hermes/columnar_numeric_bench_test.go": "07b2e1c67edc9d7132505b8ebe6dd6bdb430e1510dd38d2e51671e694a258829",
+    "server-kit/go/hermes/movement_test.go": "2465767158438d72cbd375340b9c502a032afb70bb44b9c34c45881af9a3840c",
+    "tooling/benchmark_movement_baseline.psv": "331756a7a88549862133fd5a344d176f6b4376991ec0517488d8084dc708fef9",
+    "tooling/benchmark_movement_sources.psv": "1cf895271be3c31c4b6f5e203996dc41d57e6615e2e5ae7d99fbc654f21185e8",
+    "tooling/enforcement_manifest.tsv": "0354d3149d7733ed7672dcb4fb19483fb9c4857e5c3068e07e5e0de41031a5cc"
+  },
+  "binaries": {
+    "/tmp/foundation-hermes-validity-before.test": "288e12f2485dcca2847e6ada1513a06ad21faf4900f514ae3611dcf310f3414c",
+    "/tmp/foundation-hermes-validity-after.test": "8bca25feed961e3efa7b522826104ab708c52801e82752ddd9bc66ade6f28b46"
+  }
+}

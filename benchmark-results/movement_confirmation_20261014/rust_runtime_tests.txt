@@ -1,0 +1,115 @@
+   Compiling libc v0.2.186
+   Compiling rustversion v1.0.22
+   Compiling once_cell v1.21.3
+   Compiling rustix v1.1.4
+   Compiling getrandom v0.4.3
+   Compiling bitflags v2.13.1
+   Compiling cfg-if v1.0.4
+   Compiling fastrand v2.5.0
+   Compiling log v0.4.29
+   Compiling arc-swap v1.9.2
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling errno v0.3.14
+   Compiling ovrt-network v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-network)
+   Compiling ovrt-browser v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-browser)
+   Compiling tempfile v3.27.0
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-dispatch v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-dispatch)
+   Compiling ovrt-native v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-native)
+   Compiling ovrt-ffi v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-ffi)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.60s
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_browser-78dd421108177dee)
+
+running 7 tests
+test signal::tests::detects_epoch_changes ... ok
+test buffer::tests::rejects_payloads_that_exceed_region_capacity ... ok
+test linear_buffer::tests::validates_lifetimes_bounds_borrowing_and_epochs ... ok
+test buffer::tests::round_trips_control_regions ... ok
+test ring_buffer::tests::rejects_oversized_messages ... ok
+test ring_buffer::tests::round_trips_messages ... ok
+test ring_buffer::tests::wraps_around_buffer_end ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_core-7950a320ba2c88f4)
+
+running 22 tests
+test epoch::tests::a_lost_peer_ends_the_wait_before_the_timeout ... ok
+test epoch::tests::a_waiter_that_already_missed_the_change_does_not_block ... ok
+test diagnostics::tests::source_updates_reuse_capacity_and_replace_visible_text ... ok
+test epoch::tests::a_result_published_before_the_peer_died_is_still_returned ... ok
+test layout::tests::test_columnar_descriptor_contract ... ok
+test epoch::tests::epochs_wrap_rather_than_stopping ... ok
+test layout::tests::test_offsets ... ok
+test layout::tests::test_validations ... ok
+test mapping::tests::a_write_through_the_mapping_is_visible_through_the_file ... ok
+test mapping::tests::an_atomic_word_is_shared_between_mappings_of_one_file ... ok
+test native_gpu::tests::checks_native_gpu_descriptor_boundaries ... ok
+test native_gpu::tests::maps_all_native_gpu_enums_to_contract_codes ... ok
+test native_gpu::tests::rejects_incomplete_native_gpu_descriptors ... ok
+test native_gpu::tests::validates_native_gpu_buffer_descriptors ... ok
+test mapping::tests::an_unaligned_or_out_of_bounds_atomic_is_refused ... ok
+test mapping::tests::mapping_more_than_the_file_holds_is_refused ... ok
+test native_gpu::tests::validates_native_gpu_texture_descriptors ... ok
+test mapping::tests::two_mappings_of_one_file_observe_each_others_stores ... ok
+test unit::tests::validates_required_descriptor_fields ... ok
+test mapping::tests::bounded_reads_allow_disjoint_writes_and_reject_overflow ... ok
+test epoch::tests::a_wait_gives_up_rather_than_hanging ... ok
+test epoch::tests::a_waiter_returns_as_soon_as_the_epoch_moves ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 30.01s
+
+     Running tests/binding_contract.rs (runtime-sdk/rust/target/debug/deps/binding_contract-b590841650f39060)
+
+running 1 test
+test compiler_vectors_preserve_native_identity ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_ffi-06134522b1d8fa10)
+
+running 5 tests
+test tests::write_error_truncates_at_utf8_boundary ... ok
+test tests::a_panic_payload_always_produces_a_message ... ok
+test tests::creates_and_processes_runtime_buffers ... ok
+test tests::handles_parallel_process_buffer_calls_on_shared_host ... ok
+test tests::a_panicking_unit_is_reported_rather_than_unwinding_into_the_abi ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (runtime-sdk/rust/target/debug/deps/ovrt_unit-eb766f8327b6fe3c)
+
+running 6 tests
+test output::tests::owned_output_moves_allocations_and_appends_later_chunks ... ok
+test output::tests::bounded_output_preserves_adjacent_bytes_and_refuses_partial_writes ... ok
+test tests::metadata_is_evaluated_once_and_resolved_units_survive_replacement ... ok
+test tests::a_pinned_generation_allows_reentrant_replacement ... ok
+test tests::registers_and_reads_units ... ok
+test tests::concurrent_registration_preserves_every_generation_update ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests ovrt_browser
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_core
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_ffi
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests ovrt_unit
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

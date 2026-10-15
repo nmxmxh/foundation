@@ -1,0 +1,134 @@
+{
+  "core_head": "b06f99fafd99e32bae973ec90b7fc056e1ccb324",
+  "go": "go version go1.26.6 darwin/arm64",
+  "registered_projects": 12,
+  "preservation_files": 8244,
+  "validation_concurrency": 2,
+  "environment": {
+    "GOWORK": "off",
+    "GOCACHE": "/tmp/ovasabi-foundation-go-build"
+  },
+  "updater_flags": [
+    "--skip-deps",
+    "--validate",
+    "--verify-idempotence",
+    "--no-auto-reseed"
+  ],
+  "validation_scope": "local synthetic Hermes API and gateway tests, application startup/worker integration; no deployment or live persistence",
+  "checker_fix": "accept existing artifact directories and inspect full nested paths; replay output is temporary",
+  "historical_evidence": {
+    "benchmark-results/runtime_layers_20260924/metadata.json": "027c4a82f47169ad52a4aa78c5c8967ada2f5f7227db56325ade333dde8644a7",
+    "benchmark-results/browser_abi_20260924_evidence.json": "3f19fb31690ee4c7bb5e4029e594f3cbd0c0f24838085907d34d02bbdc3b66ab",
+    "benchmark-results/browser_abi_20260924_chromium_report.json": "07bf032965492121d064691c4fdc3d98ee1f34bc305dce439e5f2faf14674099"
+  },
+  "preservation_exceptions": {
+    "pronto": "Five existing application files changed in verified concurrent translation work; current changes preserved.",
+    "metered": "Official existing managed patch adds local runtime-sdk v0.0.0 requirement and records it in the patch ledger."
+  },
+  "all_project_content_repeat": "Eleven unchanged trees; Pronto has two concurrent application file changes. All updater-owned output is stable.",
+  "projects": [
+    {
+      "slug": "chowdash",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1",
+      "head": "3222246fc20b230e112376a27787c866c794326c",
+      "preserved_files": 1194
+    },
+    {
+      "slug": "civic",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1",
+      "head": "0988bbeeb42711db9c96e0612cd74a19b8b10aeb",
+      "preserved_files": 396
+    },
+    {
+      "slug": "docuos",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1",
+      "head": "182036960c717c191c3ed70fd6d4641d42b1d7f2",
+      "preserved_files": 348
+    },
+    {
+      "slug": "forest",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1",
+      "head": "c79166e2b8ef8854fea48b9032740d6cbba4878a",
+      "preserved_files": 288
+    },
+    {
+      "slug": "global",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1",
+      "head": "e6974178dd729306c8571b9925c79b3cff8870fb",
+      "preserved_files": 318
+    },
+    {
+      "slug": "marketer",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1",
+      "head": "64b6b128203fd5279ae8dfae33e358f4fb3bb1a9",
+      "preserved_files": 254
+    },
+    {
+      "slug": "ovasabi",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1",
+      "head": "44d3ca017556a1271f88846b4d35c4255a443972",
+      "preserved_files": 2448
+    },
+    {
+      "slug": "pronto",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1",
+      "head": "a00450ec5aed797ce568bb14f261d82ccef2b68f",
+      "preserved_files": 1638
+    },
+    {
+      "slug": "reframe",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1",
+      "head": "14dcce8f9035e3ffdd8a9e5d20f2b311e89fc82e",
+      "preserved_files": 407
+    },
+    {
+      "slug": "trader",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1",
+      "head": "dc5bb67e6cb5612577dc7a0770a54dbf850d2b02",
+      "preserved_files": 255
+    },
+    {
+      "slug": "trotters",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1",
+      "head": "48e8739f3b168ecd2418b2a0aaa32e0e3359a80b",
+      "preserved_files": 557
+    },
+    {
+      "slug": "metered",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1",
+      "head": null,
+      "preserved_files": 141
+    }
+  ],
+  "source_hashes": {
+    "server-kit/go/hermes/columnar_numeric.go": "9a3be2096735a44307e2a12317dce58d782a835be6d5ab63fe6e075c1da01790",
+    "server-kit/go/hermes/columnar.go": "0f004262c02cb9e554727a4e86065513dcc0217f45a853dc9caa97bf88737310",
+    "tooling/benchmark_movement_baseline.psv": "331756a7a88549862133fd5a344d176f6b4376991ec0517488d8084dc708fef9",
+    "tooling/benchmark_movement_sources.psv": "1cf895271be3c31c4b6f5e203996dc41d57e6615e2e5ae7d99fbc654f21185e8",
+    "tooling/scripts/benchmark_evidence_check.sh": "fe72329a3fe20db6cdbb1b84f3537704cc6bd2c2a0ae927063e43a8922477151",
+    "tests/benchmark_evidence_test.sh": "44d10cb3a6a6e4ed8cbc65f41abe3b00353160458236d318ba0ad32421ddd635",
+    "tooling/enforcement_manifest.tsv": "6cd9b65e57b848ca90f0c60affba1b05a5376b27fc4ea1d8e1b008018a6dabef"
+  },
+  "chowdash_baseline_probe": {
+    "command": [
+      "go",
+      "-C",
+      "../chowdash_rider_v1",
+      "test",
+      "-modfile=/tmp/foundation-hermes-fleet-chowdash-before.mod",
+      "-mod=readonly",
+      "-race",
+      "-p=2",
+      "./internal/startup",
+      "-run=^TestEveryFrontendBoundScopeDeclaresAnAudience$",
+      "-count=1",
+      "-timeout=120s"
+    ],
+    "GOWORK": "off",
+    "temporary_modfile_replace": "github.com/nmxmxh/ovasabi_foundation/server-kit/go=/tmp/foundation-hermes-validity-20261014/server-kit/go",
+    "baseline_columnar_sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+    "expected_exit_code": 1,
+    "observed_exit_code": 1,
+    "matching_failure_scopes": 4
+  }
+}

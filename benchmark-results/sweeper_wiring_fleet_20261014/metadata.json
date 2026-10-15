@@ -1,0 +1,110 @@
+{
+  "date": "2026-10-14",
+  "base": "b06f99fafd99e32bae973ec90b7fc056e1ccb324",
+  "go": "go version go1.26.6 darwin/arm64",
+  "projects": [
+    {
+      "slug": "chowdash",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1",
+      "head": "3222246fc20b230e112376a27787c866c794326c",
+      "preserved_files": 1228
+    },
+    {
+      "slug": "civic",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1",
+      "head": "0988bbeeb42711db9c96e0612cd74a19b8b10aeb",
+      "preserved_files": 396
+    },
+    {
+      "slug": "docuos",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1",
+      "head": "182036960c717c191c3ed70fd6d4641d42b1d7f2",
+      "preserved_files": 348
+    },
+    {
+      "slug": "forest",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1",
+      "head": "c79166e2b8ef8854fea48b9032740d6cbba4878a",
+      "preserved_files": 288
+    },
+    {
+      "slug": "global",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1",
+      "head": "e6974178dd729306c8571b9925c79b3cff8870fb",
+      "preserved_files": 318
+    },
+    {
+      "slug": "marketer",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1",
+      "head": "64b6b128203fd5279ae8dfae33e358f4fb3bb1a9",
+      "preserved_files": 254
+    },
+    {
+      "slug": "ovasabi",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1",
+      "head": "44d3ca017556a1271f88846b4d35c4255a443972",
+      "preserved_files": 2448
+    },
+    {
+      "slug": "pronto",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1",
+      "head": "a00450ec5aed797ce568bb14f261d82ccef2b68f",
+      "preserved_files": 1641
+    },
+    {
+      "slug": "reframe",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1",
+      "head": "14dcce8f9035e3ffdd8a9e5d20f2b311e89fc82e",
+      "preserved_files": 407
+    },
+    {
+      "slug": "trader",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1",
+      "head": "dc5bb67e6cb5612577dc7a0770a54dbf850d2b02",
+      "preserved_files": 255
+    },
+    {
+      "slug": "trotters",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1",
+      "head": "48e8739f3b168ecd2418b2a0aaa32e0e3359a80b",
+      "preserved_files": 557
+    },
+    {
+      "slug": "metered",
+      "project": "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1",
+      "head": null,
+      "preserved_files": 141
+    }
+  ],
+  "preservation_files": 8281,
+  "fixed_application_source_hashes": [
+    {
+      "slug": "chowdash",
+      "command": [
+        "staticcheck",
+        "-checks=SA4023",
+        "./internal/startup"
+      ],
+      "scratch": "/tmp/foundation-chowdash-sweeper-regression-20261014",
+      "expected_exit_code": 1,
+      "observed_exit_code": 1,
+      "working_source_sha256": "ee8e73ec3234c4cc7f343d7af19529c4d3f5a96389f9010ce9ba9dd9b032f428",
+      "working_source_unchanged": true
+    },
+    {
+      "slug": "trotters",
+      "command": [
+        "staticcheck",
+        "-checks=SA4023",
+        "./internal/startup"
+      ],
+      "scratch": "/tmp/foundation-trotters-sweeper-regression-20261014",
+      "expected_exit_code": 1,
+      "observed_exit_code": 1,
+      "working_source_sha256": "5fe6860c95ce927bc372f6feda1820dbf859f92c1fedbfa792944453473072a9",
+      "working_source_unchanged": true
+    }
+  ],
+  "scope": "Local source synchronization, race tests, static checks, synthetic movement fixtures; no production or live database claims.",
+  "known_failures": []
+}

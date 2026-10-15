@@ -70,6 +70,13 @@ runtime-specific Rust risks.
 
 ## Performance rules
 
+Measure payload movement independently from allocation counts.
+Borrowed inputs can coexist with output construction, host copies, buffer clearing, and transport copies.
+State which operations each counter observes. Label unobserved native and device work explicitly.
+Compare adapter declarations with actual host operations before changing placement budgets.
+Preserve ownership, aliasing, panic isolation, and buffer bounds when reducing movement.
+Use [RUNTIME-02](performance_lab.md) for source coverage, diagnostic builds, and mutation evidence.
+
 1. Start with a behavior boundary and baseline measurement. Use `cargo test`,
    `cargo bench`/Criterion, `hyperfine`, `cargo flamegraph`, `iai`/cachegrind,
    or the Foundation native flow simulation according to the question.

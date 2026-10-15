@@ -60,6 +60,11 @@ Each trusted implementation declares its complete input copies through `BindingS
 Admission compares that cost with `RuntimeBindingRequest.MaxInputCopyBytes` before executing the operation.
 The receipt reports the admitted copy cost. Arbitrary native code cannot be instrumented by this descriptor alone.
 Operation internals, type validators, and opaque driver behavior require separate benchmarks and adapter evidence.
+Compare declared input copies with independent observations before trusting a new adapter budget.
+The `foundation_movement` diagnostics perform this comparison for the Go FFI caller-buffer path.
+Output copies and buffer clearing have separate counters. The input-copy receipt does not describe their costs.
+The [movement evidence](info/movement_accounting_20261013.md) records a deliberately injected copy that the new guard rejects.
+That mutation existed only in an isolated checkout. It was not a defect found in the working implementation.
 Publication costs are measured separately from steady-state execution.
 Local calls do not encode Cap'n Proto messages.
 Cross-process calls use generated codecs with bounded frames.

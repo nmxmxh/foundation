@@ -75,7 +75,14 @@ Open priorities include consumer compatibility, bounded diagnostics, and represe
      to 4.13x throughput gain (75.8% reduction in latency) via CPU Memory-Level
      Parallelism (MLP, source: Lemire 2026);
    - an explicit bytes-moved-per-op budget next to B/op in benchmark rows, so
-     movement (not just allocation) is a gated regression class;
+     movement (not just allocation) is a gated regression class.
+     The [2026-10-13 accounting work](info/movement_accounting_20261013.md) instruments selected Hermes and Go FFI paths.
+     It distinguishes executed accesses, declared copies, kernel models, and hardware traffic.
+     Runtime and gaming practices now apply RUNTIME-02 when extending movement evidence beyond these audited paths.
+     The [numeric validity improvement](evidence/hermes_validity_words_2026-10-14.md) stores each nonempty construction word once.
+     Its local evidence supports lower logical movement, without establishing a general latency or planner calibration claim.
+     Browser, WASM, process, and GPU counters require separate promotion evidence.
+     Planner changes and Hermes algorithm changes remain separate experiments;
    - lane-planner readiness for near-memory hardware (PIM DIMMs, CXL pooled
      memory, GPU near-data kernels): compute location is already a planned,
      benchmarked decision in Foundation, so a near-data device is a new lane,

@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/civic_watch_ng/internal/startup	1.847s
+ok  	github.com/ovasabi/civic_watch_ng/cmd/worker	2.609s

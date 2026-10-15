@@ -1,0 +1,4142 @@
+[
+  {
+    "slug": "chowdash",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1/foundation"
+        ],
+        "evidence": "chowdash.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 0,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "chowdash.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1"
+        ],
+        "evidence": "chowdash.practice-controls.txt"
+      }
+    ],
+    "passed": true
+  },
+  {
+    "slug": "civic",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1/foundation"
+        ],
+        "evidence": "civic.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 0,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "civic.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1"
+        ],
+        "evidence": "civic.practice-controls.txt"
+      }
+    ],
+    "passed": true
+  },
+  {
+    "slug": "docuos",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1/foundation"
+        ],
+        "evidence": "docuos.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 0,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "docuos.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1"
+        ],
+        "evidence": "docuos.practice-controls.txt"
+      }
+    ],
+    "passed": true
+  },
+  {
+    "slug": "forest",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1/foundation"
+        ],
+        "evidence": "forest.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 0,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "forest.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1"
+        ],
+        "evidence": "forest.practice-controls.txt"
+      }
+    ],
+    "passed": true
+  },
+  {
+    "slug": "global",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/foundation"
+        ],
+        "evidence": "global.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 1,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "global.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1"
+        ],
+        "evidence": "global.practice-controls.txt"
+      }
+    ],
+    "passed": false
+  },
+  {
+    "slug": "marketer",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1/foundation"
+        ],
+        "evidence": "marketer.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 0,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "marketer.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1"
+        ],
+        "evidence": "marketer.practice-controls.txt"
+      }
+    ],
+    "passed": true
+  },
+  {
+    "slug": "ovasabi",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/foundation"
+        ],
+        "evidence": "ovasabi.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 0,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "ovasabi.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1"
+        ],
+        "evidence": "ovasabi.practice-controls.txt"
+      }
+    ],
+    "passed": true
+  },
+  {
+    "slug": "pronto",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/foundation"
+        ],
+        "evidence": "pronto.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 0,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "pronto.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1"
+        ],
+        "evidence": "pronto.practice-controls.txt"
+      }
+    ],
+    "passed": true
+  },
+  {
+    "slug": "reframe",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/foundation"
+        ],
+        "evidence": "reframe.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 1,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "reframe.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1"
+        ],
+        "evidence": "reframe.practice-controls.txt"
+      }
+    ],
+    "passed": false
+  },
+  {
+    "slug": "trader",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1/foundation"
+        ],
+        "evidence": "trader.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 0,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "trader.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1"
+        ],
+        "evidence": "trader.practice-controls.txt"
+      }
+    ],
+    "passed": true
+  },
+  {
+    "slug": "trotters",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1/foundation"
+        ],
+        "evidence": "trotters.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 0,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "trotters.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1"
+        ],
+        "evidence": "trotters.practice-controls.txt"
+      }
+    ],
+    "passed": true
+  },
+  {
+    "slug": "metered",
+    "project": "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1",
+    "parity": [
+      {
+        "source": "docs/game_runtime_practices.md",
+        "destination": "docs/foundation/game_runtime_practices.md",
+        "sha256": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "actual": "e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_foundation.md",
+        "destination": "docs/foundation/runtime_foundation.md",
+        "sha256": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "actual": "ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980",
+        "passed": true
+      },
+      {
+        "source": "docs/runtime_sab_capnp_contracts.md",
+        "destination": "docs/foundation/runtime_sab_capnp_contracts.md",
+        "sha256": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "actual": "36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b",
+        "passed": true
+      },
+      {
+        "source": "docs/native_resource_bindings.md",
+        "destination": "docs/foundation/native_resource_bindings.md",
+        "sha256": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "actual": "77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b",
+        "passed": true
+      },
+      {
+        "source": "docs/rust_runtime_practices.md",
+        "destination": "docs/foundation/rust_runtime_practices.md",
+        "sha256": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "actual": "2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52",
+        "passed": true
+      },
+      {
+        "source": "docs/gpu_practices.md",
+        "destination": "docs/foundation/gpu_practices.md",
+        "sha256": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "actual": "d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e",
+        "passed": true
+      },
+      {
+        "source": "docs/render_surface_lane.md",
+        "destination": "docs/foundation/render_surface_lane.md",
+        "sha256": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "actual": "4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_lab.md",
+        "destination": "docs/foundation/performance_lab.md",
+        "sha256": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "actual": "1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc",
+        "passed": true
+      },
+      {
+        "source": "docs/performance_practices.md",
+        "destination": "docs/foundation/performance_practices.md",
+        "sha256": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "actual": "9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149",
+        "passed": true
+      },
+      {
+        "source": "docs/practice_controls.md",
+        "destination": "docs/foundation/practice_controls.md",
+        "sha256": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "actual": "ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_glossary.md",
+        "destination": "docs/foundation/foundation_glossary.md",
+        "sha256": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "actual": "f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19",
+        "passed": true
+      },
+      {
+        "source": "docs/foundation_guide.md",
+        "destination": "docs/foundation/foundation_guide.md",
+        "sha256": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "actual": "0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51",
+        "passed": true
+      },
+      {
+        "source": "docs/PHILOSOPHY.md",
+        "destination": "docs/foundation/PHILOSOPHY.md",
+        "sha256": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "actual": "26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e",
+        "passed": true
+      },
+      {
+        "source": "docs/future_practices_research.md",
+        "destination": "docs/foundation/future_practices_research.md",
+        "sha256": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "actual": "c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2",
+        "passed": true
+      },
+      {
+        "source": "docs/info/movement_accounting_20261013.md",
+        "destination": "docs/foundation/info/movement_accounting_20261013.md",
+        "sha256": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "actual": "9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/README.md",
+        "destination": "foundation/runtime-sdk/README.md",
+        "sha256": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "actual": "060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_packages.tsv",
+        "destination": "foundation/tooling/benchmark_movement_packages.tsv",
+        "sha256": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "actual": "82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_baseline.psv",
+        "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+        "sha256": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "actual": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+        "passed": true
+      },
+      {
+        "source": "tooling/benchmark_movement_sources.psv",
+        "destination": "foundation/tooling/benchmark_movement_sources.psv",
+        "sha256": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "actual": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+        "passed": true
+      },
+      {
+        "source": "tooling/practice_controls.psv",
+        "destination": "foundation/tooling/practice_controls.psv",
+        "sha256": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "actual": "61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3",
+        "passed": true
+      },
+      {
+        "source": "tooling/enforcement_manifest.tsv",
+        "destination": "foundation/tooling/enforcement_manifest.tsv",
+        "sha256": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "actual": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_disabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_disabled.go",
+        "sha256": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "actual": "fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled.go",
+        "sha256": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "actual": "668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_enabled_test.go",
+        "sha256": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "actual": "b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/movement_ffi_test.go",
+        "sha256": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "actual": "4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement.go",
+        "destination": "foundation/server-kit/go/hermes/movement.go",
+        "sha256": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "actual": "3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_disabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_disabled.go",
+        "sha256": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "actual": "7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_enabled.go",
+        "destination": "foundation/server-kit/go/hermes/movement_enabled.go",
+        "sha256": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "actual": "f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/movement_test.go",
+        "destination": "foundation/server-kit/go/hermes/movement_test.go",
+        "sha256": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "actual": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost.go",
+        "sha256": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "actual": "d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/ffi_unix.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/ffi_unix.go",
+        "sha256": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "actual": "41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799",
+        "passed": true
+      },
+      {
+        "source": "runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "destination": "foundation/runtime-sdk/go/runtimehost/runtimehost_test.go",
+        "sha256": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "actual": "8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/bitmap_dispatch.go",
+        "destination": "foundation/server-kit/go/hermes/bitmap_dispatch.go",
+        "sha256": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "actual": "cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar.go",
+        "destination": "foundation/server-kit/go/hermes/columnar.go",
+        "sha256": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "actual": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_bitmap.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_bitmap.go",
+        "sha256": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "actual": "10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_candidates.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_candidates.go",
+        "sha256": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "actual": "333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_mlp.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_mlp.go",
+        "sha256": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "actual": "5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select.go",
+        "sha256": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "actual": "1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a",
+        "passed": true
+      },
+      {
+        "source": "server-kit/go/hermes/columnar_select_test.go",
+        "destination": "foundation/server-kit/go/hermes/columnar_select_test.go",
+        "sha256": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "actual": "49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.go",
+        "destination": "scripts/checks/benchmark_movement_check.go",
+        "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+        "passed": true
+      },
+      {
+        "source": "tooling/scripts/benchmark_movement_check.sh",
+        "destination": "scripts/checks/benchmark_movement_check.sh",
+        "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+        "passed": true
+      }
+    ],
+    "checks": [
+      {
+        "check": "movement",
+        "exit_code": 0,
+        "command": [
+          "bash",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1/foundation"
+        ],
+        "evidence": "metered.movement.txt"
+      },
+      {
+        "check": "compile",
+        "exit_code": 1,
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/worker",
+          "-run=^$",
+          "-count=1",
+          "-timeout=120s"
+        ],
+        "evidence": "metered.compile.txt"
+      },
+      {
+        "check": "practice-controls",
+        "exit_code": 0,
+        "command": [
+          "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1/scripts/checks/practice_controls_check.sh",
+          "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1"
+        ],
+        "evidence": "metered.practice-controls.txt"
+      }
+    ],
+    "passed": false
+  }
+]

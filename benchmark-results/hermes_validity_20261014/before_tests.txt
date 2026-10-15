@@ -1,0 +1,1 @@
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	1.723s	coverage: 85.9% of statements

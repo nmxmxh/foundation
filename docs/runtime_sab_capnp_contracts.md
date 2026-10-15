@@ -99,6 +99,13 @@ Writing an existing JavaScript input into a region still copies that input once.
 Rust output construction and writes can still allocate and copy.
 `read_at`, `read_input_bytes`, and `readOutputBytes` return owned results and therefore copy.
 
+Zero copy-import calls describe that ABI boundary only.
+Measure input clearing, payload writes, guest output construction, owned output reads, and worker or device transfers separately.
+Record each measured interval and its omitted operations.
+Preserve memory-growth refresh, generation checks, and borrowed-view lifetimes when reducing copies.
+The current Core movement gate does not measure browser or WASM payload bytes.
+Use the [runtime movement evidence rule](performance_lab.md) before adding those budgets.
+
 Without shared capability, a scalar ABI version 2 guest still uses direct access within its owning thread.
 The loader tries `.shared.wasm` first, then existing compressed and raw scalar artifacts.
 Older guests retain the bounded copy imports automatically.

@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/global_value_exchange_net/internal/startup	2.441s
+ok  	github.com/ovasabi/global_value_exchange_net/cmd/worker	1.645s

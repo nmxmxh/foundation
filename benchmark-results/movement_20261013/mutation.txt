@@ -1,0 +1,157 @@
+Foundation movement mutation proof
+Original workspace is read-only for this experiment.
+Scratch root: /tmp/foundation-movement-mutant-2w9_auxs
+
+$ bash /tmp/foundation-movement-mutant-2w9_auxs/tooling/scripts/benchmark_movement_check.sh /tmp/foundation-movement-mutant-2w9_auxs audit
+[OK] movement source audit: 86 covered function declarations
+Exit code: 0
+
+Mutation 1: additional raw copy into existing control storage.
+--- original/runtimehost.go
++++ raw-mutant/runtimehost.go
+@@ -114,6 +114,7 @@
+ 	// #nosec G115 -- payload length is guarded by generated.INPUT_MAX_BYTES.
+ 	payloadLen := uint32(len(payload))
+ 	end := start + payloadLen
++	copy(b.raw[start:end], payload)
+ 	movementRecordInputCopy(copy(b.raw[start:end], payload))
+ 	// #nosec G115 -- payload length is guarded by generated.INPUT_MAX_BYTES.
+ 	b.setHeaderInt(generated.INT_IDX_INPUT_LENGTH, int32(payloadLen))
+
+$ bash /tmp/foundation-movement-mutant-2w9_auxs/tooling/scripts/benchmark_movement_check.sh /tmp/foundation-movement-mutant-2w9_auxs audit
+[FAIL] movement guard: movement source changed: runtime-sdk/go/runtimehost/runtimehost.go|(*Buffer).SetInputBytesFast; review copy sites and called helpers before refreshing
+exit status 1
+Exit code: 1
+
+Mutation 2: additional metered copy into existing control storage.
+--- original/runtimehost.go
++++ metered-mutant/runtimehost.go
+@@ -114,6 +114,7 @@
+ 	// #nosec G115 -- payload length is guarded by generated.INPUT_MAX_BYTES.
+ 	payloadLen := uint32(len(payload))
+ 	end := start + payloadLen
++	movementRecordInputCopy(copy(b.raw[start:end], payload))
+ 	movementRecordInputCopy(copy(b.raw[start:end], payload))
+ 	// #nosec G115 -- payload length is guarded by generated.INPUT_MAX_BYTES.
+ 	b.setHeaderInt(generated.INT_IDX_INPUT_LENGTH, int32(payloadLen))
+
+Scratch source audit is explicitly refreshed; tests and budgets remain unchanged.
+$ bash /tmp/foundation-movement-mutant-2w9_auxs/tooling/scripts/benchmark_movement_check.sh /tmp/foundation-movement-mutant-2w9_auxs write-audit
+Exit code: 0
+
+$ bash /tmp/foundation-movement-mutant-2w9_auxs/tooling/scripts/benchmark_movement_check.sh /tmp/foundation-movement-mutant-2w9_auxs check
+[OK] movement source audit: 86 covered function declarations
+=== RUN   TestMovementFullPathBoundaries
+=== RUN   TestMovementFullPathBoundaries/1
+=== RUN   TestMovementFullPathBoundaries/63
+=== RUN   TestMovementFullPathBoundaries/64
+=== RUN   TestMovementFullPathBoundaries/65
+=== RUN   TestMovementFullPathBoundaries/1000
+--- PASS: TestMovementFullPathBoundaries (0.01s)
+    --- PASS: TestMovementFullPathBoundaries/1 (0.00s)
+    --- PASS: TestMovementFullPathBoundaries/63 (0.00s)
+    --- PASS: TestMovementFullPathBoundaries/64 (0.00s)
+    --- PASS: TestMovementFullPathBoundaries/65 (0.00s)
+    --- PASS: TestMovementFullPathBoundaries/1000 (0.01s)
+=== RUN   TestMovementResidentSelection
+=== RUN   TestMovementResidentSelection/none
+=== RUN   TestMovementResidentSelection/all_present
+=== RUN   TestMovementResidentSelection/mixed
+--- PASS: TestMovementResidentSelection (0.00s)
+    --- PASS: TestMovementResidentSelection/none (0.00s)
+    --- PASS: TestMovementResidentSelection/all_present (0.00s)
+    --- PASS: TestMovementResidentSelection/mixed (0.00s)
+=== RUN   TestMovementEmptyAndMalformed
+=== RUN   TestMovementEmptyAndMalformed/3
+=== RUN   TestMovementEmptyAndMalformed/5
+--- PASS: TestMovementEmptyAndMalformed (0.00s)
+    --- PASS: TestMovementEmptyAndMalformed/3 (0.00s)
+    --- PASS: TestMovementEmptyAndMalformed/5 (0.00s)
+=== RUN   TestMovementCopyRegression
+--- PASS: TestMovementCopyRegression (0.00s)
+=== RUN   TestMovementReadBoundaries
+=== RUN   TestMovementReadBoundaries/canceled
+=== RUN   TestMovementReadBoundaries/missing_org
+=== RUN   TestMovementReadBoundaries/fence
+=== RUN   TestMovementReadBoundaries/other_org
+--- PASS: TestMovementReadBoundaries (0.00s)
+    --- PASS: TestMovementReadBoundaries/canceled (0.00s)
+    --- PASS: TestMovementReadBoundaries/missing_org (0.00s)
+    --- PASS: TestMovementReadBoundaries/fence (0.00s)
+    --- PASS: TestMovementReadBoundaries/other_org (0.00s)
+=== RUN   TestMovementAlternateExecutorIsUnobserved
+--- PASS: TestMovementAlternateExecutorIsUnobserved (0.00s)
+=== RUN   TestMovementDecliningExecutorIsUnobserved
+--- PASS: TestMovementDecliningExecutorIsUnobserved (0.00s)
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkMovementHermesFullPath10K
+BenchmarkMovementHermesFullPath10K-8   	     200	   5371427 ns/op	    152792 bitmap_read_bytes/op	    150280 bitmap_write_bytes/op	     10000 candidates/op	         0 explicit_copy_bytes/op	     40007 field_probes/op	    175968 numeric_read_bytes/op	    144000 numeric_write_bytes/op	     55822 parse_input_bytes/op	     10000 rows_materialized/op	    252684 sort_comparisons/op	         0 unobserved_kernel_calls/op	  251104 B/op	      11 allocs/op
+BenchmarkMovementHermesResident10K
+BenchmarkMovementHermesResident10K-8   	     200	    160590 ns/op	      8792 bitmap_read_bytes/op	      6280 bitmap_write_bytes/op	         0 candidates/op	         0 explicit_copy_bytes/op	         0 field_probes/op	    175968 numeric_read_bytes/op	         0 numeric_write_bytes/op	         0 parse_input_bytes/op	         0 rows_materialized/op	         0 sort_comparisons/op	         0 unobserved_kernel_calls/op	    2560 B/op	       2 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	1.831s
+[FAIL] movement guard: movement process failed: runtime-sdk/go ./runtimehost: exit status 1
+=== RUN   TestMovementCollectorOwnership
+--- PASS: TestMovementCollectorOwnership (0.00s)
+=== RUN   TestMovementFFIExecuteInto
+=== RUN   TestMovementFFIExecuteInto/0
+    movement_ffi_test.go:71: host bytes: {inputCopied:0 outputCopied:0 controlCleared:4096 errorCleared:4096}
+=== RUN   TestMovementFFIExecuteInto/8
+    movement_ffi_test.go:69: movement: {inputCopied:16 outputCopied:8 controlCleared:4096 errorCleared:4096}, want {inputCopied:8 outputCopied:8 controlCleared:4096 errorCleared:4096}
+=== RUN   TestMovementFFIExecuteInto/64
+    movement_ffi_test.go:69: movement: {inputCopied:128 outputCopied:64 controlCleared:4096 errorCleared:4096}, want {inputCopied:64 outputCopied:64 controlCleared:4096 errorCleared:4096}
+=== RUN   TestMovementFFIExecuteInto/256
+    movement_ffi_test.go:69: movement: {inputCopied:512 outputCopied:256 controlCleared:4096 errorCleared:4096}, want {inputCopied:256 outputCopied:256 controlCleared:4096 errorCleared:4096}
+=== RUN   TestMovementFFIExecuteInto/1024
+    movement_ffi_test.go:69: movement: {inputCopied:2048 outputCopied:1024 controlCleared:4096 errorCleared:4096}, want {inputCopied:1024 outputCopied:1024 controlCleared:4096 errorCleared:4096}
+--- FAIL: TestMovementFFIExecuteInto (1.40s)
+    --- PASS: TestMovementFFIExecuteInto/0 (0.00s)
+    --- FAIL: TestMovementFFIExecuteInto/8 (0.00s)
+    --- FAIL: TestMovementFFIExecuteInto/64 (0.00s)
+    --- FAIL: TestMovementFFIExecuteInto/256 (0.00s)
+    --- FAIL: TestMovementFFIExecuteInto/1024 (0.00s)
+=== RUN   TestMovementFFIFailures
+=== RUN   TestMovementFFIFailures/canceled
+=== RUN   TestMovementFFIFailures/nil-output
+=== RUN   TestMovementFFIFailures/oversized
+=== RUN   TestMovementFFIFailures/short-output
+    movement_ffi_test.go:115: failure movement: {inputCopied:16 outputCopied:0 controlCleared:4096 errorCleared:4096}, want {inputCopied:8 outputCopied:0 controlCleared:4096 errorCleared:4096}
+=== RUN   TestMovementFFIFailures/runtime-status
+    movement_ffi_test.go:115: failure movement: {inputCopied:16 outputCopied:0 controlCleared:4096 errorCleared:4096}, want {inputCopied:8 outputCopied:0 controlCleared:4096 errorCleared:4096}
+=== RUN   TestMovementFFIFailures/closed
+    movement_ffi_test.go:115: failure movement: {inputCopied:16 outputCopied:0 controlCleared:4096 errorCleared:0}, want {inputCopied:8 outputCopied:0 controlCleared:4096 errorCleared:0}
+--- FAIL: TestMovementFFIFailures (2.04s)
+    --- PASS: TestMovementFFIFailures/canceled (1.97s)
+    --- PASS: TestMovementFFIFailures/nil-output (0.00s)
+    --- PASS: TestMovementFFIFailures/oversized (0.00s)
+    --- FAIL: TestMovementFFIFailures/short-output (0.00s)
+    --- FAIL: TestMovementFFIFailures/runtime-status (0.00s)
+    --- FAIL: TestMovementFFIFailures/closed (0.00s)
+=== RUN   TestMovementFFIBindingReceipt
+    movement_ffi_test.go:163: receipt={SchemaVersion:1 BindingRevision:1 ResourceGeneration:1 OutputTypeID:1 OutputBytes:8 TransferredBytes:0 InputCopiedBytes:8 Status:0} observed={inputCopied:16 outputCopied:8 controlCleared:4096 errorCleared:4096} output="RESIDENT" error=<nil>
+--- FAIL: TestMovementFFIBindingReceipt (0.81s)
+=== RUN   TestMovementFFIExtraCopyExceedsBudget
+    movement_ffi_test.go:185: extra copy did not exceed the input budget: {inputCopied:24 outputCopied:8 controlCleared:4096 errorCleared:4096}
+--- FAIL: TestMovementFFIExtraCopyExceedsBudget (1.75s)
+FAIL
+exit status 1
+FAIL	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	6.933s
+FAIL
+
+exit status 1
+Exit code: 1
+
+Result: real source audit rejected the raw copy.
+Result: real movement tests rejected the metered copy after scratch audit refresh.
+Workspace runtimehost.go SHA256 preserved: d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591
+Required runtime tests and movement budgets match the workspace.
+Ordinary-build allocation and output parity check on the same mutant:
+$ (cd /tmp/foundation-movement-mutant-2w9_auxs/runtime-sdk/go && go test ./runtimehost -run ^TestFFIPoolExecuteIntoAllocatesNothingInSteadyState$ -count=1 -timeout=30s -v)
+=== RUN   TestFFIPoolExecuteIntoAllocatesNothingInSteadyState
+--- PASS: TestFFIPoolExecuteIntoAllocatesNothingInSteadyState (0.00s)
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	0.581s
+Exit code: 0

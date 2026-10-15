@@ -38,6 +38,15 @@ exists.
 Do not mark a rule `strong` because it is important. Mark it `strong` only when
 the automation has enough precision to avoid pushing agents toward worse code.
 
+### Runtime movement scope
+
+`PERFLAB-03` enforces recorded allocation and movement ceilings for configured Core fixtures.
+Its movement fixtures currently cover selected Hermes and Go FFI operations.
+`RUNTIME-02` requires contextual review for additional runtime and gaming lanes.
+That review must name observed operations, omissions, ownership, fallback, and regression evidence.
+Passing browser or device tests alone does not establish byte budgets for those lanes.
+See [the coverage table](performance_lab.md#runtime-02-movement-evidence-across-runtime-lanes) before claiming automatic enforcement.
+
 ## Agent Workflow
 
 When an agent changes a practice, check, scaffold default, or generated-project

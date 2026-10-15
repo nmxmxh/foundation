@@ -483,6 +483,7 @@ check-server-kit-module-parity:
 	@bash tooling/scripts/server_kit_module_parity_check.sh .
 
 check-benchmark-evidence:
+	@bash tests/benchmark_evidence_test.sh
 	@bash tooling/scripts/benchmark_evidence_check.sh .
 
 # bench-zerocopy-linux exercises the hermessnapshot kernel zero-copy clone
@@ -515,6 +516,7 @@ check-coverage-ratchet:
 # bounded tolerance; ns/op is never gated here (see the script header).
 check-benchmark-ratchet:
 	@FOUNDATION_GO_CACHE_DIR="$(FOUNDATION_GO_CACHE_DIR)" tooling/scripts/benchmark_ratchet_check.sh .
+	@FOUNDATION_GO_CACHE_DIR="$(FOUNDATION_GO_CACHE_DIR)" tooling/scripts/benchmark_movement_check.sh .
 
 check-transport-ladder:
 	@tooling/scripts/transport_ladder_check.sh .

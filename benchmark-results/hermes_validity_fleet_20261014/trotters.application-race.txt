@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/trotters/internal/startup	1.828s
+ok  	github.com/ovasabi/trotters/cmd/worker	2.261s

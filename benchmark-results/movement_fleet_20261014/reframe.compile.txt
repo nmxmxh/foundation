@@ -1,0 +1,2 @@
+go: updates to go.mod needed, disabled by -mod=readonly; to update it:
+	go mod tidy

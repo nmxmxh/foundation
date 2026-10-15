@@ -1,0 +1,45 @@
+[OK] CP no goto in handwritten sources
+[OK] CP no unsafe in handwritten Go sources
+[OK] CP JSON marshal/unmarshal errors checked
+[OK] CP no unwrap/todo/dbg in Rust runtime code
+[OK] CP no blocking Atomics.wait on browser main/runtime code
+[OK] CP no direct MutationObserver construction
+[OK] CP no transition-all in frontend motion
+[OK] CP no large runtime buffer expansion
+[OK] CP internal Go avoids JSON gRPC compatibility dispatch
+[OK] CP no zero-duration Go timer placeholders
+[OK] CP channel close must not use select-default race guard
+[OK] CP WaitGroup Add must happen before goroutine launch
+[OK] CP foundation runtime SDK hot path avoids JSON materialization
+[OK] CP foundation consumers do not open raw websocket lanes
+[OK] CP foundation no gRPC compatibility envelope as default
+[OK] CP foundation app up migrations avoid destructive drops
+[OK] No checked-in dist artifacts
+[OK] No checked-in frontend dist artifacts
+[OK] No checked-in node_modules (local ignored artifact)
+[OK] No checked-in macOS residue (local ignored artifact)
+coding practices check passed
+managed-patch hygiene OK (tooling/scripts)
+[OK] TE no focused TypeScript tests
+[OK] TE no skipped TypeScript tests
+[FAIL] TE TypeScript tests avoid long fixed waits
+./frontend-lab/src/browser/browserAbi.browser.test.ts:12:    const timeout = setTimeout(() => { worker.terminate(); reject(new Error("ABI worker timeout")); }, 5000);
+[OK] TE TypeScript tests avoid uncontrolled Math.random
+[OK] TE Go tests use production-owner filenames
+[OK] TE Go tests avoid extreme fixed sleeps outside load tests
+[OK] TE lifecycle/contract tests present for event contracts
+[OK] TE Go tests avoid package-global random without explicit source
+[OK] TE percentile helpers use conservative nearest-rank math
+[OK] TE performance check separates latency percentile duration
+[OK] TE frontend scaffold includes Testing Library React
+[OK] TE frontend scaffold includes user-event
+[OK] TE frontend scaffold includes jsdom
+[OK] TE frontend scaffold includes property testing
+[OK] TE scaffold lint runs testing practices check
+[OK] no acceptance feature files present
+testing practices check failed
+make: *** [check-testing-practices] Error 1
+
+Existing failure verification
+git show HEAD:frontend-lab/src/browser/browserAbi.browser.test.ts exactly matches working file: True
+frontend-lab/src/browser/browserAbi.browser.test.ts:12:     const timeout = setTimeout(() => { worker.terminate(); reject(new Error("ABI worker timeout")); }, 5000);

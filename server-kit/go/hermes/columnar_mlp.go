@@ -28,6 +28,7 @@ func popcountWords(words []uint64) int {
 	var c0, c1, c2, c3 int
 	i := 0
 	for ; i+4 <= len(words); i += 4 {
+		movementRecord(movementBitmapRead, 32)
 		c0 += bits.OnesCount64(words[i])
 		c1 += bits.OnesCount64(words[i+1])
 		c2 += bits.OnesCount64(words[i+2])
@@ -35,6 +36,7 @@ func popcountWords(words []uint64) int {
 	}
 	total := (c0 + c1) + (c2 + c3)
 	for ; i < len(words); i++ {
+		movementRecord(movementBitmapRead, 8)
 		total += bits.OnesCount64(words[i])
 	}
 	return total
@@ -48,12 +50,16 @@ func andWords(dst, src []uint64) {
 	}
 	i := 0
 	for ; i+4 <= len(dst); i += 4 {
+		movementRecord(movementBitmapRead, 64)
+		movementRecord(movementBitmapWrite, 32)
 		dst[i] &= src[i]
 		dst[i+1] &= src[i+1]
 		dst[i+2] &= src[i+2]
 		dst[i+3] &= src[i+3]
 	}
 	for ; i < len(dst); i++ {
+		movementRecord(movementBitmapRead, 16)
+		movementRecord(movementBitmapWrite, 8)
 		dst[i] &= src[i]
 	}
 }

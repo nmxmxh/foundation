@@ -1,0 +1,2 @@
+[FAIL] movement guard: movement source changed: server-kit/go/hermes/columnar.go|buildDataFieldVector; review copy sites and called helpers before refreshing
+exit status 1

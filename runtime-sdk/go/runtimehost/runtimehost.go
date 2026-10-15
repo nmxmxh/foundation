@@ -36,6 +36,7 @@ func (b *Buffer) Reset() {
 		return
 	}
 	clear(b.raw)
+	movementRecordControlClear(len(b.raw))
 }
 
 func (b *Buffer) HeaderInt(index uint32) (int32, error) {
@@ -113,7 +114,7 @@ func (b *Buffer) SetInputBytesFast(payload []byte) error {
 	// #nosec G115 -- payload length is guarded by generated.INPUT_MAX_BYTES.
 	payloadLen := uint32(len(payload))
 	end := start + payloadLen
-	copy(b.raw[start:end], payload)
+	movementRecordInputCopy(copy(b.raw[start:end], payload))
 	// #nosec G115 -- payload length is guarded by generated.INPUT_MAX_BYTES.
 	b.setHeaderInt(generated.INT_IDX_INPUT_LENGTH, int32(payloadLen))
 	return nil

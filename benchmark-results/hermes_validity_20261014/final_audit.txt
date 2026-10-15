@@ -1,0 +1,1 @@
+[OK] movement source audit: 90 covered function declarations

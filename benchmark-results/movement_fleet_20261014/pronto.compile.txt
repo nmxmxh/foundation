@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/pronto/internal/startup	2.279s [no tests to run]
+ok  	github.com/ovasabi/pronto/cmd/worker	2.179s [no tests to run]

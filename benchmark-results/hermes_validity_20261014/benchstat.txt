@@ -1,0 +1,58 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+                                                     │ benchmark-results/hermes_validity_20261014/before_ordinary.txt │ benchmark-results/hermes_validity_20261014/after_ordinary.txt │
+                                                     │                             sec/op                             │                 sec/op                   vs base              │
+HermesNumericValidityFullPath/1-8                                                                        897.2n ± 10%                              873.8n ±  5%       ~ (p=0.279 n=8)
+HermesNumericValidityFullPath/64-8                                                                       14.93µ ±  2%                              14.75µ ±  3%       ~ (p=0.161 n=8)
+HermesNumericValidityFullPath/65-8                                                                       14.88µ ±  4%                              14.56µ ±  4%       ~ (p=0.065 n=8)
+HermesNumericValidityFullPath/1024-8                                                                     323.5µ ±  1%                              320.3µ ±  2%       ~ (p=0.130 n=8)
+HermesNumericValidityFullPath/10000-8                                                                    4.479m ±  7%                              4.499m ± 11%       ~ (p=0.878 n=8)
+HermesColumnarBitmapFilterSum-8                                                                          4.667m ± 11%                              4.711m ± 12%       ~ (p=0.959 n=8)
+HermesColumnarAssembly/rows128/full-8                                                                    32.14µ ±  1%                              31.77µ ±  1%  -1.15% (p=0.000 n=8)
+HermesColumnarAssembly/rows128/limit50-8                                                                 10.90µ ±  3%                              10.80µ ±  2%       ~ (p=0.328 n=8)
+HermesColumnarAssembly/rows128/predicate_limit50-8                                                       6.609µ ±  2%                              6.640µ ±  2%       ~ (p=0.856 n=8)
+HermesColumnarAssembly/rows10000/full-8                                                                  4.677m ±  8%                              4.607m ± 12%       ~ (p=0.721 n=8)
+HermesColumnarAssembly/rows10000/limit50-8                                                               12.00µ ±  7%                              11.60µ ±  4%       ~ (p=0.105 n=8)
+HermesColumnarAssembly/rows10000/predicate_limit50-8                                                     398.3µ ±  1%                              399.0µ ±  2%       ~ (p=0.721 n=8)
+geomean                                                                                                  80.10µ                                    79.30µ        -0.99%
+
+                                                     │ benchmark-results/hermes_validity_20261014/before_ordinary.txt │ benchmark-results/hermes_validity_20261014/after_ordinary.txt │
+                                                     │                              B/op                              │                 B/op                   vs base                │
+HermesNumericValidityFullPath/1-8                                                                          280.0 ± 0%                              280.0 ± 0%       ~ (p=1.000 n=8) ¹
+HermesNumericValidityFullPath/64-8                                                                       1.750Ki ± 0%                            1.750Ki ± 0%       ~ (p=1.000 n=8) ¹
+HermesNumericValidityFullPath/65-8                                                                       1.969Ki ± 0%                            1.969Ki ± 0%       ~ (p=1.000 n=8) ¹
+HermesNumericValidityFullPath/1024-8                                                                     25.99Ki ± 0%                            25.99Ki ± 0%       ~ (p=0.981 n=8)
+HermesNumericValidityFullPath/10000-8                                                                    245.2Ki ± 0%                            245.2Ki ± 0%       ~ (p=1.000 n=8)
+HermesColumnarBitmapFilterSum-8                                                                          245.2Ki ± 0%                            245.2Ki ± 0%       ~ (p=1.000 n=8)
+HermesColumnarAssembly/rows128/full-8                                                                    3.375Ki ± 0%                            3.375Ki ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows128/limit50-8                                                                 1.453Ki ± 0%                            1.453Ki ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows128/predicate_limit50-8                                                         864.0 ± 0%                              864.0 ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows10000/full-8                                                                  242.7Ki ± 0%                            242.7Ki ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows10000/limit50-8                                                               1.453Ki ± 0%                            1.453Ki ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows10000/predicate_limit50-8                                                     17.05Ki ± 0%                            17.05Ki ± 0%       ~ (p=1.000 n=8) ¹
+geomean                                                                                                  7.591Ki                                 7.591Ki       +0.00%
+¹ all samples are equal
+
+                                                     │ benchmark-results/hermes_validity_20261014/before_ordinary.txt │ benchmark-results/hermes_validity_20261014/after_ordinary.txt │
+                                                     │                           allocs/op                            │               allocs/op                vs base                │
+HermesNumericValidityFullPath/1-8                                                                          11.00 ± 0%                              11.00 ± 0%       ~ (p=1.000 n=8) ¹
+HermesNumericValidityFullPath/64-8                                                                         11.00 ± 0%                              11.00 ± 0%       ~ (p=1.000 n=8) ¹
+HermesNumericValidityFullPath/65-8                                                                         11.00 ± 0%                              11.00 ± 0%       ~ (p=1.000 n=8) ¹
+HermesNumericValidityFullPath/1024-8                                                                       11.00 ± 0%                              11.00 ± 0%       ~ (p=1.000 n=8) ¹
+HermesNumericValidityFullPath/10000-8                                                                      11.00 ± 0%                              11.00 ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarBitmapFilterSum-8                                                                            11.00 ± 0%                              11.00 ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows128/full-8                                                                      9.000 ± 0%                              9.000 ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows128/limit50-8                                                                   9.000 ± 0%                              9.000 ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows128/predicate_limit50-8                                                         9.000 ± 0%                              9.000 ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows10000/full-8                                                                    9.000 ± 0%                              9.000 ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows10000/limit50-8                                                                 9.000 ± 0%                              9.000 ± 0%       ~ (p=1.000 n=8) ¹
+HermesColumnarAssembly/rows10000/predicate_limit50-8                                                       9.000 ± 0%                              9.000 ± 0%       ~ (p=1.000 n=8) ¹
+geomean                                                                                                    9.950                                   9.950       +0.00%
+¹ all samples are equal
+
+                                │ benchmark-results/hermes_validity_20261014/before_ordinary.txt │ benchmark-results/hermes_validity_20261014/after_ordinary.txt │
+                                │                     kernel_model_bytes/op                      │           kernel_model_bytes/op             vs base           │
+HermesColumnarBitmapFilterSum-8                                                      179.7k ± 0%                                  179.7k ± 0%  ~ (p=1.000 n=8) ¹
+¹ all samples are equal

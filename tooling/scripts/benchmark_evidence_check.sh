@@ -85,10 +85,10 @@ while IFS= read -r artifact; do
     if ! compgen -G "$target/${artifact}*" >/dev/null; then
       missing_artifacts+="$artifact* (no file with this prefix)"$'\n'
     fi
-  elif [[ ! -f "$target/$artifact" ]]; then
+  elif [[ ! -f "$target/$artifact" && ! -d "$target/$artifact" ]]; then
     missing_artifacts+="$artifact"$'\n'
   fi
-done < <(grep -oE 'benchmark-results/[A-Za-z0-9_.-]+' "$doc" | sort -u)
+done < <(grep -oE 'benchmark-results/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*/?' "$doc" | sort -u)
 
 if [[ -n "$missing_artifacts" ]]; then
   fail "benchmark artifacts referenced in the ledger exist" \

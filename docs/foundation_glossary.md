@@ -52,6 +52,7 @@ pre-answered questions without scanning multiple files.
 | **Lifecycle manifest** | Machine-readable JSON at `docs/references/lifecycle/lifecycle_contract.json` derived from protobuf request/response pairs. | `foundation_nervous_system.md` |
 | **Managed scaffold** | Files generated and synchronized from `templates/scaffold.manifest.tsv` — Makefile, CI, Docker, config, checks, and baseline wiring. | `foundation_architecture_contract.md` |
 | **Metadata** | `server-kit/go/metadata` — context-aware request metadata: correlation ID, tenant ID, request ID, user, session, tags, locale, and trace fields. | `foundation_guide.md` |
+| **Movement accounting** | Counts executed payload operations within an explicit measurement boundary. Allocation counts, declared copies, and hardware traffic remain separate evidence. | `performance_lab.md` |
 | **Money** | `server-kit/go/money` — integer minor-unit financial arithmetic with checked operations. Floats are forbidden for ledger balances. | `coding_practices.md` |
 | **Nervous system** | The canonical lifecycle path connecting contracts, metadata, dispatch, workers, Redis, WebSocket, frontend stores, and observability. | `foundation_nervous_system.md` |
 | **Object store** | `server-kit/go/objectstore` — object-storage helpers with tenant-scoped key derivation, streaming put/get, and presigned URLs. | `transfer_lane.md` |
@@ -88,7 +89,7 @@ pre-answered questions without scanning multiple files.
 | **Transfer lane** | `server-kit/go/transfer` — progress-bearing operation lifecycle: monotonic byte progress on an ephemeral lane, bracketed by durable bookend events. | `transfer_lane.md` |
 | **UI-minimal** | `@ovasabi/ui-minimal` — shared structural UI primitives, semantic theme tokens, and motion helpers. App components should be thin wrappers. | `styling_design_practices.md` |
 | **Vector projection** | Hermes dense-vector delivery policy. Record views exclude vectors unless compute consumers request them. | `vector_projection_practices.md` |
-| **WASM control buffer** | The 4KB fixed shared buffer in `runtime-sdk` guaranteeing cache affinity and zero-copy pointer exchanges with zero allocation pressure. | `foundation_guide.md` |
+| **WASM control buffer** | Fixed 4KB layout for runtime headers, epochs, and payload regions. Borrowed access, publication copies, clearing, and owned results have distinct costs. | `runtime_sab_capnp_contracts.md` |
 | **Worker** | `server-kit/go/worker` — River-based background job handling with bounded queues, retry policies, and correlation metadata propagation. | `foundation_guide.md` |
 
 ---

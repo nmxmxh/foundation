@@ -314,6 +314,12 @@ Columnar assembly retains pointers to immutable published entries during selecti
 The pointers remain internal. Materialized vectors retain their existing ownership rules.
 This removes temporary record copies without adding a persistent cache.
 
+Numeric column construction accumulates validity bits in local 64-row words.
+It stores each nonempty word once in a fresh mask.
+All-null groups retain their initial zero words.
+Numeric parsing, inferred types, canonical order, and returned ownership remain unchanged.
+The [validity evidence](evidence/hermes_validity_words_2026-10-14.md) records full-path checks and movement ceilings.
+
 Limited selection uses reverse publication order only while timestamps and versions prove that order matches the canonical order.
 Writers invalidate that proof before publishing decreasing timestamps or repeated or decreasing versions.
 Readers verify the proof after traversal and repeat selection once if a concurrent publication invalidated it.

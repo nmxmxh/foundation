@@ -1,0 +1,4 @@
+ok  	github.com/nmxmxh/reframe_v1/internal/config	1.596s
+ok  	github.com/nmxmxh/reframe_v1/internal/startup	2.072s
+ok  	github.com/nmxmxh/reframe_v1/internal/worker	2.105s
+ok  	github.com/nmxmxh/reframe_v1/cmd/worker	1.804s

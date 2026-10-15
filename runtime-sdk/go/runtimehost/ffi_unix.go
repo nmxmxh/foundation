@@ -192,6 +192,7 @@ func (p *FFIPool) executeInto(ctx context.Context, req ProcessRequest, dst []byt
 	}
 	errBuf := *errPtr
 	clear(errBuf)
+	movementRecordErrorClear(len(errBuf))
 	defer p.errorPool.Put(errPtr)
 	status, message := backend.Process(req.UnitID, raw, errBuf)
 	if status != 0 {
@@ -220,7 +221,9 @@ func (p *FFIPool) executeInto(ctx context.Context, req ProcessRequest, dst []byt
 	}
 	var owned []byte
 	if dst != nil {
-		owned = dst[:copy(dst, output)]
+		copied := copy(dst, output)
+		movementRecordOutputCopy(copied)
+		owned = dst[:copied]
 	} else {
 		owned = append([]byte(nil), output...)
 	}

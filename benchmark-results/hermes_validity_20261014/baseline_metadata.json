@@ -1,0 +1,11 @@
+{
+  "base": "b06f99fafd99e32bae973ec90b7fc056e1ccb324",
+  "snapshot": "/tmp/foundation-hermes-validity-20261014",
+  "sources": {
+    "server-kit/go/hermes/columnar.go": "b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444",
+    "server-kit/go/hermes/movement_test.go": "94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7",
+    "tooling/benchmark_movement_baseline.psv": "1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f",
+    "tooling/benchmark_movement_sources.psv": "84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0",
+    "tooling/enforcement_manifest.tsv": "5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49"
+  }
+}

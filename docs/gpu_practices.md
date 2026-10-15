@@ -58,6 +58,18 @@ first-use hitch prevention.
    fallback coordination. For visual canvas rasterization and offscreen render
    surfaces, see `render_surface_lane.md`.
 
+## Movement evidence
+
+Record host writes, staging copies, uploads, device copies, and readbacks as separate operations.
+Count initial residency separately from repeated execution and fallback materialization.
+Borrowed descriptors and successful GPU receipts do not measure opaque driver work.
+Label unavailable measurements as unobserved. Do not infer zero traffic from zero heap allocations or absent readback.
+
+Pair diagnostics with ordinary frame timing and target-device captures.
+Preserve resource leases, queue completion, and device-loss fallback when reducing movement.
+The Core movement gate covers selected Hermes and Go FFI paths, with no automatic GPU byte accounting.
+Use [RUNTIME-02](performance_lab.md) and [movement budgets per frame](game_runtime_practices.md) when admitting GPU measurements.
+
 ## Workload fit
 
 Good GPU candidates:

@@ -292,6 +292,7 @@ func (p *partition) collectRecordEntries(ctx context.Context, registry *partitio
 	candidates := entryCandidates{entries: make([]*recordEntry, 0, capacity), limit: query.Limit}
 	var iterErr error
 	accept := func(entry *recordEntry) bool {
+		movementRecord(movementCandidates, 1)
 		if iterErr = ctxErr(ctx); iterErr != nil {
 			return false
 		}
@@ -439,6 +440,7 @@ func buildRecordBatch(fields []string, entries []*recordEntry) (*RecordBatch, er
 		}
 		columns = append(columns, Column{Name: field, Data: vec})
 	}
+	movementRecord(movementRowsMaterialized, rows)
 	return &RecordBatch{
 		Columns: columns,
 		Rows:    rows,
@@ -502,6 +504,7 @@ func buildFieldVector(field string, entries []*recordEntry, rows int) (Vector, e
 		for i, entry := range entries {
 			// #nosec G115
 			iv.values[i] = int64(entry.version)
+			movementRecord(movementNumericWrite, 8)
 			iv.validity.set(i)
 		}
 		return iv, nil
@@ -543,35 +546,9 @@ func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vecto
 
 	switch kind {
 	case 'i', 'u':
-		iv := newInt64Vector(rows)
-		for i, entry := range entries {
-			if val, ok := lookupRecordField(entry.record.Data, want); ok {
-				if k, idxVal, ok := val.ScalarIndex(); ok && (k == 'i' || k == 'u') {
-					parsed, err2 := strconv.ParseInt(idxVal, 10, 64)
-					if err2 != nil {
-						return nil, fmt.Errorf("hermes: failed to parse integer field %q value %q: %w", field, idxVal, err2)
-					}
-					iv.values[i] = parsed
-					iv.validity.set(i)
-				}
-			}
-		}
-		return iv, nil
+		return buildIntDataFieldVector(field, want, entries, rows)
 	case 'f':
-		fv := newFloat64Vector(rows)
-		for i, entry := range entries {
-			if val, ok := lookupRecordField(entry.record.Data, want); ok {
-				if k, idxVal, ok := val.ScalarIndex(); ok && k == 'f' {
-					parsed, err2 := parseColumnarFloat(idxVal)
-					if err2 != nil {
-						return nil, fmt.Errorf("hermes: failed to parse float field %q value %q: %w", field, idxVal, err2)
-					}
-					fv.values[i] = parsed
-					fv.validity.set(i)
-				}
-			}
-		}
-		return fv, nil
+		return buildFloatDataFieldVector(field, want, entries, rows)
 	case 'b':
 		iv := newInt64Vector(rows)
 		for i, entry := range entries {
@@ -579,6 +556,7 @@ func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vecto
 				if k, idxVal, ok := val.ScalarIndex(); ok && k == 'b' {
 					if idxVal == "1" {
 						iv.values[i] = 1
+						movementRecord(movementNumericWrite, 8)
 					}
 					iv.validity.set(i)
 				}
@@ -608,6 +586,7 @@ func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vecto
 // per-row column build.
 func lookupRecordField(data database.RecordData, trimmed string) (database.RecordValue, bool) {
 	for _, field := range data {
+		movementRecord(movementFieldProbes, 1)
 		if field.Name == trimmed {
 			return field.Value, true
 		}
@@ -625,6 +604,7 @@ func lookupRecordField(data database.RecordData, trimmed string) (database.Recor
 // scales once at the end. Digits are bounded at 15 because a longer run would
 // overflow int64 and belongs on the strconv path anyway.
 func parseColumnarFloat(s string) (float64, error) {
+	movementRecord(movementParseInput, len(s))
 	if fast, ok := fastDecimalFloat(s); ok {
 		return fast, nil
 	}

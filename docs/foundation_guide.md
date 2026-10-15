@@ -74,7 +74,9 @@ Primary performance companions:
 ### C. runtime-sdk (Rust/WASM)
 
 * **Purpose**: High-performance kernel for CPU-bound tasks.
-* **Performance Model**: 4KB Fixed Shared Buffer to guarantee cache affinity and zero-copy pointer exchanges with zero Allocation Pressure.
+* **Performance Model**: Fixed 4KB control layout with borrowed views and explicit payload ownership.
+  Allocation counts, payload copies, clearing, and device transfers require separate evidence.
+  See [movement accounting](performance_lab.md) for current coverage.
 
 ### D. ui-minimal (TypeScript)
 

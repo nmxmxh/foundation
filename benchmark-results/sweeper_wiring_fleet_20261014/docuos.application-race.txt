@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/docuos/internal/startup	1.843s
+ok  	github.com/ovasabi/docuos/cmd/worker	2.547s

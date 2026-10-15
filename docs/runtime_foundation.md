@@ -278,6 +278,23 @@ Process transports retain their timeout and termination behavior.
 Run `make test-bench-runtime-layers` to verify allocation budgets.
 See the [runtime layer report](info/runtime_layers_20260924.md) for measurements and project retirement evidence.
 
+### Movement evidence and ownership
+
+Allocation budgets, copy declarations, and observed payload operations describe separate costs.
+`ExecuteInto` copies input into the control buffer and copies output into caller storage.
+The output copy preserves ownership when the pool reuses its control buffer.
+Control clearing and error-buffer clearing also consume work without requiring fresh allocations.
+Preserve clearing and lifetime guarantees when evaluating fewer copies.
+
+The `foundation_movement` diagnostics observe selected Go host operations.
+They do not observe arbitrary native instructions, process transports, browser workers, or device traffic.
+Binding receipts report declared input copies. Reconcile declarations against independent adapter measurements.
+Treat planner estimates as admission inputs until their lane has measured evidence.
+
+Run `make check-benchmark-ratchet` for the Core allocation and movement guards.
+Apply the [runtime movement evidence rule](performance_lab.md) when extending coverage to another lane.
+See the [accounting evidence](info/movement_accounting_20261013.md) for exact boundaries and deliberate mutation tests.
+
 ## Go SIMD posture
 
 Go 1.26 adds experimental `simd/archsimd` access through

@@ -1,0 +1,85 @@
+[
+  {
+    "slug": "chowdash",
+    "checks": [
+      {
+        "check": "staticcheck",
+        "command": [
+          "staticcheck",
+          "./internal/startup",
+          "./internal/chowauth",
+          "./internal/service/message",
+          "./internal/logistics"
+        ],
+        "exit_code": 0
+      },
+      {
+        "check": "race",
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-race",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/server",
+          "./cmd/worker",
+          "-count=1",
+          "-timeout=180s"
+        ],
+        "exit_code": 0
+      },
+      {
+        "check": "vet",
+        "command": [
+          "go",
+          "vet",
+          "./internal/startup",
+          "./cmd/server",
+          "./cmd/worker"
+        ],
+        "exit_code": 0
+      }
+    ]
+  },
+  {
+    "slug": "trotters",
+    "checks": [
+      {
+        "check": "staticcheck",
+        "command": [
+          "staticcheck",
+          "./internal/startup"
+        ],
+        "exit_code": 0
+      },
+      {
+        "check": "race",
+        "command": [
+          "go",
+          "test",
+          "-mod=readonly",
+          "-race",
+          "-p=2",
+          "./internal/startup",
+          "./cmd/server",
+          "./cmd/worker",
+          "-count=1",
+          "-timeout=180s"
+        ],
+        "exit_code": 0
+      },
+      {
+        "check": "vet",
+        "command": [
+          "go",
+          "vet",
+          "./internal/startup",
+          "./cmd/server",
+          "./cmd/worker"
+        ],
+        "exit_code": 0
+      }
+    ]
+  }
+]

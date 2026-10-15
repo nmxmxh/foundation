@@ -1,0 +1,3 @@
+ok  	github.com/ovasabi/chowdash-rider/internal/startup	19.632s
+?   	github.com/ovasabi/chowdash-rider/cmd/server	[no test files]
+ok  	github.com/ovasabi/chowdash-rider/cmd/worker	1.972s

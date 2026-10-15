@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/pronto/internal/startup	6.304s
+ok  	github.com/ovasabi/pronto/cmd/worker	4.109s

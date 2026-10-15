@@ -4,25 +4,44 @@ The `runtime-sdk` is the high-performance kernel of the Ovasabi ecosystem. It pr
 
 ## The Performance Model: 4KB RuntimeControlBuffer
 
-Traditional data exchange between runtimes (for example, JS to WASM or Go to C++) relies on heavy serialization (JSON/Protobuf) and dynamic memory allocation. The `runtime-sdk` bypasses this using a **Fixed-Layout 4096-byte Shared Buffer**.
+The `runtime-sdk` provides a **Fixed-Layout 4096-byte Shared Buffer** for bounded host and guest exchanges.
+Borrowed access reduces materialization at supported boundaries.
+Input publication, owned output, clearing, and unit internals retain their own costs.
 
 The 4KB buffer is the hot control plane, not the whole runtime. Large payloads use the optional `RuntimeSharedArena`, transferable buffers, or runtime-transport binary envelopes so the control plane stays cache-friendly and predictable.
 
 ### Buffer Topology
 
+The generated runtime constants define these byte ranges.
+
 | Offset | Size | Purpose |
 | :--- | :--- | :--- |
-| `0` | `128` | **Control Plane (Epochs)**: Atomic counters for synchronization. |
-| `128` | `128` | **Headers**: Schema versions, status codes, and context hashes. |
+| `0` | `64` | **Epochs**: Atomic counters for synchronization. |
+| `64` | `64` | **Route Bytes**: Bounded routing metadata. |
+| `128` | `32` | **Header Integers**: Schema versions, lengths, status, and context hashes. |
+| `160` | `96` | **Reserved**: Unused control space before the input region. |
 | `256` | `1024` | **Input Data**: Binary payload for the unit to process. |
 | `1280` | `2048` | **Output Data**: Result payload from the unit. |
 | `3328` | `768` | **Diagnostics**: Trace data and detailed error logs. |
 
 ### Technical Advantages
 
-1. **CPU Cache Affinity**: 4KB fits within most L1/L2 cache pages. Keeping the buffer "hot" in the cache prevents expensive main-memory lookups during processing.
-2. **Zero-Copy FFI**: The Host and Guest share a pointer to the same memory block. There is no copying of data across the boundary.
-3. **Deterministic Memory**: By forbidding dynamic growth of the buffer during the FFI callback, we eliminate heap fragmentation and garbage collection latency.
+1. **Bounded Layout**: Fixed offsets permit contiguous access. Cache behavior still requires measurement.
+2. **Borrowed FFI Access**: Host and guest can access one control block during execution.
+   Go input publication and caller-owned output still copy bytes.
+3. **Fixed Capacity**: Control-buffer capacity bounds inline payloads. Unit internals and result construction can still allocate.
+
+### Allocation and movement evidence
+
+The Go FFI caller-buffer path counts input copies, output copies, control clearing, and error-buffer clearing separately.
+`foundation_movement` enables diagnostic probes. Ordinary builds use empty probes.
+The Core gate runs through `make check-benchmark-ratchet` at the repository root.
+It covers selected Hermes and Go FFI paths, with no automatic browser, WASM, process, or GPU byte budgets.
+
+Required ownership copies protect results when pooled buffers are reused.
+Preserve those lifetimes and tenant-safe clearing when evaluating reduced movement.
+Use [RUNTIME-02](../docs/performance_lab.md) for additional lanes.
+See the [movement evidence](../docs/info/movement_accounting_20261013.md) for counts, mutation tests, and runtime confirmation.
 
 ## Getting Started: Developing a "Unit"
 

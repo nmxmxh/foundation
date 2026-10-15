@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/trader/internal/startup	2.475s
+ok  	github.com/ovasabi/trader/cmd/worker	1.656s

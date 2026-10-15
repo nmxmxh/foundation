@@ -45,6 +45,8 @@ func (b *bitmap) set(i int) {
 		b.grow(i + 1)
 	}
 	b.words[i>>6] |= 1 << uint(i&63)
+	movementRecord(movementBitmapRead, 8)
+	movementRecord(movementBitmapWrite, 8)
 }
 
 // clear unsets bit i.
@@ -76,7 +78,7 @@ func (b *bitmap) grow(newN int) {
 			clear(b.words[oldLen:reqWords])
 		} else {
 			grown := make([]uint64, reqWords, 2*reqWords)
-			copy(grown, b.words)
+			copyBitmapWords(grown, b.words)
 			b.words = grown
 		}
 	}
@@ -86,7 +88,7 @@ func (b *bitmap) grow(newN int) {
 // clone returns a deep copy of the bitmap.
 func (b *bitmap) clone() bitmap {
 	wordsCopy := make([]uint64, len(b.words))
-	copy(wordsCopy, b.words)
+	copyBitmapWords(wordsCopy, b.words)
 	return bitmap{
 		words: wordsCopy,
 		n:     b.n,
@@ -179,6 +181,7 @@ func (b *bitmap) andClamped(words []uint64) {
 	andWords(b.words[:n], words[:n])
 	for i := n; i < len(b.words); i++ {
 		b.words[i] = 0
+		movementRecord(movementBitmapWrite, 8)
 	}
 }
 
@@ -187,6 +190,7 @@ func (b *bitmap) andClamped(words []uint64) {
 // set bit costs one TrailingZeros64.
 func (b *bitmap) forEachSet(fn func(i int) bool) {
 	for wi, w := range b.words {
+		movementRecord(movementBitmapRead, 8)
 		base := wi << 6
 		for w != 0 {
 			bit := bits.TrailingZeros64(w)

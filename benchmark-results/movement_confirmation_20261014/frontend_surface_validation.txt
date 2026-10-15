@@ -1,0 +1,33 @@
+[OK] no layout read inside a frame
+[OK] high-performance adapter is reserved for the compute lane
+[OK] quality ladder uses a proportional miss threshold
+[OK] render surface opens on a device prior
+[OK] shared state channel is wired to both halves of the lane
+[OK] a render pass must declare disposal
+[OK] prewarming is wired and a late INIT waits for it
+[OK] a shared worker acquires once, counts references, and releases a late device
+[OK] a gpu host offers a public teardown and destroys only what it owns
+[OK] media queries carry no hand-typed pixel literal
+[OK] full-screen surfaces use svh or dvh, never vh
+[OK] rhythm values come from the scale
+[OK] foundation sources read theme.space, not the deprecated alias
+[OK] document-shaped stacks use flow layout, not a flex column with a gap
+[OK] every spacing step is distinguishable from its neighbours (9 steps)
+[OK] no transition: all
+[OK] no permanent will-change
+[OK] backdrop-filter goes through the quality-tier token
+[OK] infinite animations stop on the low_power and reduced_motion tiers
+[OK] keyframes animate only compositor properties
+[OK] ui-minimal imports no JavaScript animation runtime
+[OK] images reserve their box before they load
+[OK] the low_power tier swaps the shadow and blur tokens
+[OK] ui quality demotes on the slow-frame share, never a percentile
+[OK] a degraded frame clock reports why
+[OK] no styled-components import in kit, template or app code
+[OK] no third-party font origin
+[OK] every @font-face declares font-display
+[OK] at most two font faces are preloaded
+[OK] fonts ship as woff2 only
+[OK] no unreferenced font file ships
+
+frontend surface practices passed

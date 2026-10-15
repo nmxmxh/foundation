@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/marketer/internal/startup	1.909s
+ok  	github.com/ovasabi/marketer/cmd/worker	1.673s

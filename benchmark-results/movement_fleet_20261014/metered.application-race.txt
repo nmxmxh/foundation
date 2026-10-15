@@ -1,0 +1,4 @@
+ok  	github.com/ovasabi/metered_v1/internal/config	1.497s
+ok  	github.com/ovasabi/metered_v1/internal/startup	1.829s
+ok  	github.com/ovasabi/metered_v1/internal/worker	2.136s
+ok  	github.com/ovasabi/metered_v1/cmd/worker	1.794s

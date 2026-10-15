@@ -1,0 +1,163 @@
+{
+  "slug": "civic",
+  "checks": [
+    {
+      "check": "movement",
+      "command": [
+        "bash",
+        "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1/foundation/tooling/scripts/benchmark_movement_check.sh",
+        "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1/foundation"
+      ],
+      "exit_code": 0,
+      "evidence": "civic.movement.txt"
+    },
+    {
+      "check": "hermes-race",
+      "command": [
+        "go",
+        "test",
+        "-mod=readonly",
+        "-race",
+        "-p=2",
+        "./hermes",
+        "./projectiongw",
+        "-count=1",
+        "-timeout=180s"
+      ],
+      "exit_code": 0,
+      "evidence": "civic.hermes-race.txt"
+    },
+    {
+      "check": "application-race",
+      "command": [
+        "go",
+        "test",
+        "-mod=readonly",
+        "-race",
+        "-p=2",
+        "./internal/startup",
+        "./cmd/worker",
+        "-count=1",
+        "-timeout=120s"
+      ],
+      "exit_code": 0,
+      "evidence": "civic.application-race.txt"
+    },
+    {
+      "check": "dependency",
+      "command": [
+        "go",
+        "list",
+        "-mod=readonly",
+        "-f={{.Dir}}",
+        "github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes"
+      ],
+      "exit_code": 0,
+      "evidence": "civic.dependency.txt",
+      "resolved_local_reference": true
+    },
+    {
+      "check": "controls",
+      "command": [
+        "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1/scripts/checks/practice_controls_check.sh",
+        "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1"
+      ],
+      "exit_code": 0,
+      "evidence": "civic.controls.txt"
+    }
+  ],
+  "parity": [
+    {
+      "source": "server-kit/go/hermes/columnar.go",
+      "destination": "foundation/server-kit/go/hermes/columnar.go",
+      "sha256": "0f004262c02cb9e554727a4e86065513dcc0217f45a853dc9caa97bf88737310",
+      "actual": "0f004262c02cb9e554727a4e86065513dcc0217f45a853dc9caa97bf88737310",
+      "passed": true
+    },
+    {
+      "source": "server-kit/go/hermes/columnar_numeric.go",
+      "destination": "foundation/server-kit/go/hermes/columnar_numeric.go",
+      "sha256": "9a3be2096735a44307e2a12317dce58d782a835be6d5ab63fe6e075c1da01790",
+      "actual": "9a3be2096735a44307e2a12317dce58d782a835be6d5ab63fe6e075c1da01790",
+      "passed": true
+    },
+    {
+      "source": "server-kit/go/hermes/movement_test.go",
+      "destination": "foundation/server-kit/go/hermes/movement_test.go",
+      "sha256": "2465767158438d72cbd375340b9c502a032afb70bb44b9c34c45881af9a3840c",
+      "actual": "2465767158438d72cbd375340b9c502a032afb70bb44b9c34c45881af9a3840c",
+      "passed": true
+    },
+    {
+      "source": "tooling/benchmark_movement_baseline.psv",
+      "destination": "foundation/tooling/benchmark_movement_baseline.psv",
+      "sha256": "331756a7a88549862133fd5a344d176f6b4376991ec0517488d8084dc708fef9",
+      "actual": "331756a7a88549862133fd5a344d176f6b4376991ec0517488d8084dc708fef9",
+      "passed": true
+    },
+    {
+      "source": "tooling/benchmark_movement_sources.psv",
+      "destination": "foundation/tooling/benchmark_movement_sources.psv",
+      "sha256": "1cf895271be3c31c4b6f5e203996dc41d57e6615e2e5ae7d99fbc654f21185e8",
+      "actual": "1cf895271be3c31c4b6f5e203996dc41d57e6615e2e5ae7d99fbc654f21185e8",
+      "passed": true
+    },
+    {
+      "source": "tooling/scripts/benchmark_movement_check.sh",
+      "destination": "foundation/tooling/scripts/benchmark_movement_check.sh",
+      "sha256": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+      "actual": "9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8",
+      "passed": true
+    },
+    {
+      "source": "tooling/scripts/benchmark_movement_check.go",
+      "destination": "foundation/tooling/scripts/benchmark_movement_check.go",
+      "sha256": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+      "actual": "3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6",
+      "passed": true
+    },
+    {
+      "source": "tooling/scripts/benchmark_evidence_check.sh",
+      "destination": "foundation/tooling/scripts/benchmark_evidence_check.sh",
+      "sha256": "fe72329a3fe20db6cdbb1b84f3537704cc6bd2c2a0ae927063e43a8922477151",
+      "actual": "fe72329a3fe20db6cdbb1b84f3537704cc6bd2c2a0ae927063e43a8922477151",
+      "passed": true
+    },
+    {
+      "source": "tooling/enforcement_manifest.tsv",
+      "destination": "foundation/tooling/enforcement_manifest.tsv",
+      "sha256": "6cd9b65e57b848ca90f0c60affba1b05a5376b27fc4ea1d8e1b008018a6dabef",
+      "actual": "6cd9b65e57b848ca90f0c60affba1b05a5376b27fc4ea1d8e1b008018a6dabef",
+      "passed": true
+    },
+    {
+      "source": "docs/hermes_hotplane.md",
+      "destination": "docs/foundation/hermes_hotplane.md",
+      "sha256": "305b9cf036a1f9b0d7cde0b9a1ef8ced5a7986f7f808180eaf9fa9df02a92cfa",
+      "actual": "305b9cf036a1f9b0d7cde0b9a1ef8ced5a7986f7f808180eaf9fa9df02a92cfa",
+      "passed": true
+    },
+    {
+      "source": "docs/columnar_null_algebra.md",
+      "destination": "docs/foundation/columnar_null_algebra.md",
+      "sha256": "929fad66bb2c072799b80256ca52cfd2c9bd53b996ab6374b879c0523cb2b3fc",
+      "actual": "929fad66bb2c072799b80256ca52cfd2c9bd53b996ab6374b879c0523cb2b3fc",
+      "passed": true
+    },
+    {
+      "source": "docs/evidence/hermes_validity_words_2026-10-14.md",
+      "destination": "docs/foundation/evidence/hermes_validity_words_2026-10-14.md",
+      "sha256": "c3a6c3a016757aa2b2986d41a6fd1638ec7766a9c10e2dd5981495c0fb030016",
+      "actual": "c3a6c3a016757aa2b2986d41a6fd1638ec7766a9c10e2dd5981495c0fb030016",
+      "passed": true
+    }
+  ],
+  "preservation": {
+    "files_checked": 396,
+    "changed_paths": [
+      ".foundation"
+    ],
+    "unexpected_changes": []
+  },
+  "passed": true
+}

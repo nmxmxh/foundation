@@ -1,0 +1,3 @@
+internal/startup/dependencies.go:107:33: this comparison is always true (SA4023)
+	internal/startup/dependencies.go:107:15: the lhs of the comparison is the 1st return value of this function call
+	foundation/server-kit/go/hermes/mirror_sweep.go:504:1: (*github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes.MirrorSweeper).Run never returns a nil interface value

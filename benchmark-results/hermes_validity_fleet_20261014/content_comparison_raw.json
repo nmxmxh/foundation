@@ -1,0 +1,77 @@
+[
+  {
+    "slug": "chowdash",
+    "files_compared": 2347,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  },
+  {
+    "slug": "civic",
+    "files_compared": 1548,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  },
+  {
+    "slug": "docuos",
+    "files_compared": 1500,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  },
+  {
+    "slug": "forest",
+    "files_compared": 1440,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  },
+  {
+    "slug": "global",
+    "files_compared": 1470,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  },
+  {
+    "slug": "marketer",
+    "files_compared": 1407,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  },
+  {
+    "slug": "ovasabi",
+    "files_compared": 3604,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  },
+  {
+    "slug": "pronto",
+    "files_compared": 2794,
+    "changed_paths": [
+      "internal/translation/hermes.go",
+      "internal/translation/hermes_test.go"
+    ],
+    "all_project_content_unchanged": false
+  },
+  {
+    "slug": "reframe",
+    "files_compared": 1581,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  },
+  {
+    "slug": "trader",
+    "files_compared": 1408,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  },
+  {
+    "slug": "trotters",
+    "files_compared": 1730,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  },
+  {
+    "slug": "metered",
+    "files_compared": 1293,
+    "changed_paths": [],
+    "all_project_content_unchanged": true
+  }
+]

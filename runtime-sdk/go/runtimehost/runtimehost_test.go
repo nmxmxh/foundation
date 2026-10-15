@@ -1481,7 +1481,7 @@ func runSharedMemoryProcessPoolHelper(t *testing.T) {
 	}
 }
 
-func buildFFITestLibrary(t *testing.T) string {
+func buildFFITestLibrary(t testing.TB) string {
 	t.Helper()
 
 	return buildFFITestLibrarySource(t, fmt.Sprintf(`#include <ctype.h>
@@ -1579,7 +1579,7 @@ int32_t ovrt_runtime_process_buffer(void* host, const uint8_t* unit_id, uintptr_
 	))
 }
 
-func buildFFITestLibrarySource(t *testing.T, source string) string {
+func buildFFITestLibrarySource(t testing.TB, source string) string {
 	t.Helper()
 
 	cc, err := exec.LookPath("cc")
@@ -1601,7 +1601,9 @@ func buildFFITestLibrarySource(t *testing.T, source string) string {
 	default:
 		args = append(args, "-shared", "-fPIC", sourcePath)
 	}
-	cmd := exec.Command(cc, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, cc, args...)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("compile ffi test library: %v\n%s", err, string(output))
 	}

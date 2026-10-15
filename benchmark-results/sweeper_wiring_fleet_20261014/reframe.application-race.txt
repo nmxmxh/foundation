@@ -1,0 +1,2 @@
+ok  	github.com/nmxmxh/reframe_v1/internal/startup	2.272s
+ok  	github.com/nmxmxh/reframe_v1/cmd/worker	2.986s

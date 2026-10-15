@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/docuos/internal/startup	0.845s [no tests to run]
+ok  	github.com/ovasabi/docuos/cmd/worker	0.791s [no tests to run]

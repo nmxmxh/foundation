@@ -1,0 +1,46 @@
+docs reference check passed
+test naming check passed (191 paired, 29 benchmark, 37 build-constrained, 12 in source-less packages, 2 baselined of 271 files)
+[OK] agent operating contract doc
+[OK] foundation quick start doc
+[OK] future practices research doc
+[OK] foundation docs index
+[OK] docs index links quick start
+[OK] docs index links agent contract
+[OK] docs index links future practices research
+[OK] quick start names common mistakes
+[OK] quick start names typed payload regression
+[OK] agent contract defines definition of done
+[OK] agent contract defines evidence ledger
+[OK] agent contract defines memory sources
+[OK] agent contract defines succession continuity
+[OK] agent contract names lifecycle manifest
+[OK] agent contract names app security profile
+[OK] research ledger maps document gaps
+[OK] architecture contract defines profiles
+[OK] coding practices require JSON compatibility regression guard
+[OK] agents guide
+[OK] agents guide links agent contract
+[OK] agents guide carries definition of done
+[OK] Claude template links agent contract
+[OK] root README
+[OK] root README describes agent-native workflow
+[OK] Makefile
+[OK] Makefile exposes agent contract check
+[OK] domain guide template links agent contract
+[OK] post-init template links agent contract
+[OK] references README index
+[OK] references animation directory
+[OK] references lifecycle directory
+[OK] lifecycle contract json
+[OK] lifecycle contract guide
+[OK] foundation docs avoid product security postures
+[OK] foundation agent contract check
+agent contract check passed
+[OK] benchmarks referenced in the ledger exist
+[FAIL] benchmark artifacts referenced in the ledger exist
+  restore the artifact or mark the doc row as pruned:
+      benchmark-results/browser_abi_report.json
+    benchmark-results/runtime_layers_20260924
+[OK] source paths referenced in the ledger exist
+benchmark evidence check failed
+make: *** [check-benchmark-evidence] Error 1

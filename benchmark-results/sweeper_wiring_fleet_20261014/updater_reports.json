@@ -1,0 +1,122 @@
+[
+  {
+    "project": "chowdash_rider_v1",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/chowdash_rider_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/chowdash_rider_v1.changes.txt"
+  },
+  {
+    "project": "civic_watch_ng",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/civic_watch_ng_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/civic_watch_ng_v1.changes.txt"
+  },
+  {
+    "project": "docuos",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/docuos_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/docuos_v1.changes.txt"
+  },
+  {
+    "project": "forest",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/forest_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/forest_v1.changes.txt"
+  },
+  {
+    "project": "global_value_exchange_net",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/global_value_exchange_net_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/global_value_exchange_net_v1.changes.txt"
+  },
+  {
+    "project": "marketer",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/marketer_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/marketer_v1.changes.txt"
+  },
+  {
+    "project": "metered",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/metered_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/metered_v1.changes.txt"
+  },
+  {
+    "project": "ovasabi",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/ovasabi_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/ovasabi_v1.changes.txt"
+  },
+  {
+    "project": "pronto",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/pronto_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/pronto_v1.changes.txt"
+  },
+  {
+    "project": "reframe",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/reframe_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/reframe_v1.changes.txt"
+  },
+  {
+    "project": "trader",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/trader_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/trader_v1.changes.txt"
+  },
+  {
+    "project": "trotters",
+    "path": "/Users/okhai/Desktop/OVASABI STUDIOS/trotters_v1",
+    "dry_run": false,
+    "status": "success",
+    "validation": "passed",
+    "idempotence": "passed",
+    "migration_id": "20260712-managed-compat-v1",
+    "changed_manifest": "/Users/okhai/Desktop/OVASABI STUDIOS/foundation/test-results/sweeper-wiring-fleet-20261014/update/trotters_v1.changes.txt"
+  }
+]

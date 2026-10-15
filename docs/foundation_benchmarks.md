@@ -111,6 +111,16 @@ This footprint reduction does not establish a browser startup or download improv
 See the [runtime layer report](info/runtime_layers_20260924.md) for complete measurements, profile attribution, contract changes, and migration details.
 Raw results reside in `benchmark-results/runtime_layers_20260924/`.
 
+### Hermes numeric validity: 2026-10-14
+
+Numeric construction now stores each nonempty validity word once.
+At 10,000 rows, full-path bitmap reads decrease from 152,792 to 8,792 logical bytes per operation.
+Bitmap writes decrease from 150,280 to 8,792 logical bytes per operation.
+These counts describe audited source operations, not physical DRAM traffic.
+Full-path timing shows no significant change. Allocation counts remain unchanged.
+The [implementation evidence](evidence/hermes_validity_words_2026-10-14.md) records samples, scope, mutation checks, and coverage.
+The [fleet handoff](evidence/hermes_validity_fleet_2026-10-14.md) records adoption separately from the Core experiment.
+
 ### Service-backed PostgreSQL writer budget: 2026-09-24
 
 Machine: Apple M1 Pro, eight cores. The isolated Docker service used PostgreSQL 18 on tmpfs.
@@ -240,9 +250,10 @@ To retain browser samples, run this command after the fixture build:
 
 ```bash
 cd frontend-lab
-npm run test:browser -- src/browser/browserAbi.browser.test.ts --reporter=json --outputFile=../benchmark-results/browser_abi_report.json
+npm run test:browser -- src/browser/browserAbi.browser.test.ts --reporter=json --outputFile=/tmp/foundation-browser-abi-replay.json
 ```
 
+The replay writes a new temporary report. The dated browser report above remains the historical evidence.
 The JSON report stores samples under `testResults[].assertionResults[].meta.browserAbi`.
 
 Evidence ledger:

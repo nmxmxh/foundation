@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/trader/internal/startup	1.595s [no tests to run]
+ok  	github.com/ovasabi/trader/cmd/worker	1.587s [no tests to run]

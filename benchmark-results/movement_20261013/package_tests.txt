@@ -1,0 +1,42 @@
+hermes: baseline ordinary coverage
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	1.527s	coverage: 85.8% of statements
+
+hermes: revised ordinary coverage
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	1.227s	coverage: 85.9% of statements
+
+hermes: revised tagged coverage
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	2.102s	coverage: 86.0% of statements
+
+hermes: ordinary complete suite with race detector
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	3.347s
+
+runtimehost: baseline ordinary coverage
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	5.644s	coverage: 88.3% of statements
+
+runtimehost: revised ordinary coverage
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	9.600s	coverage: 88.3% of statements
+
+runtimehost: revised tagged coverage
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	7.373s	coverage: 88.5% of statements
+
+runtimehost: ordinary complete suite with race detector
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	6.987s
+
+hermes: tagged accounting tests with race detector
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	1.711s
+
+(cd server-kit/go && go vet -tags=foundation_movement ./hermes): exit 0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes/movement.go:22:		copyBitmapWords				100.0%
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes/movement_enabled.go:12:	movementRecord				100.0%
+
+runtimehost: tagged accounting tests with race detector
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	4.490s
+
+(cd runtime-sdk/go && go vet -tags=foundation_movement ./runtimehost): exit 0
+github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/movement_enabled.go:22:		startMovementCollection		100.0%
+github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/movement_enabled.go:27:		stop				100.0%
+github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/movement_enabled.go:31:		snapshot			100.0%
+github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/movement_enabled.go:35:		movementRecordInputCopy		100.0%
+github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/movement_enabled.go:41:		movementRecordOutputCopy	100.0%
+github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/movement_enabled.go:47:		movementRecordControlClear	100.0%
+github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/movement_enabled.go:53:		movementRecordErrorClear	100.0%

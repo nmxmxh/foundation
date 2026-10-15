@@ -120,6 +120,14 @@ Use these defaults for `server-kit`, app services, workers, registries, and WebS
 
 ### Allocation discipline
 
+Allocation budgets and movement budgets describe different costs.
+For audited movement paths, count executed payload operations and preserve the source audit with the measurement.
+Use `performance_lab.md` for accounting boundaries, diagnostic builds, and regression evidence.
+The Core movement gate covers selected Hermes and Go FFI operations.
+Browser, game, WASM, process, and GPU lanes require their own reviewed movement evidence under RUNTIME-02.
+Zero allocations can coexist with repeated copies or clearing of existing buffers.
+Preserve required ownership copies and tenant-safe clearing when evaluating an optimization.
+
 1. Preallocate slices and maps when the expected size is known.
 2. Use `strings.Builder`, `bytes.Buffer`, or append-style byte builders for repeated accumulation.
 3. Reuse temporary buffers with `sync.Pool` only for stateless, recreatable, high-churn objects. Always reset before reuse.

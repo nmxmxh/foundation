@@ -1,0 +1,116 @@
+[OK] movement source audit: 90 covered function declarations
+=== RUN   TestMovementFullPathBoundaries
+=== RUN   TestMovementFullPathBoundaries/1
+=== RUN   TestMovementFullPathBoundaries/63
+=== RUN   TestMovementFullPathBoundaries/64
+=== RUN   TestMovementFullPathBoundaries/65
+=== RUN   TestMovementFullPathBoundaries/1000
+--- PASS: TestMovementFullPathBoundaries (0.01s)
+    --- PASS: TestMovementFullPathBoundaries/1 (0.00s)
+    --- PASS: TestMovementFullPathBoundaries/63 (0.00s)
+    --- PASS: TestMovementFullPathBoundaries/64 (0.00s)
+    --- PASS: TestMovementFullPathBoundaries/65 (0.00s)
+    --- PASS: TestMovementFullPathBoundaries/1000 (0.01s)
+=== RUN   TestMovementResidentSelection
+=== RUN   TestMovementResidentSelection/none
+=== RUN   TestMovementResidentSelection/all_present
+=== RUN   TestMovementResidentSelection/mixed
+--- PASS: TestMovementResidentSelection (0.00s)
+    --- PASS: TestMovementResidentSelection/none (0.00s)
+    --- PASS: TestMovementResidentSelection/all_present (0.00s)
+    --- PASS: TestMovementResidentSelection/mixed (0.00s)
+=== RUN   TestMovementEmptyAndMalformed
+=== RUN   TestMovementEmptyAndMalformed/3
+=== RUN   TestMovementEmptyAndMalformed/5
+--- PASS: TestMovementEmptyAndMalformed (0.00s)
+    --- PASS: TestMovementEmptyAndMalformed/3 (0.00s)
+    --- PASS: TestMovementEmptyAndMalformed/5 (0.00s)
+=== RUN   TestMovementCopyRegression
+--- PASS: TestMovementCopyRegression (0.00s)
+=== RUN   TestMovementReadBoundaries
+=== RUN   TestMovementReadBoundaries/canceled
+=== RUN   TestMovementReadBoundaries/missing_org
+=== RUN   TestMovementReadBoundaries/fence
+=== RUN   TestMovementReadBoundaries/other_org
+--- PASS: TestMovementReadBoundaries (0.00s)
+    --- PASS: TestMovementReadBoundaries/canceled (0.00s)
+    --- PASS: TestMovementReadBoundaries/missing_org (0.00s)
+    --- PASS: TestMovementReadBoundaries/fence (0.00s)
+    --- PASS: TestMovementReadBoundaries/other_org (0.00s)
+=== RUN   TestMovementAlternateExecutorIsUnobserved
+--- PASS: TestMovementAlternateExecutorIsUnobserved (0.00s)
+=== RUN   TestMovementDecliningExecutorIsUnobserved
+--- PASS: TestMovementDecliningExecutorIsUnobserved (0.00s)
+=== RUN   TestMovementNumericValidityWords
+=== RUN   TestMovementNumericValidityWords/dense
+=== RUN   TestMovementNumericValidityWords/sparse
+=== RUN   TestMovementNumericValidityWords/null_word
+=== RUN   TestMovementNumericValidityWords/mixed
+--- PASS: TestMovementNumericValidityWords (0.00s)
+    --- PASS: TestMovementNumericValidityWords/dense (0.00s)
+    --- PASS: TestMovementNumericValidityWords/sparse (0.00s)
+    --- PASS: TestMovementNumericValidityWords/null_word (0.00s)
+    --- PASS: TestMovementNumericValidityWords/mixed (0.00s)
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkMovementHermesFullPath10K
+BenchmarkMovementHermesFullPath10K-8   	     200	   6330609 ns/op	      8792 bitmap_read_bytes/op	      8792 bitmap_write_bytes/op	     10000 candidates/op	         0 explicit_copy_bytes/op	     40007 field_probes/op	    175968 numeric_read_bytes/op	    144000 numeric_write_bytes/op	     55822 parse_input_bytes/op	     10000 rows_materialized/op	    252684 sort_comparisons/op	         0 unobserved_kernel_calls/op	  251130 B/op	      11 allocs/op
+BenchmarkMovementHermesResident10K
+BenchmarkMovementHermesResident10K-8   	     200	    207887 ns/op	      8792 bitmap_read_bytes/op	      6280 bitmap_write_bytes/op	         0 candidates/op	         0 explicit_copy_bytes/op	         0 field_probes/op	    175968 numeric_read_bytes/op	         0 numeric_write_bytes/op	         0 parse_input_bytes/op	         0 rows_materialized/op	         0 sort_comparisons/op	         0 unobserved_kernel_calls/op	    2560 B/op	       2 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	2.387s
+=== RUN   TestMovementCollectorOwnership
+--- PASS: TestMovementCollectorOwnership (0.00s)
+=== RUN   TestMovementFFIExecuteInto
+=== RUN   TestMovementFFIExecuteInto/0
+    movement_ffi_test.go:71: host bytes: {inputCopied:0 outputCopied:0 controlCleared:4096 errorCleared:4096}
+=== RUN   TestMovementFFIExecuteInto/8
+    movement_ffi_test.go:71: host bytes: {inputCopied:8 outputCopied:8 controlCleared:4096 errorCleared:4096}
+=== RUN   TestMovementFFIExecuteInto/64
+    movement_ffi_test.go:71: host bytes: {inputCopied:64 outputCopied:64 controlCleared:4096 errorCleared:4096}
+=== RUN   TestMovementFFIExecuteInto/256
+    movement_ffi_test.go:71: host bytes: {inputCopied:256 outputCopied:256 controlCleared:4096 errorCleared:4096}
+=== RUN   TestMovementFFIExecuteInto/1024
+    movement_ffi_test.go:71: host bytes: {inputCopied:1024 outputCopied:1024 controlCleared:4096 errorCleared:4096}
+--- PASS: TestMovementFFIExecuteInto (0.53s)
+    --- PASS: TestMovementFFIExecuteInto/0 (0.00s)
+    --- PASS: TestMovementFFIExecuteInto/8 (0.00s)
+    --- PASS: TestMovementFFIExecuteInto/64 (0.00s)
+    --- PASS: TestMovementFFIExecuteInto/256 (0.00s)
+    --- PASS: TestMovementFFIExecuteInto/1024 (0.00s)
+=== RUN   TestMovementFFIFailures
+=== RUN   TestMovementFFIFailures/canceled
+=== RUN   TestMovementFFIFailures/nil-output
+=== RUN   TestMovementFFIFailures/oversized
+=== RUN   TestMovementFFIFailures/short-output
+=== RUN   TestMovementFFIFailures/runtime-status
+=== RUN   TestMovementFFIFailures/closed
+--- PASS: TestMovementFFIFailures (0.52s)
+    --- PASS: TestMovementFFIFailures/canceled (0.44s)
+    --- PASS: TestMovementFFIFailures/nil-output (0.00s)
+    --- PASS: TestMovementFFIFailures/oversized (0.00s)
+    --- PASS: TestMovementFFIFailures/short-output (0.00s)
+    --- PASS: TestMovementFFIFailures/runtime-status (0.00s)
+    --- PASS: TestMovementFFIFailures/closed (0.00s)
+=== RUN   TestMovementFFIBindingReceipt
+--- PASS: TestMovementFFIBindingReceipt (0.55s)
+=== RUN   TestMovementFFIExtraCopyExceedsBudget
+--- PASS: TestMovementFFIExtraCopyExceedsBudget (0.52s)
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkMovementFFIExecuteInto
+BenchmarkMovementFFIExecuteInto/8
+BenchmarkMovementFFIExecuteInto/8-8 	     200	       760.6 ns/op	  10.52 MB/s	      4096 control-clear-B/op	      4096 error-clear-B/op	         8.000 input-copy-B/op	         8.000 output-copy-B/op	       0 B/op	       0 allocs/op
+BenchmarkMovementFFIExecuteInto/64
+BenchmarkMovementFFIExecuteInto/64-8         	     200	       862.1 ns/op	  74.24 MB/s	      4096 control-clear-B/op	      4096 error-clear-B/op	        64.00 input-copy-B/op	        64.00 output-copy-B/op	       0 B/op	       0 allocs/op
+BenchmarkMovementFFIExecuteInto/256
+BenchmarkMovementFFIExecuteInto/256-8        	     200	      1261 ns/op	 203.04 MB/s	      4096 control-clear-B/op	      4096 error-clear-B/op	       256.0 input-copy-B/op	       256.0 output-copy-B/op	       0 B/op	       0 allocs/op
+BenchmarkMovementFFIExecuteInto/1024
+BenchmarkMovementFFIExecuteInto/1024-8       	     200	      2899 ns/op	 353.21 MB/s	      4096 control-clear-B/op	      4096 error-clear-B/op	      1024 input-copy-B/op	      1024 output-copy-B/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost	3.251s
+movement guard passed: 38 exact ceilings across 2 packages

@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/chowdash-rider/internal/startup	0.734s [no tests to run]
+ok  	github.com/ovasabi/chowdash-rider/cmd/worker	1.279s [no tests to run]

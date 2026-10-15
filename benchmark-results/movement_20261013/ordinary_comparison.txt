@@ -1,0 +1,266 @@
+Ordinary builds; foundation_movement tag absent.
+Host: macOS-26.5.2-arm64-arm-64bit
+UTC start: 2026-10-13T20:38:32.851968+00:00
+Original source: /tmp/foundation-movement-baseline-b06f99f (HEAD source archived by parent).
+Warmup: each binary 200x discarded. Four pairs alternate original/revised order, 200x each.
+
+=== Hermes discarded-warmup original ===
+Command: ['/tmp/foundation-hermes-original.test', '-test.run=^$', '-test.bench=^BenchmarkHermesColumnarBitmapFilterSum$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     200	   3463733 ns/op	    179736 bytes_touched/op	  251104 B/op	      11 allocs/op
+PASS
+
+=== Hermes discarded-warmup revised ===
+Command: ['/tmp/foundation-hermes-revised.test', '-test.run=^$', '-test.bench=^BenchmarkHermesColumnarBitmapFilterSum$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     200	   3464224 ns/op	    179736 kernel_model_bytes/op	  251130 B/op	      11 allocs/op
+PASS
+
+=== Hermes pair-1 original ===
+Command: ['/tmp/foundation-hermes-original.test', '-test.run=^$', '-test.bench=^BenchmarkHermesColumnarBitmapFilterSum$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     200	   3500081 ns/op	    179736 bytes_touched/op	  251131 B/op	      11 allocs/op
+PASS
+
+=== Hermes pair-1 revised ===
+Command: ['/tmp/foundation-hermes-revised.test', '-test.run=^$', '-test.bench=^BenchmarkHermesColumnarBitmapFilterSum$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     200	   3590270 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+=== Hermes pair-2 revised ===
+Command: ['/tmp/foundation-hermes-revised.test', '-test.run=^$', '-test.bench=^BenchmarkHermesColumnarBitmapFilterSum$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     200	   3534497 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+=== Hermes pair-2 original ===
+Command: ['/tmp/foundation-hermes-original.test', '-test.run=^$', '-test.bench=^BenchmarkHermesColumnarBitmapFilterSum$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     200	   3801880 ns/op	    179736 bytes_touched/op	  251131 B/op	      11 allocs/op
+PASS
+
+=== Hermes pair-3 original ===
+Command: ['/tmp/foundation-hermes-original.test', '-test.run=^$', '-test.bench=^BenchmarkHermesColumnarBitmapFilterSum$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     200	   3604660 ns/op	    179736 bytes_touched/op	  251104 B/op	      11 allocs/op
+PASS
+
+=== Hermes pair-3 revised ===
+Command: ['/tmp/foundation-hermes-revised.test', '-test.run=^$', '-test.bench=^BenchmarkHermesColumnarBitmapFilterSum$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     200	   3645426 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+=== Hermes pair-4 revised ===
+Command: ['/tmp/foundation-hermes-revised.test', '-test.run=^$', '-test.bench=^BenchmarkHermesColumnarBitmapFilterSum$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     200	   3680419 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+=== Hermes pair-4 original ===
+Command: ['/tmp/foundation-hermes-original.test', '-test.run=^$', '-test.bench=^BenchmarkHermesColumnarBitmapFilterSum$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     200	   3571263 ns/op	    179736 bytes_touched/op	  251130 B/op	      11 allocs/op
+PASS
+
+=== RuntimeHost discarded-warmup original ===
+Command: ['/tmp/foundation-runtimehost-original.test', '-test.run=^$', '-test.bench=^BenchmarkPlacementFullHostPath$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8   	     200	       924.0 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+=== RuntimeHost discarded-warmup revised ===
+Command: ['/tmp/foundation-runtimehost-revised.test', '-test.run=^$', '-test.bench=^BenchmarkPlacementFullHostPath$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8   	     200	      1035 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+=== RuntimeHost pair-1 original ===
+Command: ['/tmp/foundation-runtimehost-original.test', '-test.run=^$', '-test.bench=^BenchmarkPlacementFullHostPath$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8   	     200	       797.5 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+=== RuntimeHost pair-1 revised ===
+Command: ['/tmp/foundation-runtimehost-revised.test', '-test.run=^$', '-test.bench=^BenchmarkPlacementFullHostPath$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8   	     200	       651.9 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+=== RuntimeHost pair-2 revised ===
+Command: ['/tmp/foundation-runtimehost-revised.test', '-test.run=^$', '-test.bench=^BenchmarkPlacementFullHostPath$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8   	     200	       606.2 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+=== RuntimeHost pair-2 original ===
+Command: ['/tmp/foundation-runtimehost-original.test', '-test.run=^$', '-test.bench=^BenchmarkPlacementFullHostPath$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8   	     200	       546.5 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+=== RuntimeHost pair-3 original ===
+Command: ['/tmp/foundation-runtimehost-original.test', '-test.run=^$', '-test.bench=^BenchmarkPlacementFullHostPath$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8   	     200	       525.4 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+=== RuntimeHost pair-3 revised ===
+Command: ['/tmp/foundation-runtimehost-revised.test', '-test.run=^$', '-test.bench=^BenchmarkPlacementFullHostPath$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8   	     200	       521.2 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+=== RuntimeHost pair-4 revised ===
+Command: ['/tmp/foundation-runtimehost-revised.test', '-test.run=^$', '-test.bench=^BenchmarkPlacementFullHostPath$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8   	     200	       525.8 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+=== RuntimeHost pair-4 original ===
+Command: ['/tmp/foundation-runtimehost-original.test', '-test.run=^$', '-test.bench=^BenchmarkPlacementFullHostPath$', '-test.benchtime=200x', '-test.count=1', '-test.benchmem', '-test.timeout=90s']
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost
+cpu: Apple M1 Pro
+BenchmarkPlacementFullHostPath-8   	     200	       527.3 ns/op	       0 B/op	       0 allocs/op
+PASS
+
+=== SUMMARY ===
+{
+  "Hermes": {
+    "original": {
+      "median_ns": 3587961.5,
+      "min_ns": 3500081.0,
+      "max_ns": 3801880.0,
+      "B_per_op": [
+        251104.0,
+        251130.0,
+        251131.0
+      ],
+      "allocs_per_op": [
+        11.0
+      ],
+      "samples_ns": [
+        3500081.0,
+        3801880.0,
+        3604660.0,
+        3571263.0
+      ]
+    },
+    "revised": {
+      "median_ns": 3617848.0,
+      "min_ns": 3534497.0,
+      "max_ns": 3680419.0,
+      "B_per_op": [
+        251104.0
+      ],
+      "allocs_per_op": [
+        11.0
+      ],
+      "samples_ns": [
+        3590270.0,
+        3534497.0,
+        3645426.0,
+        3680419.0
+      ]
+    },
+    "median_delta_percent": 0.8329660170545372
+  },
+  "RuntimeHost": {
+    "original": {
+      "median_ns": 536.9,
+      "min_ns": 525.4,
+      "max_ns": 797.5,
+      "B_per_op": [
+        0.0
+      ],
+      "allocs_per_op": [
+        0.0
+      ],
+      "samples_ns": [
+        797.5,
+        546.5,
+        525.4,
+        527.3
+      ]
+    },
+    "revised": {
+      "median_ns": 566.0,
+      "min_ns": 521.2,
+      "max_ns": 651.9,
+      "B_per_op": [
+        0.0
+      ],
+      "allocs_per_op": [
+        0.0
+      ],
+      "samples_ns": [
+        651.9,
+        606.2,
+        521.2,
+        525.8
+      ]
+    },
+    "median_delta_percent": 5.420003725088485
+  }
+}
+UTC finish: 2026-10-13T20:38:43.778129+00:00

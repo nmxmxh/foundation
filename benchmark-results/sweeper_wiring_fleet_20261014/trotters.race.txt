@@ -1,0 +1,3 @@
+ok  	github.com/ovasabi/trotters/internal/startup	2.253s
+?   	github.com/ovasabi/trotters/cmd/server	[no test files]
+ok  	github.com/ovasabi/trotters/cmd/worker	1.696s

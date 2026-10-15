@@ -368,8 +368,7 @@ func TestForEachSelectedEarlyStop(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Benchmarks: the Ambit-style claim under test is that two predicates plus a
 // bulk AND merge plus a masked reduction beat the equivalent per-record
-// pointer-chase filter, and that the bitmap lane's bytes touched are
-// deterministic and small.
+// pointer-chase filter. The modeled footprint excludes construction and repeated accesses.
 // ---------------------------------------------------------------------------
 
 // BenchmarkHermesColumnarBitmapFilterSum: fetch batch, build two predicate
@@ -381,8 +380,9 @@ func BenchmarkHermesColumnarBitmapFilterSum(b *testing.B) {
 	query := Query{OrganizationID: "org_1"}
 	fields := []string{"price", "bucket"}
 
-	// Deterministic bytes-touched budget for one iteration of the bitmap lane:
-	// two full column scans + three bitmaps' words + selected value reads.
+	// Estimate the resident kernel footprint, excluding batch construction.
+	// Include column values, three masks, and selected values in the model.
+	// Use foundation_movement diagnostics for instrumented access counts.
 	// (The ListRecords baseline has no deterministic equivalent: its per-record
 	// pointer graph is the cost the columnar layout removes.)
 	batch, err := store.GetColumnarBatch(ctx, "ticks", query, fields, Fence{})
@@ -429,7 +429,7 @@ func BenchmarkHermesColumnarBitmapFilterSum(b *testing.B) {
 		}
 		sink = sum
 	}
-	b.ReportMetric(float64(bytesTouched), "bytes_touched/op")
+	b.ReportMetric(float64(bytesTouched), "kernel_model_bytes/op")
 	_ = sink
 }
 
@@ -505,7 +505,7 @@ func BenchmarkHermesSelectionBitmapMerge10K(b *testing.B) {
 		}
 		sink = merged.Count()
 	}
-	b.ReportMetric(float64(len(left.words)*8*3), "bytes_touched/op")
+	b.ReportMetric(float64(len(left.words)*8*3), "kernel_model_bytes/op")
 	_ = sink
 }
 

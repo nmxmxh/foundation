@@ -1,0 +1,7 @@
+benchmark evidence fixtures passed: 8 cases
+[OK] benchmarks referenced in the ledger exist
+[OK] benchmark artifacts referenced in the ledger exist
+[OK] source paths referenced in the ledger exist
+benchmark evidence check passed
+docs reference check passed
+test naming check passed (191 paired, 29 benchmark, 37 build-constrained, 12 in source-less packages, 2 baselined of 271 files)

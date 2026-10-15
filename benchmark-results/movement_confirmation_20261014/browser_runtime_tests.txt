@@ -1,0 +1,14 @@
+[RUN] vitest /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host run --exclude **/*.profile.test.ts --no-file-parallelism
+
+ RUN  v5.0.0 /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host
+
+
+ Test Files  34 passed (34)
+      Tests  293 passed (293)
+   Start at  10:56:47
+   Duration  4.89s (tests 41%, transform 29%, import 23%, worker 6%)
+
+    Isolate  34 workers spawned · ~92ms startup each (spawn + environment, per file)
+             at least ~3.04s faster with isolate: false — reuses workers across files instead of one per file
+
+[OK] vitest /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host

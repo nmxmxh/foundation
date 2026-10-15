@@ -1,0 +1,61 @@
+   Compiling rustversion v1.0.22
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling once_cell v1.21.3
+   Compiling log v0.4.29
+   Compiling ovrt-browser v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-browser)
+   Compiling arc-swap v1.9.2
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+   Compiling ovrt-parity-fixture v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-parity-fixture)
+    Finished `release` profile [optimized] target(s) in 3.75s
+   Compiling compiler_builtins v0.1.160 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+   Compiling core v0.0.0 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/core)
+   Compiling libc v0.2.178
+   Compiling object v0.37.3
+   Compiling std v0.0.0 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std)
+   Compiling rustversion v1.0.22
+   Compiling rustc-std-workspace-core v1.99.0 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/rustc-std-workspace-core)
+   Compiling alloc v0.0.0 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/alloc)
+   Compiling cfg-if v1.0.4
+   Compiling memchr v2.7.6
+   Compiling adler2 v2.0.1
+   Compiling rustc-demangle v0.1.26
+   Compiling dlmalloc v0.2.11
+   Compiling unwind v0.0.0 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/unwind)
+   Compiling panic_abort v0.0.0 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/panic_abort)
+   Compiling rustc-std-workspace-alloc v1.99.0 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/rustc-std-workspace-alloc)
+   Compiling panic_unwind v0.0.0 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/panic_unwind)
+   Compiling gimli v0.32.3
+   Compiling miniz_oxide v0.8.9
+   Compiling hashbrown v0.16.1
+   Compiling std_detect v0.1.5 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/std_detect)
+   Compiling addr2line v0.25.1
+   Compiling rustc-std-workspace-std v1.99.0 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/rustc-std-workspace-std)
+   Compiling rustc-literal-escaper v0.0.5
+   Compiling proc_macro v0.0.0 (/Users/okhai/.rustup/toolchains/nightly-aarch64-apple-darwin/lib/rustlib/src/rust/library/proc_macro)
+   Compiling ovrt-core v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-core)
+   Compiling once_cell v1.21.3
+   Compiling log v0.4.29
+   Compiling arc-swap v1.9.2
+warning: unstable feature specified for `-Ctarget-feature`: `atomics`
+  |
+  = note: this feature is not stably supported; its behavior can change in the future
+
+   Compiling ovrt-browser v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-browser)
+warning: `ovrt-core` (lib) generated 1 warning
+   Compiling ovrt-unit v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-unit)
+warning: `ovrt-browser` (lib) generated 1 warning (1 duplicate)
+warning: `ovrt-unit` (lib) generated 1 warning (1 duplicate)
+   Compiling ovrt-parity-fixture v0.1.0 (/Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/rust/crates/ovrt-parity-fixture)
+warning: `ovrt-parity-fixture` (lib) generated 1 warning (1 duplicate)
+    Finished `release` profile [optimized] target(s) in 23.15s
+[RUN] vitest /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host run --config vitest.abi.config.ts --no-file-parallelism
+
+ RUN  v5.0.0 /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host
+
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  10:58:13
+   Duration  301ms (tests 55%, transform 35%, import 8%, worker 2%)
+
+[OK] vitest /Users/okhai/Desktop/OVASABI STUDIOS/foundation/runtime-sdk/ts/browser-host

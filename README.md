@@ -29,7 +29,7 @@ It is a full-stack substrate that compounds the strengths of Go, Rust/WASM, and 
 | --- | --- | --- |
 | **server-kit** | Go | Backend: event bus, workers, Hermes, database, resilience, observability |
 | **runtime-transport** | TypeScript | Client wire: command bus, envelope creation, metadata stores, WebSocket/HTTP fallback |
-| **runtime-sdk** | Rust/WASM | High-performance kernel: 4KB control buffer, zero-copy communication |
+| **runtime-sdk** | Rust/WASM | Runtime kernel: 4KB control buffer, borrowed views, and explicit payload ownership |
 | **ui-minimal** | TypeScript/React | Shared UI primitives, semantic theme tokens, motion helpers |
 | **frontend-kit** | TypeScript | IndexedDB storage, metadata helpers, runtime adapters, transfer progress |
 | **runtime-native** | Tauri/Rust | Native shell bridge: secure storage, GPU handles, device access |

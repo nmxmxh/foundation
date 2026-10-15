@@ -70,6 +70,7 @@ func ClearBitmapDispatchHooks() {
 
 func tryCount(words []uint64) (int, bool) {
 	if hook := bitmapCountHook.Load(); hook != nil {
+		movementRecord(movementUnobservedKernels, 1)
 		return (*hook)(words)
 	}
 	return 0, false
@@ -77,6 +78,7 @@ func tryCount(words []uint64) (int, bool) {
 
 func tryBinary(op BitmapOp, dst, src []uint64) bool {
 	if hook := bitmapBinaryHook.Load(); hook != nil {
+		movementRecord(movementUnobservedKernels, 1)
 		return (*hook)(op, dst, src)
 	}
 	return false

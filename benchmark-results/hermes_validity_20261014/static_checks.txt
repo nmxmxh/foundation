@@ -1,0 +1,180 @@
+benchmark ratchet regression tests passed
+movement guard regression tests passed
+	command-line-arguments		coverage: 96.4% of statements
+benchmark history regression tests passed
+practice controls regression tests passed
+command timeout regression tests passed
+coverage ratchet regression tests passed
+Foundation Core validation contract passed
+[OK] CP no goto in handwritten sources
+[OK] CP no unsafe in handwritten Go sources
+[OK] CP JSON marshal/unmarshal errors checked
+[OK] CP no unwrap/todo/dbg in Rust runtime code
+[OK] CP no blocking Atomics.wait on browser main/runtime code
+[OK] CP no direct MutationObserver construction
+[OK] CP no transition-all in frontend motion
+[OK] CP no large runtime buffer expansion
+[OK] CP internal Go avoids JSON gRPC compatibility dispatch
+[OK] CP no zero-duration Go timer placeholders
+[OK] CP channel close must not use select-default race guard
+[OK] CP WaitGroup Add must happen before goroutine launch
+[OK] CP foundation runtime SDK hot path avoids JSON materialization
+[OK] CP foundation consumers do not open raw websocket lanes
+[OK] CP foundation no gRPC compatibility envelope as default
+[OK] CP foundation app up migrations avoid destructive drops
+[OK] No checked-in dist artifacts
+[OK] No checked-in frontend dist artifacts
+[OK] No checked-in node_modules (local ignored artifact)
+[OK] No checked-in macOS residue (local ignored artifact)
+coding practices check passed
+managed-patch hygiene OK (tooling/scripts)
+[OK] practice controls matrix exists
+[OK] practice controls matrix header
+[OK] control mapped TE-19
+[OK] control mapped CP-35
+[OK] control mapped CP-13
+[OK] control mapped CP-36
+[OK] control mapped CP-14
+[OK] control mapped CP-37
+[OK] control mapped CP-15
+[OK] control mapped AISEC-01
+[OK] control mapped CP-38
+[OK] control mapped CP-16
+[OK] control mapped CP-39
+[OK] control mapped CP-17
+[OK] control mapped CP-18
+[OK] control mapped CP-19
+[OK] control mapped FORMAL-01
+[OK] control mapped CTRL-01
+[OK] control mapped TE-40
+[OK] control mapped TE-41
+[OK] control mapped TE-42
+[OK] control mapped TE-20
+[OK] control mapped TE-21
+[OK] control mapped TE-22
+[OK] control mapped TE-23
+[OK] control mapped TE-01
+[OK] control mapped TE-24
+[OK] control mapped TE-02
+[OK] control mapped CP-40
+[OK] control mapped TE-25
+[OK] control mapped TE-03
+[OK] control mapped CP-41
+[OK] control mapped PERFLAB-01
+[OK] control mapped EVID-01
+[OK] control mapped TE-26
+[OK] control mapped TE-04
+[OK] control mapped CP-42
+[OK] control mapped CP-20
+[OK] control mapped TE-27
+[OK] control mapped TE-05
+[OK] control mapped CP-43
+[OK] control mapped CP-21
+[OK] control mapped OPS-01
+[OK] control mapped TE-28
+[OK] control mapped TE-06
+[OK] control mapped CP-44
+[OK] control mapped CP-22
+[OK] control mapped TE-29
+[OK] control mapped TE-07
+[OK] control mapped CP-45
+[OK] control mapped CP-01
+[OK] control mapped CP-23
+[OK] control mapped RUNTIME-01
+[OK] control mapped TE-08
+[OK] control mapped CP-46
+[OK] control mapped CP-02
+[OK] control mapped CP-10A
+[OK] control mapped CP-24
+[OK] control mapped TE-09
+[OK] control mapped CP-47
+[OK] control mapped CP-03
+[OK] control mapped CP-25
+[OK] control mapped CP-04
+[OK] control mapped CP-26
+[OK] control mapped CP-05
+[OK] control mapped CP-27
+[OK] control mapped CP-06
+[OK] control mapped CP-28
+[OK] control mapped CP-07
+[OK] control mapped CP-29
+[OK] control mapped CP-08
+[OK] control mapped CP-09
+[OK] control mapped FPR-01
+[OK] control mapped TE-30
+[OK] control mapped TE-31
+[OK] control mapped TE-32
+[OK] control mapped TE-10
+[OK] control mapped TE-33
+[OK] control mapped TE-11
+[OK] control mapped AOC-01
+[OK] control mapped TE-34
+[OK] control mapped TE-12
+[OK] control mapped CP-07B
+[OK] control mapped TE-35
+[OK] control mapped TE-13
+[OK] control mapped TE-36
+[OK] control mapped TE-14
+[OK] control mapped CP-30
+[OK] control mapped MATH-01
+[OK] control mapped TE-37
+[OK] control mapped TE-15
+[OK] control mapped CP-31
+[OK] control mapped PROJFRESH-01
+[OK] control mapped TE-38
+[OK] control mapped TE-16
+[OK] control mapped CP-32
+[OK] control mapped CP-10
+[OK] control mapped TE-39
+[OK] control mapped TE-17
+[OK] control mapped CP-33
+[OK] control mapped CP-11
+[OK] control mapped TE-18
+[OK] control mapped CP-34
+[OK] control mapped CP-11A
+[OK] control mapped CP-12
+practice controls check passed
+[REVIEW] Go lock scope avoids blocking channel/context/select/wait work
+./server-kit/go/hermes/scope_signal.go:234: s.closeMu.RLock()
+[REVIEW] Go select default has explicit drop/probe/error rationale
+./server-kit/go/hermes/scope_signal.go:243: select {
+[OK] Go loop-launched anonymous goroutines copy inputs explicitly
+[OK] Go timers/tickers have Stop ownership
+[REVIEW] Go channel close ownership is single-owner or sync.Once guarded
+./runtime-sdk/go/runtimehost/ffi_unix.go:273: close(p.closeDone)
+go concurrency practices review found 3 area(s) for human review
+set GO_CONCURRENCY_STRICT=1 to fail on review findings
+[OK] low-level performance lab doc
+[OK] performance practices doc
+[OK] GPU practices doc
+[OK] Rust runtime practices doc
+[OK] performance lab names CPU counter taxonomy
+[OK] performance lab names Go pprof and trace
+[OK] performance lab names Rust Miri and Loom
+[OK] performance lab names WebGPU/WGSL
+[OK] performance lab names CUDA and capture tools
+[OK] performance practices separates hard bounds from statistics
+[OK] GPU practices require capture bundle schema
+[OK] performance runner supports profile directory
+[OK] performance runner emits machine metadata
+[OK] performance runner supports runtime trace capture
+[OK] performance runner captures Go traces
+[OK] performance runner captures block profiles
+[OK] performance runner captures mutex profiles
+[OK] performance runner supports hardware counter lane
+[OK] performance runner resolves generated app module layout
+[OK] performance runner resolves runtime-sdk module path
+[OK] performance runner resolves Vitest runner
+[OK] performance runner resolves frontend-kit module path
+[OK] performance runner captures frontend workbench profile
+[OK] frontend profile captures PROFILE metrics
+[OK] frontend profile writes benchmark results
+[OK] Vitest runner supports GC-exposed profile runs
+[OK] benchmark history captures frontend profile metrics
+[OK] Rust runtime script exposes Miri opt-in
+[OK] Rust runtime script exposes Loom opt-in
+[OK] Makefile defines -race test gate
+[OK] race gate runs the detector
+[OK] verify enforces the -race gate
+[OK] Makefile defines Loom interleaving gate
+runtime performance contract check passed

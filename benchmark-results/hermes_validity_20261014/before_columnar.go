@@ -1,0 +1,694 @@
+package hermes
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+)
+
+type DataType int
+
+const (
+	TypeInt64 DataType = iota
+	TypeFloat64
+	TypeString
+	TypeBinary
+	TypeTimestamp
+)
+
+// validityBitmap is the Arrow-style validity mask over one column: bit i is 1
+// when row i holds a value. It is the shared columnar bitmap (see
+// columnar_bitmap.go) plus the null-specific vocabulary, so validity and
+// selection share one set of word kernels and one tail-hygiene rule.
+//
+// Bit-packing is 64× more memory-efficient than []bool, and it is what makes
+// null counting a POPCNT rather than a scan.
+type validityBitmap struct {
+	bitmap
+}
+
+func newValidityBitmap(n int) validityBitmap {
+	return validityBitmap{bitmap: newBitmap(n)}
+}
+
+// isValid reports whether row i holds a value. Out-of-range rows read as null.
+func (b *validityBitmap) isValid(i int) bool {
+	return b.get(i)
+}
+
+// validCount returns the number of present (non-null) entries. This is the
+// count component of every null-aware reduction, and it is free: one POPCNT per
+// word rather than a pass over the values. See docs/columnar_null_algebra.md.
+func (b *validityBitmap) validCount() int {
+	return b.count()
+}
+
+// nullCount returns the number of null entries. Validity bits are set for
+// present values, so nulls are the total row count minus the set-bit count
+// (see popcountWords for the interleaved POPCNT/CNT kernel).
+func (b *validityBitmap) nullCount() int {
+	return b.n - b.count()
+}
+
+// Vector is the columnar data interface. StringVector intentionally
+// does NOT expose StringValues() []string at this level because
+// materializing a []string heap-allocates. Callers that need zero-copy
+// string access must assert to *StringVector and use Offsets()/Bytes().
+type Vector interface {
+	Type() DataType
+	Len() int
+	NullCount() int
+	IsValid(i int) bool
+
+	Int64Values() []int64
+	Float64Values() []float64
+	// StringValues returns a materialized []string. This allocates.
+	// For zero-copy access use (*StringVector).Offsets() and (*StringVector).Bytes().
+	StringValues() []string
+	BytesValues() [][]byte
+}
+
+type Column struct {
+	Name string
+	Data Vector
+}
+
+type RecordBatch struct {
+	Columns []Column
+	Rows    int
+}
+
+// ---------------------------------------------------------------------------
+// Int64Vector
+// ---------------------------------------------------------------------------
+
+type Int64Vector struct {
+	values   []int64
+	validity validityBitmap
+}
+
+func newInt64Vector(n int) *Int64Vector {
+	return &Int64Vector{values: make([]int64, n), validity: newValidityBitmap(n)}
+}
+
+func (v *Int64Vector) Type() DataType           { return TypeInt64 }
+func (v *Int64Vector) Len() int                 { return len(v.values) }
+func (v *Int64Vector) NullCount() int           { return v.validity.nullCount() }
+func (v *Int64Vector) IsValid(i int) bool       { return v.validity.isValid(i) }
+func (v *Int64Vector) Int64Values() []int64     { return v.values }
+func (v *Int64Vector) Float64Values() []float64 { return nil }
+func (v *Int64Vector) StringValues() []string   { return nil }
+func (v *Int64Vector) BytesValues() [][]byte    { return nil }
+
+// ---------------------------------------------------------------------------
+// Float64Vector
+// ---------------------------------------------------------------------------
+
+type Float64Vector struct {
+	values   []float64
+	validity validityBitmap
+}
+
+func newFloat64Vector(n int) *Float64Vector {
+	return &Float64Vector{values: make([]float64, n), validity: newValidityBitmap(n)}
+}
+
+func (v *Float64Vector) Type() DataType           { return TypeFloat64 }
+func (v *Float64Vector) Len() int                 { return len(v.values) }
+func (v *Float64Vector) NullCount() int           { return v.validity.nullCount() }
+func (v *Float64Vector) IsValid(i int) bool       { return v.validity.isValid(i) }
+func (v *Float64Vector) Int64Values() []int64     { return nil }
+func (v *Float64Vector) Float64Values() []float64 { return v.values }
+func (v *Float64Vector) StringValues() []string   { return nil }
+func (v *Float64Vector) BytesValues() [][]byte    { return nil }
+
+// ---------------------------------------------------------------------------
+// StringVector — Arrow-style offset+bytes layout
+//
+// Memory layout (matches Apache Arrow binary/string specification):
+//
+//   offsets: [o0, o1, o2, ..., oN]   (N+1 int32 values)
+//   buf:     [s0_bytes | s1_bytes | ...]
+//
+// String i occupies buf[offsets[i]:offsets[i+1]].
+// Accessing a single string is a bounds check + slice header construction —
+// zero heap allocation. StringValues() materializes []string and DOES allocate;
+// callers on hot paths should use Offsets()+Bytes() directly.
+// ---------------------------------------------------------------------------
+
+type StringVector struct {
+	offsets  []int32 // len == n+1
+	buf      []byte
+	validity validityBitmap
+	n        int
+}
+
+func newStringVectorFromSlice(ss []string, valid []bool) (*StringVector, error) {
+	n := len(ss)
+	// Compute total byte length for single allocation.
+	total := 0
+	for _, s := range ss {
+		total += len(s)
+	}
+	// Arrow's standard binary layout uses int32 offsets, capping one string
+	// column at 2 GiB. Bound the input explicitly (CP-02) rather than let the
+	// int32(len(v.buf)) conversions below overflow silently (CWE-190).
+	if total > math.MaxInt32 {
+		return nil, fmt.Errorf("hermes: string column bytes %d exceed int32 offset limit", total)
+	}
+	v := &StringVector{
+		offsets:  make([]int32, n+1),
+		validity: newValidityBitmap(n),
+		n:        n,
+	}
+	v.buf = make([]byte, 0, total)
+	for i, s := range ss {
+		// #nosec G115 -- len(v.buf) <= total <= MaxInt32, guarded above.
+		v.offsets[i] = int32(len(v.buf))
+		v.buf = append(v.buf, s...)
+		if valid[i] {
+			v.validity.set(i)
+		}
+	}
+	// #nosec G115 -- len(v.buf) == total <= MaxInt32, guarded above.
+	v.offsets[n] = int32(len(v.buf))
+	return v, nil
+}
+
+func (v *StringVector) Type() DataType           { return TypeString }
+func (v *StringVector) Len() int                 { return v.n }
+func (v *StringVector) NullCount() int           { return v.validity.nullCount() }
+func (v *StringVector) IsValid(i int) bool       { return v.validity.isValid(i) }
+func (v *StringVector) Int64Values() []int64     { return nil }
+func (v *StringVector) Float64Values() []float64 { return nil }
+func (v *StringVector) BytesValues() [][]byte    { return nil }
+
+// Offsets returns the raw offset array (length n+1). Use with Bytes() for
+// zero-copy string views: buf[offsets[i]:offsets[i+1]] is string i.
+func (v *StringVector) Offsets() []int32 { return v.offsets }
+
+// Bytes returns the contiguous backing byte buffer.
+func (v *StringVector) Bytes() []byte { return v.buf }
+
+// ValueAt returns the string at index i. The result is a safe, independently
+// owned copy of the backing bytes, so callers may retain it freely. On hot
+// scan paths where the value is consumed transiently (e.g. length or hashing),
+// Go escape analysis elides the copy. For genuine zero-copy access into the
+// shared buffer, use Offsets()+Bytes() directly and observe their lifetime
+// caveats — Hermes carries tenant projection data, so the unsafe view is kept
+// out of this convenience accessor (see CP "no unsafe in handwritten Go").
+func (v *StringVector) ValueAt(i int) string {
+	return string(v.buf[v.offsets[i]:v.offsets[i+1]])
+}
+
+// StringValues materializes a []string heap copy. Use for compatibility
+// only — prefer ValueAt or Offsets/Bytes on hot paths.
+func (v *StringVector) StringValues() []string {
+	out := make([]string, v.n)
+	for i := range out {
+		out[i] = v.ValueAt(i)
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
+// TimestampVector
+// ---------------------------------------------------------------------------
+
+type TimestampVector struct {
+	values   []time.Time
+	validity validityBitmap
+}
+
+func newTimestampVector(n int) *TimestampVector {
+	return &TimestampVector{values: make([]time.Time, n), validity: newValidityBitmap(n)}
+}
+
+func (v *TimestampVector) Type() DataType     { return TypeTimestamp }
+func (v *TimestampVector) Len() int           { return len(v.values) }
+func (v *TimestampVector) NullCount() int     { return v.validity.nullCount() }
+func (v *TimestampVector) IsValid(i int) bool { return v.validity.isValid(i) }
+func (v *TimestampVector) Int64Values() []int64 {
+	out := make([]int64, len(v.values))
+	for i, t := range v.values {
+		out[i] = t.UnixNano()
+	}
+	return out
+}
+func (v *TimestampVector) Float64Values() []float64 { return nil }
+func (v *TimestampVector) StringValues() []string   { return nil }
+func (v *TimestampVector) BytesValues() [][]byte    { return nil }
+
+// ---------------------------------------------------------------------------
+// DomainRecordVector — wraps full DomainRecord values for the _record column.
+// ---------------------------------------------------------------------------
+
+type DomainRecordVector struct {
+	values   []database.DomainRecord
+	validity validityBitmap
+}
+
+func (v *DomainRecordVector) Type() DataType                        { return TypeBinary }
+func (v *DomainRecordVector) Len() int                              { return len(v.values) }
+func (v *DomainRecordVector) NullCount() int                        { return v.validity.nullCount() }
+func (v *DomainRecordVector) IsValid(i int) bool                    { return v.validity.isValid(i) }
+func (v *DomainRecordVector) Int64Values() []int64                  { return nil }
+func (v *DomainRecordVector) Float64Values() []float64              { return nil }
+func (v *DomainRecordVector) StringValues() []string                { return nil }
+func (v *DomainRecordVector) BytesValues() [][]byte                 { return nil }
+func (v *DomainRecordVector) RecordValues() []database.DomainRecord { return v.values }
+
+// ---------------------------------------------------------------------------
+// GetColumnarBatch — public entry point
+// ---------------------------------------------------------------------------
+
+func (s *Store) GetColumnarBatch(ctx context.Context, projection string, query Query, fields []string, fence Fence) (*RecordBatch, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
+	part, err := s.partition(projection)
+	if err != nil {
+		return nil, err
+	}
+	return part.getColumnarBatch(ctx, query, fields, fence)
+}
+
+// ---------------------------------------------------------------------------
+// collectRecordEntries — shared candidate collection used by getColumnarBatch.
+// ---------------------------------------------------------------------------
+
+func (p *partition) collectRecordEntries(ctx context.Context, registry *partitionRegistry, query Query) ([]*recordEntry, error) {
+	index := p.candidateIndex(registry, query)
+	capacity := index.len()
+	if query.Limit > 0 {
+		capacity = min(capacity, query.Limit)
+	}
+	candidates := entryCandidates{entries: make([]*recordEntry, 0, capacity), limit: query.Limit}
+	var iterErr error
+	accept := func(entry *recordEntry) bool {
+		movementRecord(movementCandidates, 1)
+		if iterErr = ctxErr(ctx); iterErr != nil {
+			return false
+		}
+		if entry != nil && recordMatches(entry.record, p.spec, query) {
+			candidates.add(entry)
+		}
+		return true
+	}
+	visit := func(key string) bool { return accept(p.recordEntryPointer(registry, key)) }
+	if query.Limit > 0 && !registry.columnarUnordered.Load() {
+		index.forEachOrderDesc(func(order recordOrderEntry) bool {
+			if len(candidates.entries) >= query.Limit {
+				return false
+			}
+			entry := p.recordEntryPointer(registry, order.key)
+			if entry != nil && entry.version != order.version {
+				entry = nil
+			}
+			return accept(entry)
+		})
+		if iterErr != nil || !registry.columnarUnordered.Load() {
+			return candidates.entries, iterErr
+		}
+		// A concurrent publication invalidated the order proof. Rescan once with bounded selection.
+		candidates.entries = candidates.entries[:0]
+	}
+	if keys, ok := p.bitmapCandidates(registry, query); ok {
+		for _, key := range keys {
+			if !visit(key) {
+				break
+			}
+		}
+	} else {
+		index.forEachKey(visit)
+	}
+	return candidates.entries, iterErr
+}
+
+// ---------------------------------------------------------------------------
+// getColumnarBatch — builds a RecordBatch from the active partition registry.
+// ---------------------------------------------------------------------------
+
+func (p *partition) getColumnarBatch(ctx context.Context, query Query, fields []string, fence Fence) (*RecordBatch, error) {
+	if err := p.waitForStable(ctx); err != nil {
+		return nil, err
+	}
+	if err := p.checkFence(fence); err != nil {
+		return nil, err
+	}
+	query = normalizeQuery(query)
+	if query.OrganizationID == "" {
+		return nil, ErrInvalidEvent
+	}
+
+	entries, err := p.collectRecordEntries(ctx, p.activeRegistry(), query)
+	if err != nil {
+		return nil, err
+	}
+	entries = sortAndLimitEntries(entries, query)
+	return buildRecordBatch(fields, entries)
+}
+
+// getColumnarBatchWhere is the predicate-pushdown twin of getColumnarBatch:
+// candidates are collected without the query limit, filtered before sorting,
+// then sorted, limited, and materialized — so unselected rows never pay sort
+// comparisons or vector construction, and the limit applies to filtered rows.
+func (p *partition) getColumnarBatchWhere(ctx context.Context, query Query, fields []string, predicates []ColumnPredicate, fence Fence) (*RecordBatch, error) {
+	if err := p.waitForStable(ctx); err != nil {
+		return nil, err
+	}
+	if err := p.checkFence(fence); err != nil {
+		return nil, err
+	}
+	query = normalizeQuery(query)
+	if query.OrganizationID == "" {
+		return nil, ErrInvalidEvent
+	}
+
+	// Collect with the limit lifted: an early-stopped candidate walk would
+	// truncate before filtering and break WHERE-then-LIMIT semantics.
+	collectQuery := query
+	collectQuery.Limit = 0
+	registry := p.activeRegistry()
+	var entries []*recordEntry
+	var err error
+	if plan, ok := p.bestRangeCandidatePlan(registry, collectQuery, predicates); ok {
+		entries, _, err = p.collectRangeEntries(ctx, registry, collectQuery, plan)
+	} else {
+		entries, err = p.collectRecordEntries(ctx, registry, collectQuery)
+	}
+	if err != nil {
+		return nil, err
+	}
+	entries = filterEntriesInPlace(entries, predicates)
+	entries = sortAndLimitEntries(entries, query)
+	return buildRecordBatch(fields, entries)
+}
+
+func (p *partition) collectRangeEntries(
+	ctx context.Context,
+	registry *partitionRegistry,
+	query Query,
+	plan rangeCandidatePlan,
+) ([]*recordEntry, int, error) {
+	if plan.snapshot == nil || plan.estimate == 0 {
+		return nil, 0, nil
+	}
+	entries := make([]*recordEntry, 0, plan.estimate)
+	inspected := 0
+	var iterErr error
+	plan.forEach(func(candidate rangeIndexEntry) bool {
+		if err := ctxErr(ctx); err != nil {
+			iterErr = err
+			return false
+		}
+		inspected++
+		entry := p.recordEntryPointer(registry, candidate.key)
+		if entry == nil || entry.version != candidate.version || !recordMatches(entry.record, p.spec, query) {
+			return true
+		}
+		entries = append(entries, entry)
+		return true
+	})
+	return entries, inspected, iterErr
+}
+
+// sortAndLimitEntries applies the canonical batch order (descending UpdatedAt
+// → descending version → ascending RecordID), then the query limit.
+func sortAndLimitEntries(entries []*recordEntry, query Query) []*recordEntry {
+	slices.SortFunc(entries, compareColumnarEntries)
+	if query.Limit > 0 && len(entries) > query.Limit {
+		entries = entries[:query.Limit]
+	}
+	return entries
+}
+
+// buildRecordBatch materializes the requested field vectors for the entries.
+func buildRecordBatch(fields []string, entries []*recordEntry) (*RecordBatch, error) {
+	rows := len(entries)
+	columns := make([]Column, 0, len(fields))
+	for _, field := range fields {
+		vec, err := buildFieldVector(field, entries, rows)
+		if err != nil {
+			return nil, err
+		}
+		columns = append(columns, Column{Name: field, Data: vec})
+	}
+	movementRecord(movementRowsMaterialized, rows)
+	return &RecordBatch{
+		Columns: columns,
+		Rows:    rows,
+	}, nil
+}
+
+// buildFieldVector builds the Vector for a single column. Reserved field names
+// map to fixed record attributes; any other field is resolved from the record's
+// data map, with the column type inferred from the first valid scalar value.
+// Zero-copy/borrowed-view semantics and allocation shape are preserved exactly.
+func buildFieldVector(field string, entries []*recordEntry, rows int) (Vector, error) {
+	switch field {
+	case "_record":
+		vals := make([]database.DomainRecord, rows)
+		dv := &DomainRecordVector{
+			values:   vals,
+			validity: newValidityBitmap(rows),
+		}
+		for i, entry := range entries {
+			dv.values[i] = entry.record
+			dv.validity.set(i)
+		}
+		return dv, nil
+
+	case "record_id":
+		ss := make([]string, rows)
+		vv := make([]bool, rows)
+		for i, entry := range entries {
+			ss[i] = entry.record.RecordID
+			vv[i] = true
+		}
+		return newStringVectorFromSlice(ss, vv)
+
+	case "organization_id":
+		ss := make([]string, rows)
+		vv := make([]bool, rows)
+		for i, entry := range entries {
+			ss[i] = entry.record.OrganizationID
+			vv[i] = true
+		}
+		return newStringVectorFromSlice(ss, vv)
+
+	case "created_at":
+		tv := newTimestampVector(rows)
+		for i, entry := range entries {
+			tv.values[i] = entry.record.CreatedAt
+			tv.validity.set(i)
+		}
+		return tv, nil
+
+	case "updated_at":
+		tv := newTimestampVector(rows)
+		for i, entry := range entries {
+			tv.values[i] = entry.record.UpdatedAt
+			tv.validity.set(i)
+		}
+		return tv, nil
+
+	case "version":
+		iv := newInt64Vector(rows)
+		for i, entry := range entries {
+			// #nosec G115
+			iv.values[i] = int64(entry.version)
+			movementRecord(movementNumericWrite, 8)
+			iv.validity.set(i)
+		}
+		return iv, nil
+
+	default:
+		return buildDataFieldVector(field, entries, rows)
+	}
+}
+
+// buildDataFieldVector resolves a non-reserved field from the record data map.
+// The column type is determined from the first valid scalar entry; an empty
+// string column is produced when no entry carries the field.
+func buildDataFieldVector(field string, entries []*recordEntry, rows int) (Vector, error) {
+	// RecordData.Get trims the wanted name on every call, and this function calls
+	// it once per row per column. Resolve the trimmed name once and scan for it
+	// directly; hermes normalizes record field names on the write path, so the
+	// stored names carry no surrounding space.
+	want := strings.TrimSpace(field)
+
+	// Determine column type from the first valid entry.
+	var kind byte
+	found := false
+	for _, entry := range entries {
+		if val, ok := lookupRecordField(entry.record.Data, want); ok {
+			k, _, ok := val.ScalarIndex()
+			if ok {
+				kind = k
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		ss := make([]string, rows)
+		vv := make([]bool, rows)
+		return newStringVectorFromSlice(ss, vv)
+	}
+
+	switch kind {
+	case 'i', 'u':
+		iv := newInt64Vector(rows)
+		for i, entry := range entries {
+			if val, ok := lookupRecordField(entry.record.Data, want); ok {
+				if k, idxVal, ok := val.ScalarIndex(); ok && (k == 'i' || k == 'u') {
+					parsed, err2 := strconv.ParseInt(idxVal, 10, 64)
+					movementRecord(movementParseInput, len(idxVal))
+					if err2 != nil {
+						return nil, fmt.Errorf("hermes: failed to parse integer field %q value %q: %w", field, idxVal, err2)
+					}
+					iv.values[i] = parsed
+					movementRecord(movementNumericWrite, 8)
+					iv.validity.set(i)
+				}
+			}
+		}
+		return iv, nil
+	case 'f':
+		fv := newFloat64Vector(rows)
+		for i, entry := range entries {
+			if val, ok := lookupRecordField(entry.record.Data, want); ok {
+				if k, idxVal, ok := val.ScalarIndex(); ok && k == 'f' {
+					parsed, err2 := parseColumnarFloat(idxVal)
+					if err2 != nil {
+						return nil, fmt.Errorf("hermes: failed to parse float field %q value %q: %w", field, idxVal, err2)
+					}
+					fv.values[i] = parsed
+					movementRecord(movementNumericWrite, 8)
+					fv.validity.set(i)
+				}
+			}
+		}
+		return fv, nil
+	case 'b':
+		iv := newInt64Vector(rows)
+		for i, entry := range entries {
+			if val, ok := lookupRecordField(entry.record.Data, want); ok {
+				if k, idxVal, ok := val.ScalarIndex(); ok && k == 'b' {
+					if idxVal == "1" {
+						iv.values[i] = 1
+						movementRecord(movementNumericWrite, 8)
+					}
+					iv.validity.set(i)
+				}
+			}
+		}
+		return iv, nil
+	default:
+		ss := make([]string, rows)
+		vv := make([]bool, rows)
+		for i, entry := range entries {
+			if val, ok := lookupRecordField(entry.record.Data, want); ok {
+				if _, idxVal, ok := val.ScalarIndex(); ok {
+					ss[i] = idxVal
+					vv[i] = true
+				} else {
+					ss[i] = val.Text
+					vv[i] = val.Kind != database.RecordValueNull
+				}
+			}
+		}
+		return newStringVectorFromSlice(ss, vv)
+	}
+}
+
+// lookupRecordField resolves an already-trimmed field name. RecordData.Get does
+// the same scan but re-trims the name on every call, which is wasted work in a
+// per-row column build.
+func lookupRecordField(data database.RecordData, trimmed string) (database.RecordValue, bool) {
+	for _, field := range data {
+		movementRecord(movementFieldProbes, 1)
+		if field.Name == trimmed {
+			return field.Value, true
+		}
+	}
+	return database.RecordValue{}, false
+}
+
+// parseColumnarFloat parses the plain decimal form that float record values
+// carry. strconv.ParseFloat spends most of its time on setup that this shape
+// never needs: Inf/NaN detection, base detection, and error construction. The
+// fast path handles short fixed-point decimals exactly and defers everything
+// else, including exponents and non-finite values, to strconv.
+//
+// The accumulated value must be exact, so the loop stays in int64 and only
+// scales once at the end. Digits are bounded at 15 because a longer run would
+// overflow int64 and belongs on the strconv path anyway.
+func parseColumnarFloat(s string) (float64, error) {
+	movementRecord(movementParseInput, len(s))
+	if fast, ok := fastDecimalFloat(s); ok {
+		return fast, nil
+	}
+	return strconv.ParseFloat(s, 64)
+}
+
+func fastDecimalFloat(s string) (float64, bool) {
+	if len(s) == 0 || len(s) > 24 {
+		return 0, false
+	}
+	neg := false
+	i := 0
+	if s[0] == '+' || s[0] == '-' {
+		neg = s[0] == '-'
+		i++
+	}
+	var mantissa int64
+	digits := 0
+	for ; i < len(s) && s[i] >= '0' && s[i] <= '9'; i++ {
+		mantissa = mantissa*10 + int64(s[i]-'0')
+		digits++
+		if digits > 15 {
+			return 0, false
+		}
+	}
+	if digits == 0 {
+		return 0, false
+	}
+	scale := 0
+	if i < len(s) && s[i] == '.' {
+		i++
+		for ; i < len(s) && s[i] >= '0' && s[i] <= '9'; i++ {
+			mantissa = mantissa*10 + int64(s[i]-'0')
+			digits++
+			scale++
+			if digits > 15 {
+				return 0, false
+			}
+		}
+	}
+	// Reject trailing bytes: an exponent, a second dot, or trailing space. Those
+	// shapes go to strconv so the returned value matches ParseFloat exactly.
+	if i != len(s) {
+		return 0, false
+	}
+	out := float64(mantissa)
+	if scale > 0 {
+		div := float64(int64(1))
+		for range scale {
+			div *= 10
+		}
+		out /= div
+	}
+	if neg {
+		out = -out
+	}
+	return out, true
+}

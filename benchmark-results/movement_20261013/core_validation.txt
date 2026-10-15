@@ -1,0 +1,8 @@
+benchmark ratchet regression tests passed
+movement guard regression tests passed
+	command-line-arguments		coverage: 96.4% of statements
+benchmark history regression tests passed
+practice controls regression tests passed
+command timeout regression tests passed
+coverage ratchet regression tests passed
+Foundation Core validation contract passed

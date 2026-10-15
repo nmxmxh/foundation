@@ -191,11 +191,13 @@ func selectFloat64Scalar(words []uint64, values []float64, op CompareOp, operand
 		end := min(base+64, n)
 		var word uint64
 		for i := base; i < end; i++ {
+			movementRecord(movementNumericRead, 8)
 			if compareMatches(op, values[i], operand) {
 				word |= 1 << uint(i-base)
 			}
 		}
 		words[w] = word
+		movementRecord(movementBitmapWrite, 8)
 	}
 }
 
@@ -206,11 +208,13 @@ func selectInt64Scalar(words []uint64, values []int64, op CompareOp, operand int
 		end := min(base+64, n)
 		var word uint64
 		for i := base; i < end; i++ {
+			movementRecord(movementNumericRead, 8)
 			if compareMatches(op, values[i], operand) {
 				word |= 1 << uint(i-base)
 			}
 		}
 		words[w] = word
+		movementRecord(movementBitmapWrite, 8)
 	}
 }
 
@@ -255,6 +259,7 @@ func (b *RecordBatch) SumFloat64Selected(name string, sel *SelectionBitmap) (flo
 	}
 	var sum float64
 	sel.ForEachSelected(func(row int) bool {
+		movementRecord(movementNumericRead, 8)
 		sum += values[row]
 		return true
 	})

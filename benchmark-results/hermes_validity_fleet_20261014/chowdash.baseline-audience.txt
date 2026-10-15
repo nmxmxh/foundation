@@ -1,0 +1,8 @@
+--- FAIL: TestEveryFrontendBoundScopeDeclaresAnAudience (0.16s)
+    projection_audience_test.go:56: frontend binds scope "logistics_runtime/observations" but it declares no audience policy: Strict refuses it with 403
+    projection_audience_test.go:56: frontend binds scope "logistics_runtime/stops" but it declares no audience policy: Strict refuses it with 403
+    projection_audience_test.go:56: frontend binds scope "logistics_runtime/unserved_stops" but it declares no audience policy: Strict refuses it with 403
+    projection_audience_test.go:56: frontend binds scope "message/ops_conversations" but it declares no audience policy: Strict refuses it with 403
+FAIL
+FAIL	github.com/ovasabi/chowdash-rider/internal/startup	0.963s
+FAIL

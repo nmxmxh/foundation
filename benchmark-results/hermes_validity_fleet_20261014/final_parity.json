@@ -1,0 +1,86 @@
+[
+  {
+    "slug": "chowdash",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "civic",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "docuos",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "forest",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "global",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "marketer",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "ovasabi",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "pronto",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "reframe",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "trader",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "trotters",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  },
+  {
+    "slug": "metered",
+    "files_compared": 230,
+    "failures": [],
+    "passed": true,
+    "content_digest": "63211162412d3ea3b6d3920ac1b1ceccbf568ae33bec49177afd9674f1dfd2c5"
+  }
+]

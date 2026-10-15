@@ -1,0 +1,2 @@
+ok  	github.com/ovasabi/metered_v1/internal/startup	0.736s [no tests to run]
+ok  	github.com/ovasabi/metered_v1/cmd/worker	1.288s [no tests to run]

@@ -44,6 +44,9 @@ default_paths() {
     scripts/lib/scaffold.sh \
     tooling/practice_controls.psv \
     tooling/foundation_ownership.tsv \
+    tooling/benchmark_movement_packages.tsv \
+    tooling/benchmark_movement_baseline.psv \
+    tooling/benchmark_movement_sources.psv \
     templates/Makefile \
     templates/scaffold.manifest.tsv \
     tests/scaffold_manifest_test.sh \
@@ -53,6 +56,8 @@ default_paths() {
     tests/lifecycle_contract_generator_test.sh \
     tests/core_validation_contract_test.sh \
     tests/benchmark_ratchet_test.sh \
+    tests/benchmark_evidence_test.sh \
+    tests/benchmark_movement_test.sh \
     tests/benchmark_history_test.sh \
     tests/practice_controls_test.sh \
     tests/command_timeout_test.sh \

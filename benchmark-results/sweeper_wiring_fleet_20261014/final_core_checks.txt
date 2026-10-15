@@ -1,0 +1,6 @@
+docs reference check passed
+benchmark evidence fixtures passed: 8 cases
+[OK] benchmarks referenced in the ledger exist
+[OK] benchmark artifacts referenced in the ledger exist
+[OK] source paths referenced in the ledger exist
+benchmark evidence check passed

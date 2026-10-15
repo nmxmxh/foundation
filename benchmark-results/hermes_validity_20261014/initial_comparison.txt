@@ -1,0 +1,114 @@
+phase=0 before; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   6001551 ns/op	    179736 kernel_model_bytes/op	  251122 B/op	      11 allocs/op
+PASS
+
+phase=0 candidate; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4889167 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+phase=1 candidate; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4104641 ns/op	    179736 kernel_model_bytes/op	  251122 B/op	      11 allocs/op
+PASS
+
+phase=1 before; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4185131 ns/op	    179736 kernel_model_bytes/op	  251122 B/op	      11 allocs/op
+PASS
+
+phase=2 before; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   5049625 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+phase=2 candidate; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4654434 ns/op	    179736 kernel_model_bytes/op	  251122 B/op	      11 allocs/op
+PASS
+
+phase=3 candidate; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4221352 ns/op	    179736 kernel_model_bytes/op	  251105 B/op	      11 allocs/op
+PASS
+
+phase=3 before; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4214675 ns/op	    179736 kernel_model_bytes/op	  251121 B/op	      11 allocs/op
+PASS
+
+phase=4 before; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4587766 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+phase=4 candidate; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4073148 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+phase=5 candidate; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4169176 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+phase=5 before; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4242872 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+phase=6 before; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4274110 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+phase=6 candidate; phase zero discarded
+goos: darwin
+goarch: arm64
+pkg: github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes
+cpu: Apple M1 Pro
+BenchmarkHermesColumnarBitmapFilterSum-8   	     300	   4267887 ns/op	    179736 kernel_model_bytes/op	  251104 B/op	      11 allocs/op
+PASS
+
+before: median 4258491 ns/op, range 4185131..5049625
+candidate: median 4195264 ns/op, range 4073148..4654434

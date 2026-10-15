@@ -1,0 +1,73 @@
+[OK] movement source audit: 90 covered function declarations
+[FAIL] movement guard: movement process failed: server-kit/go ./hermes: exit status 1
+=== RUN   TestMovementFullPathBoundaries
+=== RUN   TestMovementFullPathBoundaries/1
+    movement_test.go:118: bitmap_read_bytes/op=72, want 56
+=== RUN   TestMovementFullPathBoundaries/63
+    movement_test.go:118: bitmap_read_bytes/op=968, want 56
+    movement_test.go:118: bitmap_write_bytes/op=952, want 56
+=== RUN   TestMovementFullPathBoundaries/64
+    movement_test.go:118: bitmap_read_bytes/op=984, want 56
+    movement_test.go:118: bitmap_write_bytes/op=968, want 56
+=== RUN   TestMovementFullPathBoundaries/65
+    movement_test.go:118: bitmap_read_bytes/op=1048, want 112
+    movement_test.go:118: bitmap_write_bytes/op=1016, want 112
+=== RUN   TestMovementFullPathBoundaries/1000
+    movement_test.go:118: bitmap_read_bytes/op=15296, want 896
+    movement_test.go:118: bitmap_write_bytes/op=15040, want 896
+--- FAIL: TestMovementFullPathBoundaries (0.01s)
+    --- FAIL: TestMovementFullPathBoundaries/1 (0.00s)
+    --- FAIL: TestMovementFullPathBoundaries/63 (0.00s)
+    --- FAIL: TestMovementFullPathBoundaries/64 (0.00s)
+    --- FAIL: TestMovementFullPathBoundaries/65 (0.00s)
+    --- FAIL: TestMovementFullPathBoundaries/1000 (0.01s)
+=== RUN   TestMovementResidentSelection
+=== RUN   TestMovementResidentSelection/none
+=== RUN   TestMovementResidentSelection/all_present
+=== RUN   TestMovementResidentSelection/mixed
+--- PASS: TestMovementResidentSelection (0.00s)
+    --- PASS: TestMovementResidentSelection/none (0.00s)
+    --- PASS: TestMovementResidentSelection/all_present (0.00s)
+    --- PASS: TestMovementResidentSelection/mixed (0.00s)
+=== RUN   TestMovementEmptyAndMalformed
+=== RUN   TestMovementEmptyAndMalformed/3
+=== RUN   TestMovementEmptyAndMalformed/5
+--- PASS: TestMovementEmptyAndMalformed (0.00s)
+    --- PASS: TestMovementEmptyAndMalformed/3 (0.00s)
+    --- PASS: TestMovementEmptyAndMalformed/5 (0.00s)
+=== RUN   TestMovementCopyRegression
+--- PASS: TestMovementCopyRegression (0.00s)
+=== RUN   TestMovementReadBoundaries
+=== RUN   TestMovementReadBoundaries/canceled
+=== RUN   TestMovementReadBoundaries/missing_org
+=== RUN   TestMovementReadBoundaries/fence
+=== RUN   TestMovementReadBoundaries/other_org
+--- PASS: TestMovementReadBoundaries (0.00s)
+    --- PASS: TestMovementReadBoundaries/canceled (0.00s)
+    --- PASS: TestMovementReadBoundaries/missing_org (0.00s)
+    --- PASS: TestMovementReadBoundaries/fence (0.00s)
+    --- PASS: TestMovementReadBoundaries/other_org (0.00s)
+=== RUN   TestMovementAlternateExecutorIsUnobserved
+--- PASS: TestMovementAlternateExecutorIsUnobserved (0.00s)
+=== RUN   TestMovementDecliningExecutorIsUnobserved
+--- PASS: TestMovementDecliningExecutorIsUnobserved (0.00s)
+=== RUN   TestMovementNumericValidityWords
+=== RUN   TestMovementNumericValidityWords/dense
+    movement_test.go:341: construction bitmap reads=2064 writes=2064, want 0/48
+=== RUN   TestMovementNumericValidityWords/sparse
+    movement_test.go:341: construction bitmap reads=32 writes=32, want 0/32
+=== RUN   TestMovementNumericValidityWords/null_word
+    movement_test.go:341: construction bitmap reads=1040 writes=1040, want 0/32
+=== RUN   TestMovementNumericValidityWords/mixed
+    movement_test.go:341: construction bitmap reads=1472 writes=1472, want 0/48
+--- FAIL: TestMovementNumericValidityWords (0.00s)
+    --- FAIL: TestMovementNumericValidityWords/dense (0.00s)
+    --- FAIL: TestMovementNumericValidityWords/sparse (0.00s)
+    --- FAIL: TestMovementNumericValidityWords/null_word (0.00s)
+    --- FAIL: TestMovementNumericValidityWords/mixed (0.00s)
+FAIL
+exit status 1
+FAIL	github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes	0.653s
+FAIL
+
+exit status 1

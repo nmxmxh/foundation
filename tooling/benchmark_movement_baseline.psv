@@ -1,0 +1,41 @@
+# module|package|benchmark|metric|max_value
+# Exact logical accounting ceilings. Changes require review and an integrity refresh.
+# These counters do not measure hardware traffic or allocator initialization.
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|bitmap_read_bytes/op|8792
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|bitmap_write_bytes/op|8792
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|candidates/op|10000
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|explicit_copy_bytes/op|0
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|field_probes/op|40007
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|numeric_read_bytes/op|175968
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|numeric_write_bytes/op|144000
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|parse_input_bytes/op|55822
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|rows_materialized/op|10000
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|sort_comparisons/op|252684
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|bitmap_read_bytes/op|8792
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|bitmap_write_bytes/op|6280
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|candidates/op|0
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|explicit_copy_bytes/op|0
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|field_probes/op|0
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|numeric_read_bytes/op|175968
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|numeric_write_bytes/op|0
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|parse_input_bytes/op|0
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|rows_materialized/op|0
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|sort_comparisons/op|0
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/8|input-copy-B/op|8
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/8|output-copy-B/op|8
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/8|control-clear-B/op|4096
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/8|error-clear-B/op|4096
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/64|input-copy-B/op|64
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/64|output-copy-B/op|64
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/64|control-clear-B/op|4096
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/64|error-clear-B/op|4096
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/256|input-copy-B/op|256
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/256|output-copy-B/op|256
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/256|control-clear-B/op|4096
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/256|error-clear-B/op|4096
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/1024|input-copy-B/op|1024
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/1024|output-copy-B/op|1024
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/1024|control-clear-B/op|4096
+runtime-sdk/go|./runtimehost|BenchmarkMovementFFIExecuteInto/1024|error-clear-B/op|4096
+server-kit/go|./hermes|BenchmarkMovementHermesFullPath10K|unobserved_kernel_calls/op|0
+server-kit/go|./hermes|BenchmarkMovementHermesResident10K|unobserved_kernel_calls/op|0

@@ -142,6 +142,31 @@ names must be stable, hierarchical, and meaningful across captures.
    - capability profile
    - correlation ID as a field, not part of the marker name
 
+## Movement budgets per frame
+
+Budget payload movement beside frame time and allocations.
+Record simulation writes, state publication, worker copies, GPU uploads, device copies, readbacks, and fallback materialization separately.
+Count buffer clearing separately from copying. Shared storage can receive substantial writes while allocating nothing.
+
+Measure initial asset decoding and uploads separately from repeated frames that reuse resident resources.
+Distinguish executed frames, unchanged-state frames, cadence skips, and rejected frames.
+Require evidence that the intended pass executed before accepting a zero count.
+
+Computing directly into a shared slot still writes payload bytes.
+The render reader borrows that slot until its next acquisition.
+Preserve slot ownership, generation publication, and view lifetime during optimization.
+Borrowed reads do not establish zero movement for the complete frame.
+
+Include representative entity counts, payload sizes, update cadences, and quality profiles in each capture.
+Count source operations in diagnostics, then measure ordinary frame timing separately.
+Inject additional counted and uncounted copies into isolated test checkouts to validate new movement guards.
+Label deliberate mutations separately from defects found in the application.
+
+The Core movement guard currently covers selected Hermes and Go FFI paths.
+It does not provide automatic game, browser, WASM, or GPU byte budgets.
+Use [RUNTIME-02](performance_lab.md) to define each additional lane's evidence and fallback.
+Preserve target-device captures for frame, device-loss, and gameplay claims.
+
 ## Data reduction before acceleration
 
 AAA engines win by not drawing what cannot matter. Foundation should not

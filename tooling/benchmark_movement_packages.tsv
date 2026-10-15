@@ -1,0 +1,4 @@
+# module_dir	package	benchmark_pattern	test_pattern
+# Core-only accounting fixtures run separately from allocation and timing gates.
+server-kit/go	./hermes	^BenchmarkMovementHermes	^TestMovement
+runtime-sdk/go	./runtimehost	^BenchmarkMovementFFIExecuteInto	^TestMovement

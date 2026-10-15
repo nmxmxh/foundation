@@ -1,0 +1,77 @@
+Movement confirmation and practice integration
+Client date: 2026-10-14 Africa/Lagos
+Base revision: b06f99fafd99e32bae973ec90b7fc056e1ccb324
+go version go1.26.6 darwin/arm64
+v24.1.0
+rustc 1.95.0 (59807616e 2026-04-14)
+rustc 1.94.0-nightly (21cf7fb3f 2025-12-28)
+Darwin arm64
+
+All listed validation commands returned zero. Commands used explicit process timeouts.
+Behavioral tests excluded renderSurface.profile.test.ts. No ordinary timing claim is made.
+Rust/WASM artifacts were rebuilt. Shared atomics compilation warning is retained in browser_abi.txt.
+No deployed game journey or physical GPU capture was executed.
+The existing unrelated browser timeout rule still limits a claim of full repository verification.
+
+Runtime source preserved from the mutation experiment: d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591
+
+Commands:
+go test ./runtimehost -count=1 -timeout=180s (runtime-sdk/go)
+go test -tags=foundation_movement -race ./runtimehost -run ^TestMovement -count=1 -timeout=180s (runtime-sdk/go)
+make check-benchmark-ratchet
+FOUNDATION_REQUIRE_TS_DEPS=1 tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host run --exclude '**/*.profile.test.ts'
+rustup run 1.95 cargo test --locked --manifest-path runtime-sdk/rust/Cargo.toml -p ovrt-core -p ovrt-ffi -p ovrt-browser -p ovrt-unit
+RUSTUP_TOOLCHAIN=1.95 bash runtime-sdk/scripts/build_browser_wasm.sh
+FOUNDATION_REQUIRE_TS_DEPS=1 tooling/scripts/run_vitest.sh runtime-sdk/ts/browser-host run --config vitest.abi.config.ts
+make -k check-runtime-performance-contracts check-practice-controls check-doc-references check-markdown-frontmatter check-agent-contract check-rust-runtime-practices check-frontend-runtime-workbench
+make check-frontend-surface-practices
+HUMAN_SUPERVISED_CHECK_UPDATE=1 tooling/scripts/enforcement_integrity_check.sh . --write
+make -k check-enforcement-integrity check-practice-controls check-doc-references check-markdown-frontmatter check-runtime-performance-contracts check-frontend-surface-practices
+
+SHA256 of relevant source and control files:
+5f35c5ce51327a1a05260bb32cd691bb8cc7b935c811b69067bd8fb4392d658e  Makefile
+4855ccd47da7e4b8cf26992ba233d313b0d78d6efde994cd8a94cab0ddf9aa6c  README.md
+26932a1e57b4ba7b60b98118bf5c865877c2e8cd6e3bf3b817b1a72a29c87c2e  docs/PHILOSOPHY.md
+f146c0960a7afdff2e2e87e4ded3ea0bcf51b5ba42e5436fa55c7c2d1198ce19  docs/foundation_glossary.md
+0391273e61223bd98ee2b4498d492b5d948ba6e95fab684cb5685c1724417f51  docs/foundation_guide.md
+c5f1bd6441b171bba55c4fb9eee97f970e46d65cd72707c41f618f4eb931bdc2  docs/future_practices_research.md
+e4c41672d85f6394e4d0020d4ed44b2b927cb57072aed655f7f930618578c4ad  docs/game_runtime_practices.md
+d5a221dbc13847feee53c347384ef8649a977fbd92ee278b4dee08ffcca0d69e  docs/gpu_practices.md
+9e19ae712032d953a5bd37c15ba4a18d00ee094d15943d7e0f28f4b95b3421d7  docs/info/movement_accounting_20261013.md
+77cb1ab9783e2ebd541e44792a61e0d6ca6e1adf0d043fc4ec30eccb5fda8f2b  docs/native_resource_bindings.md
+1f696e2d3871652197ec863b000f5ed493e71ba5fae7187b81fee5d435055fdc  docs/performance_lab.md
+9b676ac427d26c1299e03ed6c91cc834d15c61115f1a325dcf055851147ee149  docs/performance_practices.md
+ecbb31e78ec37d492dcfa3225e1e417156f2c1792d1073d621d127606edd15d7  docs/practice_controls.md
+4750eb7bf0ebb1f2bbc2186851ff35e9bb040bfdb52706401846b3179d6b9e6f  docs/render_surface_lane.md
+ebbf0f7476ad72ca489d8d72824b7baa1b20706ae230e91af0e253f4e2103980  docs/runtime_foundation.md
+36852d9d09cdf00cd8650fb83d3a8f0072d7c7db59461271764e78729941214b  docs/runtime_sab_capnp_contracts.md
+2c9e238cc2e514504a9252c12f352351e7ceb9fc796a0a6639c357bc49b15a52  docs/rust_runtime_practices.md
+060657e3f16b0b264c42e5025139edb45870a6e4dab767c17fc4a30e645ccedd  runtime-sdk/README.md
+41310df9b40458dc4861852470cd743dcdb05b6a965b18d15fd65b0e53fe7799  runtime-sdk/go/runtimehost/ffi_unix.go
+fe29b1761d13ab6aea9f8d5bb328f7876a92410d2ef008b6c6c39336dce00211  runtime-sdk/go/runtimehost/movement_disabled.go
+668fe52a8618cb1708cf7ef5b8d9e71afea3a7970dc4b0011a7f790a9c954ccd  runtime-sdk/go/runtimehost/movement_enabled.go
+b82731ca16e2ef1c7d341ec200c39d54efcd1cd6f430c2b456e07a66b121e162  runtime-sdk/go/runtimehost/movement_enabled_test.go
+4917f0b96c18ec39f34ffd2918588b4c3e8d6a236e1fc1a1ae657e605f2a90c2  runtime-sdk/go/runtimehost/movement_ffi_test.go
+d0cf6262ec5ac29dc9cd675fa2b1b916eff1d109be66fc56fb8a2ce2d602e591  runtime-sdk/go/runtimehost/runtimehost.go
+8f6b564956dd78599f0cc57376b25c447e5e565ed30bcc8272adafd169787ec7  runtime-sdk/go/runtimehost/runtimehost_test.go
+cd921c1520c658139bae7dc5b2f0f423871e92a08e5b926468a68a98343adab5  server-kit/go/hermes/bitmap_dispatch.go
+b73d02dca5ab05a2ec26de3cc85e3aae901e0909c79b59df37bf409b8a76c444  server-kit/go/hermes/columnar.go
+10dc5a15a9f9efce2bd153a0efdbf17846da8aaf36fb91ecef45a0bf4ca7f93a  server-kit/go/hermes/columnar_bitmap.go
+333dd243eaae925e3f08268eb69a765d3271ef3461f1f19ca9afdce43382b9d5  server-kit/go/hermes/columnar_candidates.go
+5adedd5670bb5b14bd270fb8cc642a037648a07fce240d31c13b54ba8a4d63f1  server-kit/go/hermes/columnar_mlp.go
+1da1c80469443b0dab1bf360b8a0bd79c380aa672cac971dfdb8982c7ab8729a  server-kit/go/hermes/columnar_select.go
+49bfc6e67b0a12a0171eba2aeec10a038297ea641f3259bd54863e2c034dbf50  server-kit/go/hermes/columnar_select_test.go
+3ce20d2bae4848433cbd908dfecb9a4cdbf443f80f9f9482110db90c38ee85b7  server-kit/go/hermes/movement.go
+7b3c611d1ebb98b900d2d5e1c843661dfa93806d17a8d7e8a29fae006aa2f9a3  server-kit/go/hermes/movement_disabled.go
+f9d254b219206152c4b8d5187d9c14cc8126e91393b89f3d7af72d4b52d83efa  server-kit/go/hermes/movement_enabled.go
+94e838c5eb61ddd6d49a3cbfb80072b8bd2ddd4a1408d73184b2a005196f48e7  server-kit/go/hermes/movement_test.go
+57c7171fbdb91ccbfc72c5932831ee74b38a096fb6eedd122f84156b812328a4  tests/benchmark_movement_test.sh
+5dd7e17b052ae1a5fb0262aa1a8305cec68cd31eef245fc65432e8f4e3b68c7e  tests/core_validation_contract_test.sh
+1e006258c241bc4987c6bf7ecf53f6a2b63b5b564370afd26c9ca068277ee80f  tooling/benchmark_movement_baseline.psv
+82abb0fa29167536245704db9309a13a3f6f99bf1af359bce817e7d14267deaf  tooling/benchmark_movement_packages.tsv
+84e4d1e51e8b3bd855f17d86608aa0043b879f374a382c537e3c37d9b1278ce0  tooling/benchmark_movement_sources.psv
+5e9a9e4d50d704297eb061979d99caba0106d61e57582c4c4346d1d2e863af49  tooling/enforcement_manifest.tsv
+61906dc42f1cf7d8689d1a12ada10037fd8eeba5dae9a80747b364cb5f7b16e3  tooling/practice_controls.psv
+3cbaff9057d922c609fc0a37df317557f40e3d990f406451628640793857d0e6  tooling/scripts/benchmark_movement_check.go
+9023fa78176e303fbde21c4170bb1309db589b7402f30ea951bd2535006ce2c8  tooling/scripts/benchmark_movement_check.sh
+39474cf0dca903177692e91dbd9e16fff95896a97b5e4dbdd00c897eea8334ad  tooling/scripts/enforcement_integrity_check.sh

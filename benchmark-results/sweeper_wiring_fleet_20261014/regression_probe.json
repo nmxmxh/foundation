@@ -1,0 +1,28 @@
+[
+  {
+    "slug": "chowdash",
+    "command": [
+      "staticcheck",
+      "-checks=SA4023",
+      "./internal/startup"
+    ],
+    "scratch": "/tmp/foundation-chowdash-sweeper-regression-20261014",
+    "expected_exit_code": 1,
+    "observed_exit_code": 1,
+    "working_source_sha256": "ee8e73ec3234c4cc7f343d7af19529c4d3f5a96389f9010ce9ba9dd9b032f428",
+    "working_source_unchanged": true
+  },
+  {
+    "slug": "trotters",
+    "command": [
+      "staticcheck",
+      "-checks=SA4023",
+      "./internal/startup"
+    ],
+    "scratch": "/tmp/foundation-trotters-sweeper-regression-20261014",
+    "expected_exit_code": 1,
+    "observed_exit_code": 1,
+    "working_source_sha256": "5fe6860c95ce927bc372f6feda1820dbf859f92c1fedbfa792944453473072a9",
+    "working_source_unchanged": true
+  }
+]

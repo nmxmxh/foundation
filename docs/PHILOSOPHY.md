@@ -15,9 +15,12 @@ Typical software stacks suffer from a massive *software deficit*. A simple JSON 
 Foundation is engineered to bridge this deficit. It provides:
 
 - A **performance ladder** with seven planes, from zero-alloc direct dispatch (10–30 ns/op) to compatibility JSON (30 µs/op)
-- **Zero-allocation hotpaths** where the only work happening is the work you intended
+- **Measured hotpaths** with separate budgets for allocations and payload movement
 - **Hardware-aligned memory interfaces** that keep operations in the nanosecond-to-microsecond domain
 - **Bounded work guarantees** on every queue, cache, retry, and worker to prevent surprise latency cliffs
+
+Zero allocations can coexist with repeated copies into reused storage.
+Measure both costs within explicit operation boundaries. See [movement accounting](performance_lab.md) for current coverage and evidence requirements.
 
 This is not premature optimization. When you can keep a dashboard read in microseconds instead of tens of milliseconds, you enable product experiences that feel instant. When you eliminate allocation pressure from critical paths, you gain predictability under load. When you measure this carefully and enforce it, you build systems that stay fast as they grow.
 

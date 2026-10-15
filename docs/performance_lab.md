@@ -167,6 +167,70 @@ Separate construction, resident-data execution, and complete request costs.
 A cached columnar filter does not include the cost of constructing its batch.
 A cadence-skipped frame does not measure eligible frame work.
 
+### Movement accounting
+
+Allocation counts do not measure data movement. A reused buffer can copy many bytes without allocating.
+Keep these evidence classes separate:
+
+| Evidence | Meaning |
+| --- | --- |
+| Instrumented accesses | Explicit payload operations counted at executed source sites. |
+| Declared copies | Adapter promises used during admission. These require independent validation. |
+| Kernel model | A formula for selected operations. State every omitted stage. |
+| Hardware counters | Platform measurements of cache or memory traffic, with their collection limits. |
+
+The `foundation_movement` build tag enables diagnostic counters for audited Hermes and Go FFI paths.
+Ordinary builds use inline empty probes. Measure ordinary timing and allocations separately.
+Instrumented timing includes observer cost and cannot establish a performance improvement.
+
+Exercise the complete operation while documenting the accounting boundary.
+Include batch construction when the request constructs a batch.
+Separate initial publication from repeated reads of resident data.
+Count clearing separately from copying. Do not label logical accesses as physical DRAM traffic.
+
+The Core movement guard requires declared metrics, exact ceilings, and reviewed source coverage.
+Missing evidence must fail. An unchanged metric formula cannot justify changed source operations.
+Validate both an additional counted copy and an additional uncounted copy.
+The first must exceed its budget. The second must invalidate the source audit.
+
+The [2026-10-13 evidence](info/movement_accounting_20261013.md) records scope, counters, commands, exclusions, and mutation results.
+Generated projects require their own fixtures and budgets before adopting this Core guard.
+The [numeric validity improvement](evidence/hermes_validity_words_2026-10-14.md) reduces measured construction accesses without changing planner thresholds.
+
+### RUNTIME-02: Movement evidence across runtime lanes
+
+Apply this review control when changing runtime, game, browser, WASM, process, or GPU movement behavior.
+Keep each measured boundary explicit:
+
+| Lane | Existing evidence | Additional evidence needed |
+| --- | --- | --- |
+| Hermes build and resident query | Executed source counters and reviewed ceilings | Separate workloads for other query shapes. |
+| Go FFI caller-buffer path | Host copies, clearing, ownership tests, and receipt reconciliation | Native unit internals and other adapters. |
+| Browser and WASM ABI | Copy-import counts, memory bounds, growth, lifetime, and parity tests | Payload writes, owned reads, clearing, and complete dispatch accounting. |
+| Render state channel | Shared-slot identity, ownership, generations, and view reuse | Producer writes and complete frame accounting. |
+| Process transports | Bounded framing and lifecycle tests | Transport copies, serialization, syscalls, and complete operation counts. |
+| GPU and game frames | Pass, fallback, ownership, and capture contracts | Measured uploads, device copies, readbacks, residency, and target-device evidence. |
+
+Behavioral tests do not establish byte budgets for uninstrumented paths.
+The automated Core guard currently covers the first two rows only.
+Apply `RUNTIME-02` through review until each additional lane has its own executable fixtures and reviewed ceilings.
+Do not treat an unavailable counter as zero.
+
+For each additional lane:
+
+1. Define publication, execution, materialization, and fallback intervals.
+2. Record sizes, concurrency, input seeds, capability state, and executed work.
+3. Distinguish initialization, clearing, logical accesses, copies, transfers, declarations, and hardware counters.
+4. Reconcile adapter declarations against independent observations where available.
+5. Preserve scalar parity, ownership, tenant boundaries, bounds, and lifecycle fallback.
+6. Validate new guards with deliberate counted and uncounted copies in isolated checkouts.
+7. Record whether each failure represents a deliberate mutation or an actual defect.
+8. Measure ordinary timing separately from instrumented diagnostics.
+
+An extra copy can preserve output and allocations while violating a movement budget.
+The [mutation evidence](info/movement_accounting_20261013.md) demonstrates this with an injected runtime defect.
+The working implementation never contained that injected copy.
+
 ## Staged Load Research
 
 Use `make test-load-research` when the question is scale shape rather than a
