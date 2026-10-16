@@ -277,6 +277,16 @@ This document tracks the deliberate performance and architecture carryovers fold
     Memoizes serialized tool descriptors, manifest trees, and multi-source fusion
     models under 10-15s TTL locks for AI agent and MCP query endpoints, reducing
     repeat query latencies from >500ms to <2ms.
+99. Server-Kit and Runtime Hot-Path Allocation Ratchet (2026-10-16):
+    Precomputed HMAC pads, stack-buffered base64 decoding, and single-string flat
+    JSON scanning reduce `JWTManager.ValidateToken` from 27 to 3 allocations.
+    Shared header backing arrays and single-key context injection reduce
+    `BenchmarkNullLane_06_HTTPSecuredChain` from 68 to 24 allocations.
+    Direct `metadata.NormalizeObjectToTransportProto` conversion reduces
+    `BenchmarkEnvelope_ToBinary` from 20 to 9 allocations. Uncontended
+    `bootstrap.acquireSlot` fast paths, streaming FNV-1a shard hashing in
+    `hermes.shardedMap`, stack-buffered hex codecs in `placement`, and reusable
+    `ovrt-native` stdio frame buffers complete the pass.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 

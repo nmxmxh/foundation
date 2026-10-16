@@ -1,7 +1,7 @@
 # Foundation Benchmarks
 
 Status: active reference
-Date: 2026-09-24
+Date: 2026-10-16
 Owner: Platform Architecture
 
 This document holds the current benchmark results for the main Foundation
@@ -79,6 +79,34 @@ that break them are not comparable.
    associative.
 
 ## Results by lane
+
+### Server-kit hot-path allocation and concurrency pass: 2026-10-16
+
+Machine: Apple M1 Pro, `darwin/arm64`, Go 1.26.6, Rust 1.92.0.
+This pass removes allocations across token validation, HTTP middleware, binary envelopes, placement codecs, and native stdio framing.
+All ceilings in `tooling/benchmark_baseline.psv` are ratcheted down to the new measured boundaries.
+
+| Benchmark | Before (`ns/op`) | After (`ns/op`) | `B/op` before → after | `allocs/op` before → after |
+| --- | ---: | ---: | ---: | ---: |
+| `BenchmarkAppLane_Auth_ValidateToken` | 3,660 | 1,070 | 2,104 → 432 | 27 → 3 |
+| `BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC` | 8,018 | 4,535 | 11,286 → 9,240 | 74 → 35 |
+| `BenchmarkNullLane_06_HTTPSecuredChain` | 7,492 | 3,752 | 6,837 → 4,592 | 68 → 24 |
+| `BenchmarkNullLane_05_HTTPRouteHandlerCorrelated` | 2,898 | 1,920 | 3,756 → 3,564 | 22 → 17 |
+| `BenchmarkNullLane_03_HTTPDispatchBuild` | 2,350 | 1,716 | 2,891 → 2,795 | 14 → 12 |
+| `BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest` | 7,393 | 6,271 | 12,508 → 11,212 | 43 → 39 |
+| `BenchmarkEnvelope_ToBinary` | 9,307 | 2,568 | 5,691 → 1,787 | 20 → 9 |
+| `BenchmarkRemoteComputeRoundTrip` | 133.0 | 109.7 | 185 → 104 | 4 → 3 |
+| `BenchmarkMirrorFrameEncode32` | 405.0 | 411.5 | 1,900 → 1,792 | 1 → 1 |
+| `BenchmarkMirrorFrameDecode32` | 487.0 | 472.9 | 1,950 → 1,824 | 3 → 3 |
+| `BenchmarkPlacementFullHostPath` | 654.0 | 522.7 | 0 → 0 | 0 → 0 |
+
+`JWTManager` now precomputes HMAC pads, decodes stack-buffered base64 segments, and scans flat JSON claims from one string allocation.
+`security.Middleware` shares backing slices for response headers and injects one claims context key per request.
+`metadata.NormalizeObjectToTransportProto` converts flat metadata maps directly to protobuf without intermediate `extension.Object` staging.
+`bootstrap.acquireSlot` takes an uncontended channel slot before timer creation and releases without a deferred closure allocation.
+`hermes.shardedMap` hashes composite keys via streaming FNV-1a without string concatenation.
+`events.InMemoryBus.Publish` separates recent-ring locking from subscriber read locking.
+`ovrt-native` reuses frame buffers across `serve_framed_session` iterations.
 
 ### Native runtime allocations and Go WASM retirement: 2026-09-24
 

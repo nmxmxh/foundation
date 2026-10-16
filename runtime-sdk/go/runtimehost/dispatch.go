@@ -214,13 +214,18 @@ const (
 // encodeDescriptor packs one row into its fixed slot, little-endian.
 func encodeDescriptor(descriptor DispatchLaneDescriptor) []byte {
 	bytes := make([]byte, dispatchSlotBytes)
-	binary.LittleEndian.PutUint64(bytes[rowUnitClasses:], descriptor.UnitClassMask)
-	binary.LittleEndian.PutUint64(bytes[rowAffinityBloom:], descriptor.AffinityBloom)
-	binary.LittleEndian.PutUint16(bytes[rowLaneID:], descriptor.LaneID)
-	binary.LittleEndian.PutUint16(bytes[rowJurisdiction:], descriptor.Jurisdiction)
-	binary.LittleEndian.PutUint32(bytes[rowMaxConcurrency:], descriptor.MaxConcurrency)
-	binary.LittleEndian.PutUint32(bytes[rowGeneration:], descriptor.Generation)
+	encodeDescriptorInto(bytes, descriptor)
 	return bytes
+}
+
+func encodeDescriptorInto(dst []byte, descriptor DispatchLaneDescriptor) {
+	clear(dst[:dispatchSlotBytes])
+	binary.LittleEndian.PutUint64(dst[rowUnitClasses:], descriptor.UnitClassMask)
+	binary.LittleEndian.PutUint64(dst[rowAffinityBloom:], descriptor.AffinityBloom)
+	binary.LittleEndian.PutUint16(dst[rowLaneID:], descriptor.LaneID)
+	binary.LittleEndian.PutUint16(dst[rowJurisdiction:], descriptor.Jurisdiction)
+	binary.LittleEndian.PutUint32(dst[rowMaxConcurrency:], descriptor.MaxConcurrency)
+	binary.LittleEndian.PutUint32(dst[rowGeneration:], descriptor.Generation)
 }
 
 // decodeDescriptor unpacks one published slot. Short rows are refused rather

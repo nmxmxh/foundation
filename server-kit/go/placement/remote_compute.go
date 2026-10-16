@@ -60,12 +60,12 @@ func EncodeRemoteComputeRequest(ticket RemoteComputeTicket, payload []byte) ([]b
 			ticket.ProjectionID, ticket.ChunkIndex, len(payload), maxInlinePayloadBytes,
 		)
 	}
-	checksum, err := hex.DecodeString(ticket.ChecksumHex)
-	if err != nil || len(checksum) != 32 {
+	var checksum [32]byte
+	if n, err := hex.Decode(checksum[:], []byte(ticket.ChecksumHex)); err != nil || n != 32 {
 		return nil, fmt.Errorf("placement: ticket %s/%d checksum must be 32-byte hex", ticket.ProjectionID, ticket.ChunkIndex)
 	}
-	proj := []byte(ticket.ProjectionID)
-	scope := []byte(ticket.ScopeKey)
+	proj := ticket.ProjectionID
+	scope := ticket.ScopeKey
 	if len(proj) == 0 || len(proj) > 255 {
 		return nil, fmt.Errorf("placement: projection id 1..255 bytes, got %d", len(proj))
 	}
@@ -73,14 +73,14 @@ func EncodeRemoteComputeRequest(ticket RemoteComputeTicket, payload []byte) ([]b
 		return nil, fmt.Errorf("placement: scope 0..255 bytes, got %d", len(scope))
 	}
 
-	frame := make([]byte, 0, 8+len(proj)+len(scope)+len(payload))
+	frame := make([]byte, 0, 73+len(proj)+len(scope)+len(payload))
 	frame = append(frame, remoteComputeWireVersion, byte(len(proj))) // #nosec G115 -- proj length validated 1..255 above
 	frame = append(frame, proj...)
 	frame = append(frame, byte(len(scope))) // #nosec G115 -- scope length validated <= 255 above
 	frame = append(frame, scope...)
 	frame = binary.LittleEndian.AppendUint32(frame, ticket.ChunkIndex)
 	frame = binary.LittleEndian.AppendUint32(frame, ticket.PayloadLen)
-	frame = append(frame, checksum...)
+	frame = append(frame, checksum[:]...)
 	frame = binary.LittleEndian.AppendUint64(frame, ticket.RequiredClassMask)
 	frame = binary.LittleEndian.AppendUint16(frame, ticket.Jurisdiction)
 	frame = binary.LittleEndian.AppendUint64(frame, ticket.DeadlineNs)
@@ -141,7 +141,9 @@ func DecodeRemoteComputeRequest(frame []byte) (RemoteComputeTicket, []byte, erro
 	if err != nil {
 		return ticket, nil, err
 	}
-	ticket.ChecksumHex = hex.EncodeToString(checksum)
+	var checksumBuf [64]byte
+	hex.Encode(checksumBuf[:], checksum)
+	ticket.ChecksumHex = string(checksumBuf[:])
 	maskRaw, err := read(8)
 	if err != nil {
 		return ticket, nil, err

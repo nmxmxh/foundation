@@ -22,6 +22,7 @@ type Bus interface {
 // InMemoryBus is a development-safe event bus implementation with fanout support.
 type InMemoryBus struct {
 	mu                 sync.RWMutex
+	recentMu           sync.Mutex
 	exactSubscribers   map[string][]Subscriber
 	allSubscribers     []Subscriber
 	prefixSubscribers  map[string][]Subscriber
@@ -54,12 +55,14 @@ func (b *InMemoryBus) Publish(ctx context.Context, envelope Envelope) error {
 		return err
 	}
 
-	b.mu.Lock()
+	b.recentMu.Lock()
 	b.recordRecentLocked(envelope)
+	b.recentMu.Unlock()
 
+	b.mu.RLock()
 	exact := b.exactSubscribers[envelope.EventType]
 	if len(b.allSubscribers) == 0 && len(b.prefixSubscribers) == 0 && len(b.patternSubscribers) == 0 {
-		b.mu.Unlock()
+		b.mu.RUnlock()
 		recordEventTrace("event.publish", envelope)
 		for _, subscriber := range exact {
 			subscriber(ctx, envelope)
@@ -75,7 +78,7 @@ func (b *InMemoryBus) Publish(ctx context.Context, envelope Envelope) error {
 			matching = append(matching, subs...)
 		}
 	}
-	b.mu.Unlock()
+	b.mu.RUnlock()
 	recordEventTrace("event.publish", envelope)
 
 	for _, subscriber := range matching {
@@ -130,8 +133,8 @@ func (b *InMemoryBus) Subscribe(pattern string, subscriber Subscriber) {
 }
 
 func (b *InMemoryBus) Recent(limit int) []Envelope {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
+	b.recentMu.Lock()
+	defer b.recentMu.Unlock()
 
 	if limit <= 0 || limit > b.recentCount {
 		limit = b.recentCount

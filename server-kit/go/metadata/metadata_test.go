@@ -394,3 +394,74 @@ func TestTransportProtoRoundTrip(t *testing.T) {
 		t.Fatalf("expected invalid extras JSON error")
 	}
 }
+
+func TestNormalizeObjectToTransportProto(t *testing.T) {
+	full := extension.Object{
+		"correlation_id":     extension.String("corr_full"),
+		"causation_id":       extension.String("caus_1"),
+		"request_id":         extension.String("req_1"),
+		"idempotency_key":    extension.String("idem_1"),
+		"trace_id":           extension.String("trace_1"),
+		"span_id":            extension.String("span_1"),
+		"channel":            extension.String("http"),
+		"locale":             extension.String("en-US"),
+		"tenant_region":      extension.String("eu-west-1"),
+		"embedding_id":       extension.String("emb_1"),
+		"knowledge_graph":    extension.String("kg_1"),
+		"source_ref":         extension.String("src_1"),
+		"gamification_state": extension.String("lvl_1"),
+		"global_context": extension.ObjectValueOwned(extension.Object{
+			"user_id":         extension.String("usr_1"),
+			"session_id":      extension.String("sess_1"),
+			"source":          extension.String("api"),
+			"device_id":       extension.String("dev_1"),
+			"organization_id": extension.String("org_1"),
+			"role_id":         extension.String("admin"),
+			"audit_context":   extension.String("aud_1"),
+			"ip_address":      extension.String("127.0.0.1"),
+			"user_agent":      extension.String("agent"),
+		}),
+		"custom_str": extension.String("val"),
+	}
+	pb, corr, err := NormalizeObjectToTransportProto(full, "corr_full")
+	if err != nil || corr != "corr_full" || pb.GlobalContext.GetUserId() != "usr_1" || string(pb.ExtrasJson) != `{"custom_str":"val"}` {
+		t.Fatalf("unexpected full fast-path result: pb=%+v corr=%q err=%v", pb, corr, err)
+	}
+
+	boolExtra := extension.Object{
+		"global_context": extension.ObjectValueOwned(extension.Object{"user_id": extension.String("")}),
+		"flag":           extension.Bool(true),
+	}
+	pb, corr, err = NormalizeObjectToTransportProto(boolExtra, "")
+	if err != nil || corr == "" || pb.GlobalContext != nil || string(pb.ExtrasJson) != `{"flag":true}` {
+		t.Fatalf("unexpected bool extra result: pb=%+v corr=%q err=%v", pb, corr, err)
+	}
+
+	// Non-object global_context, empty global_context, camelCase fallback, multi-extra fallback, non-string/bool extra fallback.
+	for _, raw := range []extension.Object{
+		{"global_context": extension.String("ignored")},
+		{"global_context": extension.ObjectValueOwned(extension.Object{})},
+		{"global_context": extension.ObjectValueOwned(extension.Object{"userId": extension.String("u")})},
+		{"correlationId": extension.String("corr_camel")},
+		{"extra_a": extension.String("1"), "extra_b": extension.String("2")},
+		{"extra_int": extension.Int(42)},
+	} {
+		if _, _, err := NormalizeObjectToTransportProto(raw, ""); err != nil {
+			t.Fatalf("NormalizeObjectToTransportProto(%+v) error = %v", raw, err)
+		}
+	}
+
+	if _, _, err := NormalizeObjectToTransportProto(extension.Object{"correlation_id": extension.String("a")}, "b"); err == nil {
+		t.Fatalf("expected correlation mismatch error")
+	}
+	if _, _, err := NormalizeObjectToTransportProto(extension.Object{"trace_id": extension.String("bad trace!")}, "corr_ok"); err == nil {
+		t.Fatalf("expected invalid token error")
+	}
+	if _, _, err := NormalizeObjectToTransportProto(extension.Object{"tags": extension.List([]extension.Value{extension.String("t")}), "correlation_id": extension.String("a")}, "b"); err == nil {
+		t.Fatalf("expected slow-path correlation mismatch error")
+	}
+	if _, _, err := NormalizeObjectToTransportProto(extension.Object{"tags": extension.List([]extension.Value{extension.String("t")}), "trace_id": extension.String("bad!")}, "corr_ok"); err == nil {
+		t.Fatalf("expected slow-path validation error")
+	}
+}
+

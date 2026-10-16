@@ -107,23 +107,7 @@ func (e *Envelope) Validate() error {
 					}
 				}
 			}
-			if err := ValidateSchemaVersion(e.SchemaVersion); err != nil {
-				return err
-			}
-			if e.Timestamp.IsZero() {
-				return errors.New("missing timestamp")
-			}
-			switch normalized := normalizePayloadEncoding(e.PayloadEncoding); normalized {
-			case PayloadEncodingJSON:
-				return nil
-			case PayloadEncodingProtobuf, PayloadEncodingCapnp, PayloadEncodingBinary:
-				if len(e.PayloadBytes) == 0 {
-					return fmt.Errorf("%s payload_encoding requires payload bytes", normalized)
-				}
-				return nil
-			default:
-				return errors.New("unsupported payload_encoding")
-			}
+			return e.validatePostMetadata()
 		}
 	}
 
@@ -146,6 +130,10 @@ func (e *Envelope) Validate() error {
 		}
 	}
 
+	return e.validatePostMetadata()
+}
+
+func (e *Envelope) validatePostMetadata() error {
 	if err := ValidateSchemaVersion(e.SchemaVersion); err != nil {
 		return err
 	}
@@ -239,6 +227,17 @@ func (e *Envelope) Normalize() {
 	if e == nil {
 		return
 	}
+	e.normalizeScalars()
+	_ = e.MaterializeMetadata()
+	md := metadata.FromObject(e.Metadata)
+	if e.CorrelationID != "" && md.CorrelationID != "" && e.CorrelationID != md.CorrelationID {
+		return
+	}
+	e.CorrelationID = md.EnsureCorrelation(e.CorrelationID)
+	e.Metadata = md.ToObject()
+}
+
+func (e *Envelope) normalizeScalars() {
 	e.SchemaVersion = NormalizeSchemaVersion(e.SchemaVersion)
 	if e.Timestamp.IsZero() {
 		e.Timestamp = time.Now().UTC()
@@ -247,13 +246,6 @@ func (e *Envelope) Normalize() {
 	if e.PayloadEncoding == PayloadEncodingJSON && e.Payload == nil && len(e.PayloadBytes) == 0 {
 		e.Payload = extension.Object{}
 	}
-	_ = e.MaterializeMetadata()
-	md := metadata.FromObject(e.Metadata)
-	if e.CorrelationID != "" && md.CorrelationID != "" && e.CorrelationID != md.CorrelationID {
-		return
-	}
-	e.CorrelationID = md.EnsureCorrelation(e.CorrelationID)
-	e.Metadata = md.ToObject()
 }
 
 // ToJSON serializes envelope into canonical JSON.
@@ -290,22 +282,36 @@ type envelopeJSON struct {
 }
 
 func (e Envelope) ToBinary() ([]byte, error) {
-	env := e
-	env.Normalize()
-	if err := env.Validate(); err != nil {
+	msg, err := encodeEnvelopeProto(e)
+	if err != nil {
 		return nil, err
 	}
+	return proto.Marshal(msg)
+}
 
-	metadataProto, err := metadata.FromObject(env.Metadata).ToTransportProto()
+func encodeEnvelopeProto(env Envelope) (*foundationpb.EventEnvelope, error) {
+	env.normalizeScalars()
+	if err := ValidateEventType(env.EventType); err != nil {
+		return nil, err
+	}
+	if env.Metadata == nil && env.lazyMetadata != nil {
+		if err := env.MaterializeMetadata(); err != nil {
+			return nil, err
+		}
+	}
+	metadataProto, correlationID, err := metadata.NormalizeObjectToTransportProto(env.Metadata, env.CorrelationID)
 	if err != nil {
+		return nil, err
+	}
+	env.CorrelationID = correlationID
+	if err := env.validatePostMetadata(); err != nil {
 		return nil, err
 	}
 
 	// The payload is passed to proto.Marshal by reference. Marshal reads the
 	// bytes into a fresh output buffer and does not retain the input, and the
 	// EventEnvelope holding it is local and discarded here — so a defensive copy
-	// protects nothing and costs one full payload allocation per encode. (It was
-	// also dead work on the JSON branch below, which overwrites it outright.)
+	// protects nothing and costs one full payload allocation per encode.
 	payload := env.PayloadBytes
 	if env.PayloadEncoding == PayloadEncodingJSON {
 		payload, err = encodePayloadObject(env.Payload)
@@ -314,7 +320,7 @@ func (e Envelope) ToBinary() ([]byte, error) {
 		}
 	}
 
-	return proto.Marshal(&foundationpb.EventEnvelope{
+	return &foundationpb.EventEnvelope{
 		Id:              env.ID,
 		EventType:       env.EventType,
 		Payload:         payload,
@@ -324,7 +330,7 @@ func (e Envelope) ToBinary() ([]byte, error) {
 		OccurredAt:      timestamppb.New(env.Timestamp.UTC()),
 		PayloadEncoding: payloadEncodingToProto(env.PayloadEncoding),
 		SourceNodeId:    env.SourceNodeID,
-	})
+	}, nil
 }
 
 // FromJSON parses and normalizes an envelope.
@@ -688,38 +694,11 @@ func (b Batch) ToBinary() ([]byte, error) {
 		Envelopes: make([]*foundationpb.EventEnvelope, len(b.Envelopes)),
 	}
 	for i, e := range b.Envelopes {
-		e.Normalize()
-		if err := e.Validate(); err != nil {
-			return nil, err
-		}
-
-		metadataProto, err := metadata.FromObject(e.Metadata).ToTransportProto()
+		msg, err := encodeEnvelopeProto(e)
 		if err != nil {
 			return nil, err
 		}
-
-		// By reference for the same reason as ToBinary: the batch message is
-		// local, and Marshal copies rather than retains.
-		payload := e.PayloadBytes
-		if e.PayloadEncoding == PayloadEncodingJSON {
-			var err error
-			payload, err = encodePayloadObject(e.Payload)
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		batch.Envelopes[i] = &foundationpb.EventEnvelope{
-			Id:              e.ID,
-			EventType:       e.EventType,
-			Payload:         payload,
-			Metadata:        metadataProto,
-			CorrelationId:   e.CorrelationID,
-			SchemaVersion:   e.SchemaVersion,
-			OccurredAt:      timestamppb.New(e.Timestamp.UTC()),
-			PayloadEncoding: payloadEncodingToProto(e.PayloadEncoding),
-			SourceNodeId:    e.SourceNodeID,
-		}
+		batch.Envelopes[i] = msg
 	}
 	return proto.Marshal(batch)
 }

@@ -123,7 +123,7 @@ func buildDispatchRequest(r *http.Request, route registry.HTTPRoute, pathParams 
 	}
 	if (len(includeHeaders) > 0 || len(route.IncludeHeaders) > 0) && payloadEncoding != "protobuf" {
 		headers := includedHeadersObject(r, route.IncludeHeaders, includeHeaders)
-		payload["_request_headers"] = extension.ObjectValue(headers)
+		payload["_request_headers"] = extension.ObjectValueOwned(headers)
 	}
 
 	requestMetadata := MetadataFromRequest(r)
@@ -242,11 +242,15 @@ func payloadFromRequest(r *http.Request) (extension.Object, []byte, string, stri
 	requestEncoding := requestEncodingFromRequest(r)
 	responseEncoding := responseEncodingFromRequest(r, requestEncoding)
 	if r.Method == http.MethodGet || r.Method == http.MethodDelete {
-		if err := security.RejectDuplicateQueryParams(r.URL.Query()); err != nil {
+		if r.URL.RawQuery == "" {
+			return extension.Object{}, nil, requestEncoding, responseEncoding, nil
+		}
+		query := r.URL.Query()
+		if err := security.RejectDuplicateQueryParams(query); err != nil {
 			return nil, nil, "", "", domainerr.Validation("duplicate_query_parameter", "duplicate query parameter")
 		}
 		out := extension.Object{}
-		for key, values := range r.URL.Query() {
+		for key, values := range query {
 			if len(values) == 0 {
 				continue
 			}

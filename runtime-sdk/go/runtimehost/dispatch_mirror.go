@@ -35,21 +35,19 @@ func (b *DispatchBlock) ApplyMirrorUpdate(update placement.LaneMirrorUpdate) err
 	}
 	// Issuing a fresh click here (rather than reading a possibly-zero one)
 	// keeps the restamped heartbeat meaningful on an otherwise idle region.
-	if _, err := b.AdvanceTick(); err != nil {
-		return err
-	}
-	localTick, err := b.TickNow()
+	prevTick, err := b.AdvanceTick()
 	if err != nil {
 		return err
 	}
-	row, err := b.StatRow(int(update.Lane))
+	base, err := b.statRowBase(int(update.Lane))
 	if err != nil {
 		return err
 	}
+	row := DispatchStatRow{block: b, base: base}
 	return row.ApplyMirror(DispatchLaneStats{
 		EwmaNs:         update.EwmaNs,
 		Inflight:       update.Inflight,
 		MaxConcurrency: update.MaxConcurrency,
-		LastTickSeen:   localTick,
+		LastTickSeen:   prevTick + 1,
 	})
 }

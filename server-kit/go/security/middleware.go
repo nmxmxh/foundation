@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	stdpath "path"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +31,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 			"default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests; block-all-mixed-content",
 			"nosniff", "DENY", "strict-origin-when-cross-origin",
 			"geolocation=(), microphone=(), camera=()", "same-origin", "require-corp", "same-origin", "?1",
+			"max-age=31536000; includeSubDomains",
 		}
 		headers := w.Header()
 		headers["Content-Security-Policy"] = values[0:1:1]
@@ -45,7 +45,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 		headers["Origin-Agent-Cluster"] = values[8:9:9]
 
 		if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
-			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+			headers["Strict-Transport-Security"] = values[9:10:10]
 		}
 
 		next.ServeHTTP(w, r)
@@ -100,20 +100,36 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
+			allowedOrigin := isOriginAllowed(origin, allowedOrigins)
 			if origin != "" {
-				w.Header().Add("Vary", "Origin")
-				w.Header().Add("Vary", "Access-Control-Request-Method")
-				w.Header().Add("Vary", "Access-Control-Request-Headers")
-			}
-			if isOriginAllowed(origin, allowedOrigins) {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Allow-Credentials", "true")
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", allowedRequestHeaders(r.Header.Get("Access-Control-Request-Headers")))
-				w.Header().Set("Access-Control-Max-Age", "3600")
+				headers := w.Header()
+				if allowedOrigin {
+					corsValues := [...]string{
+						"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers",
+						origin, "true", "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+						allowedRequestHeaders(r.Header.Get("Access-Control-Request-Headers")), "3600",
+					}
+					if len(headers["Vary"]) == 0 {
+						headers["Vary"] = corsValues[0:3:3]
+					} else {
+						headers["Vary"] = append(headers["Vary"], corsValues[0:3]...)
+					}
+					headers["Access-Control-Allow-Origin"] = corsValues[3:4:4]
+					headers["Access-Control-Allow-Credentials"] = corsValues[4:5:5]
+					headers["Access-Control-Allow-Methods"] = corsValues[5:6:6]
+					headers["Access-Control-Allow-Headers"] = corsValues[6:7:7]
+					headers["Access-Control-Max-Age"] = corsValues[7:8:8]
+				} else {
+					varyValues := [...]string{"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers"}
+					if len(headers["Vary"]) == 0 {
+						headers["Vary"] = varyValues[0:3:3]
+					} else {
+						headers["Vary"] = append(headers["Vary"], varyValues[0:3]...)
+					}
+				}
 			}
 			if r.Method == http.MethodOptions {
-				if origin != "" && !isOriginAllowed(origin, allowedOrigins) {
+				if origin != "" && !allowedOrigin {
 					domainerr.WriteHTTP(w, domainerr.Forbidden("origin_not_allowed", "origin not allowed"), domainerr.ResponseOptions{
 						Status: http.StatusForbidden,
 					})
@@ -255,18 +271,7 @@ func jwtAuth(jwtManager *auth.JWTManager, publicPaths []string, required bool) f
 				return
 			}
 
-			ctx := r.Context()
-			ctx = ContextWithUserID(ctx, claims.UserID)
-			ctx = ContextWithOrganizationID(ctx, claims.OrganizationID)
-			ctx = ContextWithRole(ctx, claims.Role)
-			ctx = ContextWithCapabilities(ctx, claims.Capabilities)
-			ctx = ContextWithSessionID(ctx, claims.SessionID)
-			if claims.ExpiresAt != 0 {
-				ctx = ContextWithAccessExpiresAt(ctx, time.Unix(claims.ExpiresAt, 0).UTC().Format(time.RFC3339))
-			}
-			if claims.IssuedAt != 0 {
-				ctx = ContextWithRefreshExpiresAt(ctx, time.Unix(claims.IssuedAt, 0).UTC().Add(14*24*time.Hour).Format(time.RFC3339))
-			}
+			ctx := context.WithValue(r.Context(), claimsContextKey{}, claims)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -364,35 +369,7 @@ func isPublicPath(path string, publicPaths []string) bool {
 	// publicly by exact match. "/" must never be added to a prefix-matched
 	// public list — every path starts with "/", which would make the whole
 	// surface public.
-	if path == "/" {
-		return true
-	}
-
-	// System public paths are matched exactly. Prefix-matching them was a
-	// silent widening: "/metrics" is not a route, but it is a prefix of
-	// "/metricsz" and "/metricsz/trace", which quietly classified the
-	// operational surface as public.
-	systemPublic := []string{
-		// The whole health family, named exactly. Under prefix matching only
-		// "/healthz" was listed, so "/health/live" and "/health/ready" — the
-		// routes an orchestrator actually probes — were never public and
-		// answered 401 wherever auth was required.
-		"/healthz",
-		"/health",
-		"/health/live",
-		"/health/ready",
-		"/ws",
-		"/api/auth/login",
-		"/api/auth/register",
-		"/v1/user/authenticate",
-		"/api/v1/user/authenticate",
-		"/v1/user/register",
-		"/api/v1/user/register",
-		"/v1/user/refresh",
-		"/api/v1/user/refresh",
-	}
-
-	if slices.Contains(systemPublic, path) {
+	if path == "/" || isSystemPublicPath(path) {
 		return true
 	}
 
@@ -407,6 +384,29 @@ func isPublicPath(path string, publicPaths []string) bool {
 		}
 	}
 	return false
+}
+
+// isSystemPublicPath matches system public paths exactly so prefix collisions
+// cannot expose operational endpoints.
+func isSystemPublicPath(path string) bool {
+	switch path {
+	case "/healthz",
+		"/health",
+		"/health/live",
+		"/health/ready",
+		"/ws",
+		"/api/auth/login",
+		"/api/auth/register",
+		"/v1/user/authenticate",
+		"/api/v1/user/authenticate",
+		"/v1/user/register",
+		"/api/v1/user/register",
+		"/v1/user/refresh",
+		"/api/v1/user/refresh":
+		return true
+	default:
+		return false
+	}
 }
 
 // matchesPathPrefix reports whether path is prefix itself or sits beneath it,
@@ -430,13 +430,13 @@ func requestFingerprint(r *http.Request) string {
 		return "ip:unknown"
 	}
 	if apiKey := strings.TrimSpace(r.Header.Get("X-API-Key")); apiKey != "" {
-		return "apikey:" + HashIdentifier(apiKey)
+		return prefixedHashIdentifier("apikey:", apiKey)
 	}
 	if authHeader := strings.TrimSpace(r.Header.Get("Authorization")); authHeader != "" {
-		return "auth:" + HashIdentifier(authHeader)
+		return prefixedHashIdentifier("auth:", authHeader)
 	}
-	if clientHash := HashIdentifier(GetClientIP(r)); clientHash != "" {
-		return "ip:" + clientHash
+	if clientHash := prefixedHashIdentifier("ip:", GetClientIP(r)); clientHash != "" {
+		return clientHash
 	}
 	return "ip:unknown"
 }
@@ -502,10 +502,8 @@ func GetClientIP(r *http.Request) string {
 		return ""
 	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
-		}
+		first, _, _ := strings.Cut(xff, ",")
+		return strings.TrimSpace(first)
 	}
 	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
 		return strings.TrimSpace(realIP)
@@ -514,6 +512,7 @@ func GetClientIP(r *http.Request) string {
 }
 
 type contextKey string
+type claimsContextKey struct{}
 
 const (
 	userIDKey        contextKey = "user_id"
@@ -557,12 +556,18 @@ func GetUserIDFromContext(ctx context.Context) string {
 	if value, ok := ctx.Value(userIDKey).(string); ok {
 		return value
 	}
+	if claims, ok := ctx.Value(claimsContextKey{}).(*auth.Claims); ok && claims != nil {
+		return claims.UserID
+	}
 	return ""
 }
 
 func GetOrganizationIDFromContext(ctx context.Context) string {
 	if value, ok := ctx.Value(organizationKey).(string); ok {
 		return value
+	}
+	if claims, ok := ctx.Value(claimsContextKey{}).(*auth.Claims); ok && claims != nil {
+		return claims.OrganizationID
 	}
 	return ""
 }
@@ -571,12 +576,18 @@ func GetRoleFromContext(ctx context.Context) string {
 	if value, ok := ctx.Value(roleKey).(string); ok {
 		return value
 	}
+	if claims, ok := ctx.Value(claimsContextKey{}).(*auth.Claims); ok && claims != nil {
+		return claims.Role
+	}
 	return ""
 }
 
 func GetCapabilitiesFromContext(ctx context.Context) []string {
 	if value, ok := ctx.Value(capabilityKey).([]string); ok {
 		return value
+	}
+	if claims, ok := ctx.Value(claimsContextKey{}).(*auth.Claims); ok && claims != nil {
+		return claims.Capabilities
 	}
 	return nil
 }
@@ -585,6 +596,9 @@ func GetSessionIDFromContext(ctx context.Context) string {
 	if value, ok := ctx.Value(sessionIDKey).(string); ok {
 		return value
 	}
+	if claims, ok := ctx.Value(claimsContextKey{}).(*auth.Claims); ok && claims != nil {
+		return claims.SessionID
+	}
 	return ""
 }
 
@@ -592,12 +606,18 @@ func GetAccessExpiresAtFromContext(ctx context.Context) string {
 	if value, ok := ctx.Value(accessExpiryKey).(string); ok {
 		return value
 	}
+	if claims, ok := ctx.Value(claimsContextKey{}).(*auth.Claims); ok && claims != nil && claims.ExpiresAt != 0 {
+		return time.Unix(claims.ExpiresAt, 0).UTC().Format(time.RFC3339)
+	}
 	return ""
 }
 
 func GetRefreshExpiresAtFromContext(ctx context.Context) string {
 	if value, ok := ctx.Value(refreshExpiryKey).(string); ok {
 		return value
+	}
+	if claims, ok := ctx.Value(claimsContextKey{}).(*auth.Claims); ok && claims != nil && claims.IssuedAt != 0 {
+		return time.Unix(claims.IssuedAt, 0).UTC().Add(14 * 24 * time.Hour).Format(time.RFC3339)
 	}
 	return ""
 }

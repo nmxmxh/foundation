@@ -37,12 +37,14 @@ func TicketFromChunkDescriptor(
 	jurisdiction uint16,
 	deadlineNs uint64,
 ) RemoteComputeTicket {
+	var checksumBuf [64]byte
+	hex.Encode(checksumBuf[:], chunk.Checksum[:])
 	return RemoteComputeTicket{
 		ProjectionID:      projectionID,
 		ScopeKey:          scopeKey,
 		ChunkIndex:        chunk.Index,
 		PayloadLen:        chunk.PayloadLength,
-		ChecksumHex:       hex.EncodeToString(chunk.Checksum[:]),
+		ChecksumHex:       string(checksumBuf[:]),
 		RequiredClassMask: classMask,
 		Jurisdiction:      jurisdiction,
 		DeadlineNs:        deadlineNs,

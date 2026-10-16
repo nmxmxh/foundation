@@ -39,8 +39,9 @@ func CorrelationMiddleware(next http.Handler) http.Handler {
 		md := MetadataFromRequest(r)
 		correlationID := md.CorrelationID
 
-		r.Header.Set(correlationHeader, correlationID)
-		w.Header().Set(correlationHeader, correlationID)
+		hdr := [2]string{correlationID, correlationID}
+		r.Header[correlationHeader] = hdr[0:1:1]
+		w.Header()[correlationHeader] = hdr[1:2:2]
 
 		ctx := metadata.IntoContext(r.Context(), md)
 		ctx = tracing.WithCorrelationID(ctx, correlationID)
@@ -86,13 +87,13 @@ func ContextWithRequestMetadata(r *http.Request) context.Context {
 }
 
 func MetadataFromRequest(r *http.Request) metadata.EnvelopeMetadata {
-	md := metadata.New()
 	if r != nil {
-		md = metadata.FromContext(r.Context())
+		md := metadata.FromContext(r.Context())
 		md.EnsureCorrelation(CorrelationIDFromRequest(r))
 		enrichMetadataFromHeaders(&md, r)
 		return md
 	}
+	md := metadata.New()
 	md.EnsureCorrelation()
 	return md
 }

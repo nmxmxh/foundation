@@ -254,3 +254,60 @@ func TestBuildTypedServiceHandlers(t *testing.T) {
 		t.Fatal("expected response encode error")
 	}
 }
+
+func TestAcquireSlotFastPathAndZeroTimeout(t *testing.T) {
+	controller := NewHandlerExecutionController(ConcurrencyOptions{
+		MaxConcurrent:  4,
+		AcquireTimeout: 50 * time.Millisecond,
+	})
+	wrapped := controller.Wrap(func(ctx context.Context, payload extension.Object) (any, error) {
+		return nil, nil
+	})
+	allocs := testing.AllocsPerRun(100, func() {
+		_, err := wrapped(context.Background(), nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("expected 0 allocs/op on uncontended HandlerExecutionController.Wrap, got %.1f", allocs)
+	}
+
+	var nilController *HandlerExecutionController
+	nilWrapped := nilController.Wrap(func(ctx context.Context, payload extension.Object) (any, error) {
+		return "ok", nil
+	})
+	if _, err := nilWrapped(context.Background(), nil); err != nil {
+		t.Fatalf("nilController.Wrap error = %v", err)
+	}
+	nilTyped := nilController.WrapTyped(func(ctx context.Context, payload proto.Message) (proto.Message, error) {
+		return &testprotos.TestResponse{}, nil
+	})
+	if _, err := nilTyped(context.Background(), &testprotos.TestRequest{}); err != nil {
+		t.Fatalf("nilController.WrapTyped error = %v", err)
+	}
+
+	sem := make(chan struct{}, 1)
+	sem <- struct{}{}
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := acquireSlot(canceledCtx, sem, 0); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled on pre-canceled context, got %v", err)
+	}
+
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), 15*time.Millisecond)
+	defer cancelWait()
+	if err := acquireSlot(waitCtx, sem, 0); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded on zero-timeout saturated sem, got %v", err)
+	}
+
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		releaseSlot(sem)
+	}()
+	if err := acquireSlot(nil, sem, 0); err != nil {
+		t.Fatalf("expected acquireSlot with timeout=0 to succeed once released, got %v", err)
+	}
+	releaseSlot(sem)
+}
+

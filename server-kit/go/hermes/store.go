@@ -174,12 +174,21 @@ func newShardedMap() *shardedMap {
 	return sm
 }
 
-func hashString(s string) uint32 {
-	var h uint32 = 2166136261
+func hashStringFrom(h uint32, s string) uint32 {
 	for i := 0; i < len(s); i++ {
 		h = (h ^ uint32(s[i])) * 16777619
 	}
 	return h
+}
+
+func hashString(s string) uint32 {
+	return hashStringFrom(2166136261, s)
+}
+
+func hashRecordScope(k recordScope) uint32 {
+	h := hashStringFrom(2166136261, k.domain)
+	h = hashStringFrom((h^uint32(':'))*16777619, k.collection)
+	return hashStringFrom((h^uint32(':'))*16777619, k.organizationID)
 }
 
 func (sm *shardedMap) getShard(key any) *sync.Map {
@@ -188,11 +197,15 @@ func (sm *shardedMap) getShard(key any) *sync.Map {
 	case string:
 		hash = hashString(k)
 	case fieldIndex:
-		hash = hashString(k.scope.domain + ":" + k.scope.collection + ":" + k.scope.organizationID + ":" + k.field + ":" + k.value)
+		h := hashRecordScope(k.scope)
+		h = hashStringFrom((h^uint32(':'))*16777619, k.field)
+		hash = hashStringFrom((h^uint32(':'))*16777619, k.value)
 	case rangeIndex:
-		hash = hashString(k.scope.domain + ":" + k.scope.collection + ":" + k.scope.organizationID + ":" + k.field + ":" + string(k.kind))
+		h := hashRecordScope(k.scope)
+		h = hashStringFrom((h^uint32(':'))*16777619, k.field)
+		hash = hashStringFrom((h^uint32(':'))*16777619, string(k.kind))
 	case recordScope:
-		hash = hashString(k.domain + ":" + k.collection + ":" + k.organizationID)
+		hash = hashRecordScope(k)
 	default:
 		hash = 0
 	}

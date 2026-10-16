@@ -146,11 +146,10 @@ func (c *HandlerExecutionController) Wrap(handler HandlerFunc) HandlerFunc {
 	}
 
 	return func(ctx context.Context, payload extension.Object) (any, error) {
-		release, err := acquireSlot(ctx, c.workerSem, c.acquireTimeout)
-		if err != nil {
+		if err := acquireSlot(ctx, c.workerSem, c.acquireTimeout); err != nil {
 			return nil, err
 		}
-		defer release()
+		defer releaseSlot(c.workerSem)
 
 		if c.limiter != nil {
 			if err := c.limiter.Wait(ctx); err != nil {
@@ -169,11 +168,10 @@ func (c *HandlerExecutionController) WrapTyped(handler TypedHandlerFunc) TypedHa
 	}
 
 	return func(ctx context.Context, payload proto.Message) (proto.Message, error) {
-		release, err := acquireSlot(ctx, c.workerSem, c.acquireTimeout)
-		if err != nil {
+		if err := acquireSlot(ctx, c.workerSem, c.acquireTimeout); err != nil {
 			return nil, err
 		}
-		defer release()
+		defer releaseSlot(c.workerSem)
 
 		if c.limiter != nil {
 			if err := c.limiter.Wait(ctx); err != nil {
@@ -216,18 +214,30 @@ func normalizeConcurrencyOptions(opts ConcurrencyOptions) ConcurrencyOptions {
 	return normalized
 }
 
-func acquireSlot(ctx context.Context, sem chan struct{}, timeout time.Duration) (func(), error) {
+func releaseSlot(sem chan struct{}) {
+	<-sem
+}
+
+func acquireSlot(ctx context.Context, sem chan struct{}, timeout time.Duration) error {
 	waitCtx := ctx
 	if waitCtx == nil {
 		waitCtx = context.Background()
+	}
+	if err := waitCtx.Err(); err != nil {
+		return err
+	}
+	select {
+	case sem <- struct{}{}:
+		return nil
+	default:
 	}
 
 	if timeout <= 0 {
 		select {
 		case sem <- struct{}{}:
-			return func() { <-sem }, nil
+			return nil
 		case <-waitCtx.Done():
-			return nil, waitCtx.Err()
+			return waitCtx.Err()
 		}
 	}
 
@@ -236,11 +246,11 @@ func acquireSlot(ctx context.Context, sem chan struct{}, timeout time.Duration) 
 
 	select {
 	case sem <- struct{}{}:
-		return func() { <-sem }, nil
+		return nil
 	case <-timer.C:
-		return nil, ErrConcurrencyLimitReached
+		return ErrConcurrencyLimitReached
 	case <-waitCtx.Done():
-		return nil, waitCtx.Err()
+		return waitCtx.Err()
 	}
 }
 

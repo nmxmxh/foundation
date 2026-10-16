@@ -187,3 +187,16 @@ func BenchmarkPlannedDispatchRequestJSONBody(b *testing.B) {
 		}
 	}
 }
+
+func TestBuildDispatchRequestGETEmptyAndDuplicateQuery(t *testing.T) {
+	route := registry.HTTPRoute{Method: http.MethodGet, Path: "/v1/items", EventType: "items:list:v1:requested"}
+	req := httptest.NewRequest(http.MethodGet, "/v1/items", nil)
+	if _, err := BuildDispatchRequest(req, route); err != nil {
+		t.Fatalf("expected empty query GET to succeed: %v", err)
+	}
+	dupReq := httptest.NewRequest(http.MethodGet, "/v1/items?k=1&k=2", nil)
+	if _, err := BuildDispatchRequest(dupReq, route); err == nil {
+		t.Fatalf("expected duplicate query parameter error")
+	}
+}
+

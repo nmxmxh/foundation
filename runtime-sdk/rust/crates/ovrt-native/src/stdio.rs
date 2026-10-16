@@ -26,24 +26,26 @@ pub fn serve_framed_session<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
 ) -> Result<(), String> {
+    let mut unit_id_bytes = Vec::with_capacity(MAX_UNIT_ID_FRAME_BYTES);
+    let mut raw_buffer = Vec::with_capacity(BUFFER_TOTAL_BYTES as usize);
     loop {
-        let unit_id_bytes = match read_frame_bounded(reader, MAX_UNIT_ID_FRAME_BYTES) {
-            Ok(payload) => payload,
+        match read_frame_bounded_into(reader, MAX_UNIT_ID_FRAME_BYTES, &mut unit_id_bytes) {
+            Ok(()) => {}
             Err(FrameReadError::EndOfStream) => return Ok(()),
             Err(FrameReadError::Io(error)) => return Err(format!("read unit frame: {error}")),
-        };
-        let unit_id = String::from_utf8(unit_id_bytes).map_err(|error| error.to_string())?;
+        }
+        let unit_id = std::str::from_utf8(&unit_id_bytes).map_err(|error| error.to_string())?;
 
-        let raw_buffer = match read_frame_bounded(reader, BUFFER_TOTAL_BYTES as usize) {
-            Ok(payload) => payload,
+        match read_frame_bounded_into(reader, BUFFER_TOTAL_BYTES as usize, &mut raw_buffer) {
+            Ok(()) => {}
             Err(FrameReadError::EndOfStream) => {
                 return Err("received unit frame without a matching runtime buffer".to_string())
             }
             Err(FrameReadError::Io(error)) => return Err(format!("read runtime buffer: {error}")),
-        };
+        }
 
-        let output = process_runtime_buffer(host, &unit_id, raw_buffer)?;
-        write_frame(writer, &output).map_err(|error| format!("write runtime buffer: {error}"))?;
+        process_runtime_buffer_in_place(host, unit_id, &mut raw_buffer)?;
+        write_frame(writer, &raw_buffer).map_err(|error| format!("write runtime buffer: {error}"))?;
         writer.flush().map_err(|error| error.to_string())?;
     }
 }
@@ -250,10 +252,11 @@ enum FrameReadError {
     Io(io::Error),
 }
 
-fn read_frame_bounded<R: Read>(
+fn read_frame_bounded_into<R: Read>(
     reader: &mut R,
     max_payload_bytes: usize,
-) -> Result<Vec<u8>, FrameReadError> {
+    payload: &mut Vec<u8>,
+) -> Result<(), FrameReadError> {
     let mut size = [0_u8; 4];
     match reader.read_exact(&mut size) {
         Ok(()) => {}
@@ -273,8 +276,19 @@ fn read_frame_bounded<R: Read>(
             format!("frame payload has {length} bytes; max is {max_payload_bytes}"),
         )));
     }
-    let mut payload = vec![0_u8; length];
-    reader.read_exact(&mut payload).map_err(FrameReadError::Io)?;
+    payload.clear();
+    payload.resize(length, 0);
+    reader.read_exact(payload).map_err(FrameReadError::Io)?;
+    Ok(())
+}
+
+#[cfg(test)]
+fn read_frame_bounded<R: Read>(
+    reader: &mut R,
+    max_payload_bytes: usize,
+) -> Result<Vec<u8>, FrameReadError> {
+    let mut payload = Vec::new();
+    read_frame_bounded_into(reader, max_payload_bytes, &mut payload)?;
     Ok(payload)
 }
 

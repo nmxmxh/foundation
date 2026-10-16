@@ -276,10 +276,11 @@ func (s *DispatchStatRow) ApplyMirror(stats DispatchLaneStats) error {
 
 // SnapshotStatRow reads one row atomically word-by-word.
 func (b *DispatchBlock) SnapshotStatRow(lane int) (DispatchLaneStats, error) {
-	row, err := b.StatRow(lane)
+	base, err := b.statRowBase(lane)
 	if err != nil {
 		return DispatchLaneStats{}, err
 	}
+	row := DispatchStatRow{block: b, base: base}
 	return row.Snapshot()
 }
 
@@ -368,8 +369,8 @@ func (b *DispatchBlock) PublishDescriptors(rows []DispatchLaneDescriptor, genera
 			descriptor.LaneID = uint16(slot)
 			descriptor.Generation = generation
 		}
-		encoded := encodeDescriptor(descriptor)
-		copy(b.raw[base+slot*dispatchSlotBytes:], encoded)
+		offset := base + slot*dispatchSlotBytes
+		encodeDescriptorInto(b.raw[offset:offset+dispatchSlotBytes], descriptor)
 	}
 	flip, err := b.dispatchWord32(int(generated.DISPATCH_FLIP_INDEX_OFFSET))
 	if err != nil {

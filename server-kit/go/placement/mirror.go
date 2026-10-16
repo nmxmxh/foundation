@@ -84,20 +84,18 @@ func EncodeLaneMirrorFrame(nodeID, regionID string, class LaneClass, lanes []Lan
 	if len(lanes) > 255 {
 		return nil, fmt.Errorf("mirror frame carries %d lanes; 255 maximum", len(lanes))
 	}
-	nodeBytes := []byte(nodeID)
-	regionBytes := []byte(regionID)
-	if len(nodeBytes) == 0 || len(nodeBytes) > 255 {
+	if len(nodeID) == 0 || len(nodeID) > 255 {
 		return nil, fmt.Errorf("node id must be 1..255 bytes")
 	}
-	if len(regionBytes) == 0 || len(regionBytes) > 255 {
+	if len(regionID) == 0 || len(regionID) > 255 {
 		return nil, fmt.Errorf("region id must be 1..255 bytes")
 	}
 
-	frame := make([]byte, 0, 7+len(nodeBytes)+len(regionBytes)+len(lanes)*mirrorRecordBytes)
-	frame = append(frame, MirrorWireVersion, byte(class), byte(len(nodeBytes))) // #nosec G115 -- nodeBytes length validated 1..255 above
-	frame = append(frame, nodeBytes...)
-	frame = append(frame, byte(len(regionBytes))) // #nosec G115 -- regionBytes length validated 1..255 above
-	frame = append(frame, regionBytes...)
+	frame := make([]byte, 0, 7+len(nodeID)+len(regionID)+len(lanes)*mirrorRecordBytes)
+	frame = append(frame, MirrorWireVersion, byte(class), byte(len(nodeID))) // #nosec G115 -- nodeID length validated 1..255 above
+	frame = append(frame, nodeID...)
+	frame = append(frame, byte(len(regionID))) // #nosec G115 -- regionID length validated 1..255 above
+	frame = append(frame, regionID...)
 	frame = binary.LittleEndian.AppendUint16(frame, uint16(len(lanes))) // #nosec G115 -- lane count validated <= 255 above
 
 	for _, lane := range lanes {

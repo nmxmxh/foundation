@@ -10,6 +10,7 @@ import (
 	"maps"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,9 +26,8 @@ const (
 )
 
 var (
-	metadataTokenPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
-	metadataTagPattern   = regexp.MustCompile(`^[a-z0-9._:-]+$`)
-	metadataTagSpace     = regexp.MustCompile(`\s+`)
+	metadataTagPattern = regexp.MustCompile(`^[a-z0-9._:-]+$`)
+	metadataTagSpace   = regexp.MustCompile(`\s+`)
 )
 
 var unsafeMetadataTagFragments = []string{
@@ -300,8 +300,12 @@ func FromObject(raw extension.Object) EnvelopeMetadata {
 		}
 	}
 
-	md.Tags = NormalizeTags(parseStringSliceValue(raw["tags"]))
-	md.Categories = NormalizeCategories(parseStringSliceValue(raw["categories"]))
+	if rawTags, ok := raw["tags"]; ok {
+		md.Tags = NormalizeTags(parseStringSliceValue(rawTags))
+	}
+	if rawCategories, ok := raw["categories"]; ok {
+		md.Categories = NormalizeCategories(parseStringSliceValue(rawCategories))
+	}
 	md.AIConfidence = pickObjectFloat64(raw, "ai_confidence", "aiConfidence")
 	md.EmbeddingID = pickObjectString(raw, "embedding_id", "embeddingId")
 	md.KnowledgeGraph = pickObjectString(raw, "knowledge_graph", "knowledgeGraph")
@@ -327,8 +331,7 @@ func FromObject(raw extension.Object) EnvelopeMetadata {
 		}
 	}
 
-	if attrs := pickObject(raw, "attributes"); attrs != nil {
-		md.Attributes = map[string]string{}
+	if attrs := pickObject(raw, "attributes"); len(attrs) > 0 {
 		for key, value := range attrs {
 			if str, ok := value.StringValue(); ok {
 				md.Attributes[key] = str
@@ -347,12 +350,205 @@ func FromObject(raw extension.Object) EnvelopeMetadata {
 	return md
 }
 
+// NormalizeObjectToTransportProto normalizes raw metadata and builds a transport protobuf.
+func NormalizeObjectToTransportProto(raw extension.Object, envelopeCorrelationID string) (*foundationpb.Metadata, string, error) {
+	if pb, corr, ok, err := normalizeObjectToTransportProtoFast(raw, envelopeCorrelationID); ok {
+		return pb, corr, err
+	}
+	return normalizeObjectToTransportProtoSlow(raw, envelopeCorrelationID)
+}
+
+func normalizeObjectToTransportProtoSlow(raw extension.Object, envelopeCorrelationID string) (*foundationpb.Metadata, string, error) {
+	md := FromObject(raw)
+	if envelopeCorrelationID != "" && md.CorrelationID != "" && envelopeCorrelationID != md.CorrelationID {
+		return nil, "", errors.New("metadata.correlation_id must match envelope correlation_id")
+	}
+	correlationID := md.EnsureCorrelation(envelopeCorrelationID)
+	if err := md.Validate(); err != nil {
+		return nil, "", err
+	}
+	pb, err := md.ToTransportProto()
+	return pb, correlationID, err
+}
+
+func normalizeObjectToTransportProtoFast(raw extension.Object, envelopeCorrelationID string) (*foundationpb.Metadata, string, bool, error) {
+	pb := &foundationpb.Metadata{}
+	var extraKey string
+	var extraVal extension.Value
+	extraCount := 0
+
+	for key, val := range raw {
+		if !assignFastMetadataField(pb, key, val, &extraKey, &extraVal, &extraCount) {
+			return nil, "", false, nil
+		}
+	}
+
+	if envelopeCorrelationID != "" && pb.CorrelationId != "" && envelopeCorrelationID != pb.CorrelationId {
+		return nil, "", true, errors.New("metadata.correlation_id must match envelope correlation_id")
+	}
+	corr := strings.TrimSpace(envelopeCorrelationID)
+	if corr == "" {
+		corr = strings.TrimSpace(pb.CorrelationId)
+	}
+	if corr == "" {
+		corr = NewCorrelationID()
+	}
+	pb.CorrelationId = corr
+	if strings.TrimSpace(pb.RequestId) == "" {
+		pb.RequestId = corr
+	}
+	if err := validateTransportProtoTokens(pb); err != nil {
+		return nil, "", true, err
+	}
+	if extraCount == 1 {
+		extrasJSON, ok := marshalSingleExtraJSON(extraKey, extraVal)
+		if !ok {
+			return nil, "", false, nil
+		}
+		pb.ExtrasJson = extrasJSON
+	}
+	return pb, corr, true, nil
+}
+
+func assignFastMetadataField(pb *foundationpb.Metadata, key string, val extension.Value, extraKey *string, extraVal *extension.Value, extraCount *int) bool {
+	switch key {
+	case "correlation_id":
+		pb.CorrelationId, _ = val.StringValue()
+	case "causation_id":
+		pb.CausationId, _ = val.StringValue()
+	case "request_id":
+		pb.RequestId, _ = val.StringValue()
+	case "idempotency_key":
+		pb.IdempotencyKey, _ = val.StringValue()
+	case "trace_id":
+		pb.TraceId, _ = val.StringValue()
+	case "span_id":
+		pb.SpanId, _ = val.StringValue()
+	case "channel":
+		pb.Channel, _ = val.StringValue()
+	case "locale":
+		pb.Locale, _ = val.StringValue()
+	case "tenant_region":
+		pb.TenantRegion, _ = val.StringValue()
+	case "embedding_id":
+		pb.EmbeddingId, _ = val.StringValue()
+	case "knowledge_graph":
+		pb.KnowledgeGraph, _ = val.StringValue()
+	case "source_ref":
+		pb.SourceRef, _ = val.StringValue()
+	case "gamification_state":
+		pb.GamificationState, _ = val.StringValue()
+	case "global_context":
+		gcObj, ok := val.ObjectValue()
+		if !ok {
+			return true
+		}
+		gc, ok := buildFastGlobalContextProto(gcObj)
+		if !ok {
+			return false
+		}
+		pb.GlobalContext = gc
+	default:
+		if isKnownField(key) {
+			return false
+		}
+		*extraCount++
+		if *extraCount > 1 {
+			return false
+		}
+		*extraKey = key
+		*extraVal = val
+	}
+	return true
+}
+
+func buildFastGlobalContextProto(gcObj extension.Object) (*foundationpb.GlobalContext, bool) {
+	if len(gcObj) == 0 {
+		return nil, true
+	}
+	gc := &foundationpb.GlobalContext{}
+	nonEmpty := false
+	for key, val := range gcObj {
+		str, _ := val.StringValue()
+		switch key {
+		case "user_id":
+			gc.UserId = str
+		case "session_id":
+			gc.SessionId = str
+		case "source":
+			gc.Source = str
+		case "device_id":
+			gc.DeviceId = str
+		case "organization_id":
+			gc.OrganizationId = str
+		case "role_id":
+			gc.RoleId = str
+		case "audit_context":
+			gc.AuditContext = str
+		case "ip_address":
+			gc.IpAddress = str
+		case "user_agent":
+			gc.UserAgent = str
+		default:
+			return nil, false
+		}
+		if str != "" {
+			nonEmpty = true
+		}
+	}
+	if !nonEmpty {
+		return nil, true
+	}
+	return gc, true
+}
+
+func validateTransportProtoTokens(pb *foundationpb.Metadata) error {
+	for _, item := range [...]struct{ name, val string }{
+		{"correlation_id", pb.CorrelationId},
+		{"causation_id", pb.CausationId},
+		{"request_id", pb.RequestId},
+		{"idempotency_key", pb.IdempotencyKey},
+		{"trace_id", pb.TraceId},
+		{"span_id", pb.SpanId},
+	} {
+		if err := validateToken(item.name, item.val); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func marshalSingleExtraJSON(key string, val extension.Value) ([]byte, bool) {
+	if str, ok := val.StringValue(); ok {
+		buf := make([]byte, 0, len(key)+len(str)+6)
+		buf = append(buf, '{')
+		buf = strconv.AppendQuote(buf, key)
+		buf = append(buf, ':')
+		buf = strconv.AppendQuote(buf, str)
+		buf = append(buf, '}')
+		return buf, true
+	}
+	if b, ok := val.BoolValue(); ok {
+		buf := make([]byte, 0, len(key)+10)
+		buf = append(buf, '{')
+		buf = strconv.AppendQuote(buf, key)
+		buf = append(buf, ':')
+		buf = strconv.AppendBool(buf, b)
+		buf = append(buf, '}')
+		return buf, true
+	}
+	return nil, false
+}
+
 func isMergeableStringSliceField(key string) bool {
 	return key == "tags" || key == "categories"
 }
 
 func normalizeStringSet(values []string, limit, maxLength int, rejectSecrets bool) []string {
-	seen := map[string]struct{}{}
+	if len(values) == 0 {
+		return []string{}
+	}
+	seen := make(map[string]struct{}, min(len(values), limit))
 	normalized := make([]string, 0, min(len(values), limit))
 	for _, value := range values {
 		item := normalizeTagPart(value, maxLength)
@@ -637,10 +833,14 @@ func (m EnvelopeMetadata) Validate() error {
 }
 
 func (m EnvelopeMetadata) ToJSON() ([]byte, error) {
-	return json.Marshal(m.ToObject())
+	return m.ToObject().MarshalJSON()
 }
 
 func (m EnvelopeMetadata) ToTransportProto() (*foundationpb.Metadata, error) {
+	var attrs map[string]string
+	if len(m.Attributes) > 0 {
+		attrs = copyStringMap(m.Attributes)
+	}
 	pb := &foundationpb.Metadata{
 		Tags:              append([]string(nil), m.Tags...),
 		AiConfidence:      m.AIConfidence,
@@ -658,7 +858,7 @@ func (m EnvelopeMetadata) ToTransportProto() (*foundationpb.Metadata, error) {
 		Channel:           m.Channel,
 		Locale:            m.Locale,
 		TenantRegion:      m.TenantRegion,
-		Attributes:        copyStringMap(m.Attributes),
+		Attributes:        attrs,
 	}
 	if m.GlobalContext != nil {
 		pb.GlobalContext = &foundationpb.GlobalContext{
@@ -680,7 +880,7 @@ func (m EnvelopeMetadata) ToTransportProto() (*foundationpb.Metadata, error) {
 		}
 	}
 	if len(m.Extras) > 0 {
-		extrasJSON, err := json.Marshal(m.Extras)
+		extrasJSON, err := m.Extras.MarshalJSON()
 		if err != nil {
 			return nil, err
 		}
@@ -740,7 +940,9 @@ func FromTransportProto(pb *foundationpb.Metadata) (EnvelopeMetadata, error) {
 	md.Channel = pb.GetChannel()
 	md.Locale = pb.GetLocale()
 	md.TenantRegion = pb.GetTenantRegion()
-	md.Attributes = copyStringMap(pb.GetAttributes())
+	if len(pb.GetAttributes()) > 0 {
+		md.Attributes = copyStringMap(pb.GetAttributes())
+	}
 	if len(pb.GetExtrasJson()) > 0 {
 		if err := json.Unmarshal(pb.GetExtrasJson(), &md.Extras); err != nil {
 			return New(), err
@@ -811,7 +1013,14 @@ func validateToken(name, value string) error {
 	if strings.TrimSpace(value) == "" {
 		return nil
 	}
-	if !metadataTokenPattern.MatchString(value) {
+	if len(value) > 128 {
+		return fmt.Errorf("metadata.%s has invalid format", name)
+	}
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == ':' || ch == '-' {
+			continue
+		}
 		return fmt.Errorf("metadata.%s has invalid format", name)
 	}
 	return nil

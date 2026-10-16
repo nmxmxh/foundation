@@ -672,4 +672,19 @@ func TestSecurityHeadersValuesAndHSTSConditions(t *testing.T) {
 			t.Fatal("next handler was not called")
 		}
 	}
+	if got := RedactSecret(strings.Repeat("x", 600)); !strings.HasPrefix(got, "redacted:") {
+		t.Fatalf("unexpected long secret redaction: %q", got)
+	}
+	claimsCtx := context.WithValue(context.Background(), claimsContextKey{}, &auth.Claims{
+		UserID:         "usr_c",
+		OrganizationID: "org_c",
+		Role:           "admin",
+		SessionID:      "sess_c",
+		Capabilities:   []string{"cap.a"},
+		IssuedAt:       1700000000,
+		ExpiresAt:      1700003600,
+	})
+	if GetAccessExpiresAtFromContext(claimsCtx) == "" || GetRefreshExpiresAtFromContext(claimsCtx) == "" {
+		t.Fatalf("expected non-empty expiry timestamps from claims context")
+	}
 }

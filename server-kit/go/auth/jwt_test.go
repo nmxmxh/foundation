@@ -243,3 +243,77 @@ func TestJWTManagerAcceptsTokensWithoutIssuedAt(t *testing.T) {
 		t.Fatalf("token without iat should validate, got: %v", err)
 	}
 }
+
+func TestJWTManagerHandlesLongSecretAndEscapedClaims(t *testing.T) {
+	longSecret := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef-extra-bytes"
+	manager, err := NewJWTManager(longSecret)
+	if err != nil {
+		t.Fatalf("NewJWTManager with long secret failed: %v", err)
+	}
+
+	want := Claims{
+		UserID:         "usr_\"quoted\"_\\slash",
+		Email:          "user+tag@example.com",
+		Role:           "admin",
+		OrganizationID: "org_1",
+		SessionID:      "sess_1",
+		DeviceID:       "dev_1",
+		Capabilities:   []string{"cap.read", "cap.\"write\""},
+	}
+	token, err := manager.GenerateAccessToken(want, time.Minute)
+	if err != nil {
+		t.Fatalf("GenerateAccessToken failed: %v", err)
+	}
+
+	got, err := manager.ValidateToken(token)
+	if err != nil {
+		t.Fatalf("ValidateToken failed: %v", err)
+	}
+	if got.UserID != want.UserID || got.Email != want.Email || len(got.Capabilities) != 2 || got.Capabilities[1] != want.Capabilities[1] {
+		t.Fatalf("unexpected round-trip claims: got %+v, want %+v", got, want)
+	}
+
+	var parsed Claims
+	if !parseClaimsFast(`{"user_id":"u","email":"e","role":"r","organization_id":"o","device_id":"d","session_id":"s","token_type":"custom","capabilities":[],"iat":-5,"exp":10}`, &parsed) {
+		t.Fatalf("expected parseClaimsFast to succeed on full flat object")
+	}
+	if !parseClaimsFast(`{}`, &parsed) {
+		t.Fatalf("expected parseClaimsFast to succeed on empty object")
+	}
+	for _, bad := range []string{
+		``, `[]`, `{1:2}`, `{"user_id"}`, `{"user_id":}`, `{"user_id":"a" "b":1}`, `{"user_id":"a",}`,
+		`{"unknown":"x"}`, `{"user_id":123}`, `{"iat":"x"}`, `{"iat":-}`, `{"capabilities":[1]}`,
+		`{"capabilities":["a" "b"]}`, `{"capabilities":["a",]}`, `{"capabilities":["a"`,
+	} {
+		if parseClaimsFast(bad, &parsed) {
+			t.Fatalf("expected parseClaimsFast(%q) to return false", bad)
+		}
+	}
+}
+
+func TestValidateTokenAllocationBudget(t *testing.T) {
+	manager, err := NewJWTManager("this-is-a-very-secure-secret-key-for-jwt")
+	if err != nil {
+		t.Fatalf("NewJWTManager failed: %v", err)
+	}
+	token, err := manager.GenerateAccessToken(Claims{
+		UserID:         "usr_01J8X6Z2Y9W4Q7R5T3V1N0M8K2",
+		Role:           "operator",
+		OrganizationID: "org_01J8X6Z2Y9W4Q7R5T3V1N0M8K2",
+		SessionID:      "sess_01J8X6Z2Y9W4Q7R5T3V1N0M8K2",
+		Capabilities:   []string{"orders.read", "orders.write"},
+	}, 15*time.Minute)
+	if err != nil {
+		t.Fatalf("GenerateAccessToken failed: %v", err)
+	}
+
+	allocs := testing.AllocsPerRun(200, func() {
+		if _, err := manager.ValidateToken(token); err != nil {
+			t.Fatalf("ValidateToken failed: %v", err)
+		}
+	})
+	if allocs > 8 {
+		t.Fatalf("ValidateToken exceeded allocation budget: got %.1f allocs/run, want <= 8", allocs)
+	}
+}
+

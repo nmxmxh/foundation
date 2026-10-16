@@ -54,7 +54,10 @@ type Claims struct {
 
 // JWTManager manages token issuance and validation.
 type JWTManager struct {
-	secret []byte
+	secret    []byte
+	ipad      [64]byte
+	opad      [64]byte
+	padsReady bool
 }
 
 // NewJWTManager creates a token manager with HMAC signing.
@@ -62,7 +65,24 @@ func NewJWTManager(secret string) (*JWTManager, error) {
 	if len(strings.TrimSpace(secret)) < 16 {
 		return nil, errors.New("jwt secret must be at least 16 characters")
 	}
-	return &JWTManager{secret: []byte(secret)}, nil
+	manager := &JWTManager{secret: []byte(secret)}
+	manager.initPads()
+	return manager, nil
+}
+
+func (m *JWTManager) initPads() {
+	var keyBlock [64]byte
+	if len(m.secret) > 64 {
+		sum := sha256.Sum256(m.secret)
+		copy(keyBlock[:], sum[:])
+	} else {
+		copy(keyBlock[:], m.secret)
+	}
+	for i := range 64 {
+		m.ipad[i] = keyBlock[i] ^ 0x36
+		m.opad[i] = keyBlock[i] ^ 0x5c
+	}
+	m.padsReady = true
 }
 
 // GenerateAccessToken creates a signed token with default 15m expiry.
@@ -97,19 +117,14 @@ func (m *JWTManager) ValidateToken(token string) (*Claims, error) {
 		return nil, errInvalidTokenFormat
 	}
 
-	unsigned := header + "." + payloadPart
-	expected := m.sign(unsigned)
-	if subtle.ConstantTimeCompare([]byte(expected), []byte(signaturePart)) != 1 {
+	unsigned := token[:len(header)+1+len(payloadPart)]
+	if !m.verifySignature(unsigned, signaturePart) {
 		return nil, errInvalidSignature
 	}
 
-	payload, err := base64.RawURLEncoding.DecodeString(payloadPart)
-	if err != nil {
-		return nil, fmt.Errorf("decode payload: %w", err)
-	}
 	var claims Claims
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return nil, fmt.Errorf("unmarshal claims: %w", err)
+	if err := decodeAndUnmarshalClaims(payloadPart, &claims); err != nil {
+		return nil, err
 	}
 
 	nowUnix := time.Now().UTC().Unix()
@@ -185,9 +200,258 @@ func (m *JWTManager) generateToken(claims Claims, ttl time.Duration) (string, er
 }
 
 func (m *JWTManager) sign(unsigned string) string {
+	sum := m.hmacSum256(unsigned)
+	var encoded [43]byte
+	base64.RawURLEncoding.Encode(encoded[:], sum[:])
+	return string(encoded[:])
+}
+
+func (m *JWTManager) verifySignature(unsigned, signaturePart string) bool {
+	sum := m.hmacSum256(unsigned)
+	var expected [43]byte
+	base64.RawURLEncoding.Encode(expected[:], sum[:])
+	if len(signaturePart) != len(expected) {
+		return subtle.ConstantTimeCompare(expected[:], []byte(signaturePart)) == 1
+	}
+	var actual [43]byte
+	copy(actual[:], signaturePart)
+	return subtle.ConstantTimeCompare(expected[:], actual[:]) == 1
+}
+
+func (m *JWTManager) hmacSum256(unsigned string) [32]byte {
+	if m.padsReady && len(unsigned) <= 768 {
+		var innerBuf [64 + 768]byte
+		copy(innerBuf[:64], m.ipad[:])
+		copy(innerBuf[64:], unsigned)
+		innerSum := sha256.Sum256(innerBuf[:64+len(unsigned)])
+		var outerBuf [64 + 32]byte
+		copy(outerBuf[:64], m.opad[:])
+		copy(outerBuf[64:], innerSum[:])
+		return sha256.Sum256(outerBuf[:])
+	}
 	mac := hmac.New(sha256.New, m.secret)
 	_, _ = mac.Write([]byte(unsigned))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+	var out [32]byte
+	copy(out[:], mac.Sum(nil))
+	return out
+}
+
+func decodeAndUnmarshalClaims(payloadPart string, claims *Claims) error {
+	if len(payloadPart) <= 768 {
+		var srcBuf [768]byte
+		var dstBuf [576]byte
+		copy(srcBuf[:], payloadPart)
+		n, err := base64.RawURLEncoding.Decode(dstBuf[:], srcBuf[:len(payloadPart)])
+		if err != nil {
+			return fmt.Errorf("decode payload: %w", err)
+		}
+		var parsed Claims
+		if parseClaimsFast(string(dstBuf[:n]), &parsed) {
+			*claims = parsed
+			return nil
+		}
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(payloadPart)
+	if err != nil {
+		return fmt.Errorf("decode payload: %w", err)
+	}
+	if err := json.Unmarshal(payload, claims); err != nil {
+		return fmt.Errorf("unmarshal claims: %w", err)
+	}
+	return nil
+}
+
+// parseClaimsFast parses standard flat JWT claims without reflection allocations.
+func parseClaimsFast(data string, claims *Claims) bool {
+	data = strings.TrimSpace(data)
+	if len(data) < 2 || data[0] != '{' || data[len(data)-1] != '}' {
+		return false
+	}
+	body := strings.TrimSpace(data[1 : len(data)-1])
+	if len(body) == 0 {
+		return true
+	}
+	for len(body) > 0 {
+		key, rest, ok := cutJSONString(body)
+		if !ok {
+			return false
+		}
+		rest = strings.TrimSpace(rest)
+		if len(rest) == 0 || rest[0] != ':' {
+			return false
+		}
+		valRaw, next, ok := cutJSONFieldValue(strings.TrimSpace(rest[1:]))
+		if !ok || !assignClaimFast(claims, key, valRaw) {
+			return false
+		}
+		body = next
+	}
+	return true
+}
+
+func cutJSONString(b string) (string, string, bool) {
+	if len(b) < 2 || b[0] != '"' {
+		return "", "", false
+	}
+	for i := 1; i < len(b); i++ {
+		if b[i] == '\\' || b[i] < 0x20 {
+			return "", "", false
+		}
+		if b[i] == '"' {
+			return b[1:i], b[i+1:], true
+		}
+	}
+	return "", "", false
+}
+
+func cutJSONFieldValue(b string) (string, string, bool) {
+	if len(b) == 0 {
+		return "", "", false
+	}
+	var end int
+	switch b[0] {
+	case '"':
+		_, rest, ok := cutJSONString(b)
+		if !ok {
+			return "", "", false
+		}
+		end = len(b) - len(rest)
+	case '[':
+		idx := strings.IndexByte(b, ']')
+		if idx < 0 {
+			return "", "", false
+		}
+		end = idx + 1
+	default:
+		end = len(b)
+		for i := 0; i < len(b); i++ {
+			ch := b[i]
+			if ch == ',' || ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' {
+				end = i
+				break
+			}
+		}
+		if end == 0 {
+			return "", "", false
+		}
+	}
+	val := b[:end]
+	rest := strings.TrimSpace(b[end:])
+	if len(rest) == 0 {
+		return val, "", true
+	}
+	if rest[0] != ',' {
+		return "", "", false
+	}
+	next := strings.TrimSpace(rest[1:])
+	if len(next) == 0 {
+		return "", "", false
+	}
+	return val, next, true
+}
+
+func assignClaimFast(claims *Claims, key, val string) bool {
+	switch key {
+	case "user_id":
+		return assignClaimString(&claims.UserID, val)
+	case "email":
+		return assignClaimString(&claims.Email, val)
+	case "role":
+		return assignClaimString(&claims.Role, val)
+	case "organization_id":
+		return assignClaimString(&claims.OrganizationID, val)
+	case "device_id":
+		return assignClaimString(&claims.DeviceID, val)
+	case "session_id":
+		return assignClaimString(&claims.SessionID, val)
+	case "token_type":
+		if val == `"access"` {
+			claims.TokenType = TokenTypeAccess
+			return true
+		}
+		if val == `"refresh"` {
+			claims.TokenType = TokenTypeRefresh
+			return true
+		}
+		return assignClaimString(&claims.TokenType, val)
+	case "capabilities":
+		return assignClaimCapabilities(&claims.Capabilities, val)
+	case "iat":
+		return assignClaimInt64(&claims.IssuedAt, val)
+	case "exp":
+		return assignClaimInt64(&claims.ExpiresAt, val)
+	default:
+		return false
+	}
+}
+
+func assignClaimString(dst *string, val string) bool {
+	str, rest, ok := cutJSONString(val)
+	if !ok || len(rest) != 0 {
+		return false
+	}
+	*dst = str
+	return true
+}
+
+func assignClaimInt64(dst *int64, val string) bool {
+	if len(val) == 0 || len(val) > 19 {
+		return false
+	}
+	neg := false
+	if val[0] == '-' {
+		neg = true
+		val = val[1:]
+		if len(val) == 0 {
+			return false
+		}
+	}
+	var n int64
+	for i := 0; i < len(val); i++ {
+		ch := val[i]
+		if ch < '0' || ch > '9' {
+			return false
+		}
+		n = n*10 + int64(ch-'0')
+	}
+	if neg {
+		n = -n
+	}
+	*dst = n
+	return true
+}
+
+func assignClaimCapabilities(dst *[]string, val string) bool {
+	if len(val) < 2 || val[0] != '[' || val[len(val)-1] != ']' {
+		return false
+	}
+	inner := strings.TrimSpace(val[1 : len(val)-1])
+	if len(inner) == 0 {
+		*dst = []string{}
+		return true
+	}
+	count := 1 + strings.Count(inner, ",")
+	out := make([]string, 0, count)
+	for len(inner) > 0 {
+		str, rest, ok := cutJSONString(inner)
+		if !ok {
+			return false
+		}
+		out = append(out, str)
+		rest = strings.TrimSpace(rest)
+		if len(rest) == 0 {
+			break
+		}
+		if rest[0] != ',' {
+			return false
+		}
+		inner = strings.TrimSpace(rest[1:])
+		if len(inner) == 0 {
+			return false
+		}
+	}
+	*dst = out
+	return true
 }
 
 func (c *Claims) IsRefreshToken() bool {
