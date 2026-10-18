@@ -19,8 +19,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/net/http2"
-
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/apidocs"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
 	kitcompress "github.com/nmxmxh/ovasabi_foundation/server-kit/go/compress"
@@ -617,10 +615,11 @@ func (s *Server) buildHTTPServer(addr string) *http.Server {
 	}
 
 	if s.tlsConfig != nil {
-		_ = http2.ConfigureServer(srv, &http2.Server{
-			MaxConcurrentStreams: s.maxConcurrentStreams,
-			IdleTimeout:          s.idleTimeout,
-		})
+		protocols := new(http.Protocols)
+		protocols.SetHTTP1(true)
+		protocols.SetHTTP2(true)
+		srv.Protocols = protocols
+		srv.HTTP2 = &http.HTTP2Config{MaxConcurrentStreams: int(s.maxConcurrentStreams)}
 	}
 
 	return srv

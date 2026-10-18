@@ -59,7 +59,7 @@ func BenchmarkHermesPointReadHotPartition(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		if _, found, err := projected.GetRecord(ctx, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID); err != nil || !found {
 			b.Fatalf("read: found=%v err=%v", found, err)
 		}
@@ -80,7 +80,7 @@ func BenchmarkHermesPointReadRotatingKeys(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		rec := benchRecord(i % keys)
 		if _, found, err := projected.GetRecord(ctx, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID); err != nil || !found {
 			b.Fatalf("read: found=%v err=%v", found, err)
@@ -96,7 +96,7 @@ func BenchmarkHermesPointWrite(b *testing.B) {
 	rec := benchRecord(0)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		mutated := rec
 		mutated.Data = rec.Data.With("title", database.StringValue(fmt.Sprintf("facet-%d", i)))
 		if _, err := projected.UpsertRecord(ctx, mutated); err != nil {

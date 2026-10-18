@@ -166,8 +166,8 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) (*DeliveryReceipt, e
 func ParseQueueRef(reply string) string {
 	// Stalwart pattern: `queued with id <hex>`
 	const marker = "queued with id "
-	if idx := strings.Index(reply, marker); idx >= 0 {
-		raw := strings.Trim(strings.TrimSpace(reply[idx+len(marker):]), ".")
+	if _, after, ok := strings.Cut(reply, marker); ok {
+		raw := strings.Trim(strings.TrimSpace(after), ".")
 		if n, err := strconv.ParseUint(raw, 16, 64); err == nil {
 			return strconv.FormatUint(n, 10)
 		}
@@ -176,8 +176,8 @@ func ParseQueueRef(reply string) string {
 
 	// Standard ESMTP: `queued as <id>`
 	const queuedAs = "queued as "
-	if idx := strings.Index(reply, queuedAs); idx >= 0 {
-		fields := strings.Fields(reply[idx+len(queuedAs):])
+	if _, after, ok := strings.Cut(reply, queuedAs); ok {
+		fields := strings.Fields(after)
 		if len(fields) > 0 {
 			return strings.Trim(fields[0], ".")
 		}

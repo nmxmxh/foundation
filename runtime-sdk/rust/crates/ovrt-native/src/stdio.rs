@@ -45,7 +45,8 @@ pub fn serve_framed_session<R: Read, W: Write>(
         }
 
         process_runtime_buffer_in_place(host, unit_id, &mut raw_buffer)?;
-        write_frame(writer, &raw_buffer).map_err(|error| format!("write runtime buffer: {error}"))?;
+        write_frame(writer, &raw_buffer)
+            .map_err(|error| format!("write runtime buffer: {error}"))?;
         writer.flush().map_err(|error| error.to_string())?;
     }
 }

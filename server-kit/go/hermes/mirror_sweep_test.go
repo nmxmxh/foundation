@@ -110,20 +110,16 @@ func TestSweepSourceIsSafeConcurrently(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := sweeper.SweepSource(t.Context(), "presence"); err != nil {
 				t.Errorf("SweepSource() error = %v", err)
 			}
-		}()
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			if _, err := sweeper.SweepOnce(t.Context()); err != nil {
 				t.Errorf("SweepOnce() error = %v", err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

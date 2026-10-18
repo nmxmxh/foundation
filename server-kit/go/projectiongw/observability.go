@@ -1,6 +1,7 @@
 package projectiongw
 
 import (
+	"maps"
 	"time"
 
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
@@ -74,9 +75,7 @@ func scopeTags(scope *foundationpb.ProjectionScope) metrics.Tags {
 // never mutated by a recorder.
 func withTag(tags metrics.Tags, key, value string) metrics.Tags {
 	out := make(metrics.Tags, len(tags)+1)
-	for k, v := range tags {
-		out[k] = v
-	}
+	maps.Copy(out, tags)
 	out[key] = value
 	return out
 }

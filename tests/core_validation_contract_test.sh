@@ -23,6 +23,10 @@ for contract in \
   grep -Fq -- "$contract" "$workflow" || fail "Core CI is missing: $contract"
 done
 
+grep -Fq 'npm --prefix frontend-lab audit --audit-level=high' "$workflow" || fail "frontend lab dependencies bypass audit"
+grep -Fq 'check-latest: true' "$workflow" || fail "Go setup can reuse an older patch release"
+grep -Fq 'check-scaffold-smoke test-nginx-edge' "$ROOT/Makefile" || fail "full verification omits real Nginx evidence"
+
 mkdir -p "$TMP/ts/runtime-transport/ts"
 printf '%s\n' '{"name":"fixture","sideEffects":false}' >"$TMP/ts/runtime-transport/ts/package.json"
 printf '%s\n' '{}' >"$TMP/ts/runtime-transport/ts/package-lock.json"
@@ -58,6 +62,7 @@ bash "$ROOT/tests/benchmark_movement_test.sh"
 bash "$ROOT/tests/benchmark_history_test.sh"
 bash "$ROOT/tests/practice_controls_test.sh"
 bash "$ROOT/tests/command_timeout_test.sh"
+bash "$ROOT/tests/go_static_analysis_test.sh"
 bash "$ROOT/tests/coverage_ratchet_test.sh"
 
 echo "Foundation Core validation contract passed"

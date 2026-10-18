@@ -109,6 +109,7 @@ type chainContext struct {
 	done      atomic.Pointer[chan struct{}]
 	closed    atomic.Bool
 	once      sync.Once
+	doneOnce  sync.Once
 	watchOnce sync.Once
 }
 
@@ -144,10 +145,14 @@ func (c *chainContext) Value(key any) any {
 func (c *chainContext) Cancel() {
 	c.once.Do(func() {
 		c.closed.Store(true)
-		if done := c.done.Load(); done != nil {
-			close(*done)
-		}
+		c.closeDone()
 	})
+}
+
+func (c *chainContext) closeDone() {
+	if done := c.done.Load(); done != nil {
+		c.doneOnce.Do(func() { close(*done) })
+	}
 }
 
 func (c *chainContext) ensureDone() <-chan struct{} {
@@ -156,6 +161,10 @@ func (c *chainContext) ensureDone() <-chan struct{} {
 	}
 	ch := make(chan struct{})
 	if c.done.CompareAndSwap(nil, &ch) {
+		// Cancellation can finish before channel publication.
+		if c.closed.Load() {
+			c.closeDone()
+		}
 		return ch
 	}
 	return *c.done.Load()

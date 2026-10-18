@@ -88,8 +88,11 @@ func (JSONSerializer) Unmarshal(data []byte, v any) error {
 
 // Cache provides cache operations.
 type Cache struct {
-	config Config
-	sf     singleflight.Group
+	config     Config
+	sf         singleflight.Group
+	loadMu     sync.Mutex
+	loads      map[string]*loadCall
+	loadConfig LoadPolicy
 }
 
 // New creates a new cache instance.

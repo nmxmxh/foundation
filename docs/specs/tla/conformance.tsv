@@ -21,8 +21,8 @@ MetadataMerge	StrongEventualConsistency	go-property	TestMergeMapsACILaws	server-
 MetadataMerge	StrongEventualConsistency	go-symbol	AssertACILaws	server-kit/go/contracttest/aci.go
 WorkerRetryQueue	RetryBudgetBounded	tlc	RetryBudgetBounded	docs/specs/tla/WorkerRetryQueue.tla
 WorkerRetryQueue	RetryBudgetBounded	go-symbol	exceeds max_attempts	server-kit/go/worker/job.go
-WorkerRetryQueue	RetryBudgetBounded	go-test	TestConformanceWorkerRetryBudgetBounded	server-kit/go/worker/conformance_test.go
-WorkerRetryQueue	RetryBudgetBounded	go-trace	TestConformanceTraceWorkerRetryQueue	server-kit/go/worker/conformance_test.go
+WorkerRetryQueue	RetryBudgetBounded	go-test	TestConformanceWorkerRetryBudgetBounded	server-kit/go/worker/job_test.go
+WorkerRetryQueue	RetryBudgetBounded	go-trace	TestConformanceTraceWorkerRetryQueue	server-kit/go/worker/job_test.go
 CacheProjectionFreshness	ProjectionVersionMonotonic	tlc	ProjectionVersionMonotonic	docs/specs/tla/CacheProjectionFreshness.tla
 CacheProjectionFreshness	ProjectionVersionMonotonic	go-symbol	observeSourceWatermark	server-kit/go/hermes/apply.go
 CacheProjectionFreshness	ProjectionVersionMonotonic	servicebacked	TestConformanceServiceBackedHermesProjectionMonotonic	server-kit/go/servicebacked/conformance_test.go

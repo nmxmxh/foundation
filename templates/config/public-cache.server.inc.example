@@ -1,0 +1,30 @@
+# Include inside the server block after installing public-cache.conf.
+# Route ownership and freshness remain application decisions.
+proxy_cache $foundation_public_zone;
+proxy_cache_key "$proxy_forwarded_proto|$host|$proxy_host|$request_uri";
+proxy_cache_methods GET HEAD;
+proxy_cache_valid 200 2m;
+proxy_cache_lock on;
+proxy_cache_lock_timeout 1s;
+proxy_cache_lock_age 5s;
+proxy_cache_bypass $foundation_public_method_skip $foundation_public_credentials_skip;
+proxy_no_cache $foundation_public_method_skip $foundation_public_credentials_skip
+    $foundation_public_status_skip;
+# Preserve upstream Cache-Control, Set-Cookie, Vary, and X-Accel-Expires processing.
+
+location = /sitemap.xml {
+    proxy_pass http://foundation_backend;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $proxy_forwarded_proto;
+}
+location = /robots.txt {
+    proxy_pass http://foundation_backend;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $proxy_forwarded_proto;
+}

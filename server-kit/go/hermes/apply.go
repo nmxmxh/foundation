@@ -372,11 +372,11 @@ type watermarkFence struct {
 // colon only, and returns a substring rather than a []string, so the apply path
 // does not allocate a slice per event to read a prefix.
 func sourceWatermarkPrefix(source string) (string, bool) {
-	at := strings.IndexByte(source, ':')
-	if at < 0 {
+	before, _, ok := strings.Cut(source, ":")
+	if !ok {
 		return "", false
 	}
-	return source[:at], true
+	return before, true
 }
 
 func (p *partition) rememberAppliedLocked(source string, version uint64) {

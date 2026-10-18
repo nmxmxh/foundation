@@ -3,6 +3,9 @@ import { playwright } from "@vitest/browser-playwright";
 import wyw from "@wyw-in-js/vite";
 import { defineConfig } from "vitest/config";
 
+// Preserve the timezone used by the historical calendar snapshots in every worker.
+process.env.TZ = "Africa/Lagos";
+
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 /*

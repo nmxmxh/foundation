@@ -145,3 +145,37 @@ generated applications.
    `CLAUDE.md`, and `.agents/*`) should remain `create` unless Platform
    Architecture explicitly accepts the risk of overwriting project-local agent
    guidance.
+
+## Public edge recipes
+
+The two `config/public-cache.*.example` files are optional create-mode seeds.
+The scaffold never activates them automatically.
+Application owners select public routes and freshness before activation.
+
+1. Copy `public-cache.http.conf.example` into `/etc/nginx/conf.d/public-cache.conf` in the application image.
+2. Enable only reviewed exact paths in its map. The default zone remains `off`.
+3. Copy `public-cache.server.inc.example` into the same directory without its `.example` suffix.
+4. Include that file inside the application server block.
+5. Adjust its exact machine routes to match the application backend.
+6. Run `nginx -t` and the application route tests before deployment.
+
+The recipe caches anonymous GET and HEAD responses only.
+Credentials, cookies, queries, ranges, unsuccessful responses, and upstream privacy directives prevent cache publication.
+The cache key includes effective scheme, public host, upstream group, and original request URI.
+Upstream `Vary`, `Set-Cookie`, `Cache-Control`, and `X-Accel-Expires` remain effective.
+Expired entries require a successful origin response. No stale-response fallback is enabled.
+Public routes must precede static extension rules and SPA fallback.
+Canonical URLs, localization, publication rules, and route allowlists remain application-owned.
+
+The default `/api/` and `/v1/` routes select `foundation_backend` for connection reuse.
+Docker DNS refresh remains enabled through the shared upstream zone and `resolve` parameter.
+Upstream Host values, upgrade headers, compression guards, and streaming behavior remain compatible.
+The updater preserves custom pool sizes and custom log formats.
+The standard log format now escapes JSON and records request identity, upstream timing, and cache outcomes.
+`NONE` and missing instrumentation must not be reported as cache hits.
+A 499 response records client closure. It does not identify the underlying bottleneck.
+
+`make test-nginx-edge` exercises real Nginx against an instrumented origin.
+CI requires Docker for this lane. Local runs report an explicit skip when Docker is unavailable.
+The test removes its temporary containers and network.
+It checks connection reuse, upgrades, Host values, route precedence, default caching, privacy, expiry, and cold coalescing.

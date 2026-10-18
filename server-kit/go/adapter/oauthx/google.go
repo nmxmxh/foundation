@@ -20,7 +20,7 @@ import (
 
 const (
 	defaultGoogleAuthURL     = "https://accounts.google.com/o/oauth2/v2/auth"
-	defaultGoogleTokenURL    = "https://oauth2.googleapis.com/token"
+	defaultGoogleTokenURL    = "https://oauth2.googleapis.com/token" // #nosec G101 -- Public OAuth endpoint, not an embedded credential.
 	defaultGoogleRevokeURL   = "https://oauth2.googleapis.com/revoke"
 	defaultGoogleUserInfoURL = "https://openidconnect.googleapis.com/v1/userinfo"
 	maxResponseLimit         = 64 * 1024 // 64 KiB

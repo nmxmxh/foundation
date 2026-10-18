@@ -2,6 +2,8 @@ module {{MODULE_PATH}}
 
 go 1.26
 
+toolchain go1.26.9
+
 require (
 	// Foundation modules
 	github.com/nmxmxh/ovasabi_foundation/config-contracts/go v0.0.0

@@ -37,9 +37,10 @@ trap 'rm -rf "$WORK"' EXIT
 seed_legacy_project() {
     local dir="$1"
     mkdir -p "$dir/config"
-    git -C "$FOUNDATION_DIR" show HEAD:templates/config/nginx.conf >"$dir/config/nginx.conf"
-    git -C "$FOUNDATION_DIR" show HEAD:templates/config/default.conf.template >"$dir/config/default.conf.template"
-    git -C "$FOUNDATION_DIR" show HEAD:templates/docker/start.sh >"$dir/start.sh"
+    local fixture="$SCRIPT_DIR/fixtures/nginx_edge_legacy"
+    cp "$fixture/nginx.conf" "$dir/config/nginx.conf"
+    cp "$fixture/default.conf.template" "$dir/config/default.conf.template"
+    cp "$fixture/start.sh" "$dir/start.sh"
     chmod +x "$dir/start.sh"
 }
 
@@ -67,7 +68,7 @@ PY
 
 seed_legacy_project "$WORK/project"
 if grep -Fq 'upstream foundation_backend' "$WORK/project/config/default.conf.template"; then
-    fail "fixture is not legacy: HEAD already carries the keepalive pool"
+    fail "fixture is not legacy: it already carries the keepalive pool"
 fi
 
 first="$(run_patch "$WORK/project")"
@@ -182,6 +183,26 @@ if grep -Fq '${' "$WORK/project/config/nginx.conf"; then
 else
     pass "global nginx.conf needs no substitution"
 fi
+
+# Preserve application settings while repairing an already migrated raw target.
+cp -R "$WORK/project" "$WORK/custom"
+python3 - "$WORK/custom" <<'PYFIXTURE'
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+p = root / "config/default.conf.template"
+s = p.read_text().replace('keepalive ${UPSTREAM_KEEPALIVE_CONNECTIONS};', 'keepalive 77;')
+s = s.replace('set $upstream_keepalive "http://foundation_backend";', 'set $upstream_keepalive "http://${UPSTREAM_HOST}:${UPSTREAM_PORT}";')
+p.write_text(s)
+p = root / "config/nginx.conf"
+p.write_text(p.read_text().replace('"http_user_agent":"$http_user_agent"', '"http_user_agent":"$http_user_agent","application":"kept"'))
+PYFIXTURE
+run_patch "$WORK/custom" >/dev/null
+[[ "$(run_patch "$WORK/custom")" == "$NO_DRIFT" ]] || fail "custom configuration update drifts"
+grep -Fq 'keepalive 77;' "$WORK/custom/config/default.conf.template" || fail "custom pool size was lost"
+grep -Fq '"application":"kept"' "$WORK/custom/config/nginx.conf" || fail "custom logging was lost"
+grep -Fq 'set $upstream_keepalive "http://foundation_backend";' "$WORK/custom/config/default.conf.template" || fail "existing raw target was not repaired"
+pass "custom settings survive the named-pool repair"
 
 if [[ "$failed" -ne 0 ]]; then
     echo "nginx managed-patch test failed" >&2

@@ -1839,3 +1839,21 @@ func TestRunReportsUnusableListenAddress(t *testing.T) {
 		t.Fatalf("Run() err=%v, want it wrapped with the address it tried", err)
 	}
 }
+
+func TestHTTP2ServerPreservesConfiguredProtocols(t *testing.T) {
+	s := New(nil, nil)
+	s.tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	s.ConfigureHTTP2(73)
+	configured := s.buildHTTPServer(":0")
+	if configured.HTTP2 == nil || configured.HTTP2.MaxConcurrentStreams != 73 {
+		t.Fatalf("HTTP/2 stream limit: %+v", configured.HTTP2)
+	}
+	if configured.Protocols == nil || !configured.Protocols.HTTP1() || !configured.Protocols.HTTP2() || configured.Protocols.UnencryptedHTTP2() {
+		t.Fatalf("protocols: %+v", configured.Protocols)
+	}
+	s.tlsConfig = nil
+	plain := s.buildHTTPServer(":0")
+	if plain.Protocols != nil || plain.HTTP2 != nil {
+		t.Fatal("plain listener gained HTTP/2 configuration")
+	}
+}

@@ -30,6 +30,8 @@ templates/docker/docker-compose.test.yml	docker-compose.test.yml	full,backend	do
 templates/docker/start.sh	start.sh	full,backend	docker	create
 templates/config/default.conf.template	config/default.conf.template	full,backend	docker	create
 templates/config/nginx.conf	config/nginx.conf	full,backend	docker	create
+templates/config/public-cache.http.conf.example	config/public-cache.http.conf.example	full,backend	docker	create
+templates/config/public-cache.server.inc.example	config/public-cache.server.inc.example	full,backend	docker	create
 templates/config/postgresql.conf	config/postgresql.conf	full,backend	docker	create
 templates/config/pg_hba.conf	config/pg_hba.conf	full,backend	docker	create
 templates/config/redis.conf	config/redis.conf	full,backend	docker	create

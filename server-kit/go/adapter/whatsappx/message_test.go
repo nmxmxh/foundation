@@ -150,7 +150,7 @@ func BenchmarkMarshalFlowMessage(b *testing.B) {
 	to := "+15550001111"
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		msg := NewQuizFlow(to, "flow_12345", "token_abc", "System Quiz", "Answer questions")
 		_, err := json.Marshal(msg)
 		if err != nil {
@@ -165,7 +165,7 @@ func BenchmarkVerifySignature(b *testing.B) {
 	sig := "sha256=2b1e2e4e"
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		_ = VerifySignature(payload, sig, secret)
 	}
 }

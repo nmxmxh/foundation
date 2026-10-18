@@ -78,8 +78,9 @@ func (h *WebhookHandler) HandleVerification(w http.ResponseWriter, r *http.Reque
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
-	_, _ = io.WriteString(w, challenge)
+	_, _ = io.WriteString(w, challenge) // #nosec G705 -- Verification echoes plain text with nosniff, never HTML.
 }
 
 // HandleEvent processes inbound POST events with signature verification.

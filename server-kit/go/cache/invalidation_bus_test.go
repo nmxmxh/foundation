@@ -201,8 +201,7 @@ func TestInvalidationBus_ListenIsExclusiveAndClosable(t *testing.T) {
 	backend := NewMemoryBackend()
 	t.Cleanup(func() { _ = backend.Close() })
 	bus := NewInvalidationBus(client, "", New(Config{Backend: backend}))
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	if err := bus.Listen(ctx); err != nil {
 		t.Fatalf("Listen() err=%v", err)

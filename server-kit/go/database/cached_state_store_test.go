@@ -752,7 +752,7 @@ func BenchmarkCachedGetHit(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		if _, found, err := s.GetRecord(ctx, testDomain, testCollection, testOrg, testRecord); err != nil || !found {
 			b.Fatalf("hit: found=%v err=%v", found, err)
 		}
@@ -771,7 +771,7 @@ func BenchmarkCachedReadThroughMiss(b *testing.B) {
 	base := sampleRecord("bench")
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		base.RecordID = fmt.Sprintf("miss-%d", i)
 		if _, err := mem.UpsertRecord(ctx, base); err != nil {
 			b.Fatalf("seed: %v", err)
@@ -790,7 +790,7 @@ func BenchmarkUncachedGet(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		if _, found, err := mem.GetRecord(ctx, testDomain, testCollection, testOrg, testRecord); err != nil || !found {
 			b.Fatalf("read: found=%v err=%v", found, err)
 		}
@@ -814,7 +814,7 @@ func BenchmarkEnvelopeEncodeDecode(b *testing.B) {
 	envelope := newEnvelope(rec, true)
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		raw, err := json.Marshal(envelope)
 		if err != nil {
 			b.Fatal(err)

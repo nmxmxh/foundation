@@ -1989,11 +1989,8 @@ patch_nginx_edge_transport() {
 
   # Upstream keepalive pool.
   #
-  # nginx reuses an upstream socket only through an upstream block. The scaffold
-  # used a variable proxy_pass target, which bypasses the pool, and it set
-  # Connection from $connection_upgrade — which maps an empty Upgrade header to
-  # "close". Every non-upgrade API request therefore told the Go backend to close
-  # the connection, so each one paid a fresh TCP and TLS handshake.
+  # A raw host target bypasses the configured upstream pool.
+  # Plain requests also require an empty Connection header to preserve reuse.
   #
   # The block lives in the server template, not the global one, because only the
   # server template is rendered by start.sh. Putting it in the global file would
@@ -2008,6 +2005,18 @@ patch_nginx_edge_transport() {
     insert_before_marker_or_append "$server_conf" 'server {' "$upstream" \
       "nginx adds an upstream keepalive pool"
   fi
+
+  # Keep Docker DNS refresh when routing through the named connection pool.
+  replace_in_file "$server_conf" 'upstream foundation_backend {
+    server ${UPSTREAM_HOST}:${UPSTREAM_PORT};' \
+'upstream foundation_backend {
+    zone foundation_backend 64k;
+    resolver 127.0.0.11 valid=30s ipv6=off;
+    server ${UPSTREAM_HOST}:${UPSTREAM_PORT} resolve;' \
+    "nginx pool refreshes Docker DNS"
+
+  replace_in_file "$global_conf" '    log_format main_json '"'"'{"time":"$time_iso8601","remote_addr":"$remote_addr","request_method":"$request_method","request_uri":"$request_uri","status":$status,"body_bytes_sent":$body_bytes_sent,"request_time":$request_time,"upstream_response_time":"$upstream_response_time"}'"'"';' \
+'    log_format main_json escape=json '"'"'{"time":"$time_iso8601","remote_addr":"$remote_addr","request_method":"$request_method","request_uri":"$request_uri","status":$status,"body_bytes_sent":$body_bytes_sent,"request_time":$request_time,"upstream_response_time":"$upstream_response_time","cache_status":"$upstream_cache_status","upstream_addr":"$upstream_addr","upstream_connect_time":"$upstream_connect_time","upstream_header_time":"$upstream_header_time","request_id":"$request_id","http_user_agent":"$http_user_agent"}'"'"';' "nginx records escaped cache diagnostics"
 
   # Connection header value for upgrade-capable locations. An empty value is
   # what returns the socket to the pool; "close" is what defeats it.
@@ -2049,14 +2058,11 @@ patch_nginx_edge_transport() {
 
   # Point /api/ at the pool, clear Connection there, and stream request bodies.
   if [[ -f "$server_conf" ]]; then
-    # The pool is named by the upstream block, and a location only reaches a
-    # named pool through a variable that names it. Without this variable the
-    # /api/ proxy_pass below has nothing to resolve and nginx refuses to start.
+    # The variable must select the named group, rather than its raw host.
     if ! grep -Fq '$upstream_keepalive' "$server_conf"; then
       replace_in_file "$server_conf" '    set $upstream_backend http://${UPSTREAM_HOST}:${UPSTREAM_PORT};' \
 '    set $upstream_backend http://${UPSTREAM_HOST}:${UPSTREAM_PORT};
-    # Names the keepalive pool above. A named pool is reachable only through a
-    # variable, so this is what lets a location reuse an upstream socket.
+    # Select the named upstream group for connection reuse.
     set $upstream_keepalive "http://${UPSTREAM_HOST}:${UPSTREAM_PORT}";' \
         "nginx defines the keepalive pool variable"
     fi
@@ -2182,6 +2188,29 @@ export NGINX_CONFIG=${NGINX_CONFIG:-/etc/nginx/nginx.conf}' \
       "envsubst '\${UPSTREAM_HOST} \${UPSTREAM_PORT} \${UPSTREAM_KEEPALIVE_CONNECTIONS} \${UPSTREAM_KEEPALIVE_REQUESTS} \${UPSTREAM_KEEPALIVE_TIMEOUT}'" \
       "start.sh substitutes the keepalive variables"
   fi
+  if [[ -f "$server_conf" ]]; then
+    local pool_before
+    pool_before="$(mktemp)"
+    cp "$server_conf" "$pool_before"
+    perl -0pi -e '
+      s{set \$upstream_keepalive "http://\$\{UPSTREAM_HOST\}:\$\{UPSTREAM_PORT\}";}{set \$upstream_keepalive "http://foundation_backend";}g;
+      s{proxy_set_header Host \$proxy_host;}{proxy_set_header Host \$\{UPSTREAM_HOST\}:\$\{UPSTREAM_PORT\};}g;
+      s{(location \^~ /(?:api|v1)/ \{)(.*?)(\n    \})}{
+        my ($open, $body, $close) = ($1, $2, $3);
+        $body =~ s/proxy_pass \$upstream_backend;/proxy_pass \$upstream_keepalive;/g;
+        $body =~ s/Connection \$connection_upgrade;/Connection \$api_connection;/g;
+        if ($body !~ /Accept-Encoding/) {
+          $body =~ s/(proxy_set_header Upgrade \$http_upgrade;)/$1\n        proxy_set_header Accept-Encoding \$upgrade_accept_encoding;/;
+        }
+        $open . $body . $close;
+      }gse;
+    ' "$server_conf"
+    if ! cmp -s "$pool_before" "$server_conf"; then
+      log_patch "nginx routes select the named pool: ${server_conf#$target/}"
+    fi
+    rm -f "$pool_before"
+  fi
+
 }
 
 # @since 0.0.1

@@ -24,6 +24,76 @@ Bounded diagnostic shards remove the shared counter from steady-state successful
 The [measured report](info/runtime_finalize_20260924.md) records large-output gains, concurrency gains, allocation budgets, and small owned-result regressions.
 The owning rules reside in `rust_runtime_practices.md`.
 
+## Pronto edge review: 2026-10-16
+
+Pronto provides useful application evidence for shared edge practices.
+Its crawl routes and publication rules remain application-owned.
+Foundation already provides API route precedence, upgrade compression guards, and bounded proxy buffers.
+
+| Lesson | Foundation action | Acceptance evidence |
+| --- | --- | --- |
+| Public HTML and XML caching | Provide an optional cache recipe with application route allowlists. Keep default caching disabled. | Verify GET and HEAD reuse. Reject credentials, cookies, queries, errors, and private responses. |
+| Crawler routing | Declare public machine routes before static extensions and SPA fallback. Keep canonical URL rules application-owned. | Verify robots, XML, and OpenAPI status, content type, redirects, and negative paths. |
+| Cache diagnostics | Record escaped JSON, cache status, upstream timing, and request identity. | Parse hostile header values. Distinguish HIT, MISS, BYPASS, EXPIRED, NONE, and missing instrumentation. |
+| Shared request budgets | Apply one parent deadline across optional enrichment calls. Preserve useful source content when enrichment times out. | Verify cancellation, deadline propagation, and fallback output. |
+| Locale fanout | Share locale-independent coverage before localized rendering. Preserve the snapshot generation time across cache layers. | Verify one coverage read across cold locales, refresh, corruption, and cancellation. |
+| Materialization ownership | Consult decoded residency before fetching payload bytes. Fetch only misses and bound cold construction ownership. | Verify warm reads perform no payload batches and concurrent cold readers reuse decoded rows. |
+| Read failure integrity | Preserve transport errors and cancellation. Remove indexes only after confirmed payload absence or invalidity. | Inject Redis failure and verify recovery without live index loss. |
+| Translation projections | Reuse Hermes with PostgreSQL authority. Validate scope, generation, age, payload, and negative-entry lifetime. | Verify correction, rollback, failed persistence, and SQL fallback. |
+| Upstream pooling | Ensure proxy targets select the configured upstream group. An empty Connection header alone does not select a pool. | Count accepted origin connections across repeated requests. Test upgrades separately. |
+
+The implementation now includes a context-aware cache loader and optional public cache recipes.
+The loader preserves `GetOrSet` and `Config` while bounding shared construction.
+The standard edge now selects the named upstream pool and preserves Docker DNS refresh.
+Real Nginx tests verify pooling, upgrades, Host values, caching, privacy, expiry, and request coalescing.
+An injected raw-host target failed the connection-reuse assertion.
+The owning contracts are `database_practices.md`, `scaffold_manifest.md`, and `testing_practices.md`.
+
+Pronto now shares raw facet coverage across directories, sitemaps, locales, and statistics.
+Its Redis reader checks residency before payload copies and bounds each read to three seconds.
+Its MCP refresh shares one five-second budget across recency and collection reads.
+These construction guards are ownership controls, not fixed ingress throttles.
+The source application remains unchanged by this Foundation implementation.
+The reviewed application packages passed race tests.
+Its current 53-page fixture used two payload batches and approximately 44.1 MB of allocations.
+This local measurement does not establish production performance or an improvement ratio.
+
+Core dependency updates use the patched Go 1.26.9 toolchain, x/net 0.60.0, gRPC 1.83.2, and OpenTelemetry 1.45.0.
+The inspected [GitHub run](https://github.com/nmxmxh/foundation/actions/runs/38831148201) failed during dependency auditing and frontend rendering checks.
+The frontend job now audits its own lab dependencies.
+Historical fixtures preserve migration and rendering checks in shallow checkouts.
+The worker conformance index references the existing tests in `job_test.go`.
+Allocation guard isolation preserves its original budget and rejects the injected allocation defect.
+Security validation now preserves scanner failure codes, including findings, unexpected errors, and strict offline failures.
+Discovery-only checks do not initialize toolchains or caches.
+The FFI length validator performs no copies and is included in the movement source audit.
+Movement and allocation ceilings remain unchanged.
+The chain context now closes channels published during cancellation.
+Its regression rejects the original implementation and passes 25 race-enabled repetitions.
+Parallel execution retains six allocations; caller-owned result storage retains five allocations.
+
+The public cache API is additive. Existing configuration fields, transport envelopes, and fallback routes retain their contracts.
+Callers retain responsibility for authorization scope in cache keys.
+Cache failures retain source reads. TLS retains HTTP/1 support. Public edge caching remains disabled until application activation.
+The change affects Core modules, validation tools, and scaffold seeds. It does not update applications or deploy services.
+### Local validation evidence
+
+Validation used macOS ARM64, Go 1.26.9, Node 24.22.0, Rust 1.95.0, and the workflow analysis versions.
+`GOFLAGS=-p=2` bounded local compilation. Strict security and required dependency flags remained enabled.
+
+| Check | Result |
+| --- | --- |
+| Strict `make verify` | Passed, including language tests, race tests, ratchets, scaffold checks, and real Nginx integration. |
+| `make test-bench-runtime-layers` | Passed Rust and Go runtime allocation checks. Placement retained zero allocations. |
+| `make test-frontend-lab-contracts` | Passed 16 rendering files and 50 tests, plus nine browser-host contract tests. |
+| Core and frontend lab audits | All seven package audits reported zero vulnerabilities. |
+| Shared cache loader | Race tests passed. Loader coverage reached 97.5%; package coverage reached 96.2%. |
+| Chain cancellation | Passed 25 race-enabled repetitions. The original implementation failed the new regression. |
+| Edge reload and cache behavior | Passed three consecutive runs after bounded worker synchronization. Cold MISS and GET/HEAD HIT assertions remained strict. |
+| Fault injection | Disabled caching, incorrect pool selection, and excess epoch allocations each failed their respective guards. |
+
+No production deployment or GitHub run is implied by local evidence.
+
 ## Research Lanes To Track
 
 The [graphics FPS refinement](graphics_fps_refinement.md) applies current worker and WebGPU guidance to measured frame throughput.

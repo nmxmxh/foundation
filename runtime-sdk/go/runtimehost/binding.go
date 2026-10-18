@@ -23,7 +23,15 @@ func NewFFIBinding(pool *FFIPool, unitID string, spec placement.BindingSpec) (pl
 		if err != nil {
 			return 0, err
 		}
-		return uint32(len(response.Output)), nil
+		return ffiBindingOutputSize(len(response.Output))
 	}
 	return spec, nil
+}
+
+// ffiBindingOutputSize validates the ABI bound before narrowing the length.
+func ffiBindingOutputSize(size int) (uint32, error) {
+	if size < 0 || size > int(generated.OUTPUT_MAX_BYTES) {
+		return 0, placement.ErrBindingInvalid
+	}
+	return uint32(size), nil
 }

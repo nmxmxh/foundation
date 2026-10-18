@@ -47,6 +47,7 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
+          check-latest: true
           cache-dependency-path: "**/go.sum"
 
       - name: Set up Node
@@ -108,6 +109,8 @@ jobs:
         run: |
           make install-ts-deps
           npm --prefix frontend-lab ci --ignore-scripts --no-audit --no-fund
+      - name: Audit frontend lab dependencies
+        run: npm --prefix frontend-lab audit --audit-level=high
       - name: Install Chromium
         working-directory: frontend-lab
         run: npx --no-install playwright install --with-deps chromium

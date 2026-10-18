@@ -1,0 +1,22 @@
+# Install as /etc/nginx/conf.d/public-cache.conf to enable this optional recipe.
+# Enable only reviewed public routes. The default keeps caching disabled.
+proxy_cache_path /var/cache/nginx/public levels=1:2 keys_zone=foundation_public:5m
+    max_size=128m inactive=10m use_temp_path=off;
+map $uri $foundation_public_zone {
+    default off;
+    # /sitemap.xml foundation_public;
+    # /robots.txt foundation_public;
+}
+map $request_method $foundation_public_method_skip {
+    default 1;
+    GET 0;
+    HEAD 0;
+}
+map $upstream_status $foundation_public_status_skip {
+    default 1;
+    200 0;
+}
+map "$http_authorization|$http_cookie|$args|$http_range" $foundation_public_credentials_skip {
+    default 1;
+    "|||" 0;
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -297,7 +298,7 @@ func TestBindingOperationFailures(t *testing.T) {
 			t.Fatal("execution lease leaked")
 		}
 	}
-	r, ctx, request, spec := bindingFixture(t, nil)
+	r, ctx, _, spec := bindingFixture(t, nil)
 	canceled, cancel := context.WithCancel(ctx)
 	spec.Operation = func(context.Context, []byte, []byte) (uint32, error) { cancel(); return 8, nil }
 	request, err := r.Bind(ctx, spec, 1)
@@ -341,13 +342,11 @@ func TestBindingConcurrentPublication(t *testing.T) {
 	r, ctx, _, _ := bindingFixture(t, nil)
 	var wg sync.WaitGroup
 	results := make(chan error, 8)
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			_, err := r.PublishResource(ctx, 7, 101, 1, []byte("new-data"))
 			results <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(results)
@@ -398,4 +397,21 @@ func BenchmarkBindingResident(b *testing.B) {
 			}
 		}
 	})
+}
+
+func TestBindingStatisticsCountBounds(t *testing.T) {
+	for _, count := range []int{-1, 0, 7} {
+		want := uint32(max(count, 0))
+		if got := boundedBindingCount(count); got != want {
+			t.Fatalf("count %d: %d != %d", count, got, want)
+		}
+	}
+	if strconv.IntSize == 64 {
+		maximum := uint64(math.MaxUint32)
+		for _, count := range []uint64{maximum, maximum + 1} {
+			if got := boundedBindingCount(int(count)); got != math.MaxUint32 {
+				t.Fatalf("large count %d: %d", count, got)
+			}
+		}
+	}
 }

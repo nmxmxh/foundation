@@ -259,3 +259,33 @@ func TestFSStorePutKeepsExplicitContentType(t *testing.T) {
 		t.Fatalf("ContentType = %q, want image/avif", obj.ContentType)
 	}
 }
+
+func TestFSStoreOpenConfinesSymlinks(t *testing.T) {
+	store := newFSStore(t)
+	outside := filepath.Join(t.TempDir(), "outside.txt")
+	if err := os.WriteFile(outside, []byte("private"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(store.root, "escape.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if reader, _, err := store.Open(t.Context(), "escape.txt"); err == nil {
+		_ = reader.Close()
+		t.Fatal("object read escaped its root through a symlink")
+	}
+	if _, err := store.PutStream(t.Context(), "inside.txt", strings.NewReader("public"), 6, PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("inside.txt", filepath.Join(store.root, "alias.txt")); err != nil {
+		t.Fatal(err)
+	}
+	reader, object, err := store.Open(t.Context(), "alias.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	data, err := io.ReadAll(reader)
+	if err != nil || string(data) != "public" || object.Size != 6 {
+		t.Fatalf("confined alias: %q %+v %v", data, object, err)
+	}
+}

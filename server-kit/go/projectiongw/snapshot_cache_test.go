@@ -311,18 +311,14 @@ func TestSnapshotCacheConcurrentReadersUnderApplies(t *testing.T) {
 	var wg sync.WaitGroup
 	stop := make(chan struct{})
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		cacheApplyLoop(gw, stop)
-	}()
+	})
 
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			cacheReadLoop(t, handler, 200)
-		}()
+		})
 	}
 
 	// Let the readers finish, then stop the writer.

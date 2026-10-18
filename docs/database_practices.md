@@ -721,9 +721,10 @@ The River `JobCleaner` deletes finalized jobs older than configured retention pe
 In high-throughput event architectures, 24 hours retains 100k+ completed rows in PostgreSQL.
 This dead-row accumulation bloats table heap and degrades index scans.
 Foundation defaults high-frequency worker queues to 2–4 hours retention:
-- `RetentionTierHuman`: 24 hours retention for human-scale tasks.
-- `RetentionTierStandard`: 4 hours retention for general application tasks.
-- `RetentionTierHighFrequency`: 2 hours retention for event processing, market data, and projections.
+
+* `RetentionTierHuman`: 24 hours retention for human-scale tasks.
+* `RetentionTierStandard`: 4 hours retention for general application tasks.
+* `RetentionTierHighFrequency`: 2 hours retention for event processing, market data, and projections.
 
 Both template clients use `RIVER_RETENTION_TIER` with a `high_frequency` default.
 When `RIVER_COMPLETED_JOB_RETENTION` is absent, the selected tier controls completed retention.
@@ -856,17 +857,17 @@ moved, the writer says so, on the bus the deployment already runs:
 
 Consequences worth stating plainly:
 
-- **The application already knows what it wrote.** Deriving that from the
+* **The application already knows what it wrote.** Deriving that from the
   database is paying to rediscover it, on the commit path, in the one place
   where contention is most expensive.
-- **The announcement is a hint, never data.** It carries a scope, no records.
+* **The announcement is a hint, never data.** It carries a scope, no records.
   Losing one costs time, not correctness, because the cursor read behind it
   reads everything since the cursor whenever it next runs.
-- **Convergence writes must not be announced.** A replica that rebroadcasts
+* **Convergence writes must not be announced.** A replica that rebroadcasts
   what it just converged turns a fan-out lane into an echo chamber whose
   traffic grows with the square of the fleet. The store excludes
   `MirrorSweeper` writes for exactly this reason.
-- **Keep a slow reconcile.** Signals cover what the application writes; a
+* **Keep a slow reconcile.** Signals cover what the application writes; a
   migration or an admin `UPDATE` announces nothing. A minute is ample, and it
   is cheap: see below.
 
@@ -890,14 +891,14 @@ go sweeper.Run(ctx)
 
 What that buys, in the order these bite:
 
-- **Neither end blocks the goroutine that reached it.** `OnCommandWrite` runs on
+* **Neither end blocks the goroutine that reached it.** `OnCommandWrite` runs on
   the writer's goroutine right after commit, so announcing hands a scope name to
   a buffered channel and returns — no commit waits on Redis. Receiving runs on
   the one goroutine a bus dispatches every subscription from, so converging
   flags a source (`MirrorSweeper.Notify`) and returns — no bus dispatch waits on
   Postgres. Sweeping inline in a subscriber puts a database round trip in front
   of every other event that process was about to handle.
-- **A burst costs one announcement and one sweep, not one of each per write.**
+* **A burst costs one announcement and one sweep, not one of each per write.**
   A hint carries no data, so a second copy of one says exactly what the first
   already said: writes to a scope whose announcement is still in flight are
   folded into it, and signals arriving while a sweep runs collapse onto the flag
@@ -905,15 +906,15 @@ What that buys, in the order these bite:
   anyway. Every replica receives every announcement, so without both, a burst of
   *k* writes puts *k* messages on the channel and *k* queries on each of *n*
   processes.
-- **The two halves cannot disagree about a name.** `AddScopeSource` registers
+* **The two halves cannot disagree about a name.** `AddScopeSource` registers
   under the name `DefaultScopeSourceName` derives, so a source registered under
   one name and woken under another — which converges nothing while every part
   looks correct alone — is not expressible. Hard deletes converge through the
   tombstone source under its own name, which the announcement knows to use.
-- **The identity is random, not a clock.** Two processes started together on one
+* **The identity is random, not a clock.** Two processes started together on one
   host can read the same clock, and two nodes sharing an id each mistake the
   other's announcements for an echo of their own and skip them.
-- **The payload is materialized before it is read.** A bus materializes an
+* **The payload is materialized before it is read.** A bus materializes an
   envelope's metadata on receipt and leaves the payload as bytes. Reading
   through the nil payload yields empty strings rather than an error, so a
   subscriber that skips `MaterializePayload` silently discards every message.
@@ -951,3 +952,37 @@ replication slot retains WAL until the disk fills. Prefer one consumer feeding
 the bus over one slot per replica. Unmeasured here — the benchmark environment
 could not be restarted — so treat the write-path cost of `wal_level=logical` as
 an open question rather than a settled one.
+
+## Context-aware shared cache loads
+
+`cache.GetOrSetContext` adds bounded construction without another value cache.
+Existing `GetOrSet` and `Config` contracts remain unchanged.
+`cache.NewWithLoadPolicy` configures construction timeout, concurrent keys, and callers per key.
+Nonpositive policy fields select five seconds, 64 keys, and 64 callers.
+These limits govern construction ownership, not ingress rate.
+Capacity rejection returns `ErrLoadBusy`. Conflicting result types return `ErrLoadType`.
+Loader panics return `ErrLoadExecution` without panic data.
+
+Each caller retains its cancellation and deadline.
+Shared work retains the first caller's context values and uses its own bounded deadline.
+The final departing caller cancels the work.
+Loaders must honor their supplied context. A stalled loader retains its slot until it returns.
+Failed, cancelled, and expired loads do not publish late results.
+Writes already dispatched follow the backend cancellation contract.
+Cache read or write failures preserve the source fallback.
+Source failures remain failures and do not create negative entries.
+Nil interface and pointer results retain their declared type.
+Use separate policy choices for confirmed absence and dependency failure.
+
+Scope keys by organization, authorization view, payload type, and source generation where needed.
+Use PostgreSQL for durable authority and Hermes for validated projections.
+Preserve snapshot generation times across cache layers. Cache warming must not restart freshness.
+Consult existing residency before fetching or decoding payload bytes.
+Do not use shared read construction for mutations or strict authorization decisions.
+
+`loader_test.go` covers cancellation, coalescing, capacity, timeout, failure, type conflicts, and late publication.
+Warm reads retain the three-allocation budget enforced by `TestContextLoaderWarmAllocationBound`.
+
+The local warm-read comparison used an Apple M1 Pro and Go 1.26.9.
+Three 300-millisecond samples retained three allocations and 165 bytes for both loader APIs.
+These allocation results do not establish a production latency improvement.

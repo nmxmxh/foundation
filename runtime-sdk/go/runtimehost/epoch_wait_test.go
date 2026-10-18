@@ -3,7 +3,10 @@
 package runtimehost
 
 import (
+	"context"
 	"errors"
+	"os"
+	"os/exec"
 	"runtime"
 	"sync/atomic"
 	"testing"
@@ -50,6 +53,18 @@ func TestWaitForEpochChangeFallbackIsAllocationStable(t *testing.T) {
 		// the budget still guards every non-race build.
 		t.Skip("allocation budget is not meaningful under -race")
 	}
+	// Isolate process-wide allocation counters from unrelated package goroutines.
+	const childFlag = "FOUNDATION_EPOCH_ALLOCATION_CHILD"
+	if os.Getenv(childFlag) != "1" {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+		child := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestWaitForEpochChangeFallbackIsAllocationStable$", "-test.count=1")
+		child.Env = append(os.Environ(), childFlag+"=1")
+		if output, err := child.CombinedOutput(); err != nil {
+			t.Fatalf("isolated allocation guard: %v\n%s", err, output)
+		}
+		return
+	}
 	const (
 		shortWindow = 25 * time.Millisecond
 		longWindow  = 175 * time.Millisecond
@@ -58,6 +73,7 @@ func TestWaitForEpochChangeFallbackIsAllocationStable(t *testing.T) {
 		wakeBudgetBytes = 512
 	)
 
+	_ = measureParkChurn(t, shortWindow)
 	runtime.GC()
 	short := measureParkChurn(t, shortWindow)
 	long := measureParkChurn(t, longWindow)

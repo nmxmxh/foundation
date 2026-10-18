@@ -183,11 +183,11 @@ func (s *FSStore) Open(_ context.Context, key string) (io.ReadCloser, Object, er
 	if s == nil {
 		return nil, Object{}, fmt.Errorf("object store is required")
 	}
-	p, err := s.objectPath(key)
+	_, err := s.objectPath(key)
 	if err != nil {
 		return nil, Object{}, err
 	}
-	f, err := os.Open(p) // #nosec G304 -- p is confined to the store root by objectPath.
+	f, err := os.OpenInRoot(s.root, filepath.FromSlash(normalizeKey(key)))
 	if err != nil {
 		return nil, Object{}, err
 	}

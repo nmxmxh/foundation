@@ -1,0 +1,146 @@
+# A WebSocket handshake's response is hijacked from the HTTP layer and can
+# never be compressed, so upgrade requests are forwarded without
+# Accept-Encoding. Server builds whose compression middleware predates the
+# protocol-based upgrade skip would otherwise 500 the handshake whenever a
+# proxy advertises compression.
+map $http_upgrade $upgrade_accept_encoding {
+    default $http_accept_encoding;
+    websocket "";
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    charset utf-8;
+
+    add_header X-Frame-Options "DENY" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Embedder-Policy "require-corp" always;
+    add_header Cross-Origin-Resource-Policy "same-origin" always;
+    add_header Origin-Agent-Cluster "?1" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+
+    resolver 127.0.0.11 valid=30s ipv6=off;
+    set $upstream_backend http://${UPSTREAM_HOST}:${UPSTREAM_PORT};
+
+    location = /nginx-health {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "healthy\n";
+    }
+
+    location = /index.html {
+        expires -1;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+    }
+
+    location = /sw.js {
+        expires -1;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+    }
+
+    location ~* \.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|json|webmanifest)$ {
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        try_files $uri =404;
+    }
+
+    location ~* \.wasm$ {
+        brotli_static on;
+        default_type application/wasm;
+        expires 1y;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Cross-Origin-Embedder-Policy "require-corp" always;
+        try_files $uri =404;
+    }
+
+    location /ws {
+        proxy_pass $upstream_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Accept-Encoding $upgrade_accept_encoding;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $proxy_forwarded_proto;
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+        proxy_buffering off;
+        limit_req zone=api_limit burst=10 nodelay;
+    }
+
+    # ^~ prefix locations win over the static-extension regex above, so API
+    # URLs that end in .png/.json (e.g. /v1/media/objects/…) reach the backend
+    # instead of 404ing on try_files. The Upgrade headers pass WebSocket
+    # handshakes through (projection delta streams live at /v1/projections/…);
+    # $connection_upgrade maps to "" for plain requests, so both traffic kinds
+    # share the block.
+    location ^~ /api/ {
+        proxy_pass $upstream_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $proxy_forwarded_proto;
+        proxy_connect_timeout 60s;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        limit_req zone=api_limit burst=60 nodelay;
+    }
+
+    location ^~ /v1/ {
+        proxy_pass $upstream_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Accept-Encoding $upgrade_accept_encoding;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $proxy_forwarded_proto;
+        proxy_connect_timeout 60s;
+        # Long read timeout: projection WebSocket streams idle between deltas;
+        # the server's 25s pings keep them alive within it.
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        proxy_buffering off;
+        limit_req zone=api_limit burst=60 nodelay;
+    }
+
+    location /healthz {
+        proxy_pass $upstream_backend/healthz;
+        access_log off;
+    }
+
+    # Kubernetes/Coolify-style split probes. server-kit's httpserver serves
+    # /health/live (liveness) and /health/ready (readiness) alongside /healthz;
+    # without these blocks the SPA try_files fallback would swallow them.
+    location /health/live {
+        proxy_pass $upstream_backend/health/live;
+        access_log off;
+    }
+
+    location /health/ready {
+        proxy_pass $upstream_backend/health/ready;
+        access_log off;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+        expires -1;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+    }
+}

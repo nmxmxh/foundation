@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"time"
 
@@ -69,9 +70,7 @@ type apiPayload struct {
 // Send delivers one email message over the configured HTTP API.
 func (a *APISender) Send(ctx context.Context, msg Message) (*DeliveryReceipt, error) {
 	headers := make(map[string]string)
-	for k, v := range msg.Headers {
-		headers[k] = v
-	}
+	maps.Copy(headers, msg.Headers)
 
 	if msg.ListUnsubscribe != nil {
 		if msg.ListUnsubscribe.URL != "" {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/placement"
 )
 
@@ -42,6 +43,19 @@ func TestFFIBindingAdapter(t *testing.T) {
 	for _, bad := range []placement.BindingSpec{{}, {MaxInputBytes: 1 << 20, MaxOutputBytes: 8}, {MaxInputBytes: 8, MaxOutputBytes: 1 << 20}} {
 		if _, err := NewFFIBinding(pool, "unit", bad); !errors.Is(err, placement.ErrBindingInvalid) {
 			t.Fatal(err)
+		}
+	}
+}
+
+func TestFFIBindingOutputSize(t *testing.T) {
+	for _, size := range []int{-1, 0, 1, int(generated.OUTPUT_MAX_BYTES), int(generated.OUTPUT_MAX_BYTES) + 1} {
+		written, err := ffiBindingOutputSize(size)
+		if size < 0 || size > int(generated.OUTPUT_MAX_BYTES) {
+			if !errors.Is(err, placement.ErrBindingInvalid) {
+				t.Fatalf("size %d accepted: %v", size, err)
+			}
+		} else if err != nil || int(written) != size {
+			t.Fatalf("size %d returned %d: %v", size, written, err)
 		}
 	}
 }

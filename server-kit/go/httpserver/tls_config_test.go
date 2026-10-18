@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
-	"golang.org/x/net/http2"
 )
 
 func generateTestCertificate(t *testing.T) (tls.Certificate, *x509.CertPool) {
@@ -194,9 +193,11 @@ func TestServerHTTP2AndTLSResumption(t *testing.T) {
 		ClientSessionCache: clientSessionCache,
 	}
 
-	transport := &http2.Transport{
-		TLSClientConfig: clientTLS,
+	transport := &http.Transport{
+		TLSClientConfig:   clientTLS,
+		ForceAttemptHTTP2: true,
 	}
+	t.Cleanup(transport.CloseIdleConnections)
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   5 * time.Second,
@@ -351,5 +352,34 @@ func TestConfigureTimeoutSetters(t *testing.T) {
 	srv.ConfigureHTTP2(300)
 	if srv.maxConcurrentStreams != 300 {
 		t.Errorf("expected updated maxConcurrentStreams 300, got %d", srv.maxConcurrentStreams)
+	}
+}
+
+func TestServerTLSRetainsHTTP1Fallback(t *testing.T) {
+	cert, roots := generateTestCertificate(t)
+	config, err := BuildTLSConfig(&TLSConfig{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS13})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	server := New(&Config{Port: 0}, nil)
+	server.ConfigureTLS(config)
+	go func() { _ = server.Serve(listener, t.Context()) }()
+	protocols := new(http.Protocols)
+	protocols.SetHTTP1(true)
+	transport := &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, ServerName: "localhost", MinVersion: tls.VersionTLS13}, Protocols: protocols}
+	t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+	response, err := client.Get("https://" + listener.Addr().String() + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK || response.ProtoMajor != 1 {
+		t.Fatalf("HTTP/1 fallback: status=%d protocol=%s", response.StatusCode, response.Proto)
 	}
 }

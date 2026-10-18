@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { gunzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { cascadeOf, compareCascaded, stripInvalidAttributes, type CascadedSnapshot } from "./cascade";
 import { renderSweepExtracted, resolveMinimalVars } from "./renderSweep";
@@ -8,7 +9,7 @@ import { renderSweepExtracted, resolveMinimalVars } from "./renderSweep";
 /*
  * The Linaria port's equivalence proof.
  *
- * `results/ui-minimal-cascade.styled-components.reference.json` is the full
+ * `baselines/ui-minimal-cascade.styled-components.reference.json.gz` is the full
  * cascaded snapshot of the kit as it was on styled-components (2,240 cases,
  * saved before the port). This builds the ported kit the way an app does
  * (`buildKit.mjs`: wyw-in-js, extracted CSS), renders the same sweep from the
@@ -22,7 +23,7 @@ import { renderSweepExtracted, resolveMinimalVars } from "./renderSweep";
 
 const LAB = new URL("../../", import.meta.url);
 const path = (p: string) => fileURLToPath(new URL(p, LAB));
-const REFERENCE = path("results/ui-minimal-cascade.styled-components.reference.json");
+const REFERENCE = path("baselines/ui-minimal-cascade.styled-components.reference.json.gz");
 
 describe("Linaria port equivalence (ssr, built kit)", () => {
   it("renders every case as the styled-components kit did", async () => {
@@ -39,7 +40,7 @@ describe("Linaria port equivalence (ssr, built kit)", () => {
         current[name][caseName] = "error" in rendered ? { error: rendered.error } : cascadeOf({ css: resolveMinimalVars(rendered.css), html: rendered.html });
       }
     }
-    const reference = JSON.parse(readFileSync(REFERENCE, "utf8")) as CascadedSnapshot;
+    const reference = JSON.parse(gunzipSync(readFileSync(REFERENCE)).toString("utf8")) as CascadedSnapshot;
     // The reference was cascaded before the harness normalised keyframe names and
     // Linaria's inline variables, so re-derive it through today's normaliser.
     const normalised = normaliseReference(reference);

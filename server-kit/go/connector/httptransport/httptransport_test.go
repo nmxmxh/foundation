@@ -11,7 +11,8 @@ import (
 // TestSharedIsSingleton keeps the pool shared, which is the point: a per-driver
 // transport would put each driver back to a small pool.
 func TestSharedIsSingleton(t *testing.T) {
-	if Shared() != Shared() {
+	first := Shared()
+	if first == nil || first != Shared() {
 		t.Fatal("Shared must return one process-wide transport")
 	}
 }

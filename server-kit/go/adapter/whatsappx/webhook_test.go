@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -149,5 +150,19 @@ func TestWebhookHandler(t *testing.T) {
 	}
 	if messages[1].Interactive == nil || messages[1].Interactive.ButtonReply.Title != "Confirm" {
 		t.Fatal("expected button reply title Confirm")
+	}
+}
+
+func TestVerificationChallengeRemainsPlainText(t *testing.T) {
+	challenge := `<script>alert("fixture")</script>`
+	query := url.Values{"hub.mode": {"subscribe"}, "hub.verify_token": {"fixture-token"}, "hub.challenge": {challenge}}
+	handler := NewWebhookHandler("fixture-token", "fixture-secret", nil)
+	response := httptest.NewRecorder()
+	handler.HandleVerification(response, httptest.NewRequest(http.MethodGet, "/webhook?"+query.Encode(), nil))
+	if response.Code != http.StatusOK || response.Body.String() != challenge {
+		t.Fatalf("protocol response: %d %q", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Content-Type") != "text/plain" || response.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("unsafe challenge headers: %v", response.Header())
 	}
 }

@@ -9,12 +9,19 @@ const wasmUrl = new URL("../../../runtime-sdk/ts/browser-host/fixtures/browser-a
 
 function request(worker: Worker, message: unknown): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => { worker.terminate(); reject(new Error("ABI worker timeout")); }, 5000);
+    const deadline = AbortSignal.timeout(5000);
+    const expire = () => { worker.terminate(); reject(new Error("ABI worker timeout")); };
+    const cleanup = () => {
+      deadline.removeEventListener("abort", expire);
+      worker.onmessage = null;
+      worker.onerror = null;
+    };
+    deadline.addEventListener("abort", expire, { once: true });
     worker.onmessage = (event) => {
-      clearTimeout(timeout);
+      cleanup();
       if (event.data.error) reject(new Error(event.data.error)); else resolve(event.data);
     };
-    worker.onerror = (event) => { clearTimeout(timeout); reject(new Error(event.message)); };
+    worker.onerror = (event) => { cleanup(); reject(new Error(event.message)); };
     worker.postMessage(message);
   });
 }

@@ -243,7 +243,7 @@ func (r *BindingRegistry) releaseRetired(resource *resourceVersion) {
 func (r *BindingRegistry) Stats() BindingStats {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return BindingStats{uint32(len(r.resources)), uint32(len(r.bindings)), r.residentBytes, r.inFlight}
+	return BindingStats{boundedBindingCount(len(r.resources)), boundedBindingCount(len(r.bindings)), r.residentBytes, r.inFlight}
 }
 
 // Close refuses active executions so their resource views remain valid.
@@ -258,4 +258,15 @@ func (r *BindingRegistry) Close() error {
 	clear(r.bindings)
 	r.residentBytes = 0
 	return nil
+}
+
+// boundedBindingCount preserves unsigned statistics without narrowing overflow.
+func boundedBindingCount(count int) uint32 {
+	if count < 0 {
+		return 0
+	}
+	if uint64(count) > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(count)
 }

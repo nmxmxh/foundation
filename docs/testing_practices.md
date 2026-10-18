@@ -758,7 +758,7 @@ Requirements:
    per-operation churn; `alloc_space` and `alloc_objects` are cumulative churn;
    `inuse_space` and `inuse_objects` are retained footprint. Do not describe
    one as another.
- 9. Hot collection and scan benchmarks must report enough cardinalities to
+9. Hot collection and scan benchmarks must report enough cardinalities to
     expose the growth curve. When the operation filters or projects data, report
     candidates inspected and results produced, or document why those counters
     cannot yet be observed.
@@ -877,3 +877,25 @@ These checks intentionally do not try to infer whether every test has a strong o
 - [ ] Long, service-backed, load, or external tests are under explicit targets/gates.
 - [ ] Benchmarks separate fixture setup from measured hot paths, use enough
       samples for p95/p99, and preserve variance diagnostics.
+
+## Shared edge and construction verification
+
+`make verify` includes `test-nginx-edge`.
+CI requires a running Docker daemon for this test.
+Local runs without Docker report a skip; they do not prove edge behavior.
+The fixture uses the scaffold templates and the optional public cache recipe.
+It verifies connection reuse, credential bypasses, upstream privacy, expiry, cache locking, and escaped log records.
+The fixture waits for old workers to exit after configuration reloads.
+Cache assertions require a cold MISS followed by GET and HEAD hits.
+Disabling the selected public route must fail these assertions.
+
+The epoch allocation guard runs in a bounded child process.
+This isolates process-wide allocation counters from unrelated package goroutines.
+The 512-byte growth budget remains unchanged.
+An injected per-wake timer allocation must still fail the guard.
+The browser ABI deadline uses `AbortSignal.timeout`; it does not wait before accepting a worker response.
+
+The Go analysis regression fixture injects scanner findings, offline failure, unexpected failure, and timeout status.
+A scanner finding must remain fatal even when its output mentions the vulnerability database.
+Only local database unavailability retains the documented warning fallback.
+Discovery-only checks must not invoke Go or create a module cache.

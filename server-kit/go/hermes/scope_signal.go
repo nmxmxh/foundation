@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -449,12 +450,7 @@ func DefaultScopeSourceName(rec database.DomainRecord, op Operation) string {
 // containsName reports whether name is already in names. Linear because the
 // slice is a handful of scopes at most.
 func containsName(names []string, name string) bool {
-	for _, existing := range names {
-		if existing == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(names, name)
 }
 
 // randomToken returns 16 random bytes as hex — a valid metadata token, and not

@@ -2,3 +2,5 @@ node_modules/
 results/
 __screenshots__/
 .vitest/
+
+!baselines/ui-minimal-cascade.styled-components.reference.json.gz

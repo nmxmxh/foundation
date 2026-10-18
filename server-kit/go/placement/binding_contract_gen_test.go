@@ -47,12 +47,12 @@ func TestBindingCompilerVectors(t *testing.T) {
 	if err := receipt.EncodeTo(nil); err == nil {
 		t.Fatal("short receipt accepted")
 	}
-	for n := 0; n < RuntimeBindingRequestBytes; n++ {
+	for n := range RuntimeBindingRequestBytes {
 		if _, err := DecodeRuntimeBindingRequest(make([]byte, n)); err == nil {
 			t.Fatal(n)
 		}
 	}
-	for n := 0; n < RuntimeBindingReceiptBytes; n++ {
+	for n := range RuntimeBindingReceiptBytes {
 		if _, err := DecodeRuntimeBindingReceipt(make([]byte, n)); err == nil {
 			t.Fatal(n)
 		}

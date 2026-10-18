@@ -530,7 +530,7 @@ lifecycle-manifest:
 	node tooling/scripts/generate_lifecycle_manifest.mjs --proto-root "$$proto_root"
 
 
-verify: lint test test-go-race frontend-build check-scaffold-smoke
+verify: lint test test-go-race frontend-build check-scaffold-smoke test-nginx-edge
 
 docker-up:
 	@docker compose -f tests/docker-compose.service-backed.yml up -d
@@ -579,3 +579,7 @@ help:
 	@echo "  make check-benchmark-ratchet  Enforce per-benchmark allocation ceilings that only fall"
 	@echo "  make check-transport-ladder  Enforce the same-process transport ladder (no network transports on hot dispatch)"
 	@echo "  make check-database-practices  Run a single foundation check"
+
+.PHONY: test-nginx-edge
+test-nginx-edge:
+	@python3 tests/nginx_transport_integration_test.py

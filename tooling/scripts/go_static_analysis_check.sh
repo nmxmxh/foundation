@@ -5,10 +5,6 @@ target="${1:-.}"
 target="$(cd "$target" && pwd)"
 script_dir="${0:A:h}"
 
-if [[ -f "$script_dir/local_toolchain_env.sh" ]]; then
-  source "$script_dir/local_toolchain_env.sh"
-  ovasabi_toolchain_init "$target"
-fi
 
 prepend_path_dir() {
   local dir="$1"
@@ -26,16 +22,15 @@ discover_go_tool_bins() {
   gobin="$(go env GOBIN 2>/dev/null || true)"
   gopath="$(go env GOPATH 2>/dev/null || true)"
 
-  prepend_path_dir "$gobin"
   if [[ -n "$gopath" ]]; then
     local entry
     for entry in ${(s/:/)gopath}; do
       prepend_path_dir "$entry/bin"
     done
   fi
+  prepend_path_dir "$gobin"
 }
 
-discover_go_tool_bins
 
 ensure_writable_dir_or_tmp() {
   local candidate="$1"
@@ -88,13 +83,15 @@ run_govulncheck() {
   local output_file
   output_file="$(mktemp "${TMPDIR:-/tmp}/govulncheck.XXXXXX")"
 
+  local exit_code=0
   if run_with_timeout "${GO_ANALYSIS_TOOL_TIMEOUT_SEC:-120}" govulncheck ./... >"$output_file" 2>&1; then
     rm -f "$output_file"
     return 0
+  else
+    exit_code=$?
   fi
 
-  local exit_code=$?
-  if grep -Eqi 'fetching vulnerabilities|vuln[.]go[.]dev|no such host|network is unreachable|i/o timeout|TLS handshake timeout|connection refused|temporary failure in name resolution' "$output_file"; then
+  if [[ "$exit_code" -eq 1 ]] && grep -Eqi 'fetching vulnerabilities|no such host|network is unreachable|i/o timeout|TLS handshake timeout|connection refused|temporary failure in name resolution' "$output_file"; then
     if strict_vuln_check; then
       cat "$output_file"
       rm -f "$output_file"
@@ -157,6 +154,13 @@ if (( ${#go_modules[@]} == 0 )); then
   echo "[OK] no Go modules found"
   exit 0
 fi
+
+if [[ -f "$script_dir/local_toolchain_env.sh" ]]; then
+  source "$script_dir/local_toolchain_env.sh"
+  ovasabi_toolchain_init "$target"
+fi
+
+discover_go_tool_bins
 
 required_tools=(go staticcheck gopls govulncheck gosec)
 missing_tools=()

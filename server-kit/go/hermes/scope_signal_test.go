@@ -281,9 +281,7 @@ func TestScopeSignalCloseRacesAWrite(t *testing.T) {
 	var writers sync.WaitGroup
 	start := make(chan struct{})
 	for i := range 8 {
-		writers.Add(1)
-		go func() {
-			defer writers.Done()
+		writers.Go(func() {
 			<-start
 			for j := range 50 {
 				if _, err := store.UpsertRecord(t.Context(), presenceRecord(
@@ -292,7 +290,7 @@ func TestScopeSignalCloseRacesAWrite(t *testing.T) {
 					return
 				}
 			}
-		}()
+		})
 	}
 	close(start)
 	time.Sleep(time.Millisecond)

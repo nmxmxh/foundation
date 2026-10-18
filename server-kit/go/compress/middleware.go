@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"strings"
@@ -316,9 +317,7 @@ func (b *bufferedResponseWriter) flushTo(w http.ResponseWriter) {
 	for key := range dst {
 		dst.Del(key)
 	}
-	for key, values := range b.header {
-		dst[key] = values
-	}
+	maps.Copy(dst, b.header)
 	w.WriteHeader(b.status)
 	if b.body.Len() > 0 {
 		_, _ = w.Write(b.body.Bytes())

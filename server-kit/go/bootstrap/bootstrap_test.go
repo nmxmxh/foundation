@@ -305,9 +305,10 @@ func TestAcquireSlotFastPathAndZeroTimeout(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 		releaseSlot(sem)
 	}()
-	if err := acquireSlot(nil, sem, 0); err != nil {
-		t.Fatalf("expected acquireSlot with timeout=0 to succeed once released, got %v", err)
+	for _, slotContext := range []context.Context{nil, context.Background()} {
+		if err := acquireSlot(slotContext, sem, 0); err != nil {
+			t.Fatalf("expected acquireSlot with timeout=0 to succeed once released, got %v", err)
+		}
+		releaseSlot(sem)
 	}
-	releaseSlot(sem)
 }
-

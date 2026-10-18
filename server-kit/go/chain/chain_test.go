@@ -3,9 +3,49 @@ package chain
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
+
+func TestChainContextClosesChannelPublishedAfterCancellation(t *testing.T) {
+	ctx := newChainContext(context.Background())
+	ctx.Cancel()
+	select {
+	case <-ctx.ensureDone():
+	default:
+		t.Fatal("channel published after cancellation remains open")
+	}
+	ctx.Cancel()
+}
+
+func TestChainContextConcurrentDoneAndCancel(t *testing.T) {
+	for range 256 {
+		ctx := newChainContext(context.Background())
+		var channels [8]<-chan struct{}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for i := range channels {
+			wg.Go(func() {
+				<-start
+				channels[i] = ctx.Done()
+			})
+		}
+		wg.Go(func() {
+			<-start
+			ctx.Cancel()
+		})
+		close(start)
+		wg.Wait()
+		for _, ch := range channels {
+			select {
+			case <-ch:
+			default:
+				t.Fatal("concurrent cancellation left a returned channel open")
+			}
+		}
+	}
+}
 
 func TestRunParallelCancelsChainOnCriticalFailure(t *testing.T) {
 	criticalErr := errors.New("critical")

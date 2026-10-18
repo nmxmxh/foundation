@@ -174,17 +174,19 @@ func findHeaderValue(raw, name string) string {
 	for i, l := range lines {
 		clean := strings.TrimRight(l, "\r\n")
 		if strings.HasPrefix(strings.ToLower(clean), target) {
-			val := clean[len(target):]
+			var val strings.Builder
+			val.WriteString(clean[len(target):])
 			// Check continuation lines
 			for j := i + 1; j < len(lines); j++ {
 				next := strings.TrimRight(lines[j], "\r\n")
 				if strings.HasPrefix(next, " ") || strings.HasPrefix(next, "\t") {
-					val += " " + strings.TrimSpace(next)
+					val.WriteString(" ")
+					val.WriteString(strings.TrimSpace(next))
 				} else {
 					break
 				}
 			}
-			return val
+			return val.String()
 		}
 	}
 	return ""

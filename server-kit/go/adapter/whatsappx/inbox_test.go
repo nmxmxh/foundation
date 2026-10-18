@@ -47,7 +47,7 @@ func TestDurableAcceptanceAndMapping(t *testing.T) {
 		t.Fatalf("failed persistence acknowledged: %d", got)
 	}
 	inbox.fail = false
-	for n := 0; n < 2; n++ {
+	for range 2 {
 		if got := signedDelivery(h, durablePayload); got != 200 {
 			t.Fatal(got)
 		}

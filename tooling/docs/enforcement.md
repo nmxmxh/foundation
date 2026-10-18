@@ -221,3 +221,15 @@ When an exception is justified:
 2. observe the smallest possible subtree with narrow options
 3. disconnect reliably on cleanup
 4. prove the behavior with tests or fixture-driven verification
+
+## CI security and edge evidence
+
+The Core Go analysis wrapper preserves scanner exit codes.
+CI and strict mode reject database unavailability. Local offline mode retains its existing warning fallback.
+`tests/go_static_analysis_test.sh` verifies both policies with injected scanner results.
+Module discovery performs no toolchain initialization.
+
+Core verification includes real Nginx tests when Docker is available.
+CI requires that lane and rejects an unavailable Docker daemon.
+Optional public cache recipes remain disabled until an application activates reviewed routes.
+The frontend CI job audits its own dependencies before browser verification.

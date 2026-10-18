@@ -95,3 +95,16 @@ cd frontend-lab && npm install
 
 Playwright 1.62.1 reuses the Chromium already in `~/Library/Caches/ms-playwright`.
 On a machine without it: `npx playwright install chromium`.
+
+### CI repairs, 2026-10-16
+
+The historical styled-components reference now resides in `baselines/` as a compressed fixture.
+The equivalence test reads this fixture without a previous local run.
+Vitest pins `Africa/Lagos`, the timezone used by the historical calendar snapshots.
+UTC renders changed 64 calendar cases because date attributes include timezone values.
+The committed cascade digests remain unchanged.
+
+Core and lab lockfiles now resolve `source-map-js` to patched version 1.2.2.
+The existing dependency audit and SSR comparisons remain regression guards.
+No public API, production fallback, or scaffold contract changes.
+These changes affect Core dependencies and the Core-only frontend lab.
