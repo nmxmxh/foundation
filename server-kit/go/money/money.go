@@ -3,6 +3,7 @@ package money
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 )
 
 // Currency represents an ISO 4217 currency definition.
@@ -174,37 +175,41 @@ func (m Money) Scale(factor int64, divisor int64, mode RoundingMode) (Money, err
 	return Money{Amount: finalAmount, Currency: m.Currency}, nil
 }
 
-// Allocate splits the money proportional to the given ratios, conserving the total (MU-4).
-// Uses the largest-remainder method.
+// Allocate splits the money proportional to the given ratios and conserves the total (MU-4).
+//
+// It uses the Hamilton (largest-remainder) method: each party receives its truncated
+// ideal share, and leftover minor units go one at a time in descending remainder order,
+// breaking ties in favor of the lowest index.
+//
+// Mathematical properties:
+//   - Conservation: the sum of shares equals m.Amount.
+//   - Quota property: every share is within 1 minor unit of its exact rational ideal.
+//   - Alabama paradox (Balinski-Young theorem): increasing m.Amount can decrease an
+//     individual share by 1 minor unit because no method satisfies both quota and
+//     house monotonicity. For monotonic incremental splits, use AllocateMonotone.
 func (m Money) Allocate(ratios []int64) ([]Money, error) {
-	if len(ratios) == 0 {
-		return nil, errors.New("cannot allocate to zero ratios")
+	totalRatio, err := sumRatios(ratios)
+	if err != nil {
+		return nil, err
 	}
 
-	var totalRatio int64
-	for _, r := range ratios {
-		if r < 0 {
-			return nil, errors.New("allocation ratios must be non-negative")
-		}
-		next := totalRatio + r
-		if next < totalRatio {
-			return nil, errors.New("allocation ratio sum overflow")
-		}
-		totalRatio = next
-	}
+	n := len(ratios)
+	shares := make([]Money, n)
 
-	if totalRatio == 0 {
-		return nil, errors.New("sum of allocation ratios must be greater than zero")
+	const stackCap = 16
+	var remStack [stackCap]int64
+	remainders := remStack[:0]
+	if n > stackCap {
+		remainders = make([]int64, n)
+	} else {
+		remainders = remStack[:n]
 	}
-
-	shares := make([]Money, len(ratios))
-	remainders := make([]struct {
-		index     int
-		remainder int64
-	}, len(ratios))
 
 	var allocatedAmount int64
 	for i, r := range ratios {
+		if (m.Amount == -9223372036854775808 && r == -1) || (r == -9223372036854775808 && m.Amount == -1) {
+			return nil, errors.New("allocation multiplication overflow")
+		}
 		prod := m.Amount * r
 		if r != 0 && prod/r != m.Amount {
 			return nil, errors.New("allocation multiplication overflow")
@@ -217,47 +222,186 @@ func (m Money) Allocate(ratios []int64) ([]Money, error) {
 		}
 
 		shares[i] = Money{Amount: share, Currency: m.Currency}
-		remainders[i] = struct {
-			index     int
-			remainder int64
-		}{index: i, remainder: rem}
-
+		remainders[i] = rem
 		allocatedAmount += share
 	}
 
-	leftover := m.Amount - allocatedAmount
-	if leftover != 0 {
-		// Sort remainders descending (simple stable sort to preserve order for matching remainders)
-		for i := 0; i < len(remainders)-1; i++ {
-			for j := i + 1; j < len(remainders); j++ {
-				if remainders[i].remainder < remainders[j].remainder {
-					remainders[i], remainders[j] = remainders[j], remainders[i]
-				}
-			}
-		}
-
-		step := int64(1)
-		if leftover < 0 {
-			step = -1
-		}
-
-		for leftover != 0 {
-			for i := 0; i < len(remainders) && leftover != 0; i++ {
-				idx := remainders[i].index
-				shares[idx].Amount += step
-				leftover -= step
-			}
-		}
-	}
-
-	// Post-condition invariant: sum of shares must equal total
-	var sum int64
-	for _, s := range shares {
-		sum += s.Amount
-	}
-	if sum != m.Amount {
-		return nil, fmt.Errorf("allocation invariant violated: sum=%d, total=%d", sum, m.Amount)
-	}
-
+	distributeLeftover(shares, remainders, m.Amount-allocatedAmount)
 	return shares, nil
+}
+
+// AllocateWide splits the money proportional to the given ratios using 128-bit
+// intermediate arithmetic (math/bits.Mul64 and Div64) so that large amounts and
+// ratios do not overflow 64-bit multiplication before division by the ratio sum.
+func (m Money) AllocateWide(ratios []int64) ([]Money, error) {
+	totalRatio, err := sumRatios(ratios)
+	if err != nil {
+		return nil, err
+	}
+
+	n := len(ratios)
+	shares := make([]Money, n)
+
+	const stackCap = 16
+	var remStack [stackCap]int64
+	remainders := remStack[:0]
+	if n > stackCap {
+		remainders = make([]int64, n)
+	} else {
+		remainders = remStack[:n]
+	}
+
+	absAmount, neg := absUint64(m.Amount)
+	uTotal := uint64(totalRatio)
+
+	var allocatedAmount int64
+	for i, r := range ratios {
+		hi, lo := bits.Mul64(absAmount, uint64(r))
+		q, rem := bits.Div64(hi, lo, uTotal)
+		share := int64(q)
+		if neg {
+			share = -share
+		}
+		shares[i] = Money{Amount: share, Currency: m.Currency}
+		remainders[i] = int64(rem)
+		allocatedAmount += share
+	}
+
+	distributeLeftover(shares, remainders, m.Amount-allocatedAmount)
+	return shares, nil
+}
+
+// AllocateMonotone splits the money proportional to the given ratios using the
+// Webster / Sainte-Lague highest-averages divisor method.
+//
+// Unlike Allocate (Hamilton), AllocateMonotone is house-monotone: increasing the
+// total amount never reduces any recipient's share (no Alabama paradox). By the
+// Balinski-Young impossibility theorem, it can deviate from the ideal quota when
+// ratios are highly skewed.
+func (m Money) AllocateMonotone(ratios []int64) ([]Money, error) {
+	totalRatio, err := sumRatios(ratios)
+	if err != nil {
+		return nil, err
+	}
+
+	n := len(ratios)
+	shares := make([]Money, n)
+
+	absAmount, neg := absUint64(m.Amount)
+	uTotal := uint64(totalRatio)
+
+	const stackCap = 16
+	var countStack [stackCap]uint64
+	var counts []uint64
+	if n > stackCap {
+		counts = make([]uint64, n)
+	} else {
+		counts = countStack[:n]
+	}
+
+	// Safe lower-bound jump: start from max(0, floor(absAmount*r/totalRatio) - 1)
+	// so the divisor step loop runs at most O(n) iterations instead of O(absAmount).
+	var assigned uint64
+	for i, r := range ratios {
+		if r == 0 {
+			continue
+		}
+		hi, lo := bits.Mul64(absAmount, uint64(r))
+		q, _ := bits.Div64(hi, lo, uTotal)
+		if q > 1 {
+			base := q - 1
+			counts[i] = base
+			assigned += base
+		}
+	}
+
+	for assigned < absAmount {
+		bestIdx := -1
+		for i, r := range ratios {
+			if r == 0 {
+				continue
+			}
+			if bestIdx == -1 || websterHigherPriority(uint64(r), counts[i], uint64(ratios[bestIdx]), counts[bestIdx]) {
+				bestIdx = i
+			}
+		}
+		counts[bestIdx]++
+		assigned++
+	}
+
+	for i, c := range counts {
+		amt := int64(c)
+		if neg {
+			amt = -amt
+		}
+		shares[i] = Money{Amount: amt, Currency: m.Currency}
+	}
+	return shares, nil
+}
+
+func sumRatios(ratios []int64) (int64, error) {
+	if len(ratios) == 0 {
+		return 0, errors.New("cannot allocate to zero ratios")
+	}
+	var totalRatio int64
+	for _, r := range ratios {
+		if r < 0 {
+			return 0, errors.New("allocation ratios must be non-negative")
+		}
+		next := totalRatio + r
+		if next < totalRatio {
+			return 0, errors.New("allocation ratio sum overflow")
+		}
+		totalRatio = next
+	}
+	if totalRatio == 0 {
+		return 0, errors.New("sum of allocation ratios must be greater than zero")
+	}
+	return totalRatio, nil
+}
+
+func absUint64(v int64) (uint64, bool) {
+	if v < 0 {
+		return uint64(^v) + 1, true
+	}
+	return uint64(v), false
+}
+
+func distributeLeftover(shares []Money, remainders []int64, leftover int64) {
+	if leftover == 0 {
+		return
+	}
+	step := int64(1)
+	count := leftover
+	if leftover < 0 {
+		step = -1
+		count = -leftover
+	}
+	// Each party has 0 <= rem < totalRatio, so 0 <= count < len(shares).
+	// Select the top `count` remainders directly, breaking ties by lowest index.
+	for k := int64(0); k < count; k++ {
+		bestIdx := 0
+		bestRem := int64(-1)
+		for i, rem := range remainders {
+			if rem > bestRem {
+				bestRem = rem
+				bestIdx = i
+			}
+		}
+		shares[bestIdx].Amount += step
+		remainders[bestIdx] = -1
+	}
+}
+
+// websterHigherPriority reports whether ratioA/(2*countA+1) > ratioB/(2*countB+1)
+// using exact 128-bit cross-multiplication. Ties return false so the lower index wins.
+func websterHigherPriority(ratioA, countA, ratioB, countB uint64) bool {
+	denB := 2*countB + 1
+	denA := 2*countA + 1
+	hiA, loA := bits.Mul64(ratioA, denB)
+	hiB, loB := bits.Mul64(ratioB, denA)
+	if hiA != hiB {
+		return hiA > hiB
+	}
+	return loA > loB
 }

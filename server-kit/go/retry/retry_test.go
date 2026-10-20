@@ -268,3 +268,133 @@ func BenchmarkPolicy_CalculateDelay(b *testing.B) {
 		_ = policy.calculateDelay(i%10 + 1)
 	}
 }
+
+func BenchmarkPolicy_CalculateDelay_Parallel(b *testing.B) {
+	policy := NewPolicy(DefaultConfig())
+
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			i++
+			_ = policy.calculateDelay(i%5 + 1)
+		}
+	})
+}
+
+func TestJitterModesAndThunderingHerdSpread(t *testing.T) {
+	const (
+		clients = 1000
+		base    = 100 * time.Millisecond
+		bucket  = 10 * time.Millisecond
+	)
+
+	peakPerBucket := func(mode JitterMode, jitter float64) int {
+		p := NewPolicy(Config{
+			MaxAttempts:  3,
+			InitialDelay: base,
+			MaxDelay:     time.Second,
+			Multiplier:   2.0,
+			Jitter:       jitter,
+			JitterMode:   mode,
+		})
+		counts := make(map[int64]int)
+		peak := 0
+		for range clients {
+			d := p.calculateDelay(2) // nominal 200ms
+			if d < 0 || d > time.Second {
+				t.Fatalf("delay out of bounds for mode %d: %v", mode, d)
+			}
+			b := int64(d / bucket)
+			counts[b]++
+			if counts[b] > peak {
+				peak = counts[b]
+			}
+		}
+		return peak
+	}
+
+	peakSymmetric := peakPerBucket(JitterSymmetric, 0.1)
+	peakFull := peakPerBucket(JitterFull, 1.0)
+	peakEqual := peakPerBucket(JitterEqual, 1.0)
+	peakDecorrelated := peakPerBucket(JitterDecorrelated, 1.0)
+
+	// Narrow ±10% around 200ms lands in only 4 buckets of 10ms (~250/bucket),
+	// whereas JitterFull spreads across 20 buckets (~50/bucket).
+	if peakFull >= peakSymmetric {
+		t.Fatalf("expected JitterFull peak (%d) < JitterSymmetric peak (%d)", peakFull, peakSymmetric)
+	}
+	if peakEqual <= 0 || peakDecorrelated <= 0 {
+		t.Fatalf("unexpected peaks: equal=%d decorrelated=%d", peakEqual, peakDecorrelated)
+	}
+}
+
+func TestRetryBudgetCapsAmplification(t *testing.T) {
+	now := time.Now()
+	budget := NewBudget(0.1, 0, 5) // 10% retry ratio, no time refill, initial burst 5
+	budget.nowFn = func() time.Time { return now }
+
+	policy := NewPolicy(Config{
+		MaxAttempts:  4,
+		InitialDelay: time.Nanosecond,
+		Jitter:       0,
+		Budget:       budget,
+	})
+
+	// Under 100% outage over 200 requests, without budget 4 attempts/req = 800 calls (4.0x).
+	// With 10% budget + 5 initial capacity: at most 200 + 25 = 225 calls (<= 1.15x).
+	totalCalls := 0
+	budgetErrs := 0
+	for range 200 {
+		err := policy.Do(context.Background(), func() error {
+			totalCalls++
+			return errors.New("outage")
+		})
+		var bErr *BudgetExhaustedError
+		if errors.As(err, &bErr) {
+			budgetErrs++
+			if bErr.Error() == "" || bErr.Unwrap() == nil {
+				t.Fatal("BudgetExhaustedError unwrap/message failed")
+			}
+		}
+	}
+	if totalCalls > 230 {
+		t.Fatalf("expected retry budget to cap total calls <= 230, got %d", totalCalls)
+	}
+	if budgetErrs == 0 {
+		t.Fatal("expected BudgetExhaustedError to trigger during outage")
+	}
+
+	// Verify DoWithResult also enforces budget and nil-receiver safety.
+	var nilBudget *Budget
+	nilBudget.RecordRequest()
+	if !nilBudget.AllowRetry() {
+		t.Fatal("nil budget should allow retry")
+	}
+
+	b2 := NewBudget(-1, -1, 0)
+	b2.tokens = 0
+	p2 := NewPolicy(Config{
+		MaxAttempts:  3,
+		InitialDelay: time.Nanosecond,
+		Budget:       b2,
+		OnRetry:      func(int, error, time.Duration) {},
+	})
+	_, err := p2.DoWithResult(context.Background(), func() (any, error) {
+		return nil, errors.New("boom")
+	})
+	var bErr *BudgetExhaustedError
+	if !errors.As(err, &bErr) {
+		t.Fatalf("expected BudgetExhaustedError from DoWithResult, got %v", err)
+	}
+
+	// Time refill restores tokens.
+	now2 := time.Now()
+	b3 := NewBudget(0.1, 10, 5)
+	b3.nowFn = func() time.Time { return now2 }
+	b3.tokens = 0
+	now2 = now2.Add(200 * time.Millisecond)
+	if !b3.AllowRetry() {
+		t.Fatal("expected refill to allow retry")
+	}
+}

@@ -1,5 +1,7 @@
 package hermes
 
+import "math"
+
 // Float64 column reduction. This is the first Foundation Go SIMD lane: a
 // bounded, benchmark-gated reduction over a contiguous structure-of-arrays
 // buffer — exactly the shape the Go SIMD posture sanctions (AGENTS.md,
@@ -29,6 +31,31 @@ package hermes
 // columnar_reduce.go and docs/columnar_null_algebra.md.
 func (v *Float64Vector) Sum() float64 {
 	return sumFloat64s(v.values)
+}
+
+// SumCompensated returns the Neumaier-compensated sum of the column's
+// contiguous value buffer (FP-3).
+//
+// While Sum uses a 4-way (or 8-way AVX2) accumulator whose error grows as
+// O((n/k)·u), SumCompensated tracks a running rounding-error compensation term
+// so that error stays bounded by 2u + O(n·u²) even on ill-conditioned inputs
+// where values span many orders of magnitude with alternating signs.
+func (v *Float64Vector) SumCompensated() float64 {
+	return sumFloat64sNeumaier(v.values)
+}
+
+func sumFloat64sNeumaier(xs []float64) float64 {
+	var sum, comp float64
+	for _, x := range xs {
+		t := sum + x
+		if math.Abs(sum) >= math.Abs(x) {
+			comp += (sum - t) + x
+		} else {
+			comp += (x - t) + sum
+		}
+		sum = t
+	}
+	return sum + comp
 }
 
 // sumFloat64sScalar is the portable reference reduction and the fallback used by

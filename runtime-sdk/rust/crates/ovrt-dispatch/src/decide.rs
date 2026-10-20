@@ -76,7 +76,9 @@ pub struct DispatchRequest {
 
 impl DispatchRequest {
     /// Expected latency for this request on this lane, before the locality
-    /// bonus: measured mean inflated by current queue pressure.
+    /// bonus: measured mean inflated by current queue pressure using exact
+    /// rational arithmetic (`ewma * (concurrency + inflight) / concurrency`)
+    /// so partial sub-capacity load is never truncated to zero.
     ///
     /// Returns `None` while the lane has no measurement; unsampled lanes must
     /// not look free.
@@ -92,8 +94,11 @@ impl DispatchRequest {
             0 => 1,
             value => value,
         };
-        let factor = 1 + u64::from(stats.inflight) / u64::from(concurrency);
-        Some(stats.ewma_ns.saturating_mul(factor))
+        let c = u128::from(concurrency);
+        let num = u128::from(stats.ewma_ns)
+            .saturating_mul(c + u128::from(stats.inflight));
+        let expected = num / c;
+        Some(expected.min(u128::from(u64::MAX)) as u64)
     }
 
     fn is_fresh(&self, tick_now: u64, stats: &DispatchLaneStats) -> bool {
@@ -159,6 +164,73 @@ pub fn decide(
         }
     }
     best.map(|(_, lane_id)| lane_id)
+}
+
+/// Power-of-two-choices (`d = 2`) selection over eligible lanes, seeded
+/// deterministically from `(tick_now, request.affinity_key)`.
+///
+/// Under stale mirrored load snapshots (Mitzenmacher, "How Useful Is Old
+/// Information?"), deterministic argmin causes herd oscillations where every
+/// caller piles onto the single lowest-score lane until the next mirror
+/// broadcast. Sampling two eligible candidates and picking the lower-score
+/// lane reduces maximum queue depth from O(log N / log log N) to O(log log N)
+/// while remaining pure, allocation-free, and reproducible.
+pub fn decide_power_of_two(
+    tick_now: u64,
+    descriptors: &[DispatchLaneDescriptor],
+    stats: &[Option<DispatchLaneStats>],
+    request: &DispatchRequest,
+) -> Option<u16> {
+    let mut candidates = [(0u64, 0u16); MAX_LANES];
+    let mut count = 0usize;
+    let bound = descriptors.len().min(MAX_LANES).min(stats.len());
+    for index in 0..bound {
+        let descriptor = &descriptors[index];
+        let Some(lane_stats) = stats[index] else {
+            continue;
+        };
+        if descriptor.unit_class_mask == 0
+            || !descriptor.covers(request.required_class_mask)
+            || !descriptor.allows_jurisdiction(request.jurisdiction)
+            || !request.is_fresh(tick_now, &lane_stats)
+        {
+            continue;
+        }
+        let Some(mut score) = request.expected_latency_ns(&lane_stats, descriptor) else {
+            continue;
+        };
+        if descriptor.holds_locality(request.affinity_key) {
+            score = score.saturating_sub(u64::from(DISPATCH_AFFINITY_BONUS_NS));
+        }
+        if score > request.deadline_ns {
+            continue;
+        }
+        candidates[count] = (score, descriptor.lane_id);
+        count += 1;
+    }
+    if count == 0 {
+        return None;
+    }
+    if count == 1 {
+        return Some(candidates[0].1);
+    }
+    // SplitMix64 mixing of (tick_now, affinity_key) to pick two distinct indices.
+    let mut z = tick_now
+        .wrapping_add(request.affinity_key.rotate_left(31))
+        .wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^= z >> 31;
+
+    let first = (z as usize) % count;
+    let second = (first + 1 + ((z >> 32) as usize % (count - 1))) % count;
+    let (s1, id1) = candidates[first];
+    let (s2, id2) = candidates[second];
+    if s1 < s2 || (s1 == s2 && id1 <= id2) {
+        Some(id1)
+    } else {
+        Some(id2)
+    }
 }
 
 #[cfg(test)]
@@ -291,5 +363,47 @@ mod tests {
         let descriptors = vec![lane(1), second];
         let table = vec![stats(4_000), stats(4_000)];
         assert_eq!(decide(TICK, &descriptors, &table, &request(1_000_000)), Some(1));
+    }
+
+    #[test]
+    fn sub_capacity_partial_load_penalizes_expected_latency() {
+        // Under the old integer division `1 + inflight / concurrency`, inflight=3
+        // on max_concurrency=4 truncated to factor=1 (zero penalty), so a 75%-full
+        // lane (ewma=4_000) beat an idle lane (ewma=5_000). Exact rational scaling
+        // scores lane 1 at 4_000 * (4 + 3) / 4 = 7_000 > 5_000, picking idle lane 2.
+        let mut busy_sub_cap = stats(4_000).expect("stats");
+        busy_sub_cap.inflight = 3;
+        let descriptors = vec![lane(1), lane(2)];
+        let table = vec![Some(busy_sub_cap), stats(5_000)];
+        assert_eq!(decide(TICK, &descriptors, &table, &request(1_000_000)), Some(2));
+    }
+
+    #[test]
+    fn power_of_two_prevents_stale_snapshot_herding() {
+        // 8 eligible lanes with slightly staggered EWMAs (5_000..5_070 ns) and
+        // stale snapshot refreshed only after 64 arrivals. Deterministic argmin
+        // routes all 64 requests to lane 0 (peak=64), whereas power-of-two spreads
+        // arrivals across multiple lanes with peak <= 24.
+        let descriptors: Vec<DispatchLaneDescriptor> =
+            (0..8u16).map(lane).collect();
+        let snapshot: Vec<Option<DispatchLaneStats>> = (0..8u64)
+            .map(|i| stats(5_000 + i * 10))
+            .collect();
+
+        let mut argmin_counts = [0u32; 8];
+        let mut p2c_counts = [0u32; 8];
+        for step in 0..64u64 {
+            let mut req = request(1_000_000);
+            req.affinity_key = step;
+            let now = TICK + (step % u64::from(DISPATCH_STALE_TICKS));
+            let a = decide(now, &descriptors, &snapshot, &req).expect("argmin");
+            let p = decide_power_of_two(now, &descriptors, &snapshot, &req).expect("p2c");
+            argmin_counts[usize::from(a)] += 1;
+            p2c_counts[usize::from(p)] += 1;
+        }
+        let max_argmin = *argmin_counts.iter().max().expect("max");
+        let max_p2c = *p2c_counts.iter().max().expect("max");
+        assert_eq!(max_argmin, 64);
+        assert!(max_p2c <= 28, "expected p2c peak <= 28, got {max_p2c}");
     }
 }

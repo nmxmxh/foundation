@@ -547,21 +547,29 @@ func resolveResourceField(resource Resource, parts []string) any {
 }
 
 func resolveObjectField(object extension.Object, parts []string) any {
+	const maxFieldDepth = 32
 	if len(parts) == 0 {
 		return object
 	}
-	value, ok := object[parts[0]]
-	if !ok {
+	if len(parts) > maxFieldDepth {
 		return nil
 	}
-	if len(parts) == 1 {
-		return value.Interface()
+	cur := object
+	for i, key := range parts {
+		value, ok := cur[key]
+		if !ok {
+			return nil
+		}
+		if i == len(parts)-1 {
+			return value.Interface()
+		}
+		next, ok := value.ObjectValue()
+		if !ok {
+			return nil
+		}
+		cur = next
 	}
-	next, ok := value.ObjectValue()
-	if !ok {
-		return nil
-	}
-	return resolveObjectField(next, parts[1:])
+	return nil
 }
 
 // Middleware returns an HTTP middleware that enforces policies.

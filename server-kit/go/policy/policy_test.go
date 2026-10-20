@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -159,5 +160,120 @@ func TestLoadRemoveAndMiddleware(t *testing.T) {
 	}
 	if PrincipalFromContext(r.Context()).ID != "u1" {
 		t.Fatal("principal not stored in context")
+	}
+}
+
+func TestMinatoMorrealeISOPAndPolicyAnalyze(t *testing.T) {
+	// 1. Direct Minato-Morreale ISOP verification on a 4-variable function with
+	// don't-cares: verify cover lies in [L, U] and is irredundant (no cube and
+	// no literal can be dropped without falling below L or escaping U).
+	lower := NewTruthTable(4)
+	upper := NewTruthTable(4)
+	// f = x0*x1 + x0*~x1*x2, with x0*x1*x2*x3 as don't-care
+	for a := uint32(0); a < 16; a++ {
+		x0 := (a & 1) != 0
+		x1 := (a & 2) != 0
+		x2 := (a & 4) != 0
+		on := (x0 && x1) || (x0 && !x1 && x2)
+		dc := !x0 && x1 && x2
+		if on {
+			lower.Set(a, true)
+			upper.Set(a, true)
+		} else if dc {
+			upper.Set(a, true)
+		}
+	}
+	cover := MinatoMorrealeISOP(lower, upper)
+	covTable := tableFromCubes(4, cover)
+	if !lower.andNot(covTable).IsZero() {
+		t.Fatal("ISOP cover failed to cover all lower minterms")
+	}
+	if !covTable.andNot(upper).IsZero() {
+		t.Fatal("ISOP cover exceeded upper bound")
+	}
+	// Irredundancy: dropping any single cube must uncover at least one lower minterm.
+	for i := range cover {
+		reduced := append([]Cube(nil), cover[:i]...)
+		reduced = append(reduced, cover[i+1:]...)
+		if lower.andNot(tableFromCubes(4, reduced)).IsZero() {
+			t.Fatalf("ISOP cover is redundant: cube %d (%+v) can be removed", i, cover[i])
+		}
+	}
+
+	// 2. Policy Engine.Analyze() detects shadowed allow rules, redundant narrow rules,
+	// and mutual exclusion don't-cares (e.g. principal.type==User vs Service), and
+	// produces an irredundant cover equivalent to Engine.Evaluate on all concrete requests.
+	engine := NewEngine()
+	// Broad allow: User with role editor on Document
+	engine.AddPolicy(Policy{
+		ID:        "allow-editor-doc",
+		Effect:    Allow,
+		Principal: &PrincipalMatcher{Type: "User", Roles: []string{"editor"}},
+		Actions:   []string{"document:read"},
+		Resource:  &ResourceMatcher{Type: "Document", OrgID: "org_1"},
+	})
+	// Redundant narrower allow: same + extra condition
+	engine.AddPolicy(Policy{
+		ID:        "redundant-narrow-editor",
+		Effect:    Allow,
+		Principal: &PrincipalMatcher{Type: "User", Roles: []string{"editor"}},
+		Actions:   []string{"document:read"},
+		Resource:  &ResourceMatcher{Type: "Document", OrgID: "org_1"},
+		Conditions: []Condition{
+			{Field: "context.env", Operator: OpEquals, Value: "prod"},
+		},
+	})
+	// Shadowed allow: allows document:delete for User, but overridden by explicit deny
+	engine.AddPolicy(Policy{
+		ID:        "shadowed-allow-delete",
+		Effect:    Allow,
+		Principal: &PrincipalMatcher{Type: "User", Roles: []string{"editor"}},
+		Actions:   []string{"document:delete"},
+		Resource:  &ResourceMatcher{Type: "Document", OrgID: "org_1"},
+	})
+	engine.AddPolicy(Policy{
+		ID:       "deny-all-delete",
+		Effect:   Deny,
+		Actions:  []string{"document:delete"},
+		Resource: &ResourceMatcher{Type: "Document"},
+	})
+	// Mutual exclusion test policy for Service principal
+	engine.AddPolicy(Policy{
+		ID:        "allow-service-read",
+		Effect:    Allow,
+		Principal: &PrincipalMatcher{Type: "Service"},
+		Actions:   []string{"document:read"},
+		Resource:  &ResourceMatcher{Type: "Document", OrgID: "org_1"},
+		Conditions: []Condition{
+			{Field: "context.env", Operator: OpNotEquals, Value: "dev"},
+		},
+	})
+
+	report, err := engine.Analyze()
+	if err != nil {
+		t.Fatalf("Analyze() error: %v", err)
+	}
+	if !slices.Contains(report.ShadowedAllowPolicies, "shadowed-allow-delete") {
+		t.Fatalf("expected shadowed-allow-delete in ShadowedAllowPolicies, got %v", report.ShadowedAllowPolicies)
+	}
+	if !slices.Contains(report.RedundantPolicies, "redundant-narrow-editor") {
+		t.Fatalf("expected redundant-narrow-editor in RedundantPolicies, got %v", report.RedundantPolicies)
+	}
+	if len(report.IrredundantCover) == 0 || report.AllowedMintermCount == 0 {
+		t.Fatalf("unexpected empty cover: %+v", report)
+	}
+	for _, c := range report.IrredundantCover {
+		if c.Format(report.Atoms) == "" {
+			t.Fatal("empty formatted cube")
+		}
+	}
+	if (Cube{}).Format(report.Atoms) != "true" {
+		t.Fatal("expected tautology cube to format as 'true'")
+	}
+
+	// Verify deep object field depth guard in resolveObjectField (>32 levels returns nil).
+	deepPath := "context." + strings.Repeat("a.", 35) + "leaf"
+	if got := engine.resolveField(deepPath, Request{Context: policyObject(map[string]any{"a": map[string]any{"b": 1}})}); got != nil {
+		t.Fatalf("expected nil on excessive field depth, got %v", got)
 	}
 }

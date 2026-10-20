@@ -245,17 +245,28 @@ func TestFloat64VectorSumMatchesExactOracle(t *testing.T) {
 
 			lane := sumFloat64s(tc.xs)
 			ref := sumFloat64sScalar(tc.xs)
+			comp := sumFloat64sNeumaier(tc.xs)
 
 			// Sum() must route to the same lane as the free function.
 			v := &Float64Vector{values: tc.xs, validity: newValidityBitmap(len(tc.xs))}
 			if got := v.Sum(); got != lane {
 				t.Fatalf("Sum()=%v does not match sumFloat64s()=%v", got, lane)
 			}
+			if got := v.SumCompensated(); got != comp {
+				t.Fatalf("SumCompensated()=%v does not match sumFloat64sNeumaier()=%v", got, comp)
+			}
+			for i := range tc.xs {
+				v.validity.set(i)
+			}
+			validComp := v.SumValidCompensated()
+			if validComp.Count != len(tc.xs) || validComp.Value != comp {
+				t.Fatalf("SumValidCompensated()=%+v want (%v, %d)", validComp, comp, len(tc.xs))
+			}
 
 			for _, got := range []struct {
 				what  string
 				value float64
-			}{{"lane", lane}, {"scalar reference", ref}} {
+			}{{"lane", lane}, {"scalar reference", ref}, {"neumaier", comp}} {
 				if err := math.Abs(got.value - exact); err > bound {
 					t.Errorf("%s sum=%v exact=%v error=%v exceeds Higham bound %v",
 						got.what, got.value, exact, err, bound)
@@ -266,6 +277,12 @@ func TestFloat64VectorSumMatchesExactOracle(t *testing.T) {
 						got.what, got.value, exact, ulps, tc.maxULP)
 				}
 				t.Logf("%-17s = %-24v exact = %-24v %d ULP", got.what, got.value, exact, ulps)
+			}
+			if tc.name == "big-plus-small" {
+				if ulpDistance(comp, exact) != 0 {
+					t.Errorf("expected Neumaier compensated sum to achieve 0 ULP on big-plus-small, got %d ULP",
+						ulpDistance(comp, exact))
+				}
 			}
 		})
 	}

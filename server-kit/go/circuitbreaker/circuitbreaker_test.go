@@ -459,3 +459,67 @@ func BenchmarkCircuitBreaker_StateRead(b *testing.B) {
 		_ = cb.State()
 	}
 }
+
+func TestCircuitBreaker_RollingWindowAndWilsonBound(t *testing.T) {
+	clock := &mockClock{now: time.Unix(100, 0)}
+
+	// At a 33% failure rate (every 3rd request fails), consecutive-5 never trips!
+	// Rolling-window failure rate with FailureRateThreshold=0.25 trips as soon as
+	// MinObservations is reached.
+	cb := New("rate-svc", Config{
+		FailureThreshold:     5,
+		FailureRateThreshold: 0.25,
+		Clock:                clock,
+	})
+	for i := 1; i <= 30; i++ {
+		clock.Advance(50 * time.Millisecond)
+		_, _ = cb.Execute(context.Background(), func() (any, error) {
+			if i%3 == 0 {
+				return nil, errFake
+			}
+			return "ok", nil
+		})
+	}
+	if cb.State() != StateOpen {
+		t.Fatalf("expected rate-based breaker to trip on 33%% alternating errors, got %s", cb.State())
+	}
+
+	// Wilson lower bound prevents false tripping on small noisy samples, then trips
+	// once sufficient evidence accumulates.
+	clock2 := &mockClock{now: time.Unix(200, 0)}
+	cbWilson := New("wilson-svc", Config{
+		FailureThreshold:     100,
+		FailureRateThreshold: 0.20,
+		MinObservations:      10,
+		RollingWindow:        10 * time.Second,
+		UseWilsonLowerBound:  true,
+		Clock:                clock2,
+	})
+	// 3 failures out of 10 = 30% empirical, but 95% Wilson lower bound is ~0.108 < 0.20 -> must NOT trip.
+	for i := range 10 {
+		_, _ = cbWilson.Execute(context.Background(), func() (any, error) {
+			if i < 3 {
+				return nil, errFake
+			}
+			return "ok", nil
+		})
+	}
+	if cbWilson.State() != StateClosed {
+		t.Fatalf("expected Wilson bound to prevent false trip at 3/10, got %s", cbWilson.State())
+	}
+	// At 40 failures out of 100 (40% empirical), Wilson lower bound is ~0.309 >= 0.20 -> trips.
+	for i := 10; i < 100; i++ {
+		_, _ = cbWilson.Execute(context.Background(), func() (any, error) {
+			if i%2 == 0 {
+				return nil, errFake
+			}
+			return "ok", nil
+		})
+	}
+	if cbWilson.State() != StateOpen {
+		t.Fatalf("expected Wilson bound to trip under sustained 40%%+ failures, got %s", cbWilson.State())
+	}
+	if wilsonLowerBound95(1, 0) != 0 {
+		t.Fatal("expected wilsonLowerBound95(1, 0) == 0")
+	}
+}

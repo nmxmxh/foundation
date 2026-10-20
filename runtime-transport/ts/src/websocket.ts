@@ -51,6 +51,13 @@ type WebSocketTransportOptions = {
     maxAttempts?: number;
     baseDelayMs?: number;
     maxDelayMs?: number;
+    /**
+     * Randomization factor in [0, 1] applied to exponential reconnect backoff
+     * to prevent synchronized thundering-herd reconnect storms.
+     * A factor of 1.0 corresponds to full jitter in [0, cap]; default 0.5
+     * draws uniformly from [cap * 0.5, cap] (equal jitter).
+     */
+    jitterFactor?: number;
     shouldReconnect?: (close: { code: number; reason: string; wasClean: boolean }) => boolean;
   };
   health?: {
@@ -84,6 +91,7 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
     maxAttempts: Math.max(0, options.reconnect?.maxAttempts ?? 4),
     baseDelayMs: Math.max(25, options.reconnect?.baseDelayMs ?? 250),
     maxDelayMs: Math.max(100, options.reconnect?.maxDelayMs ?? 4000),
+    jitterFactor: Math.min(1, Math.max(0, options.reconnect?.jitterFactor ?? 0.5)),
     shouldReconnect:
       options.reconnect?.shouldReconnect ??
       ((close: { code: number; reason: string; wasClean: boolean }) => close.code !== 1000 && close.code !== 1001),
@@ -131,7 +139,9 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
       return;
     }
 
-    const delay = Math.min(reconnect.maxDelayMs, reconnect.baseDelayMs * 2 ** reconnectAttempts);
+    const exp = Math.min(reconnect.maxDelayMs, reconnect.baseDelayMs * 2 ** reconnectAttempts);
+    const spread = exp * reconnect.jitterFactor;
+    const delay = exp - spread + Math.random() * spread;
     reconnectAttempts += 1;
     connectionState = "reconnecting";
     reconnectTimer = globalThis.setTimeout(() => {

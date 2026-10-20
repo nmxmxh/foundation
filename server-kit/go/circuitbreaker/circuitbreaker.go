@@ -18,10 +18,19 @@ package circuitbreaker
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+const rollingBucketCount = 10
+
+type windowBucket struct {
+	epoch     int64
+	successes uint32
+	failures  uint32
+}
 
 // State represents the current state of the circuit breaker.
 type State int32
@@ -82,6 +91,26 @@ type Config struct {
 
 	// Clock is used for time operations (for testing).
 	Clock Clock
+
+	// FailureRateThreshold (0.0-1.0) trips the circuit when the rolling-window
+	// failure rate meets or exceeds this threshold once MinObservations is reached.
+	// When UseWilsonLowerBound is true, the 95% Wilson score lower bound of the
+	// failure rate must meet or exceed FailureRateThreshold.
+	// Zero disables rate-based tripping (consecutive-failure mode only).
+	FailureRateThreshold float64
+
+	// MinObservations is the minimum total requests in RollingWindow before
+	// FailureRateThreshold is evaluated. Default when FailureRateThreshold > 0: 20.
+	MinObservations uint32
+
+	// RollingWindow is the time horizon for FailureRateThreshold.
+	// Default when FailureRateThreshold > 0: 10 seconds.
+	RollingWindow time.Duration
+
+	// UseWilsonLowerBound requires the 95% Wilson score lower confidence bound
+	// of the empirical failure rate to reach FailureRateThreshold before tripping,
+	// preventing false trips on small samples.
+	UseWilsonLowerBound bool
 }
 
 // Clock interface for time operations.
@@ -117,6 +146,8 @@ type CircuitBreaker struct {
 	halfOpenCalls   uint32
 	lastFailureTime time.Time
 	lastStateChange time.Time
+	buckets         [rollingBucketCount]windowBucket
+	bucketSpan      time.Duration
 }
 
 // New creates a new circuit breaker with the given name and configuration.
@@ -139,12 +170,26 @@ func New(name string, cfg Config) *CircuitBreaker {
 	if cfg.Clock == nil {
 		cfg.Clock = realClock{}
 	}
+	if cfg.FailureRateThreshold > 0 {
+		if cfg.MinObservations == 0 {
+			cfg.MinObservations = 20
+		}
+		if cfg.RollingWindow <= 0 {
+			cfg.RollingWindow = 10 * time.Second
+		}
+	}
+
+	var span time.Duration
+	if cfg.RollingWindow > 0 {
+		span = max(cfg.RollingWindow/rollingBucketCount, time.Millisecond)
+	}
 
 	return &CircuitBreaker{
 		name:            name,
 		config:          cfg,
 		state:           int32(StateClosed),
 		lastStateChange: cfg.Clock.Now(),
+		bucketSpan:      span,
 	}
 }
 
@@ -240,16 +285,18 @@ func (cb *CircuitBreaker) afterRequest(err error) {
 
 	switch state {
 	case StateClosed:
+		now := cb.config.Clock.Now()
 		if isFailure {
 			cb.failures++
 			cb.successes = 0
-			cb.lastFailureTime = cb.config.Clock.Now()
-			if cb.failures >= cb.config.FailureThreshold {
+			cb.lastFailureTime = now
+			if cb.recordWindowAndShouldTrip(now, true) || cb.failures >= cb.config.FailureThreshold {
 				cb.transitionTo(StateOpen)
 			}
 		} else {
 			cb.failures = 0
 			cb.successes++
+			_ = cb.recordWindowAndShouldTrip(now, false)
 		}
 
 	case StateHalfOpen:
@@ -282,11 +329,66 @@ func (cb *CircuitBreaker) transitionTo(newState State) {
 	cb.failures = 0
 	cb.successes = 0
 	cb.halfOpenCalls = 0
+	cb.buckets = [rollingBucketCount]windowBucket{}
 
 	if cb.config.OnStateChange != nil {
 		// Call outside of lock to prevent deadlocks
 		go cb.config.OnStateChange(cb.name, oldState, newState)
 	}
+}
+
+// recordWindowAndShouldTrip records an outcome in the fixed-size rolling ring
+// and reports whether the windowed failure rate trips the circuit.
+func (cb *CircuitBreaker) recordWindowAndShouldTrip(now time.Time, isFailure bool) bool {
+	if cb.config.FailureRateThreshold <= 0 || cb.bucketSpan <= 0 {
+		return false
+	}
+	epoch := now.UnixNano() / int64(cb.bucketSpan)
+	idx := int(uint64(epoch) % rollingBucketCount)
+	if cb.buckets[idx].epoch != epoch {
+		cb.buckets[idx] = windowBucket{epoch: epoch}
+	}
+	if isFailure {
+		cb.buckets[idx].failures++
+	} else {
+		cb.buckets[idx].successes++
+	}
+	if !isFailure {
+		return false
+	}
+
+	minEpoch := epoch - rollingBucketCount + 1
+	var totalFail, totalSucc uint32
+	for i := range rollingBucketCount {
+		b := cb.buckets[i]
+		if b.epoch >= minEpoch && b.epoch <= epoch {
+			totalFail += b.failures
+			totalSucc += b.successes
+		}
+	}
+	total := totalFail + totalSucc
+	if total < cb.config.MinObservations {
+		return false
+	}
+	if cb.config.UseWilsonLowerBound {
+		return wilsonLowerBound95(float64(totalFail), float64(total)) >= cb.config.FailureRateThreshold
+	}
+	return float64(totalFail)/float64(total) >= cb.config.FailureRateThreshold
+}
+
+// wilsonLowerBound95 returns the 95% (z = 1.95996) one-sided/two-sided Wilson score
+// lower confidence bound for k failures out of n trials.
+func wilsonLowerBound95(failures, total float64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	const z = 1.959963984540054
+	const z2 = z * z
+	pHat := failures / total
+	denom := 1.0 + z2/total
+	center := pHat + z2/(2.0*total)
+	rad := z * math.Sqrt((pHat*(1.0-pHat)+z2/(4.0*total))/total)
+	return math.Max(0, (center-rad)/denom)
 }
 
 // Reset manually resets the circuit breaker to the closed state.
@@ -299,6 +401,7 @@ func (cb *CircuitBreaker) Reset() {
 	cb.failures = 0
 	cb.successes = 0
 	cb.halfOpenCalls = 0
+	cb.buckets = [rollingBucketCount]windowBucket{}
 	cb.lastStateChange = cb.config.Clock.Now()
 
 	if cb.config.OnStateChange != nil && oldState != StateClosed {

@@ -24,7 +24,8 @@ pub mod publisher;
 pub mod sample;
 
 pub use decide::{
-    blend_ewma, decide, DispatchLaneDescriptor, DispatchLaneStats, DispatchRequest, MAX_LANES,
+    blend_ewma, decide, decide_power_of_two, DispatchLaneDescriptor, DispatchLaneStats,
+    DispatchRequest, MAX_LANES,
 };
 
 #[cfg(unix)]

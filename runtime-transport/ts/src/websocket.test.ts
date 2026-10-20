@@ -259,4 +259,45 @@ describe('WebSocketTransport Resilience', () => {
     expect(sockets.length).toBe(2);
     expect(authenticate).toHaveBeenCalledTimes(2);
   });
+
+  it('applies jitter to reconnect backoff to spread synchronized reconnect storms', async () => {
+    const scheduledDelays: number[] = [];
+    const origSetTimeout = globalThis.setTimeout;
+    const spy = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: any, ms?: number) => {
+      if (typeof ms === 'number' && ms >= 100 && ms <= 200) {
+        scheduledDelays.push(ms);
+      }
+      return origSetTimeout(fn, ms);
+    }) as any);
+
+    const transports: WebSocketTransport[] = [];
+    try {
+      for (let i = 0; i < 32; i++) {
+        const t = createWebSocketTransport({
+          url: 'ws://localhost:8080',
+          reconnect: { baseDelayMs: 200, maxDelayMs: 1000, jitterFactor: 0.5 },
+          createSocket: (url) => {
+            const ws = new MockWebSocket(url);
+            queueMicrotask(() => ws.onclose?.({ code: 1006, reason: 'drop', wasClean: false }));
+            return ws as any;
+          },
+        });
+        transports.push(t);
+        void t.subscribe?.('x:*', () => {}).catch(() => undefined);
+      }
+      await new Promise((resolve) => origSetTimeout(resolve, 25));
+      for (const t of transports) {
+        t.close();
+      }
+      const unique = new Set(scheduledDelays.map((d) => Math.round(d)));
+      expect(scheduledDelays.length).toBeGreaterThanOrEqual(16);
+      expect(unique.size).toBeGreaterThan(4);
+      for (const d of scheduledDelays) {
+        expect(d).toBeGreaterThanOrEqual(100);
+        expect(d).toBeLessThanOrEqual(200);
+      }
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });

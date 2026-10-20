@@ -667,7 +667,11 @@ Layering rule, evidence-backed:
    (`BenchmarkCachedGetHit`). It exists for callers that bypass projections,
    for cold scopes, and for cross-process sharing over Redis.
 3. Never stack the cache in front of warm projection reads. That ordering
-   regresses latency by roughly nine times.
+   regresses latency by roughly nine times. This is a concrete instance of the
+   **Braess paradox** in queueing networks: adding an ostensibly "fast" extra
+   link (a serialized network cache hop) increases equilibrium latency when the
+   existing direct path (`hermes` in-process memory) has lower service time and
+   zero serialization overhead.
 
 Contracts:
 

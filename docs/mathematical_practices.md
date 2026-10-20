@@ -1,11 +1,11 @@
 # Mathematical Practices
- 
+
 Status: baseline
 Date: 2026-06-16
 Owner: Platform Architecture
- 
+
 ## Purpose
- 
+
 This document is the "mathematician in the room" for Foundation. It
 translates the relevant numerical-analysis, probability, statistics, and
 abstract-algebra results into engineering constraints that bind real code. It
@@ -77,16 +77,29 @@ integer minor unit (cents, satang, pence) and format only at the boundary
   (banker's rounding) to remove the upward bias of round-half-up over many
   transactions; document any deviation at the call site.
 - **MU-4 — Allocation conserves the total.** When splitting an amount across
-  `n` parties, use the largest-remainder method: floor each share, then
-  distribute the leftover minor units one at a time by descending remainder.
-  Post-condition `sum(shares) == total` is an invariant and must be tested.
+  `n` parties, use the largest-remainder (Hamilton) method: floor each share,
+  then distribute leftover minor units one at a time by descending remainder,
+  breaking ties by lowest index (`Money.Allocate`, `Money.AllocateWide`).
+  Post-condition `sum(shares) == total` and the quota property (`|share − ideal| < 1`
+  minor unit) are invariants and must be tested.
 - **MU-5 — No cross-currency arithmetic.** Two amounts may only be combined
   after an explicit FX conversion with a recorded rate and rounding step.
+- **MU-6 — Apportionment trade-offs (Balinski–Young theorem).** No apportionment
+  method with `n ≥ 3` parties satisfies both the quota property and house
+  monotonicity. Hamilton (`Allocate`, `AllocateWide`) guarantees quota but can
+  exhibit the *Alabama paradox* (increasing the total by 1 minor unit can reduce
+  one party's share by 1 minor unit when remainders shift). When monotonic
+  incremental streaming is required, call `Money.AllocateMonotone` (Webster /
+  Sainte-Laguë divisor method) and document that quota can deviate on skewed
+  ratios.
 
 ### Citations
 
 - Fowler, "Money" pattern — minor-unit integer storage.
   <https://martinfowler.com/eaaCatalog/money.html>
+- Balinski & Young, *Fair Representation: Meeting the Ideal of One Man, One
+  Vote*, Yale University Press, 1982 (impossibility of simultaneous quota and
+  monotonicity).
 - Modern Treasury, "Floats Don't Work For Storing Cents."
   <https://www.moderntreasury.com/journal/floats-dont-work-for-storing-cents>
 - IEEE 754-2019; Goldberg, "What Every Computer Scientist Should Know About
@@ -228,6 +241,47 @@ American Statistician* 50(4), 1996. · Maritz–Jarrett method, Akinshin.
 <https://aakinshin.net/posts/maritz-jarrett-vs-jackknife/> · Nearest-rank sample
 size guidance. <https://hackmysql.com/eng/percentiles/>
 
+### 3.4 Multiple comparisons in benchmark gating (Benjamini–Hochberg FDR)
+
+**Result.** Testing `m` independent benchmarks at per-test significance level
+`α = 0.05` yields family-wise false-alarm probability `1 − (1 − α)^m` (for
+`m = 30`, `P(false alarm) ≈ 78.5%`). The Benjamini–Hochberg step-up procedure
+sorts p-values `p_(1) ≤ p_(2) ≤ … ≤ p_(m)` and rejects all `i ≤ k` where
+`k = max { i : p_(i) ≤ (i / m) · q }`, bounding the expected False Discovery
+Rate (FDR) at `≤ q`.
+
+**Rules.**
+
+- **FDR-1** Multi-benchmark CI gates must apply Benjamini–Hochberg FDR control
+  (or Holm–Bonferroni family-wise control) across the suite rather than raw
+  unadjusted `p < 0.05` per benchmark.
+- **FDR-2** Pair statistical significance with a minimum practical effect-size
+  floor (for example, `≥ 3%` ns/op delta or `≥ 1` alloc/op delta) so zero-variance noise
+  never blocks merges.
+
+### 3.5 Sequential testing for canary rollouts (Wald SPRT)
+
+**Result.** Repeatedly peeking at a fixed-horizon A/B or canary p-value inflates
+Type I error toward 100%. Wald's Sequential Probability Ratio Test (SPRT) tracks
+the log-likelihood ratio `Λ_n = ∑ log(f_1(x_i) / f_0(x_i))` against upper and
+lower stopping boundaries `B = log((1 − β) / α)` and `A = log(β / (1 − α))`,
+preserving exact error guarantees `(α, β)` regardless of check frequency.
+
+**Rules.**
+
+- **SPRT-1** Automated canary and `featureflags` progressive rollouts that
+  evaluate health continuously must use sequential boundaries (SPRT or always-valid
+  confidence sequences), never repeated fixed-sample z-tests.
+- **SPRT-2** Circuit-breaker failure-rate trips on small windows must require a
+  minimum sample floor (`MinObservations`) and, where noisy low-rate false trips
+  matter, a 95% Wilson score lower confidence bound (`UseWilsonLowerBound` in
+  `server-kit/go/circuitbreaker`).
+
+**Citations (3.4–3.5).** Benjamini & Hochberg, "Controlling the False Discovery
+Rate," *JRSS-B* 57(1), 1995. · Wald, *Sequential Analysis*, 1945. · Wilson,
+"Probable Inference, the Law of Succession, and Statistical Inference," *JASA*
+22, 1927.
+
 ---
 
 ## 4. SIMD & GPU floating-point tolerances (bounded approximation)
@@ -267,10 +321,13 @@ bit-identical to the unfused path.
   band grows with the count of operations and with cancellation (sums of mixed
   sign). State `n`-dependence explicitly; a fixed `1e−12` for arbitrary `n` is
   wrong.
-- **FP-3 — Use the accuracy ladder deliberately.** Default to pairwise/
-  multi-accumulator (already in `sumFloat64s`). Promote to Kahan/Neumaier when
-  `n` is large or inputs are ill-conditioned. Reserve exact/integer paths for
-  money (§1).
+- **FP-3 — Use the accuracy ladder deliberately.** Default to pairwise /
+  multi-accumulator (`Float64Vector.Sum`, `SumValid` in `server-kit/go/hermes`).
+  Promote to Neumaier compensated summation (`Float64Vector.SumCompensated`,
+  `SumValidCompensated`) when `n` is large or inputs are ill-conditioned with
+  alternating-sign cancellation. For streaming variance and standard deviation,
+  use the Chan/Welford parallel moments monoid (`columnar_moments.go`). Reserve
+  exact integer paths for money (§1).
 - **FP-4 — Subnormal / NaN / Inf safeguards.** Reductions must define behavior
   on NaN (propagates), ±Inf (saturates), and subnormals (flush-to-zero only if
   the lane config says so, and then documented). Tests include these inputs.
@@ -358,11 +415,19 @@ and limit `τ` related to burst by `σ = (τ+1)/T`. Steady-state admitted rate i
 - **RL-2** Document the arrival-curve guarantee (`ρ·Δt + σ`) at the limiter;
   it is the contract callers depend on.
 
-### 6.2 Queue depth & concurrency (Little's Law)
+### 6.2 Queue depth, concurrency & tail latency (Little's Law & Kingman's Formula)
 
-**Result.** Little's Law: `L = λ · W` — mean items in system `L` equals arrival
-rate `λ` times mean residence time `W`. It holds for any stable system
-regardless of distribution.
+**Result.** Little's Law states `L = λ · W` — mean items in system `L` equals
+arrival rate `λ` times mean residence time `W`. It holds for any stable system.
+For queueing wait time before service, Kingman's G/G/1 heavy-traffic
+approximation gives:
+
+`E[W_q] ≈ (ρ / (1 − ρ)) · ((c_a² + c_s²) / 2) · τ`
+
+where `ρ = λ·τ < 1` is utilization, `τ` is mean service time, and `c_a², c_s²`
+are the squared coefficients of variation of inter-arrival and service times.
+Wait time explodes hyperbolically as `ρ → 1` and scales linearly with arrival
+and service variance.
 
 **Rules.**
 
@@ -373,6 +438,10 @@ regardless of distribution.
   doc).
 - **QD-2** State `λ`, target `W`, and derived `L` when choosing a pool/queue
   bound; do not pick round numbers.
+- **QD-3** Target steady-state pool utilization at `ρ ≤ 0.70–0.80` so the
+  Kingman factor `ρ / (1 − ρ)` stays bounded (`≤ 4`). Reduce service-time
+  variance `c_s²` (by splitting heavy jobs into dedicated pools as in
+  `scaling.QueueWorkersHeavy` and bounding batch sizes) before adding workers.
 
 ### 6.3 Alignment & sizing arithmetic
 
@@ -386,10 +455,67 @@ are `⌈s/P⌉ = (s + P − 1) / P`.
   float for byte counts or offsets.
 - **AL-2** Alignment masks require `A` to be a power of two; assert it.
 
+### 6.4 Retry budgets, jitter & stale-snapshot placement
+
+**Result.**
+
+1. *Metastable retry amplification:* Without a budget, `k` retry attempts
+   multiply downstream load by up to `k×` during an outage, keeping utilization
+   `ρ > 1` even after the root cause clears. A token-ratio budget (`retry.Budget`)
+   bounds total load at `(1 + r) · λ`.
+2. *Decorrelated / full jitter:* Unjittered or narrow symmetric backoff keeps
+   synchronized failure waves correlated across attempts; drawing from `[0, cap]`
+   (`retry.JitterFull`) or `[cap/2, cap]` (`websocket.ts` reconnect jitter)
+   disperses arrival spikes in `O(1)` rounds.
+3. *Power of two choices (`d = 2`) under stale load snapshots:* Deterministic
+   argmin over a periodically mirrored load table routes every concurrent caller
+   to the same lowest-score lane until the next refresh (Mitzenmacher, 2000).
+   Sampling `d = 2` eligible lanes (`ovrt_dispatch::decide_power_of_two`) drops
+   maximum queue depth from `Θ(log N / log log N)` to `Θ(log log N)`. In addition,
+   expected-latency scoring must use exact rational scaling
+   `ewma · (concurrency + inflight) / concurrency` rather than integer division
+   `1 + inflight / concurrency` so sub-capacity load is never hidden.
+
+**Rules.**
+
+- **RB-1** Every retry loop on a shared dependency must pair bounded attempts
+  with jitter (`JitterFull` or `JitterEqual`) and a token-ratio `retry.Budget`
+  (or circuit breaker) to cap retry amplification.
+- **PL-1** Load-aware placement must penalize partial sub-capacity load
+  continuously and use `decide_power_of_two` when routing across stale mirrored
+  lane snapshots.
+
+### 6.5 Decidability & boolean minimization of rule engines (ISOP)
+
+**Result.** By Rice's theorem and the unsolvability of the Halting Problem, any
+Turing-complete policy or routing DSL makes termination and semantic equivalence
+undecidable. Keeping authorization (`server-kit/go/policy`) and targeting rules
+restricted to finite boolean predicates over bounded structures guarantees total
+evaluation and permits exact boolean minimization via the Minato–Morreale
+Irredundant Sum-of-Products (ISOP) recurrence over a care/don't-care interval
+`[L, U]` (`policy.MinatoMorrealeISOP`, `Engine.Analyze`).
+
+**Rules.**
+
+- **DEC-1** Policy, feature-flag, and agent-guard DSLs must remain
+  non-Turing-complete (no unbounded loops, no general recursion; see CP-01/CP-02).
+- **DEC-2** Use `Engine.Analyze` in tests or CI reviews to detect shadowed allow
+  rules (`Allow_i ∧ ¬Deny == 0`) and redundant policies before shipping policy
+  changes.
+
 ### Citations (6)
 
 - Little, "A Proof for the Queuing Formula L = λW," *Operations Research* 9(3),
   1961.
+- Kingman, "The single server queue in heavy traffic," *Proc. Cambridge Philos.
+  Soc.* 57, 1961.
+- Mitzenmacher, "The Power of Two Choices in Randomized Load Balancing," *IEEE
+  TPDS* 12(10), 2001, and "How Useful Is Old Information?" *IEEE TPDS* 11(1),
+  2000.
+- Minato, "Fast Generation of Irredundant Sum-of-Products Forms from Binary
+  Decision Diagrams," SASIMI 1992; Morreale, "Recursive Operators for Prime
+  Implicant and Irredundant Normal Form Determination," *IEEE Trans. Computers*
+  19(6), 1970.
 - GCRA ≡ token bucket equivalence (rate `1/T`, bucket `(τ+1)/T`).
   <https://brandur.org/rate-limiting> · LimoncelliNetworks/Cruz, σ-ρ arrival
   curves.

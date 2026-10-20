@@ -53,12 +53,14 @@ Rules:
 
 ## Load optimization
 
-Placement is argmin over measured expected latency:
+Placement is argmin over measured expected latency (with `decide_power_of_two`
+available when routing across stale mirrored snapshots to prevent Mitzenmacher
+stale-information herding):
 
 ```text
-expected_ns(lane) = ewma_ns x (1 + inflight / max_concurrency)
+expected_ns(lane) = ewma_ns * (max_concurrency + inflight) / max_concurrency
 score(lane)       = expected_ns - affinityBonus(if locality key hits)
-select            = argmin score, subject to hard filters
+select            = argmin score (or d=2 power-of-two choice), subject to hard filters
 ```
 
 Where each ingredient comes from:

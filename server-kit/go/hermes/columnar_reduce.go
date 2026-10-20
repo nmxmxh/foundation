@@ -210,6 +210,41 @@ func (v *Float64Vector) SumValid() Reduction[float64] {
 	return Reduction[float64]{Value: sum, Count: count}
 }
 
+// SumValidCompensated returns the Neumaier-compensated sum over present rows,
+// with nulls filled by 0 (FP-3). Use this when summing ill-conditioned float64
+// columns with large magnitude swings or alternating-sign cancellation.
+func (v *Float64Vector) SumValidCompensated() Reduction[float64] {
+	sum, count := sumFloat64ValidNeumaier(v.values, v.validity.words)
+	return Reduction[float64]{Value: sum, Count: count}
+}
+
+func sumFloat64ValidNeumaier(values []float64, validity []uint64) (float64, int) {
+	var sum, comp float64
+	count := 0
+	n := len(values)
+	for w, word := range validity {
+		if word == 0 {
+			continue
+		}
+		base, end := wordSpan(w, n)
+		if base >= end {
+			break
+		}
+		count += bits.OnesCount64(word)
+		for i := base; i < end; i++ {
+			x := math.Float64frombits(math.Float64bits(values[i]) & maskBit(word, uint(i-base)))
+			t := sum + x
+			if math.Abs(sum) >= math.Abs(x) {
+				comp += (sum - t) + x
+			} else {
+				comp += (x - t) + sum
+			}
+			sum = t
+		}
+	}
+	return sum + comp, count
+}
+
 // MinValid returns the minimum over present rows, with nulls filled by +Inf.
 //
 // NaN in a present row is ignored rather than propagated: both `v < best` and
