@@ -169,6 +169,8 @@ Read in order:
 | Document | Purpose |
 | --- | --- |
 | `foundation_distribution.md` | CLI bootstrap, registry boundaries, agent bundle, license verification |
+| [Experimental Linux architecture](foundation_linux_experimental.md) | Proposed minimal Linux images, portable runtime, device boundaries, security, and research |
+| [Experimental Linux phased plan](foundation_linux_plan.md) | Proposed implementation stages, failure tests, support gates, and evidence requirements |
 | `scaffold_manifest.md` | Scaffold manifest columns, update modes, safe maintenance workflow |
 | `scaffold_ownership_boundary.md` | What Foundation may change in an existing project and what it must never touch |
 | `foundation_project_standardization.md` | Project drift measurement, `appkit` extraction plan |
