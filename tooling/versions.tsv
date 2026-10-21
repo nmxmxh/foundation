@@ -33,7 +33,7 @@
 # is range-checked as 16, and only the leading integer is compared.
 #
 # key	value	class	supported	notes
-GO_VERSION	1.26	reversible	current	Go toolchain for builds and CI; wrapper substrate, no persisted state.
+GO_VERSION	1.26.10	reversible	current	Go toolchain for builds and CI; wrapper substrate, no persisted state.
 NODE_VERSION	24	reversible	current	Node for frontend build and CI.
 ALPINE_VERSION	3.23	reversible	current	Base image for Go build and runtime stages.
 MIGRATE_VERSION	v4.17.0	reversible	current	golang-migrate CLI image; the tool is stateless, the migrations it applies are not.

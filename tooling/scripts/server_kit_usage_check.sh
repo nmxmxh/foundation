@@ -80,11 +80,11 @@ check_no_internal_path() {
   local label="$1"
   shift
   local found=""
-  local root
+  local root candidate_file
   for root in "$target/internal" "$target/backend/internal"; do
     [[ -d "$root" ]] || continue
-    while IFS= read -r path; do
-      found+="${path#$target/}"$'\n'
+    while IFS= read -r candidate_file; do
+      found+="${candidate_file#$target/}"$'\n'
     done < <(find "$root" "$@" 2>/dev/null)
   done
   if [[ -n "$found" ]]; then
@@ -149,7 +149,7 @@ if [[ -f "$target/.foundation" && -d "$target/internal" ]]; then
   check_no_project_match "services use Foundation event bus" "type .*Bus struct|type .*EventBus" "$target/internal/service"
   check_no_project_match "services use Foundation cache/Redis clients" "type .*Cache struct|type .*Redis|redis\\.NewClient\\(|redis\\.NewClusterClient\\(" "$target/internal/service"
   check_no_project_match "services use Foundation database executors" "\"database/sql\"|sql\\.(DB|Tx|Rows|Row)|pgxpool\\.New|pgxpool\\.ParseConfig|pgx\\.Connect" "$target/internal/service"
-  check_no_project_match "services use Foundation worker/runtime primitives" "type .*Worker|type .*Queue|go func\\(|time\\.NewTicker\\(" "$target/internal/service"
+  check_no_project_match "services use Foundation worker/runtime primitives" "type .*Worker|type .*Queue.*(struct|interface|map\\[|chan|\\[\\])|go func\\(|time\\.NewTicker\\(" "$target/internal/service"
   check_no_project_match "internal code avoids legacy map handler bridges" "NormalizeHandler|LegacyHandler|QueryMaps|func [A-Za-z0-9_]*Handler\\(fn func\\(context\\.Context, extension\\.Object\\) \\(map\\[string\\]any, error\\)\\)|func adaptHandler\\(" "$target/internal" "$target/cmd"
   check_no_project_match "internal code avoids map payload handler contracts" "type HandlerFunc func\\(context\\.Context, map\\[string\\]any\\)|DomainEventExecutor func\\(context\\.Context, string, map\\[string\\]any\\)" "$target/internal" "$target/cmd"
   check_no_project_match "internal code avoids map-return object handlers" "func .*extension\\.Object.*\\) \\(map\\[string\\]any, error\\)" "$target/internal" "$target/cmd"

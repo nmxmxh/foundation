@@ -1,5 +1,3 @@
 module github.com/nmxmxh/foundation/cmd/ovasabi
 
-go 1.26.0
-
-toolchain go1.26.9
+go 1.26.10

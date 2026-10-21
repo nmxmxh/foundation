@@ -291,6 +291,7 @@ check-init-project:
 	@tests/init_project_test.sh
 
 check-update-project:
+	@python3 tests/go_security_update_test.py
 	@PYTHONDONTWRITEBYTECODE=1 python3 tests/startup_patch_guards_test.py
 	@PYTHONDONTWRITEBYTECODE=1 python3 tests/deep_resource_profiler_test.py
 	@PYTHONDONTWRITEBYTECODE=1 python3 tests/river_retention_patch_test.py
@@ -375,6 +376,7 @@ check-operational-excellence:
 	@tooling/scripts/operational_excellence_check.sh .
 
 check-go-fix:
+	@bash tests/standalone_go_tools_test.sh
 	@tooling/scripts/go_fix_check.sh .
 
 check-version-consistency:
@@ -387,6 +389,7 @@ check-go-static-analysis:
 	@tooling/scripts/go_static_analysis_check.sh .
 
 check-rust-static-analysis:
+	@bash tests/rust_dependency_check_test.sh
 	@tooling/scripts/rust_static_analysis_check.sh .
 
 check-ts-static-analysis:
@@ -477,6 +480,7 @@ check-domain-contract-consistency:
 	@tooling/scripts/domain_contract_consistency_check.sh .
 
 check-server-kit-usage:
+	@bash tests/server_kit_queue_contract_test.sh
 	@tooling/scripts/server_kit_usage_check.sh .
 
 check-server-kit-module-parity:
@@ -499,7 +503,7 @@ bench-zerocopy-linux:
 	else \
 		docker run --rm -v "$$(pwd):/work" -w /work/server-kit/go \
 			-e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomod -e TMPDIR=/tmp \
-			golang:1.26 sh -c \
+			golang:1.26.10 sh -c \
 			"go test ./hermessnapshot -v -run 'TestFileStore' && go test ./hermessnapshot -run '^$$' -bench BenchmarkFileStorePromoteLatest -benchmem -count=3"; \
 	fi
 
@@ -510,6 +514,7 @@ check-app-security-profile:
 	@tooling/scripts/app_security_profile_check.sh .
 
 check-coverage-ratchet:
+	@bash tests/coverage_package_scope_test.sh
 	@FOUNDATION_GO_CACHE_DIR="$(FOUNDATION_GO_CACHE_DIR)" tooling/scripts/coverage_ratchet_check.sh .
 
 # Allocation budgets as a merge gate. Gates allocs/op exactly and B/op with a

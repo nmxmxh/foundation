@@ -316,4 +316,3 @@ func TestValidateTokenAllocationBudget(t *testing.T) {
 		t.Fatalf("ValidateToken exceeded allocation budget: got %.1f allocs/run, want <= 8", allocs)
 	}
 }
-

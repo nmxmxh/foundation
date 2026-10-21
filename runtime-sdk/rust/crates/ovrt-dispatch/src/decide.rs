@@ -95,8 +95,7 @@ impl DispatchRequest {
             value => value,
         };
         let c = u128::from(concurrency);
-        let num = u128::from(stats.ewma_ns)
-            .saturating_mul(c + u128::from(stats.inflight));
+        let num = u128::from(stats.ewma_ns).saturating_mul(c + u128::from(stats.inflight));
         let expected = num / c;
         Some(expected.min(u128::from(u64::MAX)) as u64)
     }
@@ -384,11 +383,9 @@ mod tests {
         // stale snapshot refreshed only after 64 arrivals. Deterministic argmin
         // routes all 64 requests to lane 0 (peak=64), whereas power-of-two spreads
         // arrivals across multiple lanes with peak <= 24.
-        let descriptors: Vec<DispatchLaneDescriptor> =
-            (0..8u16).map(lane).collect();
-        let snapshot: Vec<Option<DispatchLaneStats>> = (0..8u64)
-            .map(|i| stats(5_000 + i * 10))
-            .collect();
+        let descriptors: Vec<DispatchLaneDescriptor> = (0..8u16).map(lane).collect();
+        let snapshot: Vec<Option<DispatchLaneStats>> =
+            (0..8u64).map(|i| stats(5_000 + i * 10)).collect();
 
         let mut argmin_counts = [0u32; 8];
         let mut p2c_counts = [0u32; 8];

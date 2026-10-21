@@ -148,6 +148,14 @@ Enforcement:
   legacy module is the "approved exception" of requirement 4, made explicit.
 - Reviewer gate on untested critical branches.
 
+`make test-coverage` instruments all owned application packages together.
+Calls from another package's tests count toward the called package.
+The source exclusions and coverage threshold remain unchanged.
+Set `GO_COVERAGE_INTEGRATION=true` to include integration tests and their database prerequisites.
+Local runs create disposable test services and remove them after the coverage command.
+CI must provide its configured database and Redis services.
+This lane supplements package floors and critical branch review.
+
 The coverage gate rejects failed test commands and missing recorded packages.
 It preserves diagnostics and leaves the baseline unchanged when evidence is incomplete.
 Package retirement requires explicit baseline review; absent output cannot retire a floor.

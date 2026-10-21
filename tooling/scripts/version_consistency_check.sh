@@ -105,17 +105,19 @@ SITES=(
 "GO_VERSION	templates/.env.example	^GO_VERSION=([0-9.]+)"
 "GO_VERSION	templates/github/workflows/ci.yml	GO_VERSION: \"([0-9.]+)\""
 "GO_VERSION	templates/github/workflows/security.yml	go-version: \"([0-9.]+)\""
-"GO_VERSION	.github/workflows/core-ci.yml	GO_VERSION: \"([0-9.]+)\\.x\""
+"GO_VERSION	.github/workflows/core-ci.yml	GO_VERSION: \"([0-9.]+)\""
 
-# Every module's go directive is a declaration site too. runtime-transport sat
-# on 1.24.1 while the rest of the repo was on 1.26.0 and nothing noticed, which
-# is precisely the drift this row now prevents. The capture takes major.minor,
-# since the directive carries a patch component the toolchain pins do not.
-"GO_VERSION	server-kit/go/go.mod	^go ([0-9]+\\.[0-9]+)"
-"GO_VERSION	runtime-sdk/go/go.mod	^go ([0-9]+\\.[0-9]+)"
-"GO_VERSION	runtime-transport/go/go.mod	^go ([0-9]+\\.[0-9]+)"
-"GO_VERSION	config-contracts/go/go.mod	^go ([0-9]+\\.[0-9]+)"
-"GO_VERSION	cmd/ovasabi/go.mod	^go ([0-9]+\\.[0-9]+)"
+# Enforce security patches in module requirements.
+"GO_VERSION	server-kit/go/go.mod	^go ([0-9.]+)"
+"GO_VERSION	runtime-sdk/go/go.mod	^go ([0-9.]+)"
+"GO_VERSION	runtime-transport/go/go.mod	^go ([0-9.]+)"
+"GO_VERSION	config-contracts/go/go.mod	^go ([0-9.]+)"
+"GO_VERSION	cmd/ovasabi/go.mod	^go ([0-9.]+)"
+
+"GO_VERSION	tooling/math_lab/go.mod	^go ([0-9.]+)"
+"GO_VERSION	templates/backend/go.mod.template	^go ([0-9.]+)"
+"GO_VERSION	templates/docker/docker-compose.yml	GO_VERSION:-([0-9.]+)"
+"GO_VERSION	Makefile	golang:([0-9.]+) sh"
 
 "NODE_VERSION	templates/github/workflows/ci.yml	node-version: \"([0-9]+)\""
 "NODE_VERSION	.github/workflows/core-ci.yml	NODE_VERSION: \"([0-9]+)\""

@@ -71,7 +71,7 @@ services:
       dockerfile: Dockerfile
       target: final
       args:
-        GO_VERSION: "${GO_VERSION:-1.26}"
+        GO_VERSION: "${GO_VERSION:-1.26.10}"
         ALPINE_VERSION: "${ALPINE_VERSION:-3.23}"
         CACHE_NAMESPACE: "${DOCKER_CACHE_NAMESPACE:-ovasabi-foundation-v1}"
         PROJECT_NAME: "${PROJECT_NAME:-server}"

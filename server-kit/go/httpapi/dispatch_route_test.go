@@ -199,4 +199,3 @@ func TestBuildDispatchRequestGETEmptyAndDuplicateQuery(t *testing.T) {
 		t.Fatalf("expected duplicate query parameter error")
 	}
 }
-

@@ -48,6 +48,7 @@ GO_CACHE_DIR ?= $(CURDIR)/.cache/go-build
 GO_MOD_CACHE_DIR ?= $(CURDIR)/.cache/go-mod
 GO_PACKAGE_EXCLUDE_RE ?= /node_modules/|/api/protos/
 GO_COVERAGE_THRESHOLD ?= 95.0
+GO_COVERAGE_INTEGRATION ?= false
 FOUNDATION_VITEST_WORKERS ?= 0
 FOUNDATION_VITEST_SERIAL ?= 1
 MIGRATE_TEST_MAX_RETRIES ?= 12
@@ -479,11 +480,26 @@ test-coverage:
 		echo "No Go module; skipping Go coverage"; \
 		exit 0; \
 	fi; \
+	coverage_tags=""; \
+	started_test_env=0; \
+	if [ "$(GO_COVERAGE_INTEGRATION)" = "true" ]; then \
+		if [ -z "$$CI" ]; then \
+			$(MAKE) test-env-up; \
+			started_test_env=1; \
+			trap 'if [ "$$started_test_env" = "1" ]; then $(MAKE) test-env-down >/dev/null 2>&1 || true; fi' EXIT; \
+		fi; \
+		$(MAKE) migrate-test; \
+		export TEST_INFRA_REQUIRED=true TEST_REDIS_REQUIRED=true; \
+		export TEST_DATABASE_URL="$(TEST_DATABASE_URL)" TEST_REDIS_URL="$(TEST_REDIS_URL)"; \
+		if [ -f "$(TEST_ENV_FILE)" ]; then set -a; . "$(TEST_ENV_FILE)"; set +a; fi; \
+		export DATABASE_URL="$$TEST_DATABASE_URL" REDIS_URL="$$TEST_REDIS_URL"; \
+		coverage_tags="-tags=integration"; \
+	fi; \
 	mkdir -p coverage "$(GO_CACHE_DIR)"; \
 	( cd "$$go_dir" && \
-		packages=$$(GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" go list ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
+		packages=$$(GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" go list $$coverage_tags ./... | grep -Ev '$(GO_PACKAGE_EXCLUDE_RE)'); \
 		if [ -z "$$packages" ]; then echo "No Go packages found"; exit 0; fi; \
-		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" $(GOTEST) -race -count=1 -covermode=atomic -coverprofile="$$root_dir/coverage/go.raw.out" -timeout $(GO_TEST_TIMEOUT) $$packages; \
+		APP_ENV=test GOCACHE="$(GO_CACHE_DIR)" GOMODCACHE="$(GO_MOD_CACHE_DIR)" $(GOTEST) $$coverage_tags -race -count=1 -coverpkg="$$(printf '%s\n' "$$packages" | paste -sd, -)" -covermode=atomic -coverprofile="$$root_dir/coverage/go.raw.out" -timeout $(GO_TEST_TIMEOUT) $$packages; \
 	); \
 	awk 'NR == 1 { print; next } $$0 !~ /\/generated\// && $$0 !~ /\.pb\.go:/' coverage/go.raw.out > coverage/go.owned.out; \
 	go tool cover -func=coverage/go.owned.out | tee coverage/go.summary.txt; \

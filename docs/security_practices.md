@@ -115,6 +115,39 @@ Every exposed feature should add tests for the vulnerability families it touches
 10. Generated production scaffolds must default to authentication enabled, exact allowed origins, and protected operational endpoints. `/metricsz`, `/metricsz/trace`, and operational event views are not public production surfaces.
 11. Every projected scope names its audience. Where a record belongs to particular parties, declare `projectiongw.AudiencePolicy{Mode: AudiencePerRecord}` and set `AudienceConfig.Strict` once every scope is declared, so a scope someone forgot is refused instead of broadcast. Materialize only the fields consumers render: what was never projected cannot leak. See `docs/projection_freshness_contract.md`.
 
+## Advisory 2026-10-20: Rust WASM Hosts
+
+Wasmtime 36.0.14 is affected by critical Cranelift sandbox-escape advisories.
+Foundation requires Wasmtime 36.0.19 in the optional host lane.
+The [Rust runtime practices](rust_runtime_practices.md#dependency-security) define the minimum and audit gate.
+Rebuild affected native hosts and applications before claiming deployed protection.
+
+## Advisory 2026-10-20: Go Certificate Verification
+
+CVE-2026-111943 affects certificate verification in `crypto/x509`.
+The Go team blocks selected intermediate certificates because of security concerns.
+Use Go 1.26.10 or Go 1.27.3, or a later patched release.
+See the [official issue](https://github.com/golang/go/issues/82345) and [release history](https://go.dev/doc/devel/release#go1.26.10).
+
+Foundation requires Go 1.26.10 through module requirements and build defaults.
+`tooling/versions.tsv` defines the exact baseline.
+The consistency guard compares complete patch versions.
+The managed `go_security` patch raises application requirements and preserves newer module requirements.
+It updates Go defaults in Docker, Compose, and environment files.
+It preserves unrelated application configuration.
+
+WARNING: Existing binaries retain their compiled standard library.
+Rebuild and redeploy every Go server, worker, command, and container that verifies certificates.
+Inspect each deployed executable with `go version -m` after replacement.
+Verify critical outbound TLS connections with the rebuilt application.
+Do not bypass certificate verification when a blocked chain fails.
+
+Run `govulncheck ./...` with the patched toolchain for each application module.
+Require successful database retrieval before declaring a scan complete.
+A clean scan does not replace the minimum toolchain requirement.
+New advisories can precede vulnerability database publication.
+The [evidence record](evidence/go_security_2026-10-20.md) states local coverage and deployment limits.
+
 ## Advisory 2026-09-08: Projection Reads Authorized By Tenant Only
 
 **Applies to** every deployment using `projectiongw` where more than one end

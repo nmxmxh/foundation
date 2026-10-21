@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Movement accounting guards cover the declared functions and benchmark fixtures only.
 // They do not measure hardware traffic or inspect an entire program.
 package main

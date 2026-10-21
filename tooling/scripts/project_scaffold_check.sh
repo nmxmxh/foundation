@@ -404,8 +404,8 @@ check_exists "security workflow" "$target/.github/workflows/security.yml"
 check_exists "operations bootstrap" "$target/docs/operations/README.md"
 check_exists "incident record template" "$target/docs/operations/incident_record_template.md"
 check_exists "migration log template" "$target/docs/operations/migration_log.md"
-check_file_contains "ci uses Go 1.26 baseline" "$target/.github/workflows/ci.yml" 'GO_VERSION: "1.26"'
-check_file_contains "security workflow uses Go 1.26 baseline" "$target/.github/workflows/security.yml" 'go-version: "1.26"'
+check_file_contains "ci uses Go security baseline" "$target/.github/workflows/ci.yml" 'GO_VERSION: "1.26.10"'
+check_file_contains "security workflow uses Go security baseline" "$target/.github/workflows/security.yml" 'go-version: "1.26.10"'
 check_file_contains "ci runs Go coverage gate" "$target/.github/workflows/ci.yml" "make test-coverage"
 check_file_contains "ci captures delivery metrics" "$target/.github/workflows/ci.yml" "ci_delivery_metrics.mjs"
 check_file_contains "ci uploads delivery metrics artifact" "$target/.github/workflows/ci.yml" "delivery-metrics/ci-event.json"

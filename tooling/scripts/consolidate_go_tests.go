@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Command consolidate-go-tests merges redundant Go test files into their
 // production-owner test file while preserving declarations and imports.
 //

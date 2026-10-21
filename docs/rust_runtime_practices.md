@@ -98,6 +98,27 @@ Use [RUNTIME-02](performance_lab.md) for source coverage, diagnostic builds, and
    dependency manifests for profile settings.
 
 
+## Dependency security
+
+Audit every discovered Cargo lockfile before Rust formatting, linting, or tests.
+`tooling/scripts/rust_dependency_check.sh` runs bounded `cargo audit` commands.
+Missing lockfiles, vulnerabilities, scanner failures, and unavailable databases fail the check.
+Informational maintenance and unsoundness warnings remain visible.
+Core CI pins `cargo-audit` to version 0.22.2.
+Generated security workflows run the same audit without requiring native application compilation.
+
+Wasmtime execution requires version 36.0.19 or a later compatible patch.
+This minimum addresses the [Cranelift index advisory](https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-897f-g5gm-fmxm)
+and the [AArch64 branch advisory](https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-mghf-wjfp-p5xm).
+Both can permit a sandbox escape from a malicious WASM module.
+The `wasm-runtime` feature remains optional.
+A disabled feature does not justify retaining vulnerable dependency metadata.
+
+Use the managed `rust_security` patch to distribute reviewed manifests and lockfiles from Core.
+Do not modify vendored runtime code inside applications.
+Rebuild and replace native hosts that enabled Wasmtime before claiming deployed protection.
+See the [security evidence](evidence/rust_security_2026-10-20.md) for audit scope and validation limits.
+
 ## Required unit output and registry ownership
 
 Implement `RuntimeUnit::execute(input, output)` and write through `RuntimeOutput`.

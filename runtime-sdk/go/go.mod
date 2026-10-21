@@ -1,8 +1,6 @@
 module github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go
 
-go 1.26.0
-
-toolchain go1.26.9
+go 1.26.10
 
 require github.com/nmxmxh/ovasabi_foundation/server-kit/go v0.0.0
 

@@ -26,7 +26,7 @@ wasm-runtime = ["dep:wasmtime"]
 ovrt-core = { path = "../ovrt-core" }
 ovrt-unit = { path = "../ovrt-unit" }
 ovrt-native = { path = "../ovrt-native" }
-wasmtime = { version = "36", optional = true, default-features = false, features = ["cranelift", "runtime"] }
+wasmtime = { version = "36.0.19", optional = true, default-features = false, features = ["cranelift", "runtime"] }
 
 [dev-dependencies]
 ovrt-parity-fixture = { path = "../ovrt-parity-fixture" }

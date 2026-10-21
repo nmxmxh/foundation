@@ -464,4 +464,3 @@ func TestNormalizeObjectToTransportProto(t *testing.T) {
 		t.Fatalf("expected slow-path validation error")
 	}
 }
-

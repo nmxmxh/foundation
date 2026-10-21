@@ -115,6 +115,74 @@ retarget_version() {
   rm -f "$before"
 }
 
+# Raise Go requirements without reducing newer project requirements.
+# @since 0.0.1
+patch_go_security() {
+  local want file before
+  want="$(version_field GO_VERSION 2)"
+  [[ "$want" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || return 1
+  for file in "$target/go.mod" "$target/go.work"; do
+    [[ -f "$file" ]] || continue
+    before="$(mktemp)"
+    cp "$file" "$before"
+    GO_SECURITY_FLOOR="$want" perl -0pi -e '
+      sub older {
+        my @a = split /\./, shift;
+        my @b = split /\./, $ENV{GO_SECURITY_FLOOR};
+        for my $i (0..2) {
+          my $cmp = ($a[$i] // 0) <=> $b[$i];
+          return $cmp < 0 if $cmp;
+        }
+        return 0;
+      }
+      s/^(go )(\d+\.\d+(?:\.\d+)?)([ \t]*)$/$1 . (older($2) ? $ENV{GO_SECURITY_FLOOR} : $2) . $3/gme;
+      s/^(toolchain go)(\d+\.\d+(?:\.\d+)?)([ \t]*)$/$1 . (older($2) ? $ENV{GO_SECURITY_FLOOR} : $2) . $3/gme;
+    ' "$file"
+    if ! cmp -s "$before" "$file"; then
+      log_patch "Go security floor $want: ${file#$target/}"
+    fi
+    rm -f "$before"
+  done
+  retarget_version "$target/.env" GO_VERSION
+  retarget_version "$target/.env.example" GO_VERSION
+  retarget_version "$target/Dockerfile" GO_VERSION
+  for file in "$target/docker-compose.yml" "$target/docker-compose.dev.yml" "$target/docker-compose.test.yml"; do
+    retarget_version "$file" GO_VERSION
+  done
+}
+
+# Copy reviewed Rust dependency metadata from Core into its read-only references.
+# @since 0.0.1
+patch_rust_security() {
+  local relative source destination
+  for relative in runtime-sdk/rust/Cargo.lock runtime-sdk/rust/crates/ovrt-wasm-host/Cargo.toml; do
+    source="$foundation_root/$relative"
+    destination="$target/foundation/$relative"
+    [[ -f "$destination" ]] || continue
+    if ! cmp -s "$source" "$destination"; then
+      cp "$source" "$destination"
+      log_patch "Rust security metadata: foundation/$relative"
+    fi
+  done
+  local row
+  local assets=(
+    "tooling/scripts/rust_dependency_check.sh:scripts/checks/rust_dependency_check.sh"
+    "tooling/scripts/rust_static_analysis_check.sh:scripts/checks/rust_static_analysis_check.sh"
+    "templates/github/workflows/security.yml:.github/workflows/security.yml"
+    "tooling/scripts/rust_dependency_check.sh:foundation/tooling/scripts/rust_dependency_check.sh"
+    "tooling/scripts/rust_static_analysis_check.sh:foundation/tooling/scripts/rust_static_analysis_check.sh"
+  )
+  for row in "${assets[@]}"; do
+    source="$foundation_root/${row%%:*}"
+    destination="$target/${row#*:}"
+    [[ -d "$(dirname "$destination")" ]] || continue
+    if [[ ! -f "$destination" ]] || ! cmp -s "$source" "$destination"; then
+      cp "$source" "$destination"
+      log_patch "Rust audit control: ${row#*:}"
+    fi
+  done
+}
+
 # report_irreversible_range checks the project's own .env — what Compose
 # actually resolves — against the supported range, and fails the update when an
 # irreversible service is outside it. This is the one version condition that
@@ -1895,7 +1963,7 @@ sync_go_work() {
   local tmp
   tmp="$(mktemp)"
   {
-    printf 'go 1.26.0\n\n'
+    printf 'go %s\n\n' "$(awk '$1 == "go" {print $2; exit}' "$target/go.mod")"
     printf 'use (\n'
     for module in "${modules[@]}"; do
       printf '\t%s\n' "$module"
@@ -3669,7 +3737,7 @@ if [[ "${2:-}" == "--only" ]]; then
   [[ ${#selected_patches[@]} -gt 0 && ${#selected_patches[@]} -le 32 ]] || exit 2
   for name in "${selected_patches[@]}"; do
     case "$name" in
-      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile|nginx_edge_transport|wasm_speed_profile) ;;
+      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile|nginx_edge_transport|wasm_speed_profile|go_security|rust_security) ;;
       *) printf 'unsupported selected patch: %s\n' "$name" >&2; exit 2 ;;
     esac
   done
@@ -3751,6 +3819,9 @@ patch_redundant_foundation_test_files
 sync_go_work
 
 report_irreversible_range
+
+patch_go_security
+patch_rust_security
 
 if [[ "$patched" -eq 0 ]]; then
   printf '[PATCH] no managed scaffold drift found\n'

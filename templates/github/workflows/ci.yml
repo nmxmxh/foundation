@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  GO_VERSION: "1.26"
+  GO_VERSION: "1.26.10"
   # Anchors Postgres version across templates (compose files, .env.example,
   # Dockerfile.postgres) via version-consistency checks. The services block
   # below cannot read this — the env context is unavailable there — so its

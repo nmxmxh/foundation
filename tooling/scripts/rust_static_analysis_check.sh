@@ -39,6 +39,8 @@ if (( ${#manifests[@]} == 0 )); then
   exit 0
 fi
 
+"${0:A:h}/rust_dependency_check.sh" "$target"
+
 required_tools=(cargo rustfmt)
 missing_tools=()
 for tool in "${required_tools[@]}"; do

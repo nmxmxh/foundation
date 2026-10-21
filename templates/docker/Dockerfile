@@ -18,7 +18,7 @@
 #   memory consumer in this graph.
 # =============================================================================
 
-ARG GO_VERSION=1.26
+ARG GO_VERSION=1.26.10
 ARG ALPINE_VERSION=3.23
 ARG CACHE_NAMESPACE=ovasabi-foundation-v1
 
