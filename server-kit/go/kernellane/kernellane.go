@@ -164,9 +164,10 @@ func probeHolePunchInDir(dir string) bool {
 	if err != nil {
 		return false
 	}
+	name := f.Name()
 	defer func() {
-		_ = os.Remove(f.Name())
 		_ = f.Close()
+		_ = os.Remove(name)
 	}()
 
 	payload := make([]byte, BlockSize*2)
