@@ -287,6 +287,9 @@ The server-kit handles this automatically. Clients can request binary format wit
 - [ ] Create `internal/service/<domain>/registration.go`
 - [ ] Register handlers in `internal/registry/`
 - [ ] Write tests in `tests/integration/<domain>_test.go`
+- [ ] Put every `NOT NULL` column without `DEFAULT` in the domain proto
+- [ ] Scan into fields with the same names as the SQL columns
+- [ ] Run `scripts/checks/database_practices_check.sh .` (includes the offline SQL contract check)
 
 ---
 Foundation Domain Guide v{{FOUNDATION_VERSION}}

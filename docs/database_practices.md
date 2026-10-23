@@ -626,6 +626,29 @@ The database (PostgreSQL) is a scarce, vertically scaled, state-oriented resourc
 4. Bootstrap from clean DB must exercise real recurring ingest paths, including duplicate document uploads and recurring business events.
 5. Schema/docs updated in same change set.
 6. Integration tests cover tenant-isolation, race/duplicate prevention, and sensitive-token storage behavior where applicable.
+7. The offline SQL contract check passes (`scripts/checks/sql_contract_alignment_check.go`).
+
+## Offline SQL contract alignment
+
+The check reads `migrations/*.up.sql` and the Go source. It does not need a database. It adds no runtime layer.
+
+The check finds these problems:
+
+* A `SELECT` or `RETURNING` column that is not in the migration table.
+* `Scan` destinations in a different order than the projected columns.
+* `INSERT` or `UPDATE` arguments in a different order than the target columns.
+* An `INSERT` that omits a `NOT NULL` column that has no `DEFAULT`.
+* A skipped `$N` placeholder, or a column count that does not match the values.
+* `ON CONFLICT` columns or `EXCLUDED` references that do not exist.
+* An `UPDATE` or `DELETE` statement without a `WHERE` clause.
+* Hermes `IndexedFields`, `projectionSources`, or `projectedFields` that name unknown tables or columns.
+* A `.down.sql` file that drops tables that no `.up.sql` file creates.
+
+`database_practices_check.sh` and `sql_prepare_check.sh` run the check. When `DATABASE_URL` is set, `sql_prepare_check.sh` also prepares each statement against the live schema.
+
+NOTE: Use the same name for a scan destination and its column. For example, scan `u.email` into `&user.Email`. The check matches names to find swaps.
+
+To accept a statement that the check cannot parse, put `// cp:allow-sql-shape <reason>` on the call line or on the line above it.
 
 ## Field OS observation (2026-02-16)
 

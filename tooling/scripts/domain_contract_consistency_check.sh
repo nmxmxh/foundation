@@ -72,6 +72,49 @@ migration_column_tokens_for_domain() {
   ' "${files[@]}" 2>/dev/null | sort -u || true
 }
 
+all_field_tokens_for_proto_dir() {
+  local proto_dir="$1"
+  rg -o '^[[:space:]]*(repeated[[:space:]]+|optional[[:space:]]+)?([A-Za-z0-9_.<>]+)[[:space:]]+([a-z][A-Za-z0-9_]*)[[:space:]]*=' "$proto_dir" --glob '*.proto' 2>/dev/null |
+    rg -v '(^|:|[[:space:]])option[[:space:]]' |
+    sed -E 's/.*[[:space:]]([a-z][A-Za-z0-9_]*)[[:space:]]*=.*/\1/' |
+    tr '[:upper:]' '[:lower:]' |
+    sort -u || true
+}
+
+primary_table_required_columns_for_domain() {
+  local domain="$1"
+  [[ -d "$target/migrations" ]] || return 0
+  setopt local_options null_glob
+  local files=("$target"/migrations/*.up.sql)
+  (( ${#files} )) || return 0
+  awk -v d="$domain" '
+    FNR==1 { capture=0 }
+    /CREATE[ \t]+TABLE/ {
+      t=$0
+      sub(/.*CREATE[ \t]+TABLE([ \t]+IF[ \t]+NOT[ \t]+EXISTS)?[ \t]+/, "", t)
+      sub(/[ \t("].*/, "", t)
+      gsub(/[`"]/, "", t)
+      sub(/^[a-z0-9_]+\./, "", t)
+      lt = tolower(t)
+      capture = (lt == d || lt == d "s" || lt == d "es")
+      next
+    }
+    capture && /^[ \t]*[a-z][a-z0-9_]*[ \t]/ {
+      c = tolower($1)
+      line = tolower($0)
+      if (c !~ /^(constraint|primary|unique|foreign|check|index|like)$/ &&
+          line ~ /not[ \t]+null/ &&
+          line !~ /default[ \t]/ &&
+          line !~ /generated[ \t]/ &&
+          line !~ /serial/ &&
+          c !~ /^(id|organization_id|org_id|tenant_id|created_at|updated_at|deleted_at|password_hash|token_hash|secret_hash|key_hash|version|seq|sequence)$/) {
+        print c
+      }
+    }
+    capture && /\);/ { capture=0 }
+  ' "${files[@]}" 2>/dev/null | sort -u || true
+}
+
 timestamp_proto_violations() {
   local proto_dir="$1"
   rg -n '^[[:space:]]*(string|int32|int64|uint64|double|float)[[:space:]]+(created_at|updated_at|deleted_at|expires_at|expired_at|occurred_at|reviewed_at|verified_at|scheduled_for|delivered_at|acknowledged_at|published_at|refreshed_at|last_seen_at|first_seen_at|[a-z][A-Za-z0-9_]*(_at|_date))[[:space:]]*=' "$proto_dir" --glob '*.proto' 2>/dev/null || true
@@ -137,6 +180,17 @@ while IFS= read -r service_dir; do
     echo "[WARN] $domain migration timestamp-like columns may need timestamp types"
     echo "$sql_time_bad" | sed 's/^/  /' | head -10
     warnings=$((warnings + 1))
+  fi
+
+  required_sql_cols="$(primary_table_required_columns_for_domain "$domain")"
+  all_proto_fields="$(all_field_tokens_for_proto_dir "$proto_dir")"
+  if [[ -n "$required_sql_cols" && -n "$all_proto_fields" ]]; then
+    missing_req="$(comm -23 <(print -r -- "$required_sql_cols") <(print -r -- "$all_proto_fields") || true)"
+    if [[ -n "$missing_req" ]]; then
+      echo "[WARN] $domain primary table has NOT NULL column(s) without DEFAULT missing from api/protos/$domain:"
+      echo "$missing_req" | sed 's/^/  - /'
+      warnings=$((warnings + 1))
+    fi
   fi
 done < <(find "$service_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
 

@@ -392,10 +392,18 @@ function schemaFromMessage(file, message, index) {
 
   if (fields.length === 0) return undefined;
 
+  // Proto field-number order is the wire contract; keep it for positional checks.
+  const fieldOrder = message.field
+    .filter((field) => field.name)
+    .slice()
+    .sort((left, right) => (left.number ?? 0) - (right.number ?? 0))
+    .map((field) => field.name);
+
   const key = `${domainInfo.domain}.${collection}`;
   return {
     collection,
     domain: domainInfo.domain,
+    fieldOrder,
     fields,
     idField: idField ?? "id",
     key,
@@ -647,7 +655,24 @@ function renderSchema(schema) {
   const registerName = `register${base}Store`;
   const hookName = `use${base}Snapshot`;
 
+  const fieldsTypeName = `${base}Fields`;
+  const fieldOrderName = `${variableBase}FieldOrder`;
+  const requiredFieldsName = `${variableBase}RequiredFields`;
+  const fieldLines = schema.fields
+    .map((field) => `  readonly ${JSON.stringify(field.name)}${field.optional ? "?" : ""}: ${tsTypeForField(field)};`)
+    .join("\n");
+  const requiredFields = schema.fields.filter((field) => !field.optional).map((field) => field.name);
+
   return `export type ${typeName} = Record<string, unknown>;
+
+/** Typed field shape for ${schema.protoPackage}.${schema.messageName}. Use it to narrow ${typeName} records. */
+export type ${fieldsTypeName} = {
+${fieldLines}
+};
+
+export const ${fieldOrderName} = ${JSON.stringify(schema.fieldOrder)} as const satisfies readonly (keyof ${fieldsTypeName})[];
+
+export const ${requiredFieldsName} = ${JSON.stringify(requiredFields)} as const satisfies readonly (keyof ${fieldsTypeName})[];
 
 export type ${storeName} = TenantProjectionStore<${typeName}>;
 
@@ -895,6 +920,33 @@ export const createPrototypeTenantStores = (
     return domain.registerStore(tenantId, domain.createStore(tenantId, records, cache));
   });
 `;
+}
+
+function tsTypeForField(field) {
+  let base;
+  if (field.enumValues && field.enumValues.length > 0) {
+    base = field.enumValues.map((value) => JSON.stringify(value)).join(" | ");
+  } else {
+    switch (field.kind) {
+      case "bool":
+        base = "boolean";
+        break;
+      case "int":
+      case "float":
+        base = "number";
+        break;
+      case "bytes":
+        base = "Uint8Array | string";
+        break;
+      case "object":
+        base = "Record<string, unknown>";
+        break;
+      default:
+        base = "string";
+    }
+  }
+  if (field.repeated) return `readonly (${base})[]`;
+  return field.optional ? `${base} | null` : base;
 }
 
 function stableJson(value) {

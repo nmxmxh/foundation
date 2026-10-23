@@ -127,6 +127,13 @@ else
   echo "[OK] SQL parameters in arithmetic carry explicit casts"
 fi
 
+script_dir="${0:A:h}"
+if command -v go >/dev/null 2>&1 && [[ -f "$script_dir/sql_contract_alignment_check.go" ]]; then
+  if ! go run "$script_dir/sql_contract_alignment_check.go" "$target"; then
+    failed=1
+  fi
+fi
+
 if [[ "$failed" -ne 0 ]]; then
   echo "database practices check failed"
   exit 1

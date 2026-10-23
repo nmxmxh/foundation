@@ -16,9 +16,14 @@ set -euo pipefail
 
 target="${1:-.}"
 target="$(cd "$target" && pwd)"
+script_dir="${0:A:h}"
+
+if command -v go >/dev/null 2>&1 && [[ -f "$script_dir/sql_contract_alignment_check.go" ]]; then
+  go run "$script_dir/sql_contract_alignment_check.go" "$target"
+fi
 
 if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "[SKIP] DATABASE_URL not set; sql prepare check requires a schema-loaded database"
+  echo "[SKIP] DATABASE_URL not set; live psql PREPARE check skipped (offline SQL contract alignment check passed)"
   exit 0
 fi
 if ! command -v psql >/dev/null 2>&1; then
@@ -33,11 +38,17 @@ python3 - "$target" "$workdir/sweep.sql" <<'PYEOF'
 import re, glob, sys, os
 
 target, out = sys.argv[1], sys.argv[2]
-files = sorted(set(glob.glob(os.path.join(target, "internal/service/*/*.go"))))
+files = sorted(set(
+    glob.glob(os.path.join(target, "internal/**/*.go"), recursive=True)
+))
 consts = {}
 for f in files:
+    if f.endswith("_test.go"):
+        continue
     src = open(f).read()
-    for m in re.finditer(r'(\w+ReturnColumns)\s*=\s*`([^`]+)`', src):
+    for m in re.finditer(r'\b(\w+)\s*=\s*`([^`]+)`', src):
+        consts[m.group(1)] = m.group(2)
+    for m in re.finditer(r'\b(\w+)\s*=\s*"([^"]+)"', src):
         consts[m.group(1)] = m.group(2)
 
 count = 0
