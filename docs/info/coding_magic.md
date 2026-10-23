@@ -699,8 +699,19 @@ As blocks expand, the kernel punches holes backwards into the consumed archive:
 
 The physical storage returns to the operating system immediately.
 The logical file size stays constant.
-Crash safety is preserved.
 Disk write amplification disappears.
+
+A naive forward punch causes catastrophic failure on fatal errors or crashes:
+
+- Punching ahead of write confirmation destroys source data before destination verification.
+- Punching inside the sliding dictionary window corrupts back-references.
+- Decompressors reading a punched archive see zeroes instead of magic headers.
+
+A production reclaimer enforces three safety invariants:
+
+1. **Two-phase commit**: punch only after destination chunks are written, synced, and checksum verified.
+2. **Lookback window lag**: protect 32 KiB for DEFLATE and 8 MiB for Zstandard behind the read head.
+3. **Watermarked restarts**: persist durable byte checkpoints so crashes resume cleanly instead of reading zeroed holes.
 
 ### Bit-parallel SWAR (SIMD-Within-A-Register)
 
