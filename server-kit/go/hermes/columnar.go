@@ -196,6 +196,15 @@ func (v *StringVector) Offsets() []int32 { return v.offsets }
 // Bytes returns the contiguous backing byte buffer.
 func (v *StringVector) Bytes() []byte { return v.buf }
 
+// BytesSlice returns a view of the backing bytes for string i.
+// The returned slice aliases the vector's buffer and must not be mutated.
+func (v *StringVector) BytesSlice(i int) []byte {
+	if i < 0 || i >= v.n {
+		return nil
+	}
+	return v.buf[v.offsets[i]:v.offsets[i+1]]
+}
+
 // ValueAt returns the string at index i. The result is a safe, independently
 // owned copy of the backing bytes, so callers may retain it freely. On hot
 // scan paths where the value is consumed transiently (e.g. length or hashing),

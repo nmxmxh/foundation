@@ -1192,6 +1192,7 @@ func lanePayload(lane LaneDiagnostics) transport.Object {
 		"resume_supported":     transport.Bool(lane.ResumeSupported),
 		"distributed_state":    transport.Bool(lane.DistributedState),
 		"zero_copy_available":  transport.Bool(lane.ZeroCopyAvailable),
+		"hole_punch_available": transport.Bool(lane.HolePunchAvailable),
 		"mptcp_available":      transport.Bool(lane.MPTCPAvailable),
 		"quic_available":       transport.Bool(lane.QUICAvailable),
 		"kernel_pacing":        transport.Bool(lane.KernelPacing),

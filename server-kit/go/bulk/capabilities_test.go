@@ -23,21 +23,33 @@ func TestDetectPlatformCapabilitiesProbedReflectsRealProbes(t *testing.T) {
 	if caps.ZeroCopyAvailable != kernellane.ZeroCopyFileSupported() {
 		t.Fatalf("zero-copy capability %v disagrees with kernellane probe", caps.ZeroCopyAvailable)
 	}
+	if caps.HolePunchAvailable != kernellane.HolePunchSupported() {
+		t.Fatalf("hole-punch capability %v disagrees with kernellane probe", caps.HolePunchAvailable)
+	}
 	if caps.MPTCPAvailable != kernellane.MultipathTCPSupported(ctx) {
 		t.Fatalf("mptcp capability %v disagrees with kernellane probe", caps.MPTCPAvailable)
 	}
-	if caps.Notes["zero_copy"] == "" || caps.Notes["mptcp"] == "" {
+	if caps.Notes["zero_copy"] == "" || caps.Notes["hole_punch"] == "" || caps.Notes["mptcp"] == "" {
 		t.Fatalf("expected explanatory notes, got %#v", caps.Notes)
 	}
 }
 
 func TestCapabilityNotesDescribeBothStates(t *testing.T) {
-	if zeroCopyNote(true) == zeroCopyNote(false) || mptcpNote(true) == mptcpNote(false) {
+	if zeroCopyNote(true) == zeroCopyNote(false) ||
+		mptcpNote(true) == mptcpNote(false) ||
+		holePunchNote(true) == holePunchNote(false) {
 		t.Fatal("note helpers must distinguish available from fallback")
 	}
-	for _, s := range []string{zeroCopyNote(true), zeroCopyNote(false), mptcpNote(true), mptcpNote(false)} {
+	for _, s := range []string{
+		zeroCopyNote(true), zeroCopyNote(false),
+		mptcpNote(true), mptcpNote(false),
+		holePunchNote(true), holePunchNote(false),
+	} {
 		if s == "" {
 			t.Fatal("note must not be empty")
 		}
 	}
+	// Exercise platform static detector and linux MPTCP file reader
+	_ = DetectPlatformCapabilities()
+	_ = linuxMPTCPEnabled()
 }

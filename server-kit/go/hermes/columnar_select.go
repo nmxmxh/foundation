@@ -240,6 +240,62 @@ func (b *RecordBatch) SelectString(name string, op CompareOp, operand string) (S
 	return sel, nil
 }
 
+// SelectContainsByte builds a selection bitmap selecting rows where the string
+// column contains the target byte. It scans contiguous Arrow memory with ScanByte.
+func (b *RecordBatch) SelectContainsByte(name string, target byte) (SelectionBitmap, error) {
+	vec, err := b.column(name)
+	if err != nil {
+		return SelectionBitmap{}, err
+	}
+	stringVec, ok := vec.(*StringVector)
+	if !ok {
+		return SelectionBitmap{}, fmt.Errorf("hermes column %q is not string-comparable (%d)", name, vec.Type())
+	}
+	sel := NewSelectionBitmap(b.Rows)
+	for i := 0; i < stringVec.Len(); i++ {
+		slice := stringVec.BytesSlice(i)
+		if len(slice) > 0 && ScanByte(slice, target) >= 0 {
+			sel.words[i>>6] |= 1 << uint(i&63)
+		}
+	}
+	sel.maskValidity(vec)
+	return sel, nil
+}
+
+// SelectContainsDelimiter builds a selection bitmap selecting rows where the string
+// column contains either b1 or b2. It scans contiguous Arrow memory with ScanDelimiter2.
+func (b *RecordBatch) SelectContainsDelimiter(name string, b1, b2 byte) (SelectionBitmap, error) {
+	sel := NewSelectionBitmap(b.Rows)
+	if err := b.SelectContainsDelimiterInto(&sel, name, b1, b2); err != nil {
+		return SelectionBitmap{}, err
+	}
+	return sel, nil
+}
+
+// SelectContainsDelimiterInto evaluates delimiter matches directly into dst.
+// It executes with strictly zero heap allocations.
+func (b *RecordBatch) SelectContainsDelimiterInto(dst *SelectionBitmap, name string, b1, b2 byte) error {
+	vec, err := b.column(name)
+	if err != nil {
+		return err
+	}
+	stringVec, ok := vec.(*StringVector)
+	if !ok {
+		return fmt.Errorf("hermes column %q is not string-comparable (%d)", name, vec.Type())
+	}
+	if dst.Len() < b.Rows {
+		return fmt.Errorf("destination bitmap length %d is smaller than batch rows %d", dst.Len(), b.Rows)
+	}
+	for i := 0; i < stringVec.Len(); i++ {
+		slice := stringVec.BytesSlice(i)
+		if len(slice) > 0 && ScanDelimiter2(slice, b1, b2) >= 0 {
+			dst.words[i>>6] |= 1 << uint(i&63)
+		}
+	}
+	dst.maskValidity(vec)
+	return nil
+}
+
 // SumFloat64Selected reduces a float64 column over the selected rows only,
 // visiting values by bit-scan so unselected memory is never touched. Null
 // handling is inherited from the constructors (null rows are never selected);

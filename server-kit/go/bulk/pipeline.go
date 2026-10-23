@@ -29,6 +29,7 @@ type Pipeline struct {
 	objectStoreBackend string
 	distributedState   bool
 	zeroCopyAvailable  bool
+	holePunchAvailable bool
 	mptcpAvailable     bool
 	quicAvailable      bool
 	kernelPacing       bool
@@ -57,6 +58,7 @@ func NewPipeline(opts PipelineOptions) (*Pipeline, error) {
 		objectStoreBackend: backend,
 		distributedState:   opts.DistributedState,
 		zeroCopyAvailable:  opts.ZeroCopyAvailable,
+		holePunchAvailable: opts.HolePunchAvailable,
 		mptcpAvailable:     opts.MPTCPAvailable,
 		quicAvailable:      opts.QUICAvailable,
 		kernelPacing:       opts.KernelPacing,
@@ -104,6 +106,9 @@ func (p *Pipeline) HandleControl(ctx context.Context, envelope transport.Envelop
 }
 
 func (p *Pipeline) AcceptPartEnvelope(ctx context.Context, envelope transport.Envelope, reader io.Reader) (transport.Envelope, error) {
+	if err := ctx.Err(); err != nil {
+		return p.failureEnvelope(envelope, "", err), err
+	}
 	if envelope.EventType != EventPartAcceptRequest {
 		err := apperrors.New(apperrors.CodeValidation, "unsupported bulk part event")
 		return p.failureEnvelope(envelope, "", err), err
@@ -189,6 +194,7 @@ func (p *Pipeline) Diagnostics(plan TransferPlan) LaneDiagnostics {
 		ResumeSupported:    true,
 		DistributedState:   p.distributedState,
 		ZeroCopyAvailable:  p.zeroCopyAvailable,
+		HolePunchAvailable: p.holePunchAvailable,
 		MPTCPAvailable:     p.mptcpAvailable,
 		QUICAvailable:      p.quicAvailable,
 		KernelPacing:       p.kernelPacing,

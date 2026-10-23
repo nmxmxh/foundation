@@ -1123,6 +1123,7 @@ Requirements:
 7. A `ReadTimeout` on `http.Server` must be zero when large bodies are served.
    It covers the whole body read, not one read.
 8. Every new request-path package carries an allocation ceiling test.
+9. Hot parsing loops and columnar scans must operate with zero heap allocations (`AllocsPerRun == 0`). Prefer stack scanners (`parseEncodingScores`), Arrow buffer slice views (`BytesSlice`), Bounds Check Elimination (BCE) hoisting, and 64-bit SWAR/SIMD delimiter kernels over dynamic maps or per-element `string` materialization.
 
 Rationale:
 

@@ -213,6 +213,7 @@ type LaneDiagnostics struct {
 	ResumeSupported    bool              `json:"resume_supported"`
 	DistributedState   bool              `json:"distributed_state"`
 	ZeroCopyAvailable  bool              `json:"zero_copy_available"`
+	HolePunchAvailable bool              `json:"hole_punch_available"`
 	MPTCPAvailable     bool              `json:"mptcp_available"`
 	QUICAvailable      bool              `json:"quic_available"`
 	KernelPacing       bool              `json:"kernel_pacing"`
@@ -263,6 +264,7 @@ type PipelineOptions struct {
 	ObjectStoreBackend string
 	DistributedState   bool
 	ZeroCopyAvailable  bool
+	HolePunchAvailable bool
 	MPTCPAvailable     bool
 	QUICAvailable      bool
 	KernelPacing       bool

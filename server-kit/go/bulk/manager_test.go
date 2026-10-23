@@ -246,6 +246,22 @@ func TestManagerCompressedChunksCompleteButRejectRawRange(t *testing.T) {
 	if _, err := mgr.AcceptPart(ctx, oversizedPlan.TransferID, desc, strings.NewReader("aaa")); !apperrors.Is(err, apperrors.CodeQuotaExceeded) {
 		t.Fatalf("oversized gzip AcceptPart() error = %v", err)
 	}
+
+	badDigestPlan, err := mgr.Initiate(ctx, InitiateRequest{
+		TransferID:  "transfer_gzip_bad_digest",
+		TotalSize:   2,
+		ChunkSize:   2,
+		MaxMemory:   2,
+		Compression: EncodingGzip,
+		Deadline:    fixedNow().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("bad digest Initiate() error = %v", err)
+	}
+	badDesc := PartDescriptor{PartNumber: 0, Size: 2, ExpectedRawSHA256: "0000000000000000000000000000000000000000000000000000000000000000"}
+	if _, err := mgr.AcceptPart(ctx, badDigestPlan.TransferID, badDesc, strings.NewReader("aa")); err == nil {
+		t.Fatalf("expected digest mismatch error for compressed part")
+	}
 }
 
 func TestManagerAutoCompressionKeepsIncompressibleChunksIdentity(t *testing.T) {
@@ -868,6 +884,48 @@ func TestAcceptSignedPartEmitsSuccessFailureAsDependency(t *testing.T) {
 		ExpectedRawSHA256: shaHex("x"),
 	}); !apperrors.Is(err, apperrors.CodeDependency) {
 		t.Fatalf("AcceptSignedPart event failure error = %v", err)
+	}
+
+	gzipPlan := plan
+	gzipPlan.TransferID = "signed_gzip_fail"
+	gzipPlan.Compression = EncodingGzip
+	if err := state.SavePlan(ctx, gzipPlan); err != nil {
+		t.Fatalf("SavePlan() error = %v", err)
+	}
+	if _, err := mgr.AcceptSignedPart(ctx, gzipPlan.TransferID, PartDescriptor{PartNumber: 0, Size: 1, ExpectedRawSHA256: shaHex("x")}); !apperrors.Is(err, apperrors.CodeNotImplemented) {
+		t.Fatalf("expected CodeNotImplemented for compressed signed part, got %v", err)
+	}
+
+	oversizeSignedPlan := plan
+	oversizeSignedPlan.TransferID = "signed_oversize_fail"
+	if err := state.SavePlan(ctx, oversizeSignedPlan); err != nil {
+		t.Fatalf("SavePlan() error = %v", err)
+	}
+	if _, err := store.PutStream(ctx, partObjectKey(oversizeSignedPlan, 0), strings.NewReader("xx"), 2, objectstore.PutOptions{}); err != nil {
+		t.Fatalf("PutStream() error = %v", err)
+	}
+	if _, err := mgr.AcceptSignedPart(ctx, oversizeSignedPlan.TransferID, PartDescriptor{
+		PartNumber:        0,
+		Size:              1,
+		ExpectedRawSHA256: shaHex("x"),
+	}); !apperrors.Is(err, apperrors.CodeQuotaExceeded) {
+		t.Fatalf("expected CodeQuotaExceeded for oversized signed part, got %v", err)
+	}
+
+	badDigestSignedPlan := plan
+	badDigestSignedPlan.TransferID = "signed_bad_digest_fail"
+	if err := state.SavePlan(ctx, badDigestSignedPlan); err != nil {
+		t.Fatalf("SavePlan() error = %v", err)
+	}
+	if _, err := store.PutStream(ctx, partObjectKey(badDigestSignedPlan, 0), strings.NewReader("x"), 1, objectstore.PutOptions{}); err != nil {
+		t.Fatalf("PutStream() error = %v", err)
+	}
+	if _, err := mgr.AcceptSignedPart(ctx, badDigestSignedPlan.TransferID, PartDescriptor{
+		PartNumber:        0,
+		Size:              1,
+		ExpectedRawSHA256: "0000000000000000000000000000000000000000000000000000000000000000",
+	}); !apperrors.Is(err, apperrors.CodeValidation) {
+		t.Fatalf("expected CodeValidation for bad digest signed part, got %v", err)
 	}
 }
 

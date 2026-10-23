@@ -3,6 +3,7 @@ package compress
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -134,6 +135,30 @@ func BenchmarkMiddlewareReusesWriter(b *testing.B) {
 				wrapped.ServeHTTP(rec, req)
 			}
 		})
+	}
+}
+
+func BenchmarkPreferredEncoding(b *testing.B) {
+	header := "gzip, deflate, br;q=0.9, zstd;q=0.8, *;q=0.1"
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = PreferredEncoding(header)
+	}
+}
+
+func BenchmarkPreferredEncoding_Adversarial(b *testing.B) {
+	header := "   ,,,   gzip  ;  q = 0.5   ,   br  ;  q = 0.999999   ,  zstd ; q=NaN  ,  deflate ; q=-1.0 ; foo=bar  "
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = PreferredEncoding(header)
+	}
+}
+
+func BenchmarkPreferredEncoding_Oversized(b *testing.B) {
+	header := strings.Repeat("gzip;q=0.5, deflate;q=0.4, br;q=0.9, zstd;q=0.8, ", 100)
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = PreferredEncoding(header)
 	}
 }
 

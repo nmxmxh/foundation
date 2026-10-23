@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
@@ -539,4 +540,151 @@ func BenchmarkHermesColumnarBitmapFilterCachedBatch(b *testing.B) {
 		sink = sum
 	}
 	_ = sink
+}
+
+func TestSelectContainsByteAndDelimiter(t *testing.T) {
+	ss := []string{"admin,user", "guest", "root;sudo", "audit,compliance", "viewer", "system:internal"}
+	vv := []bool{true, true, true, true, true, true}
+	stringVec, err := newStringVectorFromSlice(ss, vv)
+	if err != nil {
+		t.Fatalf("newStringVectorFromSlice failed: %v", err)
+	}
+	batch := &RecordBatch{
+		Columns: []Column{{Name: "roles", Data: stringVec}},
+		Rows:    len(ss),
+	}
+
+	selComma, err := batch.SelectContainsByte("roles", ',')
+	if err != nil {
+		t.Fatalf("SelectContainsByte failed: %v", err)
+	}
+	if selComma.Count() != 2 || !selComma.IsSelected(0) || !selComma.IsSelected(3) {
+		t.Fatalf("SelectContainsByte comma unexpected selection: count=%d", selComma.Count())
+	}
+
+	selDelim, err := batch.SelectContainsDelimiter("roles", ',', ';')
+	if err != nil {
+		t.Fatalf("SelectContainsDelimiter failed: %v", err)
+	}
+	if selDelim.Count() != 3 || !selDelim.IsSelected(0) || !selDelim.IsSelected(2) || !selDelim.IsSelected(3) {
+		t.Fatalf("SelectContainsDelimiter unexpected selection: count=%d", selDelim.Count())
+	}
+
+	if _, err := batch.SelectContainsByte("missing", ','); err == nil {
+		t.Fatal("expected error on missing column")
+	}
+	if _, err := batch.SelectContainsDelimiter("missing", ',', ';'); err == nil {
+		t.Fatal("expected error on missing column")
+	}
+
+	short := NewSelectionBitmap(batch.Rows - 1)
+	if err := batch.SelectContainsDelimiterInto(&short, "roles", ',', ';'); err == nil {
+		t.Fatal("expected error when destination bitmap is too small")
+	}
+}
+
+func TestSelectContainsDelimiterAllocations(t *testing.T) {
+	const n = 1000
+	ss := make([]string, n)
+	vv := make([]bool, n)
+	for i := 0; i < n; i++ {
+		ss[i] = "tag1,tag2,tag3"
+		vv[i] = true
+	}
+	vec, err := newStringVectorFromSlice(ss, vv)
+	if err != nil {
+		t.Fatalf("create vector: %v", err)
+	}
+	batch := &RecordBatch{
+		Columns: []Column{{Name: "tags", Data: vec}},
+		Rows:    n,
+	}
+
+	// The only allocation allowed is the 1 slice header for the resulting SelectionBitmap words.
+	// Zero string or byte buffer allocations may occur.
+	allocs := testing.AllocsPerRun(100, func() {
+		sel, err := batch.SelectContainsDelimiter("tags", ',', ';')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sel.Count() != n {
+			t.Fatalf("expected count %d, got %d", n, sel.Count())
+		}
+	})
+
+	if allocs != 1 {
+		t.Fatalf("expected exactly 1 alloc/run (the bitmap), got %f", allocs)
+	}
+}
+
+// BenchmarkSelectContainsDelimiter measures filtering across 10,000 string rows.
+// It compares the vectorized delimiter scan against the naive string copy lane.
+func BenchmarkSelectContainsDelimiter(b *testing.B) {
+	const n = 10000
+	ss := make([]string, n)
+	vv := make([]bool, n)
+	for i := 0; i < n; i++ {
+		vv[i] = true
+		switch i % 4 {
+		case 0:
+			ss[i] = "admin,operator,developer"
+		case 1:
+			ss[i] = "guest"
+		case 2:
+			ss[i] = "billing;auditor"
+		case 3:
+			ss[i] = "system:service:worker"
+		}
+	}
+	vec, err := newStringVectorFromSlice(ss, vv)
+	if err != nil {
+		b.Fatalf("create vector: %v", err)
+	}
+	batch := &RecordBatch{
+		Columns: []Column{{Name: "roles", Data: vec}},
+		Rows:    n,
+	}
+
+	b.Run("vectorized_scan", func(b *testing.B) {
+		b.ReportAllocs()
+		var sink int
+		for b.Loop() {
+			sel, err := batch.SelectContainsDelimiter("roles", ',', ';')
+			if err != nil {
+				b.Fatal(err)
+			}
+			sink = sel.Count()
+		}
+		_ = sink
+	})
+
+	b.Run("vectorized_scan_reused_bitmap", func(b *testing.B) {
+		b.ReportAllocs()
+		sel := NewSelectionBitmap(n)
+		var sink int
+		for b.Loop() {
+			clear(sel.words)
+			if err := batch.SelectContainsDelimiterInto(&sel, "roles", ',', ';'); err != nil {
+				b.Fatal(err)
+			}
+			sink = sel.Count()
+		}
+		_ = sink
+	})
+
+	b.Run("naive_string_copy", func(b *testing.B) {
+		b.ReportAllocs()
+		var sink int
+		for b.Loop() {
+			sel := NewSelectionBitmap(n)
+			for i := 0; i < n; i++ {
+				val := vec.ValueAt(i)
+				if strings.Contains(val, ",") || strings.Contains(val, ";") {
+					sel.words[i>>6] |= 1 << uint(i&63)
+				}
+			}
+			sink = sel.Count()
+		}
+		_ = sink
+	})
 }

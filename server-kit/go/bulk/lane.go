@@ -24,6 +24,7 @@ func (p *Pipeline) PlanLane(req LaneRequest) LanePlan {
 	diagnostic := p.Diagnostics(req.Plan)
 	diagnostic.Ingress = string(selected)
 	diagnostic.ZeroCopyAvailable = req.Capabilities.ZeroCopyAvailable
+	diagnostic.HolePunchAvailable = req.Capabilities.HolePunchAvailable
 	diagnostic.MPTCPAvailable = req.Capabilities.MPTCPAvailable
 	diagnostic.QUICAvailable = req.QUICAdapterAvailable
 	diagnostic.KernelPacing = req.Capabilities.KernelPacing

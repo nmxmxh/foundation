@@ -530,11 +530,18 @@ func TestDecompressWithEncodingVariants(t *testing.T) {
 
 func TestPreferredEncodingHonorsQValuesAndWildcard(t *testing.T) {
 	cases := map[string]string{
-		"gzip;q=0, deflate;q=1": EncodingDeflate,
-		"*;q=1":                 EncodingBrotli,
-		"br;q=0, gzip;q=0":      "",
-		"zstd;q=bad, gzip;q=0":  EncodingZstd,
-		"":                      "",
+		"gzip;q=0, deflate;q=1":       EncodingDeflate,
+		"*;q=1":                       EncodingBrotli,
+		"br;q=0, gzip;q=0":            "",
+		"zstd;q=bad, gzip;q=0":        EncodingZstd,
+		"":                            "",
+		"   ":                         "",
+		"BR, GZIP;q=0.5":              EncodingBrotli,
+		"gzip; q = 0.8 , br; q= 0.2 ": EncodingBrotli,
+		"deflate;q=0.9, zstd;q=0.1":   EncodingZstd,
+		"gzip;q=0.0":                  "",
+		"unknown;q=1.0, gzip":         EncodingGzip,
+		"text/html, gzip;q=0.8, br;q=0.9, *;q=0.1": EncodingBrotli,
 	}
 	for header, want := range cases {
 		if got := PreferredEncoding(header); got != want {
@@ -543,6 +550,25 @@ func TestPreferredEncodingHonorsQValuesAndWildcard(t *testing.T) {
 	}
 	if !CanGzip("br, GZIP") {
 		t.Fatalf("CanGzip should be case insensitive")
+	}
+	if CanGzip("br, deflate, zstd") {
+		t.Fatalf("CanGzip should be false when gzip is absent")
+	}
+
+	// Zero-allocation assertion: PreferredEncoding must not allocate on the heap.
+	header := "gzip, deflate, br;q=0.9, zstd;q=0.8"
+	allocs := testing.AllocsPerRun(100, func() {
+		_ = PreferredEncoding(header)
+	})
+	if allocs != 0 {
+		t.Fatalf("PreferredEncoding allocated %f allocs/run, want 0", allocs)
+	}
+
+	allocsGzip := testing.AllocsPerRun(100, func() {
+		_ = CanGzip(header)
+	})
+	if allocsGzip != 0 {
+		t.Fatalf("CanGzip allocated %f allocs/run, want 0", allocsGzip)
 	}
 }
 

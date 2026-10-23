@@ -109,6 +109,19 @@ func TestPipelineConstructionDefaultsAndValidation(t *testing.T) {
 	if diag.Ingress != "app-owned" || diag.ObjectStoreBackend != "unknown" {
 		t.Fatalf("default diagnostics = %+v", diag)
 	}
+
+	customPipeline, err := NewPipeline(PipelineOptions{
+		Manager:            mgr,
+		Ingress:            "custom-ingress",
+		ObjectStoreBackend: "custom-s3",
+	})
+	if err != nil {
+		t.Fatalf("NewPipeline(custom) error = %v", err)
+	}
+	customDiag := customPipeline.Diagnostics(TransferPlan{ChunkSize: 1, MaxMemory: 1, Compression: EncodingIdentity})
+	if customDiag.Ingress != "custom-ingress" || customDiag.ObjectStoreBackend != "custom-s3" {
+		t.Fatalf("custom diagnostics = %+v", customDiag)
+	}
 }
 
 func TestPipelineAcceptHTTPPartUsesStreamReader(t *testing.T) {
@@ -841,17 +854,18 @@ func TestDetectPlatformCapabilitiesAreConservative(t *testing.T) {
 	}
 	opts := caps.PipelineOptions()
 	if caps.ZeroCopyAvailable != opts.ZeroCopyAvailable ||
+		caps.HolePunchAvailable != opts.HolePunchAvailable ||
 		caps.MPTCPAvailable != opts.MPTCPAvailable ||
 		caps.KernelPacing != opts.KernelPacing {
 		t.Fatalf("options do not mirror capabilities: caps=%+v opts=%+v", caps, opts)
 	}
 
 	darwin := detectPlatformCapabilities("darwin", func() bool { return true })
-	if darwin.ZeroCopyAvailable || darwin.MPTCPAvailable || darwin.Notes["fallback"] == "" {
+	if darwin.ZeroCopyAvailable || darwin.HolePunchAvailable || darwin.MPTCPAvailable || darwin.Notes["fallback"] == "" {
 		t.Fatalf("darwin capabilities = %+v", darwin)
 	}
 	linuxEnabled := detectPlatformCapabilities("linux", func() bool { return true })
-	if !linuxEnabled.ZeroCopyAvailable || !linuxEnabled.KernelPacing || !linuxEnabled.MPTCPAvailable {
+	if !linuxEnabled.ZeroCopyAvailable || !linuxEnabled.HolePunchAvailable || !linuxEnabled.KernelPacing || !linuxEnabled.MPTCPAvailable {
 		t.Fatalf("linux enabled capabilities = %+v", linuxEnabled)
 	}
 	linuxDisabled := detectPlatformCapabilities("linux", func() bool { return false })
@@ -902,6 +916,17 @@ func TestPipelinePlansAdaptiveLanes(t *testing.T) {
 	if untrustedDescriptor.Selected != LaneHTTPStream {
 		t.Fatalf("untrusted descriptor lane = %+v", untrustedDescriptor)
 	}
+	noDescriptor := pipeline.PlanLane(LaneRequest{
+		Plan:                base,
+		Part:                part,
+		Locality:            "same-host",
+		TrustedProducer:     true,
+		DescriptorAvailable: false,
+		HTTPStreamAvailable: true,
+	})
+	if noDescriptor.Selected != LaneHTTPStream {
+		t.Fatalf("no descriptor lane = %+v", noDescriptor)
+	}
 
 	signed := pipeline.PlanLane(LaneRequest{
 		Plan:                base,
@@ -912,6 +937,16 @@ func TestPipelinePlansAdaptiveLanes(t *testing.T) {
 	})
 	if signed.Selected != LaneSignedObjectStore {
 		t.Fatalf("signed lane = %+v", signed)
+	}
+	signedNonIdentity := pipeline.PlanLane(LaneRequest{
+		Plan:                TransferPlan{TotalSize: 10, ChunkSize: 5, MaxMemory: 5, Compression: "gzip"},
+		Part:                part,
+		Locality:            "internet",
+		DirectObjectStore:   true,
+		HTTPStreamAvailable: true,
+	})
+	if signedNonIdentity.Selected != LaneHTTPStream {
+		t.Fatalf("signed non-identity lane = %+v", signedNonIdentity)
 	}
 
 	kernel := pipeline.PlanLane(LaneRequest{
@@ -928,6 +963,19 @@ func TestPipelinePlansAdaptiveLanes(t *testing.T) {
 	})
 	if kernel.Selected != LaneKernelZeroCopy {
 		t.Fatalf("kernel lane = %+v", kernel)
+	}
+	kernelNotDetected := pipeline.PlanLane(LaneRequest{
+		Plan:                 base,
+		Part:                 part,
+		Locality:             "internet",
+		HTTPStreamAvailable:  true,
+		KernelAdapterEnabled: true,
+		Capabilities: PlatformCapabilities{
+			OS: "linux",
+		},
+	})
+	if kernelNotDetected.Selected != LaneHTTPStream {
+		t.Fatalf("kernel not detected lane = %+v", kernelNotDetected)
 	}
 	kernelNoPacing := pipeline.PlanLane(LaneRequest{
 		Plan:                 base,

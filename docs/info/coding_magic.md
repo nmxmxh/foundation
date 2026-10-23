@@ -687,6 +687,50 @@ Pass pointers instead of payload copies.
 
 When the CPU does less visible work and throughput jumps, the result feels supernatural.
 
+### Sparse hole punching (the HatchZip trick)
+
+Traditional decompression requires double the storage: compressed source plus uncompressed target.
+The HatchZip trick collapses peak storage to the uncompressed size plus a tiny delta.
+
+As blocks expand, the kernel punches holes backwards into the consumed archive:
+
+- Linux `FALLOC_FL_PUNCH_HOLE`
+- Darwin APFS `fcntl(F_PUNCHHOLE)`
+
+The physical storage returns to the operating system immediately.
+The logical file size stays constant.
+Crash safety is preserved.
+Disk write amplification disappears.
+
+### Bit-parallel SWAR (SIMD-Within-A-Register)
+
+You do not always need vector registers to achieve SIMD speed.
+An ordinary 64-bit general-purpose register holds 8 ASCII bytes.
+
+Using Alan Mycroft's zero-byte algorithm:
+`hasZero = (v - 0x0101010101010101) & ^v & 0x8080808080808080`
+
+The ALU evaluates 8 characters simultaneously in three clock cycles.
+Conditional branches vanish from the inner loop.
+Throughput multiplies fourfold without specialized build dependencies.
+
+### Vectorized delimiter scanning (archsimd)
+
+When 256-bit AVX2 vectors load 32 bytes in a single cycle, character scanning reaches memory bus limits.
+Vector equality masks check all 32 bytes in parallel.
+A trailing-zero count instruction extracts the match index in one clock cycle.
+Scanning throughput jumps from 2 GB/s to 30+ GB/s.
+
+### Compiler bounds check elimination (the Roc trick)
+
+Safe languages enforce bounds checks on every slice index.
+In tight inner loops, these checks trigger pipeline stalls.
+
+Placing an explicit slice length check before the loop gives the compiler a mathematical proof:
+All indices inside the loop are guaranteed valid.
+The compiler eliminates every bounds check from the generated machine code.
+Safety stays intact while loop latency drops.
+
 ### Cache locality
 
 The CPU is not a theorem prover.
@@ -773,6 +817,9 @@ These are the magical ideas that map directly to our foundation work.
 - `SKIP LOCKED` and bounded concurrency as controlled summoning
 - goroutine ownership as a lifecycle seal: every launched worker needs a cancel path and terminal observation
 - channels as local law, not proof of safety: send, receive, close, buffer, and shutdown priority must be named
+- `kernellane.PunchHole` as extent-level deallocation: freeing disk blocks in-place without logical truncation or file copying
+- `hermes` Arrow columnar SWAR/AVX2 scanning: turning substring and multi-tag filtering into branchless bitwise masks
+- stack scanners in `compress.PreferredEncoding`: parsing HTTP quality values without heap allocation
 
 ### TypeScript / runtime-transport
 

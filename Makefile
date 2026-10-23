@@ -2,7 +2,7 @@
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-scaffold-idempotency check-scaffold-seed-drift check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator check-agent-change \
 	check-core-validation-contract check-contract-drift check-runtime-contract-field-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
-	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-package-licenses check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux \
+	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-package-licenses check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux bench-holepunch-linux \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet check-benchmark-ratchet check-transport-ladder check-system-profiling lifecycle-manifest
 
 .DEFAULT_GOAL := help
@@ -224,7 +224,7 @@ test-bench-history:
 bench-simd:
 	@echo "Running opt-in Go SIMD columnar benchmarks (GOEXPERIMENT=simd)..."
 	@mkdir -p "$(FOUNDATION_GO_CACHE_DIR)"
-	@cd server-kit/go && GOEXPERIMENT=simd GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -run='TestFloat64VectorSum' -bench='BenchmarkColumnarFloat64Sum' -benchmem -count=3 ./hermes
+	@cd server-kit/go && GOEXPERIMENT=simd GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -run='TestFloat64VectorSum|TestScanDelimiter' -bench='BenchmarkColumnarFloat64Sum|BenchmarkScanDelimiter' -benchmem -count=3 ./hermes
 
 test-bench-go:
 	@echo "Running bounded Foundation benchmarks..."
@@ -505,6 +505,22 @@ bench-zerocopy-linux:
 			-e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomod -e TMPDIR=/tmp \
 			golang:1.26.10 sh -c \
 			"go test ./hermessnapshot -v -run 'TestFileStore' && go test ./hermessnapshot -run '^$$' -bench BenchmarkFileStorePromoteLatest -benchmem -count=3"; \
+	fi
+
+# bench-holepunch-linux exercises the kernellane hole-punching primitive
+# (fallocate FALLOC_FL_PUNCH_HOLE) on a real Linux kernel. Inside Docker
+# Desktop on macOS it runs against Linux container storage; run directly
+# on a Linux host with ext4/XFS for native block-reclaim verification.
+bench-holepunch-linux:
+	@if [ "$$(uname -s)" = "Linux" ]; then \
+		cd server-kit/go && \
+		go test ./kernellane -v -run 'TestPunchHole' && \
+		go test ./kernellane -run '^$$' -bench BenchmarkPunchHole -benchmem -count=3; \
+	else \
+		docker run --rm -v "$$(pwd):/work" -w /work/server-kit/go \
+			-e GOCACHE=/tmp/gocache -e GOMODCACHE=/tmp/gomod -e TMPDIR=/tmp \
+			golang:1.26.10 sh -c \
+			"go test ./kernellane -v -run 'TestPunchHole' && go test ./kernellane -run '^$$' -bench BenchmarkPunchHole -benchmem -count=3"; \
 	fi
 
 check-lifecycle-manifest:

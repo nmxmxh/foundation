@@ -10,12 +10,13 @@ import (
 )
 
 type PlatformCapabilities struct {
-	OS                string            `json:"os"`
-	ZeroCopyAvailable bool              `json:"zero_copy_available"`
-	MPTCPAvailable    bool              `json:"mptcp_available"`
-	QUICAvailable     bool              `json:"quic_available"`
-	KernelPacing      bool              `json:"kernel_pacing"`
-	Notes             map[string]string `json:"notes,omitempty"`
+	OS                 string            `json:"os"`
+	ZeroCopyAvailable  bool              `json:"zero_copy_available"`
+	HolePunchAvailable bool              `json:"hole_punch_available"`
+	MPTCPAvailable     bool              `json:"mptcp_available"`
+	QUICAvailable      bool              `json:"quic_available"`
+	KernelPacing       bool              `json:"kernel_pacing"`
+	Notes              map[string]string `json:"notes,omitempty"`
 }
 
 func DetectPlatformCapabilities() PlatformCapabilities {
@@ -32,9 +33,11 @@ func detectPlatformCapabilities(goos string, mptcpEnabled func() bool) PlatformC
 		return caps
 	}
 	caps.ZeroCopyAvailable = true
+	caps.HolePunchAvailable = true
 	caps.KernelPacing = true
 	caps.MPTCPAvailable = mptcpEnabled()
 	caps.Notes["zero_copy"] = "candidate only; adapter must manage pinned-buffer lifetime and completions"
+	caps.Notes["hole_punch"] = "candidate only; adapter must manage sparse extent boundaries"
 	caps.Notes["kernel_pacing"] = "candidate only; adapter must set socket pacing policy"
 	if caps.MPTCPAvailable {
 		caps.Notes["mptcp"] = "kernel MPTCP appears enabled"
@@ -55,8 +58,10 @@ func detectPlatformCapabilities(goos string, mptcpEnabled func() bool) PlatformC
 func DetectPlatformCapabilitiesProbed(ctx context.Context) PlatformCapabilities {
 	caps := DetectPlatformCapabilities() // always returns an initialized Notes map
 	caps.ZeroCopyAvailable = kernellane.ZeroCopyFileSupported()
+	caps.HolePunchAvailable = kernellane.HolePunchSupported()
 	caps.MPTCPAvailable = kernellane.MultipathTCPSupported(ctx)
 	caps.Notes["zero_copy"] = zeroCopyNote(caps.ZeroCopyAvailable)
+	caps.Notes["hole_punch"] = holePunchNote(caps.HolePunchAvailable)
 	caps.Notes["mptcp"] = mptcpNote(caps.MPTCPAvailable)
 	return caps
 }
@@ -68,6 +73,13 @@ func zeroCopyNote(available bool) string {
 	return "kernel copy_file_range unavailable; portable copy fallback"
 }
 
+func holePunchNote(available bool) string {
+	if available {
+		return "verified: sparse hole punching supported on host"
+	}
+	return "sparse hole punching unavailable; standard allocation fallback"
+}
+
 func mptcpNote(available bool) string {
 	if available {
 		return "verified: MPTCP negotiated on loopback probe"
@@ -77,11 +89,12 @@ func mptcpNote(available bool) string {
 
 func (c PlatformCapabilities) PipelineOptions() PipelineOptions {
 	return PipelineOptions{
-		ZeroCopyAvailable: c.ZeroCopyAvailable,
-		MPTCPAvailable:    c.MPTCPAvailable,
-		QUICAvailable:     c.QUICAvailable,
-		KernelPacing:      c.KernelPacing,
-		Attributes:        cloneStringMap(c.Notes),
+		ZeroCopyAvailable:  c.ZeroCopyAvailable,
+		HolePunchAvailable: c.HolePunchAvailable,
+		MPTCPAvailable:     c.MPTCPAvailable,
+		QUICAvailable:      c.QUICAvailable,
+		KernelPacing:       c.KernelPacing,
+		Attributes:         cloneStringMap(c.Notes),
 	}
 }
 

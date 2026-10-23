@@ -30,8 +30,8 @@ func HTTPMiddleware(enabled bool, minBytes, level int) func(http.Handler) http.H
 				next.ServeHTTP(w, r)
 				return
 			}
-			// Resolve the encoding once. PreferredEncoding allocates a map, and
-			// Compress would otherwise parse the same header again.
+			// Resolve the encoding once. PreferredEncoding scans the header on the
+			// stack with zero heap allocations.
 			encoding := PreferredEncoding(r.Header.Get("Accept-Encoding"))
 			if encoding == "" {
 				next.ServeHTTP(w, r)

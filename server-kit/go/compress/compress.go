@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -446,53 +447,157 @@ func decompressFlate(data []byte, maxDecoded int64) ([]byte, error) {
 	return out, nil
 }
 
+type encodingScores struct {
+	br      float64
+	zstd    float64
+	gzip    float64
+	deflate float64
+	any     float64
+}
+
+// PreferredEncoding returns the highest priority supported compression encoding
+// specified by the Accept-Encoding header. It parses the header with zero heap
+// allocations, scanning tokens and q-values on the stack.
 func PreferredEncoding(acceptEncoding string) string {
-	qvalues := parseEncodingQValues(acceptEncoding)
+	if acceptEncoding == "" {
+		return ""
+	}
+	scores := parseEncodingScores(acceptEncoding)
 	switch {
-	case qvalues[EncodingBrotli] > 0:
+	case scores.br > 0:
 		return EncodingBrotli
-	case qvalues[EncodingZstd] > 0:
+	case scores.zstd > 0:
 		return EncodingZstd
-	case qvalues[EncodingGzip] > 0:
+	case scores.gzip > 0:
 		return EncodingGzip
-	case qvalues[EncodingDeflate] > 0:
+	case scores.deflate > 0:
 		return EncodingDeflate
-	case qvalues["*"] > 0:
+	case scores.any > 0:
 		return EncodingBrotli
 	default:
 		return ""
 	}
 }
 
+// CanGzip reports whether the Accept-Encoding header accepts gzip.
 func CanGzip(acceptEncoding string) bool {
-	return strings.Contains(strings.ToLower(acceptEncoding), "gzip")
+	return containsFoldASCII(acceptEncoding, "gzip")
 }
 
-func parseEncodingQValues(acceptEncoding string) map[string]float64 {
-	values := map[string]float64{}
-	for item := range strings.SplitSeq(strings.ToLower(strings.TrimSpace(acceptEncoding)), ",") {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		parts := strings.Split(item, ";")
-		name := strings.TrimSpace(parts[0])
-		if name == "" {
-			continue
-		}
-		qvalue := 1.0
-		for _, part := range parts[1:] {
-			part = strings.TrimSpace(part)
-			if !strings.HasPrefix(part, "q=") {
-				continue
-			}
-			if parsed, err := strconv.ParseFloat(strings.TrimPrefix(part, "q="), 64); err == nil {
-				qvalue = parsed
-			}
-		}
-		values[name] = qvalue
+func containsFoldASCII(s, substr string) bool {
+	if len(substr) == 0 {
+		return true
 	}
-	return values
+	if len(s) < len(substr) {
+		return false
+	}
+	end := len(s) - len(substr)
+	for i := 0; i <= end; i++ {
+		if equalFoldASCII(s[i:i+len(substr)], substr) {
+			return true
+		}
+	}
+	return false
+}
+
+func equalFoldASCII(s, target string) bool {
+	if len(s) != len(target) {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c1 := s[i]
+		c2 := target[i]
+		if c1 >= 'A' && c1 <= 'Z' {
+			c1 += 'a' - 'A'
+		}
+		if c2 >= 'A' && c2 <= 'Z' {
+			c2 += 'a' - 'A'
+		}
+		if c1 != c2 {
+			return false
+		}
+	}
+	return true
+}
+
+func parseEncodingScores(s string) encodingScores {
+	var scores encodingScores
+	i := 0
+	n := len(s)
+	for i < n {
+		// Skip whitespace and commas
+		for i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == ',') {
+			i++
+		}
+		if i >= n {
+			break
+		}
+
+		// Read encoding token name
+		nameStart := i
+		for i < n && s[i] != ';' && s[i] != ',' && s[i] != ' ' && s[i] != '\t' {
+			i++
+		}
+		nameEnd := i
+
+		// Skip whitespace after name until ';' or ',' or end
+		for i < n && (s[i] == ' ' || s[i] == '\t') {
+			i++
+		}
+
+		q := 1.0
+		// Parse parameters if ';'
+		for i < n && s[i] == ';' {
+			i++ // skip ';'
+			for i < n && (s[i] == ' ' || s[i] == '\t') {
+				i++
+			}
+			paramStart := i
+			for i < n && s[i] != ';' && s[i] != ',' {
+				i++
+			}
+			param := s[paramStart:i]
+			// Trim trailing whitespace from param
+			for len(param) > 0 && (param[len(param)-1] == ' ' || param[len(param)-1] == '\t') {
+				param = param[:len(param)-1]
+			}
+			if strings.HasPrefix(param, "q=") || strings.HasPrefix(param, "Q=") {
+				if val, err := strconv.ParseFloat(param[2:], 64); err == nil {
+					if math.IsNaN(val) || val <= 0.0 {
+						q = 0.0
+					} else if math.IsInf(val, 0) || val > 1.0 {
+						q = 1.0
+					} else {
+						q = val
+					}
+				}
+			}
+		}
+
+		// Match token name case-insensitively
+		name := s[nameStart:nameEnd]
+		switch {
+		case equalFoldASCII(name, EncodingBrotli):
+			scores.br = q
+		case equalFoldASCII(name, EncodingZstd):
+			scores.zstd = q
+		case equalFoldASCII(name, EncodingGzip):
+			scores.gzip = q
+		case equalFoldASCII(name, EncodingDeflate):
+			scores.deflate = q
+		case name == "*":
+			scores.any = q
+		}
+
+		// Advance past comma if present
+		for i < n && s[i] != ',' {
+			i++
+		}
+		if i < n && s[i] == ',' {
+			i++
+		}
+	}
+	return scores
 }
 
 func normalizeBrotliLevel(level int) int {

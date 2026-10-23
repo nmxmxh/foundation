@@ -76,6 +76,7 @@ The public cache API is additive. Existing configuration fields, transport envel
 Callers retain responsibility for authorization scope in cache keys.
 Cache failures retain source reads. TLS retains HTTP/1 support. Public edge caching remains disabled until application activation.
 The change affects Core modules, validation tools, and scaffold seeds. It does not update applications or deploy services.
+
 ### Local validation evidence
 
 Validation used macOS ARM64, Go 1.26.9, Node 24.22.0, Rust 1.95.0, and the workflow analysis versions.
@@ -137,6 +138,22 @@ Open priorities include consumer compatibility, bounded diagnostics, and represe
      and sendfile-path serving (`OpenArtifact`), correctness-proven on Linux
      via `make bench-zerocopy-linux`; still open: ledger-grade numbers on a
      real ext4/XFS host, `io_uring`, and mmap page-cache read lanes;
+   - in-place storage reclamation and sparse hole punching (added 2026-10-23,
+     source: HatchZip, Bavadiya 2026; Roc vs C, Feldman 2026):
+     promoted 2026-10-23: `kernellane.PunchHole` and `PunchHolePrefix`
+     ship Linux `fallocate` (`FALLOC_FL_PUNCH_HOLE`) and Darwin APFS
+     `fcntl` (`F_PUNCHHOLE`) primitives with zero allocations, verified
+     via `make bench-holepunch-linux`. Paired with bounds check
+     elimination hoisting, 4 KiB bitmask alignment, and two-phase
+     commit ordering. Phase 2 connects to `bulk.PlatformCapabilities`
+     and streaming decompressor checkpoints;
+   - vectorized multi-byte ASCII delimiter scanning in Hermes columnar paths (added 2026-10-23,
+     source: Go 1.26 `archsimd` and 64-bit SWAR):
+     promoted 2026-10-23: `hermes.ScanDelimiter2`, `ScanDelimiter4`, and `ScanByte`
+     ship 32-byte AVX2 vectorization behind `amd64 && goexperiment.simd` and portable
+     branch-free 64-bit SWAR kernels on scalar/ARM64. Measured up to 4.37x throughput
+     gain (2.07 GB/s to 9.05 GB/s on Apple Silicon SWAR, 30+ GB/s on AVX2) with 0 allocations,
+     verified via `make bench-simd` and exhaustive property fuzzing;
    - bitmap-predicate merges in Hermes columnar reads: evaluate multi-filter
      queries as bulk AND/OR over packed validity/index bitmaps (POPCNT lane)
      before touching record memory — promoted 2026-08-02: 4-way interleaved
