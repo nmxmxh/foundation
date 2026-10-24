@@ -14,6 +14,7 @@ import (
 
 	"github.com/andybalholm/brotli"
 	"github.com/klauspost/compress/zstd"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 const (
@@ -48,6 +49,19 @@ var (
 // CompressZstd compresses data with Zstd at the configured level.
 func CompressZstd(data []byte) ([]byte, error) {
 	return zstdEncoder.EncodeAll(data, make([]byte, 0, len(data))), nil
+}
+
+// CompressZstdWithArena compresses data with Zstd into memory allocated from the provided scratch arena.
+// If arena is nil or cannot satisfy the allocation, it falls back to CompressZstd.
+func CompressZstdWithArena(arena *scratch.Arena, data []byte) ([]byte, error) {
+	if arena == nil {
+		return CompressZstd(data)
+	}
+	destBuf, err := arena.Alloc(len(data))
+	if err != nil {
+		return CompressZstd(data)
+	}
+	return zstdEncoder.EncodeAll(data, destBuf[:0]), nil
 }
 
 // Encoder pools keep per-codec state off the request path. A brotli writer at
@@ -268,6 +282,22 @@ func CompressWithEncoding(data []byte, encoding string, level int) ([]byte, stri
 	}
 }
 
+// CompressWithArena compresses data with the preferred encoding using the scratch arena when eligible.
+func CompressWithArena(arena *scratch.Arena, data []byte, acceptEncoding string, level int) ([]byte, string, error) {
+	return CompressWithEncodingArena(arena, data, PreferredEncoding(acceptEncoding), level)
+}
+
+// CompressWithEncodingArena compresses data using a specific encoding and scratch arena.
+func CompressWithEncodingArena(arena *scratch.Arena, data []byte, encoding string, level int) ([]byte, string, error) {
+	switch encoding {
+	case EncodingZstd:
+		compressed, err := CompressZstdWithArena(arena, data)
+		return compressed, EncodingZstd, err
+	default:
+		return CompressWithEncoding(data, encoding, level)
+	}
+}
+
 func CompressBest(data []byte, level int) ([]byte, string, error) {
 	compressed, err := CompressBrotli(data, level)
 	if err == nil && len(compressed) < len(data) {
@@ -416,6 +446,74 @@ func decompressZstd(data []byte, maxDecoded int64) ([]byte, error) {
 		return nil, ErrDecodedTooLarge
 	}
 	return out, nil
+}
+
+func decompressZstdWithArena(arena *scratch.Arena, data []byte, maxDecoded int64) ([]byte, error) {
+	if arena == nil {
+		return decompressZstd(data, maxDecoded)
+	}
+	allocSize := int(maxDecoded)
+	if avail := arena.Available(); avail > 0 && avail < allocSize {
+		allocSize = avail
+	}
+	destBuf, err := arena.Alloc(allocSize)
+	if err != nil {
+		return decompressZstd(data, maxDecoded)
+	}
+	out, err := zstdDecoder.DecodeAll(data, destBuf[:0])
+	if err != nil {
+		if errors.Is(err, zstd.ErrDecoderSizeExceeded) {
+			return nil, ErrDecodedTooLarge
+		}
+		return nil, err
+	}
+	if int64(len(out)) > maxDecoded {
+		return nil, ErrDecodedTooLarge
+	}
+	return out, nil
+}
+
+// DecompressZstdWithArena decompresses Zstd data into the provided scratch arena.
+func DecompressZstdWithArena(arena *scratch.Arena, data []byte, maxDecoded int64) ([]byte, error) {
+	maxDecoded = normalizeDecodeLimit(maxDecoded)
+	return decompressZstdWithArena(arena, data, maxDecoded)
+}
+
+// DecompressWithArena decodes data under DefaultMaxDecodedBytes using the scratch arena when available.
+func DecompressWithArena(arena *scratch.Arena, data []byte) ([]byte, error) {
+	return DecompressLimitArena(arena, data, DefaultMaxDecodedBytes)
+}
+
+// DecompressLimitArena decodes data with an explicit limit using the scratch arena.
+func DecompressLimitArena(arena *scratch.Arena, data []byte, maxDecoded int64) ([]byte, error) {
+	maxDecoded = normalizeDecodeLimit(maxDecoded)
+	if out, err := decompressZstdWithArena(arena, data, maxDecoded); err == nil {
+		return out, nil
+	}
+	return DecompressLimit(data, maxDecoded)
+}
+
+// DecompressWithEncodingLimitArena decodes data with an explicit encoding and limit into the scratch arena.
+func DecompressWithEncodingLimitArena(arena *scratch.Arena, data []byte, encoding string, maxDecoded int64) ([]byte, error) {
+	maxDecoded = normalizeDecodeLimit(maxDecoded)
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "", EncodingIdentity:
+		if int64(len(data)) > maxDecoded {
+			return nil, ErrDecodedTooLarge
+		}
+		if arena != nil {
+			buf, err := arena.Alloc(len(data))
+			if err == nil {
+				copy(buf, data)
+				return buf, nil
+			}
+		}
+		return append([]byte(nil), data...), nil
+	case EncodingZstd:
+		return decompressZstdWithArena(arena, data, maxDecoded)
+	default:
+		return DecompressWithEncodingLimit(data, encoding, maxDecoded)
+	}
 }
 
 func decompressGzip(data []byte, maxDecoded int64) ([]byte, error) {

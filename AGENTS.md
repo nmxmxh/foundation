@@ -202,6 +202,7 @@ make migrate-up              # Run DB migrations
 | `resilience` | Coordinated health, circuit, retry, and degradation across dependencies. |
 | `connector` | HTTP and WebSocket connectors with health probing and streaming. |
 | `adapter` | Outbound external service adapters (push, OAuth, messaging, email, SMS). |
+| `scratch` | Zero-allocation linear bump arena for frame-scoped hot paths. |
 
 ## Go SIMD Posture
 

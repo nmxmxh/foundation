@@ -208,6 +208,7 @@ Requirements:
 18. When populating a Hermes projection from validated materialized records, prefer `ApplyRecords` for incremental pure-upsert projector batches and `BulkLoad` for trusted snapshot replacement. Avoid constructing `Event` values unless the batch needs delete operations, per-event idempotency, source correlation, or mixed mutation semantics.
 19. Fixed-size checksum, random suffix, and short redaction hash encodings in hot paths should use stack-backed `hex.Encode`/`hex.Decode` into fixed arrays before final string conversion. `hex.EncodeToString`/`hex.DecodeString` are acceptable in cold paths, tests, or one-off setup code.
 20. Stream APIs with a declared size should prefer exact-size bounded reads or caller-owned copy buffers over hidden scratch allocation. When both materialized and callback/borrowed APIs exist, benchmark and document them separately.
+20a. Request and frame hot paths should prefer linear scratch arenas (`server-kit/go/scratch`) with scoped checkpoint unwinding over heap allocations or unmanaged `sync.Pool` usage. Slices and string views from a scratch arena are valid for the frame lifetime and must not be retained after arena reset.
 21. Parallelize independent I/O-bound operations, such as object-storage uploads during batch ingestion, with bounded goroutines or the project chain helper. Preserve per-record diagnostics and cancellation semantics.
 22. Initial dashboard and bootstrap summaries must request the smallest useful projection: explicit compact/light metadata, bounded recent items, and expensive sections disabled unless the first viewport actually renders them.
 23. Frontend cache keys for summary/list hot paths must be semantic and stable. Include filters that change the response; exclude volatile metadata such as correlation IDs, timestamps, trace IDs, and retry markers.
@@ -1123,7 +1124,8 @@ Requirements:
 7. A `ReadTimeout` on `http.Server` must be zero when large bodies are served.
    It covers the whole body read, not one read.
 8. Every new request-path package carries an allocation ceiling test.
-9. Hot parsing loops and columnar scans must operate with zero heap allocations (`AllocsPerRun == 0`). Prefer stack scanners (`parseEncodingScores`), Arrow buffer slice views (`BytesSlice`), Bounds Check Elimination (BCE) hoisting, and 64-bit SWAR/SIMD delimiter kernels over dynamic maps or per-element `string` materialization.
+9. Hot parsing loops and columnar scans must operate with zero heap allocations (`AllocsPerRun == 0`). Prefer stack scanners (`parseEncodingScores`), Arrow buffer slice views (`BytesSlice`), linear scratch arenas (`scratch.Arena`), Bounds Check Elimination (BCE) hoisting, and 64-bit SWAR/SIMD delimiter kernels over dynamic maps or per-element `string` materialization.
+10. Memory mappings for shared arenas and bulk projection slabs exceeding 2 MiB should use 2 MiB alignment and `MADV_HUGEPAGE` advice on supported platforms to minimize TLB translation misses.
 
 Rationale:
 

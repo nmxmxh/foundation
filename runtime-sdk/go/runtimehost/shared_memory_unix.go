@@ -56,6 +56,9 @@ func newSharedMemorySegment(dir string, size int) (*sharedMemorySegment, error) 
 	if size <= 0 {
 		return nil, fmt.Errorf("shared memory segment size must be positive, got %d", size)
 	}
+	if size >= HugePageThresholdBytes {
+		size = ((size + HugePageThresholdBytes - 1) / HugePageThresholdBytes) * HugePageThresholdBytes
+	}
 	baseDir := normalizeSharedMemoryDir(dir)
 	if err := os.MkdirAll(baseDir, 0o700); err != nil && !os.IsExist(err) {
 		return nil, fmt.Errorf("prepare shared memory directory %q: %w", baseDir, err)
@@ -82,6 +85,7 @@ func newSharedMemorySegment(dir string, size int) (*sharedMemorySegment, error) 
 	if err != nil {
 		return cleanup(fmt.Errorf("map shared memory segment of %d bytes: %w", size, err))
 	}
+	_ = adviseHugePage(raw)
 	return &sharedMemorySegment{
 		file: file,
 		path: file.Name(),

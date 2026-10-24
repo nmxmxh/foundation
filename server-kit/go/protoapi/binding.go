@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 const (
@@ -144,6 +145,31 @@ func (b Binding) EncodeResponseBytes(msg proto.Message) ([]byte, error) {
 		return []byte{}, nil
 	}
 	return proto.Marshal(msg)
+}
+
+// EncodeResponseBytesInto encodes a response proto.Message directly into dst using proto.MarshalAppend.
+func (b Binding) EncodeResponseBytesInto(dst []byte, msg proto.Message) ([]byte, error) {
+	if msg == nil {
+		return dst, nil
+	}
+	return proto.MarshalOptions{}.MarshalAppend(dst, msg)
+}
+
+// EncodeResponseBytesArena encodes a response proto.Message into memory reserved from the given scratch arena.
+// If arena is nil or cannot reserve capacity, it falls back to EncodeResponseBytes.
+func (b Binding) EncodeResponseBytesArena(arena *scratch.Arena, msg proto.Message) ([]byte, error) {
+	if msg == nil {
+		return []byte{}, nil
+	}
+	if arena == nil {
+		return b.EncodeResponseBytes(msg)
+	}
+	size := proto.Size(msg)
+	buf, err := arena.Alloc(size)
+	if err != nil {
+		return b.EncodeResponseBytes(msg)
+	}
+	return proto.MarshalOptions{}.MarshalAppend(buf[:0], msg)
 }
 
 func (b Binding) ResponseFromObject(payload extension.Object) (proto.Message, error) {

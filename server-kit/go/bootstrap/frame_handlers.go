@@ -10,6 +10,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -72,7 +73,7 @@ func RegisterTypedFrameHandlers(router FrameRouterAdapter, handlers TypedService
 				return grpcsvc.Frame{}, err
 			}
 
-			payload, err := currentBinding.EncodeResponseBytes(response)
+			payload, err := currentBinding.EncodeResponseBytesArena(scratch.FromContext(ctx), response)
 			if err != nil {
 				releaseFrameRequest(requestPool, request, pooled)
 				return grpcsvc.Frame{}, err

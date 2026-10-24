@@ -1,0 +1,161 @@
+package scratch
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"unsafe"
+)
+
+var (
+	// ErrArenaFull indicates that requested allocation exceeds available capacity.
+	ErrArenaFull = errors.New("scratch arena capacity exceeded")
+
+	// ErrNegativeAlloc indicates an invalid negative allocation size request.
+	ErrNegativeAlloc = errors.New("negative allocation size")
+)
+
+// DefaultCapacity is the default buffer size for scratch arenas (64 KiB).
+const DefaultCapacity = 64 * 1024
+
+// Arena is a single-worker linear bump allocator for frame-scoped operations.
+// It provides zero-heap allocations, O(1) allocation, and O(0) reset.
+type Arena struct {
+	buf  []byte
+	base int
+	head int
+}
+
+// New creates an Arena with the given capacity in bytes.
+// If capacity is <= 0, DefaultCapacity is used.
+func New(capacity int) *Arena {
+	if capacity <= 0 {
+		capacity = DefaultCapacity
+	}
+	return NewWithBuffer(make([]byte, capacity))
+}
+
+// NewWithBuffer wraps an existing byte slice as an Arena.
+// It ensures that initial allocations align to 8-byte boundaries.
+func NewWithBuffer(buf []byte) *Arena {
+	base := 0
+	if len(buf) > 0 {
+		addr := uintptr(unsafe.Pointer(&buf[0]))
+		misalign := addr & 7
+		if misalign != 0 {
+			base = int(8 - misalign)
+		}
+	}
+	return &Arena{
+		buf:  buf,
+		base: base,
+		head: base,
+	}
+}
+
+func align8(n int) int {
+	return (n + 7) &^ 7
+}
+
+// Alloc reserves size bytes aligned to an 8-byte boundary.
+// It returns a slice view of the reserved region.
+func (a *Arena) Alloc(size int) ([]byte, error) {
+	if size < 0 {
+		return nil, ErrNegativeAlloc
+	}
+	if size == 0 {
+		return nil, nil
+	}
+	aligned := align8(size)
+	if a.head+aligned > len(a.buf) {
+		return nil, fmt.Errorf("%w: requested %d bytes, available %d",
+			ErrArenaFull, size, len(a.buf)-a.head)
+	}
+	start := a.head
+	a.head += aligned
+	return a.buf[start : start+size : start+aligned], nil
+}
+
+// Reset rewinds the allocation pointer to the beginning.
+// This reclaims all arena memory in O(0) time without garbage collection.
+func (a *Arena) Reset() {
+	a.head = a.base
+}
+
+// Capacity returns the total usable byte capacity of the arena.
+func (a *Arena) Capacity() int {
+	return len(a.buf) - a.base
+}
+
+// Allocated returns the number of bytes currently allocated from the arena.
+func (a *Arena) Allocated() int {
+	return a.head - a.base
+}
+
+// Available returns the remaining unallocated bytes in the arena.
+func (a *Arena) Available() int {
+	return len(a.buf) - a.head
+}
+
+// Raw returns the underlying storage slice.
+func (a *Arena) Raw() []byte {
+	return a.buf[a.base:]
+}
+
+// AllocSlice allocates a contiguous slice of type T with the specified count.
+// Allocations are 8-byte aligned and incur zero heap allocations.
+func AllocSlice[T any](a *Arena, count int) ([]T, error) {
+	if count < 0 {
+		return nil, ErrNegativeAlloc
+	}
+	if count == 0 {
+		return nil, nil
+	}
+	var zero T
+	elemSize := int(unsafe.Sizeof(zero))
+	if elemSize == 0 {
+		return make([]T, count), nil
+	}
+	totalBytes := elemSize * count
+	raw, err := a.Alloc(totalBytes)
+	if err != nil {
+		return nil, err
+	}
+	return unsafe.Slice((*T)(unsafe.Pointer(&raw[0])), count), nil
+}
+
+// AllocString copies string s into the arena and returns an immutable string view.
+// The returned string references arena memory and incurs zero heap allocations.
+func AllocString(a *Arena, s string) (string, error) {
+	if len(s) == 0 {
+		return "", nil
+	}
+	raw, err := a.Alloc(len(s))
+	if err != nil {
+		return "", err
+	}
+	copy(raw, s)
+	return unsafe.String(&raw[0], len(s)), nil
+}
+
+type contextKey struct{}
+
+// WithArena attaches a ScratchArena to the given context.
+func WithArena(ctx context.Context, a *Arena) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if a == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, contextKey{}, a)
+}
+
+// FromContext extracts a ScratchArena from the context, or returns nil if absent.
+func FromContext(ctx context.Context) *Arena {
+	if ctx == nil {
+		return nil
+	}
+	a, _ := ctx.Value(contextKey{}).(*Arena)
+	return a
+}

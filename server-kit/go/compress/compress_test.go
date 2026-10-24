@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func TestCompressNormalizesLevelOnce(t *testing.T) {
@@ -950,4 +952,80 @@ func measureAllocBytesPerCall(runs int, fn func()) int {
 		return 0
 	}
 	return int((after.TotalAlloc - before.TotalAlloc) / uint64(runs))
+}
+
+func TestCompressAndDecompressWithArena(t *testing.T) {
+	data := []byte("carmack-fast-path-compression-arena-verification-string-repeated-to-be-compressable")
+	for range 10 {
+		data = append(data, data...)
+	}
+
+	// 1. Nil arena fallback
+	compNil, err := CompressZstdWithArena(nil, data)
+	if err != nil || len(compNil) == 0 {
+		t.Fatalf("CompressZstdWithArena(nil) failed: %v", err)
+	}
+	decNil, err := DecompressZstdWithArena(nil, compNil, DefaultMaxDecodedBytes)
+	if err != nil || !bytes.Equal(decNil, data) {
+		t.Fatalf("DecompressZstdWithArena(nil) failed: %v", err)
+	}
+
+	// 2. Normal arena execution
+	arena := scratch.New(len(data) * 4)
+	compArena, err := CompressZstdWithArena(arena, data)
+	if err != nil || len(compArena) == 0 {
+		t.Fatalf("CompressZstdWithArena failed: %v", err)
+	}
+	decArena, err := DecompressZstdWithArena(arena, compArena, DefaultMaxDecodedBytes)
+	if err != nil || !bytes.Equal(decArena, data) {
+		t.Fatalf("DecompressZstdWithArena failed: %v", err)
+	}
+
+	// 3. Fallback when arena capacity is exceeded
+	tinyArena := scratch.New(8)
+	compTiny, err := CompressZstdWithArena(tinyArena, data)
+	if err != nil || len(compTiny) == 0 {
+		t.Fatalf("CompressZstdWithArena(tiny) fallback failed: %v", err)
+	}
+	decTiny, err := DecompressZstdWithArena(tinyArena, compTiny, DefaultMaxDecodedBytes)
+	if err != nil || !bytes.Equal(decTiny, data) {
+		t.Fatalf("DecompressZstdWithArena(tiny) fallback failed: %v", err)
+	}
+
+	// 4. CompressWithArena & CompressWithEncodingArena
+	compEncd, enc, err := CompressWithArena(arena, data, "zstd", 0)
+	if err != nil || enc != EncodingZstd || len(compEncd) == 0 {
+		t.Fatalf("CompressWithArena failed: %v, %s", err, enc)
+	}
+	compGz, encGz, err := CompressWithEncodingArena(arena, data, EncodingGzip, 6)
+	if err != nil || encGz != EncodingGzip || len(compGz) == 0 {
+		t.Fatalf("CompressWithEncodingArena(gzip) failed: %v", err)
+	}
+
+	// 5. DecompressWithArena & DecompressWithEncodingLimitArena
+	decAuto, err := DecompressWithArena(arena, compArena)
+	if err != nil || !bytes.Equal(decAuto, data) {
+		t.Fatalf("DecompressWithArena failed: %v", err)
+	}
+
+	decLimit, err := DecompressLimitArena(arena, compArena, 10)
+	if !errors.Is(err, ErrDecodedTooLarge) {
+		t.Fatalf("expected ErrDecodedTooLarge, got %v", err)
+	}
+	_ = decLimit
+
+	decIdent, err := DecompressWithEncodingLimitArena(arena, data, EncodingIdentity, DefaultMaxDecodedBytes)
+	if err != nil || !bytes.Equal(decIdent, data) {
+		t.Fatalf("DecompressWithEncodingLimitArena(identity) failed: %v", err)
+	}
+
+	_, err = DecompressWithEncodingLimitArena(arena, data, EncodingIdentity, 5)
+	if !errors.Is(err, ErrDecodedTooLarge) {
+		t.Fatalf("expected ErrDecodedTooLarge for identity, got %v", err)
+	}
+
+	decZstd, err := DecompressWithEncodingLimitArena(arena, compArena, EncodingZstd, DefaultMaxDecodedBytes)
+	if err != nil || !bytes.Equal(decZstd, data) {
+		t.Fatalf("DecompressWithEncodingLimitArena(zstd) failed: %v", err)
+	}
 }

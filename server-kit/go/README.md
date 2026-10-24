@@ -56,7 +56,9 @@ Generated app checks reject app-internal `grpcsvc.Dispatch(...)` and
 default internal fabric while preserving HTTP/WebSocket ingress compatibility.
 
 ### 1. Events (`/events`)
+
 The event system is the nervous system of the application.
+
 - **Bus Interface**: A generic interface for pub/sub.
 - **Redis Bus**: Distributed event routing across multiple nodes.
 - **In-Memory Bus**: Local event routing for development and single-node deployments.
@@ -64,11 +66,14 @@ The event system is the nervous system of the application.
 - **Dispatch Workers**: Redis listeners fan in traffic to blocking workers instead of polling loops, reducing idle CPU churn.
 
 ### 2. Redis (`/redis`)
+
 A unified client for Redis operations.
+
 - **Atomic Counters**: Used for distributed locking and rate limiting.
 - **In-Memory Mock**: `NewMemoryClient` allows for full testing of distributed logic without a real Redis instance.
 
 ### 2b. Hermes (`/hermes`) And Eventlog (`/eventlog`)
+
 - **Hermes**: Node-local, bounded projection hotplane for scoped live reads.
   It consumes committed Postgres/outbox/River/Redis Stream observations and
   publishes epoch-signaled snapshots without becoming durable truth.
@@ -81,21 +86,26 @@ A unified client for Redis operations.
   `runtime-transport/protos/foundation/v1/projection.proto`.
 
 ### 3. Compression (`/compress`)
+
 Handles transport-level optimization.
+
 - **Priority**: Brotli (Encoding `br`) is the primary target for modern clients, with GZIP as fallback.
 - **Streaming**: The `StreamingCompressor` enables low-memory footprint response delivery. Use it when returning channels (`<-chan`).
 
 ### 4. Security (`/security`)
+
 - **RedisRateLimiter**: Implements sliding-window rate limiting.
 - **Middleware**: Injects stricter default security headers, exact-origin CORS handling, hashed credential-aware rate-limit fingerprints, and JWT validation with RBAC (Role-Based Access Control) support.
 - **Post-Quantum TLS Helper**: `ApplyPostQuantumTLS` prefers hybrid TLS key exchange at connection setup while keeping app request handlers on the same hot path.
 - **Redaction Helpers**: Reusable helpers sanitize session identifiers and secret-bearing telemetry fields before analytics or logs persist them.
 
 ### 5. Bootstrap (`/bootstrap`)
+
 - **HandlerExecutionController**: Applies bounded concurrency, acquire timeouts, and optional token-bucket pacing to registered handlers.
 - **Explicit Saturation Errors**: Acquire-timeout failures surface as `concurrency limit reached` rather than disappearing into a generic timeout path.
 
 ### 6. Resilience Runtime (`/resilience`)
+
 - **Single startup binding**: Generated projects register database and Redis
   dependencies with the resilience runtime during startup.
 - **Circuit and degradation together**: A registered dependency gets health
@@ -104,7 +114,15 @@ Handles transport-level optimization.
 - **Failure drills**: Use `/chaos` to inject latency, failure, and partition
   behavior against dependency names already registered with resilience.
 
+### 6b. Scratch Arenas (`/scratch`)
+
+- **Linear Bump Allocation**: Provides 8-byte aligned scratch allocation and $O(0)$ reset for hot execution paths.
+- **Nested Scoping**: `Scope()` and `End()` allow sub-operations to allocate temporary buffers that unwind in $<4$ nanoseconds.
+- **Context Passing**: `WithArena(ctx, arena)` and `FromContext(ctx)` allow zero-alloc frame passing across handlers and codecs.
+- **Huge-Page Support**: 2 MiB boundary alignment and `MADV_HUGEPAGE` advice on supported Linux environments.
+
 ### 7. Performance Evidence
+
 - Use `go test ./...` for correctness.
 - Use `go test -bench=. ./chain ./compress ./grpcsvc ./metrics ./profiling ./slo`
   from `foundation/server-kit/go` when changing hot runtime primitives.
@@ -119,6 +137,7 @@ Handles transport-level optimization.
 ## LLM Agent Patterns: Implementing a New Route
 
 When adding a new capability (for example, `media:process`):
+
 1. Define the route in the `registry`.
 2. Determine if it requires **Streaming**. If so, return a channel.
 3. Use the `EventEmitter` to signal progress.

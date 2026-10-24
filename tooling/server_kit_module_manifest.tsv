@@ -45,6 +45,7 @@ registry	vendored
 resilience	vendored	
 retry	vendored	
 scaling	vendored	
+scratch	vendored	Zero-allocation linear bump arena for frame-scoped hot paths
 security	vendored	
 servicebacked	foundation-only	Service-backed load/bench harness; pruned from generated projects.
 slo	vendored	

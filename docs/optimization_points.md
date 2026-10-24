@@ -23,7 +23,7 @@ This document tracks the deliberate performance and architecture carryovers fold
 15. Stale chunk/module failures should trigger one-shot cache and service-worker refresh plus reload, instead of leaving the app in a white-screen state.
 16. Hot-path parsing should precompile regexes, centralize normalization, and use bounded caches when the same values recur heavily.
 17. Performance work must start with a behavior boundary and a baseline measurement: profile, benchmark, load test, query plan, or production telemetry.
-18. Go hot paths should preallocate predictable collections, preserve payload bytes until owner decode, use borrowed frame views where lifetime-safe, and keep `sync.Pool` limited to stateless temporary objects.
+18. Go hot paths should preallocate predictable collections, preserve payload bytes until owner decode, use borrowed frame views where lifetime-safe, and prefer linear scratch arenas (`scratch.Arena`) over `sync.Pool` or heap churn on request paths.
 19. Concurrency defaults must be bounded and observable: worker pools, buffered channels, queue depth, acquire timeouts, context cancellation, and rejection metrics are part of the contract.
 20. Network tuning follows the runtime ladder: direct/frame dispatch for same-process hot paths, `ffi`/`shm`/`stdio` for native runtime boundaries, generated protobuf or `grpcsvc.Frame` for cross-host service calls, and JSON only as a compatibility adapter.
 21. PostgreSQL tuning starts with `EXPLAIN (ANALYZE, BUFFERS)` and `pg_stat_statements`; indexes must match actual predicates, and high-volume writes should use `COPY`, `pgx.CopyFrom`, or driver-native batching.
@@ -379,3 +379,4 @@ This document tracks the deliberate performance and architecture carryovers fold
     removed the known case; the reasoning that dismissed futexes originally was
     wrong even though its conclusion survived, so reopen this with measurements
     rather than argument.
+16. Adopt linear scratch bump arenas (`server-kit/go/scratch`) and 2 MiB Huge-Page mappings (`MADV_HUGEPAGE`) across hot compression codecs, protobuf frame encoders, and shared memory slabs to eliminate megabytes of heap garbage per call and avoid GC mark-assist latency spikes.

@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func BenchmarkCompressLargeBatch(b *testing.B) {
@@ -23,6 +25,15 @@ func BenchmarkCompressLargeBatch(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			_, _ = CompressZstd(data)
+		}
+	})
+
+	b.Run("Zstd-Arena", func(b *testing.B) {
+		arena := scratch.New(len(data) + 1024)
+		b.ReportAllocs()
+		for b.Loop() {
+			arena.Reset()
+			_, _ = CompressZstdWithArena(arena, data)
 		}
 	})
 }
@@ -44,6 +55,15 @@ func BenchmarkDecompressLargeBatch(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			_, _ = decompressZstd(zstdData, DefaultMaxDecodedBytes)
+		}
+	})
+
+	b.Run("Zstd-Arena", func(b *testing.B) {
+		arena := scratch.New(len(data) * 2)
+		b.ReportAllocs()
+		for b.Loop() {
+			arena.Reset()
+			_, _ = DecompressZstdWithArena(arena, zstdData, DefaultMaxDecodedBytes)
 		}
 	})
 }

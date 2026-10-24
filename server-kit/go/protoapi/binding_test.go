@@ -3,6 +3,7 @@ package protoapi
 import (
 	"context"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	testprotos "github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi/testprotos"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
@@ -811,6 +812,39 @@ func TestBindingEncodeResponseHandlesNilAndPopulated(t *testing.T) {
 	if err != nil || len(raw) == 0 {
 		t.Fatalf("EncodeResponseBytes = (%v,%v)", raw, err)
 	}
+
+	// Test EncodeResponseBytesInto
+	intoBuf, err := b.EncodeResponseBytesInto(nil, nil)
+	if err != nil || len(intoBuf) != 0 {
+		t.Fatalf("EncodeResponseBytesInto(nil, nil) = (%v, %v)", intoBuf, err)
+	}
+	intoBuf, err = b.EncodeResponseBytesInto(make([]byte, 0, 64), respMsg)
+	if err != nil || len(intoBuf) == 0 {
+		t.Fatalf("EncodeResponseBytesInto error: %v", err)
+	}
+
+	// Test EncodeResponseBytesArena
+	arenaRaw, err := b.EncodeResponseBytesArena(nil, respMsg)
+	if err != nil || len(arenaRaw) != len(raw) {
+		t.Fatalf("EncodeResponseBytesArena(nil) = (%v, %v)", arenaRaw, err)
+	}
+
+	arena := scratch.New(1024)
+	arenaRaw, err = b.EncodeResponseBytesArena(arena, nil)
+	if err != nil || len(arenaRaw) != 0 {
+		t.Fatalf("EncodeResponseBytesArena(arena, nil) = (%v, %v)", arenaRaw, err)
+	}
+	arenaRaw, err = b.EncodeResponseBytesArena(arena, respMsg)
+	if err != nil || string(arenaRaw) != string(raw) {
+		t.Fatalf("EncodeResponseBytesArena mismatch: got %v, want %v", arenaRaw, raw)
+	}
+
+	// Small arena fallback
+	tinyArena := scratch.New(4)
+	fallbackRaw, err := b.EncodeResponseBytesArena(tinyArena, respMsg)
+	if err != nil || string(fallbackRaw) != string(raw) {
+		t.Fatalf("fallback mismatch: got %v, want %v", fallbackRaw, raw)
+	}
 	back, err := b.ResponseFromObject(obj)
 	if err != nil {
 		t.Fatalf("ResponseFromObject error: %v", err)
@@ -850,5 +884,33 @@ func TestBindingDecodeAndResponseErrorOnMissingFactory(t *testing.T) {
 	}
 	if _, err := (Binding{Request: func() proto.Message { return &testprotos.TestRequest{} }}).ResponseFromObject(nil); err == nil {
 		t.Fatal("ResponseFromObject with nil response factory should error")
+	}
+}
+
+var sinkBytes []byte
+
+func BenchmarkEncodeResponseBytes_Heap(b *testing.B) {
+	binding := newTestBinding()
+	resp := &testprotos.TestResponse{ResourceId: "resource-12345", Status: "success-completed-status"}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		raw, _ := binding.EncodeResponseBytes(resp)
+		sinkBytes = raw
+	}
+}
+
+func BenchmarkEncodeResponseBytes_Arena(b *testing.B) {
+	binding := newTestBinding()
+	resp := &testprotos.TestResponse{ResourceId: "resource-12345", Status: "success-completed-status"}
+	arena := scratch.New(64 * 1024)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; b.Loop(); i++ {
+		if arena.Available() < 128 {
+			arena.Reset()
+		}
+		raw, _ := binding.EncodeResponseBytesArena(arena, resp)
+		sinkBytes = raw
 	}
 }

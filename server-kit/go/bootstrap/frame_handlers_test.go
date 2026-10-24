@@ -9,6 +9,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/protoapi/testprotos"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -91,6 +92,51 @@ func TestRegisterTypedFrameHandlersDispatchPreservesFrameMetadata(t *testing.T) 
 	}
 	if response.ResourceId != "wrk_frame" || response.Status != "complete" {
 		t.Fatalf("unexpected response: %+v", &response)
+	}
+}
+
+func TestRegisterTypedFrameHandlersWithScratchArena(t *testing.T) {
+	router := grpcsvc.NewRouter()
+	binding := frameTestBinding()
+	err := RegisterTypedFrameHandlers(router, TypedServiceHandlers{
+		"media:process_asset:v1:requested": {
+			Binding: binding,
+			Handler: func(_ context.Context, request proto.Message) (proto.Message, error) {
+				typed := request.(*testprotos.TestRequest)
+				return &testprotos.TestResponse{ResourceId: typed.GetWorkspaceId(), Status: "arena_complete"}, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterTypedFrameHandlers error: %v", err)
+	}
+
+	payload, err := proto.Marshal(&testprotos.TestRequest{WorkspaceId: "wrk_arena"})
+	if err != nil {
+		t.Fatalf("Marshal error: %v", err)
+	}
+
+	arena := scratch.New(4096)
+	ctx := scratch.WithArena(context.Background(), arena)
+
+	responseFrame, err := router.DispatchFrame(ctx, grpcsvc.Frame{
+		EventType: "media:process_asset:v1:requested",
+		Payload:   payload,
+	})
+	if err != nil {
+		t.Fatalf("DispatchFrame error: %v", err)
+	}
+
+	if arena.Allocated() == 0 {
+		t.Fatal("expected response to be encoded into the arena, got 0 allocated bytes")
+	}
+
+	var response testprotos.TestResponse
+	if err := proto.Unmarshal(responseFrame.Payload, &response); err != nil {
+		t.Fatalf("Unmarshal response error: %v", err)
+	}
+	if response.ResourceId != "wrk_arena" || response.Status != "arena_complete" {
+		t.Fatalf("unexpected response payload: %+v", &response)
 	}
 }
 
