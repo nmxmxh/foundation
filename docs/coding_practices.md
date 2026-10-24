@@ -1193,6 +1193,23 @@ Enforcement:
   test. The placement batch lost three tests to a badly formed `mv` before the
   check existed; the same surgery now fails loudly instead.
 
+### CP-48: Timestamp Wire Serialization and Numeric Epoch Comparison
+
+Level: `Mandatory`
+
+Requirements:
+
+1. All wire payloads (RPC responses, JSON bodies, Hermes projections, WebSocket events) must format timestamps as RFC3339 UTC strings (`time.RFC3339Nano`).
+2. Never cast PostgreSQL temporal columns to text in SQL queries (`created_at::text` is prohibited). PostgreSQL `TIMESTAMPTZ::text` returns space-delimited text, which causes lexicographical sorting traps.
+3. Frontend clients must never compare raw timestamp strings with `localeCompare`, `<`, or `>`. Always parse timestamps to numeric epoch milliseconds using `@ovasabi/frontend-kit` (`compareTimestamps`).
+4. Chronological comparisons must resolve ties deterministically using record identifiers and support sub-millisecond precision. Missing or pending timestamps must sort to the end of chronological feeds by default.
+
+Enforcement:
+
+- `tooling/scripts/database_practices_check.sh` fails when Go SQL sources cast temporal columns to `::text`.
+- `tooling/scripts/coding_practices_check.sh` fails when frontend code invokes `localeCompare` on timestamp properties.
+- `@ovasabi/frontend-kit` unit tests verify space versus ISO sorting, sub-millisecond precision, and tie-breaking.
+
 ## Enforcement matrix
 
 | Rule ID | Primary enforcement | Automation | Merge gate |
@@ -1243,6 +1260,7 @@ Enforcement:
 | `CP-45` | Unit tests (redirect guard, bounded body, blocked ranges) + review | Partial | Yes |
 | `CP-46` | Allocation and interface tests + benchmark | Partial | Yes |
 | `CP-47` | `test_naming_check.cjs` + `test_preservation_check.py` | Strong | Yes |
+| `CP-48` | `database_practices_check.sh` + `coding_practices_check.sh` | Strong | Yes |
 
 ## Exception process and ADR linkage
 

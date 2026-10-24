@@ -72,6 +72,7 @@ CP-43|docs/coding_practices.md|tooling|high|strong|script:tooling/scripts/coding
 CP-45|docs/coding_practices.md|security|critical|partial|script:tooling/scripts/practice_controls_check.sh;review|outbound-hop-guard-test|yes
 CP-46|docs/coding_practices.md|performance|critical|partial|script:tooling/scripts/practice_controls_check.sh;review|request-path-allocation-budget|yes
 CP-47|docs/coding_practices.md|testing|high|strong|script:tooling/scripts/test_naming_check.cjs|test-file-owns-one-source|yes
+CP-48|docs/coding_practices.md|contracts|high|strong|script:tooling/scripts/database_practices_check.sh;script:tooling/scripts/coding_practices_check.sh|timestamp-wire-and-ordering-check|yes
 TE-01|docs/testing_practices.md|testing|high|partial|script:tooling/scripts/testing_practices_check.sh;review|architecture-test|yes
 TE-02|docs/testing_practices.md|testing|medium|human|review|black-box-case|contextual
 TE-03|docs/testing_practices.md|testing|high|human|review|oracle-statement|yes

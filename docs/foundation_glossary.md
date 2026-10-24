@@ -48,6 +48,7 @@ pre-answered questions without scanning multiple files.
 | **httpapi** | `server-kit/go/httpapi` — HTTP route generation from event types, transfer routes, and the route catalog projection for frontend command generation. | `frontend_command_registry.md` |
 | **Idempotency key** | Token carried on mutating commands ensuring retries and duplicate deliveries do not duplicate durable side effects. | `foundation_nervous_system.md` |
 | **Intelligence** | `server-kit/go/intelligence` — registry-level signal extraction: keyword hints, graph edges, entity references, and relevance vectors. | `ai_practices.md` |
+| **Lexicographical timestamp trap** | The ordering defect where ASCII space (32) sorts before 'T' (84), causing space-delimited timestamps to sort before ISO-8601 timestamps on the same date. | `database_practices.md` |
 | **Kernellane** | `server-kit/go/kernellane` — native Rust/FFI/SHM compute lane dispatch with descriptor management and schema validation. | `runtime_foundation.md` |
 | **Lifecycle manifest** | Machine-readable JSON at `docs/references/lifecycle/lifecycle_contract.json` derived from protobuf request/response pairs. | `foundation_nervous_system.md` |
 | **Managed scaffold** | Files generated and synchronized from `templates/scaffold.manifest.tsv` — Makefile, CI, Docker, config, checks, and baseline wiring. | `foundation_architecture_contract.md` |
@@ -86,6 +87,7 @@ pre-answered questions without scanning multiple files.
 | **STE controlled vocabulary** | The set of approved words with single-meaning assignments and approved parts of speech. Technical names from the Foundation glossary and module API surface are always permitted as nouns. | `ste_documentation_practices.md` |
 | **STE noun cluster** | A group of nouns or adjectives functioning as a single noun phrase. Foundation limits noun clusters to a maximum of 3 words and requires expansion with prepositions for longer names. | `ste_documentation_practices.md` |
 | **Tenant isolation** | Organization scope derived from authenticated context, never from client-supplied data. Preserved through all lifecycle lanes. | `foundation_nervous_system.md` |
+| **Timestamp ordering invariant** | The requirement that all wire timestamps use RFC3339 UTC strings, and all client comparisons use numeric epoch milliseconds with sub-millisecond precision. | `coding_practices.md` |
 | **Tracing** | `server-kit/go/tracing` — OpenTelemetry integration with correlation ID bridging and HTTP middleware for automatic span creation. | `foundation_guide.md` |
 | **Transfer lane** | `server-kit/go/transfer` — progress-bearing operation lifecycle: monotonic byte progress on an ephemeral lane, bracketed by durable bookend events. | `transfer_lane.md` |
 | **UI-minimal** | `@ovasabi/ui-minimal` — shared structural UI primitives, semantic theme tokens, and motion helpers. App components should be thin wrappers. | `styling_design_practices.md` |
@@ -145,7 +147,7 @@ pre-answered questions without scanning multiple files.
 | :--- | :--- | :--- | :--- |
 | `@ovasabi/runtime-transport` | Client wire | Command bus, envelopes, WS/HTTP, route registry | `createCommandBus`, `createAppRuntime`, `createRouteRegistry` |
 | `@ovasabi/runtime-browser` | Browser runtime SDK | WebGPU compute, render surface lane, canvas stage, pulse clock | `createRenderSurfaceHost`, `serveRenderSurface`, `createCanvasStage`, `onFrame`, `createPulseManager` |
-| `@ovasabi/frontend-kit` | Operational utilities | IndexedDB, metadata, stores, transfer progress | `useTransfer`, `createTenantProjectionStore` |
+| `@ovasabi/frontend-kit` | Operational utilities | IndexedDB, metadata, stores, transfer progress, timestamp ordering | `useTransfer`, `createTenantProjectionStore`, `compareTimestamps`, `parseTimestamp` |
 | `@ovasabi/ui-minimal` | UI primitives | Theme, components, motion | `MinimalButton`, `MinimalAppShell`, `useMinimalMotion` |
 | `@ovasabi/runtime-native` | Native shell bridge | Tauri IPC, secure storage, capability detection | `dispatchNativeFrame` |
 

@@ -224,7 +224,7 @@ References checked for wording:
 ## Schema design rules
 
 1. Use `BIGSERIAL`/`BIGINT` primary keys and stable external refs (`*_ref`, `public_id` UUID where needed).
-2. Use `TIMESTAMPTZ` for all temporal columns.
+2. Use `TIMESTAMPTZ` for all temporal columns. `TIMESTAMPTZ` guarantees durable UTC storage in PostgreSQL, but is not a wire serialization format. Never cast temporal columns to `::text` in SQL queries. Always format wire timestamps as RFC3339 UTC strings (`time.RFC3339Nano`).
 3. Use `JSONB` only for flexible metadata, not core filter keys.
 4. If a query uses JSONB tags or metadata paths in a recurring path, add a matching GIN or expression index immediately. JSONB is acceptable for cross-cutting metadata only when index-backed.
 5. Metadata tags must be low-cardinality, namespaced, and safe to index (`actor:*`, `entity:*`, `domain:*`, `service:*`, `event:*`, `state:*`, `risk:*`, `security:*`, `intent:*`, `source:*`, `channel:*`, `region:*`, `locale:*`, `privacy:*`, `compliance:*`, `kg:*`). Store high-cardinality graph facts in explicit columns, `source_ref`, `knowledge_graph`, or bounded `attributes`, not arbitrary tag strings.
@@ -234,6 +234,34 @@ References checked for wording:
 9. Store password-reset tokens, invite tokens, API tokens, and other bearer secrets as digests or encrypted blobs when raw-value lookup is unnecessary.
 10. Separate especially sensitive fields (PII, tax identifiers, recovery data) from broad read paths and duplicate them as little as possible.
 11. App runtime roles must default to least privilege on tables, sequences, functions, and views.
+
+## Timestamp Invariant: Storage vs Wire Format vs Client Ordering
+
+PostgreSQL `TIMESTAMPTZ` stores timestamps as eight-byte integers in UTC. It guarantees storage consistency, but does not enforce wire serialization formatting.
+
+### 1. The Wire Format Discrepancy
+
+Two database data paths can emit different text shapes for the same timestamp:
+
+- **Direct SQL string casts (`created_at::text`)**: PostgreSQL formats `TIMESTAMPTZ` as space-delimited text (`"2026-10-24 22:58:00.123456+00"`).
+- **JSON serialization (`to_jsonb(record)`)**: PostgreSQL serializes `TIMESTAMPTZ` as ISO-8601 text (`"2026-10-24T22:58:00.123456Z"`).
+
+### 2. The Lexicographical Sorting Trap
+
+JavaScript string comparison (`localeCompare`, `<`, `>`) sorts by ASCII values:
+
+- The space character (`' '`) is ASCII 32.
+- The letter `'T'` is ASCII 84.
+- Because `32 < 84`, `"2026-10-24 22:58:00+00".localeCompare("2026-10-24T22:50:00Z") === -1`.
+- A newly sent message evaluates as older than existing messages from the same date, causing order inversion in client feeds.
+
+### 3. Mandatory Contract Invariants
+
+1. **Storage**: Always define temporal columns as `TIMESTAMPTZ`.
+2. **Backend queries**: Never write `created_at::text` or `updated_at::text` in SQL queries. Scan into Go `time.Time` or normalize using `database.FormatRFC3339UTC`.
+3. **Wire format**: Always transmit timestamps as RFC3339 UTC strings with `'T'` and `'Z'` (`time.RFC3339Nano`).
+4. **Client comparison**: Never sort timestamp strings directly. Always parse to epoch milliseconds using `@ovasabi/frontend-kit` (`compareTimestamps`).
+5. **Optimistic items**: Records without valid timestamps must sort to the end of chronological timelines (`nullsOrder: "last"`).
 
 ## Foundation state store
 
@@ -494,9 +522,9 @@ State-machine candidates that deserve table-driven/property-style tests:
 9. Idle transactions are production hazards because they hold snapshots, block vacuum progress, and can amplify replica/WAL pressure. Foundation pools set `idle_in_transaction_session_timeout`; repository code must still keep `AtomicLane` closures tight.
 10. **Zero-Allocation Scanning**: In high-throughput paths, use manual `rows.Scan()` or the Foundation's optimized `QueryMaps` bridge to avoid reflection and redundant allocations.
 11. **Count Optimization**: Exact `COUNT(*)` is an O(N) operation in Postgres due to MVCC.
-    * **Small Sets**: Exact count with index is acceptable.
-    * **Large Sets**: Use `EstimateCount` (via `EXPLAIN` plan analysis or `reltuples` catalog statistics) for UI indicators and non-critical analytics.
-    * **Hot Counters**: Use a dedicated counter cache table or Redis if exact, high-frequency counting is required.
+    - **Small Sets**: Exact count with index is acceptable.
+    - **Large Sets**: Use `EstimateCount` (via `EXPLAIN` plan analysis or `reltuples` catalog statistics) for UI indicators and non-critical analytics.
+    - **Hot Counters**: Use a dedicated counter cache table or Redis if exact, high-frequency counting is required.
 12. **Index Overhead**: While missing indexes cause slow reads, excessive indexes cause slow writes and increased VACUUM pressure. Audit indexes regularly for usage.
 13. Use read models or materialized views for dashboard, feed, search, and analytics reads that would otherwise join many live transactional tables.
 14. Use partitioned append tables for high-volume events, audit logs, outbox history, and time/campaign-heavy telemetry. Partition by time, tenant/campaign, or hash only when query pruning and retention policy are explicit.
@@ -569,9 +597,9 @@ The database (PostgreSQL) is a scarce, vertically scaled, state-oriented resourc
 
 ### 1. Cryptographic Hashing and Column Encryption (pgcrypto)
 
-* **The Conflict**: Invoking `pgcrypto` functions like `crypt('password', gen_salt('bf', 12))` directly in SQL. Bcrypt with cost factor 12 takes ~300ms of pure CPU time by design. Under a default database statement timeout of 250ms (`CP-02`), this query will reliably fail with `canceling statement due to statement timeout`, locking database connection slots for 250ms of pure CPU block time and starving other queries.
+- **The Conflict**: Invoking `pgcrypto` functions like `crypt('password', gen_salt('bf', 12))` directly in SQL. Bcrypt with cost factor 12 takes ~300ms of pure CPU time by design. Under a default database statement timeout of 250ms (`CP-02`), this query will reliably fail with `canceling statement due to statement timeout`, locking database connection slots for 250ms of pure CPU block time and starving other queries.
 
-* **The Remediation**: Perform all cryptographic hashing, salt generation, and verification at the application layer (for example, using Go's `bcrypt` package). The database should execute only a trivial, sub-1ms query to retrieve the hashed credential:
+- **The Remediation**: Perform all cryptographic hashing, salt generation, and verification at the application layer (for example, using Go's `bcrypt` package). The database should execute only a trivial, sub-1ms query to retrieve the hashed credential:
 
   ```sql
   SELECT hashed_password FROM users WHERE email = $1;
@@ -581,33 +609,33 @@ The database (PostgreSQL) is a scarce, vertically scaled, state-oriented resourc
 
 ### 2. Complex Pattern Matching & Regex Parsing
 
-* **The Conflict**: Running sequential evaluations of complex regular expressions (`~`, `~*`, `regexp_like`, `regexp_matches`) over unindexed text columns in a hot database lane. Regex parsing and compilation is highly CPU-bound. Sequential regex checks over millions of rows will instantly consume database CPU cores and trip statement timeouts.
+- **The Conflict**: Running sequential evaluations of complex regular expressions (`~`, `~*`, `regexp_like`, `regexp_matches`) over unindexed text columns in a hot database lane. Regex parsing and compilation is highly CPU-bound. Sequential regex checks over millions of rows will instantly consume database CPU cores and trip statement timeouts.
 
-* **The Remediation**: Use `tsvector`/GIN full-text search or trigram search (`pg_trgm`/GiST) for filtering at the database boundary. If complex regex transformation or schema extraction is required, fetch candidates using indexed SQL fields first, and perform the final regex parsing or manipulation in the Go/Rust application.
+- **The Remediation**: Use `tsvector`/GIN full-text search or trigram search (`pg_trgm`/GiST) for filtering at the database boundary. If complex regex transformation or schema extraction is required, fetch candidates using indexed SQL fields first, and perform the final regex parsing or manipulation in the Go/Rust application.
 
 ### 3. JSON/XML Schema Validation & Complex Transformations
 
-* **The Conflict**: Implementing JSON schema validation, deep recursive JSON path traversals (`jsonb_to_recordset`), or complex XML conversions in database triggers and functions. Parsing, validating, and mutating complex document formats in the DB consumes massive amounts of database CPU and memory allocator overhead.
+- **The Conflict**: Implementing JSON schema validation, deep recursive JSON path traversals (`jsonb_to_recordset`), or complex XML conversions in database triggers and functions. Parsing, validating, and mutating complex document formats in the DB consumes massive amounts of database CPU and memory allocator overhead.
 
-* **The Remediation**: Validate, structure, and serialize document payloads in the application layer. The database should only store fully validated JSONB, or extract key queryable attributes into dedicated relational columns.
+- **The Remediation**: Validate, structure, and serialize document payloads in the application layer. The database should only store fully validated JSONB, or extract key queryable attributes into dedicated relational columns.
 
 ### 4. Heavy Spatial / Distance Computations
 
-* **The Conflict**: Calculating exact distances or intersections between complex polygons (for example, PostGIS `ST_Distance` or `ST_Contains`) over large datasets without spatial indexes or pre-filtering. Calculating spatial geometric relations on complex shapes is extremely float-compute intensive.
+- **The Conflict**: Calculating exact distances or intersections between complex polygons (for example, PostGIS `ST_Distance` or `ST_Contains`) over large datasets without spatial indexes or pre-filtering. Calculating spatial geometric relations on complex shapes is extremely float-compute intensive.
 
-* **The Remediation**: Always pair spatial operator predicates with the bounding-box overlap operator (`&&`) and ensure a spatial GiST index is defined on geometry fields. If exact, high-precision geo-computations are needed, perform coarse-grained bounding-box filtering in SQL first, then run high-fidelity geometric calculations in the application layer (for example, utilizing a fast native Rust/WASM library).
+- **The Remediation**: Always pair spatial operator predicates with the bounding-box overlap operator (`&&`) and ensure a spatial GiST index is defined on geometry fields. If exact, high-precision geo-computations are needed, perform coarse-grained bounding-box filtering in SQL first, then run high-fidelity geometric calculations in the application layer (for example, utilizing a fast native Rust/WASM library).
 
 ### 5. Intensive Mathematical / Financial Calculation Loops
 
-* **The Conflict**: Computing amortization schedules, financial forecasts, Monte Carlo simulations, or multi-step statistical projections inside database triggers or PL/pgSQL procedural code.
+- **The Conflict**: Computing amortization schedules, financial forecasts, Monte Carlo simulations, or multi-step statistical projections inside database triggers or PL/pgSQL procedural code.
 
-* **The Remediation**: Implement state-machines and calculation loops in Go or Rust. Fetch the required inputs via simple database queries, compute the calculations in memory, and save the final values in a single database transaction.
+- **The Remediation**: Implement state-machines and calculation loops in Go or Rust. Fetch the required inputs via simple database queries, compute the calculations in memory, and save the final values in a single database transaction.
 
 ### 6. UUID/Key Generation in High-Volume Ingest
 
-* **The Conflict**: Forcing PostgreSQL to generate UUIDs (`uuid_generate_v4()`) during high-frequency bulk insert paths, which introduces unnecessary DB CPU overhead and creates transaction lock contention.
+- **The Conflict**: Forcing PostgreSQL to generate UUIDs (`uuid_generate_v4()`) during high-frequency bulk insert paths, which introduces unnecessary DB CPU overhead and creates transaction lock contention.
 
-* **The Remediation**: Generate UUIDs (V4 or V7) in the Go application layer and supply them as part of the `INSERT` payload. This ensures the application knows the record identifiers prior to writing them, simplifies idempotency keys, and keeps the database focused purely on write durability.
+- **The Remediation**: Generate UUIDs (V4 or V7) in the Go application layer and supply them as part of the `INSERT` payload. This ensures the application knows the record identifiers prior to writing them, simplifies idempotency keys, and keeps the database focused purely on write durability.
 
 ## Security and compliance
 
@@ -634,15 +662,15 @@ The check reads `migrations/*.up.sql` and the Go source. It does not need a data
 
 The check finds these problems:
 
-* A `SELECT` or `RETURNING` column that is not in the migration table.
-* `Scan` destinations in a different order than the projected columns.
-* `INSERT` or `UPDATE` arguments in a different order than the target columns.
-* An `INSERT` that omits a `NOT NULL` column that has no `DEFAULT`.
-* A skipped `$N` placeholder, or a column count that does not match the values.
-* `ON CONFLICT` columns or `EXCLUDED` references that do not exist.
-* An `UPDATE` or `DELETE` statement without a `WHERE` clause.
-* Hermes `IndexedFields`, `projectionSources`, or `projectedFields` that name unknown tables or columns.
-* A `.down.sql` file that drops tables that no `.up.sql` file creates.
+- A `SELECT` or `RETURNING` column that is not in the migration table.
+- `Scan` destinations in a different order than the projected columns.
+- `INSERT` or `UPDATE` arguments in a different order than the target columns.
+- An `INSERT` that omits a `NOT NULL` column that has no `DEFAULT`.
+- A skipped `$N` placeholder, or a column count that does not match the values.
+- `ON CONFLICT` columns or `EXCLUDED` references that do not exist.
+- An `UPDATE` or `DELETE` statement without a `WHERE` clause.
+- Hermes `IndexedFields`, `projectionSources`, or `projectedFields` that name unknown tables or columns.
+- A `.down.sql` file that drops tables that no `.up.sql` file creates.
 
 `database_practices_check.sh` and `sql_prepare_check.sh` run the check. When `DATABASE_URL` is set, `sql_prepare_check.sh` also prepares each statement against the live schema.
 
@@ -698,12 +726,12 @@ Layering rule, evidence-backed:
 
 Contracts:
 
-* Staleness from concurrent writers is bounded by `TTL` (default one minute).
-* Version-guarded refreshes stop late commits from clobbering newer values.
-* Not-found results cache for `NegativeTTL` (default ten seconds).
-* Every cache error degrades to a Postgres read. Reads never fail on cache.
-* Bulk upserts bypass this wrapper. Call `InvalidateScope` after bulk writes.
-* Values ride `json.RawMessage` opaquely. Integer precision above int64 range
+- Staleness from concurrent writers is bounded by `TTL` (default one minute).
+- Version-guarded refreshes stop late commits from clobbering newer values.
+- Not-found results cache for `NegativeTTL` (default ten seconds).
+- Every cache error degrades to a Postgres read. Reads never fail on cache.
+- Bulk upserts bypass this wrapper. Call `InvalidateScope` after bulk writes.
+- Values ride `json.RawMessage` opaquely. Integer precision above int64 range
   degrades identically on every lane today; wrap such numbers in raw bytes.
 
 Allocation budgets pin these numbers in CI. `TestAllocationBudgetCachedHit`
@@ -749,9 +777,9 @@ In high-throughput event architectures, 24 hours retains 100k+ completed rows in
 This dead-row accumulation bloats table heap and degrades index scans.
 Foundation defaults high-frequency worker queues to 2–4 hours retention:
 
-* `RetentionTierHuman`: 24 hours retention for human-scale tasks.
-* `RetentionTierStandard`: 4 hours retention for general application tasks.
-* `RetentionTierHighFrequency`: 2 hours retention for event processing, market data, and projections.
+- `RetentionTierHuman`: 24 hours retention for human-scale tasks.
+- `RetentionTierStandard`: 4 hours retention for general application tasks.
+- `RetentionTierHighFrequency`: 2 hours retention for event processing, market data, and projections.
 
 Both template clients use `RIVER_RETENTION_TIER` with a `high_frequency` default.
 When `RIVER_COMPLETED_JOB_RETENTION` is absent, the selected tier controls completed retention.
@@ -884,17 +912,17 @@ moved, the writer says so, on the bus the deployment already runs:
 
 Consequences worth stating plainly:
 
-* **The application already knows what it wrote.** Deriving that from the
+- **The application already knows what it wrote.** Deriving that from the
   database is paying to rediscover it, on the commit path, in the one place
   where contention is most expensive.
-* **The announcement is a hint, never data.** It carries a scope, no records.
+- **The announcement is a hint, never data.** It carries a scope, no records.
   Losing one costs time, not correctness, because the cursor read behind it
   reads everything since the cursor whenever it next runs.
-* **Convergence writes must not be announced.** A replica that rebroadcasts
+- **Convergence writes must not be announced.** A replica that rebroadcasts
   what it just converged turns a fan-out lane into an echo chamber whose
   traffic grows with the square of the fleet. The store excludes
   `MirrorSweeper` writes for exactly this reason.
-* **Keep a slow reconcile.** Signals cover what the application writes; a
+- **Keep a slow reconcile.** Signals cover what the application writes; a
   migration or an admin `UPDATE` announces nothing. A minute is ample, and it
   is cheap: see below.
 
@@ -918,14 +946,14 @@ go sweeper.Run(ctx)
 
 What that buys, in the order these bite:
 
-* **Neither end blocks the goroutine that reached it.** `OnCommandWrite` runs on
+- **Neither end blocks the goroutine that reached it.** `OnCommandWrite` runs on
   the writer's goroutine right after commit, so announcing hands a scope name to
   a buffered channel and returns — no commit waits on Redis. Receiving runs on
   the one goroutine a bus dispatches every subscription from, so converging
   flags a source (`MirrorSweeper.Notify`) and returns — no bus dispatch waits on
   Postgres. Sweeping inline in a subscriber puts a database round trip in front
   of every other event that process was about to handle.
-* **A burst costs one announcement and one sweep, not one of each per write.**
+- **A burst costs one announcement and one sweep, not one of each per write.**
   A hint carries no data, so a second copy of one says exactly what the first
   already said: writes to a scope whose announcement is still in flight are
   folded into it, and signals arriving while a sweep runs collapse onto the flag
@@ -933,15 +961,15 @@ What that buys, in the order these bite:
   anyway. Every replica receives every announcement, so without both, a burst of
   *k* writes puts *k* messages on the channel and *k* queries on each of *n*
   processes.
-* **The two halves cannot disagree about a name.** `AddScopeSource` registers
+- **The two halves cannot disagree about a name.** `AddScopeSource` registers
   under the name `DefaultScopeSourceName` derives, so a source registered under
   one name and woken under another — which converges nothing while every part
   looks correct alone — is not expressible. Hard deletes converge through the
   tombstone source under its own name, which the announcement knows to use.
-* **The identity is random, not a clock.** Two processes started together on one
+- **The identity is random, not a clock.** Two processes started together on one
   host can read the same clock, and two nodes sharing an id each mistake the
   other's announcements for an echo of their own and skip them.
-* **The payload is materialized before it is read.** A bus materializes an
+- **The payload is materialized before it is read.** A bus materializes an
   envelope's metadata on receipt and leaves the payload as bytes. Reading
   through the nil payload yields empty strings rather than an error, so a
   subscriber that skips `MaterializePayload` silently discards every message.

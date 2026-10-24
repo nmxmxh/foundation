@@ -114,6 +114,7 @@ check_no_match "CP JSON marshal/unmarshal errors checked" "(_\\s*=\\s*json\\.Unm
 check_no_match "CP no unwrap/todo/dbg in Rust runtime code" "\\bunwrap\\s*\\(|todo!\\s*\\(|dbg!\\s*\\(" "$target" --glob '*.rs'
 check_no_match "CP no blocking Atomics.wait on browser main/runtime code" "\\bAtomics\\.wait\\s*\\(" "$target" --glob '*.ts' --glob '*.tsx' --glob '*.js' --glob '*.jsx'
 check_no_match "CP no direct MutationObserver construction" "\\bnew\\s+([A-Za-z0-9_]+\\.)?MutationObserver\\s*\\(" "$target" --glob '*.ts' --glob '*.tsx' --glob '*.js' --glob '*.jsx'
+check_no_match "CP no localeCompare on timestamp fields in frontend" "\\b(created_at|updated_at|timestamp)\\.localeCompare\\s*\\(" "$target" --glob '*.ts' --glob '*.tsx' --glob '*.js' --glob '*.jsx'
 check_no_match "CP no transition-all in frontend motion" "transition\\s*:\\s*['\"]?all\\b|transition-all" "$target" --glob '*.ts' --glob '*.tsx' --glob '*.css'
 check_no_match "CP no large runtime buffer expansion" "runtime.{0,32}buffer.{0,32}(8192|16384|32768|65536)|buffer.{0,32}runtime.{0,32}(8192|16384|32768|65536)" "$target" --glob '*.go' --glob '*.rs' --glob '*.ts' --glob '*.tsx'
 check_no_match "CP internal Go avoids JSON gRPC compatibility dispatch" "grpcsvc\\.Dispatch\\s*\\(|grpcsvc\\.Envelope\\b" "$target" --glob '*.go' --glob '!**/foundation/**' --glob '!**/server-kit/go/grpcsvc/**'

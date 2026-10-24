@@ -95,6 +95,7 @@ templates/frontend/src/hooks/useIdleLogout.ts	{{FRONTEND_ROOT}}/src/hooks/useIdl
 templates/frontend/src/lib/api.ts	{{FRONTEND_ROOT}}/src/lib/api.ts	full,frontend	always	create
 templates/frontend/src/lib/serviceWorker.ts	{{FRONTEND_ROOT}}/src/lib/serviceWorker.ts	full,frontend	always	create
 templates/frontend/src/lib/sessionActivity.ts	{{FRONTEND_ROOT}}/src/lib/sessionActivity.ts	full,frontend	always	create
+templates/frontend/src/lib/timestamp.ts	{{FRONTEND_ROOT}}/src/lib/timestamp.ts	full,frontend	always	create
 templates/frontend/src/stores/app.ts	{{FRONTEND_ROOT}}/src/stores/app.ts	full,frontend	always	create
 templates/frontend/src/stores/prototype.ts	{{FRONTEND_ROOT}}/src/stores/prototype.ts	full,frontend	always	create
 templates/frontend/src/styles/theme.ts	{{FRONTEND_ROOT}}/src/styles/theme.ts	full,frontend	always	create
