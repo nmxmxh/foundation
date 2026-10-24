@@ -1,6 +1,7 @@
 package hermes
 
 import (
+	"encoding/binary"
 	"math"
 	"slices"
 	"sort"
@@ -14,9 +15,18 @@ const maxRangeIndexDeltaDepth = 32
 
 type rangeIndexEntry struct {
 	key      string
+	prefix   uint64
 	version  uint64
 	intVal   int64
 	floatVal float64
+}
+
+// inlineKeyPrefix extracts the first eight bytes of a key in big-endian order.
+// Big-endian numeric comparison matches lexicographical byte order.
+func inlineKeyPrefix(key string) uint64 {
+	var buffer [8]byte
+	copy(buffer[:], key)
+	return binary.BigEndian.Uint64(buffer[:])
 }
 
 type rangeIndexSnapshot struct {
@@ -107,6 +117,9 @@ func (publisher *indexPublisher) rangeChange(cell *rangeIndexCell) *rangeIndexCh
 }
 
 func (publisher *indexPublisher) rangeAdd(cell *rangeIndexCell, entry rangeIndexEntry) {
+	if entry.prefix == 0 && len(entry.key) > 0 {
+		entry.prefix = inlineKeyPrefix(entry.key)
+	}
 	change := publisher.rangeChange(cell)
 	if _, exists := change.adds[entry.key]; !exists {
 		change.delta++
@@ -158,6 +171,9 @@ func sortRangeEntries(entries []rangeIndexEntry, kind byte) {
 		less, equal := rangeEntryCompare(kind, entries[i], entries[j])
 		if !equal {
 			return less
+		}
+		if entries[i].prefix != entries[j].prefix {
+			return entries[i].prefix < entries[j].prefix
 		}
 		return entries[i].key < entries[j].key
 	})

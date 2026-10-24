@@ -8,7 +8,7 @@ use arc_swap::ArcSwap;
 use ovrt_core::RuntimeUnitDescriptor;
 
 mod output;
-pub use output::{RuntimeOutput, SliceOutput};
+pub use output::{RuntimeOutput, ScratchOutput, SliceOutput};
 
 pub trait RuntimeUnit: Send + Sync {
     fn descriptor(&self) -> RuntimeUnitDescriptor;
@@ -19,6 +19,17 @@ pub trait RuntimeUnit: Send + Sync {
         let mut output = Vec::new();
         self.execute(input, &mut output)?;
         Ok(output)
+    }
+
+    /// Executes the unit into a scratch-backed slice without heap reallocation.
+    fn run_scratch<'a>(
+        &self,
+        input: &[u8],
+        arena: &'a mut ovrt_core::ScratchArena,
+    ) -> Result<&'a [u8], String> {
+        let mut output = ScratchOutput::new(arena);
+        self.execute(input, &mut output)?;
+        output.finish()
     }
 }
 
@@ -41,6 +52,14 @@ impl RegisteredUnit {
 
     pub fn run(&self, input: &[u8]) -> Result<Vec<u8>, String> {
         self.unit.run(input)
+    }
+
+    pub fn run_scratch<'a>(
+        &self,
+        input: &[u8],
+        arena: &'a mut ovrt_core::ScratchArena,
+    ) -> Result<&'a [u8], String> {
+        self.unit.run_scratch(input, arena)
     }
 
     pub fn execute(&self, input: &[u8], output: &mut dyn RuntimeOutput) -> Result<(), String> {
@@ -137,6 +156,10 @@ mod tests {
 
         let unit = registry.get("echo.compute").expect("registry access").expect("unit must exist");
         assert_eq!(unit.run(b"ping").expect("run unit"), b"ping");
+
+        let mut arena = ovrt_core::ScratchArena::with_capacity(1024);
+        let result = unit.run_scratch(b"ping_scratch", &mut arena).expect("run scratch");
+        assert_eq!(result, b"ping_scratch");
     }
 
     struct CountedUnit {

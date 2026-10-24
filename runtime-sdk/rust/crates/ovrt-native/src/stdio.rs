@@ -26,26 +26,47 @@ pub fn serve_framed_session<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
 ) -> Result<(), String> {
-    let mut unit_id_bytes = Vec::with_capacity(MAX_UNIT_ID_FRAME_BYTES);
-    let mut raw_buffer = Vec::with_capacity(BUFFER_TOTAL_BYTES as usize);
+    let mut arena = ovrt_core::ScratchArena::with_capacity(8192);
+    serve_framed_session_scratch(host, reader, writer, &mut arena)
+}
+
+/// Serves a framed session using scratch memory to eliminate heap churn.
+pub fn serve_framed_session_scratch<R: Read, W: Write>(
+    host: &NativeRuntimeHost,
+    reader: &mut R,
+    writer: &mut W,
+    arena: &mut ovrt_core::ScratchArena,
+) -> Result<(), String> {
+    let combined = arena
+        .alloc_bytes(MAX_UNIT_ID_FRAME_BYTES + BUFFER_TOTAL_BYTES as usize)
+        .map_err(|error| error.to_string())?;
+    let (unit_id_buf, raw_buffer) = combined.split_at_mut(MAX_UNIT_ID_FRAME_BYTES);
+
     loop {
-        match read_frame_bounded_into(reader, MAX_UNIT_ID_FRAME_BYTES, &mut unit_id_bytes) {
-            Ok(()) => {}
+        let unit_id_len = match read_frame_slice(reader, unit_id_buf) {
+            Ok(len) => len,
             Err(FrameReadError::EndOfStream) => return Ok(()),
             Err(FrameReadError::Io(error)) => return Err(format!("read unit frame: {error}")),
-        }
-        let unit_id = std::str::from_utf8(&unit_id_bytes).map_err(|error| error.to_string())?;
+        };
+        let unit_id =
+            std::str::from_utf8(&unit_id_buf[..unit_id_len]).map_err(|error| error.to_string())?;
 
-        match read_frame_bounded_into(reader, BUFFER_TOTAL_BYTES as usize, &mut raw_buffer) {
-            Ok(()) => {}
+        let buf_len = match read_frame_slice(reader, raw_buffer) {
+            Ok(len) => len,
             Err(FrameReadError::EndOfStream) => {
                 return Err("received unit frame without a matching runtime buffer".to_string())
             }
             Err(FrameReadError::Io(error)) => return Err(format!("read runtime buffer: {error}")),
+        };
+
+        if buf_len != BUFFER_TOTAL_BYTES as usize {
+            return Err(format!(
+                "runtime buffer length mismatch: {buf_len} != {BUFFER_TOTAL_BYTES}"
+            ));
         }
 
-        process_runtime_buffer_in_place(host, unit_id, &mut raw_buffer)?;
-        write_frame(writer, &raw_buffer)
+        process_runtime_buffer_in_place(host, unit_id, raw_buffer)?;
+        write_frame(writer, raw_buffer)
             .map_err(|error| format!("write runtime buffer: {error}"))?;
         writer.flush().map_err(|error| error.to_string())?;
     }
@@ -248,12 +269,38 @@ fn region_raw_mut(raw_buffer: &mut [u8], offset: u32, length: u32) -> Result<&mu
 }
 
 #[derive(Debug)]
-enum FrameReadError {
+pub enum FrameReadError {
     EndOfStream,
     Io(io::Error),
 }
 
-fn read_frame_bounded_into<R: Read>(
+/// Reads one bounded frame directly into a destination slice.
+pub fn read_frame_slice<R: Read>(reader: &mut R, dest: &mut [u8]) -> Result<usize, FrameReadError> {
+    let mut size = [0_u8; 4];
+    match reader.read_exact(&mut size) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+            return Err(FrameReadError::EndOfStream)
+        }
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {
+            return Err(FrameReadError::EndOfStream)
+        }
+        Err(error) => return Err(FrameReadError::Io(error)),
+    }
+
+    let length = u32::from_le_bytes(size) as usize;
+    if length > dest.len() {
+        return Err(FrameReadError::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("frame payload has {length} bytes; slice capacity is {}", dest.len()),
+        )));
+    }
+    reader.read_exact(&mut dest[..length]).map_err(FrameReadError::Io)?;
+    Ok(length)
+}
+
+/// Reads one bounded frame into an existing vector.
+pub fn read_frame_bounded_into<R: Read>(
     reader: &mut R,
     max_payload_bytes: usize,
     payload: &mut Vec<u8>,
@@ -381,5 +428,19 @@ mod tests {
             FrameReadError::Io(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidData),
             FrameReadError::EndOfStream => panic!("oversized frame must not look like eof"),
         }
+    }
+
+    #[test]
+    fn read_frame_slice_reads_payload_without_allocation() {
+        let payload = b"hello foundation session frame";
+        let mut input = Vec::new();
+        input.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        input.extend_from_slice(payload);
+
+        let mut cursor = Cursor::new(input);
+        let mut dest = [0u8; 64];
+        let n = read_frame_slice(&mut cursor, &mut dest).expect("read frame slice");
+        assert_eq!(n, payload.len());
+        assert_eq!(&dest[..n], payload);
     }
 }

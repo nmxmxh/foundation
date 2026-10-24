@@ -71,10 +71,6 @@ func (a *Authorizer) CanAccess(role, capability, permission string, directCapabi
 		return false
 	}
 
-	if capability == "*" {
-		return true
-	}
-
 	for _, granted := range directCapabilities {
 		if grantsAccess(granted, capability, permission) {
 			return true

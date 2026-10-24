@@ -59,6 +59,55 @@ impl RuntimeOutput for SliceOutput<'_> {
     }
 }
 
+/// ScratchOutput writes into a ScratchArena without heap reallocation.
+pub struct ScratchOutput<'a> {
+    arena: &'a mut ovrt_core::ScratchArena,
+    written: usize,
+}
+
+impl<'a> ScratchOutput<'a> {
+    pub fn new(arena: &'a mut ovrt_core::ScratchArena) -> Self {
+        let _ = arena.remaining_slice_mut();
+        Self { arena, written: 0 }
+    }
+
+    pub fn written(&self) -> usize {
+        self.written
+    }
+
+    /// Commits the written bytes into the arena and returns the slice.
+    pub fn finish(self) -> Result<&'a [u8], String> {
+        if self.written == 0 {
+            return Ok(&[]);
+        }
+        let written = self.written;
+        self.arena.commit(written).map(|slice| &*slice).map_err(|error| error.to_string())
+    }
+}
+
+impl<'a> RuntimeOutput for ScratchOutput<'a> {
+    fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        let remaining = self.arena.remaining_slice_mut();
+        let target_end = self
+            .written
+            .checked_add(bytes.len())
+            .ok_or_else(|| "output length overflow".to_string())?;
+        if target_end > remaining.len() {
+            return Err(format!(
+                "output requires {} bytes; {} remain in scratch arena",
+                target_end,
+                remaining.len()
+            ));
+        }
+        remaining[self.written..target_end].copy_from_slice(bytes);
+        self.written = target_end;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,5 +135,24 @@ mod tests {
         assert_eq!(output, b"owned-tail");
         SliceOutput::new(&mut []).write(b"").expect("empty write");
         assert!(SliceOutput::new(&mut []).write(b"x").is_err());
+    }
+
+    #[test]
+    fn scratch_output_appends_chunks_and_commits_slice() {
+        let mut arena = ovrt_core::ScratchArena::with_capacity(128);
+        let mut output = ScratchOutput::new(&mut arena);
+        output.write(b"hello ").expect("write first chunk");
+        output.write(b"foundation").expect("write second chunk");
+        assert_eq!(output.written(), 16);
+        let committed = output.finish().expect("finish");
+        assert_eq!(committed, b"hello foundation");
+    }
+
+    #[test]
+    fn scratch_output_fails_on_capacity_exhaustion() {
+        let mut arena = ovrt_core::ScratchArena::with_capacity(16);
+        let mut output = ScratchOutput::new(&mut arena);
+        let err = output.write(&[0u8; 32]);
+        assert!(err.is_err());
     }
 }

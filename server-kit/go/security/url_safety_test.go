@@ -187,3 +187,19 @@ func TestValidateOutboundURLRejectsCGNATLiterals(t *testing.T) {
 		}
 	}
 }
+
+func TestSafeDialContextRejectsPrivateIPs(t *testing.T) {
+	policy := OutboundURLPolicy{
+		Resolver: func(context.Context, string) ([]net.IP, error) {
+			return []net.IP{net.ParseIP("127.0.0.1")}, nil
+		},
+	}
+	dialFn := SafeDialContext(policy)
+	_, err := dialFn(context.Background(), "tcp", "rebind.example.com:80")
+	if err == nil {
+		t.Fatalf("expected dialer to reject private IP from DNS resolution")
+	}
+	if !errors.Is(err, ErrUnsafeURL) {
+		t.Fatalf("expected ErrUnsafeURL, got %v", err)
+	}
+}

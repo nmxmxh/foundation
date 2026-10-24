@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
@@ -315,5 +316,23 @@ func TestPresignClientUsesSeparateEndpointAndCaches(t *testing.T) {
 	}
 	if again != client {
 		t.Fatalf("expected cached presign client")
+	}
+}
+
+func TestReadStreamMemoryLimitRejection(t *testing.T) {
+	// Size exceeding limit
+	_, err := readStream(bytes.NewReader([]byte("test")), maxMemoryStreamSize+1)
+	if err == nil {
+		t.Fatalf("expected error for size exceeding maxMemoryStreamSize")
+	}
+
+	// Size within limit
+	validData := []byte("hello world")
+	got, err := readStream(bytes.NewReader(validData), int64(len(validData)))
+	if err != nil {
+		t.Fatalf("readStream error: %v", err)
+	}
+	if string(got) != string(validData) {
+		t.Fatalf("readStream mismatch, got %s want %s", string(got), string(validData))
 	}
 }

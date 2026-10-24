@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
@@ -24,20 +25,32 @@ const (
 	PayloadEncodingProtobuf = "protobuf"
 	PayloadEncodingCapnp    = "capnp"
 	PayloadEncodingBinary   = "binary"
+
+	maxInternCacheEntries = 2048
+	maxInternStringLength = 256
 )
 
 var (
-	internCache sync.Map
+	internCache      sync.Map
+	internCacheCount atomic.Int64
 )
 
 func internString(s string) string {
 	if s == "" {
 		return ""
 	}
+	if len(s) > maxInternStringLength {
+		return s
+	}
 	if val, ok := internCache.Load(s); ok {
 		return val.(string)
 	}
-	internCache.Store(s, s)
+	if internCacheCount.Load() >= maxInternCacheEntries {
+		return s
+	}
+	if _, loaded := internCache.LoadOrStore(s, s); !loaded {
+		internCacheCount.Add(1)
+	}
 	return s
 }
 

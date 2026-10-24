@@ -2,6 +2,7 @@ package security
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -137,6 +138,27 @@ func TestCORSAllowsConfiguredOriginAndEmptyPreflight(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("expected empty-origin preflight to pass, got %d", recorder.Code)
+	}
+}
+
+func TestCORSWildcardOriginDoesNotReflectCredentials(t *testing.T) {
+	handler := CORS([]string{"*"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/v1/workspace", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected ok status, got %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("expected wildcard allow origin '*', got %q", got)
+	}
+	if got := recorder.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("wildcard CORS origin must not allow credentials, got %q", got)
 	}
 }
 
@@ -506,6 +528,53 @@ func TestRateLimiterClientIPAndFingerprintFallbacks(t *testing.T) {
 	}
 	if got := GetClientIP(nil); got != "" {
 		t.Fatalf("expected empty nil client ip, got %q", got)
+	}
+}
+
+func TestRateLimiterPruningAndBoundedCapacity(t *testing.T) {
+	limiter := NewRateLimiter(5, 20*time.Millisecond)
+	for i := 0; i < 10; i++ {
+		limiter.Allow(fmt.Sprintf("key-%d", i))
+	}
+	if limiter.KeyCount() != 10 {
+		t.Fatalf("expected 10 tracked keys, got %d", limiter.KeyCount())
+	}
+	time.Sleep(30 * time.Millisecond)
+	limiter.Prune(time.Now())
+	if limiter.KeyCount() != 0 {
+		t.Fatalf("expected 0 tracked keys after prune, got %d", limiter.KeyCount())
+	}
+}
+
+func TestGetClientIPTrustedProxyVerification(t *testing.T) {
+	defer SetTrustedProxyChecker(nil)
+
+	// Direct connection stripping port
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.RemoteAddr = "192.0.2.1:54321"
+	if got := GetClientIP(req); got != "192.0.2.1" {
+		t.Fatalf("expected remote addr port stripped, got %q", got)
+	}
+
+	// When trusted proxy checker is active
+	SetTrustedProxyChecker(func(remoteAddr string) bool {
+		return strings.HasPrefix(remoteAddr, "10.0.0.1")
+	})
+
+	// Untrusted direct client attempting to spoof XFF
+	untrustedReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	untrustedReq.RemoteAddr = "203.0.113.50:12345"
+	untrustedReq.Header.Set("X-Forwarded-For", "198.51.100.99")
+	if got := GetClientIP(untrustedReq); got != "203.0.113.50" {
+		t.Fatalf("expected untrusted peer XFF to be ignored, got %q", got)
+	}
+
+	// Trusted proxy client with XFF
+	trustedReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	trustedReq.RemoteAddr = "10.0.0.1:12345"
+	trustedReq.Header.Set("X-Forwarded-For", "198.51.100.99")
+	if got := GetClientIP(trustedReq); got != "198.51.100.99" {
+		t.Fatalf("expected trusted proxy XFF to be accepted, got %q", got)
 	}
 }
 

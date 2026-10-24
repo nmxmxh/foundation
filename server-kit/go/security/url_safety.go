@@ -3,7 +3,9 @@ package security
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -239,6 +241,48 @@ func buildPrefixes(cidrs ...string) []*net.IPNet {
 		out = append(out, n)
 	}
 	return out
+}
+
+// IsPrivateOrLocalIP reports whether an IP address belongs to a non-routable range.
+func IsPrivateOrLocalIP(ip net.IP) bool {
+	return isPrivateOrLocalIP(ip)
+}
+
+// SafeDialContext creates a dialer that validates resolved IP addresses to prevent DNS rebinding.
+func SafeDialContext(policy OutboundURLPolicy) func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid address: %s", ErrUnsafeURL, addr)
+		}
+		if len(policy.AllowedHosts) > 0 && !hostInAllowlist(host, policy.AllowedHosts) {
+			return nil, fmt.Errorf("%w: host %s not in allowlist", ErrUnsafeURL, host)
+		}
+		ips, err := resolveHost(ctx, host, policy)
+		if err != nil || len(ips) == 0 {
+			return nil, fmt.Errorf("%w: could not resolve host %s", ErrUnsafeURL, host)
+		}
+		if !policy.AllowPrivateNetworks {
+			for _, ip := range ips {
+				if isPrivateOrLocalIP(ip) {
+					return nil, fmt.Errorf("%w: resolved private or local ip %s for %s", ErrUnsafeURL, ip.String(), host)
+				}
+			}
+		}
+		dialer := &net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}
+		target := net.JoinHostPort(ips[0].String(), port)
+		return dialer.DialContext(ctx, network, target)
+	}
+}
+
+// SafeHTTPTransport returns an HTTP transport configured to prevent SSRF and DNS rebinding.
+func SafeHTTPTransport(policy OutboundURLPolicy) *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = SafeDialContext(policy)
+	return transport
 }
 
 func isPrivateOrLocalIP(ip net.IP) bool {

@@ -73,6 +73,55 @@ pub struct ColumnarField {
     pub values_descriptor_id: u32,
 }
 
+/// A borrowed zero-allocation view of a columnar batch.
+#[derive(Debug, Clone, Copy)]
+pub struct ColumnarBatchView<'a> {
+    slab: &'a [u8],
+    pub row_count: u32,
+    pub column_count: u32,
+}
+
+impl<'a> ColumnarBatchView<'a> {
+    /// Returns the field at the specified column index.
+    pub fn field_at(&self, index: u32) -> Result<ColumnarField, String> {
+        if index >= self.column_count {
+            return Err(format!(
+                "column index {index} out of bounds: count is {}",
+                self.column_count
+            ));
+        }
+        let base = COLUMNAR_BATCH_HEADER_BYTES as usize
+            + index as usize * COLUMNAR_FIELD_DESCRIPTOR_BYTES as usize;
+        let field_word = |idx: u32| -> u32 {
+            let at = base + idx as usize * 4;
+            u32::from_le_bytes([
+                self.slab[at],
+                self.slab[at + 1],
+                self.slab[at + 2],
+                self.slab[at + 3],
+            ])
+        };
+        Ok(ColumnarField {
+            field_id: field_word(COLUMNAR_FIELD_IDX_FIELD_ID),
+            logical_type: field_word(COLUMNAR_FIELD_IDX_LOGICAL_TYPE),
+            length: field_word(COLUMNAR_FIELD_IDX_LENGTH),
+            byte_width: field_word(COLUMNAR_FIELD_IDX_BYTE_WIDTH),
+            values_descriptor_id: field_word(COLUMNAR_FIELD_IDX_VALUES_DESCRIPTOR_ID),
+        })
+    }
+
+    /// Finds a column by its field ID without heap allocation.
+    pub fn find_field(&self, field_id: u32) -> Result<Option<ColumnarField>, String> {
+        for col in 0..self.column_count {
+            let f = self.field_at(col)?;
+            if f.field_id == field_id {
+                return Ok(Some(f));
+            }
+        }
+        Ok(None)
+    }
+}
+
 /// A decoded batch header plus its field table.
 #[derive(Debug, Clone)]
 pub struct ColumnarBatch {
@@ -290,6 +339,41 @@ impl Arena {
         Ok(ColumnarBatch { row_count, fields })
     }
 
+    /// Returns a zero-copy view of a columnar batch without vector allocation.
+    pub fn columnar_batch_view<'a>(
+        &'a self,
+        batch_descriptor_id: u32,
+    ) -> Result<ColumnarBatchView<'a>, String> {
+        let slab = self.slab(batch_descriptor_id)?;
+        if slab.len() < COLUMNAR_BATCH_HEADER_BYTES as usize {
+            return Err(format!(
+                "columnar batch slab is {} bytes, want at least {COLUMNAR_BATCH_HEADER_BYTES}",
+                slab.len()
+            ));
+        }
+        let word = |index: u32| -> u32 {
+            let at = index as usize * 4;
+            u32::from_le_bytes([slab[at], slab[at + 1], slab[at + 2], slab[at + 3]])
+        };
+        let magic = word(COLUMNAR_BATCH_HEADER_IDX_MAGIC);
+        if magic != COLUMNAR_BATCH_MAGIC {
+            return Err(format!("columnar batch magic {magic:#x}, want {COLUMNAR_BATCH_MAGIC:#x}"));
+        }
+        let row_count = word(COLUMNAR_BATCH_HEADER_IDX_ROW_COUNT);
+        let column_count = word(COLUMNAR_BATCH_HEADER_IDX_COLUMN_COUNT);
+
+        let need = COLUMNAR_BATCH_HEADER_BYTES as usize
+            + column_count as usize * COLUMNAR_FIELD_DESCRIPTOR_BYTES as usize;
+        if slab.len() < need {
+            return Err(format!(
+                "columnar batch slab is {} bytes, want {need} for {column_count} columns",
+                slab.len()
+            ));
+        }
+
+        Ok(ColumnarBatchView { slab, row_count, column_count })
+    }
+
     /// Reads a float32 column's values.
     pub fn f32_column(&self, field: &ColumnarField) -> Result<Vec<f32>, String> {
         if field.logical_type != COLUMNAR_LOGICAL_TYPE_FLOAT || field.byte_width != 4 {
@@ -311,6 +395,37 @@ impl Arena {
             .chunks_exact(4)
             .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
             .collect())
+    }
+
+    /// Reads a float32 column's values into a caller-supplied slice.
+    pub fn f32_column_into(
+        &self,
+        field: &ColumnarField,
+        dest: &mut [f32],
+    ) -> Result<usize, String> {
+        if field.logical_type != COLUMNAR_LOGICAL_TYPE_FLOAT || field.byte_width != 4 {
+            return Err(format!(
+                "column {} is logical type {} width {}, not float32",
+                field.field_id, field.logical_type, field.byte_width
+            ));
+        }
+        let slab = self.slab(field.values_descriptor_id)?;
+        let count = field.length as usize;
+        let want = count * 4;
+        if slab.len() < want {
+            return Err(format!(
+                "float32 column {} slab is {} bytes, want {want}",
+                field.field_id,
+                slab.len()
+            ));
+        }
+        if dest.len() < count {
+            return Err(format!("destination slice too small: {} < {}", dest.len(), count));
+        }
+        for (i, chunk) in slab[..want].chunks_exact(4).enumerate() {
+            dest[i] = f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        }
+        Ok(count)
     }
 
     /// Reads a uint32 column's values.
@@ -503,6 +618,18 @@ mod tests {
         let field = batch.field(0).expect("field 0 present");
         let back = arena.f32_column(field).expect("read column");
         assert_eq!(back, values);
+
+        // Test zero-allocation ColumnarBatchView and f32_column_into
+        let view = arena.columnar_batch_view(batch_id).expect("decode batch view");
+        assert_eq!(view.row_count, values.len() as u32);
+        assert_eq!(view.column_count, 1);
+        let view_field = view.find_field(0).expect("find field 0").expect("field 0 present");
+        assert_eq!(view_field.field_id, 0);
+
+        let mut dest = vec![0.0f32; values.len()];
+        let n = arena.f32_column_into(&view_field, &mut dest).expect("read column into");
+        assert_eq!(n, values.len());
+        assert_eq!(dest, values);
     }
 
     #[test]

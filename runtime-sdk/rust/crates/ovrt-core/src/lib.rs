@@ -9,6 +9,8 @@ pub mod layout;
 pub mod log_ring;
 pub mod mapping;
 pub mod native_gpu;
+pub mod scratch;
+pub mod soa_btree;
 pub mod unit;
 
 pub use diagnostics::*;
@@ -18,4 +20,6 @@ pub use layout::*;
 #[cfg(unix)]
 pub use mapping::SharedMapping;
 pub use native_gpu::*;
+pub use scratch::*;
+pub use soa_btree::*;
 pub use unit::*;

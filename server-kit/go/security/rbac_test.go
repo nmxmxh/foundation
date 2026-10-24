@@ -30,6 +30,15 @@ func TestAuthorizerRoleAndDirectCapabilities(t *testing.T) {
 	if !authorizer.CanAccess("operator", "inventory.recount", PermissionAdmin, nil) {
 		t.Fatalf("inventory.* should grant admin action")
 	}
+	if authorizer.CanAccess("operator", "*", "", nil) {
+		t.Fatalf("operator should not be granted wildcard capability")
+	}
+	if authorizer.CanAccess("guest", "*", "", nil) {
+		t.Fatalf("guest should not be granted wildcard capability")
+	}
+	if !defaultAuthorizer.CanAccess("admin", "*", "", nil) {
+		t.Fatalf("admin with wildcard granted should be granted wildcard capability")
+	}
 }
 
 func TestAuthorizerRequireFromContext(t *testing.T) {

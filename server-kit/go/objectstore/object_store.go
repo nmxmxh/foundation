@@ -683,12 +683,22 @@ func cloneMetadata(in map[string]string) map[string]string {
 	return out
 }
 
+const maxMemoryStreamSize int64 = 64 * 1024 * 1024 // 64 MiB
+
 func readStream(reader io.Reader, size int64) ([]byte, error) {
-	if size <= 0 {
-		return io.ReadAll(reader)
+	if size > maxMemoryStreamSize {
+		return nil, fmt.Errorf("stream size %d exceeds maximum memory limit %d", size, maxMemoryStreamSize)
 	}
-	if size > int64(^uint(0)>>1) {
-		return io.ReadAll(reader)
+	if size <= 0 {
+		boundedReader := io.LimitReader(reader, maxMemoryStreamSize+1)
+		payload, err := io.ReadAll(boundedReader)
+		if err != nil {
+			return nil, err
+		}
+		if int64(len(payload)) > maxMemoryStreamSize {
+			return nil, fmt.Errorf("stream exceeds maximum memory limit %d", maxMemoryStreamSize)
+		}
+		return payload, nil
 	}
 	payload := make([]byte, int(size))
 	n, err := io.ReadFull(reader, payload)

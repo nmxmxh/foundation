@@ -92,6 +92,14 @@ func TestHTTPXOutboundURLPolicyRejection(t *testing.T) {
 		t.Fatalf("failed to create driver: %v", err)
 	}
 
+	d := driver.(*Driver)
+	if d.client.Transport == nil {
+		t.Fatalf("expected client Transport to be configured")
+	}
+	if tr, ok := d.client.Transport.(*http.Transport); !ok || tr.DialContext == nil {
+		t.Fatalf("expected client Transport to have SafeDialContext configured")
+	}
+
 	// Probe should reject private IP / http scheme
 	_, err = driver.Probe(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "url safety violation") {

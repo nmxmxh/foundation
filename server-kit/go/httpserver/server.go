@@ -223,6 +223,9 @@ func New(cfg *Config, reg *registry.ServiceRegistry, handler ...*graceful.Handle
 		idleTimeout:          120 * time.Second,
 		maxConcurrentStreams: 250,
 	}
+	if s.ws != nil {
+		s.ws.upgrader.CheckOrigin = s.checkOrigin
+	}
 
 	if cfg != nil {
 		if cfg.ReadHeaderTimeout > 0 {

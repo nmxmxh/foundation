@@ -54,6 +54,15 @@ pub struct NativeDispatchRequest {
     pub metadata: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeDispatchRequestView<'a> {
+    pub unit_id: &'a str,
+    pub schema_version: &'a str,
+    pub encoding: NativePayloadEncoding,
+    pub payload: &'a [u8],
+    pub metadata: &'a [u8],
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NativeDispatchResponse {
     pub status_code: u16,
@@ -220,6 +229,44 @@ impl NativeRuntimeBridge {
         })
     }
 
+    /// dispatch_frame_into executes a frame without heap allocations, writing the wire response directly into dest.
+    pub fn dispatch_frame_into(
+        &self,
+        frame: &[u8],
+        dest: &mut [u8],
+    ) -> Result<usize, NativeRuntimeError> {
+        let request = decode_dispatch_request_view(frame, self.max_frame_bytes)?;
+        if !self.allowed_units.contains(request.unit_id) {
+            return Err(NativeRuntimeError::new(
+                NativeErrorCode::UnauthorizedUnit,
+                format!("runtime unit {} is not allowlisted", request.unit_id),
+            ));
+        }
+        if dest.len() < 16 {
+            return Err(NativeRuntimeError::new(
+                NativeErrorCode::OversizedFrame,
+                "destination buffer too small for response header",
+            ));
+        }
+
+        let (header, payload_dest) = dest.split_at_mut(16);
+        let written = self
+            .host
+            .dispatch_direct_into(request.unit_id, request.payload, payload_dest)
+            .map_err(|error| {
+                NativeRuntimeError::new(NativeErrorCode::RuntimeDispatchFailed, error)
+            })?;
+
+        header[0..4].copy_from_slice(RESPONSE_MAGIC);
+        header[4] = NATIVE_FRAME_VERSION;
+        header[5] = 0;
+        header[6..8].copy_from_slice(&0_u16.to_be_bytes());
+        header[8..12].copy_from_slice(&(written as u32).to_be_bytes());
+        header[12..16].copy_from_slice(&0_u32.to_be_bytes());
+
+        Ok(16 + written)
+    }
+
     pub fn capabilities(&self) -> NativeRuntimeCapabilities {
         NativeRuntimeCapabilities::detect()
     }
@@ -263,6 +310,19 @@ impl NativeSecureStore {
             NativeRuntimeError::new(NativeErrorCode::StoreUnavailable, "secure store lock poisoned")
         })?;
         Ok(guard.get(key).cloned())
+    }
+
+    /// inspect allows zero-allocation borrowed inspection of the stored secret.
+    pub fn inspect<R>(
+        &self,
+        key: &str,
+        f: impl FnOnce(Option<&[u8]>) -> R,
+    ) -> Result<R, NativeRuntimeError> {
+        validate_store_key(key)?;
+        let guard = self.values.read().map_err(|_| {
+            NativeRuntimeError::new(NativeErrorCode::StoreUnavailable, "secure store lock poisoned")
+        })?;
+        Ok(f(guard.get(key).map(|v| v.as_slice())))
     }
 
     pub fn delete(&self, key: &str) -> Result<bool, NativeRuntimeError> {
@@ -330,10 +390,10 @@ pub fn encode_dispatch_request(
     Ok(frame)
 }
 
-pub fn decode_dispatch_request(
-    frame: &[u8],
+pub fn decode_dispatch_request_view<'a>(
+    frame: &'a [u8],
     max_frame_bytes: usize,
-) -> Result<NativeDispatchRequest, NativeRuntimeError> {
+) -> Result<NativeDispatchRequestView<'a>, NativeRuntimeError> {
     if frame.len() > max_frame_bytes {
         return Err(NativeRuntimeError::new(
             NativeErrorCode::OversizedFrame,
@@ -374,18 +434,32 @@ pub fn decode_dispatch_request(
     }
 
     let mut cursor = offset;
-    let unit_id = read_utf8(frame, &mut cursor, unit_len, "unit id")?;
-    let schema_version = read_utf8(frame, &mut cursor, schema_len, "schema version")?;
+    let unit_id = read_str(frame, &mut cursor, unit_len, "unit id")?;
+    let schema_version = read_str(frame, &mut cursor, schema_len, "schema version")?;
     if schema_version != SUPPORTED_SCHEMA_VERSION {
         return Err(NativeRuntimeError::new(
             NativeErrorCode::UnsupportedVersion,
             format!("unsupported native schema version {schema_version}"),
         ));
     }
-    let payload = read_bytes(frame, &mut cursor, payload_len)?.to_vec();
-    let metadata = read_bytes(frame, &mut cursor, metadata_len)?.to_vec();
+    let payload = read_bytes(frame, &mut cursor, payload_len)?;
+    let metadata = read_bytes(frame, &mut cursor, metadata_len)?;
 
-    Ok(NativeDispatchRequest { unit_id, schema_version, encoding, payload, metadata })
+    Ok(NativeDispatchRequestView { unit_id, schema_version, encoding, payload, metadata })
+}
+
+pub fn decode_dispatch_request(
+    frame: &[u8],
+    max_frame_bytes: usize,
+) -> Result<NativeDispatchRequest, NativeRuntimeError> {
+    let view = decode_dispatch_request_view(frame, max_frame_bytes)?;
+    Ok(NativeDispatchRequest {
+        unit_id: view.unit_id.to_string(),
+        schema_version: view.schema_version.to_string(),
+        encoding: view.encoding,
+        payload: view.payload.to_vec(),
+        metadata: view.metadata.to_vec(),
+    })
 }
 
 pub fn encode_dispatch_response(
@@ -457,12 +531,12 @@ pub fn decode_dispatch_response(
     })
 }
 
-fn read_utf8(
-    frame: &[u8],
+fn read_str<'a>(
+    frame: &'a [u8],
     cursor: &mut usize,
     len: usize,
     label: &str,
-) -> Result<String, NativeRuntimeError> {
+) -> Result<&'a str, NativeRuntimeError> {
     let bytes = read_bytes(frame, cursor, len)?;
     let value = std::str::from_utf8(bytes).map_err(|_| {
         NativeRuntimeError::new(NativeErrorCode::MalformedFrame, format!("{label} is not utf-8"))
@@ -473,7 +547,7 @@ fn read_utf8(
             format!("{label} is required"),
         ));
     }
-    Ok(value.to_string())
+    Ok(value)
 }
 
 fn read_bytes<'a>(
@@ -653,6 +727,27 @@ mod tests {
             .expect("decode response");
         assert_eq!(response.status_code, 0);
         assert_eq!(response.payload, b"abc");
+    }
+
+    #[test]
+    fn runtime_bridge_dispatches_into_scratch_destination() {
+        let mut bridge = NativeRuntimeBridge::with_role_limits(BTreeMap::new());
+        bridge.register_allowed_unit(Arc::new(EchoUnit)).expect("register allowed unit");
+        let request = NativeDispatchRequest {
+            unit_id: "bench.echo".to_string(),
+            schema_version: "1.0".to_string(),
+            encoding: NativePayloadEncoding::Capnp,
+            payload: b"zero_alloc_scratch_payload".to_vec(),
+            metadata: Vec::new(),
+        };
+        let frame = encode_dispatch_request(&request).expect("encode request");
+        let mut scratch = [0u8; 1024];
+        let written =
+            bridge.dispatch_frame_into(&frame, &mut scratch).expect("dispatch frame into");
+        let response = decode_dispatch_response(&scratch[..written], MAX_NATIVE_FRAME_BYTES)
+            .expect("decode response");
+        assert_eq!(response.status_code, 0);
+        assert_eq!(response.payload, b"zero_alloc_scratch_payload");
     }
 
     #[test]

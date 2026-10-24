@@ -91,8 +91,8 @@ func newWSRuntime() *wsRuntime {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  cfg.ScaleBuffer(1024),
 			WriteBufferSize: cfg.ScaleBuffer(1024),
-			CheckOrigin: func(_ *http.Request) bool {
-				return true
+			CheckOrigin: func(r *http.Request) bool {
+				return checkSameOrigin(r)
 			},
 		},
 		guestLimiter:  security.NewRateLimiter(cfg.WSGuestRateLimit, time.Minute),
@@ -100,6 +100,35 @@ func newWSRuntime() *wsRuntime {
 		metrics:       wsmetrics.NewCollector(""),
 		startedAt:     time.Now().UTC(),
 	}
+}
+
+func checkSameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
+}
+
+func (s *Server) checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err == nil && strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+	for _, allowed := range s.allowedOrigins {
+		if allowed == "*" || strings.EqualFold(allowed, origin) {
+			return true
+		}
+	}
+	return false
 }
 
 // WithRouter configures a WebSocket connection router for horizontal scaling.

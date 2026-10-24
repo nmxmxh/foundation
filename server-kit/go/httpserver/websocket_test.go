@@ -1299,3 +1299,44 @@ func TestDisconnectBudgetIsBounded(t *testing.T) {
 		t.Fatal("disconnect cleanup runs off the request context and must be bounded")
 	}
 }
+
+func TestWSCheckOriginRejectsCrossSiteOrigins(t *testing.T) {
+	s := &Server{
+		allowedOrigins: []string{"https://app.example.com"},
+	}
+
+	// 1. Same-origin matches host
+	req := httptest.NewRequest(http.MethodGet, "https://api.example.com/ws", nil)
+	req.Header.Set("Origin", "https://api.example.com")
+	if !s.checkOrigin(req) {
+		t.Fatalf("expected same-origin to be allowed")
+	}
+
+	// 2. Allowed cross-origin
+	req = httptest.NewRequest(http.MethodGet, "https://api.example.com/ws", nil)
+	req.Header.Set("Origin", "https://app.example.com")
+	if !s.checkOrigin(req) {
+		t.Fatalf("expected configured allowed-origin to be allowed")
+	}
+
+	// 3. Disallowed cross-origin (CSWSH)
+	req = httptest.NewRequest(http.MethodGet, "https://api.example.com/ws", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	if s.checkOrigin(req) {
+		t.Fatalf("expected cross-site origin to be rejected")
+	}
+
+	// 4. Missing origin (native client)
+	req = httptest.NewRequest(http.MethodGet, "https://api.example.com/ws", nil)
+	if !s.checkOrigin(req) {
+		t.Fatalf("expected empty origin to be allowed")
+	}
+
+	// 5. Default runtime same-origin check
+	rt := newWSRuntime()
+	req = httptest.NewRequest(http.MethodGet, "https://api.example.com/ws", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	if rt.upgrader.CheckOrigin(req) {
+		t.Fatalf("default upgrader CheckOrigin must reject cross-site origin")
+	}
+}

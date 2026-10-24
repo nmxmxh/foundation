@@ -129,13 +129,22 @@ func (m *JWTManager) ValidateTokenWithArena(arena *scratch.Arena, token string) 
 	if err := m.validateTokenIntoArena(claims, token, arena); err != nil {
 		return nil, err
 	}
+	if claims.IsRefreshToken() {
+		return nil, errInvalidTokenType
+	}
 	return claims, nil
 }
 
 // ValidateTokenInto validates token signature and expiry, unmarshaling claims directly into target.
 // When target is caller-allocated (on stack or arena), this eliminates the return pointer allocation.
 func (m *JWTManager) ValidateTokenInto(target *Claims, token string) error {
-	return m.validateTokenIntoArena(target, token, nil)
+	if err := m.validateTokenIntoArena(target, token, nil); err != nil {
+		return err
+	}
+	if target.IsRefreshToken() {
+		return errInvalidTokenType
+	}
+	return nil
 }
 
 func (m *JWTManager) validateTokenIntoArena(target *Claims, token string, arena *scratch.Arena) error {
@@ -176,14 +185,14 @@ func (m *JWTManager) validateTokenIntoArena(target *Claims, token string, arena 
 
 // ValidateRefreshToken validates a refresh token signature, expiry, and type.
 func (m *JWTManager) ValidateRefreshToken(token string) (*Claims, error) {
-	claims, err := m.ValidateToken(token)
-	if err != nil {
+	var claims Claims
+	if err := m.validateTokenIntoArena(&claims, token, nil); err != nil {
 		return nil, err
 	}
 	if !claims.IsRefreshToken() {
 		return nil, errInvalidTokenType
 	}
-	return claims, nil
+	return &claims, nil
 }
 
 // ParseBearerToken extracts bearer token from Authorization header.
@@ -279,6 +288,9 @@ func decodeAndUnmarshalClaimsWithArena(payloadPart string, claims *Claims, arena
 		if err != nil {
 			return fmt.Errorf("decode payload: %w", err)
 		}
+		if n == 0 {
+			return errInvalidTokenFormat
+		}
 		var data string
 		if arena != nil {
 			raw, err := arena.Alloc(n)
@@ -300,6 +312,9 @@ func decodeAndUnmarshalClaimsWithArena(payloadPart string, claims *Claims, arena
 	payload, err := base64.RawURLEncoding.DecodeString(payloadPart)
 	if err != nil {
 		return fmt.Errorf("decode payload: %w", err)
+	}
+	if len(payload) == 0 {
+		return errInvalidTokenFormat
 	}
 	if err := json.Unmarshal(payload, claims); err != nil {
 		return fmt.Errorf("unmarshal claims: %w", err)

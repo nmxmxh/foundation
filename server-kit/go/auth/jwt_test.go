@@ -388,3 +388,50 @@ func TestValidateTokenWithArena_ZeroAllocations(t *testing.T) {
 		t.Fatalf("expected 0 allocs for ValidateTokenWithArena, got %f", allocs)
 	}
 }
+
+func TestValidateTokenRejectsRefreshTokens(t *testing.T) {
+	manager, err := NewJWTManager("super-secret-key-at-least-16-bytes")
+	if err != nil {
+		t.Fatalf("new jwt manager failed: %v", err)
+	}
+
+	refreshToken, err := manager.GenerateRefreshToken(Claims{UserID: "usr_refresh_1"}, time.Hour)
+	if err != nil {
+		t.Fatalf("generate refresh token failed: %v", err)
+	}
+
+	if _, err := manager.ValidateToken(refreshToken); !errors.Is(err, errInvalidTokenType) {
+		t.Fatalf("expected ValidateToken to reject refresh token with errInvalidTokenType, got %v", err)
+	}
+
+	var target Claims
+	if err := manager.ValidateTokenInto(&target, refreshToken); !errors.Is(err, errInvalidTokenType) {
+		t.Fatalf("expected ValidateTokenInto to reject refresh token, got %v", err)
+	}
+
+	arena := scratch.New(4096)
+	if _, err := manager.ValidateTokenWithArena(arena, refreshToken); !errors.Is(err, errInvalidTokenType) {
+		t.Fatalf("expected ValidateTokenWithArena to reject refresh token, got %v", err)
+	}
+}
+
+func TestValidateTokenEmptyPayloadNoPanic(t *testing.T) {
+	manager, err := NewJWTManager("super-secret-key-at-least-16-bytes")
+	if err != nil {
+		t.Fatalf("new jwt manager failed: %v", err)
+	}
+
+	header := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+	unsigned := header + "."
+	sig := manager.sign(unsigned)
+	emptyPayloadToken := unsigned + "." + sig
+
+	arena := scratch.New(4096)
+	if _, err := manager.ValidateTokenWithArena(arena, emptyPayloadToken); err == nil {
+		t.Fatalf("expected error for empty payload token")
+	}
+
+	if _, err := manager.ValidateToken(emptyPayloadToken); err == nil {
+		t.Fatalf("expected error for empty payload token")
+	}
+}

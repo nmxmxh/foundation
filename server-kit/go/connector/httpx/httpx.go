@@ -86,6 +86,15 @@ func New(endpoint string, options map[string]any) (connector.Driver, error) {
 	} else if v, ok := options["outbound_policy"].(security.OutboundURLPolicy); ok {
 		d.outboundPolicy = &v
 	}
+	if d.outboundPolicy != nil {
+		if d.client.Transport == nil {
+			d.client.Transport = security.SafeHTTPTransport(*d.outboundPolicy)
+		} else if t, ok := d.client.Transport.(*http.Transport); ok && t.DialContext == nil {
+			cloned := t.Clone()
+			cloned.DialContext = security.SafeDialContext(*d.outboundPolicy)
+			d.client.Transport = cloned
+		}
+	}
 	// ValidateOutboundURL vets the first hop only. Each redirect re-runs it so a
 	// public target cannot 302 to a private or non-routable address.
 	if d.client.CheckRedirect == nil {

@@ -31,7 +31,8 @@ pub use buffer::NativeBuffer;
 pub use shared_memory::serve_transport;
 pub use stdio::{
     process_runtime_buffer, process_runtime_buffer_in_place, process_runtime_buffer_unpublished,
-    serve_framed_session, serve_stdio, BufferOutcome,
+    read_frame_bounded_into, read_frame_slice, serve_framed_session, serve_framed_session_scratch,
+    serve_stdio, BufferOutcome, FrameReadError,
 };
 
 type TaskResult = Result<Vec<u8>, String>;

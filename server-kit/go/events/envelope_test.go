@@ -746,3 +746,34 @@ func TestBatchToBinaryWithArena(t *testing.T) {
 		t.Fatalf("expected batch error for invalid envelope")
 	}
 }
+
+func TestInternStringBoundsAndCapacity(t *testing.T) {
+	if internString("") != "" {
+		t.Fatalf("expected empty string result")
+	}
+
+	// Long strings exceeding maxInternStringLength must not be cached
+	longStr := strings.Repeat("x", maxInternStringLength+10)
+	internedLong := internString(longStr)
+	if internedLong != longStr {
+		t.Fatalf("long string mismatch")
+	}
+	if _, loaded := internCache.Load(longStr); loaded {
+		t.Fatalf("oversized string must not be stored in intern cache")
+	}
+
+	// Normal strings are cached
+	normalStr := "test.event.created"
+	if internString(normalStr) != normalStr {
+		t.Fatalf("normal string mismatch")
+	}
+	if _, loaded := internCache.Load(normalStr); !loaded {
+		t.Fatalf("normal string should be cached")
+	}
+
+	// Count should never exceed maxInternCacheEntries
+	currentCount := internCacheCount.Load()
+	if currentCount > maxInternCacheEntries {
+		t.Fatalf("internCacheCount %d exceeded max %d", currentCount, maxInternCacheEntries)
+	}
+}

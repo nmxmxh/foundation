@@ -2,6 +2,7 @@ package security
 
 import (
 	"context"
+	"net"
 	"net/http"
 	stdpath "path"
 	"strings"
@@ -100,13 +101,17 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
-			allowedOrigin := isOriginAllowed(origin, allowedOrigins)
+			allowedOrigin, isWildcard := matchOrigin(origin, allowedOrigins)
 			if origin != "" {
 				headers := w.Header()
 				if allowedOrigin {
+					allowOriginValue := origin
+					if isWildcard {
+						allowOriginValue = "*"
+					}
 					corsValues := [...]string{
 						"Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers",
-						origin, "true", "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+						allowOriginValue, "true", "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 						allowedRequestHeaders(r.Header.Get("Access-Control-Request-Headers")), "3600",
 					}
 					if len(headers["Vary"]) == 0 {
@@ -115,7 +120,9 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 						headers["Vary"] = append(headers["Vary"], corsValues[0:3]...)
 					}
 					headers["Access-Control-Allow-Origin"] = corsValues[3:4:4]
-					headers["Access-Control-Allow-Credentials"] = corsValues[4:5:5]
+					if !isWildcard {
+						headers["Access-Control-Allow-Credentials"] = corsValues[4:5:5]
+					}
 					headers["Access-Control-Allow-Methods"] = corsValues[5:6:6]
 					headers["Access-Control-Allow-Headers"] = corsValues[6:7:7]
 					headers["Access-Control-Max-Age"] = corsValues[7:8:8]
@@ -169,15 +176,26 @@ func CSRFProtection(trustedOrigins []string, bypassPatterns ...string) func(http
 }
 
 func isOriginAllowed(origin string, allowed []string) bool {
+	matched, _ := matchOrigin(origin, allowed)
+	return matched
+}
+
+func matchOrigin(origin string, allowed []string) (bool, bool) {
 	if origin == "" {
-		return false
+		return false, false
 	}
+	hasWildcard := false
 	for _, candidate := range allowed {
-		if candidate == "*" || origin == candidate {
-			return true
+		if candidate == "*" {
+			hasWildcard = true
+		} else if origin == candidate {
+			return true, false
 		}
 	}
-	return false
+	if hasWildcard {
+		return true, true
+	}
+	return false, false
 }
 
 // MaxRequestBytes is the ingress ceiling on a request body, measured on the
@@ -441,12 +459,15 @@ func requestFingerprint(r *http.Request) string {
 	return "ip:unknown"
 }
 
+const maxRateLimiterKeys = 10000
+
 // RateLimiter is a fixed-window rate limiter keyed by request fingerprint.
 type RateLimiter struct {
 	mu       sync.Mutex
 	requests map[string][]time.Time
 	limit    int
 	window   time.Duration
+	ops      uint64
 }
 
 func NewRateLimiter(limit int, window time.Duration) *RateLimiter {
@@ -479,6 +500,11 @@ func (rl *RateLimiter) Allow(key string) bool {
 	defer rl.mu.Unlock()
 	now := time.Now()
 
+	rl.ops++
+	if rl.ops%256 == 0 || len(rl.requests) >= maxRateLimiterKeys {
+		rl.pruneExpired(now)
+	}
+
 	items := rl.requests[key]
 	filtered := items[:0]
 	for _, at := range items {
@@ -493,22 +519,97 @@ func (rl *RateLimiter) Allow(key string) bool {
 		rl.requests[key] = filtered
 		return false
 	}
+	if len(filtered) == 0 && len(rl.requests) >= maxRateLimiterKeys {
+		return false
+	}
 	rl.requests[key] = append(filtered, now)
 	return true
+}
+
+// Prune removes expired entries from the tracked requests map.
+func (rl *RateLimiter) Prune(now time.Time) {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	rl.pruneExpired(now)
+}
+
+func (rl *RateLimiter) pruneExpired(now time.Time) {
+	for k, timestamps := range rl.requests {
+		valid := false
+		for _, at := range timestamps {
+			if now.Sub(at) < rl.window {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			delete(rl.requests, k)
+		}
+	}
+}
+
+// KeyCount returns the count of keys currently stored in memory.
+func (rl *RateLimiter) KeyCount() int {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	return len(rl.requests)
+}
+
+func cleanIP(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(raw); err == nil {
+		raw = host
+	}
+	raw = strings.TrimPrefix(raw, "[")
+	raw = strings.TrimSuffix(raw, "]")
+	if parsed := net.ParseIP(raw); parsed != nil {
+		return parsed.String()
+	}
+	return raw
+}
+
+// TrustedProxyFunc evaluates whether a remote address belongs to a trusted proxy.
+type TrustedProxyFunc func(remoteAddr string) bool
+
+var (
+	trustedProxyLock        sync.RWMutex
+	globalTrustedProxyCheck TrustedProxyFunc
+)
+
+// SetTrustedProxyChecker configures a global validator for reverse proxy trust.
+func SetTrustedProxyChecker(fn TrustedProxyFunc) {
+	trustedProxyLock.Lock()
+	defer trustedProxyLock.Unlock()
+	globalTrustedProxyCheck = fn
+}
+
+func isTrustedPeer(remoteAddr string) bool {
+	trustedProxyLock.RLock()
+	fn := globalTrustedProxyCheck
+	trustedProxyLock.RUnlock()
+	if fn == nil {
+		return true
+	}
+	return fn(remoteAddr)
 }
 
 func GetClientIP(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		first, _, _ := strings.Cut(xff, ",")
-		return strings.TrimSpace(first)
+	if isTrustedPeer(r.RemoteAddr) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			first, _, _ := strings.Cut(xff, ",")
+			return cleanIP(strings.TrimSpace(first))
+		}
+		if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
+			return cleanIP(strings.TrimSpace(realIP))
+		}
 	}
-	if realIP := r.Header.Get("X-Real-IP"); realIP != "" {
-		return strings.TrimSpace(realIP)
-	}
-	return strings.TrimSpace(r.RemoteAddr)
+	return cleanIP(strings.TrimSpace(r.RemoteAddr))
 }
 
 type contextKey string
