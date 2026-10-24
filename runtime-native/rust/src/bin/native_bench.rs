@@ -53,6 +53,7 @@ fn main() {
     run_columnar_assembly_bench();
     run_frame_reading_bench();
     run_soa_btree_arena_bench();
+    run_snapshot_recovery_bench();
 }
 
 fn run_soa_btree_bench() {
@@ -611,5 +612,92 @@ fn run_soa_btree_arena_bench() {
         arena_r_mean,
         percentile_ns(&arena_reset_samples, 50),
         btree_r_mean / arena_r_mean
+    );
+}
+
+fn run_snapshot_recovery_bench() {
+    use ovrt_core::ArenaSoABTreeMap;
+    use std::io::Cursor;
+
+    println!("\n--- Snapshot Recovery: Binary Load vs Rebuild (N=10,000) ---");
+    let iters = 100;
+    let size = 10_000;
+
+    let mut initial_tree = ArenaSoABTreeMap::with_capacity(1000);
+    for i in 0..size {
+        initial_tree.insert(i as u64, (i * 3) as u64);
+    }
+    let mut snapshot_bytes = Vec::new();
+    initial_tree.save_snapshot(&mut snapshot_bytes).expect("save benchmark snapshot");
+
+    let mut btree_rebuild_samples = Vec::with_capacity(iters);
+    let mut snapshot_load_samples = Vec::with_capacity(iters);
+    let mut btree_query_samples = Vec::with_capacity(iters);
+    let mut snapshot_query_samples = Vec::with_capacity(iters);
+
+    for _ in 0..iters {
+        let started = Instant::now();
+        let mut btree = BTreeMap::new();
+        for i in 0..size {
+            btree.insert(i as u64, (i * 3) as u64);
+        }
+        let btree_rebuild_time = started.elapsed();
+        btree_rebuild_samples.push(btree_rebuild_time);
+
+        let query_started = Instant::now();
+        let val = btree.get(black_box(&5000u64));
+        btree_query_samples.push(btree_rebuild_time + query_started.elapsed());
+        black_box(val);
+
+        let started = Instant::now();
+        let mut cursor = Cursor::new(&snapshot_bytes);
+        let restored: ArenaSoABTreeMap<u64, u64> =
+            ArenaSoABTreeMap::load_snapshot(&mut cursor).expect("load");
+        let snapshot_load_time = started.elapsed();
+        snapshot_load_samples.push(snapshot_load_time);
+
+        let query_started = Instant::now();
+        let val = restored.get(black_box(&5000u64));
+        snapshot_query_samples.push(snapshot_load_time + query_started.elapsed());
+        black_box(val);
+    }
+
+    btree_rebuild_samples.sort_unstable();
+    snapshot_load_samples.sort_unstable();
+    btree_query_samples.sort_unstable();
+    snapshot_query_samples.sort_unstable();
+
+    let btree_mean =
+        btree_rebuild_samples.iter().copied().sum::<Duration>().as_nanos() as f64 / iters as f64;
+    let snap_mean =
+        snapshot_load_samples.iter().copied().sum::<Duration>().as_nanos() as f64 / iters as f64;
+    let btree_q_mean =
+        btree_query_samples.iter().copied().sum::<Duration>().as_nanos() as f64 / iters as f64;
+    let snap_q_mean =
+        snapshot_query_samples.iter().copied().sum::<Duration>().as_nanos() as f64 / iters as f64;
+
+    println!(
+        "Rebuild 10,000 items [std BTreeMap]  mean={:>10.2} ns p50={} ns p99={} ns",
+        btree_mean,
+        percentile_ns(&btree_rebuild_samples, 50),
+        percentile_ns(&btree_rebuild_samples, 99)
+    );
+    println!(
+        "Snapshot Restore     [ArenaSoABTree] mean={:>10.2} ns p50={} ns p99={} ns (speedup: {:.2}x)",
+        snap_mean,
+        percentile_ns(&snapshot_load_samples, 50),
+        percentile_ns(&snapshot_load_samples, 99),
+        btree_mean / snap_mean
+    );
+    println!(
+        "Time to 1st Answer   [std BTreeMap]  mean={:>10.2} ns p50={} ns",
+        btree_q_mean,
+        percentile_ns(&btree_query_samples, 50)
+    );
+    println!(
+        "Time to 1st Answer   [ArenaSoABTree] mean={:>10.2} ns p50={} ns (speedup: {:.2}x)",
+        snap_q_mean,
+        percentile_ns(&snapshot_query_samples, 50),
+        btree_q_mean / snap_q_mean
     );
 }

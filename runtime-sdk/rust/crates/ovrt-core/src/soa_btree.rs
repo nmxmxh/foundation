@@ -3,8 +3,86 @@
 //! Linear scanning over packed prefixes minimizes branch mispredictions and cache misses.
 
 use std::fmt::Debug;
+use std::io::{self, Read, Write};
+use std::path::Path;
 
 pub const SOA_NODE_CAPACITY: usize = 16;
+pub const BTREE_SNAPSHOT_MAGIC: u32 = 0x4254_5331; // "BTS1"
+pub const BTREE_SNAPSHOT_VERSION: u32 = 1;
+
+/// SnapshotCodec handles binary serialization for snapshot persistence.
+pub trait SnapshotCodec: Sized {
+    fn write_snapshot<W: Write>(&self, writer: &mut W) -> io::Result<()>;
+    fn read_snapshot<R: Read>(reader: &mut R) -> io::Result<Self>;
+}
+
+impl SnapshotCodec for u64 {
+    #[inline]
+    fn write_snapshot<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_all(&self.to_le_bytes())
+    }
+    #[inline]
+    fn read_snapshot<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let mut buf = [0u8; 8];
+        reader.read_exact(&mut buf)?;
+        Ok(u64::from_le_bytes(buf))
+    }
+}
+
+impl SnapshotCodec for i64 {
+    #[inline]
+    fn write_snapshot<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_all(&self.to_le_bytes())
+    }
+    #[inline]
+    fn read_snapshot<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let mut buf = [0u8; 8];
+        reader.read_exact(&mut buf)?;
+        Ok(i64::from_le_bytes(buf))
+    }
+}
+
+impl SnapshotCodec for u32 {
+    #[inline]
+    fn write_snapshot<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_all(&self.to_le_bytes())
+    }
+    #[inline]
+    fn read_snapshot<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let mut buf = [0u8; 4];
+        reader.read_exact(&mut buf)?;
+        Ok(u32::from_le_bytes(buf))
+    }
+}
+
+impl SnapshotCodec for String {
+    fn write_snapshot<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        let bytes = self.as_bytes();
+        writer.write_all(&(bytes.len() as u32).to_le_bytes())?;
+        writer.write_all(bytes)
+    }
+    fn read_snapshot<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let mut len_buf = [0u8; 4];
+        reader.read_exact(&mut len_buf)?;
+        let len = u32::from_le_bytes(len_buf) as usize;
+        let mut str_buf = vec![0u8; len];
+        reader.read_exact(&mut str_buf)?;
+        String::from_utf8(str_buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+}
+
+impl<const N: usize> SnapshotCodec for [u8; N] {
+    #[inline]
+    fn write_snapshot<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_all(self)
+    }
+    #[inline]
+    fn read_snapshot<R: Read>(reader: &mut R) -> io::Result<Self> {
+        let mut buf = [0u8; N];
+        reader.read_exact(&mut buf)?;
+        Ok(buf)
+    }
+}
 
 /// InlineKey extracts an 8-byte big-endian prefix for fast comparisons.
 pub trait InlineKey: Ord + Clone + Debug {
@@ -703,6 +781,197 @@ impl<K: InlineKey, V> ArenaSoABTreeMap<K, V> {
     }
 }
 
+impl<K: InlineKey + SnapshotCodec, V: SnapshotCodec> ArenaSoABTreeMap<K, V> {
+    /// Saves the B-tree to a writer as a binary snapshot.
+    pub fn save_snapshot<W: Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write_all(&BTREE_SNAPSHOT_MAGIC.to_le_bytes())?;
+        writer.write_all(&BTREE_SNAPSHOT_VERSION.to_le_bytes())?;
+        writer.write_all(&self.root.to_le_bytes())?;
+        writer.write_all(&(self.len as u64).to_le_bytes())?;
+        writer.write_all(&(self.nodes.len() as u32).to_le_bytes())?;
+        writer.write_all(&[0u8; 8])?;
+
+        for node in &self.nodes {
+            match node {
+                ArenaNode::Leaf(leaf) => {
+                    writer.write_all(&[0u8])?;
+                    writer.write_all(&[leaf.len as u8])?;
+                    for p in &leaf.prefixes {
+                        writer.write_all(&p.to_le_bytes())?;
+                    }
+                    for (k, v) in leaf.keys.iter().zip(leaf.values.iter()).take(leaf.len) {
+                        k.as_ref().unwrap().write_snapshot(writer)?;
+                        v.as_ref().unwrap().write_snapshot(writer)?;
+                    }
+                }
+                ArenaNode::Internal(internal) => {
+                    writer.write_all(&[1u8])?;
+                    writer.write_all(&[internal.len as u8])?;
+                    for p in &internal.prefixes {
+                        writer.write_all(&p.to_le_bytes())?;
+                    }
+                    for c in &internal.children {
+                        writer.write_all(&c.to_le_bytes())?;
+                    }
+                    for k in internal.keys.iter().take(internal.len) {
+                        k.as_ref().unwrap().write_snapshot(writer)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Loads a B-tree snapshot without tree balancing or key comparisons.
+    pub fn load_snapshot<R: Read>(reader: &mut R) -> Result<Self, String> {
+        let mut magic_buf = [0u8; 4];
+        reader.read_exact(&mut magic_buf).map_err(|e| format!("read snapshot magic: {e}"))?;
+        let magic = u32::from_le_bytes(magic_buf);
+        if magic != BTREE_SNAPSHOT_MAGIC {
+            return Err(format!(
+                "snapshot magic mismatch: {magic:#x} != {BTREE_SNAPSHOT_MAGIC:#x}"
+            ));
+        }
+
+        let mut ver_buf = [0u8; 4];
+        reader.read_exact(&mut ver_buf).map_err(|e| format!("read snapshot version: {e}"))?;
+        let version = u32::from_le_bytes(ver_buf);
+        if version != BTREE_SNAPSHOT_VERSION {
+            return Err(format!(
+                "snapshot version mismatch: {version} != {BTREE_SNAPSHOT_VERSION}"
+            ));
+        }
+
+        let mut root_buf = [0u8; 4];
+        reader.read_exact(&mut root_buf).map_err(|e| format!("read snapshot root: {e}"))?;
+        let root = u32::from_le_bytes(root_buf);
+
+        let mut len_buf = [0u8; 8];
+        reader.read_exact(&mut len_buf).map_err(|e| format!("read snapshot length: {e}"))?;
+        let item_count = u64::from_le_bytes(len_buf) as usize;
+
+        let mut count_buf = [0u8; 4];
+        reader.read_exact(&mut count_buf).map_err(|e| format!("read snapshot node count: {e}"))?;
+        let node_count = u32::from_le_bytes(count_buf) as usize;
+
+        let mut reserved = [0u8; 8];
+        reader
+            .read_exact(&mut reserved)
+            .map_err(|e| format!("read snapshot reserved header: {e}"))?;
+
+        let mut nodes = Vec::with_capacity(node_count);
+        for idx in 0..node_count {
+            let mut kind_buf = [0u8; 1];
+            reader.read_exact(&mut kind_buf).map_err(|e| format!("read node {idx} kind: {e}"))?;
+            match kind_buf[0] {
+                0 => {
+                    let mut len_byte = [0u8; 1];
+                    reader
+                        .read_exact(&mut len_byte)
+                        .map_err(|e| format!("read leaf {idx} length: {e}"))?;
+                    let leaf_len = len_byte[0] as usize;
+                    if leaf_len > SOA_NODE_CAPACITY {
+                        return Err(format!(
+                            "invalid leaf length: {leaf_len} > {SOA_NODE_CAPACITY}"
+                        ));
+                    }
+
+                    let mut prefixes = [0u64; SOA_NODE_CAPACITY];
+                    for p in &mut prefixes {
+                        let mut p_buf = [0u8; 8];
+                        reader
+                            .read_exact(&mut p_buf)
+                            .map_err(|e| format!("read leaf prefix: {e}"))?;
+                        *p = u64::from_le_bytes(p_buf);
+                    }
+
+                    let mut keys: [Option<K>; SOA_NODE_CAPACITY] = Default::default();
+                    let mut values: [Option<V>; SOA_NODE_CAPACITY] = Default::default();
+                    for (i, (key_slot, val_slot)) in
+                        keys.iter_mut().zip(values.iter_mut()).enumerate().take(leaf_len)
+                    {
+                        let key = K::read_snapshot(reader)
+                            .map_err(|e| format!("read leaf key {i}: {e}"))?;
+                        let val = V::read_snapshot(reader)
+                            .map_err(|e| format!("read leaf value {i}: {e}"))?;
+                        *key_slot = Some(key);
+                        *val_slot = Some(val);
+                    }
+
+                    nodes.push(ArenaNode::Leaf(ArenaLeafNode {
+                        prefixes,
+                        keys,
+                        values,
+                        len: leaf_len,
+                    }));
+                }
+                1 => {
+                    let mut len_byte = [0u8; 1];
+                    reader
+                        .read_exact(&mut len_byte)
+                        .map_err(|e| format!("read internal {idx} length: {e}"))?;
+                    let internal_len = len_byte[0] as usize;
+                    if internal_len > SOA_NODE_CAPACITY {
+                        return Err(format!(
+                            "invalid internal length: {internal_len} > {SOA_NODE_CAPACITY}"
+                        ));
+                    }
+
+                    let mut prefixes = [0u64; SOA_NODE_CAPACITY];
+                    for p in &mut prefixes {
+                        let mut p_buf = [0u8; 8];
+                        reader
+                            .read_exact(&mut p_buf)
+                            .map_err(|e| format!("read internal prefix: {e}"))?;
+                        *p = u64::from_le_bytes(p_buf);
+                    }
+
+                    let mut children = [NULL_NODE; SOA_NODE_CAPACITY + 1];
+                    for c in &mut children {
+                        let mut c_buf = [0u8; 4];
+                        reader
+                            .read_exact(&mut c_buf)
+                            .map_err(|e| format!("read internal child: {e}"))?;
+                        *c = u32::from_le_bytes(c_buf);
+                    }
+
+                    let mut keys: [Option<K>; SOA_NODE_CAPACITY] = Default::default();
+                    for (i, key_slot) in keys.iter_mut().enumerate().take(internal_len) {
+                        let key = K::read_snapshot(reader)
+                            .map_err(|e| format!("read internal key {i}: {e}"))?;
+                        *key_slot = Some(key);
+                    }
+
+                    nodes.push(ArenaNode::Internal(ArenaInternalNode {
+                        prefixes,
+                        keys,
+                        children,
+                        len: internal_len,
+                    }));
+                }
+                other => return Err(format!("unknown node kind {other} at node index {idx}")),
+            }
+        }
+
+        Ok(Self { nodes, root, len: item_count })
+    }
+
+    /// Saves the snapshot to a file path.
+    pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
+        let file = std::fs::File::create(path)?;
+        let mut writer = io::BufWriter::new(file);
+        self.save_snapshot(&mut writer)?;
+        writer.flush()
+    }
+
+    /// Loads the snapshot from a file path.
+    pub fn load_from_file<P: AsRef<Path>>(path: P) -> Result<Self, String> {
+        let file = std::fs::File::open(path).map_err(|e| format!("open snapshot file: {e}"))?;
+        let mut reader = io::BufReader::new(file);
+        Self::load_snapshot(&mut reader)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -832,5 +1101,48 @@ mod tests {
         for i in 0..100 {
             assert_eq!(tree.get(&(i as u64)), Some(&((i * 5) as u64)));
         }
+    }
+
+    #[test]
+    fn test_arena_soa_btree_snapshot_roundtrip_numeric() {
+        let mut tree = ArenaSoABTreeMap::with_capacity(64);
+        for i in 0..500 {
+            tree.insert(i as u64, (i * 7) as u64);
+        }
+
+        let mut buffer = Vec::new();
+        tree.save_snapshot(&mut buffer).expect("save snapshot");
+        assert!(!buffer.is_empty());
+
+        let mut cursor = std::io::Cursor::new(buffer);
+        let restored: ArenaSoABTreeMap<u64, u64> =
+            ArenaSoABTreeMap::load_snapshot(&mut cursor).expect("load snapshot");
+
+        assert_eq!(restored.len(), 500);
+        for i in 0..500 {
+            assert_eq!(restored.get(&(i as u64)), Some(&((i * 7) as u64)));
+        }
+        assert_eq!(restored.get(&9999u64), None);
+    }
+
+    #[test]
+    fn test_arena_soa_btree_snapshot_roundtrip_string() {
+        let mut tree = ArenaSoABTreeMap::with_capacity(32);
+        for i in 0..200 {
+            tree.insert(format!("token_{:04}", i), i as u64);
+        }
+
+        let mut buffer = Vec::new();
+        tree.save_snapshot(&mut buffer).expect("save snapshot");
+
+        let mut cursor = std::io::Cursor::new(buffer);
+        let restored: ArenaSoABTreeMap<String, u64> =
+            ArenaSoABTreeMap::load_snapshot(&mut cursor).expect("load snapshot");
+
+        assert_eq!(restored.len(), 200);
+        for i in 0..200 {
+            assert_eq!(restored.get(&format!("token_{:04}", i)), Some(&(i as u64)));
+        }
+        assert_eq!(restored.get(&"missing".to_string()), None);
     }
 }
