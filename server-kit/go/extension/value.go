@@ -40,6 +40,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 type Kind uint8
@@ -378,6 +380,145 @@ func appendValueListFast(dst []byte, values []Value) ([]byte, error) {
 		}
 		var err error
 		if dst, err = values[i].appendJSONFast(dst); err != nil {
+			return nil, err
+		}
+	}
+	return append(dst, ']'), nil
+}
+
+// MarshalJSONWithArena emits canonical JSON using a scratch arena.
+// When arena is nil or full, it falls back to standard MarshalJSON.
+func (v Value) MarshalJSONWithArena(arena *scratch.Arena) ([]byte, error) {
+	if arena == nil {
+		return v.MarshalJSON()
+	}
+	buf, err := arena.AllocBytes(0, v.capEstimate())
+	if err != nil {
+		return v.MarshalJSON()
+	}
+	return v.appendJSONWithArena(buf, arena)
+}
+
+// MarshalJSONFast emits non-canonical JSON without sorting keys.
+func (v Value) MarshalJSONFast() ([]byte, error) {
+	return v.appendJSONFast(make([]byte, 0, v.capEstimate()))
+}
+
+// MarshalJSONFastWithArena emits non-canonical JSON using a scratch arena.
+// When arena is nil or full, it falls back to standard MarshalJSONFast.
+func (v Value) MarshalJSONFastWithArena(arena *scratch.Arena) ([]byte, error) {
+	if arena == nil {
+		return v.MarshalJSONFast()
+	}
+	buf, err := arena.AllocBytes(0, v.capEstimate())
+	if err != nil {
+		return v.MarshalJSONFast()
+	}
+	return v.appendJSONFast(buf)
+}
+
+func (v Value) capEstimate() int {
+	switch v.kind {
+	case KindObject:
+		return max(len(v.obj)*32+64, 256)
+	case KindList:
+		return max(len(v.list)*24+32, 128)
+	case KindString:
+		return max(len(v.str)+16, 64)
+	case KindBytes:
+		return max(len(v.bytes)*2+16, 64)
+	default:
+		return 64
+	}
+}
+
+// MarshalJSONWithArena emits canonical JSON with sorted keys using a scratch arena.
+// When arena is nil or full, it falls back to standard MarshalJSON.
+func (o Object) MarshalJSONWithArena(arena *scratch.Arena) ([]byte, error) {
+	if arena == nil {
+		return o.MarshalJSON()
+	}
+	capEstimate := max(len(o)*32+64, 256)
+	buf, err := arena.AllocBytes(0, capEstimate)
+	if err != nil {
+		return o.MarshalJSON()
+	}
+	return o.appendJSONWithArena(buf, arena)
+}
+
+// MarshalJSONFastWithArena emits valid JSON without sorting object keys.
+// When arena is nil or full, it falls back to standard MarshalJSONFast.
+func (o Object) MarshalJSONFastWithArena(arena *scratch.Arena) ([]byte, error) {
+	if arena == nil {
+		return o.MarshalJSONFast()
+	}
+	capEstimate := max(len(o)*32+64, 256)
+	buf, err := arena.AllocBytes(0, capEstimate)
+	if err != nil {
+		return o.MarshalJSONFast()
+	}
+	return o.appendJSONFast(buf)
+}
+
+func (o Object) appendJSONWithArena(dst []byte, arena *scratch.Arena) ([]byte, error) {
+	if len(o) == 0 {
+		return append(dst, '{', '}'), nil
+	}
+	dst = append(dst, '{')
+	keys := o.keysArena(arena)
+	for i, key := range keys {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		dst = strconv.AppendQuote(dst, key)
+		dst = append(dst, ':')
+		var err error
+		if dst, err = o[key].appendJSONWithArena(dst, arena); err != nil {
+			return nil, err
+		}
+	}
+	return append(dst, '}'), nil
+}
+
+func (o Object) keysArena(arena *scratch.Arena) []string {
+	if arena == nil {
+		return o.Keys()
+	}
+	keys, err := scratch.AllocSlice[string](arena, len(o))
+	if err != nil {
+		return o.Keys()
+	}
+	i := 0
+	for key := range o {
+		keys[i] = key
+		i++
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (v Value) appendJSONWithArena(dst []byte, arena *scratch.Arena) ([]byte, error) {
+	switch v.kind {
+	case KindList:
+		return appendValueListWithArena(dst, v.list, arena)
+	case KindObject:
+		return v.obj.appendJSONWithArena(dst, arena)
+	default:
+		return v.appendJSON(dst)
+	}
+}
+
+func appendValueListWithArena(dst []byte, values []Value, arena *scratch.Arena) ([]byte, error) {
+	if len(values) == 0 {
+		return append(dst, '[', ']'), nil
+	}
+	dst = append(dst, '[')
+	for i := range values {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		var err error
+		if dst, err = values[i].appendJSONWithArena(dst, arena); err != nil {
 			return nil, err
 		}
 	}

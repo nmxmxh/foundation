@@ -3,6 +3,8 @@ package extension
 import (
 	"testing"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func BenchmarkObjectFromMapApplicationPayload(b *testing.B) {
@@ -61,11 +63,35 @@ func BenchmarkExtensionMarshalJSON(b *testing.B) {
 	}
 }
 
+func BenchmarkExtensionMarshalJSON_Arena(b *testing.B) {
+	o := marshalBenchObject()
+	arena := scratch.New(4096)
+	b.ReportAllocs()
+	for b.Loop() {
+		arena.Reset()
+		if _, err := o.MarshalJSONWithArena(arena); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func BenchmarkExtensionMarshalJSONFast(b *testing.B) {
 	o := marshalBenchObject()
 	b.ReportAllocs()
 	for b.Loop() {
 		if _, err := o.MarshalJSONFast(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkExtensionMarshalJSONFast_Arena(b *testing.B) {
+	o := marshalBenchObject()
+	arena := scratch.New(4096)
+	b.ReportAllocs()
+	for b.Loop() {
+		arena.Reset()
+		if _, err := o.MarshalJSONFastWithArena(arena); err != nil {
 			b.Fatal(err)
 		}
 	}

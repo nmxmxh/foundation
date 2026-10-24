@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func TestJWTManagerGenerateAndValidate(t *testing.T) {
@@ -314,5 +316,75 @@ func TestValidateTokenAllocationBudget(t *testing.T) {
 	})
 	if allocs > 8 {
 		t.Fatalf("ValidateToken exceeded allocation budget: got %.1f allocs/run, want <= 8", allocs)
+	}
+}
+
+func TestValidateTokenWithArena_ZeroAllocations(t *testing.T) {
+	manager, err := NewJWTManager("this-is-a-very-secure-secret-key-for-jwt")
+	if err != nil {
+		t.Fatalf("NewJWTManager failed: %v", err)
+	}
+	expectedClaims := Claims{
+		UserID:         "usr_01J8X6Z2Y9W4Q7R5T3V1N0M8K2",
+		Role:           "operator",
+		OrganizationID: "org_01J8X6Z2Y9W4Q7R5T3V1N0M8K2",
+		SessionID:      "sess_01J8X6Z2Y9W4Q7R5T3V1N0M8K2",
+		Capabilities:   []string{"orders.read", "orders.write"},
+	}
+	token, err := manager.GenerateAccessToken(expectedClaims, 15*time.Minute)
+	if err != nil {
+		t.Fatalf("GenerateAccessToken failed: %v", err)
+	}
+
+	arena := scratch.New(4096)
+
+	// Parity check
+	claims, err := manager.ValidateTokenWithArena(arena, token)
+	if err != nil {
+		t.Fatalf("ValidateTokenWithArena failed: %v", err)
+	}
+	if claims.UserID != expectedClaims.UserID || claims.Role != expectedClaims.Role {
+		t.Fatalf("claims mismatch: got %+v, want %+v", claims, expectedClaims)
+	}
+	if len(claims.Capabilities) != 2 || claims.Capabilities[0] != "orders.read" {
+		t.Fatalf("capabilities mismatch: %+v", claims.Capabilities)
+	}
+
+	// ValidateTokenInto check
+	var target Claims
+	if err := manager.ValidateTokenInto(&target, token); err != nil {
+		t.Fatalf("ValidateTokenInto failed: %v", err)
+	}
+	if target.UserID != expectedClaims.UserID {
+		t.Fatalf("target mismatch: %+v", target)
+	}
+
+	// Nil arena fallback
+	nilClaims, err := manager.ValidateTokenWithArena(nil, token)
+	if err != nil || nilClaims.UserID != expectedClaims.UserID {
+		t.Fatalf("nil arena fallback failed")
+	}
+
+	// Tiny arena fallback
+	tinyArena := scratch.New(8)
+	tinyClaims, err := manager.ValidateTokenWithArena(tinyArena, token)
+	if err != nil || tinyClaims.UserID != expectedClaims.UserID {
+		t.Fatalf("tiny arena fallback failed")
+	}
+
+	// Nil target check
+	if err := manager.ValidateTokenInto(nil, token); err == nil {
+		t.Fatalf("expected error for nil target")
+	}
+
+	// Zero allocations check!
+	allocs := testing.AllocsPerRun(200, func() {
+		arena.Reset()
+		if _, err := manager.ValidateTokenWithArena(arena, token); err != nil {
+			t.Fatalf("ValidateTokenWithArena failed: %v", err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("expected 0 allocs for ValidateTokenWithArena, got %f", allocs)
 	}
 }

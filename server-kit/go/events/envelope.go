@@ -14,6 +14,7 @@ import (
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -289,7 +290,25 @@ func (e Envelope) ToBinary() ([]byte, error) {
 	return proto.Marshal(msg)
 }
 
-func encodeEnvelopeProto(env Envelope) (*foundationpb.EventEnvelope, error) {
+// ToBinaryWithArena serializes the envelope using a scratch arena for output buffering.
+// When arena is nil or full, it falls back to standard ToBinary.
+func (e Envelope) ToBinaryWithArena(arena *scratch.Arena) ([]byte, error) {
+	if arena == nil {
+		return e.ToBinary()
+	}
+	msg, err := encodeEnvelopeProtoWithArena(e, arena)
+	if err != nil {
+		return nil, err
+	}
+	size := proto.Size(msg)
+	buf, err := arena.AllocBytes(0, size)
+	if err != nil {
+		return proto.Marshal(msg)
+	}
+	return proto.MarshalOptions{}.MarshalAppend(buf, msg)
+}
+
+func encodeEnvelopeProtoWithArena(env Envelope, arena *scratch.Arena) (*foundationpb.EventEnvelope, error) {
 	env.normalizeScalars()
 	if err := ValidateEventType(env.EventType); err != nil {
 		return nil, err
@@ -308,15 +327,20 @@ func encodeEnvelopeProto(env Envelope) (*foundationpb.EventEnvelope, error) {
 		return nil, err
 	}
 
-	// The payload is passed to proto.Marshal by reference. Marshal reads the
-	// bytes into a fresh output buffer and does not retain the input, and the
-	// EventEnvelope holding it is local and discarded here — so a defensive copy
-	// protects nothing and costs one full payload allocation per encode.
 	payload := env.PayloadBytes
 	if env.PayloadEncoding == PayloadEncodingJSON {
-		payload, err = encodePayloadObject(env.Payload)
-		if err != nil {
-			return nil, err
+		if env.Payload == nil {
+			payload = []byte("{}")
+		} else if arena != nil {
+			payload, err = env.Payload.MarshalJSONWithArena(arena)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			payload, err = encodePayloadObject(env.Payload)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -331,6 +355,10 @@ func encodeEnvelopeProto(env Envelope) (*foundationpb.EventEnvelope, error) {
 		PayloadEncoding: payloadEncodingToProto(env.PayloadEncoding),
 		SourceNodeId:    env.SourceNodeID,
 	}, nil
+}
+
+func encodeEnvelopeProto(env Envelope) (*foundationpb.EventEnvelope, error) {
+	return encodeEnvelopeProtoWithArena(env, nil)
 }
 
 // FromJSON parses and normalizes an envelope.
@@ -701,6 +729,30 @@ func (b Batch) ToBinary() ([]byte, error) {
 		batch.Envelopes[i] = msg
 	}
 	return proto.Marshal(batch)
+}
+
+// ToBinaryWithArena serializes the batch using a scratch arena.
+// When arena is nil or full, it falls back to standard ToBinary.
+func (b Batch) ToBinaryWithArena(arena *scratch.Arena) ([]byte, error) {
+	if arena == nil {
+		return b.ToBinary()
+	}
+	batch := &foundationpb.EventBatch{
+		Envelopes: make([]*foundationpb.EventEnvelope, len(b.Envelopes)),
+	}
+	for i, e := range b.Envelopes {
+		msg, err := encodeEnvelopeProtoWithArena(e, arena)
+		if err != nil {
+			return nil, err
+		}
+		batch.Envelopes[i] = msg
+	}
+	size := proto.Size(batch)
+	buf, err := arena.AllocBytes(0, size)
+	if err != nil {
+		return proto.Marshal(batch)
+	}
+	return proto.MarshalOptions{}.MarshalAppend(buf, batch)
 }
 
 func FromBatchBinary(data []byte) (Batch, error) {

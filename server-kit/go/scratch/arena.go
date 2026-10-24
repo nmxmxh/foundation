@@ -97,9 +97,35 @@ func (a *Arena) Available() int {
 	return len(a.buf) - a.head
 }
 
+// AllocBytes reserves capacity bytes and returns a slice with length and capacity.
+// Both length and capacity must be non-negative with length <= capacity.
+func (a *Arena) AllocBytes(length, capacity int) ([]byte, error) {
+	if length < 0 || capacity < length {
+		return nil, ErrNegativeAlloc
+	}
+	if capacity == 0 {
+		return nil, nil
+	}
+	raw, err := a.Alloc(capacity)
+	if err != nil {
+		return nil, err
+	}
+	return raw[:length], nil
+}
+
 // Raw returns the underlying storage slice.
 func (a *Arena) Raw() []byte {
 	return a.buf[a.base:]
+}
+
+// Alloc allocates a single value of type T in the arena and returns a pointer to it.
+// The allocation is 8-byte aligned and incurs zero heap allocations.
+func Alloc[T any](a *Arena) (*T, error) {
+	slice, err := AllocSlice[T](a, 1)
+	if err != nil {
+		return nil, err
+	}
+	return &slice[0], nil
 }
 
 // AllocSlice allocates a contiguous slice of type T with the specified count.

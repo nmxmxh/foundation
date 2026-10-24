@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 type DataType int
@@ -298,7 +299,16 @@ func (p *partition) collectRecordEntries(ctx context.Context, registry *partitio
 	if query.Limit > 0 {
 		capacity = min(capacity, query.Limit)
 	}
-	candidates := entryCandidates{entries: make([]*recordEntry, 0, capacity), limit: query.Limit}
+	var entries []*recordEntry
+	if arena := scratch.FromContext(ctx); arena != nil {
+		if slice, err := scratch.AllocSlice[*recordEntry](arena, capacity); err == nil {
+			entries = slice[:0]
+		}
+	}
+	if entries == nil {
+		entries = make([]*recordEntry, 0, capacity)
+	}
+	candidates := entryCandidates{entries: entries, limit: query.Limit}
 	var iterErr error
 	accept := func(entry *recordEntry) bool {
 		movementRecord(movementCandidates, 1)
@@ -409,7 +419,15 @@ func (p *partition) collectRangeEntries(
 	if plan.snapshot == nil || plan.estimate == 0 {
 		return nil, 0, nil
 	}
-	entries := make([]*recordEntry, 0, plan.estimate)
+	var entries []*recordEntry
+	if arena := scratch.FromContext(ctx); arena != nil {
+		if slice, err := scratch.AllocSlice[*recordEntry](arena, plan.estimate); err == nil {
+			entries = slice[:0]
+		}
+	}
+	if entries == nil {
+		entries = make([]*recordEntry, 0, plan.estimate)
+	}
 	inspected := 0
 	var iterErr error
 	plan.forEach(func(candidate rangeIndexEntry) bool {

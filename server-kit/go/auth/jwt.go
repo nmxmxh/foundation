@@ -10,6 +10,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unsafe"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 var (
@@ -105,43 +108,70 @@ func (m *JWTManager) GenerateRefreshToken(claims Claims, ttl time.Duration) (str
 
 // ValidateToken validates token signature and expiry.
 func (m *JWTManager) ValidateToken(token string) (*Claims, error) {
+	var claims Claims
+	if err := m.ValidateTokenInto(&claims, token); err != nil {
+		return nil, err
+	}
+	return &claims, nil
+}
+
+// ValidateTokenWithArena validates token signature and expiry, allocating the Claims
+// structure and any string fields from the provided scratch arena.
+// When arena is nil or full, it falls back to standard ValidateToken.
+func (m *JWTManager) ValidateTokenWithArena(arena *scratch.Arena, token string) (*Claims, error) {
+	if arena == nil {
+		return m.ValidateToken(token)
+	}
+	claims, err := scratch.Alloc[Claims](arena)
+	if err != nil {
+		return m.ValidateToken(token)
+	}
+	if err := m.validateTokenIntoArena(claims, token, arena); err != nil {
+		return nil, err
+	}
+	return claims, nil
+}
+
+// ValidateTokenInto validates token signature and expiry, unmarshaling claims directly into target.
+// When target is caller-allocated (on stack or arena), this eliminates the return pointer allocation.
+func (m *JWTManager) ValidateTokenInto(target *Claims, token string) error {
+	return m.validateTokenIntoArena(target, token, nil)
+}
+
+func (m *JWTManager) validateTokenIntoArena(target *Claims, token string, arena *scratch.Arena) error {
 	if m == nil || len(m.secret) == 0 {
-		return nil, errors.New("jwt manager not initialized")
+		return errors.New("jwt manager not initialized")
+	}
+	if target == nil {
+		return errors.New("target claims pointer is required")
 	}
 	header, rest, ok := strings.Cut(token, ".")
 	if !ok {
-		return nil, errInvalidTokenFormat
+		return errInvalidTokenFormat
 	}
 	payloadPart, signaturePart, ok := strings.Cut(rest, ".")
 	if !ok || strings.Contains(signaturePart, ".") {
-		return nil, errInvalidTokenFormat
+		return errInvalidTokenFormat
 	}
 
 	unsigned := token[:len(header)+1+len(payloadPart)]
 	if !m.verifySignature(unsigned, signaturePart) {
-		return nil, errInvalidSignature
+		return errInvalidSignature
 	}
 
-	var claims Claims
-	if err := decodeAndUnmarshalClaims(payloadPart, &claims); err != nil {
-		return nil, err
+	if err := decodeAndUnmarshalClaimsWithArena(payloadPart, target, arena); err != nil {
+		return err
 	}
 
 	nowUnix := time.Now().UTC().Unix()
 	leeway := int64(ClockSkewLeeway.Seconds())
-	if claims.ExpiresAt != 0 && nowUnix > claims.ExpiresAt+leeway {
-		return nil, errTokenExpired
+	if target.ExpiresAt != 0 && nowUnix > target.ExpiresAt+leeway {
+		return errTokenExpired
 	}
-	// The other half of the same skew problem. `iat` was minted by GenerateToken
-	// and never checked, so a token stamped arbitrarily far in the future was
-	// accepted for its whole lifetime — from a badly skewed issuer, or from an
-	// attacker who controls the claim, as a way to extend validity past what the
-	// issuer intended. Rejecting a future `iat` beyond the same leeway closes
-	// that without punishing ordinary drift.
-	if claims.IssuedAt != 0 && claims.IssuedAt-leeway > nowUnix {
-		return nil, errTokenIssuedInFuture
+	if target.IssuedAt != 0 && target.IssuedAt-leeway > nowUnix {
+		return errTokenIssuedInFuture
 	}
-	return &claims, nil
+	return nil
 }
 
 // ValidateRefreshToken validates a refresh token signature, expiry, and type.
@@ -237,6 +267,10 @@ func (m *JWTManager) hmacSum256(unsigned string) [32]byte {
 }
 
 func decodeAndUnmarshalClaims(payloadPart string, claims *Claims) error {
+	return decodeAndUnmarshalClaimsWithArena(payloadPart, claims, nil)
+}
+
+func decodeAndUnmarshalClaimsWithArena(payloadPart string, claims *Claims, arena *scratch.Arena) error {
 	if len(payloadPart) <= 768 {
 		var srcBuf [768]byte
 		var dstBuf [576]byte
@@ -245,8 +279,20 @@ func decodeAndUnmarshalClaims(payloadPart string, claims *Claims) error {
 		if err != nil {
 			return fmt.Errorf("decode payload: %w", err)
 		}
+		var data string
+		if arena != nil {
+			raw, err := arena.Alloc(n)
+			if err == nil {
+				copy(raw, dstBuf[:n])
+				data = unsafe.String(&raw[0], n)
+			} else {
+				data = string(dstBuf[:n])
+			}
+		} else {
+			data = string(dstBuf[:n])
+		}
 		var parsed Claims
-		if parseClaimsFast(string(dstBuf[:n]), &parsed) {
+		if parseClaimsFastWithArena(data, &parsed, arena) {
 			*claims = parsed
 			return nil
 		}
@@ -263,6 +309,10 @@ func decodeAndUnmarshalClaims(payloadPart string, claims *Claims) error {
 
 // parseClaimsFast parses standard flat JWT claims without reflection allocations.
 func parseClaimsFast(data string, claims *Claims) bool {
+	return parseClaimsFastWithArena(data, claims, nil)
+}
+
+func parseClaimsFastWithArena(data string, claims *Claims, arena *scratch.Arena) bool {
 	data = strings.TrimSpace(data)
 	if len(data) < 2 || data[0] != '{' || data[len(data)-1] != '}' {
 		return false
@@ -281,12 +331,19 @@ func parseClaimsFast(data string, claims *Claims) bool {
 			return false
 		}
 		valRaw, next, ok := cutJSONFieldValue(strings.TrimSpace(rest[1:]))
-		if !ok || !assignClaimFast(claims, key, valRaw) {
+		if !ok || !assignClaimFastWithArena(claims, key, valRaw, arena) {
 			return false
 		}
 		body = next
 	}
 	return true
+}
+
+func assignClaimFastWithArena(claims *Claims, key, val string, arena *scratch.Arena) bool {
+	if key == "capabilities" {
+		return assignClaimCapabilitiesWithArena(&claims.Capabilities, val, arena)
+	}
+	return assignClaimFast(claims, key, val)
 }
 
 func cutJSONString(b string) (string, string, bool) {
@@ -422,6 +479,10 @@ func assignClaimInt64(dst *int64, val string) bool {
 }
 
 func assignClaimCapabilities(dst *[]string, val string) bool {
+	return assignClaimCapabilitiesWithArena(dst, val, nil)
+}
+
+func assignClaimCapabilitiesWithArena(dst *[]string, val string, arena *scratch.Arena) bool {
 	if len(val) < 2 || val[0] != '[' || val[len(val)-1] != ']' {
 		return false
 	}
@@ -431,7 +492,17 @@ func assignClaimCapabilities(dst *[]string, val string) bool {
 		return true
 	}
 	count := 1 + strings.Count(inner, ",")
-	out := make([]string, 0, count)
+	var out []string
+	if arena != nil {
+		slice, err := scratch.AllocSlice[string](arena, count)
+		if err == nil {
+			out = slice[:0]
+		} else {
+			out = make([]string, 0, count)
+		}
+	} else {
+		out = make([]string, 0, count)
+	}
 	for len(inner) > 0 {
 		str, rest, ok := cutJSONString(inner)
 		if !ok {

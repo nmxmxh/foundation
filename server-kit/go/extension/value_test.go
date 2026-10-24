@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 	"unsafe"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func TestValueRoundTripPreservesIntegerShape(t *testing.T) {
@@ -704,6 +706,228 @@ func TestMarshalJSONFastProducesParseableEquivalentJSON(t *testing.T) {
 	}
 	if empty, _ := (Object{}).MarshalJSONFast(); string(empty) != "{}" {
 		t.Fatalf("empty fast = %s want {}", empty)
+	}
+}
+
+func TestMarshalJSONWithArena_ParityAndZeroAllocations(t *testing.T) {
+	o := Object{
+		"id":     String("rec_12345"),
+		"size":   Int(4096),
+		"active": Bool(true),
+		"score":  Float(0.95),
+		"tags":   List([]Value{String("a"), String("b"), String("c")}),
+		"meta": ObjectValue(Object{
+			"locale": String("en-US"),
+			"region": String("us-east-1"),
+			"nested": ObjectValue(Object{"k": Int(7)}),
+		}),
+	}
+
+	canonicalExpected, err := o.MarshalJSON()
+	if err != nil {
+		t.Fatalf("canonical error: %v", err)
+	}
+
+	arena := scratch.New(4096)
+
+	// Parity check
+	arenaGot, err := o.MarshalJSONWithArena(arena)
+	if err != nil {
+		t.Fatalf("arena error: %v", err)
+	}
+	if string(arenaGot) != string(canonicalExpected) {
+		t.Fatalf("arena canonical mismatch:\n got=%s\nwant=%s", arenaGot, canonicalExpected)
+	}
+
+	// Nil arena fallback
+	nilArenaGot, err := o.MarshalJSONWithArena(nil)
+	if err != nil {
+		t.Fatalf("nil arena error: %v", err)
+	}
+	if string(nilArenaGot) != string(canonicalExpected) {
+		t.Fatalf("nil arena mismatch: got %s, want %s", nilArenaGot, canonicalExpected)
+	}
+
+	// Tiny arena fallback
+	tinyArena := scratch.New(16)
+	tinyGot, err := o.MarshalJSONWithArena(tinyArena)
+	if err != nil {
+		t.Fatalf("tiny arena error: %v", err)
+	}
+	if string(tinyGot) != string(canonicalExpected) {
+		t.Fatalf("tiny arena fallback mismatch: got %s, want %s", tinyGot, canonicalExpected)
+	}
+
+	// Zero allocations check
+	allocs := testing.AllocsPerRun(100, func() {
+		arena.Reset()
+		_, err := o.MarshalJSONWithArena(arena)
+		if err != nil {
+			t.Fatalf("MarshalJSONWithArena alloc run error: %v", err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("expected 0 allocs for MarshalJSONWithArena, got %f", allocs)
+	}
+
+	// Value.MarshalJSONWithArena parity & zero-alloc check
+	val := ObjectValue(o)
+	valCanonical, err := val.MarshalJSON()
+	if err != nil {
+		t.Fatalf("val canonical error: %v", err)
+	}
+	arena.Reset()
+	valArenaGot, err := val.MarshalJSONWithArena(arena)
+	if err != nil {
+		t.Fatalf("val arena error: %v", err)
+	}
+	if string(valArenaGot) != string(valCanonical) {
+		t.Fatalf("val arena mismatch: got %s, want %s", valArenaGot, valCanonical)
+	}
+	valNil, err := val.MarshalJSONWithArena(nil)
+	if err != nil || string(valNil) != string(valCanonical) {
+		t.Fatalf("val nil arena fallback failed")
+	}
+
+	valAllocs := testing.AllocsPerRun(100, func() {
+		arena.Reset()
+		_, err := val.MarshalJSONWithArena(arena)
+		if err != nil {
+			t.Fatalf("val alloc error: %v", err)
+		}
+	})
+	if valAllocs != 0 {
+		t.Fatalf("expected 0 allocs for Value.MarshalJSONWithArena, got %f", valAllocs)
+	}
+
+	// Test all value kinds with arena
+	kinds := []Value{
+		Null(),
+		Bool(true),
+		Bool(false),
+		Int(42),
+		Uint(100),
+		Float(3.14),
+		String("hello world"),
+		Bytes([]byte("binary payload")),
+		List([]Value{Int(1), String("two")}),
+		List(nil),
+		ObjectValue(Object{}),
+	}
+	for _, k := range kinds {
+		exp, err := k.MarshalJSON()
+		if err != nil {
+			t.Fatalf("marshal error for kind %d: %v", k.Kind(), err)
+		}
+		arena.Reset()
+		got, err := k.MarshalJSONWithArena(arena)
+		if err != nil {
+			t.Fatalf("arena marshal error for kind %d: %v", k.Kind(), err)
+		}
+		if string(got) != string(exp) {
+			t.Fatalf("mismatch for kind %d: got %s, want %s", k.Kind(), got, exp)
+		}
+
+		// Fast arena
+		gotFast, err := k.MarshalJSONFastWithArena(arena)
+		if err != nil {
+			t.Fatalf("arena fast marshal error for kind %d: %v", k.Kind(), err)
+		}
+		if len(gotFast) == 0 {
+			t.Fatalf("empty fast got for kind %d", k.Kind())
+		}
+	}
+
+	// Error propagation
+	badVal := Value{kind: 99}
+	if _, err := badVal.MarshalJSONWithArena(arena); err == nil {
+		t.Fatalf("expected error for bad value kind")
+	}
+	badObj := Object{"bad": badVal}
+	if _, err := badObj.MarshalJSONWithArena(arena); err == nil {
+		t.Fatalf("expected error for object containing bad value")
+	}
+}
+
+func TestMarshalJSONFastWithArena_ParityAndZeroAllocations(t *testing.T) {
+	o := Object{
+		"id":     String("rec_12345"),
+		"size":   Int(4096),
+		"active": Bool(true),
+		"score":  Float(0.95),
+		"tags":   List([]Value{String("a"), String("b"), String("c")}),
+		"meta": ObjectValue(Object{
+			"locale": String("en-US"),
+			"region": String("us-east-1"),
+			"nested": ObjectValue(Object{"k": Int(7)}),
+		}),
+	}
+
+	arena := scratch.New(4096)
+
+	fastArenaGot, err := o.MarshalJSONFastWithArena(arena)
+	if err != nil {
+		t.Fatalf("fast arena error: %v", err)
+	}
+	back, err := ObjectFromJSON(fastArenaGot)
+	if err != nil {
+		t.Fatalf("failed to decode fast arena JSON: %v", err)
+	}
+	if !reflect.DeepEqual(back, o) {
+		t.Fatalf("fast arena round trip mismatch:\n got=%#v\nwant=%#v", back, o)
+	}
+
+	// Fallback tests
+	nilGot, err := o.MarshalJSONFastWithArena(nil)
+	if err != nil {
+		t.Fatalf("nil fast arena error: %v", err)
+	}
+	if len(nilGot) == 0 {
+		t.Fatalf("expected non-empty nil fast arena output")
+	}
+
+	tinyArena := scratch.New(16)
+	tinyGot, err := o.MarshalJSONFastWithArena(tinyArena)
+	if err != nil || len(tinyGot) == 0 {
+		t.Fatalf("tiny arena fast fallback failed")
+	}
+
+	// Zero allocations check
+	allocs := testing.AllocsPerRun(100, func() {
+		arena.Reset()
+		_, err := o.MarshalJSONFastWithArena(arena)
+		if err != nil {
+			t.Fatalf("fast arena alloc run error: %v", err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("expected 0 allocs for MarshalJSONFastWithArena, got %f", allocs)
+	}
+
+	// Value.MarshalJSONFastWithArena check
+	val := ObjectValue(o)
+	valFast, err := val.MarshalJSONFast()
+	if err != nil || len(valFast) == 0 {
+		t.Fatalf("Value.MarshalJSONFast failed: %v", err)
+	}
+	valFastNil, err := val.MarshalJSONFastWithArena(nil)
+	if err != nil || len(valFastNil) == 0 {
+		t.Fatalf("Value.MarshalJSONFastWithArena(nil) failed: %v", err)
+	}
+	valFastTiny, err := val.MarshalJSONFastWithArena(tinyArena)
+	if err != nil || len(valFastTiny) == 0 {
+		t.Fatalf("Value.MarshalJSONFastWithArena(tiny) failed: %v", err)
+	}
+
+	valAllocs := testing.AllocsPerRun(100, func() {
+		arena.Reset()
+		_, err := val.MarshalJSONFastWithArena(arena)
+		if err != nil {
+			t.Fatalf("Value.MarshalJSONFastWithArena alloc run error: %v", err)
+		}
+	})
+	if valAllocs != 0 {
+		t.Fatalf("expected 0 allocs for Value.MarshalJSONFastWithArena, got %f", valAllocs)
 	}
 }
 

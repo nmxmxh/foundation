@@ -3,6 +3,7 @@ package events
 import (
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"strings"
@@ -629,4 +630,119 @@ func ObjectFromMap(input map[string]any) extension.Object {
 
 func objectFromMap(input map[string]any) extension.Object {
 	return ObjectFromMap(input)
+}
+
+func TestEnvelopeToBinaryWithArena(t *testing.T) {
+	env := makeTestEnvelope("media:upload:requested", "corr-123")
+	env.PayloadBytes = []byte(`{"id":"file-123","size":1048576}`)
+	env.PayloadEncoding = PayloadEncodingProtobuf
+
+	expected, err := env.ToBinary()
+	if err != nil {
+		t.Fatalf("ToBinary failed: %v", err)
+	}
+
+	arena := scratch.New(4096)
+
+	// Parity check
+	got, err := env.ToBinaryWithArena(arena)
+	if err != nil {
+		t.Fatalf("ToBinaryWithArena failed: %v", err)
+	}
+	if string(got) != string(expected) {
+		t.Fatalf("ToBinaryWithArena mismatch: got %d bytes, want %d bytes", len(got), len(expected))
+	}
+
+	// Round-trip check
+	parsed, err := FromBinary(got)
+	if err != nil {
+		t.Fatalf("FromBinary failed on arena bytes: %v", err)
+	}
+	if parsed.ID != env.ID || parsed.EventType != env.EventType {
+		t.Fatalf("round trip mismatch: got %+v, want %+v", parsed, env)
+	}
+
+	// Nil arena fallback
+	nilGot, err := env.ToBinaryWithArena(nil)
+	if err != nil || string(nilGot) != string(expected) {
+		t.Fatalf("nil arena fallback failed")
+	}
+
+	// Tiny arena fallback
+	tinyArena := scratch.New(8)
+	tinyGot, err := env.ToBinaryWithArena(tinyArena)
+	if err != nil || string(tinyGot) != string(expected) {
+		t.Fatalf("tiny arena fallback failed")
+	}
+
+	// JSON payload test with arena
+	jsonEnv := makeTestEnvelope("media:upload:requested", "corr-json")
+	jsonEnv.Payload = ObjectFromMap(map[string]any{"key": "value"})
+	jsonEnv.PayloadEncoding = PayloadEncodingJSON
+
+	jsonExpected, err := jsonEnv.ToBinary()
+	if err != nil {
+		t.Fatalf("json ToBinary failed: %v", err)
+	}
+	arena.Reset()
+	jsonGot, err := jsonEnv.ToBinaryWithArena(arena)
+	if err != nil {
+		t.Fatalf("json ToBinaryWithArena failed: %v", err)
+	}
+	if string(jsonGot) != string(jsonExpected) {
+		t.Fatalf("json arena mismatch")
+	}
+
+	// Error branches
+	badEnv := Envelope{EventType: "invalid-event-type"}
+	if _, err := badEnv.ToBinaryWithArena(arena); err == nil {
+		t.Fatalf("expected error for invalid event type")
+	}
+
+	// Empty payload JSON encoding
+	emptyPayloadEnv := makeTestEnvelope("media:upload:requested", "corr-empty")
+	emptyPayloadEnv.PayloadEncoding = PayloadEncodingJSON
+	emptyPayloadEnv.Payload = nil
+	if _, err := emptyPayloadEnv.ToBinaryWithArena(arena); err != nil {
+		t.Fatalf("empty payload encode failed: %v", err)
+	}
+}
+
+func TestBatchToBinaryWithArena(t *testing.T) {
+	env1 := makeTestEnvelope("media:upload:requested", "corr-1")
+	env2 := makeTestEnvelope("media:upload:requested", "corr-2")
+	batch := Batch{Envelopes: []Envelope{env1, env2}}
+
+	expected, err := batch.ToBinary()
+	if err != nil {
+		t.Fatalf("batch ToBinary failed: %v", err)
+	}
+
+	arena := scratch.New(8192)
+	got, err := batch.ToBinaryWithArena(arena)
+	if err != nil {
+		t.Fatalf("batch ToBinaryWithArena failed: %v", err)
+	}
+	if string(got) != string(expected) {
+		t.Fatalf("batch ToBinaryWithArena mismatch")
+	}
+
+	// Nil arena fallback
+	nilGot, err := batch.ToBinaryWithArena(nil)
+	if err != nil || string(nilGot) != string(expected) {
+		t.Fatalf("batch nil arena fallback failed")
+	}
+
+	// Tiny arena fallback
+	tinyArena := scratch.New(8)
+	tinyGot, err := batch.ToBinaryWithArena(tinyArena)
+	if err != nil || string(tinyGot) != string(expected) {
+		t.Fatalf("batch tiny arena fallback failed")
+	}
+
+	// Error in batch envelope
+	badBatch := Batch{Envelopes: []Envelope{{EventType: "invalid"}}}
+	if _, err := badBatch.ToBinaryWithArena(arena); err == nil {
+		t.Fatalf("expected batch error for invalid envelope")
+	}
 }

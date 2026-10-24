@@ -74,6 +74,41 @@ func TestArena_Alloc_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestArena_AllocBytes(t *testing.T) {
+	a := New(256)
+
+	// Valid length and capacity
+	buf, err := a.AllocBytes(10, 64)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(buf) != 10 {
+		t.Fatalf("expected len 10, got %d", len(buf))
+	}
+	if cap(buf) < 64 {
+		t.Fatalf("expected cap >= 64, got %d", cap(buf))
+	}
+
+	// Zero capacity
+	nilBuf, err := a.AllocBytes(0, 0)
+	if err != nil || nilBuf != nil {
+		t.Fatalf("expected nil buffer and nil err for 0 cap, got %v, %v", nilBuf, err)
+	}
+
+	// Negative length or capacity < length
+	if _, err := a.AllocBytes(-1, 10); !errors.Is(err, ErrNegativeAlloc) {
+		t.Fatalf("expected ErrNegativeAlloc for -1 len, got %v", err)
+	}
+	if _, err := a.AllocBytes(20, 10); !errors.Is(err, ErrNegativeAlloc) {
+		t.Fatalf("expected ErrNegativeAlloc for cap < len, got %v", err)
+	}
+
+	// Exceed capacity
+	if _, err := a.AllocBytes(0, 512); !errors.Is(err, ErrArenaFull) {
+		t.Fatalf("expected ErrArenaFull for cap exceeding available, got %v", err)
+	}
+}
+
 func TestArena_Alloc_AlignmentAndPersistence(t *testing.T) {
 	a := New(512)
 
@@ -186,6 +221,29 @@ func TestAllocSlice_Typed(t *testing.T) {
 	_, err = AllocSlice[sampleStruct](a, 1000)
 	if !errors.Is(err, ErrArenaFull) {
 		t.Fatalf("expected ErrArenaFull, got %v", err)
+	}
+}
+
+func TestAlloc_Typed(t *testing.T) {
+	a := New(256)
+
+	item, err := Alloc[sampleStruct](a)
+	if err != nil {
+		t.Fatalf("Alloc failed: %v", err)
+	}
+	item.ID = 42
+	item.Value = 9.81
+	item.Flag = true
+
+	if item.ID != 42 || item.Value != 9.81 || !item.Flag {
+		t.Fatalf("unexpected value: %+v", item)
+	}
+
+	// Out of memory
+	small := New(8)
+	_, err = Alloc[sampleStruct](small)
+	if !errors.Is(err, ErrArenaFull) {
+		t.Fatalf("expected ErrArenaFull for struct exceeding arena cap, got %v", err)
 	}
 }
 

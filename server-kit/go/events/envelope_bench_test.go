@@ -2,6 +2,8 @@ package events
 
 import (
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func BenchmarkEnvelope_ToJSON(b *testing.B) {
@@ -28,6 +30,19 @@ func BenchmarkEnvelope_ToBinary(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		_, _ = env.ToBinary()
+	}
+}
+
+func BenchmarkEnvelope_ToBinary_Arena(b *testing.B) {
+	env := makeTestEnvelope("media:upload:requested", "corr-123")
+	env.PayloadBytes = []byte(`{"id":"file-123","size":1048576,"type":"image/png","tags":["vacation","summer","beach"],"version":1}`)
+	env.PayloadEncoding = PayloadEncodingProtobuf
+	arena := scratch.New(4096)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		arena.Reset()
+		_, _ = env.ToBinaryWithArena(arena)
 	}
 }
 

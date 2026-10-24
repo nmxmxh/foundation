@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func TestGetColumnarBatch(t *testing.T) {
@@ -131,6 +132,69 @@ func TestGetColumnarBatch(t *testing.T) {
 	}
 }
 
+func TestGetColumnarBatch_WithArena(t *testing.T) {
+	store, err := NewStore(ProjectionSpec{
+		Name:          "ticks",
+		Domain:        "signals",
+		Collection:    "ticks",
+		IndexedFields: []string{"symbol", "bucket", "price"},
+	})
+	if err != nil {
+		t.Fatalf("failed to create store: %v", err)
+	}
+
+	ctx := context.Background()
+	now := time.Now().UTC()
+	records := []database.DomainRecord{
+		{
+			Domain:         "signals",
+			Collection:     "ticks",
+			OrganizationID: "org_1",
+			RecordID:       "tick_1",
+			CreatedAt:      now.Add(-time.Minute),
+			UpdatedAt:      now.Add(-time.Minute),
+			Data: database.RecordDataFromPairs(
+				database.RecordField{Name: "symbol", Value: database.StringValue("OVS")},
+				database.RecordField{Name: "bucket", Value: database.IntValue(5)},
+				database.RecordField{Name: "price", Value: database.FloatValue(12.34)},
+			),
+		},
+		{
+			Domain:         "signals",
+			Collection:     "ticks",
+			OrganizationID: "org_1",
+			RecordID:       "tick_2",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			Data: database.RecordDataFromPairs(
+				database.RecordField{Name: "symbol", Value: database.StringValue("AAPL")},
+				database.RecordField{Name: "bucket", Value: database.IntValue(10)},
+				database.RecordField{Name: "price", Value: database.FloatValue(150.50)},
+			),
+		},
+	}
+
+	if _, err := store.BulkLoad(ctx, "ticks", records); err != nil {
+		t.Fatalf("failed to bulk load: %v", err)
+	}
+
+	arena := scratch.New(65536)
+	arenaCtx := scratch.WithArena(ctx, arena)
+	query := Query{OrganizationID: "org_1"}
+	fields := []string{"record_id", "symbol", "bucket", "price"}
+
+	batch, err := store.GetColumnarBatch(arenaCtx, "ticks", query, fields, Fence{})
+	if err != nil {
+		t.Fatalf("GetColumnarBatch with arena failed: %v", err)
+	}
+	if batch.Rows != 2 {
+		t.Fatalf("expected 2 rows, got %d", batch.Rows)
+	}
+	if batch.Columns[0].Data.StringValues()[0] != "tick_2" {
+		t.Fatalf("unexpected order: %+v", batch.Columns[0].Data.StringValues())
+	}
+}
+
 func BenchmarkHermesGetColumnarBatch(b *testing.B) {
 	// Create a store with 10k records
 	store, err := NewStore(ProjectionSpec{
@@ -173,6 +237,56 @@ func BenchmarkHermesGetColumnarBatch(b *testing.B) {
 
 	for b.Loop() {
 		batch, err := store.GetColumnarBatch(ctx, "ticks", query, fields, Fence{})
+		if err != nil || batch.Rows != 10000 {
+			b.Fatalf("GetColumnarBatch failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkHermesGetColumnarBatch_WithArena(b *testing.B) {
+	store, err := NewStore(ProjectionSpec{
+		Name:          "ticks",
+		Domain:        "signals",
+		Collection:    "ticks",
+		IndexedFields: []string{"symbol", "bucket", "price"},
+		MaxRecords:    100000,
+	})
+	if err != nil {
+		b.Fatalf("failed to create store: %v", err)
+	}
+
+	ctx := context.Background()
+	records := make([]database.DomainRecord, 10000)
+	for i := range records {
+		records[i] = database.DomainRecord{
+			Domain:         "signals",
+			Collection:     "ticks",
+			OrganizationID: "org_1",
+			RecordID:       fmt.Sprintf("tick_%06d", i),
+			Data: database.RecordDataFromPairs(
+				database.RecordField{Name: "symbol", Value: database.StringValue("OVS")},
+				database.RecordField{Name: "bucket", Value: database.IntValue(int64(i % 16))},
+				database.RecordField{Name: "price", Value: database.FloatValue(float64(i) * 1.5)},
+			),
+		}
+	}
+
+	if _, err := store.BulkLoad(ctx, "ticks", records); err != nil {
+		b.Fatalf("failed to bulk load: %v", err)
+	}
+
+	query := Query{
+		OrganizationID: "org_1",
+	}
+	fields := []string{"record_id", "symbol", "bucket", "price"}
+	arena := scratch.New(2 * 1024 * 1024) // 2 MiB arena
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		arena.Reset()
+		arenaCtx := scratch.WithArena(ctx, arena)
+		batch, err := store.GetColumnarBatch(arenaCtx, "ticks", query, fields, Fence{})
 		if err != nil || batch.Rows != 10000 {
 			b.Fatalf("GetColumnarBatch failed: %v", err)
 		}

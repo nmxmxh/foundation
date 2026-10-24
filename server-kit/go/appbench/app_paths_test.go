@@ -20,6 +20,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/retry"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker"
 )
@@ -164,6 +165,20 @@ func BenchmarkAppLane_Auth_ValidateToken(b *testing.B) {
 
 	for b.Loop() {
 		if _, err := manager.ValidateToken(token); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkAppLane_Auth_ValidateToken_Arena(b *testing.B) {
+	manager, token := testJWT(b)
+	arena := scratch.New(4096)
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		arena.Reset()
+		if _, err := manager.ValidateTokenWithArena(arena, token); err != nil {
 			b.Fatal(err)
 		}
 	}
