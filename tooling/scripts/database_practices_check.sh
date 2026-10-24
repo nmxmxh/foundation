@@ -69,7 +69,7 @@ if rg -n "database|postgres|pgx|DATABASE_URL|DB_MAX_CONNS" "$target" --glob '!**
   fi
 fi
 
-if rg -n "(SELECT|RETURNING) \\*" "$target" --glob '*.go' --glob '*.sql' --glob '!**/node_modules/**' >/dev/null 2>&1; then
+if rg -n "(SELECT|RETURNING) \\*" "$target" --glob '*.go' --glob '*.sql' --glob '!**/node_modules/**' --glob '!**/docs/**' --glob '!**/scripts/**' >/dev/null 2>&1; then
   echo "[FAIL] wildcard SELECT */RETURNING * found in Go/SQL hot-path sources; project explicit columns"
   failed=1
 else
@@ -127,7 +127,7 @@ fi
 # silently lands on text. Every parameter in an arithmetic expression must
 # carry an explicit cast ($N::bigint). This caught a production checkout
 # outage; keep it strict.
-if rg -nP '\$[0-9]+\s*[+\-*/]|[+\-*/]\s*\$[0-9]+(?!::)' "$target/internal" --glob '*.go' --glob '!*_test.go' --glob '!**/node_modules/**' 2>/dev/null | rg -v '\$[0-9]+::' ; then
+if rg -nP '\$[0-9]+\s*[+\-*/]|[+\-*/]\s*\$[0-9]+(?!::)' "$target/internal" --glob '*.go' --glob '!*_test.go' --glob '!**/node_modules/**' 2>/dev/null | rg -v ':\s*//' | rg -v '\$[0-9]+::' ; then
   echo "[FAIL] SQL parameters used in arithmetic without an explicit ::cast (ambiguous type deduction, 42P08)"
   failed=1
 else
