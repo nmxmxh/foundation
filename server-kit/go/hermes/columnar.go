@@ -338,7 +338,7 @@ func (p *partition) collectRecordEntries(ctx context.Context, registry *partitio
 		// A concurrent publication invalidated the order proof. Rescan once with bounded selection.
 		candidates.entries = candidates.entries[:0]
 	}
-	if keys, ok := p.bitmapCandidates(registry, query); ok {
+	if keys, ok := p.bitmapCandidatesWithContext(ctx, registry, query); ok {
 		for _, key := range keys {
 			if !visit(key) {
 				break

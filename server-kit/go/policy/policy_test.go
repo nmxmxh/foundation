@@ -170,7 +170,7 @@ func TestMinatoMorrealeISOPAndPolicyAnalyze(t *testing.T) {
 	lower := NewTruthTable(4)
 	upper := NewTruthTable(4)
 	// f = x0*x1 + x0*~x1*x2, with x0*x1*x2*x3 as don't-care
-	for a := uint32(0); a < 16; a++ {
+	for a := range uint32(16) {
 		x0 := (a & 1) != 0
 		x1 := (a & 2) != 0
 		x2 := (a & 4) != 0

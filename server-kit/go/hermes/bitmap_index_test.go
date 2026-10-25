@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func TestBitmapIndexMultiAttribute(t *testing.T) {
@@ -86,6 +87,17 @@ func TestBitmapIndexMultiAttribute(t *testing.T) {
 	}
 	if len(keys2) != 1 || keys2[0] != "rec_1" {
 		t.Fatalf("expected [rec_1]; got %+v", keys2)
+	}
+
+	// Query 2 via Scratch Arena
+	arena := scratch.New(65536)
+	arenaCtx := scratch.WithArena(context.Background(), arena)
+	keysArena, ok := registry.QueryCompoundFiltersWithContext(arenaCtx, scope, filters2)
+	if !ok || len(keysArena) != 1 || keysArena[0] != "rec_1" {
+		t.Fatalf("expected arena query to return [rec_1], got %+v", keysArena)
+	}
+	if arena.Allocated() == 0 {
+		t.Fatalf("expected arena to record allocations during query")
 	}
 
 	// Query 3: country=UK -> zero matches
@@ -463,4 +475,54 @@ func TestBitmapValueCapTracksTheByteBudget(t *testing.T) {
 			}
 		}
 	})
+}
+
+func BenchmarkScopeBitmapIndex_Populate10k(b *testing.B) {
+	const N = 10000
+	keys := make([]string, N)
+	for i := range N {
+		keys[i] = fmt.Sprintf("tenant_org_1:record_entity_%d", i)
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		idx := newScopeBitmapIndex()
+		for j := range N {
+			idx.allocateSlotLocked(keys[j])
+		}
+	}
+}
+
+func BenchmarkScopeBitmapIndex_SlotLookup_Maplet(b *testing.B) {
+	const N = 10000
+	idx := newScopeBitmapIndex()
+	keys := make([]string, N)
+	for i := range N {
+		keys[i] = fmt.Sprintf("tenant_org_1:record_entity_%d", i)
+		idx.allocateSlotLocked(keys[i])
+	}
+
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		k := keys[i&(N-1)]
+		slot := idx.allocateSlotLocked(k)
+		_ = slot
+	}
+}
+
+func BenchmarkScopeBitmapIndex_SlotLookup_GoMapDirect(b *testing.B) {
+	const N = 10000
+	idx := newScopeBitmapIndex()
+	keys := make([]string, N)
+	for i := range N {
+		keys[i] = fmt.Sprintf("tenant_org_1:record_entity_%d", i)
+		idx.allocateSlotLocked(keys[i])
+	}
+
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		k := keys[i&(N-1)]
+		slot := idx.keyToSlot[k]
+		_ = slot
+	}
 }

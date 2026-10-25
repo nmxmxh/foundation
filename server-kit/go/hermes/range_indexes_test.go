@@ -63,13 +63,13 @@ func BenchmarkSortRangeEntries_Comparison(b *testing.B) {
 	for _, size := range []int{10_000, 100_000} {
 		// Template entries with common intVal to simulate realistic range index cardinality.
 		template := make([]rangeIndexEntry, size)
-		for i := 0; i < size; i++ {
+		for i := range size {
 			key := fmt.Sprintf("tenant:org_%04d:record_%08d", i%100, i)
 			template[i] = rangeIndexEntry{
-				key:      key,
-				prefix:   inlineKeyPrefix(key),
-				intVal:   int64(i % 50), // 50 distinct integer values, forcing tie-breaks
-				version:  uint64(i + 1),
+				key:     key,
+				prefix:  inlineKeyPrefix(key),
+				intVal:  int64(i % 50), // 50 distinct integer values, forcing tie-breaks
+				version: uint64(i + 1),
 			}
 		}
 

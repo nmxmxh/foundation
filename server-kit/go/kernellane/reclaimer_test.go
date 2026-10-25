@@ -2,6 +2,11 @@ package kernellane
 
 import (
 	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -429,4 +434,239 @@ func TestReclaimerSmallFileInspectPrefix(t *testing.T) {
 	if err != nil || punched {
 		t.Fatalf("small nonzero file: got punched=%v, err=%v", punched, err)
 	}
+}
+
+type reclaimCountingReader struct {
+	r io.Reader
+	n int64
+}
+
+func (c *reclaimCountingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.n += int64(n)
+	return n, err
+}
+
+// TestReclaimerStreamingDecompressCrashRecovery simulates in-place decompression with fatal errors and recovery.
+func TestReclaimerStreamingDecompressCrashRecovery(t *testing.T) {
+	if !HolePunchSupported() {
+		t.Skip("hole punching unsupported on host temp directory; skipping streaming crash recovery test")
+	}
+
+	dir := t.TempDir()
+	sourceGzPath := filepath.Join(dir, "archive.gz")
+	destPath := filepath.Join(dir, "extracted.bin")
+	ckptPath := filepath.Join(dir, "reclaim_ckpt.json")
+
+	// Create 1 MiB mixed-entropy test payload so compressed size exceeds lookback window.
+	const payloadSize = 1024 * 1024
+	originalPayload := make([]byte, payloadSize)
+	rng := rand.New(rand.NewSource(42))
+	for i := range originalPayload {
+		originalPayload[i] = byte(rng.Intn(128))
+	}
+	expectedChecksum := sha256.Sum256(originalPayload)
+	expectedChecksumHex := hex.EncodeToString(expectedChecksum[:])
+
+	// Compress payload to gzip format.
+	var gzBuf bytes.Buffer
+	gw := gzip.NewWriter(&gzBuf)
+	if _, err := gw.Write(originalPayload); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+
+	gzBytes := gzBuf.Bytes()
+	if int64(len(gzBytes)) < LookbackWindowDeflate*4 {
+		t.Fatalf("compressed size %d too small for lookback punch test", len(gzBytes))
+	}
+
+	if err := os.WriteFile(sourceGzPath, gzBuf.Bytes(), 0o600); err != nil {
+		t.Fatalf("write gz file: %v", err)
+	}
+
+	t.Run("midstream_fatal_error_cleans_up_and_aborts", func(t *testing.T) {
+		sf, err := os.OpenFile(sourceGzPath, os.O_RDWR, 0o600)
+		if err != nil {
+			t.Fatalf("open source: %v", err)
+		}
+		defer func() { _ = sf.Close() }()
+
+		df, err := os.OpenFile(destPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o600)
+		if err != nil {
+			t.Fatalf("open dest: %v", err)
+		}
+		defer func() { _ = df.Close() }()
+
+		rec, err := NewReclaimer(sf, ReclaimOptions{
+			LookbackWindow: LookbackWindowDeflate,
+			CheckpointPath: ckptPath,
+		})
+		if err != nil {
+			t.Fatalf("NewReclaimer: %v", err)
+		}
+
+		countingR := &reclaimCountingReader{r: sf}
+		gzr, err := gzip.NewReader(countingR)
+		if err != nil {
+			t.Fatalf("gzip reader: %v", err)
+		}
+
+		// Read half the payload then inject abort.
+		buf := make([]byte, 32*1024)
+		var written int64
+		for written < payloadSize/2 {
+			n, err := gzr.Read(buf)
+			if n > 0 {
+				if _, werr := df.Write(buf[:n]); werr != nil {
+					t.Fatalf("write: %v", werr)
+				}
+				written += int64(n)
+				if _, perr := rec.Commit(countingR.n, written, ""); perr != nil {
+					t.Fatalf("commit: %v", perr)
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+
+		// Inject fatal abort.
+		abortErr := rec.Abort(func() error {
+			return os.Remove(destPath)
+		})
+		if abortErr != nil {
+			t.Fatalf("abort failed: %v", abortErr)
+		}
+
+		// Destination file must be deleted.
+		if _, err := os.Stat(destPath); !os.IsNotExist(err) {
+			t.Fatalf("destination file must be cleaned up after abort: %v", err)
+		}
+
+		// Watermark must record aborted state.
+		wm := rec.Watermark()
+		if !wm.Aborted {
+			t.Fatalf("expected watermark to be aborted")
+		}
+	})
+
+	t.Run("successful_complete_preserves_reclaimed_integrity", func(t *testing.T) {
+		if err := os.WriteFile(sourceGzPath, gzBuf.Bytes(), 0o600); err != nil {
+			t.Fatalf("write gz file: %v", err)
+		}
+		sf, err := os.OpenFile(sourceGzPath, os.O_RDWR, 0o600)
+		if err != nil {
+			t.Fatalf("open source: %v", err)
+		}
+		defer func() { _ = sf.Close() }()
+
+		df, err := os.OpenFile(destPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0o600)
+		if err != nil {
+			t.Fatalf("open dest: %v", err)
+		}
+		defer func() { _ = df.Close() }()
+
+		rec, err := NewReclaimer(sf, ReclaimOptions{
+			LookbackWindow: LookbackWindowDeflate,
+			CheckpointPath: ckptPath,
+		})
+		if err != nil {
+			t.Fatalf("NewReclaimer: %v", err)
+		}
+
+		countingR := &reclaimCountingReader{r: sf}
+		gzr, err := gzip.NewReader(countingR)
+		if err != nil {
+			t.Fatalf("gzip reader: %v", err)
+		}
+
+		buf := make([]byte, 32*1024)
+		var written int64
+		for {
+			n, err := gzr.Read(buf)
+			if n > 0 {
+				if _, werr := df.Write(buf[:n]); werr != nil {
+					t.Fatalf("write: %v", werr)
+				}
+				written += int64(n)
+				if _, perr := rec.Commit(countingR.n, written, ""); perr != nil {
+					t.Fatalf("commit: %v", perr)
+				}
+			}
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				t.Fatalf("decompression failed: %v", err)
+			}
+		}
+
+		if err := rec.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+
+		wm := rec.Watermark()
+		if wm.SourcePunchedOffset <= 0 {
+			t.Fatalf("expected punched offset > 0, got %d", wm.SourcePunchedOffset)
+		}
+
+		// Verify extracted content bit-for-bit.
+		extracted, err := os.ReadFile(destPath)
+		if err != nil {
+			t.Fatalf("read extracted: %v", err)
+		}
+		actualChecksum := sha256.Sum256(extracted)
+		actualChecksumHex := hex.EncodeToString(actualChecksum[:])
+		if actualChecksumHex != expectedChecksumHex {
+			t.Fatalf("checksum mismatch: got %s, want %s", actualChecksumHex, expectedChecksumHex)
+		}
+
+		// Verify source file prefix was physically reclaimed.
+		punched, err := InspectPunchedPrefix(sf)
+		if err != nil {
+			t.Fatalf("InspectPunchedPrefix: %v", err)
+		}
+		if !punched {
+			t.Fatalf("expected source file prefix to be reclaimed")
+		}
+	})
+
+	t.Run("cold_crash_checkpoint_restores_and_reclaims_safely", func(t *testing.T) {
+		sf, err := os.OpenFile(sourceGzPath, os.O_RDWR, 0o600)
+		if err != nil {
+			t.Fatalf("open source: %v", err)
+		}
+		defer func() { _ = sf.Close() }()
+
+		rec, err := NewReclaimer(sf, ReclaimOptions{
+			LookbackWindow: LookbackWindowDeflate,
+			CheckpointPath: ckptPath,
+		})
+		if err != nil {
+			t.Fatalf("NewReclaimer: %v", err)
+		}
+
+		// Write checkpoint simulating 64 KiB read with 32 KiB punched.
+		rec.sourceReadOffset = 64 * 1024
+		rec.sourcePunchedOffset = 32 * 1024
+		rec.destWrittenOffset = 64 * 1024
+		if err := rec.saveCheckpointLocked(); err != nil {
+			t.Fatalf("saveCheckpointLocked: %v", err)
+		}
+
+		// Reload from checkpoint.
+		wm, err := ValidateSourceForRestart(sf, ckptPath)
+		if err != nil {
+			t.Fatalf("ValidateSourceForRestart with checkpoint: %v", err)
+		}
+		if wm.SourceReadOffset != 64*1024 {
+			t.Fatalf("expected read offset 64 KiB, got %d", wm.SourceReadOffset)
+		}
+		if wm.SourcePunchedOffset != 32*1024 {
+			t.Fatalf("expected punched offset 32 KiB, got %d", wm.SourcePunchedOffset)
+		}
+	})
 }

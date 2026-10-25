@@ -587,7 +587,7 @@ func TestSelectContainsDelimiterAllocations(t *testing.T) {
 	const n = 1000
 	ss := make([]string, n)
 	vv := make([]bool, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		ss[i] = "tag1,tag2,tag3"
 		vv[i] = true
 	}
@@ -623,7 +623,7 @@ func BenchmarkSelectContainsDelimiter(b *testing.B) {
 	const n = 10000
 	ss := make([]string, n)
 	vv := make([]bool, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		vv[i] = true
 		switch i % 4 {
 		case 0:
@@ -677,7 +677,7 @@ func BenchmarkSelectContainsDelimiter(b *testing.B) {
 		var sink int
 		for b.Loop() {
 			sel := NewSelectionBitmap(n)
-			for i := 0; i < n; i++ {
+			for i := range n {
 				val := vec.ValueAt(i)
 				if strings.Contains(val, ",") || strings.Contains(val, ";") {
 					sel.words[i>>6] |= 1 << uint(i&63)

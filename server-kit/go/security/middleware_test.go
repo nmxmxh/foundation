@@ -533,7 +533,7 @@ func TestRateLimiterClientIPAndFingerprintFallbacks(t *testing.T) {
 
 func TestRateLimiterPruningAndBoundedCapacity(t *testing.T) {
 	limiter := NewRateLimiter(5, 20*time.Millisecond)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		limiter.Allow(fmt.Sprintf("key-%d", i))
 	}
 	if limiter.KeyCount() != 10 {

@@ -1,6 +1,7 @@
 package hermes
 
 import (
+	"context"
 	"slices"
 	"time"
 
@@ -63,7 +64,7 @@ func (p *partition) removeIndexesLocked(publisher *indexPublisher, registry *par
 	}
 }
 
-func (p *partition) bitmapCandidates(registry *partitionRegistry, query Query) ([]string, bool) {
+func (p *partition) bitmapCandidatesWithContext(ctx context.Context, registry *partitionRegistry, query Query) ([]string, bool) {
 	if registry == nil || registry.bitmaps == nil || query.Plan.count <= 1 {
 		return nil, false
 	}
@@ -81,7 +82,7 @@ func (p *partition) bitmapCandidates(registry *partitionRegistry, query Query) (
 		return nil, false
 	}
 	scope := scopeKey(p.spec.Domain, p.spec.Collection, query.OrganizationID)
-	return registry.bitmaps.QueryCompoundFilters(scope, filters)
+	return registry.bitmaps.QueryCompoundFiltersWithContext(ctx, scope, filters)
 }
 
 func (p *partition) orderedCandidateIndex(registry *partitionRegistry, query Query) *indexSnapshot {

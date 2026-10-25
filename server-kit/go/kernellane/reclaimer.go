@@ -237,7 +237,7 @@ func (r *Reclaimer) saveCheckpointLocked() error {
 
 // LoadCheckpoint reads and parses a saved reclaim watermark from disk.
 func LoadCheckpoint(path string) (ReclaimWatermark, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is caller-specified checkpoint path.
 	if err != nil {
 		return ReclaimWatermark{}, err
 	}
@@ -262,10 +262,7 @@ func InspectPunchedPrefix(f *os.File) (bool, error) {
 		return false, nil
 	}
 
-	checkLen := int64(BlockSize)
-	if st.Size() < checkLen {
-		checkLen = st.Size()
-	}
+	checkLen := min(st.Size(), int64(BlockSize))
 
 	buf := make([]byte, checkLen)
 	if _, err := f.ReadAt(buf, 0); err != nil && !errors.Is(err, io.EOF) {

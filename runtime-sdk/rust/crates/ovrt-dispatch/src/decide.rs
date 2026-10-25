@@ -232,6 +232,96 @@ pub fn decide_power_of_two(
     }
 }
 
+/// Compact 4-slot bucketed Affinity Maplet mapping locality keys to target Lane IDs.
+/// Replaces saturating 64-bit integer bitmasks with space-efficient O(1) single-probe resolution.
+#[derive(Clone, Copy, Debug)]
+pub struct AffinityMaplet<const BUCKETS: usize> {
+    // 4 slots per bucket, each slot holds:
+    // [fingerprint (24 bits) | lane_id (8 bits)] packed into u32.
+    // 0 indicates empty.
+    pub buckets: [[u32; 4]; BUCKETS],
+}
+
+impl<const BUCKETS: usize> Default for AffinityMaplet<BUCKETS> {
+    fn default() -> Self {
+        Self { buckets: [[0; 4]; BUCKETS] }
+    }
+}
+
+impl<const BUCKETS: usize> AffinityMaplet<BUCKETS> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    fn hash_key(key: u64) -> u64 {
+        let mut z = key.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    #[inline]
+    fn decompose(&self, key: u64) -> (usize, u32, usize) {
+        let h = Self::hash_key(key);
+        let b1 = (h as usize) % BUCKETS;
+        let mut fp = (h >> 32) as u32 & 0x00FF_FFFF;
+        if fp == 0 {
+            fp = 1;
+        }
+        let b2 = (b1 ^ (fp as usize)) % BUCKETS;
+        (b1, fp, b2)
+    }
+
+    pub fn insert(&mut self, key: u64, lane_id: u16) -> bool {
+        let (b1, fp, b2) = self.decompose(key);
+        let mut entry = (fp << 8) | (lane_id as u32 & 0xFF);
+        for slot in &mut self.buckets[b1] {
+            if *slot == 0 || (*slot >> 8) == fp {
+                *slot = entry;
+                return true;
+            }
+        }
+        for slot in &mut self.buckets[b2] {
+            if *slot == 0 || (*slot >> 8) == fp {
+                *slot = entry;
+                return true;
+            }
+        }
+        let mut curr_b = b1;
+        for _ in 0..64 {
+            let victim = self.buckets[curr_b][0];
+            self.buckets[curr_b][0] = entry;
+            let v_fp = victim >> 8;
+            curr_b = (curr_b ^ (v_fp as usize)) % BUCKETS;
+            entry = victim;
+            for slot in &mut self.buckets[curr_b] {
+                if *slot == 0 {
+                    *slot = entry;
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[inline]
+    pub fn lookup(&self, key: u64) -> Option<u16> {
+        let (b1, fp, b2) = self.decompose(key);
+        for &slot in &self.buckets[b1] {
+            if slot != 0 && (slot >> 8) == fp {
+                return Some((slot & 0xFF) as u16);
+            }
+        }
+        for &slot in &self.buckets[b2] {
+            if slot != 0 && (slot >> 8) == fp {
+                return Some((slot & 0xFF) as u16);
+            }
+        }
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,5 +492,26 @@ mod tests {
         let max_p2c = *p2c_counts.iter().max().expect("max");
         assert_eq!(max_argmin, 64);
         assert!(max_p2c <= 28, "expected p2c peak <= 28, got {max_p2c}");
+    }
+
+    #[test]
+    fn affinity_maplet_routes_in_single_probe() {
+        let mut maplet = AffinityMaplet::<64>::new();
+
+        // Bind 100 partition keys across 4 worker lanes
+        for i in 0..100u64 {
+            let lane_id = (i % 4) as u16;
+            assert!(maplet.insert(i, lane_id), "insert must succeed");
+        }
+
+        // Verify exact lookup
+        for i in 0..100u64 {
+            let expected_lane = (i % 4) as u16;
+            let target = maplet.lookup(i);
+            assert_eq!(target, Some(expected_lane), "key {i} should map to lane {expected_lane}");
+        }
+
+        // Verify absent key
+        assert_eq!(maplet.lookup(999999), None, "absent key must return None");
     }
 }

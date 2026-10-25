@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func BenchmarkHermesGetRecordCopied(b *testing.B) {
@@ -763,6 +764,20 @@ func BenchmarkBitmapVsIterative_MultiFilter(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			keys, _ := registry.QueryCompoundFilters(scope, filters)
+			if len(keys) == 0 {
+				b.Fatal("unexpected empty")
+			}
+		}
+	})
+
+	b.Run("InvertedBitmap_AND_WithScratchArena", func(b *testing.B) {
+		arena := scratch.New(64 * 1024)
+		arenaCtx := scratch.WithArena(context.Background(), arena)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			arena.Reset()
+			keys, _ := registry.QueryCompoundFiltersWithContext(arenaCtx, scope, filters)
 			if len(keys) == 0 {
 				b.Fatal("unexpected empty")
 			}

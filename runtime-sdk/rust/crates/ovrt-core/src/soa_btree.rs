@@ -695,7 +695,10 @@ impl<K: InlineKey, V> ArenaSoABTreeMap<K, V> {
                         }
 
                         let split_prefix = right.prefixes[0];
-                        let split_key = right.keys[0].as_ref().unwrap().clone();
+                        let split_key = match right.keys[0].as_ref() {
+                            Some(k) => k.clone(),
+                            None => return (None, None),
+                        };
                         let right_id = self.nodes.len() as u32;
                         self.nodes.push(ArenaNode::Leaf(right));
                         (None, Some((split_prefix, split_key, right_id)))
@@ -748,7 +751,10 @@ impl<K: InlineKey, V> ArenaSoABTreeMap<K, V> {
 
                         let mid = SOA_NODE_CAPACITY / 2;
                         let promoted_prefix = all_prefixes[mid];
-                        let promoted_key = all_keys[mid].take().unwrap();
+                        let promoted_key = match all_keys[mid].take() {
+                            Some(k) => k,
+                            None => return (replaced, None),
+                        };
 
                         for i in 0..mid {
                             internal.prefixes[i] = all_prefixes[i];
@@ -800,8 +806,10 @@ impl<K: InlineKey + SnapshotCodec, V: SnapshotCodec> ArenaSoABTreeMap<K, V> {
                         writer.write_all(&p.to_le_bytes())?;
                     }
                     for (k, v) in leaf.keys.iter().zip(leaf.values.iter()).take(leaf.len) {
-                        k.as_ref().unwrap().write_snapshot(writer)?;
-                        v.as_ref().unwrap().write_snapshot(writer)?;
+                        if let (Some(k), Some(v)) = (k.as_ref(), v.as_ref()) {
+                            k.write_snapshot(writer)?;
+                            v.write_snapshot(writer)?;
+                        }
                     }
                 }
                 ArenaNode::Internal(internal) => {
@@ -813,8 +821,8 @@ impl<K: InlineKey + SnapshotCodec, V: SnapshotCodec> ArenaSoABTreeMap<K, V> {
                     for c in &internal.children {
                         writer.write_all(&c.to_le_bytes())?;
                     }
-                    for k in internal.keys.iter().take(internal.len) {
-                        k.as_ref().unwrap().write_snapshot(writer)?;
+                    for k in internal.keys.iter().take(internal.len).flatten() {
+                        k.write_snapshot(writer)?;
                     }
                 }
             }

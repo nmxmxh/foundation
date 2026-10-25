@@ -275,10 +275,6 @@ func (m *JWTManager) hmacSum256(unsigned string) [32]byte {
 	return out
 }
 
-func decodeAndUnmarshalClaims(payloadPart string, claims *Claims) error {
-	return decodeAndUnmarshalClaimsWithArena(payloadPart, claims, nil)
-}
-
 func decodeAndUnmarshalClaimsWithArena(payloadPart string, claims *Claims, arena *scratch.Arena) error {
 	if len(payloadPart) <= 768 {
 		var srcBuf [768]byte
@@ -296,7 +292,7 @@ func decodeAndUnmarshalClaimsWithArena(payloadPart string, claims *Claims, arena
 			raw, err := arena.Alloc(n)
 			if err == nil {
 				copy(raw, dstBuf[:n])
-				data = unsafe.String(&raw[0], n)
+				data = unsafe.String(&raw[0], n) // #nosec G103 -- zero-allocation string view into arena buffer.
 			} else {
 				data = string(dstBuf[:n])
 			}

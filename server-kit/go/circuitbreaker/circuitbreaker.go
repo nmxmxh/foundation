@@ -344,7 +344,7 @@ func (cb *CircuitBreaker) recordWindowAndShouldTrip(now time.Time, isFailure boo
 		return false
 	}
 	epoch := now.UnixNano() / int64(cb.bucketSpan)
-	idx := int(uint64(epoch) % rollingBucketCount)
+	idx := int(uint64(epoch) % rollingBucketCount) // #nosec G115 -- epoch is non-negative timestamp quotient.
 	if cb.buckets[idx].epoch != epoch {
 		cb.buckets[idx] = windowBucket{epoch: epoch}
 	}

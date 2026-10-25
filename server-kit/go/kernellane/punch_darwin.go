@@ -36,19 +36,15 @@ func kernelPunchHole(f *os.File, offset, length int64) (bool, error) {
 		offset: offset,
 		length: length,
 	}
-	_, _, errno := unix.Syscall(
-		unix.SYS_FCNTL,
-		f.Fd(),
-		uintptr(fPunchhole),
-		uintptr(unsafe.Pointer(&hole)),
-	)
-	if errno == 0 {
+	// #nosec G103 -- darwin fcntl F_PUNCHHOLE takes pointer to fpunchhole_t struct.
+	_, err := unix.FcntlInt(f.Fd(), fPunchhole, int(uintptr(unsafe.Pointer(&hole))))
+	if err == nil {
 		return true, nil
 	}
-	if isUnsupportedHolePunch(errno) {
+	if isUnsupportedHolePunch(err) {
 		return false, nil
 	}
-	return false, errno
+	return false, err
 }
 
 func isUnsupportedHolePunch(err error) bool {

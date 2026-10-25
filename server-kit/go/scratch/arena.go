@@ -40,7 +40,7 @@ func New(capacity int) *Arena {
 func NewWithBuffer(buf []byte) *Arena {
 	base := 0
 	if len(buf) > 0 {
-		addr := uintptr(unsafe.Pointer(&buf[0]))
+		addr := uintptr(unsafe.Pointer(&buf[0])) // #nosec G103 -- buffer alignment calculation.
 		misalign := addr & 7
 		if misalign != 0 {
 			base = int(8 - misalign)
@@ -147,7 +147,7 @@ func AllocSlice[T any](a *Arena, count int) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
-	return unsafe.Slice((*T)(unsafe.Pointer(&raw[0])), count), nil
+	return unsafe.Slice((*T)(unsafe.Pointer(&raw[0])), count), nil // #nosec G103 -- arena typed slice view.
 }
 
 // AllocString copies string s into the arena and returns an immutable string view.
@@ -161,7 +161,7 @@ func AllocString(a *Arena, s string) (string, error) {
 		return "", err
 	}
 	copy(raw, s)
-	return unsafe.String(&raw[0], len(s)), nil
+	return unsafe.String(&raw[0], len(s)), nil // #nosec G103 -- arena immutable string view.
 }
 
 type contextKey struct{}

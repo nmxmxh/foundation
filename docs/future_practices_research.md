@@ -253,6 +253,43 @@ Open priorities include consumer compatibility, bounded diagnostics, and represe
      processing, batch scoring, columnar transforms). Re-evaluate cuda-oxide
      when it ships on stable Rust or when Foundation needs SIMT-level
      control (shared memory, warp-level programming, TMA).
+10. Maplets and Two-Tier Metadata (added 2026-10-25, source class 2:
+    Bender, Conway, Farach-Colton, Johnson, Pandey, "Time To Replace Your
+    Filter: How Maplets Simplify System Design", arXiv:2510.05518, 2026):
+    the governing question is whether Foundation should replace raw Bloom and
+    membership filters with approximate key-value mappings over
+    join-semilattices for fast-path routing, tenancy, and cache residency.
+    Software-level deltas to track:
+    - **Two-Tier Metadata Model**: decouple heavy audit envelopes
+      (`server-kit/go/metadata.EnvelopeMetadata`) from in-memory fast-path
+      micro-values ($b \le 16$ bits). Full provenance is preserved in
+      PostgreSQL JSONB and River jobs, while hot filters inspect micro-values
+      in nanoseconds;
+    - **Lattice Maplets**: for metadata with a natural partial order
+      (`DataClassification`, `RetentionClass`, `CapabilityMask`), internal
+      fingerprint collisions resolve via the lattice join ($v_1 \vee v_2$).
+      This guarantees fail-closed one-sided error ($M[k] \preceq m[k]$)
+      without needing wide fingerprints;
+    - **Wide Fingerprint Maplets**: for unordered keys (Hermes slot
+      identifiers, storage chunk offsets), pack 28-bit fingerprints and 4-bit
+      values into 32-bit `uint32` slots. This bounds Birthday alias collisions
+      to $< 10^{-8}$ while maintaining a 10.5x memory reduction over Go
+      pointer maps (5.24 B/key vs 55 B/key);
+    - **Hermes Hotplane Integration & Scratch Arena**: implemented in
+      `server-kit/go/hermes/bitmap_index.go`. Slot lookups in `scopeBitmapIndex`
+      accelerated with a 2-choice `slotMaplet` verified against `slotToKey` (23.2 ns/op,
+      0 B/op). Compound bitmap evaluation integrated with `scratch.Arena`:
+      `InvertedBitmap_AND_WithScratchArena` achieves 2,493 ns/op and 0 allocs/op
+      (down from 4,742 ns/op and 17,696 B/op on the heap, 2.0x faster and 100% allocation-free).
+    - **Local empirical evidence**: evaluated in `tooling/math_lab` on Apple
+      M1 Pro. 10,000 inserted keys verified with zero false negatives. 100,000
+      absent probes verified with zero false positives under 28-bit slots.
+      Lookups require 14.7 ns/op with exactly 0 allocs/op and zero Go GC pointer
+      scanning overhead (`noscan` scalar memory). Ingress simulation proved
+      87.5% fast-path bypass of slow-path authorization queries;
+    - **Promotion targets**: `docs/mathematical_practices.md` Section 2.4,
+      `server-kit/go/metadata` Maplet primitives, `server-kit/go/hermes` slot
+      indexing and scratch arena query evaluation, and `server-kit/go/cache` tier detection.
 
 ## 2026-09-24 Performance Candidates
 

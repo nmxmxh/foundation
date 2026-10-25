@@ -37,7 +37,7 @@ func TestScanDelimiterMatchesScalarReference(t *testing.T) {
 		}
 
 		// Subtest 2: Single delimiter placed at every position.
-		for pos := 0; pos < n; pos++ {
+		for pos := range n {
 			buf[pos] = ','
 			want := scanDelimiter2Scalar(buf, ',', ';')
 			gotKernel := ScanDelimiter2(buf, ',', ';')
@@ -85,7 +85,7 @@ func TestScanDelimiterMatchesScalarReference(t *testing.T) {
 func TestScanDelimiterFuzz(t *testing.T) {
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	for i := 0; i < 2000; i++ {
+	for i := range 2000 {
 		length := rng.Intn(512)
 		buf := make([]byte, length)
 		rng.Read(buf)

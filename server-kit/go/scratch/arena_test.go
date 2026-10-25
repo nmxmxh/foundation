@@ -339,9 +339,11 @@ func TestAdviseHugePage(t *testing.T) {
 }
 
 func TestContextHelpers(t *testing.T) {
+	//lint:ignore SA1012 testing defensive nil context handling
 	if FromContext(nil) != nil {
 		t.Fatal("expected nil for nil context")
 	}
+	//lint:ignore SA1012 testing defensive nil context handling
 	ctx := WithArena(nil, nil)
 	if FromContext(ctx) != nil {
 		t.Fatal("expected nil arena from nil attachment")
@@ -358,7 +360,7 @@ func TestAllocations_Alloc_Zero(t *testing.T) {
 	a := New(64 * 1024)
 	allocs := testing.AllocsPerRun(100, func() {
 		a.Reset()
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			b, err := a.Alloc(32)
 			if err != nil || b == nil {
 				t.Fatalf("alloc error: %v", err)

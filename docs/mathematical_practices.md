@@ -179,6 +179,44 @@ ID reaches ~40% collision risk near `2^32 ≈ 4.3e9` IDs.
 **Citation.** Lemire, "Are 64-bit random identifiers free from collision?"
 <https://lemire.me/blog/2019/12/12/are-64-bit-random-identifiers-free-from-collision/>
 
+### 2.4 Maplets (approximate key-value mappings over join-semilattices)
+
+**Result.** A maplet is a space-efficient data structure for approximate key-value
+mappings governed by a partial order $(V, \preceq)$. When queried for key $k$,
+a maplet returns an approximation $m[k]$ of true value $M[k]$ satisfying
+$m[k] = M[k]$ with probability $1 - \varepsilon$, and one-sided error
+$M[k] \preceq m[k]$. Storing values with $b = \lceil \log_2 |V| \rceil$ bits,
+a maplet achieves space bounds of:
+$$m \ge n \cdot (\lceil \log_2(1/\varepsilon) \rceil + b) \text{ bits}$$
+
+When values form a join-semilattice $(V, \preceq, \vee)$, internal collisions
+between inserted keys resolve via the lattice join ($v_1 \vee v_2$). This
+guarantees fail-closed security and prevents false-value downgrade. Unordered
+values (system pointers, slot IDs) require wide collision-free fingerprints
+or speculative verification against canonical records.
+
+**Rules.**
+
+- **MAPLET-1 (Lattice ordering)** Any micro-value stored in a narrow Maplet
+  (slot width $\le 16$ bits) must form a verified join-semilattice where
+  collisions evaluate to the upper bound ($v_1 \vee v_2$).
+- **MAPLET-2 (One-sided fail-closed invariant)** Maplets used in security,
+  jurisdiction, or retention enforcement must strictly fail closed: an
+  approximate match may trigger slow-path verification, but must never grant
+  elevated privileges or premature deletion.
+- **MAPLET-3 (Unordered pointer boundary)** For non-ordered keys (such as Hermes
+  slot identifiers or storage offsets), Maplets must either:
+  (a) use wide fingerprints sized against the Birthday bound ($N^2 / (2 \cdot B \cdot 2^r) \ll 1$), or
+  (b) treat returned values as unverified location hints requiring canonical
+      record confirmation before use.
+- **MAPLET-4 (Zero-allocation slab layout)** Maplet storage must reside in
+  contiguous scalar slabs (`[]uint32`, `[]uint16`, or `[]byte`) marked `noscan`
+  by the Go GC, avoiding heap pointers and pointer-scanning overhead.
+
+**Citations.** Bender, Conway, Farach-Colton, Johnson, Pandey, "Time To Replace
+Your Filter: How Maplets Simplify System Design", arXiv:2510.05518 (2026).
+<https://arxiv.org/abs/2510.05518>
+
 ---
 
 ## 3. Statistical soundness of metrics

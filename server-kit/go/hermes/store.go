@@ -585,7 +585,7 @@ func (p *partition) count(ctx context.Context, query Query, fence Fence) (int64,
 	}
 
 	registry := p.activeRegistry()
-	if keys, ok := p.bitmapCandidates(registry, query); ok {
+	if keys, ok := p.bitmapCandidatesWithContext(ctx, registry, query); ok {
 		// Re-check every candidate against the query, exactly as the scan below
 		// does. An existence test alone leaves Count and ListRecords answering
 		// the same query under two different validation regimes, so any future

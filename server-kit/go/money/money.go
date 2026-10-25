@@ -198,7 +198,7 @@ func (m Money) Allocate(ratios []int64) ([]Money, error) {
 
 	const stackCap = 16
 	var remStack [stackCap]int64
-	remainders := remStack[:0]
+	var remainders []int64
 	if n > stackCap {
 		remainders = make([]int64, n)
 	} else {
@@ -244,7 +244,7 @@ func (m Money) AllocateWide(ratios []int64) ([]Money, error) {
 
 	const stackCap = 16
 	var remStack [stackCap]int64
-	remainders := remStack[:0]
+	var remainders []int64
 	if n > stackCap {
 		remainders = make([]int64, n)
 	} else {
@@ -252,18 +252,18 @@ func (m Money) AllocateWide(ratios []int64) ([]Money, error) {
 	}
 
 	absAmount, neg := absUint64(m.Amount)
-	uTotal := uint64(totalRatio)
+	uTotal := uint64(totalRatio) // #nosec G115 -- totalRatio is validated positive by sumRatios.
 
 	var allocatedAmount int64
 	for i, r := range ratios {
-		hi, lo := bits.Mul64(absAmount, uint64(r))
+		hi, lo := bits.Mul64(absAmount, uint64(r)) // #nosec G115 -- r is validated non-negative by sumRatios.
 		q, rem := bits.Div64(hi, lo, uTotal)
-		share := int64(q)
+		share := int64(q) // #nosec G115 -- q is bounded by absAmount <= math.MaxInt64.
 		if neg {
 			share = -share
 		}
 		shares[i] = Money{Amount: share, Currency: m.Currency}
-		remainders[i] = int64(rem)
+		remainders[i] = int64(rem) // #nosec G115 -- rem is bounded by uTotal <= math.MaxInt64.
 		allocatedAmount += share
 	}
 
@@ -288,7 +288,7 @@ func (m Money) AllocateMonotone(ratios []int64) ([]Money, error) {
 	shares := make([]Money, n)
 
 	absAmount, neg := absUint64(m.Amount)
-	uTotal := uint64(totalRatio)
+	uTotal := uint64(totalRatio) // #nosec G115 -- totalRatio is validated positive by sumRatios.
 
 	const stackCap = 16
 	var countStack [stackCap]uint64
@@ -306,7 +306,7 @@ func (m Money) AllocateMonotone(ratios []int64) ([]Money, error) {
 		if r == 0 {
 			continue
 		}
-		hi, lo := bits.Mul64(absAmount, uint64(r))
+		hi, lo := bits.Mul64(absAmount, uint64(r)) // #nosec G115 -- r is validated non-negative by sumRatios.
 		q, _ := bits.Div64(hi, lo, uTotal)
 		if q > 1 {
 			base := q - 1
@@ -321,6 +321,7 @@ func (m Money) AllocateMonotone(ratios []int64) ([]Money, error) {
 			if r == 0 {
 				continue
 			}
+			// #nosec G115 -- ratios are validated non-negative by sumRatios.
 			if bestIdx == -1 || websterHigherPriority(uint64(r), counts[i], uint64(ratios[bestIdx]), counts[bestIdx]) {
 				bestIdx = i
 			}
@@ -330,7 +331,7 @@ func (m Money) AllocateMonotone(ratios []int64) ([]Money, error) {
 	}
 
 	for i, c := range counts {
-		amt := int64(c)
+		amt := int64(c) // #nosec G115 -- c is bounded by absAmount <= math.MaxInt64.
 		if neg {
 			amt = -amt
 		}
@@ -362,9 +363,9 @@ func sumRatios(ratios []int64) (int64, error) {
 
 func absUint64(v int64) (uint64, bool) {
 	if v < 0 {
-		return uint64(^v) + 1, true
+		return uint64(^v) + 1, true // #nosec G115 -- bitwise NOT is non-negative for negative v.
 	}
-	return uint64(v), false
+	return uint64(v), false // #nosec G115 -- v is non-negative.
 }
 
 func distributeLeftover(shares []Money, remainders []int64, leftover int64) {

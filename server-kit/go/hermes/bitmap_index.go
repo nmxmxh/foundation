@@ -1,10 +1,157 @@
 package hermes
 
 import (
+	"context"
 	"sync"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
+
+// slotMapletEntry represents an 8-byte entry storing a 32-bit fingerprint
+// and a 32-bit slot index for single-cache-line slot hint resolution.
+type slotMapletEntry struct {
+	fp   uint32
+	slot uint32
+}
+
+// slotMaplet is a compact, 2-choice cuckoo hash table mapping record keys to slot IDs.
+// It acts as a single-cache-line slot accelerator verified against slotToKey.
+type slotMaplet struct {
+	entries []slotMapletEntry
+	mask    uint32
+	count   int
+}
+
+func newSlotMaplet(capacity int) slotMaplet {
+	size := 16
+	for size < capacity*2 {
+		size <<= 1
+	}
+	return slotMaplet{
+		entries: make([]slotMapletEntry, size),
+		mask:    uint32(size - 1), // #nosec G115 -- power-of-two capacity bounded
+	}
+}
+
+func (sm *slotMaplet) grow() {
+	oldEntries := sm.entries
+	newSize := max(len(oldEntries)*2, 32)
+	sm.entries = make([]slotMapletEntry, newSize)
+	sm.mask = uint32(newSize - 1) // #nosec G115 -- power-of-two capacity bounded
+	sm.count = 0
+
+	for _, e := range oldEntries {
+		if e.fp != 0 {
+			sm.reinsert(e)
+		}
+	}
+}
+
+func (sm *slotMaplet) reinsert(e slotMapletEntry) {
+	b1 := e.fp & sm.mask
+	if sm.entries[b1].fp == 0 {
+		sm.entries[b1] = e
+		sm.count++
+		return
+	}
+	b2 := (e.fp ^ 0x5bd1e995) & sm.mask
+	if sm.entries[b2].fp == 0 {
+		sm.entries[b2] = e
+		sm.count++
+		return
+	}
+	sm.entries[b1] = e
+}
+
+func hashKey64(key string) uint64 {
+	h := uint64(14695981039346656037)
+	for i := 0; i < len(key); i++ {
+		h = (h ^ uint64(key[i])) * 1099511628211
+	}
+	return h
+}
+
+func (sm *slotMaplet) lookup(key string, slotToKey []string) (int, bool) {
+	if sm == nil || len(sm.entries) == 0 {
+		return -1, false
+	}
+	h := hashKey64(key)
+	fp := uint32(h>>32) | 1
+
+	b1 := uint32(h) & sm.mask // #nosec G115 -- lower 32-bit bucket index
+	e1 := sm.entries[b1]
+	if e1.fp == fp {
+		slot := int(e1.slot)
+		if slot >= 0 && slot < len(slotToKey) && slotToKey[slot] == key {
+			return slot, true
+		}
+	}
+
+	b2 := (uint32(h) ^ 0x5bd1e995) & sm.mask // #nosec G115 -- lower 32-bit bucket index
+	e2 := sm.entries[b2]
+	if e2.fp == fp {
+		slot := int(e2.slot)
+		if slot >= 0 && slot < len(slotToKey) && slotToKey[slot] == key {
+			return slot, true
+		}
+	}
+
+	return -1, false
+}
+
+func (sm *slotMaplet) insert(key string, slot int) {
+	if sm == nil {
+		return
+	}
+	if len(sm.entries) == 0 || sm.count*2 >= len(sm.entries) {
+		sm.grow()
+	}
+	h := hashKey64(key)
+	fp := uint32(h>>32) | 1
+
+	b1 := uint32(h) & sm.mask // #nosec G115 -- lower 32-bit bucket index
+	if sm.entries[b1].fp == fp && int(sm.entries[b1].slot) == slot {
+		return
+	}
+	b2 := (uint32(h) ^ 0x5bd1e995) & sm.mask // #nosec G115 -- lower 32-bit bucket index
+	if sm.entries[b2].fp == fp && int(sm.entries[b2].slot) == slot {
+		return
+	}
+
+	if sm.entries[b1].fp == 0 {
+		sm.entries[b1] = slotMapletEntry{fp: fp, slot: uint32(slot)} // #nosec G115 -- slot is positive index
+		sm.count++
+		return
+	}
+	if sm.entries[b2].fp == 0 {
+		sm.entries[b2] = slotMapletEntry{fp: fp, slot: uint32(slot)} // #nosec G115 -- slot is positive index
+		sm.count++
+		return
+	}
+
+	sm.entries[b1] = slotMapletEntry{fp: fp, slot: uint32(slot)} // #nosec G115 -- slot is positive index
+}
+
+func (sm *slotMaplet) remove(key string, slot int) {
+	if sm == nil || len(sm.entries) == 0 {
+		return
+	}
+	h := hashKey64(key)
+	fp := uint32(h>>32) | 1
+
+	b1 := uint32(h) & sm.mask // #nosec G115 -- lower 32-bit bucket index
+	if sm.entries[b1].fp == fp && int(sm.entries[b1].slot) == slot {
+		sm.entries[b1] = slotMapletEntry{}
+		sm.count--
+		return
+	}
+	b2 := (uint32(h) ^ 0x5bd1e995) & sm.mask // #nosec G115 -- lower 32-bit bucket index
+	if sm.entries[b2].fp == fp && int(sm.entries[b2].slot) == slot {
+		sm.entries[b2] = slotMapletEntry{}
+		sm.count--
+	}
+}
 
 // scopeBitmapIndex manages inverted bitmaps and slot IDs for a single tenant/partition scope.
 //
@@ -17,8 +164,11 @@ import (
 type scopeBitmapIndex struct {
 	mu sync.RWMutex
 
-	// keyToSlot maps record key -> integer slot index.
+	// keyToSlot maps record key -> integer slot index (canonical durable truth).
 	keyToSlot map[string]int
+
+	// slotMaplet provides a single-cache-line O(1) slot hint accelerator.
+	slotMaplet slotMaplet
 
 	// slotToKey maps slot index -> record key.
 	slotToKey []string
@@ -85,10 +235,11 @@ func bitmapValueCapFor(maxBytes int64, slots int) int {
 
 func newScopeBitmapIndex() *scopeBitmapIndex {
 	return &scopeBitmapIndex{
-		keyToSlot: make(map[string]int),
-		slotToKey: make([]string, 0, 1024),
-		freeSlots: make([]int, 0, 128),
-		inverted:  make(map[bitmapIndexKey]bitmap),
+		keyToSlot:  make(map[string]int),
+		slotMaplet: newSlotMaplet(64),
+		slotToKey:  make([]string, 0, 1024),
+		freeSlots:  make([]int, 0, 128),
+		inverted:   make(map[bitmapIndexKey]bitmap),
 	}
 }
 
@@ -111,8 +262,13 @@ func newBitmapIndexKey(field string, kind byte, value string) bitmapIndexKey {
 }
 
 // allocateSlotLocked assigns or reuses a slot for a record key.
+// It probes slotMaplet first for a single-cache-line verified hit.
 func (s *scopeBitmapIndex) allocateSlotLocked(key string) int {
+	if slot, ok := s.slotMaplet.lookup(key, s.slotToKey); ok {
+		return slot
+	}
 	if slot, ok := s.keyToSlot[key]; ok {
+		s.slotMaplet.insert(key, slot)
 		return slot
 	}
 	if len(s.freeSlots) > 0 {
@@ -120,21 +276,27 @@ func (s *scopeBitmapIndex) allocateSlotLocked(key string) int {
 		s.freeSlots = s.freeSlots[:len(s.freeSlots)-1]
 		s.slotToKey[slot] = key
 		s.keyToSlot[key] = slot
+		s.slotMaplet.insert(key, slot)
 		return slot
 	}
 	slot := len(s.slotToKey)
 	s.slotToKey = append(s.slotToKey, key)
 	s.keyToSlot[key] = slot
+	s.slotMaplet.insert(key, slot)
 	return slot
 }
 
 // releaseSlotLocked recycles a slot index.
 func (s *scopeBitmapIndex) releaseSlotLocked(key string) (int, bool) {
-	slot, ok := s.keyToSlot[key]
+	slot, ok := s.slotMaplet.lookup(key, s.slotToKey)
 	if !ok {
-		return -1, false
+		slot, ok = s.keyToSlot[key]
+		if !ok {
+			return -1, false
+		}
 	}
 	delete(s.keyToSlot, key)
+	s.slotMaplet.remove(key, slot)
 	s.slotToKey[slot] = ""
 	s.freeSlots = append(s.freeSlots, slot)
 	return slot, true
@@ -196,6 +358,13 @@ func (s *scopeBitmapIndex) RemoveRecordLocked(key string, rec database.DomainRec
 // when the scope is saturated and the query names a value that was never
 // indexed, because there a missing bitmap means unknown, not no matches.
 func (s *scopeBitmapIndex) IntersectFilters(filters []QueryFilter) (keys []string, coveredAll bool) {
+	return s.IntersectFiltersWithContext(context.Background(), filters)
+}
+
+// IntersectFiltersWithContext returns candidate keys satisfying all query filters via bitwise AND.
+// When an arena is attached to ctx, intermediate bitmap clone words and candidate keys slices
+// are allocated from the frame scratch arena, avoiding heap allocations.
+func (s *scopeBitmapIndex) IntersectFiltersWithContext(ctx context.Context, filters []QueryFilter) (keys []string, coveredAll bool) {
 	if len(filters) == 0 {
 		return nil, false
 	}
@@ -203,7 +372,10 @@ func (s *scopeBitmapIndex) IntersectFilters(filters []QueryFilter) (keys []strin
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	arena := scratch.FromContext(ctx)
 	var result *bitmap
+	var scratchResult bitmap
+
 	for _, f := range filters {
 		k := newBitmapIndexKey(f.Field, f.Kind, f.Value)
 		bm, ok := s.inverted[k]
@@ -216,8 +388,17 @@ func (s *scopeBitmapIndex) IntersectFilters(filters []QueryFilter) (keys []strin
 			return nil, true
 		}
 		if result == nil {
-			cloned := bm.clone()
-			result = &cloned
+			if arena != nil {
+				if slice, err := scratch.AllocSlice[uint64](arena, len(bm.words)); err == nil {
+					copy(slice, bm.words)
+					scratchResult = newBitmapWithWords(slice, bm.n)
+					result = &scratchResult
+				}
+			}
+			if result == nil {
+				cloned := bm.clone()
+				result = &cloned
+			}
 		} else {
 			result.andClamped(bm.words)
 		}
@@ -232,7 +413,15 @@ func (s *scopeBitmapIndex) IntersectFilters(filters []QueryFilter) (keys []strin
 		return nil, true
 	}
 
-	keys = make([]string, 0, matchingCount)
+	if arena != nil {
+		if slice, err := scratch.AllocSlice[string](arena, matchingCount); err == nil {
+			keys = slice[:0]
+		}
+	}
+	if keys == nil {
+		keys = make([]string, 0, matchingCount)
+	}
+
 	result.forEachSet(func(slot int) bool {
 		if slot >= 0 && slot < len(s.slotToKey) {
 			k := s.slotToKey[slot]
@@ -283,6 +472,12 @@ func (r *BitmapIndexRegistry) Remove(scope recordScope, key string, rec database
 
 // QueryCompoundFilters evaluates composite secondary attribute queries using bitwise AND.
 func (r *BitmapIndexRegistry) QueryCompoundFilters(scope recordScope, filters []QueryFilter) ([]string, bool) {
+	return r.QueryCompoundFiltersWithContext(context.Background(), scope, filters)
+}
+
+// QueryCompoundFiltersWithContext evaluates composite secondary attribute queries using bitwise AND,
+// drawing intermediate allocations from any scratch.Arena attached to ctx.
+func (r *BitmapIndexRegistry) QueryCompoundFiltersWithContext(ctx context.Context, scope recordScope, filters []QueryFilter) ([]string, bool) {
 	sc := r.getScope(scope)
-	return sc.IntersectFilters(filters)
+	return sc.IntersectFiltersWithContext(ctx, filters)
 }

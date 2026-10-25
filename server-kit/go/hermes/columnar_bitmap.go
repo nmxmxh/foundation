@@ -36,6 +36,14 @@ func newBitmap(n int) bitmap {
 	return bitmap{words: make([]uint64, (n+63)/64), n: n}
 }
 
+// newBitmapWithWords wraps an existing word slice as a bitmap covering n bits.
+func newBitmapWithWords(words []uint64, n int) bitmap {
+	if n < 0 {
+		n = 0
+	}
+	return bitmap{words: words, n: n}
+}
+
 // set raises bit i. Callers must hold i in [0, n).
 func (b *bitmap) set(i int) {
 	if i < 0 {

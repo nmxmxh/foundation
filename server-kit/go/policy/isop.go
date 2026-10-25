@@ -171,7 +171,7 @@ func (t TruthTable) cofactors() (f0, f1 TruthTable) {
 	f0 = NewTruthTable(v)
 	f1 = NewTruthTable(v)
 	half := uint32(1) << uint(v)
-	for a := uint32(0); a < half; a++ {
+	for a := range half {
 		if t.Get(a) {
 			f0.Set(a, true)
 		}
@@ -189,7 +189,7 @@ func tableFromCubes(nVars int, cubes []Cube) TruthTable {
 		return out
 	}
 	limit := uint32(1) << uint(nVars)
-	for a := uint32(0); a < limit; a++ {
+	for a := range limit {
 		for _, c := range cubes {
 			if c.Covers(a) {
 				out.Set(a, true)
@@ -395,7 +395,7 @@ func (e *Engine) Analyze() (AnalysisReport, error) {
 	dontCare := NewTruthTable(nVars)
 	limit := uint32(1) << uint(nVars)
 
-	for a := uint32(0); a < limit; a++ {
+	for a := range limit {
 		possible := true
 		for _, g := range groups {
 			setCount := 0
