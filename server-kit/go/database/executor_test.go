@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -96,6 +97,91 @@ func TestQueryAllLimitStopsRetainingRows(t *testing.T) {
 	}
 }
 
+func TestQueryAllCapacity(t *testing.T) {
+	rows := &executorFakeRows{items: 3}
+	db := &fakeRowQueryer{rows: rows}
+
+	// Normal capacity
+	got, err := QueryAllCapacity(context.Background(), db, 3, "SELECT id", func(r Rows) (int, error) {
+		return DirectScanInt(r)
+	})
+	if err != nil {
+		t.Fatalf("QueryAllCapacity error = %v", err)
+	}
+	if len(got) != 3 || got[0] != 1 || got[2] != 3 {
+		t.Fatalf("QueryAllCapacity got = %#v", got)
+	}
+
+	// Negative capacity defaults safely to 0
+	rows2 := &executorFakeRows{items: 1}
+	db2 := &fakeRowQueryer{rows: rows2}
+	got2, err := QueryAllCapacity(context.Background(), db2, -5, "SELECT id", func(r Rows) (int, error) {
+		return DirectScanInt(r)
+	})
+	if err != nil || len(got2) != 1 {
+		t.Fatalf("QueryAllCapacity negative cap failed: %v", err)
+	}
+
+	// Nil scan returns error
+	if _, err := QueryAllCapacity[int](context.Background(), db, 5, "SELECT id", nil); err == nil {
+		t.Fatal("expected nil scan to fail")
+	}
+}
+
+type fallbackRows struct {
+	val int
+}
+
+func (r *fallbackRows) Close() {}
+func (r *fallbackRows) Next() bool { return false }
+func (r *fallbackRows) Err() error { return nil }
+func (r *fallbackRows) Scan(dest ...any) error {
+	if len(dest) > 0 {
+		if ptr, ok := dest[0].(*int); ok {
+			*ptr = r.val
+		} else if ptr64, ok := dest[0].(*int64); ok {
+			*ptr64 = int64(r.val)
+		} else if strPtr, ok := dest[0].(*string); ok {
+			*strPtr = fmt.Sprintf("fallback_%d", r.val)
+		}
+	}
+	return nil
+}
+
+func TestDirectScanners(t *testing.T) {
+	fake := &executorFakeRows{items: 1}
+	fake.Next()
+
+	// Direct interface path
+	vInt, err := DirectScanInt(fake)
+	if err != nil || vInt != 1 {
+		t.Fatalf("DirectScanInt error = %v, val = %d", err, vInt)
+	}
+	vInt64, err := DirectScanInt64(fake)
+	if err != nil || vInt64 != 1 {
+		t.Fatalf("DirectScanInt64 error = %v, val = %d", err, vInt64)
+	}
+	vStr, err := DirectScanString(fake)
+	if err != nil || vStr != "str_1" {
+		t.Fatalf("DirectScanString error = %v, val = %q", err, vStr)
+	}
+
+	// Fallback to rows.Scan()
+	fallback := &fallbackRows{val: 42}
+	fbInt, err := DirectScanInt(fallback)
+	if err != nil || fbInt != 42 {
+		t.Fatalf("fallback DirectScanInt error = %v, val = %d", err, fbInt)
+	}
+	fbInt64, err := DirectScanInt64(fallback)
+	if err != nil || fbInt64 != 42 {
+		t.Fatalf("fallback DirectScanInt64 error = %v, val = %d", err, fbInt64)
+	}
+	fbStr, err := DirectScanString(fallback)
+	if err != nil || fbStr != "fallback_42" {
+		t.Fatalf("fallback DirectScanString error = %v, val = %q", err, fbStr)
+	}
+}
+
 func TestQueryEachReturnsRowsErr(t *testing.T) {
 	errBoom := errors.New("rows")
 	db := &fakeRowQueryer{rows: &executorFakeRows{items: 1, err: errBoom}}
@@ -154,6 +240,18 @@ func (f *executorFakeRows) Scan(dest ...any) error {
 		*id = f.index
 	}
 	return nil
+}
+
+func (f *executorFakeRows) ScanInt() (int, error) {
+	return f.index, nil
+}
+
+func (f *executorFakeRows) ScanInt64() (int64, error) {
+	return int64(f.index), nil
+}
+
+func (f *executorFakeRows) ScanString() (string, error) {
+	return fmt.Sprintf("str_%d", f.index), nil
 }
 
 func (f *executorFakeRows) Err() error {

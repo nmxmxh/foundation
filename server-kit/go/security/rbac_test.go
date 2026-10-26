@@ -85,3 +85,111 @@ func TestEventCapabilityAndPermissionDerivation(t *testing.T) {
 		t.Fatalf("NormalizePermission unknown = %q", got)
 	}
 }
+
+func TestAuthorizerCapabilityMask(t *testing.T) {
+	authorizer := NewAuthorizer([]RoleTemplate{
+		{Role: "admin", Capabilities: []string{"*"}},
+		{Role: "editor", Capabilities: []string{"article:edit:v1", "article:create:v1"}},
+		{Role: "viewer", Capabilities: []string{"article:read:v1"}},
+	})
+
+	editBit, okEdit := authorizer.CapabilityBit("article:edit:v1")
+	if !okEdit || editBit == CapabilityMaskNone {
+		t.Fatalf("expected indexed capability bit for article:edit:v1")
+	}
+
+	readBit, okRead := authorizer.CapabilityBit("article:read:v1")
+	if !okRead || readBit == CapabilityMaskNone {
+		t.Fatalf("expected indexed capability bit for article:read:v1")
+	}
+
+	if editBit == readBit {
+		t.Fatalf("different capabilities must have distinct bits")
+	}
+
+	adminMask := authorizer.RoleMask("admin")
+	if adminMask != CapabilityMaskAll {
+		t.Fatalf("admin role must have CapabilityMaskAll, got %x", adminMask)
+	}
+
+	editorMask := authorizer.RoleMask("editor")
+	if !CheckMask(editorMask, editBit) {
+		t.Fatalf("editor mask must contain editBit")
+	}
+	if CheckMask(editorMask, readBit) {
+		t.Fatalf("editor mask must NOT contain readBit")
+	}
+
+	// Verify CheckMask logic: Authorized = (ActorMask & RequiredMask) == RequiredMask
+	combinedReq, okReq := authorizer.CapabilityMaskFor("article:edit:v1", "article:create:v1")
+	if !okReq || !CheckMask(editorMask, combinedReq) {
+		t.Fatalf("editor mask must satisfy combined edit+create mask")
+	}
+
+	// Test fast path through Can()
+	if !authorizer.Can("editor", "article:edit:v1", nil) {
+		t.Fatalf("Can() fast-path failed for editor on article:edit:v1")
+	}
+	if authorizer.Can("viewer", "article:edit:v1", nil) {
+		t.Fatalf("Can() fast-path incorrectly granted edit to viewer")
+	}
+
+	// Dynamic registration
+	newBit, okNew := authorizer.RegisterCapability("article:publish:v1")
+	if !okNew || newBit == CapabilityMaskNone {
+		t.Fatalf("expected RegisterCapability to succeed, got %x", newBit)
+	}
+	dupBit, okDup := authorizer.RegisterCapability("article:publish:v1")
+	if !okDup || dupBit != newBit {
+		t.Fatalf("duplicate RegisterCapability must return same bit")
+	}
+
+	// Empty and nil guards
+	if _, okEmpty := authorizer.RegisterCapability(" "); okEmpty {
+		t.Fatal("empty capability registration should return false")
+	}
+	var nilAuth *Authorizer
+	if _, okNil := nilAuth.RegisterCapability("foo"); okNil {
+		t.Fatal("nil authorizer registration should return false")
+	}
+	if bitNil, ok := nilAuth.CapabilityBit("foo"); ok || bitNil != CapabilityMaskNone {
+		t.Fatal("nil authorizer CapabilityBit should return 0, false")
+	}
+	if maskNil := nilAuth.RoleMask("admin"); maskNil != CapabilityMaskNone {
+		t.Fatal("nil authorizer RoleMask should return 0")
+	}
+	if maskNil, ok := nilAuth.CapabilityMaskFor("foo"); ok || maskNil != CapabilityMaskNone {
+		t.Fatal("nil authorizer CapabilityMaskFor should return 0, false")
+	}
+	if maskEmpty, ok := authorizer.CapabilityMaskFor(); ok || maskEmpty != CapabilityMaskNone {
+		t.Fatal("empty CapabilityMaskFor should return 0, false")
+	}
+	if _, okUnk := authorizer.CapabilityMaskFor("unknown:cap:v1"); okUnk {
+		t.Fatal("unindexed capability should return false")
+	}
+}
+
+func BenchmarkAuthorizer_Can_Bitmask(b *testing.B) {
+	authorizer := NewAuthorizer([]RoleTemplate{
+		{Role: "editor", Capabilities: []string{"article:edit:v1", "article:create:v1"}},
+	})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !authorizer.Can("editor", "article:edit:v1", nil) {
+			b.Fatal("unauthorized")
+		}
+	}
+}
+
+func BenchmarkAuthorizer_CheckMask_DirectBitwise(b *testing.B) {
+	actorMask := CapabilityMask(0b11)
+	reqMask := CapabilityMask(0b01)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if !CheckMask(actorMask, reqMask) {
+			b.Fatal("unauthorized")
+		}
+	}
+}

@@ -113,7 +113,8 @@ Every exposed feature should add tests for the vulnerability families it touches
 8. Treat production security headers, CORS, origin validation, rate limiting, and content-type enforcement as middleware baselines, not optional route features.
 9. Preserve an inventory of exposed routes, API versions, queue topics, webhook receivers, public buckets, DNS records, and package entrypoints.
 10. Generated production scaffolds must default to authentication enabled, exact allowed origins, and protected operational endpoints. `/metricsz`, `/metricsz/trace`, and operational event views are not public production surfaces.
-11. Every projected scope names its audience. Where a record belongs to particular parties, declare `projectiongw.AudiencePolicy{Mode: AudiencePerRecord}` and set `AudienceConfig.Strict` once every scope is declared, so a scope someone forgot is refused instead of broadcast. Materialize only the fields consumers render: what was never projected cannot leak. See `docs/projection_freshness_contract.md`.
+11. Pre-index static route capabilities into 64-bit `security.CapabilityMask` bitmaps. Bitwise evaluation `(ActorMask & RequiredMask) == RequiredMask` enforces fail-closed authorization in O(1) CPU time with zero heap allocations, avoiding string traversal in hot request handlers.
+12. Every projected scope names its audience. Where a record belongs to particular parties, declare `projectiongw.AudiencePolicy{Mode: AudiencePerRecord}` and set `AudienceConfig.Strict` once every scope is declared, so a scope someone forgot is refused instead of broadcast. Materialize only the fields consumers render: what was never projected cannot leak. See `docs/projection_freshness_contract.md`.
 
 ## Advisory 2026-10-20: Rust WASM Hosts
 

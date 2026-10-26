@@ -294,11 +294,12 @@ reaching for raw driver calls:
    "not found" from "updated" without exposing driver-specific command tags.
 3. `QueryOne` for single-row reads/writes with `RETURNING`.
 4. `QueryEach` for bounded streaming reads where retaining all rows is not appropriate.
-5. `QueryAll` for typed, bounded list reads.
-6. `AtomicLane` for short transactions with a lane-specific timeout budget.
-7. `PostgresDB.SendBatch` for independent statements that should amortize one
+5. `QueryAll` and `QueryAllCapacity` for typed, bounded list reads. Use `QueryAllCapacity` when approximate row count is known to eliminate geometric slice reallocations.
+6. `DirectScanInt`, `DirectScanInt64`, and `DirectScanString` for scalar column reads, bypassing the variadic `[]any` interface boxing tax.
+7. `AtomicLane` for short transactions with a lane-specific timeout budget.
+8. `PostgresDB.SendBatch` for independent statements that should amortize one
    client/server round trip.
-8. `PostgresDB.CopyFromSource` / `CopyFromRows` for bulk ingest.
+9. `PostgresDB.CopyFromSource` / `CopyFromRows` for bulk ingest.
 
 Performance order for write-heavy paths, fastest to slowest when the workload
 matches the lane:

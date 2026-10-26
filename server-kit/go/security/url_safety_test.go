@@ -203,3 +203,16 @@ func TestSafeDialContextRejectsPrivateIPs(t *testing.T) {
 		t.Fatalf("expected ErrUnsafeURL, got %v", err)
 	}
 }
+
+func TestExportedSafeHelpers(t *testing.T) {
+	if !IsPrivateOrLocalIP(net.ParseIP("127.0.0.1")) {
+		t.Fatal("expected 127.0.0.1 to be private/local")
+	}
+	if IsPrivateOrLocalIP(net.ParseIP("8.8.8.8")) {
+		t.Fatal("8.8.8.8 must not be private/local")
+	}
+	tr := SafeHTTPTransport(OutboundURLPolicy{})
+	if tr == nil || tr.DialContext == nil {
+		t.Fatal("SafeHTTPTransport must return configured transport")
+	}
+}

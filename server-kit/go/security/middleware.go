@@ -352,13 +352,30 @@ func RequireSubject(publicPaths []string) func(http.Handler) http.Handler {
 
 // RequireCapabilities enforces RBAC capability checks for downstream handlers.
 func RequireCapabilities(authorizer *Authorizer, capabilities ...string) func(http.Handler) http.Handler {
+	var requiredMask CapabilityMask
+	var hasMask bool
+	if authorizer != nil && len(capabilities) > 0 {
+		requiredMask, hasMask = authorizer.CapabilityMaskFor(capabilities...)
+	}
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if authorizer == nil || len(capabilities) == 0 {
 				next.ServeHTTP(w, r)
 				return
 			}
-			if err := authorizer.RequireAny(r.Context(), capabilities...); err != nil {
+			ctx := r.Context()
+			if hasMask && requiredMask != CapabilityMaskNone {
+				role := GetRoleFromContext(ctx)
+				if role != "" {
+					roleMask := authorizer.RoleMask(role)
+					if (roleMask & requiredMask) == requiredMask {
+						next.ServeHTTP(w, r)
+						return
+					}
+				}
+			}
+			if err := authorizer.RequireAny(ctx, capabilities...); err != nil {
 				domainerr.WriteHTTP(w, err, domainerr.ResponseOptions{})
 				return
 			}

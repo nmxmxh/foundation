@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 // MetricSummary holds null-safe running aggregate metrics for a numeric field.
@@ -428,11 +431,31 @@ func (s *AccumulatorStateStore) GetMetricSummary(scope, metricField string) Metr
 
 // GetFacetManifest returns the full manifest of all dimensions and counts in O(1) memory lookup.
 func (s *AccumulatorStateStore) GetFacetManifest(scope string, topNPerDim int) []DimensionSummary {
+	return s.GetFacetManifestWithArena(scope, topNPerDim, nil)
+}
+
+// GetFacetManifestContext returns the manifest using any scratch.Arena attached to ctx.
+func (s *AccumulatorStateStore) GetFacetManifestContext(ctx context.Context, scope string, topNPerDim int) []DimensionSummary {
+	return s.GetFacetManifestWithArena(scope, topNPerDim, scratch.FromContext(ctx))
+}
+
+// GetFacetManifestWithArena extracts dimension summaries into scratch arena memory when provided,
+// eliminating heap allocations.
+func (s *AccumulatorStateStore) GetFacetManifestWithArena(scope string, topNPerDim int, arena *scratch.Arena) []DimensionSummary {
 	sc := s.getScope(scope)
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 
-	result := make([]DimensionSummary, 0, len(s.cfg.Dimensions))
+	var result []DimensionSummary
+	if arena != nil {
+		if slice, err := scratch.AllocSlice[DimensionSummary](arena, len(s.cfg.Dimensions)); err == nil {
+			result = slice[:0]
+		}
+	}
+	if result == nil {
+		result = make([]DimensionSummary, 0, len(s.cfg.Dimensions))
+	}
+
 	for _, dim := range s.cfg.Dimensions {
 		freqMap, ok := sc.dimensionFrequencies[dim]
 		if !ok || len(freqMap) == 0 {
@@ -440,16 +463,28 @@ func (s *AccumulatorStateStore) GetFacetManifest(scope string, topNPerDim int) [
 			continue
 		}
 		var total int64
-		facets := make([]FacetCount, 0, len(freqMap))
+		var facets []FacetCount
+		if arena != nil {
+			if slice, err := scratch.AllocSlice[FacetCount](arena, len(freqMap)); err == nil {
+				facets = slice[:0]
+			}
+		}
+		if facets == nil {
+			facets = make([]FacetCount, 0, len(freqMap))
+		}
+
 		for val, count := range freqMap {
 			total += count
 			facets = append(facets, FacetCount{Value: val, Count: count})
 		}
-		sort.Slice(facets, func(i, j int) bool {
-			if facets[i].Count == facets[j].Count {
-				return facets[i].Value < facets[j].Value
+		slices.SortFunc(facets, func(a, b FacetCount) int {
+			if a.Count != b.Count {
+				if a.Count > b.Count {
+					return -1
+				}
+				return 1
 			}
-			return facets[i].Count > facets[j].Count
+			return strings.Compare(a.Value, b.Value)
 		})
 		if topNPerDim > 0 && len(facets) > topNPerDim {
 			facets = facets[:topNPerDim]

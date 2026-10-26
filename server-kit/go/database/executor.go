@@ -138,6 +138,81 @@ func QueryAllLimit[T any](ctx context.Context, db RowQueryer, limit int, query s
 	return items, nil
 }
 
+// QueryAllCapacity collects streamed rows into a typed slice pre-allocated with capacity.
+// This avoids geometric slice reallocations when the caller knows the approximate row count.
+func QueryAllCapacity[T any](ctx context.Context, db RowQueryer, capacity int, query string, scan func(Rows) (T, error), args ...any) ([]T, error) {
+	if scan == nil {
+		return nil, errors.New("row scanner function is required")
+	}
+	if capacity < 0 {
+		capacity = 0
+	}
+	items := make([]T, 0, capacity)
+	err := QueryEach(ctx, db, query, func(rows Rows) error {
+		item, err := scan(rows)
+		if err != nil {
+			return err
+		}
+		items = append(items, item)
+		return nil
+	}, args...)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// IntScanner extracts a single int from the current row without interface boxing allocations.
+type IntScanner interface {
+	ScanInt() (int, error)
+}
+
+// Int64Scanner extracts a single int64 from the current row without interface boxing allocations.
+type Int64Scanner interface {
+	ScanInt64() (int64, error)
+}
+
+// StringScanner extracts a single string from the current row without interface boxing allocations.
+type StringScanner interface {
+	ScanString() (string, error)
+}
+
+// DirectScanInt scans a single int value avoiding variadic slice and interface escape allocations.
+func DirectScanInt(rows Rows) (int, error) {
+	if s, ok := rows.(IntScanner); ok {
+		return s.ScanInt()
+	}
+	var val int
+	if err := rows.Scan(&val); err != nil {
+		return 0, err
+	}
+	return val, nil
+}
+
+// DirectScanInt64 scans a single int64 value avoiding variadic slice and interface escape allocations.
+func DirectScanInt64(rows Rows) (int64, error) {
+	if s, ok := rows.(Int64Scanner); ok {
+		return s.ScanInt64()
+	}
+	var val int64
+	if err := rows.Scan(&val); err != nil {
+		return 0, err
+	}
+	return val, nil
+}
+
+// DirectScanString scans a single string value avoiding variadic slice and interface escape allocations.
+func DirectScanString(rows Rows) (string, error) {
+	if s, ok := rows.(StringScanner); ok {
+		return s.ScanString()
+	}
+	var val string
+	if err := rows.Scan(&val); err != nil {
+		return "", err
+	}
+	return val, nil
+}
+
 // AtomicLane runs a transaction under the timeout budget for the selected lane.
 func AtomicLane(ctx context.Context, db DBTX, lane RuntimeLane, fn func(DBTX) error) error {
 	// Definition: transaction lane. The closure must contain only database work:

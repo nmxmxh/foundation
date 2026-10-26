@@ -661,6 +661,16 @@ func BenchmarkAccumulatorVsScan_FacetManifest(b *testing.B) {
 		}
 	})
 
+	b.Run("Accumulator_O1_WithScratchArena", func(b *testing.B) {
+		arena := scratch.New(64 * 1024)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			arena.Reset()
+			_ = acc.GetFacetManifestWithArena(scope, 10, arena)
+		}
+	})
+
 	b.Run("SequentialScan_ON", func(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()

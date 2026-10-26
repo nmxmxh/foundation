@@ -167,7 +167,7 @@ should attach an `AccumulatorStateStore`.
 - **Operations:**
   - `GetDimensionSummary(scope, dimension, topN)`: Retrieves frequency counts and distinct cardinality.
   - `GetMetricSummary(scope, metricField)`: Returns running Sum, Min, Max, Count, Mean.
-  - `GetFacetManifest(scope, topN)`: Returns complete hierarchical facet manifest without buffer scans.
+  - `GetFacetManifest(scope, topN)`: Returns complete hierarchical facet manifest without buffer scans. Use `GetFacetManifestWithArena` or `GetFacetManifestContext` to allocate manifest buffers out of a `scratch.Arena`, eliminating heap allocations entirely.
 - **Maintenance:** Handled incrementally on each `ApplyRecord` and `EvictExpired` cycle with version-aware delta reversals.
 
 ### 2. Multi-Attribute Inverted Bitmaps (`BitmapIndexRegistry`)

@@ -3,8 +3,24 @@ package security
 import (
 	"context"
 	"strings"
+	"sync"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/domainerr"
+)
+
+// CapabilityMask is a compact, zero-allocation 64-bit bitmask representing
+// authorized capabilities. Bitwise authorization evaluates in O(1) CPU time:
+// Authorized = (ActorMask & RequiredMask) == RequiredMask.
+type CapabilityMask uint64
+
+const (
+	// CapabilityMaskAll grants all capabilities (equivalent to wildcard "*").
+	CapabilityMaskAll CapabilityMask = ^CapabilityMask(0)
+	// CapabilityMaskNone grants no capabilities.
+	CapabilityMaskNone CapabilityMask = 0
+	// MaxIndexedCapabilities is the maximum number of distinct capabilities
+	// that can be indexed into a single 64-bit mask.
+	MaxIndexedCapabilities = 64
 )
 
 // RoleTemplate defines a reusable capability template.
@@ -19,9 +35,12 @@ const (
 	PermissionAdmin = "admin"
 )
 
-// Authorizer holds role-capability mappings.
+// Authorizer holds role-capability mappings with O(1) bitmask fast-paths.
 type Authorizer struct {
-	byRole map[string]map[string]struct{}
+	byRole    map[string]map[string]struct{}
+	roleMasks map[string]CapabilityMask
+	capBits   map[string]CapabilityMask
+	sync.RWMutex
 }
 
 func NewAuthorizer(templates []RoleTemplate) *Authorizer {
@@ -29,6 +48,10 @@ func NewAuthorizer(templates []RoleTemplate) *Authorizer {
 		templates = DefaultRoleTemplates()
 	}
 	byRole := map[string]map[string]struct{}{}
+	roleMasks := map[string]CapabilityMask{}
+	capBits := map[string]CapabilityMask{}
+	nextBit := CapabilityMask(1)
+
 	for _, tpl := range templates {
 		role := strings.TrimSpace(tpl.Role)
 		if role == "" {
@@ -43,9 +66,42 @@ func NewAuthorizer(templates []RoleTemplate) *Authorizer {
 				continue
 			}
 			byRole[role][capability] = struct{}{}
+			if capability == "*" {
+				roleMasks[role] = CapabilityMaskAll
+			} else if !strings.Contains(capability, "*") {
+				bit, exists := capBits[capability]
+				if !exists && nextBit != 0 {
+					bit = nextBit
+					capBits[capability] = bit
+					nextBit <<= 1
+				}
+				if bit != 0 {
+					roleMasks[role] |= bit
+				}
+			}
 		}
 	}
-	return &Authorizer{byRole: byRole}
+
+	// Resolve wildcard prefixes like "domain.*" across known capability bits
+	for _, tpl := range templates {
+		role := strings.TrimSpace(tpl.Role)
+		for _, capability := range tpl.Capabilities {
+			capability = strings.TrimSpace(capability)
+			if prefix, ok := strings.CutSuffix(capability, ".*"); ok {
+				for capName, bit := range capBits {
+					if strings.HasPrefix(capName, prefix+".") {
+						roleMasks[role] |= bit
+					}
+				}
+			}
+		}
+	}
+
+	return &Authorizer{
+		byRole:    byRole,
+		roleMasks: roleMasks,
+		capBits:   capBits,
+	}
 }
 
 func DefaultRoleTemplates() []RoleTemplate {
@@ -59,7 +115,96 @@ func DefaultRoleTemplates() []RoleTemplate {
 	}
 }
 
+// CapabilityBit returns the pre-indexed 64-bit mask for capability.
+func (a *Authorizer) CapabilityBit(capability string) (CapabilityMask, bool) {
+	if a == nil {
+		return CapabilityMaskNone, false
+	}
+	a.RLock()
+	bit, ok := a.capBits[strings.TrimSpace(capability)]
+	a.RUnlock()
+	return bit, ok
+}
+
+// RoleMask returns the composite CapabilityMask granted to role.
+func (a *Authorizer) RoleMask(role string) CapabilityMask {
+	if a == nil {
+		return CapabilityMaskNone
+	}
+	a.RLock()
+	mask := a.roleMasks[strings.TrimSpace(role)]
+	a.RUnlock()
+	return mask
+}
+
+// CapabilityMaskFor returns the combined mask for one or more capabilities.
+// If any capability is not indexed, it returns CapabilityMaskNone and false.
+func (a *Authorizer) CapabilityMaskFor(capabilities ...string) (CapabilityMask, bool) {
+	if a == nil || len(capabilities) == 0 {
+		return CapabilityMaskNone, false
+	}
+	a.RLock()
+	defer a.RUnlock()
+	var combined CapabilityMask
+	for _, capName := range capabilities {
+		bit, ok := a.capBits[strings.TrimSpace(capName)]
+		if !ok {
+			return CapabilityMaskNone, false
+		}
+		combined |= bit
+	}
+	return combined, true
+}
+
+// CheckMask verifies that actorMask satisfies requiredMask in O(1) bitwise time.
+func CheckMask(actorMask, requiredMask CapabilityMask) bool {
+	return (actorMask & requiredMask) == requiredMask
+}
+
+// RegisterCapability dynamically adds capability to the bitmask index.
+func (a *Authorizer) RegisterCapability(capability string) (CapabilityMask, bool) {
+	if a == nil {
+		return CapabilityMaskNone, false
+	}
+	capName := strings.TrimSpace(capability)
+	if capName == "" {
+		return CapabilityMaskNone, false
+	}
+	a.Lock()
+	defer a.Unlock()
+	if bit, ok := a.capBits[capName]; ok {
+		return bit, true
+	}
+	if len(a.capBits) >= MaxIndexedCapabilities {
+		return CapabilityMaskNone, false
+	}
+	bit := CapabilityMask(1) << len(a.capBits)
+	a.capBits[capName] = bit
+	for role, mask := range a.roleMasks {
+		if mask == CapabilityMaskAll {
+			continue
+		}
+		if roleCaps, ok := a.byRole[role]; ok {
+			for granted := range roleCaps {
+				if capabilityGranted(granted, capName) {
+					a.roleMasks[role] |= bit
+				}
+			}
+		}
+	}
+	return bit, true
+}
+
 func (a *Authorizer) Can(role, capability string, directCapabilities []string) bool {
+	if a != nil && len(directCapabilities) == 0 {
+		a.RLock()
+		bit, okCap := a.capBits[capability]
+		mask, okRole := a.roleMasks[role]
+		a.RUnlock()
+		if okCap && okRole && (mask&bit) == bit {
+			return true
+		}
+	}
 	return a.CanAccess(role, capability, "", directCapabilities)
 }
 

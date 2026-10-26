@@ -26,6 +26,66 @@ func BenchmarkQueryAllFakeRows100(b *testing.B) {
 	}
 }
 
+func BenchmarkQueryAllCapacityFakeRows100(b *testing.B) {
+	b.ReportAllocs()
+	ctx := context.Background()
+	for b.Loop() {
+		db := &fakeRowQueryer{rows: &executorFakeRows{items: 100}}
+		items, err := QueryAllCapacity(ctx, db, 100, "SELECT id", func(rows Rows) (int, error) {
+			var id int
+			if err := rows.Scan(&id); err != nil {
+				return 0, err
+			}
+			return id, nil
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(items) != 100 {
+			b.Fatalf("len(items) = %d", len(items))
+		}
+	}
+}
+
+func BenchmarkQueryAllCapacityDirectScanFakeRows100(b *testing.B) {
+	b.ReportAllocs()
+	ctx := context.Background()
+	for b.Loop() {
+		db := &fakeRowQueryer{rows: &executorFakeRows{items: 100}}
+		items, err := QueryAllCapacity(ctx, db, 100, "SELECT id", func(rows Rows) (int, error) {
+			return DirectScanInt(rows)
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(items) != 100 {
+			b.Fatalf("len(items) = %d", len(items))
+		}
+	}
+}
+
+func BenchmarkQueryEachDirectScanFakeRows100(b *testing.B) {
+	b.ReportAllocs()
+	ctx := context.Background()
+	for b.Loop() {
+		db := &fakeRowQueryer{rows: &executorFakeRows{items: 100}}
+		var total int
+		if err := QueryEach(ctx, db, "SELECT id", func(rows Rows) error {
+			id, err := DirectScanInt(rows)
+			if err != nil {
+				return err
+			}
+			total += id
+			return nil
+		}); err != nil {
+			b.Fatal(err)
+		}
+		if total == 0 {
+			b.Fatal("total was zero")
+		}
+	}
+}
+
 func BenchmarkExecCommandMemoryDB(b *testing.B) {
 	b.ReportAllocs()
 	ctx := context.Background()
