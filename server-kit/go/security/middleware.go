@@ -11,6 +11,7 @@ import (
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/domainerr"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 // DefaultOrganizationID is the deployment-default tenant for applications
@@ -277,7 +278,7 @@ func jwtAuth(jwtManager *auth.JWTManager, publicPaths []string, required bool) f
 				next.ServeHTTP(w, r)
 				return
 			}
-			claims, err := jwtManager.ValidateToken(token)
+			claims, err := jwtManager.ValidateTokenWithArena(scratch.FromContext(r.Context()), token)
 			if err != nil {
 				if public {
 					// A public path stays reachable even when a stale token

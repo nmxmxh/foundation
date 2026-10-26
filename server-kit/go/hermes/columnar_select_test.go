@@ -510,6 +510,61 @@ func BenchmarkHermesSelectionBitmapMerge10K(b *testing.B) {
 	_ = sink
 }
 
+// TestHermesSelectionBitmapMerge10M verifies bitwise correctness and exact counts
+// across 10 million entities without allocating off-bitmap heap structures.
+func TestHermesSelectionBitmapMerge10M(t *testing.T) {
+	const rows = 10_000_000
+	left := NewSelectionBitmap(rows)
+	right := NewSelectionBitmap(rows)
+	for i := 0; i < rows; i += 2 {
+		left.words[i>>6] |= 1 << uint(i&63)
+	}
+	for i := 0; i < rows; i += 3 {
+		right.words[i>>6] |= 1 << uint(i&63)
+	}
+	target := NewSelectionBitmap(rows)
+	copy(target.words, left.words)
+	if err := target.And(&right); err != nil {
+		t.Fatalf("target.And(&right) failed: %v", err)
+	}
+	got := target.Count()
+	// Left has multiples of 2, Right has multiples of 3.
+	// Target (AND) has multiples of 6 in [0, 10_000_000).
+	// Count = floor((10_000_000 - 1) / 6) + 1 = 1,666,667.
+	const want = 1666667
+	if got != want {
+		t.Fatalf("target.Count() = %d, want %d", got, want)
+	}
+}
+
+// BenchmarkHermesSelectionBitmapMerge10M isolates the merge and popcount
+// over 10-million row bitmaps to confirm off-heap / columnar scale.
+func BenchmarkHermesSelectionBitmapMerge10M(b *testing.B) {
+	const rows = 10_000_000
+	left := NewSelectionBitmap(rows)
+	right := NewSelectionBitmap(rows)
+	for i := 0; i < rows; i += 2 {
+		left.words[i>>6] |= 1 << uint(i&63)
+	}
+	for i := 0; i < rows; i += 3 {
+		right.words[i>>6] |= 1 << uint(i&63)
+	}
+	target := NewSelectionBitmap(rows)
+
+	b.ReportAllocs()
+
+	var sink int
+	for b.Loop() {
+		copy(target.words, left.words)
+		if err := target.And(&right); err != nil {
+			b.Fatal(err)
+		}
+		sink = target.Count()
+	}
+	b.ReportMetric(float64(len(left.words)*8*3), "kernel_model_bytes/op")
+	_ = sink
+}
+
 // BenchmarkHermesColumnarBitmapFilterCachedBatch isolates the new lane itself:
 // the batch is fetched once (the dashboard/analytics reuse pattern) and each
 // iteration pays only predicate scans + AND merge + masked sum. This is the

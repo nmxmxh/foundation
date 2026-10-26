@@ -480,16 +480,19 @@ type TargetedDelivery struct {
 	LocalOnly bool
 }
 
-// ResolveTargets returns connection IDs that should receive a message.
-// For local-only delivery, returns only this server's connections.
-// For distributed delivery, publishes to Redis for other servers.
+// ResolveTargets returns connection IDs that receive a message.
+//
+// CAUTION: Materializing a slice causes GC pauses on large fan-outs.
+// High-throughput paths must use ForEachTargetBatch to avoid allocations.
+// If callers manage buffers, use ResolveTargetsInto.
 func (r *Router) ResolveTargets(ctx context.Context, target TargetedDelivery) ([]string, error) {
 	return r.ResolveTargetsInto(ctx, target, nil)
 }
 
-// ResolveTargetsInto appends matching connection IDs into dst and returns the
-// resulting slice. Callers that fan out frequently can reuse dst to avoid
-// per-send allocation churn while preserving ResolveTargets semantics.
+// ResolveTargetsInto appends matching connection IDs into dst and returns the resulting slice.
+// Callers that fan out frequently can reuse dst to avoid per-send allocation churn.
+//
+// CAUTION: For fan-outs exceeding 1,000 targets, prefer ForEachTargetBatch.
 func (r *Router) ResolveTargetsInto(ctx context.Context, target TargetedDelivery, dst []string) ([]string, error) {
 	if err := contextError(ctx); err != nil {
 		return dst, err

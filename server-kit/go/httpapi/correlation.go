@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing"
 )
 
@@ -88,8 +89,18 @@ func ContextWithRequestMetadata(r *http.Request) context.Context {
 
 func MetadataFromRequest(r *http.Request) metadata.EnvelopeMetadata {
 	if r != nil {
-		md := metadata.FromContext(r.Context())
-		md.EnsureCorrelation(CorrelationIDFromRequest(r))
+		md, ok := metadata.FromContextOK(r.Context())
+		if !ok {
+			md = metadata.EnvelopeMetadata{}
+		}
+		if corr := CorrelationIDFromRequest(r); corr != "" {
+			md.CorrelationID = corr
+			if md.RequestID == "" {
+				md.RequestID = corr
+			}
+		} else {
+			md.EnsureCorrelation()
+		}
 		enrichMetadataFromHeaders(&md, r)
 		return md
 	}
@@ -143,7 +154,16 @@ func enrichMetadataFromHeaders(md *metadata.EnvelopeMetadata, r *http.Request) {
 		md.Locale = locale
 	}
 	if md.GlobalContext == nil {
-		md.GlobalContext = &metadata.GlobalContext{}
+		if arena := scratch.FromContext(r.Context()); arena != nil {
+			gc, err := scratch.Alloc[metadata.GlobalContext](arena)
+			if err == nil {
+				md.GlobalContext = gc
+			} else {
+				md.GlobalContext = &metadata.GlobalContext{}
+			}
+		} else {
+			md.GlobalContext = &metadata.GlobalContext{}
+		}
 	}
 	if userID := strings.TrimSpace(r.Header.Get(userIDHeader)); userID != "" {
 		md.GlobalContext.UserID = userID

@@ -205,9 +205,7 @@ func (cb *CircuitBreaker) State() State {
 
 // Counts returns current failure and success counts.
 func (cb *CircuitBreaker) Counts() (failures, successes uint32) {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-	return cb.failures, cb.successes
+	return atomic.LoadUint32(&cb.failures), atomic.LoadUint32(&cb.successes)
 }
 
 // Execute runs the given function if the circuit breaker allows it.
@@ -245,6 +243,10 @@ func (cb *CircuitBreaker) ExecuteWithFallback(
 
 // beforeRequest checks if a request is allowed and updates state if necessary.
 func (cb *CircuitBreaker) beforeRequest() error {
+	if State(atomic.LoadInt32(&cb.state)) == StateClosed {
+		return nil
+	}
+
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
@@ -277,38 +279,44 @@ func (cb *CircuitBreaker) beforeRequest() error {
 
 // afterRequest updates the circuit breaker state based on the request result.
 func (cb *CircuitBreaker) afterRequest(err error) {
+	isFailure := cb.config.IsFailure(err)
+	if !isFailure && State(atomic.LoadInt32(&cb.state)) == StateClosed &&
+		atomic.LoadUint32(&cb.failures) == 0 && cb.config.FailureRateThreshold <= 0 {
+		atomic.AddUint32(&cb.successes, 1)
+		return
+	}
+
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
-	isFailure := cb.config.IsFailure(err)
 	state := State(atomic.LoadInt32(&cb.state))
 
 	switch state {
 	case StateClosed:
 		now := cb.config.Clock.Now()
 		if isFailure {
-			cb.failures++
-			cb.successes = 0
+			atomic.AddUint32(&cb.failures, 1)
+			atomic.StoreUint32(&cb.successes, 0)
 			cb.lastFailureTime = now
-			if cb.recordWindowAndShouldTrip(now, true) || cb.failures >= cb.config.FailureThreshold {
+			if cb.recordWindowAndShouldTrip(now, true) || atomic.LoadUint32(&cb.failures) >= cb.config.FailureThreshold {
 				cb.transitionTo(StateOpen)
 			}
 		} else {
-			cb.failures = 0
-			cb.successes++
+			atomic.StoreUint32(&cb.failures, 0)
+			atomic.AddUint32(&cb.successes, 1)
 			_ = cb.recordWindowAndShouldTrip(now, false)
 		}
 
 	case StateHalfOpen:
 		if isFailure {
-			cb.failures++
-			cb.successes = 0
+			atomic.AddUint32(&cb.failures, 1)
+			atomic.StoreUint32(&cb.successes, 0)
 			cb.lastFailureTime = cb.config.Clock.Now()
 			cb.transitionTo(StateOpen)
 		} else {
-			cb.successes++
-			cb.failures = 0
-			if cb.successes >= cb.config.SuccessThreshold {
+			atomic.AddUint32(&cb.successes, 1)
+			atomic.StoreUint32(&cb.failures, 0)
+			if atomic.LoadUint32(&cb.successes) >= cb.config.SuccessThreshold {
 				cb.transitionTo(StateClosed)
 			}
 		}

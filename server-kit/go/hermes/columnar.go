@@ -289,6 +289,26 @@ func (s *Store) GetColumnarBatch(ctx context.Context, projection string, query Q
 	return part.getColumnarBatch(ctx, query, fields, fence)
 }
 
+// GetColumnarTable materializes an indexed ColumnarTable from an Arrow RecordBatch.
+func (s *Store) GetColumnarTable(ctx context.Context, projection string, query Query, fields []string, pkColumn string, fence Fence) (*ColumnarTable, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
+	part, err := s.partition(projection)
+	if err != nil {
+		return nil, err
+	}
+	return part.getColumnarTable(ctx, query, fields, pkColumn, fence)
+}
+
+func (p *partition) getColumnarTable(ctx context.Context, query Query, fields []string, pkColumn string, fence Fence) (*ColumnarTable, error) {
+	batch, err := p.getColumnarBatch(ctx, query, fields, fence)
+	if err != nil {
+		return nil, err
+	}
+	return NewColumnarTable(*batch, pkColumn)
+}
+
 // ---------------------------------------------------------------------------
 // collectRecordEntries — shared candidate collection used by getColumnarBatch.
 // ---------------------------------------------------------------------------

@@ -1,0 +1,21 @@
+step	lane	setup_ns	p50_ns_per_op	p95_ns_per_op	p99_ns_per_op	max_ns_per_op	samples	ops_per_sample	heap_alloc_before	heap_alloc_after	heap_alloc_delta	heap_sys_after	goroutines_before	goroutines_after	notes
+1000	memorydb_count	2895375	4838	4860	4860	4860	3	100	2860424	3885984	1025560	12058624	3	3	tenant indexed count
+1000	memorydb_list_limit50	2751666	11672	12739	12739	12739	3	20	2865824	6408048	3542224	12091392	3	3	tenant indexed filtered list with defensive copies
+1000	hermes_count	3933250	9061	9164	9164	9164	3	100	2865840	5171064	2305224	12091392	3	3	indexed hotplane count
+1000	hermes_get	3788042	333	529	529	529	3	100	2865856	5265976	2400120	12091392	3	3	copied hotplane point read
+1000	hermes_foreach_limit50	3575750	12193	12672	12672	12672	3	20	2865856	5726088	2860232	12091392	3	3	borrowed hotplane view iteration
+1000	hermes_apply_records64_prebuilt	4448542	180583	192666	192666	192666	3	1	2865856	6380224	3514368	12091392	3	3	incremental pure-upsert projector batch with caller-prebuilt records
+1000	hermes_build_apply_records64	4031541	197958	249834	249834	249834	3	1	2865872	5741136	2875264	12058624	3	3	incremental pure-upsert projector batch including record construction
+1000	event_exact_dispatch	237292	377	415	415	415	3	100	2865888	3330736	464848	12091392	3	3	one exact event among staged subscription cardinality
+1000	router_broadcast_batch	701000	29	64	64	64	3	20	2898976	3608640	709664	12091392	3	3	borrowed broadcast target batches before socket writes
+1000	router_broadcast_materialize	660417	316	383	383	383	3	5	2899160	3624920	725760	12091392	3	3	owned broadcast target materialization before socket writes
+10000	memorydb_count	27709250	4844	4935	4935	4935	3	100	2901920	16299080	13397160	20480000	3	3	tenant indexed count
+10000	memorydb_list_limit50	28592334	21250	28775	28775	28775	3	20	2899408	19066416	16167008	24576000	3	3	tenant indexed filtered list with defensive copies
+10000	hermes_count	35180500	114823	122979	122979	122979	3	100	2899520	24241776	21342256	28835840	3	3	indexed hotplane count
+10000	hermes_get	35610958	335	365	365	365	3	100	2899520	18017664	15118144	33062912	3	3	copied hotplane point read
+10000	hermes_foreach_limit50	35706958	12120	12625	12625	12625	3	20	2899632	23111360	20211728	33062912	3	3	borrowed hotplane view iteration
+10000	hermes_apply_records64_prebuilt	40574959	218375	226334	226334	226334	3	1	2899760	25249080	22349320	33062912	3	3	incremental pure-upsert projector batch with caller-prebuilt records
+10000	hermes_build_apply_records64	36094542	229416	267917	267917	267917	3	1	2899760	24962808	22063048	33030144	3	3	incremental pure-upsert projector batch including record construction
+10000	event_exact_dispatch	2080542	657	766	766	766	3	100	2899760	5286104	2386344	32964608	3	3	one exact event among staged subscription cardinality
+10000	router_broadcast_batch	7784917	60	114	114	114	3	20	2899776	9070672	6170896	33062912	3	3	borrowed broadcast target batches before socket writes
+10000	router_broadcast_materialize	8041417	39191	174650	174650	174650	3	5	2899960	7507504	4607544	33062912	3	3	owned broadcast target materialization before socket writes

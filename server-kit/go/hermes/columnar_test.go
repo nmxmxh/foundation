@@ -1131,3 +1131,70 @@ func TestBitmapGrowSpareCapacityIsInvisible(t *testing.T) {
 		t.Fatalf("count after grow on a clone = %d, want 5001", other.count())
 	}
 }
+
+// TestHermesColumnarRecordBatchFootprint1M empirically measures the exact memory
+// footprint of a 6-column Arrow RecordBatch with 1,000,000 records.
+func TestHermesColumnarRecordBatchFootprint1M(t *testing.T) {
+	const n = 1_000_000
+	idVec := &StringVector{
+		offsets:  make([]int32, n+1),
+		buf:      make([]byte, n*12), // 12-byte IDs ("ord_12345678")
+		validity: newValidityBitmap(n),
+		n:        n,
+	}
+	symVec := &StringVector{
+		offsets:  make([]int32, n+1),
+		buf:      make([]byte, n*4), // 4-byte ticker ("AAPL")
+		validity: newValidityBitmap(n),
+		n:        n,
+	}
+	priceVec := newFloat64Vector(n)
+	volVec := newInt64Vector(n)
+	tsVec := newInt64Vector(n)
+	statusVec := &StringVector{
+		offsets:  make([]int32, n+1),
+		buf:      make([]byte, n*6), // 6-byte status ("FILLED")
+		validity: newValidityBitmap(n),
+		n:        n,
+	}
+
+	batch := RecordBatch{
+		Rows: n,
+		Columns: []Column{
+			{Name: "id", Data: idVec},
+			{Name: "symbol", Data: symVec},
+			{Name: "price", Data: priceVec},
+			{Name: "volume", Data: volVec},
+			{Name: "timestamp", Data: tsVec},
+			{Name: "status", Data: statusVec},
+		},
+	}
+
+	// Calculate exact buffer memory
+	idBytes := len(idVec.buf) + len(idVec.offsets)*4 + len(idVec.validity.words)*8
+	symBytes := len(symVec.buf) + len(symVec.offsets)*4 + len(symVec.validity.words)*8
+	priceBytes := len(priceVec.values)*8 + len(priceVec.validity.words)*8
+	volBytes := len(volVec.values)*8 + len(volVec.validity.words)*8
+	tsBytes := len(tsVec.values)*8 + len(tsVec.validity.words)*8
+	statusBytes := len(statusVec.buf) + len(statusVec.offsets)*4 + len(statusVec.validity.words)*8
+
+	totalBytes := idBytes + symBytes + priceBytes + volBytes + tsBytes + statusBytes
+	bytesPerRecord := float64(totalBytes) / float64(n)
+
+	t.Logf("1,000,000 RecordBatch Memory Footprint:")
+	t.Logf("  id (string[12]):      %d bytes (%.2f MB)", idBytes, float64(idBytes)/(1024*1024))
+	t.Logf("  symbol (string[4]):   %d bytes (%.2f MB)", symBytes, float64(symBytes)/(1024*1024))
+	t.Logf("  price (float64):      %d bytes (%.2f MB)", priceBytes, float64(priceBytes)/(1024*1024))
+	t.Logf("  volume (int64):       %d bytes (%.2f MB)", volBytes, float64(volBytes)/(1024*1024))
+	t.Logf("  timestamp (int64):    %d bytes (%.2f MB)", tsBytes, float64(tsBytes)/(1024*1024))
+	t.Logf("  status (string[6]):   %d bytes (%.2f MB)", statusBytes, float64(statusBytes)/(1024*1024))
+	t.Logf("  TOTAL:                %d bytes (%.2f MB)", totalBytes, float64(totalBytes)/(1024*1024))
+	t.Logf("  Density:              %.2f bytes/record", bytesPerRecord)
+
+	if batch.Rows != n {
+		t.Fatalf("batch.Rows = %d, want %d", batch.Rows, n)
+	}
+	if bytesPerRecord > 70.0 {
+		t.Fatalf("bytesPerRecord = %.2f, expected <= 70.0 B/record", bytesPerRecord)
+	}
+}

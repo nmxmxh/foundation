@@ -93,6 +93,24 @@ func runLoadResearchStep(t *testing.T, recorder *loadResearchRecorder, step int,
 			return nil
 		}, nil, "copied hotplane point read"
 	})
+	runLoadResearchLane(t, recorder, step, "hermes_columnar_get", samples, 100, func(t testing.TB) (loadResearchOperation, loadResearchCleanup, string) {
+		store, projection, _, orgID, recordID, _ := setupLoadResearchHermes(t, step)
+		table, err := store.GetColumnarTable(ctx, projection, hermes.Query{OrganizationID: orgID}, []string{"record_id", "symbol", "bucket", "state"}, "record_id", hermes.Fence{})
+		if err != nil {
+			t.Fatalf("get columnar table: %v", err)
+		}
+		return func() error {
+			view, ok := table.GetView(recordID)
+			if !ok {
+				return fmt.Errorf("missing hermes columnar record %q", recordID)
+			}
+			sym, err := view.String("symbol")
+			if err != nil || sym != "OVS" {
+				return fmt.Errorf("invalid symbol %q", sym)
+			}
+			return nil
+		}, nil, "zero-alloc columnar hotplane point read"
+	})
 	runLoadResearchLane(t, recorder, step, "hermes_foreach_limit50", samples, 20, func(t testing.TB) (loadResearchOperation, loadResearchCleanup, string) {
 		store, projection, query, _, _, _ := setupLoadResearchHermes(t, step)
 		limited := query
