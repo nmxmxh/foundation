@@ -174,8 +174,8 @@ func BenchmarkAuthorizer_Can_Bitmask(b *testing.B) {
 		{Role: "editor", Capabilities: []string{"article:edit:v1", "article:create:v1"}},
 	})
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		if !authorizer.Can("editor", "article:edit:v1", nil) {
 			b.Fatal("unauthorized")
 		}
@@ -186,8 +186,8 @@ func BenchmarkAuthorizer_CheckMask_DirectBitwise(b *testing.B) {
 	actorMask := CapabilityMask(0b11)
 	reqMask := CapabilityMask(0b01)
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		if !CheckMask(actorMask, reqMask) {
 			b.Fatal("unauthorized")
 		}
