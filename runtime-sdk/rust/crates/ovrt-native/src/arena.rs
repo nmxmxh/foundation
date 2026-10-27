@@ -252,12 +252,21 @@ impl Arena {
         }
         let base = u64::from(ARENA_OFFSET_DESCRIPTOR_TABLE)
             + u64::from(id) * u64::from(ARENA_DESCRIPTOR_SIZE);
+        let entry = self.bytes_at(base, ARENA_DESCRIPTOR_SIZE as usize)?;
+        let read_u32 = |offset: usize| -> u32 {
+            u32::from_le_bytes([
+                entry[offset],
+                entry[offset + 1],
+                entry[offset + 2],
+                entry[offset + 3],
+            ])
+        };
         Ok(ArenaDescriptor {
             id,
-            state: self.u32_at(base + FIELD_STATE)?,
-            offset: self.u32_at(base + FIELD_OFFSET)?,
-            length: self.u32_at(base + FIELD_LENGTH)?,
-            kind: self.u32_at(base + FIELD_TYPE)?,
+            state: read_u32(FIELD_STATE as usize),
+            offset: read_u32(FIELD_OFFSET as usize),
+            length: read_u32(FIELD_LENGTH as usize),
+            kind: read_u32(FIELD_TYPE as usize),
         })
     }
 

@@ -63,7 +63,7 @@ impl Default for WaitPolicy {
             // responsive peer is never slept on, short enough that an
             // unresponsive one does not hold a core for meaningful time.
             spin_iterations: 2_000,
-            max_sleep: Duration::from_micros(200),
+            max_sleep: Duration::from_micros(20),
             timeout: Duration::from_secs(30),
         }
     }
@@ -147,7 +147,8 @@ pub fn wait_for_change(
         }
 
         let remaining = deadline.saturating_duration_since(now);
-        std::thread::park_timeout(remaining);
+        let sleep_dur = remaining.min(policy.max_sleep);
+        std::thread::park_timeout(sleep_dur);
     }
 }
 

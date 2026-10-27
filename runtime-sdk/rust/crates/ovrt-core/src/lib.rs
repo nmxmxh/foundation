@@ -8,6 +8,7 @@ pub mod generated;
 pub mod layout;
 pub mod log_ring;
 pub mod mapping;
+pub mod maplet;
 pub mod native_gpu;
 pub mod scratch;
 pub mod soa_btree;
@@ -17,6 +18,7 @@ pub use diagnostics::*;
 pub use epoch::{WaitError, WaitPolicy};
 pub use generated::*;
 pub use layout::*;
+pub use maplet::*;
 #[cfg(unix)]
 pub use mapping::SharedMapping;
 pub use native_gpu::*;

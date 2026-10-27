@@ -261,15 +261,24 @@ impl<const BUCKETS: usize> AffinityMaplet<BUCKETS> {
         z ^ (z >> 31)
     }
 
-    #[inline]
+    #[inline(always)]
+    fn bucket_idx(val: usize) -> usize {
+        if BUCKETS.is_power_of_two() {
+            val & (BUCKETS - 1)
+        } else {
+            val % BUCKETS
+        }
+    }
+
+    #[inline(always)]
     fn decompose(&self, key: u64) -> (usize, u32, usize) {
         let h = Self::hash_key(key);
-        let b1 = (h as usize) % BUCKETS;
+        let b1 = Self::bucket_idx(h as usize);
         let mut fp = (h >> 32) as u32 & 0x00FF_FFFF;
         if fp == 0 {
             fp = 1;
         }
-        let b2 = (b1 ^ (fp as usize)) % BUCKETS;
+        let b2 = Self::bucket_idx(b1 ^ (fp as usize));
         (b1, fp, b2)
     }
 
@@ -293,7 +302,7 @@ impl<const BUCKETS: usize> AffinityMaplet<BUCKETS> {
             let victim = self.buckets[curr_b][0];
             self.buckets[curr_b][0] = entry;
             let v_fp = victim >> 8;
-            curr_b = (curr_b ^ (v_fp as usize)) % BUCKETS;
+            curr_b = Self::bucket_idx(curr_b ^ (v_fp as usize));
             entry = victim;
             for slot in &mut self.buckets[curr_b] {
                 if *slot == 0 {

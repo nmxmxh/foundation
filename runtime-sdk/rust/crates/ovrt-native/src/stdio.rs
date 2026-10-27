@@ -128,7 +128,7 @@ pub fn process_runtime_buffer_unpublished(
     add_epoch_raw(raw_buffer, IDX_RUNTIME_TICK, 1)?;
 
     let input_length = input_bytes_view_raw(raw_buffer)?.len();
-    clear_output_raw(raw_buffer)?;
+    set_header_int_raw(raw_buffer, INT_IDX_OUTPUT_LENGTH, 0)?;
     let result = {
         let (before_output, output) = raw_buffer.split_at_mut(OFFSET_OUTPUT_BYTES as usize);
         let input =
@@ -208,6 +208,13 @@ fn set_diagnostics_text_raw(raw_buffer: &mut [u8], message: &str) -> Result<(), 
         ));
     }
     let diagnostics = region_raw_mut(raw_buffer, OFFSET_DIAGNOSTIC_BYTES, DIAGNOSTIC_MAX_BYTES)?;
+    if bytes.is_empty() {
+        // Fast path for clean success: only clear if dirty, and do not bump epoch.
+        if diagnostics[0] != 0 {
+            diagnostics.fill(0);
+        }
+        return Ok(());
+    }
     diagnostics.fill(0);
     diagnostics[..bytes.len()].copy_from_slice(bytes);
     add_epoch_raw(raw_buffer, IDX_DIAGNOSTICS_WRITTEN, 1)

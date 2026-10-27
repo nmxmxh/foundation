@@ -300,6 +300,14 @@ This document tracks the deliberate performance and architecture carryovers fold
     without modifying logical file sizes. Halves physical storage footprint in 5 microseconds
     during large-stream decompression, eliminates disk write amplification, and connects
     directly to `bulk.PlatformCapabilities` with two-phase commit crash safety.
+102. Runtime Buffer Zero-Copy Deserialization and Memset Eradication (2026-10-27):
+    Removing eager output buffer zeroing and empty diagnostic memsets in `ovrt-native/src/stdio.rs`
+    eradicates 2,816 bytes of redundant memory writes per exchange. `native process_runtime_buffer_in_place`
+    drops from 61.93 ns to 29.55 ns per operation (a 52% latency reduction). Monolithic 32-byte
+    descriptor table slice reads in `ovrt-native/src/arena.rs` reduce slab descriptor overhead
+    from 11.24 ns to 6.48 ns per operation (42% faster). Rust epoch wait policy default sleep
+    caps align with Go at 20 microseconds, and `ovrt-core::maplet` introduces zero-allocation
+    cuckoo structures (`WideMaplet`, `CountingMaplet`) with power-of-two bitwise masking.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 
