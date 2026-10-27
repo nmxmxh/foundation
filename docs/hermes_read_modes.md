@@ -179,6 +179,39 @@ Hermes evaluates candidate intersections using packed bit-vectors.
 - **Mechanism:** Bitwise word-parallel intersection across secondary attribute inverted bitmaps.
 - **Fallback:** Automatically falls back to scalar candidate scanning when unindexed fields or single-filter queries are executed.
 
+### 3. Off-Heap Columnar Serving (`ColumnarTable` & `ColumnarRowView`)
+
+Projections holding large record counts should compile into Arrow columnar tables.
+
+- **Latency:** Point reads in 160 ns with zero allocations.
+- **Memory density:** 58.75 B per record raw vectors (124.8 B with index) versus 2,430 B on the Go heap.
+- **Mechanism:** Contiguous Arrow vector buffers (`StringVector`, `Int64Vector`, `Float64Vector`).
+- **Accessors:** `GetColumnarView` returns zero-copy `ColumnarRowView` accessors without heap slice materialization.
+- **Sealing:** Call `SealColumnar` or configure `ColumnarPK` on `ProjectionSpec` to cache the compiled table automatically.
+
+> [!CAUTION]
+> Do not use `ListRecords` across collections exceeding 1,000 items. Calling `ListRecords` allocates full domain records on the heap. Always use `ForEachView` or `GetColumnarTable`.
+
+### 4. Zero-Allocation Scratch Bump Arenas (`scratch.Arena`)
+
+Request pipelines and facet aggregators should allocate short-lived working memory from a scratch bump arena.
+
+- **Latency:** Sub-nanosecond allocation with zero runtime garbage collector assist overhead.
+- **Mechanism:** Linear 8-byte aligned bump arena with scoped checkpoint rollback.
+- **Usage:** Obtain an arena checkpoint before query parsing. Reset the checkpoint when the request concludes.
+- **Lifetime rule:** Slices and string views borrowed from the arena are valid only until the next arena reset.
+
+### 5. Space-Efficient Maplets (`metadata.LatticeMaplet` & `metadata.WideMaplet`)
+
+High-cardinality routing, rate limiting, and security token lookups should replace standard Go maps with maplets.
+
+- **Memory density:** 10x to 20x smaller memory footprint than Go heap hash maps.
+- **Mechanism:** Compact cuckoo-hashed fingerprint tables with bounded probe chains.
+- **Lanes:**
+  - `CountingMaplet`: Sliding-window request rate limiting without heap node allocation.
+  - `WideMaplet`: Fast entity-to-shard routing for WebSocket connections and distributed dispatch.
+  - `LatticeMaplet`: Approximate set membership and compact integer attribute mapping.
+
 ---
 
 ## Freshness Budget Configuration

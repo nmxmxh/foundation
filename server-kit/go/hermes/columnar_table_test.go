@@ -175,6 +175,37 @@ func TestStore_GetColumnarTable(t *testing.T) {
 	if err != nil || vol != 300 {
 		t.Fatalf("volume = %v, want 300", vol)
 	}
+
+	// Verify SealColumnar and GetColumnarView
+	query := Query{OrganizationID: "org-1"}
+	sealed, err := store.SealColumnar(ctx, "orders", query, []string{"record_id", "symbol", "price", "volume"}, "record_id")
+	if err != nil {
+		t.Fatalf("SealColumnar failed: %v", err)
+	}
+	if sealed.Rows() != 2 {
+		t.Fatalf("sealed rows = %d, want 2", sealed.Rows())
+	}
+
+	stats, err := store.Stats("orders")
+	if err != nil {
+		t.Fatalf("store.Stats failed: %v", err)
+	}
+	if stats.ColumnarRows != 2 || stats.ColumnarBytes <= 0 {
+		t.Fatalf("expected columnar stats, got rows=%d bytes=%d", stats.ColumnarRows, stats.ColumnarBytes)
+	}
+
+	// Zero-alloc direct point view lookup from store
+	cv, found, err := store.GetColumnarView(ctx, "orders", query, "ord-101")
+	if err != nil {
+		t.Fatalf("GetColumnarView failed: %v", err)
+	}
+	if !found {
+		t.Fatal("expected to find ord-101 via GetColumnarView")
+	}
+	sym101, _ := cv.String("symbol")
+	if sym101 != "AAPL" {
+		t.Fatalf("sym101 = %q, want AAPL", sym101)
+	}
 }
 
 // BenchmarkColumnarTable_GetPointRead100K measures point read latency over rotating keys

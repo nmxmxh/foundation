@@ -289,7 +289,7 @@ func (s *Store) GetColumnarBatch(ctx context.Context, projection string, query Q
 	return part.getColumnarBatch(ctx, query, fields, fence)
 }
 
-// GetColumnarTable materializes an indexed ColumnarTable from an Arrow RecordBatch.
+// GetColumnarTable retrieves an indexed ColumnarTable from the sealed partition or materializes one.
 func (s *Store) GetColumnarTable(ctx context.Context, projection string, query Query, fields []string, pkColumn string, fence Fence) (*ColumnarTable, error) {
 	if err := ctxErr(ctx); err != nil {
 		return nil, err
@@ -301,12 +301,83 @@ func (s *Store) GetColumnarTable(ctx context.Context, projection string, query Q
 	return part.getColumnarTable(ctx, query, fields, pkColumn, fence)
 }
 
-func (p *partition) getColumnarTable(ctx context.Context, query Query, fields []string, pkColumn string, fence Fence) (*ColumnarTable, error) {
+// SealColumnar compiles and atomically caches an Arrow ColumnarTable for the
+// specified projection. Subsequent GetColumnarTable or GetColumnarView calls reuse
+// this cached table until the projection epoch advances.
+func (s *Store) SealColumnar(ctx context.Context, projection string, query Query, fields []string, pkColumn string) (*ColumnarTable, error) {
+	if err := ctxErr(ctx); err != nil {
+		return nil, err
+	}
+	part, err := s.partition(projection)
+	if err != nil {
+		return nil, err
+	}
+	return part.sealColumnar(ctx, query, fields, pkColumn, Fence{})
+}
+
+// GetColumnarView looks up a zero-copy row view by primary key directly from the
+// sealed ColumnarTable with zero heap allocations.
+func (s *Store) GetColumnarView(ctx context.Context, projection string, query Query, pk string) (ColumnarRowView, bool, error) {
+	if err := ctxErr(ctx); err != nil {
+		return ColumnarRowView{}, false, err
+	}
+	part, err := s.partition(projection)
+	if err != nil {
+		return ColumnarRowView{}, false, err
+	}
+	return part.getColumnarView(ctx, query, pk)
+}
+
+func (p *partition) sealColumnar(ctx context.Context, query Query, fields []string, pkColumn string, fence Fence) (*ColumnarTable, error) {
+	if pkColumn == "" {
+		pkColumn = p.spec.ColumnarPK
+	}
+	if len(fields) == 0 {
+		fields = p.spec.ColumnarFields
+	}
+	if pkColumn == "" {
+		pkColumn = "record_id"
+	}
 	batch, err := p.getColumnarBatch(ctx, query, fields, fence)
 	if err != nil {
 		return nil, err
 	}
-	return NewColumnarTable(*batch, pkColumn)
+	table, err := NewColumnarTable(*batch, pkColumn)
+	if err != nil {
+		return nil, err
+	}
+	p.sealedTable.Store(table)
+	p.sealedEpoch.Store(p.epoch.Load())
+	return table, nil
+}
+
+func (p *partition) getColumnarTable(ctx context.Context, query Query, fields []string, pkColumn string, fence Fence) (*ColumnarTable, error) {
+	epoch := p.epoch.Load()
+	if sealed := p.sealedTable.Load(); sealed != nil && p.sealedEpoch.Load() == epoch {
+		return sealed, nil
+	}
+	return p.sealColumnar(ctx, query, fields, pkColumn, fence)
+}
+
+func (p *partition) getColumnarView(ctx context.Context, query Query, pk string) (ColumnarRowView, bool, error) {
+	if err := p.waitForStable(ctx); err != nil {
+		return ColumnarRowView{}, false, err
+	}
+	epoch := p.epoch.Load()
+	sealed := p.sealedTable.Load()
+	if sealed == nil || p.sealedEpoch.Load() != epoch {
+		pkCol := p.spec.ColumnarPK
+		if pkCol == "" {
+			pkCol = "record_id"
+		}
+		var err error
+		sealed, err = p.sealColumnar(ctx, query, p.spec.ColumnarFields, pkCol, Fence{})
+		if err != nil {
+			return ColumnarRowView{}, false, err
+		}
+	}
+	view, ok := sealed.GetView(pk)
+	return view, ok, nil
 }
 
 // ---------------------------------------------------------------------------

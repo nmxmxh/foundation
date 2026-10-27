@@ -42,7 +42,12 @@ type ProjectionSpec struct {
 	// trade copy-on-write batch maintenance and bounded memory for sub-scope
 	// candidate selection; unsupported kinds/operators fall back to scanning.
 	RangeIndexedFields []string
-	MaxRecords         int
+	// ColumnarPK optionally specifies the primary key column name for automatic
+	// or on-demand ColumnarTable indexing. If set, GetColumnarView and point reads
+	// can use the sealed Arrow table directly.
+	ColumnarPK     string
+	ColumnarFields []string
+	MaxRecords     int
 	MaxBytes           int64
 	MaxIndexes         int
 	MaxRangeIndexes    int
@@ -103,6 +108,8 @@ type Stats struct {
 	IndexCompactions  int64
 	RangeIndexEntries int
 	RangeIndexBytes   int64
+	ColumnarBytes     int64
+	ColumnarRows      int
 	MaxRecords        int
 	MaxBytes          int64
 	MaxTombstones     int

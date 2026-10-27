@@ -21,6 +21,7 @@ pre-answered questions without scanning multiple files.
 | **Capability planner** | Runtime decision layer that selects an eligible execution lane from workload shape, trust, locality, platform capability, deadline, budgets, and fallback requirements while preserving the visible contract. | `runtime_foundation.md` |
 | **Chain** | `server-kit/go/chain` — worker chain helpers for bounded multi-step job composition. | `coding_practices.md` |
 | **Circuit breaker** | `server-kit/go/circuitbreaker` — fault tolerance pattern that stops calling a failing dependency after a threshold, auto-recovering after a timeout. | `foundation_guide.md` |
+| **ColumnarTable** | `server-kit/go/hermes.ColumnarTable` — off-heap Arrow columnar serving table with indexed primary key lookup, zero-copy `ColumnarRowView` accessors, and 58.75 B/record memory density. | `hermes_read_modes.md` |
 | **Command bus** | `createCommandBus` in `@ovasabi/runtime-transport` — resolves an event type to a route and dispatches it over HTTP or WebSocket. | `frontend_command_registry.md` |
 | **Config-contracts** | Cross-language configuration schemas shared between frontend and backend, ensuring validated parity. | `foundation_architecture_contract.md` |
 | **Correlation ID** | A unique identifier carried through every mutating command, all workers, events, logs, and traces. Required by the nervous system lifecycle. | `foundation_nervous_system.md` |
@@ -52,6 +53,7 @@ pre-answered questions without scanning multiple files.
 | **Kernellane** | `server-kit/go/kernellane` — native Rust/FFI/SHM compute lane dispatch with descriptor management and schema validation. | `runtime_foundation.md` |
 | **Lifecycle manifest** | Machine-readable JSON at `docs/references/lifecycle/lifecycle_contract.json` derived from protobuf request/response pairs. | `foundation_nervous_system.md` |
 | **Managed scaffold** | Files generated and synchronized from `templates/scaffold.manifest.tsv` — Makefile, CI, Docker, config, checks, and baseline wiring. | `foundation_architecture_contract.md` |
+| **Maplet** | `server-kit/go/metadata` — space-efficient cuckoo-hashed key-value tables (`WideMaplet`, `CountingMaplet`, `LatticeMaplet`) for route dispatch and rate limiting at 10x-20x lower memory than Go heap maps. | `coding_practices.md` |
 | **Metadata** | `server-kit/go/metadata` — context-aware request metadata: correlation ID, tenant ID, request ID, user, session, tags, locale, and trace fields. | `foundation_guide.md` |
 | **Movement accounting** | Counts executed payload operations within an explicit measurement boundary. Allocation counts, declared copies, and hardware traffic remain separate evidence. | `performance_lab.md` |
 | **Money** | `server-kit/go/money` — integer minor-unit financial arithmetic with checked operations. Floats are forbidden for ledger balances. | `coding_practices.md` |

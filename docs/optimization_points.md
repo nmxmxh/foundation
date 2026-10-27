@@ -380,3 +380,5 @@ This document tracks the deliberate performance and architecture carryovers fold
     wrong even though its conclusion survived, so reopen this with measurements
     rather than argument.
 16. Adopt linear scratch bump arenas (`server-kit/go/scratch`) and 2 MiB Huge-Page mappings (`MADV_HUGEPAGE`) across hot compression codecs, protobuf frame encoders, and shared memory slabs to eliminate megabytes of heap garbage per call and avoid GC mark-assist latency spikes.
+17. Compile Hermes projections holding >1,000 records into off-heap Arrow columnar tables (`hermes.ColumnarTable`). In-memory representation collapses from ~2,430 B/record in `sync.Map` down to 58.75 B/record (16x to 40x memory reduction). Point reads over `ColumnarRowView` drop to ~160 ns with zero allocations.
+18. High-cardinality routing tables and rate limiters should adopt space-efficient cuckoo maplets (`metadata.WideMaplet`, `metadata.CountingMaplet`) instead of standard Go hash maps. Maplets eliminate heap node allocations and pointer churn, shrinking memory footprint by 10x to 20x.
