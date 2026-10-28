@@ -20,6 +20,12 @@ describe("timestamp utilities", () => {
       expect(normalizeTimestampString("2026-10-24 22:58:00+02")).toBe("2026-10-24T22:58:00+02:00");
     });
 
+    it("does not corrupt date-only strings by mistaking day digits for timezone offsets", () => {
+      expect(normalizeTimestampString("2099-01-01")).toBe("2099-01-01");
+      expect(normalizeTimestampString("2026-10-24")).toBe("2026-10-24");
+      expect(normalizeTimestampString("2026-12-31")).toBe("2026-12-31");
+    });
+
     it("handles whitespace and empty strings", () => {
       expect(normalizeTimestampString("")).toBe("");
       expect(normalizeTimestampString("   ")).toBe("");
@@ -36,6 +42,11 @@ describe("timestamp utilities", () => {
       const pgString = "2026-10-24 22:58:00+00";
       const expected = Date.parse("2026-10-24T22:58:00Z");
       expect(parseTimestamp(pgString)).toBe(expected);
+    });
+
+    it("parses date-only strings without corruption", () => {
+      expect(parseTimestamp("2099-01-01")).toBe(Date.parse("2099-01-01"));
+      expect(parseTimestamp("2026-10-24")).toBe(Date.parse("2026-10-24"));
     });
 
     it("accepts numbers and Date objects", () => {

@@ -7,7 +7,7 @@ export interface CompareTimestampOptions {
 }
 
 const spaceDatePattern = /^(\d{4}-\d{2}-\d{2})[ ](\d{2}:\d{2}:\d{2}(?:\.\d+)?)(.*)$/;
-const shortTzPattern = /([+-]\d{2})$/;
+const shortTzPattern = /(?:T\S*|:\d{2})([+-]\d{2})$/;
 const fractionPattern = /\.(\d+)/;
 
 /**
