@@ -291,7 +291,7 @@ func decodeColumnarSnapshot(payload []byte, visit database.RecordVisitor) error 
 
 	cursorPerField := make([]int, len(fields))
 	for i := range n {
-		data := make(database.RecordData, 0, len(fields))
+		data := make(database.RecordData, 0, len(fields)+1)
 		for f := range fields {
 			col := &fields[f]
 			if len(col.validity) <= i/8 || col.validity[i/8]&(1<<(i%8)) == 0 {

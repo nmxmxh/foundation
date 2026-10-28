@@ -284,7 +284,7 @@ func (d RecordData) Normalize() RecordData {
 	return out
 }
 
-func (d RecordData) isSortedUnique() bool {
+func (d RecordData) IsSortedUnique() bool {
 	previous := ""
 	for _, field := range d {
 		name := strings.TrimSpace(field.Name)
@@ -294,6 +294,10 @@ func (d RecordData) isSortedUnique() bool {
 		previous = name
 	}
 	return true
+}
+
+func (d RecordData) isSortedUnique() bool {
+	return d.IsSortedUnique()
 }
 
 func (d RecordData) Clone() RecordData {
@@ -402,19 +406,31 @@ func (d *RecordData) UnmarshalJSON(data []byte) error {
 	if len(trimmed) < 2 || trimmed[0] != '{' || trimmed[len(trimmed)-1] != '}' {
 		return errors.New("record data must be a json object")
 	}
-	raw, err := extension.ObjectFromJSON(trimmed)
-	if err != nil {
-		return err
-	}
-	fields := make(RecordData, 0, len(raw))
-	for name, payload := range raw {
+	fields := make(RecordData, 0, 8)
+	isSorted := true
+	var prevKey string
+	err := extension.ForEachObjectField(trimmed, func(name string, payload extension.Value) error {
 		value, err := recordValueFromExtension(payload)
 		if err != nil {
 			return err
 		}
+		if isSorted {
+			if len(fields) > 0 && name <= prevKey {
+				isSorted = false
+			}
+			prevKey = name
+		}
 		fields = append(fields, RecordField{Name: name, Value: value})
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	*d = fields.Normalize()
+	if !isSorted {
+		*d = fields.Normalize()
+	} else {
+		*d = fields
+	}
 	return nil
 }
 

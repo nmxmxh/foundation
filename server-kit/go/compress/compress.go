@@ -397,10 +397,22 @@ func normalizeDecodeLimit(maxDecoded int64) int64 {
 // from the encoded length, which is a lower bound on the decoded size for every
 // codec here, so a small body stops paying io.ReadAll's doubling ladder.
 func readLimited(r io.Reader, maxDecoded int64) ([]byte, error) {
-	out := make([]byte, 0, 512)
-	if size, ok := r.(interface{ Len() int }); ok && size.Len() > 0 {
-		out = make([]byte, 0, size.Len())
+	return readLimitedWithHint(r, maxDecoded, 512)
+}
+
+func readLimitedWithHint(r io.Reader, maxDecoded int64, hint int) ([]byte, error) {
+	initial := 512
+	if hint > initial {
+		if int64(hint) > maxDecoded {
+			initial = int(maxDecoded)
+		} else {
+			initial = hint
+		}
 	}
+	if size, ok := r.(interface{ Len() int }); ok && size.Len() > initial {
+		initial = size.Len()
+	}
+	out := make([]byte, 0, initial)
 	out, err := readAllInto(out, io.LimitReader(r, maxDecoded+1))
 	if err != nil {
 		return nil, err
@@ -428,8 +440,26 @@ func readAllInto(buf []byte, r io.Reader) ([]byte, error) {
 	}
 }
 
+var brotliReaderPool sync.Pool
+
+func getBrotliReader(src io.Reader) *brotli.Reader {
+	if v := brotliReaderPool.Get(); v != nil {
+		zr := v.(*brotli.Reader)
+		_ = zr.Reset(src)
+		return zr
+	}
+	return brotli.NewReader(src)
+}
+
+func releaseBrotliReader(zr *brotli.Reader) {
+	_ = zr.Reset(bytes.NewReader(nil))
+	brotliReaderPool.Put(zr)
+}
+
 func decompressBrotli(data []byte, maxDecoded int64) ([]byte, error) {
-	return readLimited(brotli.NewReader(bytes.NewReader(data)), maxDecoded)
+	zr := getBrotliReader(bytes.NewReader(data))
+	defer releaseBrotliReader(zr)
+	return readLimitedWithHint(zr, maxDecoded, len(data)*2)
 }
 
 func decompressZstd(data []byte, maxDecoded int64) ([]byte, error) {

@@ -256,6 +256,9 @@ func (p *indexPublisher) remove(cell *indexCell, key string) {
 		change.delta--
 		return
 	}
+	if change.removes == nil {
+		change.removes = map[string]struct{}{}
+	}
 	if _, removed := change.removes[key]; !removed {
 		change.removes[key] = struct{}{}
 		change.delta--
@@ -311,8 +314,7 @@ func (p *indexPublisher) change(cell *indexCell) *indexChange {
 		return change
 	}
 	change = &indexChange{
-		adds:    map[string]recordOrderEntry{},
-		removes: map[string]struct{}{},
+		adds: map[string]recordOrderEntry{},
 	}
 	p.changes[cell] = change
 	return change

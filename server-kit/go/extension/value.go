@@ -586,6 +586,57 @@ func decodeObjectBytes(data []byte) (Object, error) {
 	return out, nil
 }
 
+// ForEachObjectField decodes a JSON object and invokes fn for each key and Value.
+// It avoids allocating intermediate map buckets or slice containers.
+func ForEachObjectField(data []byte, fn func(key string, val Value) error) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return errors.New("empty JSON data")
+	}
+	parser := jsonParser{data: trimmed}
+	parser.skipSpace()
+	if !parser.consumeByte('{') {
+		return errors.New("JSON data must be an object")
+	}
+	parser.skipSpace()
+	if parser.consumeByte('}') {
+		parser.skipSpace()
+		if parser.pos != len(parser.data) {
+			return errors.New("extension JSON contains trailing data")
+		}
+		return nil
+	}
+	for {
+		key, err := parser.parseString()
+		if err != nil {
+			return err
+		}
+		parser.skipSpace()
+		if !parser.consumeByte(':') {
+			return errors.New("extension object key must be followed by ':'")
+		}
+		value, err := parser.parseValue()
+		if err != nil {
+			return err
+		}
+		if err := fn(key, value); err != nil {
+			return err
+		}
+		parser.skipSpace()
+		if parser.consumeByte('}') {
+			break
+		}
+		if !parser.consumeByte(',') {
+			return errors.New("extension object fields must be separated by ','")
+		}
+	}
+	parser.skipSpace()
+	if parser.pos != len(parser.data) {
+		return errors.New("extension JSON contains trailing data")
+	}
+	return nil
+}
+
 type jsonParser struct {
 	data []byte
 	pos  int

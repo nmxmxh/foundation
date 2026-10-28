@@ -288,6 +288,17 @@ func (s *CachedStateStore) bounded(ctx context.Context) (context.Context, contex
 	return context.WithTimeout(ctx, s.opts.CacheTimeout)
 }
 
+func isSafeKeyPart(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // recordKey builds the backend key. Empty identities return "" and force
 // passthrough, because such rows cannot be addressed consistently.
 func (s *CachedStateStore) recordKey(domain, collection, organizationID, recordID string) string {
@@ -297,11 +308,32 @@ func (s *CachedStateStore) recordKey(domain, collection, organizationID, recordI
 	if domain == "" || collection == "" || recordID == "" {
 		return ""
 	}
-	parts := []string{s.opts.KeyPrefix, escapeKeyPart(domain), escapeKeyPart(collection), escapeKeyPart(strings.TrimSpace(organizationID)), escapeKeyPart(recordID)}
-	return strings.Join(parts, ":")
+	organizationID = strings.TrimSpace(organizationID)
+	ed := escapeKeyPart(domain)
+	ec := escapeKeyPart(collection)
+	eo := escapeKeyPart(organizationID)
+	er := escapeKeyPart(recordID)
+
+	var buf [128]byte
+	b := buf[:0]
+	if s.opts.KeyPrefix != "" {
+		b = append(b, s.opts.KeyPrefix...)
+		b = append(b, ':')
+	}
+	b = append(b, ed...)
+	b = append(b, ':')
+	b = append(b, ec...)
+	b = append(b, ':')
+	b = append(b, eo...)
+	b = append(b, ':')
+	b = append(b, er...)
+	return string(b)
 }
 
 func escapeKeyPart(part string) string {
+	if isSafeKeyPart(part) {
+		return part
+	}
 	return url.QueryEscape(part)
 }
 
@@ -335,7 +367,7 @@ func (e cachedRecordEnvelope) record(domain, collection, organizationID, recordI
 		Collection:     strings.TrimSpace(collection),
 		OrganizationID: strings.TrimSpace(organizationID),
 		RecordID:       strings.TrimSpace(recordID),
-		Data:           e.Data.Clone(),
+		Data:           e.Data,
 		CreatedAt:      e.CreatedAt,
 		UpdatedAt:      e.UpdatedAt,
 	}, nil

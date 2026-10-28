@@ -2,6 +2,7 @@ package extension
 
 import (
 	"encoding/json"
+	"errors"
 	"math"
 	"reflect"
 	"strconv"
@@ -1258,5 +1259,74 @@ func TestObjectFirstKeyAllocatesBucket(t *testing.T) {
 	})
 	if perOp > 2 {
 		t.Fatalf("populating a 1-key Object took %.0f allocations, want <= 2", perOp)
+	}
+}
+
+func TestForEachObjectField(t *testing.T) {
+	// Normal object decoding
+	src := []byte(`{"id":"order_1","amount":100,"active":true}`)
+	keys := make([]string, 0, 3)
+	err := ForEachObjectField(src, func(key string, val Value) error {
+		keys = append(keys, key)
+		return nil
+	})
+	if err != nil || len(keys) != 3 {
+		t.Fatalf("ForEachObjectField valid: keys=%v err=%v", keys, err)
+	}
+
+	// Empty object
+	count := 0
+	if err := ForEachObjectField([]byte(`{}`), func(string, Value) error { count++; return nil }); err != nil || count != 0 {
+		t.Fatalf("ForEachObjectField empty: count=%d err=%v", count, err)
+	}
+
+	// Empty data error
+	if err := ForEachObjectField(nil, func(string, Value) error { return nil }); err == nil {
+		t.Fatal("expected empty JSON error")
+	}
+
+	// Non-object error
+	if err := ForEachObjectField([]byte(`[1, 2]`), func(string, Value) error { return nil }); err == nil {
+		t.Fatal("expected non-object error")
+	}
+
+	// Missing colon error
+	if err := ForEachObjectField([]byte(`{"k" 1}`), func(string, Value) error { return nil }); err == nil {
+		t.Fatal("expected missing colon error")
+	}
+
+	// Missing comma error
+	if err := ForEachObjectField([]byte(`{"a":1 "b":2}`), func(string, Value) error { return nil }); err == nil {
+		t.Fatal("expected missing comma error")
+	}
+
+	// Bad string key error
+	if err := ForEachObjectField([]byte(`{bad_key:1}`), func(string, Value) error { return nil }); err == nil {
+		t.Fatal("expected bad string key error")
+	}
+
+	// Bad value error
+	if err := ForEachObjectField([]byte(`{"k":invalid}`), func(string, Value) error { return nil }); err == nil {
+		t.Fatal("expected bad value error")
+	}
+
+	// Trailing data error
+	if err := ForEachObjectField([]byte(`{"k":1} trailing`), func(string, Value) error { return nil }); err == nil {
+		t.Fatal("expected trailing data error")
+	}
+	if err := ForEachObjectField([]byte(`{} trailing`), func(string, Value) error { return nil }); err == nil {
+		t.Fatal("expected empty object trailing data error")
+	}
+
+	// User error returned from callback
+	userErr := errors.New("abort")
+	if err := ForEachObjectField(src, func(string, Value) error { return userErr }); !errors.Is(err, userErr) {
+		t.Fatalf("expected userErr, got %v", err)
+	}
+
+	// Verify ObjectValueOwned
+	owned := ObjectValueOwned(Object{"k": String("v")})
+	if owned.Kind() != KindObject {
+		t.Fatal("expected owned object")
 	}
 }

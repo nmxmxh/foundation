@@ -98,8 +98,21 @@ func normalizePatchRecord(rec database.DomainRecord) (database.DomainRecord, err
 }
 
 func normalizeRecordDataWithOrganization(data database.RecordData, organizationID string) database.RecordData {
-	normalized := data.Normalize()
 	orgValue := database.StringValue(organizationID)
+	if data.IsSortedUnique() {
+		idx := sort.Search(len(data), func(i int) bool {
+			return data[i].Name >= "organization_id"
+		})
+		if idx < len(data) && data[idx].Name == "organization_id" {
+			data[idx].Value = orgValue
+			return data
+		}
+		data = append(data, database.RecordField{})
+		copy(data[idx+1:], data[idx:])
+		data[idx] = database.RecordField{Name: "organization_id", Value: orgValue}
+		return data
+	}
+	normalized := data.Normalize()
 	idx := sort.Search(len(normalized), func(i int) bool {
 		return normalized[i].Name >= "organization_id"
 	})
