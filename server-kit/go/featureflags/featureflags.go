@@ -23,9 +23,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 )
 
 // Flag represents a feature flag configuration.
@@ -131,13 +133,53 @@ type Config struct {
 	OnChange func(oldFlags, newFlags map[string]Flag)
 }
 
+const (
+	flagStateUnknown        uint8 = 0
+	flagStateStaticDisabled uint8 = 1
+	flagStateStaticEnabled  uint8 = 2
+	flagStateDynamic        uint8 = 3
+)
+
 // Manager manages feature flags.
 type Manager struct {
-	config   Config
-	flags    map[string]Flag
-	mu       sync.RWMutex
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	config     Config
+	flags      map[string]Flag
+	flagMaplet atomic.Pointer[metadata.WideMaplet]
+	mu         sync.RWMutex
+	stopCh     chan struct{}
+	stopOnce   sync.Once
+}
+
+func isStaticFlag(flag Flag) bool {
+	return flag.RolloutPercentage == 0 &&
+		len(flag.AllowedUsers) == 0 &&
+		len(flag.DeniedUsers) == 0 &&
+		len(flag.AllowedOrgs) == 0 &&
+		len(flag.Environments) == 0 &&
+		flag.StartTime == nil &&
+		flag.EndTime == nil
+}
+
+func buildFlagMaplet(flags map[string]Flag) *metadata.WideMaplet {
+	if len(flags) == 0 {
+		return metadata.NewWideMaplet(16)
+	}
+	capacity := max(len(flags)*2, 16)
+	maplet := metadata.NewWideMaplet(capacity)
+	for name, flag := range flags {
+		var state uint8
+		if isStaticFlag(flag) {
+			if flag.Enabled {
+				state = flagStateStaticEnabled
+			} else {
+				state = flagStateStaticDisabled
+			}
+		} else {
+			state = flagStateDynamic
+		}
+		_ = maplet.Insert(name, state)
+	}
+	return maplet
 }
 
 // New creates a new feature flag manager.
@@ -151,6 +193,7 @@ func New(cfg Config) *Manager {
 		flags:  make(map[string]Flag),
 		stopCh: make(chan struct{}),
 	}
+	m.flagMaplet.Store(metadata.NewWideMaplet(16))
 
 	// Initial load
 	if cfg.Source != nil {
@@ -159,6 +202,7 @@ func New(cfg Config) *Manager {
 		cancel()
 		if err == nil {
 			m.flags = flags
+			m.flagMaplet.Store(buildFlagMaplet(flags))
 		}
 
 		// Start watching for changes
@@ -205,6 +249,7 @@ func (m *Manager) updateFlags(newFlags map[string]Flag) {
 	m.mu.Lock()
 	oldFlags := m.flags
 	m.flags = newFlags
+	m.flagMaplet.Store(buildFlagMaplet(newFlags))
 	m.mu.Unlock()
 
 	if m.config.OnChange != nil {
@@ -224,6 +269,19 @@ func (m *Manager) Stop() {
 
 // IsEnabled checks if a feature flag is enabled for the given context.
 func (m *Manager) IsEnabled(ctx context.Context, name string, opts ...Option) bool {
+	if len(opts) == 0 {
+		if maplet := m.flagMaplet.Load(); maplet != nil {
+			if state, ok := maplet.Lookup(name); ok {
+				if state == flagStateStaticEnabled {
+					return true
+				}
+				if state == flagStateStaticDisabled {
+					return false
+				}
+			}
+		}
+	}
+
 	evalCtx := &EvaluationContext{
 		Environment: m.config.DefaultEnvironment,
 	}
@@ -265,6 +323,7 @@ func (m *Manager) SetFlag(flag Flag) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.flags[flag.Name] = flag
+	m.flagMaplet.Store(buildFlagMaplet(m.flags))
 }
 
 // evaluate evaluates a flag against the given context.

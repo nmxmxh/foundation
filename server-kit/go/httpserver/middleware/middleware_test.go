@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func TestRequestIDUsesProvidedOrGeneratedID(t *testing.T) {
@@ -67,5 +68,43 @@ func TestLoggerAndRecoverMiddleware(t *testing.T) {
 	recovered.ServeHTTP(rr, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/", nil))
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("recover status = %d", rr.Code)
+	}
+}
+
+func TestWithScratchArenaMiddleware(t *testing.T) {
+	called := false
+	handler := WithScratchArena(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		arena := scratch.FromContext(r.Context())
+		if arena == nil {
+			t.Fatal("expected scratch arena in context")
+		}
+		slice, err := scratch.AllocSlice[byte](arena, 128)
+		if err != nil || len(slice) != 128 {
+			t.Fatalf("failed to allocate from arena: err=%v len=%d", err, len(slice))
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rr := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/test", nil)
+	handler.ServeHTTP(rr, req)
+
+	if !called || rr.Code != http.StatusOK {
+		t.Fatalf("handler not called or bad code: called=%v code=%d", called, rr.Code)
+	}
+
+	// Test custom arena with negative/zero capacity fallback
+	customHandler := WithCustomScratchArena(0)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		arena := scratch.FromContext(r.Context())
+		if arena == nil || arena.Available() != DefaultScratchArenaSize {
+			t.Fatalf("expected default size arena fallback, got %v", arena)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	rr2 := httptest.NewRecorder()
+	customHandler.ServeHTTP(rr2, req)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("custom handler bad code: %d", rr2.Code)
 	}
 }

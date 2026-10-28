@@ -30,6 +30,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -67,6 +68,18 @@ type Config struct {
 
 	// OnError is called on cache errors.
 	OnError func(key string, err error)
+
+	// AdmissionGuard enables a bounded CountingMaplet to track frequency and prevent cache pollution.
+	AdmissionGuard bool
+
+	// AdmissionThreshold is the minimum access count before storing in the remote backend.
+	AdmissionThreshold uint8
+
+	// ExpectedKeys configures the size of the admission counting maplet.
+	ExpectedKeys int
+
+	// PenetrationGuard blocks repeated lookups for verified non-existent keys.
+	PenetrationGuard bool
 }
 
 // Serializer handles value encoding/decoding.
@@ -88,11 +101,13 @@ func (JSONSerializer) Unmarshal(data []byte, v any) error {
 
 // Cache provides cache operations.
 type Cache struct {
-	config     Config
-	sf         singleflight.Group
-	loadMu     sync.Mutex
-	loads      map[string]*loadCall
-	loadConfig LoadPolicy
+	config             Config
+	admissionMaplet    *metadata.CountingMaplet
+	penetrationMaplet  *metadata.WideMaplet
+	sf                 singleflight.Group
+	loadMu             sync.Mutex
+	loads              map[string]*loadCall
+	loadConfig         LoadPolicy
 }
 
 // New creates a new cache instance.
@@ -103,7 +118,20 @@ func New(cfg Config) *Cache {
 	if cfg.Serializer == nil {
 		cfg.Serializer = JSONSerializer{}
 	}
-	return &Cache{config: cfg}
+	c := &Cache{config: cfg}
+	if cfg.AdmissionGuard || cfg.PenetrationGuard {
+		expectedKeys := cfg.ExpectedKeys
+		if expectedKeys <= 0 {
+			expectedKeys = 10000
+		}
+		if cfg.AdmissionGuard {
+			c.admissionMaplet = metadata.NewCountingMaplet(expectedKeys)
+		}
+		if cfg.PenetrationGuard {
+			c.penetrationMaplet = metadata.NewWideMaplet(expectedKeys)
+		}
+	}
+	return c
 }
 
 func (c *Cache) key(k string) string {
@@ -112,7 +140,17 @@ func (c *Cache) key(k string) string {
 
 // Get retrieves a value from cache.
 func (c *Cache) Get(ctx context.Context, key string, dest any) error {
-	data, err := c.config.Backend.Get(ctx, c.key(key))
+	fullKey := c.key(key)
+	if c.penetrationMaplet != nil {
+		if val, ok := c.penetrationMaplet.Lookup(fullKey); ok && val == 1 {
+			if c.config.OnMiss != nil {
+				c.config.OnMiss(key)
+			}
+			return ErrNotFound
+		}
+	}
+
+	data, err := c.config.Backend.Get(ctx, fullKey)
 	if err != nil {
 		if c.config.OnError != nil {
 			c.config.OnError(key, err)
@@ -121,6 +159,9 @@ func (c *Cache) Get(ctx context.Context, key string, dest any) error {
 	}
 
 	if data == nil {
+		if c.penetrationMaplet != nil {
+			_ = c.penetrationMaplet.Insert(fullKey, 1)
+		}
 		if c.config.OnMiss != nil {
 			c.config.OnMiss(key)
 		}
@@ -136,6 +177,17 @@ func (c *Cache) Get(ctx context.Context, key string, dest any) error {
 
 // Set stores a value in cache with optional TTL.
 func (c *Cache) Set(ctx context.Context, key string, value any, ttl ...time.Duration) error {
+	fullKey := c.key(key)
+	if c.penetrationMaplet != nil {
+		_ = c.penetrationMaplet.Insert(fullKey, 0)
+	}
+	if c.admissionMaplet != nil && c.config.AdmissionThreshold > 1 {
+		count := c.admissionMaplet.Increment(fullKey)
+		if count < c.config.AdmissionThreshold {
+			return nil
+		}
+	}
+
 	data, err := c.config.Serializer.Marshal(value)
 	if err != nil {
 		return err
@@ -146,12 +198,16 @@ func (c *Cache) Set(ctx context.Context, key string, value any, ttl ...time.Dura
 		t = ttl[0]
 	}
 
-	return c.config.Backend.Set(ctx, c.key(key), data, t)
+	return c.config.Backend.Set(ctx, fullKey, data, t)
 }
 
 // Delete removes a value from cache.
 func (c *Cache) Delete(ctx context.Context, key string) error {
-	return c.config.Backend.Delete(ctx, c.key(key))
+	fullKey := c.key(key)
+	if c.penetrationMaplet != nil {
+		_ = c.penetrationMaplet.Insert(fullKey, 0)
+	}
+	return c.config.Backend.Delete(ctx, fullKey)
 }
 
 // DeletePattern removes all keys matching a pattern and returns the removed

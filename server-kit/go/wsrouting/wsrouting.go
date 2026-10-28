@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -54,8 +55,9 @@ type Router struct {
 	connections map[string]*ConnectionInfo
 	order       []string
 	orderIndex  map[string]int
-	byDevice    map[string]string
-	byUser      map[string]map[string]struct{}
+	byDevice     map[string]string
+	byUser       map[string]map[string]struct{}
+	secureRoutes *SecureRouteMaplet
 }
 
 // ConnectionInfo holds metadata about a WebSocket connection.
@@ -106,6 +108,35 @@ func WithRegistrationBatchSize(size int) RouterOption {
 			r.registerBatchSize = clampRegistrationBatchSize(size)
 		}
 	}
+}
+
+// WithSecureRoutes enables bounded-memory route and permission verification.
+func WithSecureRoutes(capacity int) RouterOption {
+	return func(r *Router) {
+		r.secureRoutes = NewSecureRouteMaplet(capacity)
+	}
+}
+
+// RegisterRouteAction registers a cluster shard destination and required capability mask for a route key.
+func (r *Router) RegisterRouteAction(routeKey string, serverShardID uint8, requiredMask security.CapabilityMask) error {
+	r.mu.Lock()
+	if r.secureRoutes == nil {
+		r.secureRoutes = NewSecureRouteMaplet(1024)
+	}
+	secureRoutes := r.secureRoutes
+	r.mu.Unlock()
+	return secureRoutes.SetRoute(routeKey, serverShardID, requiredMask)
+}
+
+// RouteAndAuthorize performs atomic cluster route lookup and capability mask authorization in zero allocations.
+func (r *Router) RouteAndAuthorize(routeKey string, actorMask security.CapabilityMask) (uint8, bool) {
+	r.mu.RLock()
+	secureRoutes := r.secureRoutes
+	r.mu.RUnlock()
+	if secureRoutes == nil {
+		return 0, false
+	}
+	return secureRoutes.RouteAndAuthorize(routeKey, actorMask)
 }
 
 // NewRouter creates a new WebSocket connection router.

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 )
 
 func TestNewRouter(t *testing.T) {
@@ -989,3 +990,72 @@ func TestRouter_Register_SingleflightCoalescing(t *testing.T) {
 		t.Errorf("expected Publish calls to be coalesced, got %d", pubs)
 	}
 }
+
+func TestRouter_SecureRoutes(t *testing.T) {
+	client := redis.NewMemoryClient("test")
+	defer func() { _ = client.Close() }()
+
+	router := NewRouter(client, "server-1", WithSecureRoutes(16))
+
+	err := router.RegisterRouteAction("stream.quotes", 7, security.CapabilityMask(0b01))
+	if err != nil {
+		t.Fatalf("RegisterRouteAction failed: %v", err)
+	}
+
+	shardID, ok := router.RouteAndAuthorize("stream.quotes", security.CapabilityMask(0b01))
+	if !ok || shardID != 7 {
+		t.Fatalf("RouteAndAuthorize got shard %d ok %v, want 7 true", shardID, ok)
+	}
+
+	_, denied := router.RouteAndAuthorize("stream.quotes", security.CapabilityMask(0b10))
+	if denied {
+		t.Fatal("RouteAndAuthorize succeeded without required capability mask")
+	}
+
+	_, notFound := router.RouteAndAuthorize("unknown.route", security.CapabilityMask(0b01))
+	if notFound {
+		t.Fatal("RouteAndAuthorize found unmapped route")
+	}
+}
+
+func TestRouter_SecureRoutes_LazyInit(t *testing.T) {
+	client := redis.NewMemoryClient("test")
+	defer func() { _ = client.Close() }()
+
+	router := NewRouter(client, "server-2")
+
+	_, ok := router.RouteAndAuthorize("stream.ticks", security.CapabilityMask(0b01))
+	if ok {
+		t.Fatal("RouteAndAuthorize succeeded before registration")
+	}
+
+	err := router.RegisterRouteAction("stream.ticks", 9, security.CapabilityMask(0b01))
+	if err != nil {
+		t.Fatalf("RegisterRouteAction failed: %v", err)
+	}
+
+	shardID, ok := router.RouteAndAuthorize("stream.ticks", security.CapabilityMask(0b01))
+	if !ok || shardID != 9 {
+		t.Fatalf("RouteAndAuthorize got shard %d ok %v, want 9 true", shardID, ok)
+	}
+}
+
+func BenchmarkRouter_RouteAndAuthorize(b *testing.B) {
+	client := redis.NewMemoryClient("test")
+	defer func() { _ = client.Close() }()
+
+	router := NewRouter(client, "server-bench", WithSecureRoutes(64))
+	_ = router.RegisterRouteAction("market.depth", 12, security.CapabilityMask(0b01))
+
+	mask := security.CapabilityMask(0b01)
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for b.Loop() {
+		shardID, ok := router.RouteAndAuthorize("market.depth", mask)
+		if !ok || shardID != 12 {
+			b.Fatal("unexpected benchmark routing failure")
+		}
+	}
+}
+

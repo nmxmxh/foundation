@@ -658,6 +658,79 @@ func (b deleteFailingBackend) Delete(ctx context.Context, key string) error {
 	return b.err
 }
 
+func TestCache_AdmissionAndPenetrationGuards(t *testing.T) {
+	backend := NewMemoryBackend()
+	c := New(Config{
+		Backend:            backend,
+		AdmissionGuard:     true,
+		AdmissionThreshold: 2,
+		PenetrationGuard:   true,
+		ExpectedKeys:       100,
+	})
+	ctx := context.Background()
+
+	// 1. Penetration Guard: first miss sets penetration filter
+	var dest string
+	if err := c.Get(ctx, "missing-key", &dest); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	// Second miss should short-circuit via penetrationMaplet
+	if err := c.Get(ctx, "missing-key", &dest); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound on penetration blocked key, got %v", err)
+	}
+
+	// 2. Admission Guard: first set below threshold does not write to backend
+	if err := c.Set(ctx, "candidate-key", "value-1"); err != nil {
+		t.Fatalf("set candidate: %v", err)
+	}
+	raw, _ := backend.Get(ctx, c.key("candidate-key"))
+	if raw != nil {
+		t.Fatal("expected candidate-key to be held back by admission threshold")
+	}
+
+	// Second set reaches threshold and writes to backend
+	if err := c.Set(ctx, "candidate-key", "value-2"); err != nil {
+		t.Fatalf("set candidate 2: %v", err)
+	}
+	raw, _ = backend.Get(ctx, c.key("candidate-key"))
+	if raw == nil {
+		t.Fatal("expected candidate-key to be admitted to backend on second write")
+	}
+
+	// 3. Clear penetration upon Set (two writes reach admission threshold 2)
+	_ = c.Set(ctx, "missing-key", "now-found")
+	if err := c.Set(ctx, "missing-key", "now-found"); err != nil {
+		t.Fatalf("set missing-key: %v", err)
+	}
+	var val string
+	if err := c.Get(ctx, "missing-key", &val); err != nil || val != "now-found" {
+		t.Fatalf("get missing-key after set: val=%q err=%v", val, err)
+	}
+
+	// 4. Delete clears penetration state
+	if err := c.Delete(ctx, "missing-key"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+}
+
+func BenchmarkCache_PenetrationGuardMiss(b *testing.B) {
+	c := New(Config{
+		Backend:          NewMemoryBackend(),
+		PenetrationGuard: true,
+		ExpectedKeys:     1000,
+	})
+	ctx := context.Background()
+	var dest string
+	_ = c.Get(ctx, "penetration-probe", &dest)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = c.Get(ctx, "penetration-probe", &dest)
+	}
+}
+
 // InvalidateTag reports the first failure to delete a tagged key rather than
 // returning nil: the markers are gone, so a silent failure would leave the
 // entry cached and permanently unreachable by any later invalidation.

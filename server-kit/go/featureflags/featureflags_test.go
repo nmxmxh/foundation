@@ -2,6 +2,7 @@ package featureflags
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -195,5 +196,21 @@ func TestManagerWatchChangesAndAttributes(t *testing.T) {
 	}
 	if NewJSONSource(`[]`).Watch(context.Background()) != nil {
 		t.Fatal("json watch should be nil")
+	}
+}
+
+func BenchmarkFeatureFlag_MapletFastPath(b *testing.B) {
+	m := New(Config{})
+	keys := make([]string, 100)
+	for i := range 100 {
+		keys[i] = fmt.Sprintf("feature-flag-%d", i)
+		m.SetFlag(Flag{Name: keys[i], Enabled: i%2 == 0})
+	}
+	ctx := context.Background()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		_ = m.IsEnabled(ctx, keys[i%100])
 	}
 }

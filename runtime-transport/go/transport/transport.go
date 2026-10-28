@@ -142,6 +142,7 @@ func NewCorrelationIDWithAllocator(alloc ByteAllocator) string {
 		buf = buf[:offset+hex.EncodedLen(len(random))]
 		hex.Encode(buf[offset:], random[:])
 	}
+	// #nosec G103 -- zero-copy string projection from bounded slice.
 	return unsafe.String(unsafe.SliceData(buf), len(buf))
 }
 
@@ -161,6 +162,7 @@ func CreateEnvelopeWithAllocator(alloc ByteAllocator, eventType string, payload 
 		buf := rawIdem[:0]
 		buf = append(buf, prefix...)
 		buf = append(buf, suffix...)
+		// #nosec G103 -- zero-copy string projection from bounded slice.
 		idempotencyKey = unsafe.String(unsafe.SliceData(buf), len(buf))
 	} else {
 		idempotencyKey = prefix + suffix

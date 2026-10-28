@@ -5,11 +5,13 @@ import (
 	"context"
 	"net/http"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 type contextKey string
@@ -108,4 +110,35 @@ func CORS(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// DefaultScratchArenaSize is the default capacity (64 KB) for per-request scratch arenas.
+const DefaultScratchArenaSize = 64 * 1024
+
+// WithScratchArena attaches a recycled scratch.Arena to the request context.
+// Downstream handlers, database queries, and serializers use this arena for zero allocations.
+func WithScratchArena(next http.Handler) http.Handler {
+	return WithCustomScratchArena(DefaultScratchArenaSize)(next)
+}
+
+// WithCustomScratchArena creates middleware with a specified arena capacity.
+func WithCustomScratchArena(size int) func(http.Handler) http.Handler {
+	if size <= 0 {
+		size = DefaultScratchArenaSize
+	}
+	pool := &sync.Pool{
+		New: func() any {
+			return scratch.New(size)
+		},
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			arena := pool.Get().(*scratch.Arena)
+			arena.Reset()
+			defer pool.Put(arena)
+
+			ctx := scratch.WithArena(r.Context(), arena)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
