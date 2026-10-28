@@ -67,6 +67,7 @@ github.com/nmxmxh/ovasabi_foundation/server-kit/go/slo|100.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/startup|92.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing|84.3|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/transfer|97.2|95.0
+github.com/nmxmxh/ovasabi_foundation/server-kit/go/vectorstr|95.0|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/versioning|93.2|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker|73.7|95.0
 github.com/nmxmxh/ovasabi_foundation/server-kit/go/wsmetrics|95.1|95.0

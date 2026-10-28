@@ -3,7 +3,7 @@
 	check-core-validation-contract check-contract-drift check-runtime-contract-field-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
 	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-package-licenses check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux bench-holepunch-linux \
-	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet check-benchmark-ratchet check-transport-ladder check-system-profiling lifecycle-manifest
+	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet check-benchmark-ratchet check-transport-ladder check-system-profiling lifecycle-manifest check-fleet
 
 .DEFAULT_GOAL := help
 
@@ -229,7 +229,7 @@ bench-simd:
 test-bench-go:
 	@echo "Running bounded Foundation benchmarks..."
 	@mkdir -p "$(FOUNDATION_GO_CACHE_DIR)"
-	@cd server-kit/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -run=^$$ -bench='Benchmark(MemoryStore|Manager)' -benchmem -benchtime=100000000ns -count=1 ./objectstore ./bulk
+	@cd server-kit/go && GOCACHE="$(FOUNDATION_GO_CACHE_DIR)" go test -run=^$$ -bench='Benchmark(MemoryStore|Manager|StringRouting|HeaderMatch|ControlPlane|LifecycleFrame)' -benchmem -benchtime=100000000ns -count=1 ./objectstore ./bulk ./appbench
 
 test-bench-native-rust:
 	@echo "Running native GPU/runtime Rust benchmark simulation..."
@@ -303,6 +303,9 @@ check-update-project:
 
 check-scaffold-smoke:
 	@tests/scaffold_smoke_test.sh
+
+check-fleet:
+	@./scripts/fleet-check.sh
 
 check-scaffold-idempotency:
 	@tests/scaffold_idempotency_test.sh
