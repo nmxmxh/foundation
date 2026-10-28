@@ -20,6 +20,38 @@ func BenchmarkCreateEnvelopeJSON(b *testing.B) {
 	}
 }
 
+type benchBumpAlloc struct {
+	buf  []byte
+	head int
+}
+
+func (a *benchBumpAlloc) Alloc(size int) ([]byte, error) {
+	if a.head+size > len(a.buf) {
+		a.head = 0
+	}
+	start := a.head
+	a.head += size
+	return a.buf[start : start+size], nil
+}
+
+func BenchmarkCreateEnvelopeWithAllocator(b *testing.B) {
+	payload := ObjectFromMap(map[string]any{
+		"workspace_id": "ws_1",
+		"body":         "runtime-transport-go-payload",
+	})
+	extra := ObjectFromMap(map[string]any{"source": "bench"})
+	alloc := &benchBumpAlloc{buf: make([]byte, 4096)}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		alloc.head = 0
+		envelope := CreateEnvelopeWithAllocator(alloc, "workspace:create:v1:requested", payload, extra)
+		if envelope.Metadata.CorrelationID == "" {
+			b.Fatal("missing correlation id")
+		}
+	}
+}
+
 func BenchmarkResolveRouteLinear16(b *testing.B) {
 	routes := make([]Route, 16)
 	for i := range routes {

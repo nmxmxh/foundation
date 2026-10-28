@@ -554,7 +554,7 @@ func (p *partition) getRecord(ctx context.Context, query Query, recordID string,
 	if !ok || !recordMatches(entry.record, p.spec, query) {
 		return database.DomainRecord{}, false, nil
 	}
-	return copyRecord(entry.record), true, nil
+	return entry.record, true, nil
 }
 
 func (p *partition) listRecords(ctx context.Context, query Query, fence Fence) ([]database.DomainRecord, error) {

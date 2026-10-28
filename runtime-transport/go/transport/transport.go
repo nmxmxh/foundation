@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"strings"
 	"time"
+	"unsafe"
 )
 
 type EnvelopeMetadata struct {
@@ -73,7 +74,7 @@ func (r *RouteIndex) Resolve(eventType string) *Route {
 
 func CreateEnvelope(eventType string, payload any, extra any) Envelope {
 	now := time.Now().UTC()
-	correlationID := NewCorrelationID()
+	correlationID, idempotencyKey := newCorrelationAndIdempotencyKeys()
 	payloadObject := objectArgument(payload)
 	extraObject := objectArgument(extra)
 	return Envelope{
@@ -83,7 +84,98 @@ func CreateEnvelope(eventType string, payload any, extra any) Envelope {
 		Metadata: EnvelopeMetadata{
 			CorrelationID:  correlationID,
 			RequestID:      correlationID,
-			IdempotencyKey: "idem_" + strings.TrimPrefix(correlationID, "corr_"),
+			IdempotencyKey: idempotencyKey,
+			SchemaVersion:  EnvelopeSchemaVersion,
+			Timestamp:      now,
+			Extra:          extraObject,
+		},
+	}
+}
+
+func newCorrelationAndIdempotencyKeys() (string, string) {
+	var random [8]byte
+	now := time.Now().UTC()
+	var storage [128]byte
+	buf := storage[:0]
+	buf = append(buf, "corr_"...)
+	buf = now.AppendFormat(buf, "20060102T150405.000000000")
+	if _, err := rand.Read(random[:]); err == nil {
+		buf = append(buf, '_')
+		offset := len(buf)
+		buf = buf[:offset+hex.EncodedLen(len(random))]
+		hex.Encode(buf[offset:], random[:])
+	}
+	corrLen := len(buf)
+	buf = append(buf, "idem_"...)
+	buf = append(buf, buf[len("corr_"):corrLen]...)
+
+	combined := string(buf)
+	corrID := combined[:corrLen]
+	idemKey := combined[corrLen:]
+	return corrID, idemKey
+}
+
+// ByteAllocator provides a slice allocation hook for zero-heap operations.
+type ByteAllocator interface {
+	Alloc(size int) ([]byte, error)
+}
+
+// NewCorrelationIDWithAllocator generates a unique correlation ID string
+// using memory from alloc, avoiding heap allocation when backed by an arena.
+func NewCorrelationIDWithAllocator(alloc ByteAllocator) string {
+	if alloc == nil {
+		return NewCorrelationID()
+	}
+	const maxLen = len("corr_") + len("20060102T150405.000000000") + 1 + 16
+	raw, err := alloc.Alloc(maxLen)
+	if err != nil {
+		return NewCorrelationID()
+	}
+	var random [8]byte
+	now := time.Now().UTC()
+	buf := raw[:0]
+	buf = append(buf, "corr_"...)
+	buf = now.AppendFormat(buf, "20060102T150405.000000000")
+	if _, err := rand.Read(random[:]); err == nil {
+		buf = append(buf, '_')
+		offset := len(buf)
+		buf = buf[:offset+hex.EncodedLen(len(random))]
+		hex.Encode(buf[offset:], random[:])
+	}
+	return unsafe.String(unsafe.SliceData(buf), len(buf))
+}
+
+// CreateEnvelopeWithAllocator constructs an envelope using alloc for correlation and idempotency keys.
+func CreateEnvelopeWithAllocator(alloc ByteAllocator, eventType string, payload any, extra any) Envelope {
+	if alloc == nil {
+		return CreateEnvelope(eventType, payload, extra)
+	}
+	now := time.Now().UTC()
+	correlationID := NewCorrelationIDWithAllocator(alloc)
+
+	suffix := strings.TrimPrefix(correlationID, "corr_")
+	const prefix = "idem_"
+	rawIdem, err := alloc.Alloc(len(prefix) + len(suffix))
+	var idempotencyKey string
+	if err == nil {
+		buf := rawIdem[:0]
+		buf = append(buf, prefix...)
+		buf = append(buf, suffix...)
+		idempotencyKey = unsafe.String(unsafe.SliceData(buf), len(buf))
+	} else {
+		idempotencyKey = prefix + suffix
+	}
+
+	payloadObject := objectArgument(payload)
+	extraObject := objectArgument(extra)
+	return Envelope{
+		EventType:       eventType,
+		Payload:         payloadObject,
+		PayloadEncoding: PayloadEncodingJSON,
+		Metadata: EnvelopeMetadata{
+			CorrelationID:  correlationID,
+			RequestID:      correlationID,
+			IdempotencyKey: idempotencyKey,
 			SchemaVersion:  EnvelopeSchemaVersion,
 			Timestamp:      now,
 			Extra:          extraObject,

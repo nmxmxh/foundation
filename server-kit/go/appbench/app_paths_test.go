@@ -4,21 +4,25 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/transport"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/circuitbreaker"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/hermes"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/registry"
@@ -26,6 +30,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/worker"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/wsrouting"
 )
 
 type appProcessor struct {
@@ -61,11 +66,13 @@ func (p *appProcessor) Handle(context.Context, worker.Job) error {
 	return nil
 }
 
+var testProfileResponsePayload = []byte(`{"ok":true,"user_id":"user-123"}`)
+
 func testRouter(tb testing.TB) *grpcsvc.Router {
 	tb.Helper()
 	router := grpcsvc.NewRouter()
 	err := router.RegisterFrame("user.profile.read", func(_ context.Context, frame grpcsvc.Frame) (grpcsvc.Frame, error) {
-		frame.Payload = []byte(`{"ok":true,"user_id":"user-123"}`)
+		frame.Payload = testProfileResponsePayload
 		return frame, nil
 	})
 	if err != nil {
@@ -326,6 +333,103 @@ func BenchmarkAppLane_EndToEnd_ScratchArena(b *testing.B) {
 		out, err := respObj.MarshalJSONFastWithArena(arena)
 		if err != nil || len(out) == 0 {
 			b.Fatalf("marshal failed: %v", err)
+		}
+	}
+}
+
+func buildBenchColumnarTable(tb testing.TB, records int) *hermes.ColumnarTable {
+	tb.Helper()
+	const projection = "bench_orders"
+	const orgID = "org_bench"
+	store, err := hermes.NewStore(hermes.ProjectionSpec{
+		Name:          projection,
+		Domain:        "market",
+		Collection:    "orders",
+		IndexedFields: []string{"symbol", "state"},
+		MaxRecords:    records + 1024,
+		MaxBytes:      max(int64(records)*512, int64(16<<20)),
+	})
+	if err != nil {
+		tb.Fatalf("new hermes store: %v", err)
+	}
+	ctx := context.Background()
+	payload := make([]database.DomainRecord, records)
+	for i := range records {
+		payload[i] = database.DomainRecord{
+			Domain:         "market",
+			Collection:     "orders",
+			OrganizationID: orgID,
+			RecordID:       fmt.Sprintf("ord_%08d", i),
+			Data: database.RecordData{
+				{Name: "symbol", Value: database.RecordValue{Kind: database.RecordValueString, Text: "AAPL"}},
+				{Name: "state", Value: database.RecordValue{Kind: database.RecordValueString, Text: "filled"}},
+			},
+		}
+	}
+	if _, err := store.BulkLoad(ctx, projection, payload); err != nil {
+		tb.Fatalf("hermes bulk load: %v", err)
+	}
+	table, err := store.GetColumnarTable(ctx, projection, hermes.Query{OrganizationID: orgID}, []string{"record_id", "symbol", "state"}, "record_id", hermes.Fence{})
+	if err != nil {
+		tb.Fatalf("get columnar table: %v", err)
+	}
+	return table
+}
+
+func BenchmarkAppLane_WebSocketToHermesColumnar_Pipeline(b *testing.B) {
+	ctx := context.Background()
+	arena := scratch.New(64 * 1024)
+	router := wsrouting.NewRouter(nil, "bench-server")
+	for i := range 1024 {
+		id := strconv.Itoa(i)
+		_ = router.Register(ctx, wsrouting.ConnectionInfo{
+			ConnectionID: "conn-" + id,
+			DeviceID:     "device-" + id,
+			UserID:       "user-" + strconv.Itoa(i%64),
+		})
+	}
+
+	authorizer := security.NewAuthorizer([]security.RoleTemplate{{
+		Role:         "trader",
+		Capabilities: []string{"market:order:update"},
+	}})
+	actorMask := authorizer.RoleMask("trader")
+	requiredMask, _ := authorizer.CapabilityBit("market:order:update")
+
+	table := buildBenchColumnarTable(b, 1000)
+
+	payload := transport.ObjectFromMap(map[string]any{"order_id": "ord_00000500"})
+	extra := transport.ObjectFromMap(map[string]any{"source": "ws"})
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for b.Loop() {
+		arena.Reset()
+
+		// 1. Build envelope with arena (zero heap allocations)
+		envelope := transport.CreateEnvelopeWithAllocator(arena, "market:order:update", payload, extra)
+		_ = envelope
+
+		// 2. Resolve WebSocket connection for target device (zero heap allocations)
+		connID, ok, err := router.ResolveDeviceConnection(ctx, "device-500")
+		if err != nil || !ok || connID == "" {
+			b.Fatal("missing device route")
+		}
+
+		// 3. Bitwise capability authorization (zero allocations)
+		if (actorMask & requiredMask) != requiredMask {
+			b.Fatal("unauthorized")
+		}
+
+		// 4. Hermes off-heap columnar projection point lookup (zero heap allocations)
+		view, found := table.GetView("ord_00000500")
+		if !found {
+			b.Fatal("missing order in columnar projection")
+		}
+		symBytes, _ := view.Bytes("symbol")
+		if !bytes.Equal(symBytes, []byte("AAPL")) {
+			b.Fatalf("expected AAPL, got %s", symBytes)
 		}
 	}
 }

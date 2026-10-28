@@ -1,6 +1,8 @@
 package transport
 
 import (
+	"encoding/json"
+	"io"
 	"strings"
 	"testing"
 )
@@ -110,5 +112,119 @@ func TestCanDispatchAuthorizationMatrix(t *testing.T) {
 				t.Fatalf("CanDispatch() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+type bumpAllocator struct {
+	buf    []byte
+	offset int
+	err    error
+}
+
+func (a *bumpAllocator) Alloc(size int) ([]byte, error) {
+	if a.err != nil {
+		return nil, a.err
+	}
+	if a.offset+size > len(a.buf) {
+		a.buf = make([]byte, (a.offset+size)*2)
+	}
+	res := a.buf[a.offset : a.offset+size]
+	a.offset += size
+	return res, nil
+}
+
+type failingAllocator struct{}
+
+func (failingAllocator) Alloc(int) ([]byte, error) {
+	return nil, io.ErrUnexpectedEOF
+}
+
+func TestCorrelationIDAndEnvelopeWithAllocator(t *testing.T) {
+	alloc := &bumpAllocator{buf: make([]byte, 512)}
+
+	// Verify allocation using custom byte allocator.
+	corrID := NewCorrelationIDWithAllocator(alloc)
+	if !strings.HasPrefix(corrID, "corr_") {
+		t.Fatalf("expected corr_ prefix, got %q", corrID)
+	}
+
+	// Verify fallback when allocator is nil.
+	fallbackCorrID := NewCorrelationIDWithAllocator(nil)
+	if !strings.HasPrefix(fallbackCorrID, "corr_") {
+		t.Fatalf("expected corr_ prefix on nil allocator fallback, got %q", fallbackCorrID)
+	}
+
+	// Verify fallback when allocator returns an error.
+	errCorrID := NewCorrelationIDWithAllocator(failingAllocator{})
+	if !strings.HasPrefix(errCorrID, "corr_") {
+		t.Fatalf("expected corr_ prefix on error allocator fallback, got %q", errCorrID)
+	}
+
+	// Verify envelope construction with valid allocator.
+	env := CreateEnvelopeWithAllocator(alloc, "test.event", map[string]any{"key": "val"}, nil)
+	if !strings.HasPrefix(env.Metadata.CorrelationID, "corr_") {
+		t.Fatalf("invalid correlation ID in envelope: %q", env.Metadata.CorrelationID)
+	}
+	if !strings.HasPrefix(env.Metadata.IdempotencyKey, "idem_") {
+		t.Fatalf("invalid idempotency key in envelope: %q", env.Metadata.IdempotencyKey)
+	}
+
+	// Verify envelope construction with nil allocator.
+	nilEnv := CreateEnvelopeWithAllocator(nil, "test.event", nil, nil)
+	if !strings.HasPrefix(nilEnv.Metadata.CorrelationID, "corr_") {
+		t.Fatalf("invalid correlation ID with nil allocator: %q", nilEnv.Metadata.CorrelationID)
+	}
+
+	// Verify envelope construction with failing allocator.
+	failEnv := CreateEnvelopeWithAllocator(failingAllocator{}, "test.event", nil, nil)
+	if !strings.HasPrefix(failEnv.Metadata.CorrelationID, "corr_") {
+		t.Fatalf("invalid correlation ID with failing allocator: %q", failEnv.Metadata.CorrelationID)
+	}
+	if !strings.HasPrefix(failEnv.Metadata.IdempotencyKey, "idem_") {
+		t.Fatalf("invalid idempotency key with failing allocator: %q", failEnv.Metadata.IdempotencyKey)
+	}
+}
+
+func TestValueExtraConversions(t *testing.T) {
+	// Test Int64Value with json.Number and string.
+	vNum := valueFromAny(json.Number("42"))
+	if val, ok := vNum.Int64Value(); !ok || val != 42 {
+		t.Fatalf("Int64Value from json.Number expected 42, got %d (%v)", val, ok)
+	}
+	vStr := valueFromAny(" 1234 ")
+	if val, ok := vStr.Int64Value(); !ok || val != 1234 {
+		t.Fatalf("Int64Value from string expected 1234, got %d (%v)", val, ok)
+	}
+	vInvalidStr := valueFromAny("not-a-number")
+	if _, ok := vInvalidStr.Int64Value(); ok {
+		t.Fatal("expected Int64Value to fail for invalid string")
+	}
+	vBool := valueFromAny(true)
+	if _, ok := vBool.Int64Value(); ok {
+		t.Fatal("expected Int64Value to fail for boolean")
+	}
+
+	// Test ObjectValue with non-object.
+	if _, ok := vBool.ObjectValue(); ok {
+		t.Fatal("expected ObjectValue to fail for boolean")
+	}
+
+	// Test ListValue with []Value.
+	listVal := Value{raw: []Value{vNum, vStr}}
+	if items, ok := listVal.ListValue(); !ok || len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d (%v)", len(items), ok)
+	}
+	listAny := List([]Value{vNum, vStr})
+	if items, ok := listAny.ListValue(); !ok || len(items) != 2 {
+		t.Fatalf("expected 2 items from any, got %d (%v)", len(items), ok)
+	}
+	if _, ok := vBool.ListValue(); ok {
+		t.Fatal("expected ListValue to fail for boolean")
+	}
+
+	// Test UnmarshalJSON error.
+	var badVal Value
+	if err := badVal.UnmarshalJSON([]byte("invalid json {")); err == nil {
+		t.Fatal("expected UnmarshalJSON to fail for invalid json")
 	}
 }

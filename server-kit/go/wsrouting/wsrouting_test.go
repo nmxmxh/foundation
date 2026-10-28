@@ -560,6 +560,33 @@ func TestResolveTargets(t *testing.T) {
 	}
 }
 
+func TestResolveDeviceConnection(t *testing.T) {
+	r := NewRouter(nil, "server-1")
+	ctx := context.Background()
+
+	_ = r.Register(ctx, ConnectionInfo{ConnectionID: "conn-1", DeviceID: "device-1", UserID: "user-1"})
+
+	// Verify connected device lookup.
+	connID, found, err := r.ResolveDeviceConnection(ctx, "device-1")
+	if err != nil || !found || connID != "conn-1" {
+		t.Fatalf("ResolveDeviceConnection device-1: connID=%q found=%v err=%v", connID, found, err)
+	}
+
+	// Verify absent device lookup.
+	connID, found, err = r.ResolveDeviceConnection(ctx, "device-unknown")
+	if err != nil || found || connID != "" {
+		t.Fatalf("ResolveDeviceConnection absent: connID=%q found=%v err=%v", connID, found, err)
+	}
+
+	// Verify context deadline error handling.
+	canceledCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	_, _, err = r.ResolveDeviceConnection(canceledCtx, "device-1")
+	if err == nil {
+		t.Fatal("expected canceled context error")
+	}
+}
+
 func TestForEachTarget(t *testing.T) {
 	r := NewRouter(nil, "server-1")
 	ctx := context.Background()

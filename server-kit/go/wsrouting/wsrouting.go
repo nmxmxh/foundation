@@ -482,6 +482,22 @@ type TargetedDelivery struct {
 
 // ResolveTargets returns connection IDs that receive a message.
 //
+// ResolveDeviceConnection performs zero-allocation point lookup for a device's active connection.
+// Returns (connectionID, true, nil) if connected, or ("", false, nil) if absent.
+func (r *Router) ResolveDeviceConnection(ctx context.Context, deviceID string) (string, bool, error) {
+	if err := contextError(ctx); err != nil {
+		return "", false, err
+	}
+	r.mu.RLock()
+	connectionID := r.byDevice[deviceID]
+	found := r.connections[connectionID] != nil
+	r.mu.RUnlock()
+	if !found {
+		return "", false, nil
+	}
+	return connectionID, true, nil
+}
+
 // CAUTION: Materializing a slice causes GC pauses on large fan-outs.
 // High-throughput paths must use ForEachTargetBatch to avoid allocations.
 // If callers manage buffers, use ResolveTargetsInto.

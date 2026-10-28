@@ -103,6 +103,14 @@ func TestSecureRouteMaplet_RouteAndAuthorize(t *testing.T) {
 		t.Fatalf("expected unknown route to return auth=false, shard=0")
 	}
 
+	// Fast-path GetRoute lookup
+	if s, ok := sm.GetRoute("orders.read"); !ok || s != 1 {
+		t.Fatalf("expected GetRoute orders.read to return 1, true; got %d, %v", s, ok)
+	}
+	if _, ok := sm.GetRoute("unknown.route"); ok {
+		t.Fatal("expected GetRoute unknown.route to return ok=false")
+	}
+
 	if sm.Count() != 3 {
 		t.Fatalf("expected count 3, got %d", sm.Count())
 	}
