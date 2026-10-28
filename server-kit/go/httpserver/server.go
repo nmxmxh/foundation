@@ -27,6 +27,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/graceful"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpserver/middleware"
 	kitlogger "github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
@@ -545,6 +546,7 @@ func (s *Server) Handler() http.Handler {
 
 	handler = kitcompress.HTTPMiddleware(s.httpCompressionEnabled, s.httpCompressionMinBytes, s.httpCompressionLevel)(handler)
 	handler = observability.HTTPMiddleware(handler)
+	handler = middleware.WithScratchArena(handler)
 
 	return handler
 }

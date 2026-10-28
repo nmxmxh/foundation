@@ -198,19 +198,22 @@ export const parseEventType = (eventType: string): ParsedEventType => {
 
 export const eventTerminalState = (eventType: string): string => parseEventType(eventType).state;
 
-export const createEnvelope = <TPayload>(input: EnvelopeFactoryInput<TPayload>): RuntimeEnvelope<TPayload> => ({
-  eventType: parseEventType(input.eventType).raw,
-  payload: input.payload,
-  payloadEncoding: "json",
-  metadata: {
-    correlationId: input.correlationId ?? nextToken("corr"),
-    requestId: input.requestId ?? nextToken("req"),
-    idempotencyKey: input.idempotencyKey ?? nextToken("idem"),
-    schemaVersion: assertCompatibleSchemaVersion(input.schemaVersion),
-    timestamp: new Date().toISOString(),
-    extra: input.extra ?? {},
-  },
-});
+export const createEnvelope = <TPayload>(input: EnvelopeFactoryInput<TPayload>): RuntimeEnvelope<TPayload> => {
+  const tokenSuffix = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  return {
+    eventType: parseEventType(input.eventType).raw,
+    payload: input.payload,
+    payloadEncoding: "json",
+    metadata: {
+      correlationId: input.correlationId ?? `corr_${tokenSuffix}`,
+      requestId: input.requestId ?? `req_${tokenSuffix}`,
+      idempotencyKey: input.idempotencyKey ?? `idem_${tokenSuffix}`,
+      schemaVersion: assertCompatibleSchemaVersion(input.schemaVersion),
+      timestamp: new Date().toISOString(),
+      extra: input.extra ?? {},
+    },
+  };
+};
 
 export const createProtobufEnvelope = <TPayload>(
   input: EnvelopeFactoryInput<TPayload>,
