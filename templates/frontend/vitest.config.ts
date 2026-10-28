@@ -5,18 +5,16 @@ import path from 'path'
 
 const serial = process.env.FOUNDATION_VITEST_SERIAL !== '0'
 const maxWorkers = Number.parseInt(process.env.FOUNDATION_VITEST_WORKERS ?? '0', 10)
+const wywOptions = {
+  include: [/ui-minimal[\\/](ts[\\/])?src[\\/].*\.[jt]sx?(?:\?.*)?$/, /[\\/]src[\\/].*\.[jt]sx?(?:\?.*)?$/],
+  transformLibraries: true,
+  prefixer: false,
+  eval: { resolver: 'hybrid' as const },
+}
 
 export default defineConfig({
-  plugins: [
-    react() as never,
-    wyw({
-      // Vite adds query strings during development. Transform application and linked kit sources.
-      include: [/ui-minimal[\\/](ts[\\/])?src[\\/].*\.[jt]sx?(?:\?.*)?$/, /[\\/]src[\\/].*\.[jt]sx?(?:\?.*)?$/],
-      transformLibraries: true,
-      prefixer: false,
-    }) as never,
-  ],
-  optimizeDeps: { exclude: ['@ovasabi/ui-minimal'] },
+  optimizeDeps: { exclude: ['@ovasabi/ui-minimal', '@ovasabi/ui-minimal/tokens'] },
+  plugins: [react() as never, wyw(wywOptions) as never],
   resolve: {
     preserveSymlinks: true,
     alias: {
@@ -24,13 +22,17 @@ export default defineConfig({
       '@generated': path.resolve(__dirname, './src/types/protos'),
       react: path.resolve(__dirname, './node_modules/react'),
       'react-dom': path.resolve(__dirname, './node_modules/react-dom'),
+      'framer-motion': path.resolve(__dirname, './node_modules/framer-motion'),
       zustand: path.resolve(__dirname, './node_modules/zustand'),
     },
-    dedupe: ['react', 'react-dom', '@linaria/react'],
+    dedupe: ['react', 'react-dom', '@linaria/react', 'framer-motion'],
   },
   test: {
     globals: true,
     environment: 'jsdom',
+    // Styles are extracted at build time now, so tests that assert computed styles
+    // need the emitted stylesheets applied in jsdom.
+    css: true,
     fileParallelism: !serial,
     ...(Number.isFinite(maxWorkers) && maxWorkers > 0 ? { maxWorkers } : {}),
     setupFiles: ['./src/test/setup.ts'],
