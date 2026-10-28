@@ -45,7 +45,9 @@ export type PulseManager = ReturnType<typeof createPulseManager>;
 export const createPulseManager = (options: PulseManagerOptions = {}) => {
   const capabilities = getRuntimeCapabilities();
   const handlers = new Map<number, Set<EpochHandler>>();
-  const lastSeen = new Map<number, number>();
+  const watchedIndices: number[] = [];
+  const lastSeen = new Int32Array(EPOCH_SLOT_COUNT);
+  const lastSeenInitialized = new Uint8Array(EPOCH_SLOT_COUNT);
   const onDiagnostics = options.onDiagnostics ?? (() => undefined);
   const createWorker = options.createWorker ?? defaultWorkerFactory;
 
@@ -83,7 +85,10 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
     if (!group) {
       return;
     }
-    lastSeen.set(index, value);
+    if (index >= 0 && index < EPOCH_SLOT_COUNT) {
+      lastSeen[index] = value;
+      lastSeenInitialized[index] = 1;
+    }
     for (const handler of group) {
       handler(value, index);
     }
@@ -94,10 +99,16 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
     if (!epochs) {
       return;
     }
-    for (const index of handlers.keys()) {
+    const count = watchedIndices.length;
+    for (let i = 0; i < count; i++) {
+      const index = watchedIndices[i]!;
       const next = Atomics.load(epochs, index);
-      const previous = lastSeen.get(index) ?? next;
-      if (next !== previous) {
+      if (lastSeenInitialized[index] === 0) {
+        lastSeenInitialized[index] = 1;
+        lastSeen[index] = next;
+        continue;
+      }
+      if (next !== lastSeen[index]) {
         notifyHandlers(index, next);
       }
     }
@@ -192,8 +203,12 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
       buffer = nextBuffer instanceof RuntimeMemoryRegion ? nextBuffer : new RuntimeMemoryRegion(nextBuffer, 0, nextBuffer.byteLength);
       const epochs = epochView();
       if (epochs) {
-        for (const index of handlers.keys()) {
-          lastSeen.set(index, Atomics.load(epochs, index));
+        for (let i = 0; i < watchedIndices.length; i++) {
+          const index = watchedIndices[i]!;
+          if (index >= 0 && index < EPOCH_SLOT_COUNT) {
+            lastSeen[index] = Atomics.load(epochs, index);
+            lastSeenInitialized[index] = 1;
+          }
         }
       }
       installVisibilityHandlers();
@@ -248,8 +263,10 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
         if (!group) {
           group = new Set();
           handlers.set(index, group);
-          if (epochs) {
-            lastSeen.set(index, Atomics.load(epochs, index));
+          watchedIndices.push(index);
+          if (epochs && index >= 0 && index < EPOCH_SLOT_COUNT) {
+            lastSeen[index] = Atomics.load(epochs, index);
+            lastSeenInitialized[index] = 1;
           }
         }
         group.add(handler);
@@ -272,7 +289,13 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
       group.delete(handler);
       if (group.size === 0) {
         handlers.delete(index);
-        lastSeen.delete(index);
+        if (index >= 0 && index < EPOCH_SLOT_COUNT) {
+          lastSeenInitialized[index] = 0;
+        }
+        const pos = watchedIndices.indexOf(index);
+        if (pos !== -1) {
+          watchedIndices.splice(pos, 1);
+        }
         if (worker) {
           const message: PulseMessage = {
             type: "UNWATCH_INDICES",
@@ -312,7 +335,8 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
       stopMainThreadLoop();
       removeVisibilityHandlers();
       handlers.clear();
-      lastSeen.clear();
+      watchedIndices.length = 0;
+      lastSeenInitialized.fill(0);
       mode = "stopped";
       buffer = null;
       emitDiagnostics();

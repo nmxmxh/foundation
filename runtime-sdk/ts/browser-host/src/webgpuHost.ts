@@ -243,6 +243,7 @@ export class RuntimeWebGpuHost {
   private nextResourceId = 1;
   private pooledBufferCount = 0;
   private disposed = false;
+  private stagingScratch: Uint8Array | null = null;
   /**
    * Whether disposing this host destroys the device.
    *
@@ -265,6 +266,15 @@ export class RuntimeWebGpuHost {
     this.observeDeviceLoss(device);
   }
 
+  private ensureStagingScratch(requiredBytes: number): Uint8Array {
+    if (this.stagingScratch && this.stagingScratch.byteLength >= requiredBytes) {
+      return this.stagingScratch;
+    }
+    const nextCapacity = Math.max(requiredBytes, (this.stagingScratch?.byteLength ?? 65536) * 2);
+    this.stagingScratch = new Uint8Array(nextCapacity);
+    return this.stagingScratch;
+  }
+
   /**
    * Release every GPU resource this host holds. Idempotent.
    *
@@ -285,6 +295,7 @@ export class RuntimeWebGpuHost {
       return { resourcesDropped: 0, pooledBuffersDropped: 0, pipelinesDropped: 0, deviceDestroyed: false };
     }
     this.disposed = true;
+    this.stagingScratch = null;
     const dropped = this.dropDeviceResources();
     let deviceDestroyed = false;
     if (this.ownsDevice) {
@@ -384,7 +395,7 @@ export class RuntimeWebGpuHost {
 
     const uploadMode = chooseUploadMode(policy, layout);
     const packStarted = nowMs();
-    const input = uploadMode === "packed" ? new Uint8Array(layout.totalBytes) : null;
+    const input = uploadMode === "packed" ? this.ensureStagingScratch(layout.totalBytes).subarray(0, layout.totalBytes) : null;
     if (input) {
       packArenaDescriptorsIntoUnchecked(arena, descriptors, layout, input);
     }

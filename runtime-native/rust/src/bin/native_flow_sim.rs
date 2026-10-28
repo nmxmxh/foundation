@@ -78,6 +78,9 @@ fn main() {
     run_native_gpu_registry_lifecycle();
 
     println!();
+    run_native_gpu_slot_maplet_hot_path();
+
+    println!();
     run_native_gpu_plugin_opaque_registry_lifecycle();
 
     #[cfg(unix)]
@@ -233,6 +236,45 @@ fn run_native_gpu_registry_lifecycle() {
 
     println!(
         "native-gpu-registry-lifecycle ops=register+acquire+release+release mean={:>10.2}ns p50={:>8}ns p95={:>8}ns p99={:>8}ns modeled_hot_payload_copy=0B private_handle_table=bounded",
+        stats.mean_ns,
+        stats.p50_ns,
+        stats.p95_ns,
+        stats.p99_ns
+    );
+}
+
+fn run_native_gpu_slot_maplet_hot_path() {
+    let descriptor = RuntimeNativeGpuDescriptor {
+        id: "camera.frame.hot".to_string(),
+        kind: RuntimeNativeGpuKind::Texture,
+        platform: RuntimeNativeGpuPlatform::AppleIosurface,
+        byte_length: None,
+        width: Some(1920),
+        height: Some(1080),
+        format: Some("bgra8".to_string()),
+        schema_name: Some("media/v1/frame.capnp".to_string()),
+        producer: "camera.plugin".to_string(),
+        fallback: RuntimeNativeGpuFallback::CopyToWebGpu,
+    };
+    let owner =
+        NativeGpuOwnerScope::new("tenant-1", "camera.plugin", "gpu-0").expect("owner scope");
+    let registry = NativeGpuHandleRegistry::new(4);
+    registry
+        .register_stub(descriptor, owner.clone(), 1, 0)
+        .expect("register hot slot descriptor");
+    let handle = registry.slot_handle("camera.frame.hot").expect("slot handle");
+
+    let stats = sample(|| {
+        let refs = registry.acquire_slot(handle, black_box(&owner)).expect("acquire slot");
+        black_box(refs);
+        let fence = registry.signal_fence_slot(handle, 1).expect("signal fence slot");
+        black_box(fence);
+        let rel = registry.release_slot(handle, black_box(&owner)).expect("release slot");
+        black_box(rel.remaining_refs);
+    });
+
+    println!(
+        "native-gpu-slot-maplet-hot-path ops=acquire+signal_fence+release mean={:>10.2}ns p50={:>8}ns p95={:>8}ns p99={:>8}ns modeled_hot_payload_copy=0B lock_free=true allocs=0B",
         stats.mean_ns,
         stats.p50_ns,
         stats.p95_ns,

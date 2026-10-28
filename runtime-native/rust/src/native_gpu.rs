@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 #[cfg(unix)]
 use std::os::fd::OwnedFd;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::RwLock;
 
 use ovrt_core::{RuntimeNativeGpuDescriptor, RuntimeNativeGpuFallback, RuntimeNativeGpuPlatform};
@@ -124,12 +125,44 @@ pub struct NativeGpuReleaseResult {
     pub removed: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeGpuSlotReleaseResult {
+    pub remaining_refs: u32,
+    pub removed: bool,
+}
+
+struct NativeGpuSlot {
+    _slot_index: u32,
+    generation: AtomicU32,
+    ref_count: AtomicU32,
+    signaled_value: AtomicU64,
+    required_value: AtomicU64,
+    fence_id: AtomicU64,
+    owner_scope_hash: AtomicU64,
+    active: AtomicBool,
+}
+
+impl NativeGpuSlot {
+    fn new(slot_index: u32) -> Self {
+        Self {
+            _slot_index: slot_index,
+            generation: AtomicU32::new(1),
+            ref_count: AtomicU32::new(0),
+            signaled_value: AtomicU64::new(0),
+            required_value: AtomicU64::new(0),
+            fence_id: AtomicU64::new(0),
+            owner_scope_hash: AtomicU64::new(0),
+            active: AtomicBool::new(false),
+        }
+    }
+}
+
 struct NativeGpuHandleRecord {
     descriptor: RuntimeNativeGpuDescriptor,
     platform_handle: PlatformHandle,
-    fence: NativeFence,
     owner_scope: NativeGpuOwnerScope,
-    ref_count: u32,
+    slot_index: u32,
+    slot_handle: u64,
 }
 
 enum PlatformHandle {
@@ -152,38 +185,10 @@ enum PlatformHandle {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct NativeFence {
-    id: u64,
-    required_value: u64,
-    signaled_value: u64,
-}
-
-impl NativeFence {
-    fn new(id: u64, required_value: u64) -> Self {
-        Self { id, required_value, signaled_value: 0 }
-    }
-
-    fn signal(&mut self, value: u64) {
-        self.signaled_value = self.signaled_value.max(value);
-    }
-
-    fn is_complete(&self) -> bool {
-        self.signaled_value >= self.required_value
-    }
-
-    fn snapshot(&self) -> NativeGpuFenceSnapshot {
-        NativeGpuFenceSnapshot {
-            fence_id: self.id,
-            required_value: self.required_value,
-            signaled_value: self.signaled_value,
-            complete: self.is_complete(),
-        }
-    }
-}
-
 pub struct NativeGpuHandleRegistry {
     records: RwLock<BTreeMap<String, NativeGpuHandleRecord>>,
+    slots: Box<[NativeGpuSlot]>,
+    free_slots: RwLock<Vec<u32>>,
     max_records: usize,
 }
 
@@ -195,7 +200,19 @@ impl Default for NativeGpuHandleRegistry {
 
 impl NativeGpuHandleRegistry {
     pub fn new(max_records: usize) -> Self {
-        Self { records: RwLock::new(BTreeMap::new()), max_records }
+        let mut slots = Vec::with_capacity(max_records);
+        let mut free_slots = Vec::with_capacity(max_records);
+        for i in 0..max_records {
+            slots.push(NativeGpuSlot::new(i as u32));
+            free_slots.push(i as u32);
+        }
+        free_slots.reverse();
+        Self {
+            records: RwLock::new(BTreeMap::new()),
+            slots: slots.into_boxed_slice(),
+            free_slots: RwLock::new(free_slots),
+            max_records,
+        }
     }
 
     pub fn register_stub(
@@ -210,7 +227,8 @@ impl NativeGpuHandleRegistry {
         self.register_private(
             descriptor,
             PlatformHandle::Stub { _token: token, platform },
-            NativeFence::new(fence_id, required_fence_value),
+            fence_id,
+            required_fence_value,
             owner_scope,
         )
     }
@@ -235,7 +253,8 @@ impl NativeGpuHandleRegistry {
                 plane_count: handle.plane_count,
                 _modifier: handle.modifier,
             },
-            NativeFence::new(fence_id, required_fence_value),
+            fence_id,
+            required_fence_value,
             owner_scope,
         )
     }
@@ -255,9 +274,284 @@ impl NativeGpuHandleRegistry {
                 platform: handle.platform,
                 has_external_sync: handle.has_external_sync,
             },
-            NativeFence::new(fence_id, required_fence_value),
+            fence_id,
+            required_fence_value,
             owner_scope,
         )
+    }
+
+    pub fn slot_handle(&self, descriptor_id: &str) -> Result<u64, NativeRuntimeError> {
+        let guard = self
+            .records
+            .read()
+            .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
+        let record = guard.get(descriptor_id).ok_or_else(|| {
+            gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
+        })?;
+        Ok(record.slot_handle)
+    }
+
+    pub fn acquire_slot(
+        &self,
+        handle: u64,
+        owner_scope: &NativeGpuOwnerScope,
+    ) -> Result<u32, NativeRuntimeError> {
+        owner_scope.validate()?;
+        let slot_index = (handle & 0xffff_ffff) as usize;
+        let generation = (handle >> 32) as u32;
+
+        if slot_index >= self.slots.len() {
+            return Err(gpu_unavailable("native GPU slot handle out of bounds"));
+        }
+        let slot = &self.slots[slot_index];
+        if !slot.active.load(Ordering::Acquire)
+            || slot.generation.load(Ordering::Acquire) != generation
+        {
+            return Err(gpu_unavailable(
+                "native GPU slot handle is unavailable or expired",
+            ));
+        }
+
+        if slot.owner_scope_hash.load(Ordering::Acquire) != hash_owner_scope(owner_scope) {
+            return Err(NativeRuntimeError::new(
+                NativeErrorCode::NativeGpuUnauthorized,
+                "native GPU descriptor owner scope mismatch",
+            ));
+        }
+
+        let mut current = slot.ref_count.load(Ordering::Relaxed);
+        loop {
+            if current == 0 {
+                return Err(gpu_unavailable(
+                    "native GPU slot descriptor has zero references",
+                ));
+            }
+            if current == u32::MAX {
+                return Err(gpu_busy("native GPU descriptor ref_count overflow"));
+            }
+            match slot.ref_count.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return Ok(current + 1),
+                Err(actual) => current = actual,
+            }
+        }
+    }
+
+    pub fn release_slot(
+        &self,
+        handle: u64,
+        owner_scope: &NativeGpuOwnerScope,
+    ) -> Result<NativeGpuSlotReleaseResult, NativeRuntimeError> {
+        owner_scope.validate()?;
+        let slot_index = (handle & 0xffff_ffff) as usize;
+        let generation = (handle >> 32) as u32;
+
+        if slot_index >= self.slots.len() {
+            return Err(gpu_unavailable("native GPU slot handle out of bounds"));
+        }
+        let slot = &self.slots[slot_index];
+        if !slot.active.load(Ordering::Acquire)
+            || slot.generation.load(Ordering::Acquire) != generation
+        {
+            return Err(gpu_unavailable(
+                "native GPU slot handle is unavailable or expired",
+            ));
+        }
+
+        if slot.owner_scope_hash.load(Ordering::Acquire) != hash_owner_scope(owner_scope) {
+            return Err(NativeRuntimeError::new(
+                NativeErrorCode::NativeGpuUnauthorized,
+                "native GPU descriptor owner scope mismatch",
+            ));
+        }
+
+        let mut current = slot.ref_count.load(Ordering::Relaxed);
+        loop {
+            if current == 0 {
+                return Err(gpu_unavailable(
+                    "native GPU slot descriptor already released",
+                ));
+            }
+            if current > 1 {
+                match slot.ref_count.compare_exchange_weak(
+                    current,
+                    current - 1,
+                    Ordering::AcqRel,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => {
+                        return Ok(NativeGpuSlotReleaseResult {
+                            remaining_refs: current - 1,
+                            removed: false,
+                        });
+                    }
+                    Err(actual) => current = actual,
+                }
+            } else {
+                let signaled = slot.signaled_value.load(Ordering::Acquire);
+                let required = slot.required_value.load(Ordering::Acquire);
+                if signaled < required {
+                    return Err(gpu_busy("native GPU descriptor fence is not complete"));
+                }
+                return self.finalize_slot_release(slot_index, generation, owner_scope);
+            }
+        }
+    }
+
+    pub fn signal_fence_slot(
+        &self,
+        handle: u64,
+        signaled_value: u64,
+    ) -> Result<NativeGpuFenceSnapshot, NativeRuntimeError> {
+        let slot_index = (handle & 0xffff_ffff) as usize;
+        let generation = (handle >> 32) as u32;
+
+        if slot_index >= self.slots.len() {
+            return Err(gpu_unavailable("native GPU slot handle out of bounds"));
+        }
+        let slot = &self.slots[slot_index];
+        if !slot.active.load(Ordering::Acquire)
+            || slot.generation.load(Ordering::Acquire) != generation
+        {
+            return Err(gpu_unavailable(
+                "native GPU slot handle is unavailable or expired",
+            ));
+        }
+
+        let prev = slot.signaled_value.fetch_max(signaled_value, Ordering::AcqRel);
+        let final_value = prev.max(signaled_value);
+        let required = slot.required_value.load(Ordering::Acquire);
+        let fence_id = slot.fence_id.load(Ordering::Acquire);
+
+        Ok(NativeGpuFenceSnapshot {
+            fence_id,
+            required_value: required,
+            signaled_value: final_value,
+            complete: final_value >= required,
+        })
+    }
+
+    pub fn is_fence_complete_slot(&self, handle: u64) -> Result<bool, NativeRuntimeError> {
+        let slot_index = (handle & 0xffff_ffff) as usize;
+        let generation = (handle >> 32) as u32;
+
+        if slot_index >= self.slots.len() {
+            return Err(gpu_unavailable("native GPU slot handle out of bounds"));
+        }
+        let slot = &self.slots[slot_index];
+        if !slot.active.load(Ordering::Acquire)
+            || slot.generation.load(Ordering::Acquire) != generation
+        {
+            return Err(gpu_unavailable(
+                "native GPU slot handle is unavailable or expired",
+            ));
+        }
+
+        let signaled = slot.signaled_value.load(Ordering::Acquire);
+        let required = slot.required_value.load(Ordering::Acquire);
+        Ok(signaled >= required)
+    }
+
+    pub fn fence_snapshot_slot(
+        &self,
+        handle: u64,
+    ) -> Result<NativeGpuFenceSnapshot, NativeRuntimeError> {
+        let slot_index = (handle & 0xffff_ffff) as usize;
+        let generation = (handle >> 32) as u32;
+
+        if slot_index >= self.slots.len() {
+            return Err(gpu_unavailable("native GPU slot handle out of bounds"));
+        }
+        let slot = &self.slots[slot_index];
+        if !slot.active.load(Ordering::Acquire)
+            || slot.generation.load(Ordering::Acquire) != generation
+        {
+            return Err(gpu_unavailable(
+                "native GPU slot handle is unavailable or expired",
+            ));
+        }
+
+        let signaled = slot.signaled_value.load(Ordering::Acquire);
+        let required = slot.required_value.load(Ordering::Acquire);
+        let fence_id = slot.fence_id.load(Ordering::Acquire);
+        Ok(NativeGpuFenceSnapshot {
+            fence_id,
+            required_value: required,
+            signaled_value: signaled,
+            complete: signaled >= required,
+        })
+    }
+
+    fn finalize_slot_release(
+        &self,
+        slot_index: usize,
+        generation: u32,
+        owner_scope: &NativeGpuOwnerScope,
+    ) -> Result<NativeGpuSlotReleaseResult, NativeRuntimeError> {
+        let mut guard = self
+            .records
+            .write()
+            .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
+        let slot = &self.slots[slot_index];
+
+        if !slot.active.load(Ordering::Acquire)
+            || slot.generation.load(Ordering::Acquire) != generation
+        {
+            return Err(gpu_unavailable(
+                "native GPU slot handle is unavailable or expired",
+            ));
+        }
+        if slot.owner_scope_hash.load(Ordering::Acquire) != hash_owner_scope(owner_scope) {
+            return Err(NativeRuntimeError::new(
+                NativeErrorCode::NativeGpuUnauthorized,
+                "native GPU descriptor owner scope mismatch",
+            ));
+        }
+
+        let current_refs = slot.ref_count.load(Ordering::Acquire);
+        if current_refs > 1 {
+            let new_refs = slot.ref_count.fetch_sub(1, Ordering::AcqRel) - 1;
+            return Ok(NativeGpuSlotReleaseResult {
+                remaining_refs: new_refs,
+                removed: false,
+            });
+        }
+
+        let signaled = slot.signaled_value.load(Ordering::Acquire);
+        let required = slot.required_value.load(Ordering::Acquire);
+        if signaled < required {
+            return Err(gpu_busy("native GPU descriptor fence is not complete"));
+        }
+
+        let mut descriptor_id = None;
+        for (id, record) in guard.iter() {
+            if record.slot_index == slot_index as u32 {
+                descriptor_id = Some(id.clone());
+                break;
+            }
+        }
+        if let Some(id) = descriptor_id {
+            guard.remove(&id);
+        }
+
+        slot.active.store(false, Ordering::Release);
+        slot.ref_count.store(0, Ordering::Release);
+        slot.generation.fetch_add(1, Ordering::AcqRel);
+
+        let mut free_guard = self
+            .free_slots
+            .write()
+            .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
+        free_guard.push(slot_index as u32);
+
+        Ok(NativeGpuSlotReleaseResult {
+            remaining_refs: 0,
+            removed: true,
+        })
     }
 
     pub fn acquire(
@@ -266,18 +560,15 @@ impl NativeGpuHandleRegistry {
         owner_scope: &NativeGpuOwnerScope,
     ) -> Result<RuntimeNativeGpuDescriptor, NativeRuntimeError> {
         owner_scope.validate()?;
-        let mut guard = self
+        let guard = self
             .records
-            .write()
+            .read()
             .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
-        let record = guard.get_mut(descriptor_id).ok_or_else(|| {
+        let record = guard.get(descriptor_id).ok_or_else(|| {
             gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
         })?;
         assert_owner(record, owner_scope)?;
-        record.ref_count = record
-            .ref_count
-            .checked_add(1)
-            .ok_or_else(|| gpu_busy("native GPU descriptor ref_count overflow"))?;
+        self.acquire_slot(record.slot_handle, owner_scope)?;
         Ok(record.descriptor.clone())
     }
 
@@ -287,31 +578,23 @@ impl NativeGpuHandleRegistry {
         owner_scope: &NativeGpuOwnerScope,
     ) -> Result<NativeGpuReleaseResult, NativeRuntimeError> {
         owner_scope.validate()?;
-        let mut guard = self
-            .records
-            .write()
-            .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
-        let record = guard.get_mut(descriptor_id).ok_or_else(|| {
-            gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
-        })?;
-        assert_owner(record, owner_scope)?;
+        let slot_handle = {
+            let guard = self
+                .records
+                .read()
+                .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
+            let record = guard.get(descriptor_id).ok_or_else(|| {
+                gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
+            })?;
+            assert_owner(record, owner_scope)?;
+            record.slot_handle
+        };
 
-        if record.ref_count > 1 {
-            record.ref_count -= 1;
-            return Ok(NativeGpuReleaseResult {
-                descriptor_id: descriptor_id.to_string(),
-                remaining_refs: record.ref_count,
-                removed: false,
-            });
-        }
-        if !record.fence.is_complete() {
-            return Err(gpu_busy("native GPU descriptor fence is not complete"));
-        }
-        guard.remove(descriptor_id);
+        let result = self.release_slot(slot_handle, owner_scope)?;
         Ok(NativeGpuReleaseResult {
             descriptor_id: descriptor_id.to_string(),
-            remaining_refs: 0,
-            removed: true,
+            remaining_refs: result.remaining_refs,
+            removed: result.removed,
         })
     }
 
@@ -320,15 +603,17 @@ impl NativeGpuHandleRegistry {
         descriptor_id: &str,
         signaled_value: u64,
     ) -> Result<NativeGpuFenceSnapshot, NativeRuntimeError> {
-        let mut guard = self
-            .records
-            .write()
-            .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
-        let record = guard.get_mut(descriptor_id).ok_or_else(|| {
-            gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
-        })?;
-        record.fence.signal(signaled_value);
-        Ok(record.fence.snapshot())
+        let slot_handle = {
+            let guard = self
+                .records
+                .read()
+                .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
+            let record = guard.get(descriptor_id).ok_or_else(|| {
+                gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
+            })?;
+            record.slot_handle
+        };
+        self.signal_fence_slot(slot_handle, signaled_value)
     }
 
     pub fn materialization_plan(
@@ -365,11 +650,22 @@ impl NativeGpuHandleRegistry {
             gpu_unavailable(format!("native GPU descriptor {descriptor_id} is unavailable"))
         })?;
         assert_owner(record, owner_scope)?;
+        let slot = &self.slots[record.slot_index as usize];
+        let ref_count = slot.ref_count.load(Ordering::Acquire);
+        let signaled_value = slot.signaled_value.load(Ordering::Acquire);
+        let required_value = slot.required_value.load(Ordering::Acquire);
+        let fence_id = slot.fence_id.load(Ordering::Acquire);
+        let fence = NativeGpuFenceSnapshot {
+            fence_id,
+            required_value,
+            signaled_value,
+            complete: signaled_value >= required_value,
+        };
         Ok(NativeGpuRegistrySnapshot {
             descriptor: record.descriptor.clone(),
             owner_scope: record.owner_scope.clone(),
-            ref_count: record.ref_count,
-            fence: record.fence.snapshot(),
+            ref_count,
+            fence,
             handle: record.platform_handle.snapshot(),
         })
     }
@@ -394,7 +690,8 @@ impl NativeGpuHandleRegistry {
         &self,
         descriptor: RuntimeNativeGpuDescriptor,
         platform_handle: PlatformHandle,
-        fence: NativeFence,
+        fence_id: u64,
+        required_fence_value: u64,
         owner_scope: NativeGpuOwnerScope,
     ) -> Result<RuntimeNativeGpuDescriptor, NativeRuntimeError> {
         descriptor
@@ -419,10 +716,37 @@ impl NativeGpuHandleRegistry {
                 descriptor.id
             )));
         }
+
+        let mut free_guard = self
+            .free_slots
+            .write()
+            .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
+        let slot_index = free_guard
+            .pop()
+            .ok_or_else(|| gpu_busy("native GPU registry record limit reached"))?;
+
+        let slot = &self.slots[slot_index as usize];
+        let current_gen = slot.generation.load(Ordering::Acquire);
+        let scope_hash = hash_owner_scope(&owner_scope);
+
+        slot.ref_count.store(1, Ordering::Release);
+        slot.required_value.store(required_fence_value, Ordering::Release);
+        slot.fence_id.store(fence_id, Ordering::Release);
+        slot.signaled_value.store(0, Ordering::Release);
+        slot.owner_scope_hash.store(scope_hash, Ordering::Release);
+        slot.active.store(true, Ordering::Release);
+
+        let slot_handle = ((current_gen as u64) << 32) | (slot_index as u64);
         let public_descriptor = descriptor.clone();
         guard.insert(
             descriptor.id.clone(),
-            NativeGpuHandleRecord { descriptor, platform_handle, fence, owner_scope, ref_count: 1 },
+            NativeGpuHandleRecord {
+                descriptor,
+                platform_handle,
+                owner_scope,
+                slot_index,
+                slot_handle,
+            },
         );
         Ok(public_descriptor)
     }
@@ -465,6 +789,19 @@ impl PlatformHandle {
             }
         }
     }
+}
+
+fn hash_owner_scope(scope: &NativeGpuOwnerScope) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for s in [&scope.tenant_id, &scope.producer, &scope.device_id] {
+        for byte in s.bytes() {
+            hash ^= u64::from(byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 fn assert_owner(
@@ -642,7 +979,8 @@ mod tests {
                     _token: 99,
                     platform: RuntimeNativeGpuPlatform::LinuxDmabuf,
                 },
-                NativeFence::new(1, 0),
+                1,
+                0,
                 owner(),
             )
             .expect_err("platform mismatch");
@@ -760,5 +1098,79 @@ mod tests {
         let plan = registry.materialization_plan("frame-1", &owner()).expect("plan");
         assert_eq!(plan.descriptor.id, "frame-1");
         assert_eq!(plan.fallback, RuntimeNativeGpuFallback::CopyToWebGpu);
+    }
+
+    #[test]
+    fn slot_maplet_acquire_and_release_lifecycle() {
+        let registry = NativeGpuHandleRegistry::new(4);
+        registry.register_stub(descriptor(), owner(), 42, 5).expect("register");
+        let handle = registry.slot_handle("frame-1").expect("slot handle");
+
+        assert!(!registry.is_fence_complete_slot(handle).expect("fence check"));
+        let ref2 = registry.acquire_slot(handle, &owner()).expect("acquire slot");
+        assert_eq!(ref2, 2);
+        let ref3 = registry.acquire_slot(handle, &owner()).expect("acquire slot");
+        assert_eq!(ref3, 3);
+
+        let rel1 = registry.release_slot(handle, &owner()).expect("release slot");
+        assert_eq!(rel1.remaining_refs, 2);
+        assert!(!rel1.removed);
+
+        let rel2 = registry.release_slot(handle, &owner()).expect("release slot");
+        assert_eq!(rel2.remaining_refs, 1);
+        assert!(!rel2.removed);
+
+        let blocked = registry.release_slot(handle, &owner()).expect_err("fence incomplete");
+        assert_eq!(blocked.code, NativeErrorCode::NativeGpuBusy);
+
+        let fence = registry.signal_fence_slot(handle, 5).expect("signal fence slot");
+        assert!(fence.complete);
+        assert!(registry.is_fence_complete_slot(handle).expect("fence complete"));
+
+        let final_rel = registry.release_slot(handle, &owner()).expect("final release");
+        assert_eq!(final_rel.remaining_refs, 0);
+        assert!(final_rel.removed);
+        assert_eq!(registry.len().expect("len"), 0);
+
+        let expired = registry.acquire_slot(handle, &owner()).expect_err("expired");
+        assert_eq!(expired.code, NativeErrorCode::NativeGpuUnavailable);
+    }
+
+    #[test]
+    fn slot_maplet_rejects_owner_scope_mismatch() {
+        let registry = NativeGpuHandleRegistry::new(4);
+        registry.register_stub(descriptor(), owner(), 1, 0).expect("register");
+        let handle = registry.slot_handle("frame-1").expect("slot handle");
+        let other = NativeGpuOwnerScope::new("tenant-2", "camera-plugin", "gpu-0").expect("other");
+
+        let acquire_err = registry.acquire_slot(handle, &other).expect_err("scope mismatch");
+        assert_eq!(acquire_err.code, NativeErrorCode::NativeGpuUnauthorized);
+
+        let release_err = registry.release_slot(handle, &other).expect_err("scope mismatch");
+        assert_eq!(release_err.code, NativeErrorCode::NativeGpuUnauthorized);
+    }
+
+    #[test]
+    fn slot_maplet_generational_invalidation_on_slot_reuse() {
+        let registry = NativeGpuHandleRegistry::new(1);
+        registry.register_stub(descriptor(), owner(), 1, 0).expect("register 1");
+        let handle1 = registry.slot_handle("frame-1").expect("handle 1");
+
+        let rel = registry.release_slot(handle1, &owner()).expect("release 1");
+        assert!(rel.removed);
+
+        let mut desc2 = descriptor();
+        desc2.id = "frame-2".to_string();
+        registry.register_stub(desc2, owner(), 2, 0).expect("register 2");
+        let handle2 = registry.slot_handle("frame-2").expect("handle 2");
+
+        assert_ne!(handle1, handle2);
+        assert_eq!(handle1 & 0xffff_ffff, handle2 & 0xffff_ffff);
+
+        let stale_err = registry.acquire_slot(handle1, &owner()).expect_err("stale handle");
+        assert_eq!(stale_err.code, NativeErrorCode::NativeGpuUnavailable);
+
+        let ref_ok = registry.acquire_slot(handle2, &owner()).expect("valid handle");
+        assert_eq!(ref_ok, 2);
     }
 }

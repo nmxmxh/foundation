@@ -38,7 +38,8 @@ interface Subscriber {
 }
 
 const DEFAULT_TARGET_TPS = 60;
-const subscribers = new Set<Subscriber>();
+const subscriberList: Subscriber[] = [];
+const reusedTick: Tick = { now: 0, delta: 0 };
 
 let pulse: PulseManager | null = null;
 let scheduled = false;
@@ -143,7 +144,7 @@ function fallbackToFrames(): void {
   const loop = (now?: number) => {
     // Released: the worker pulse has taken the clock back.
     if (!selfDriven) return;
-    if (subscribers.size === 0) {
+    if (subscriberList.length === 0) {
       selfDriven = false;
       return;
     }
@@ -176,12 +177,17 @@ function run(now: number): void {
   scheduled = false;
   if (typeof document !== "undefined" && document.hidden) return;
 
-  for (const subscriber of subscribers) {
+  const count = subscriberList.length;
+  for (let i = 0; i < count; i++) {
+    const subscriber = subscriberList[i];
+    if (!subscriber) continue;
     const delta = subscriber.lastRunAt === 0 ? subscriber.cadenceMs : now - subscriber.lastRunAt;
     if (delta < subscriber.cadenceMs - 2.5) continue;
     subscriber.lastRunAt = now;
+    reusedTick.now = now;
+    reusedTick.delta = delta;
     try {
-      subscriber.run({ now, delta });
+      subscriber.run(reusedTick);
     } catch {
       // Individual subscriber errors are isolated so other passes continue uninterrupted.
     }
@@ -194,15 +200,15 @@ function run(now: number): void {
 export function onFrame(runCallback: (tick: Tick) => void, cadenceMs = 1000 / 30): FrameSubscription {
   ensurePulse();
   const subscriber: Subscriber = { run: runCallback, cadenceMs, lastRunAt: 0 };
-  subscribers.add(subscriber);
+  subscriberList.push(subscriber);
   schedule();
 
-  if (selfDriven === false && subscribers.size > 0) {
+  if (selfDriven === false && subscriberList.length > 0) {
     if (typeof SharedArrayBuffer === "undefined") {
       fallbackToFrames();
     } else {
       setTimeout(() => {
-        if (!selfDriven && subscribers.size > 0 && workerTicksReceived === 0) {
+        if (!selfDriven && subscriberList.length > 0 && workerTicksReceived === 0) {
           fallbackToFrames();
           // Honest while bridging: the pulse reported "worker" when it started,
           // but no tick has arrived, so animation frames are driving the clock.
@@ -222,7 +228,10 @@ export function onFrame(runCallback: (tick: Tick) => void, cadenceMs = 1000 / 30
       subscriber.cadenceMs = ms;
     },
     release() {
-      subscribers.delete(subscriber);
+      const index = subscriberList.indexOf(subscriber);
+      if (index !== -1) {
+        subscriberList.splice(index, 1);
+      }
     },
   };
 }
@@ -234,7 +243,7 @@ export function frameClockMode(): { mode: string; degraded: boolean; subscribers
   return {
     mode: selfDriven ? "frames" : (diagnosticsSeen?.mode ?? "stopped"),
     degraded: diagnosticsSeen?.degraded ?? false,
-    subscribers: subscribers.size,
+    subscribers: subscriberList.length,
   };
 }
 
@@ -248,5 +257,5 @@ export function _resetFrameClockForTesting(): void {
   selfDriven = false;
   diagnosticsSeen = null;
   workerTicksReceived = 0;
-  subscribers.clear();
+  subscriberList.length = 0;
 }

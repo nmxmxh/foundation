@@ -16,6 +16,7 @@ pub use native_gpu::{
     NativeGpuFenceSnapshot, NativeGpuHandleRegistry, NativeGpuMaterializationPlan,
     NativeGpuOpaquePluginHandle, NativeGpuOwnerScope, NativeGpuPlatformHandleKind,
     NativeGpuPlatformHandleSnapshot, NativeGpuRegistrySnapshot, NativeGpuReleaseResult,
+    NativeGpuSlotReleaseResult,
 };
 
 const REQUEST_MAGIC: &[u8; 4] = b"OVRN";
