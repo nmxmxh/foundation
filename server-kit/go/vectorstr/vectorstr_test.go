@@ -110,6 +110,97 @@ func TestPageBoundaryFallback(t *testing.T) {
 	}
 }
 
+// refEqualFold is the reference: ASCII-only case fold, exact match otherwise.
+func refEqualFold(s, lowerTarget string) bool {
+	if len(s) != len(lowerTarget) || len(s) > MaxLen {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b >= 'A' && b <= 'Z' {
+			b |= 0x20
+		}
+		if b != lowerTarget[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestEqualFold16RejectsNonLetterFold guards against folding bit 5 on non-letters.
+func TestEqualFold16RejectsNonLetterFold(t *testing.T) {
+	cases := [][2]string{
+		{"content\rtype", "content-type"},
+		{"@", "`"},
+		{"[", "{"},
+		{"^", "~"},
+		{"\x00", " "},
+		{"_", "\x7f"},
+	}
+	for _, c := range cases {
+		padded := MakePadded16(c[1])
+		if EqualFold16(c[0], &padded, len(c[1])) {
+			t.Errorf("EqualFold16(%q, %q) = true; want false", c[0], c[1])
+		}
+	}
+}
+
+// TestEqualFold16ExhaustiveBytePairs checks every byte pair at every position.
+func TestEqualFold16ExhaustiveBytePairs(t *testing.T) {
+	base := []byte("abcdefghijklmnop")
+	for pos := range MaxLen {
+		for a := range 256 {
+			for b := range 256 {
+				in := append([]byte(nil), base...)
+				tg := append([]byte(nil), base...)
+				in[pos], tg[pos] = byte(a), byte(b)
+				padded := MakePadded16(string(tg))
+				got := EqualFold16(string(in), &padded, len(tg))
+				if want := refEqualFold(string(in), string(tg)); got != want {
+					t.Fatalf("pos %d: EqualFold16(%#x vs %#x) = %v; want %v", pos, a, b, got, want)
+				}
+			}
+		}
+	}
+}
+
+// TestEqual16AllLengths checks every length from 0 to 17 and a one-byte change.
+func TestEqual16AllLengths(t *testing.T) {
+	src := "0123456789abcdefg"
+	for n := 0; n <= MaxLen+1; n++ {
+		s := src[:n]
+		padded := MakePadded16(s)
+		if got, want := Equal16(s, &padded, n), n <= MaxLen; got != want {
+			t.Fatalf("len %d: Equal16 = %v; want %v", n, got, want)
+		}
+		if n > 0 && n <= MaxLen {
+			mut := []byte(s)
+			mut[n-1] ^= 0x01
+			if Equal16(string(mut), &padded, n) {
+				t.Fatalf("len %d: Equal16 matched a changed last byte", n)
+			}
+		}
+	}
+}
+
+func FuzzEqualFold16(f *testing.F) {
+	f.Add("Content-Type", "content-type")
+	f.Add("content\rtype", "content-type")
+	f.Add("\xc3\x89", "\xc3\xa9")
+	f.Fuzz(func(t *testing.T, s, target string) {
+		if len(target) > MaxLen {
+			return
+		}
+		padded := MakePadded16(target)
+		if got, want := EqualFold16(s, &padded, len(target)), refEqualFold(s, target); got != want {
+			t.Fatalf("EqualFold16(%q, %q) = %v; want %v", s, target, got, want)
+		}
+		if got, want := Equal16(s, &padded, len(target)), s == target; got != want {
+			t.Fatalf("Equal16(%q, %q) = %v; want %v", s, target, got, want)
+		}
+	})
+}
+
 func BenchmarkEqual16_Exact(b *testing.B) {
 	s := "POST"
 	padded := MakePadded16("POST")
@@ -155,5 +246,85 @@ func BenchmarkStringsEqualFold(b *testing.B) {
 		if !strings.EqualFold(s, target) {
 			b.Fatal("mismatch")
 		}
+	}
+}
+
+func TestLookupCanonicalHeader(t *testing.T) {
+	cases := []struct {
+		header string
+		wantID CanonicalHeaderID
+		wantOk bool
+	}{
+		{"authorization", HeaderAuthorization, true},
+		{"content-type", HeaderContentType, true},
+		{"x-correlation-id", HeaderCorrelationID, true},
+		{"x-request-id", HeaderRequestID, true},
+		{"x-tenant-id", HeaderTenantID, true},
+		{"x-device-id", HeaderDeviceID, true},
+		{"accept", HeaderAccept, true},
+		{"", HeaderUnknown, false},
+		{"a", HeaderUnknown, false},
+		{"ac", HeaderUnknown, false},
+		{"unknown-header", HeaderUnknown, false},
+		{"x-custom-id", HeaderUnknown, false},
+	}
+
+	for _, c := range cases {
+		id, ok := LookupCanonicalHeader(c.header)
+		if ok != c.wantOk || id != c.wantID {
+			t.Errorf("LookupCanonicalHeader(%q) = (%v, %v); want (%v, %v)", c.header, id, ok, c.wantID, c.wantOk)
+		}
+	}
+}
+
+func BenchmarkLookupCanonicalHeader_PerfectHash(b *testing.B) {
+	headers := []string{
+		"authorization",
+		"content-type",
+		"x-correlation-id",
+		"x-request-id",
+		"x-tenant-id",
+		"x-device-id",
+		"accept",
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		h := headers[i%len(headers)]
+		id, ok := LookupCanonicalHeader(h)
+		_ = id
+		_ = ok
+	}
+}
+
+func BenchmarkLookupCanonicalHeader_MapBaseline(b *testing.B) {
+	headerMap := map[string]CanonicalHeaderID{
+		"authorization":    HeaderAuthorization,
+		"content-type":     HeaderContentType,
+		"x-correlation-id": HeaderCorrelationID,
+		"x-request-id":     HeaderRequestID,
+		"x-tenant-id":      HeaderTenantID,
+		"x-device-id":      HeaderDeviceID,
+		"accept":           HeaderAccept,
+	}
+
+	headers := []string{
+		"authorization",
+		"content-type",
+		"x-correlation-id",
+		"x-request-id",
+		"x-tenant-id",
+		"x-device-id",
+		"accept",
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		h := headers[i%len(headers)]
+		id, ok := headerMap[h]
+		_ = id
+		_ = ok
 	}
 }

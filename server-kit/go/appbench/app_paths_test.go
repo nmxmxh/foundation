@@ -16,6 +16,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/auth"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/cache"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/circuitbreaker"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/grpcsvc"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/httpapi"
@@ -235,6 +236,96 @@ func BenchmarkAppLane_HTTPIngress_ZeroAlloc(b *testing.B) {
 		nBody.reset()
 		if _, err := plan.Build(req); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+type benchPipelineRows struct {
+	count int
+	index int
+}
+
+func (r *benchPipelineRows) Close() {}
+func (r *benchPipelineRows) Next() bool {
+	if r.index < r.count {
+		r.index++
+		return true
+	}
+	return false
+}
+func (r *benchPipelineRows) Scan(dest ...any) error { return nil }
+func (r *benchPipelineRows) ScanInt() (int, error)  { return r.index, nil }
+func (r *benchPipelineRows) Err() error             { return nil }
+
+type benchPipelineQueryer struct {
+	rows benchPipelineRows
+}
+
+func (q *benchPipelineQueryer) Query(context.Context, string, ...any) (database.Rows, error) {
+	q.rows.index = 0
+	return &q.rows, nil
+}
+
+func BenchmarkAppLane_EndToEnd_ScratchArena(b *testing.B) {
+	route := registry.HTTPRoute{
+		Method:    http.MethodPost,
+		Path:      "/v1/documents",
+		EventType: "document.create",
+	}
+	body := []byte(`{"title":"quarterly report"}`)
+	plan := httpapi.CompileDispatchRoute(route)
+	arena := scratch.New(64 * 1024)
+	ctx := scratch.WithArena(context.Background(), arena)
+	nBody := newNullBody(body)
+	req := httptest.NewRequest(http.MethodPost, "/v1/documents", nBody).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/x-protobuf")
+	req.Header.Set("X-Correlation-Id", "corr_e2e_arena")
+	req.ContentLength = int64(len(body))
+
+	authorizer := security.NewAuthorizer([]security.RoleTemplate{{
+		Role:         "admin",
+		Capabilities: []string{"document.create"},
+	}})
+	actorMask := authorizer.RoleMask("admin")
+	requiredMask, _ := authorizer.CapabilityBit("document.create")
+
+	queryer := &benchPipelineQueryer{rows: benchPipelineRows{count: 10}}
+
+	respObj := extension.Object{
+		"status": extension.String("ok"),
+		"count":  extension.Int(10),
+	}
+
+	b.ReportAllocs()
+
+	for b.Loop() {
+		arena.Reset()
+		nBody.reset()
+
+		// 1. Ingress build (zero heap allocs using context arena)
+		dispatchReq, err := plan.Build(req)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = dispatchReq
+
+		// 2. O(1) bitwise capability authorization check (zero allocs)
+		if (actorMask & requiredMask) != requiredMask {
+			b.Fatal("unauthorized")
+		}
+
+		// 3. Database batch query scanning directly into arena slice (zero heap allocs)
+		rows, err := database.QueryAllArena(ctx, arena, queryer, 10, "SELECT id", func(r database.Rows) (int, error) {
+			return database.DirectScanInt(r)
+		})
+		if err != nil || len(rows) != 10 {
+			b.Fatalf("query failed: %v", err)
+		}
+
+		// 4. JSON Response serialization directly into arena buffer (zero heap allocs)
+		out, err := respObj.MarshalJSONFastWithArena(arena)
+		if err != nil || len(out) == 0 {
+			b.Fatalf("marshal failed: %v", err)
 		}
 	}
 }

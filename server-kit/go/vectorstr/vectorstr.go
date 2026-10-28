@@ -1,28 +1,20 @@
+// Package vectorstr compares short strings against fixed 16-byte targets.
+//
+// Each compare copies at most 16 bytes of the input into a local array.
+// It never reads memory past len(s), so checkptr and the race detector accept it.
 package vectorstr
 
-import (
-	"encoding/binary"
-	"unsafe"
+import "encoding/binary"
+
+const (
+	// MaxLen is the longest target that a 16-byte pad can hold.
+	MaxLen = 16
+
+	high8  = 0x8080808080808080
+	geA    = 0x3f3f3f3f3f3f3f3f // byte + 0x3F sets bit 7 when byte >= 'A'.
+	gtZ    = 0x2525252525252525 // byte + 0x25 sets bit 7 when byte > 'Z'.
+	asciiN = high8
 )
-
-// PageSizeMask identifies the offset within a 4096-byte virtual memory page.
-const PageSizeMask = 0xFFF
-
-// PageBoundaryRoom ensures that reading 16 bytes will not cross a page boundary.
-const PageBoundaryRoom = 4096 - 16
-
-// lenMasks provides bitmasks for lengths 0 through 8.
-var lenMasks = [9]uint64{
-	0x0000000000000000,
-	0x00000000000000FF,
-	0x000000000000FFFF,
-	0x0000000000FFFFFF,
-	0x00000000FFFFFFFF,
-	0x000000FFFFFFFFFF,
-	0x0000FFFFFFFFFFFF,
-	0x00FFFFFFFFFFFFFF,
-	0xFFFFFFFFFFFFFFFF,
-}
 
 // MakePadded16 creates a 16-byte zero-padded array from a string up to 16 bytes.
 func MakePadded16(s string) [16]byte {
@@ -31,95 +23,56 @@ func MakePadded16(s string) [16]byte {
 	return buf
 }
 
-// Equal16 compares string s against a 16-byte zero-padded target with constant-time
-// 64-bit register operations when memory is page-safe.
-func Equal16(s string, targetPadded *[16]byte, targetLen int) bool {
-	if len(s) != targetLen {
-		return false
-	}
-	if targetLen == 0 {
-		return true
-	}
-	if targetLen > 16 {
-		return s == string(targetPadded[:16])
-	}
-
-	ptr := unsafe.StringData(s) // #nosec G103 -- string buffer base pointer.
-	// Guard against virtual memory page boundary crossing to prevent SIGSEGV.
-	addr := uintptr(unsafe.Pointer(ptr)) // #nosec G103 -- page boundary calculation.
-	if (addr & PageSizeMask) > PageBoundaryRoom {
-		return s == string(targetPadded[:targetLen])
-	}
-
-	tgt0 := binary.LittleEndian.Uint64(targetPadded[0:8])
-
-	if targetLen <= 8 {
-		mask := lenMasks[targetLen]
-		src0 := *(*uint64)(unsafe.Pointer(ptr)) // #nosec G103 -- page-safe 64-bit word read.
-		return (src0 & mask) == tgt0
-	}
-
-	// targetLen > 8 and <= 16
-	src0 := *(*uint64)(unsafe.Pointer(ptr)) // #nosec G103 -- page-safe 64-bit word read.
-	if src0 != tgt0 {
-		return false
-	}
-
-	mask1 := lenMasks[targetLen-8]
-	src1 := *(*uint64)(unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + 8)) // #nosec G103 -- page-safe second 64-bit word read.
-	tgt1 := binary.LittleEndian.Uint64(targetPadded[8:16])
-	return (src1 & mask1) == tgt1
+// load16 copies s into a zero-padded array and returns two little-endian words.
+// The caller must make sure that len(s) <= 16.
+func load16(s string) (uint64, uint64) {
+	var buf [16]byte
+	copy(buf[:], s)
+	return binary.LittleEndian.Uint64(buf[0:8]), binary.LittleEndian.Uint64(buf[8:16])
 }
 
-// EqualFold16 provides case-insensitive 16-byte ASCII comparison.
+// Equal16 compares string s against a 16-byte zero-padded target.
+func Equal16(s string, targetPadded *[16]byte, targetLen int) bool {
+	if len(s) != targetLen || targetLen > MaxLen {
+		return false
+	}
+	w0, w1 := load16(s)
+	return w0 == binary.LittleEndian.Uint64(targetPadded[0:8]) &&
+		w1 == binary.LittleEndian.Uint64(targetPadded[8:16])
+}
+
+// foldWord converts ASCII 'A'..'Z' to lowercase in all 8 byte lanes.
+// Other bytes do not change. All bytes must be below 0x80.
+func foldWord(w uint64) uint64 {
+	upper := (w + geA) &^ (w + gtZ) & high8
+	return w | (upper >> 2)
+}
+
+// EqualFold16 compares s against a lowercase 16-byte zero-padded target.
+// It folds ASCII letters only. Bytes at or above 0x80 must match exactly.
 func EqualFold16(s string, lowerPadded *[16]byte, targetLen int) bool {
-	if len(s) != targetLen {
+	if len(s) != targetLen || targetLen > MaxLen {
 		return false
 	}
-	if targetLen == 0 {
-		return true
+	w0, w1 := load16(s)
+	t0 := binary.LittleEndian.Uint64(lowerPadded[0:8])
+	t1 := binary.LittleEndian.Uint64(lowerPadded[8:16])
+	if (w0|w1)&asciiN != 0 {
+		return equalFoldScalar(s, lowerPadded)
 	}
-	if targetLen > 16 {
-		return false
-	}
+	return foldWord(w0) == t0 && foldWord(w1) == t1
+}
 
-	ptr := unsafe.StringData(s) // #nosec G103 -- string buffer base pointer.
-	addr := uintptr(unsafe.Pointer(ptr)) // #nosec G103 -- page boundary calculation.
-	if (addr & PageSizeMask) > PageBoundaryRoom {
-		// Fallback for page boundaries
-		for i := range targetLen {
-			c := s[i]
-			if c >= 'A' && c <= 'Z' {
-				c += 'a' - 'A'
-			}
-			if c != lowerPadded[i] {
-				return false
-			}
+// equalFoldScalar is the per-byte path for input that holds non-ASCII bytes.
+func equalFoldScalar(s string, lowerPadded *[16]byte) bool {
+	for i := 0; i < len(s); i++ {
+		b := s[i]
+		if b >= 'A' && b <= 'Z' {
+			b |= 0x20
 		}
-		return true
+		if b != lowerPadded[i] {
+			return false
+		}
 	}
-
-	// ASCII uppercase to lowercase bitmask (bit 5: 0x20)
-	const toLowerMask = 0x2020202020202020
-
-	tgt0 := binary.LittleEndian.Uint64(lowerPadded[0:8])
-	if targetLen <= 8 {
-		mask := lenMasks[targetLen]
-		src0 := *(*uint64)(unsafe.Pointer(ptr)) // #nosec G103 -- page-safe 64-bit word read.
-		// Convert ASCII uppercase to lowercase in parallel across 8 bytes
-		folded0 := src0 | toLowerMask
-		return (folded0 & mask) == (tgt0 & mask)
-	}
-
-	src0 := *(*uint64)(unsafe.Pointer(ptr)) // #nosec G103 -- page-safe 64-bit word read.
-	folded0 := src0 | toLowerMask
-	if (folded0 & lenMasks[8]) != (tgt0 & lenMasks[8]) {
-		return false
-	}
-
-	mask1 := lenMasks[targetLen-8]
-	src1 := *(*uint64)(unsafe.Pointer(uintptr(unsafe.Pointer(ptr)) + 8)) // #nosec G103 -- page-safe second 64-bit word read.
-	tgt1 := binary.LittleEndian.Uint64(lowerPadded[8:16])
-	folded1 := src1 | toLowerMask
-	return (folded1 & mask1) == (tgt1 & mask1)
+	return true
 }

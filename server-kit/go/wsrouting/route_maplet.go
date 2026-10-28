@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 )
 
 // RouteMaplet is an in-memory edge cache mapping DeviceID or UserID to
@@ -45,6 +46,73 @@ func (rm *RouteMaplet) MemoryBytes() int {
 
 // Count returns the number of cached routes.
 func (rm *RouteMaplet) Count() int {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	return rm.maplet.Count()
+}
+
+// SecureRouteEntry bundles the destination server shard and the required capability mask.
+type SecureRouteEntry struct {
+	ShardID      uint8
+	RequiredMask security.CapabilityMask
+}
+
+// SecureRouteMaplet combines high-speed shard lookup with zero-allocation RBAC
+// capability bitmask verification in a single cache-efficient step.
+type SecureRouteMaplet struct {
+	mu     sync.RWMutex
+	maplet *metadata.WideMaplet
+	routes map[string]SecureRouteEntry
+}
+
+// NewSecureRouteMaplet creates an edge routing cache sized for expectedConnections.
+func NewSecureRouteMaplet(expectedConnections int) *SecureRouteMaplet {
+	return &SecureRouteMaplet{
+		maplet: metadata.NewWideMaplet(expectedConnections),
+		routes: make(map[string]SecureRouteEntry, expectedConnections),
+	}
+}
+
+// SetRoute records the server shard ID (0..15) and required capability mask for a route.
+func (rm *SecureRouteMaplet) SetRoute(routeKey string, serverShardID uint8, requiredMask security.CapabilityMask) error {
+	rm.mu.Lock()
+	defer rm.mu.Unlock()
+	if err := rm.maplet.Insert(routeKey, serverShardID); err != nil {
+		return err
+	}
+	rm.routes[routeKey] = SecureRouteEntry{
+		ShardID:      serverShardID,
+		RequiredMask: requiredMask,
+	}
+	return nil
+}
+
+// RouteAndAuthorize performs an atomic route lookup and bitwise capability check.
+// Returns (shardID, true) if the route exists and actorMask satisfies RequiredMask.
+// Returns (shardID, false) if the route exists but actor lacks required capabilities.
+// Returns (0, false) if the route does not exist.
+func (rm *SecureRouteMaplet) RouteAndAuthorize(routeKey string, actorMask security.CapabilityMask) (uint8, bool) {
+	rm.mu.RLock()
+	entry, ok := rm.routes[routeKey]
+	rm.mu.RUnlock()
+	if !ok {
+		return 0, false
+	}
+	if (actorMask & entry.RequiredMask) != entry.RequiredMask {
+		return entry.ShardID, false
+	}
+	return entry.ShardID, true
+}
+
+// GetRoute performs a fast-path lookup for the server shard ID without auth check.
+func (rm *SecureRouteMaplet) GetRoute(routeKey string) (uint8, bool) {
+	rm.mu.RLock()
+	defer rm.mu.RUnlock()
+	return rm.maplet.Lookup(routeKey)
+}
+
+// Count returns the number of cached routes.
+func (rm *SecureRouteMaplet) Count() int {
 	rm.mu.RLock()
 	defer rm.mu.RUnlock()
 	return rm.maplet.Count()

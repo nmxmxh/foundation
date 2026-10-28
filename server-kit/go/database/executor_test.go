@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func TestExecCommandAndQueryOneValidateInputs(t *testing.T) {
@@ -132,7 +134,7 @@ type fallbackRows struct {
 	val int
 }
 
-func (r *fallbackRows) Close() {}
+func (r *fallbackRows) Close()     {}
 func (r *fallbackRows) Next() bool { return false }
 func (r *fallbackRows) Err() error { return nil }
 func (r *fallbackRows) Scan(dest ...any) error {
@@ -230,6 +232,59 @@ func (f *executorFakeRows) Next() bool {
 	}
 	f.index++
 	return true
+}
+
+func TestQueryAllArena(t *testing.T) {
+	ctx := context.Background()
+	arena := scratch.New(4096)
+
+	t.Run("explicit arena allocation", func(t *testing.T) {
+		arena.Reset()
+		db := &fakeRowQueryer{rows: &executorFakeRows{items: 10}}
+		items, err := QueryAllArena(ctx, arena, db, 10, "SELECT id", func(rows Rows) (int, error) {
+			return DirectScanInt(rows)
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(items) != 10 {
+			t.Fatalf("expected 10 items, got %d", len(items))
+		}
+		if arena.Allocated() == 0 {
+			t.Fatalf("expected memory to be allocated from arena, got 0")
+		}
+	})
+
+	t.Run("context arena allocation", func(t *testing.T) {
+		arena.Reset()
+		ctxWithArena := scratch.WithArena(ctx, arena)
+		db := &fakeRowQueryer{rows: &executorFakeRows{items: 10}}
+		items, err := QueryAllArena(ctxWithArena, nil, db, 10, "SELECT id", func(rows Rows) (int, error) {
+			return DirectScanInt(rows)
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(items) != 10 {
+			t.Fatalf("expected 10 items, got %d", len(items))
+		}
+		if arena.Allocated() == 0 {
+			t.Fatalf("expected memory to be allocated from context arena, got 0")
+		}
+	})
+
+	t.Run("nil arena fallback", func(t *testing.T) {
+		db := &fakeRowQueryer{rows: &executorFakeRows{items: 5}}
+		items, err := QueryAllArena(ctx, nil, db, 5, "SELECT id", func(rows Rows) (int, error) {
+			return DirectScanInt(rows)
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(items) != 5 {
+			t.Fatalf("expected 5 items, got %d", len(items))
+		}
+	})
 }
 
 func (f *executorFakeRows) Scan(dest ...any) error {

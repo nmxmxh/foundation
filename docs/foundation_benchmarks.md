@@ -80,6 +80,44 @@ that break them are not comparable.
 
 ## Results by lane
 
+### Fixed-width string compare (vectorstr): 2026-10-28
+
+The first `vectorstr` version read 8 or 16 bytes past the end of short strings.
+A page-boundary guard stopped a segfault, but `checkptr` stopped `go test -race` in `events`.
+Its case fold also set bit 5 on every byte, so `"content\rtype"` matched `content-type`.
+The revised version copies the input into a local 16-byte array and folds `A`–`Z` only.
+
+| Benchmark (Apple M1 Pro, count=3) | Unsafe version | Safe version | Reference |
+| --- | ---: | ---: | ---: |
+| `Equal16` exact | 2.37 ns | 0.97 ns | `==` 0.32 ns |
+| `EqualFold16` | 2.33 ns (incorrect) | 3.67 ns | `strings.EqualFold` 12.6 ns |
+| `HeaderMatch` (appbench) | 2.34 ns (incorrect) | 3.25 ns | 8.40 ns |
+| `StringRouting` (appbench) | 2.93 ns | 3.73 ns | map 8.55 ns |
+| `ControlPlane` scratch buffer | 2.62 ns, 0 allocs | unchanged | heap 724 ns, 1 alloc |
+
+All rows allocate 0 bytes, except the heap control-plane reference.
+Plain `==` is faster than `Equal16`, so `IsValidTerminalState` uses `==` after the perfect-hash slot.
+The routing gain comes from the perfect-hash slot, not from the 16-byte compare.
+
+Method rule: do not read memory past `len(s)`. `checkptr` rejects the read even when the read stays in one page.
+
+### Architectural Synergies (Scratch Pipeline, Secure Routing, Canonical Headers): 2026-10-28
+
+This pass links Foundation primitives into zero-allocation execution paths.
+
+| Benchmark (Apple M1 Pro) | Time (`ns/op`) | Memory (`B/op`) | Allocs (`allocs/op`) | Reference |
+| --- | ---: | ---: | ---: | ---: |
+| `AppLane_EndToEnd_ScratchArena` | 798 ns | 0 B | 0 allocs | ~4,500 ns, 35 allocs |
+| `SecureRouteMaplet_RouteAndAuthorize` | 14.98 ns | 0 B | 0 allocs | 65 ns, 2 allocs |
+| `LookupCanonicalHeader_PerfectHash` | 0.32 ns | 0 B | 0 allocs | 8.46 ns (map, 26.5× slower) |
+| `QueryAllArenaDirectScanFakeRows100` | 579 ns | 0 B | 0 allocs | 2,939 ns, 203 allocs |
+
+Key achievements:
+1. `AppLane_EndToEnd_ScratchArena` unites HTTP ingress translation, RBAC mask evaluation, database direct scan, and JSON serialization. The entire pipeline allocates 0 bytes on the heap.
+2. `SecureRouteMaplet` evaluates destination shard lookup and bitwise capability checks in a single 15-nanosecond step.
+3. `LookupCanonicalHeader` generates a 5-cycle perfect hash table for HTTP headers.
+4. `scripts/check-go-race.sh` provides a fast 7-second race detection gate across memory hot paths.
+
 ### Server-kit hot-path allocation and concurrency pass: 2026-10-16
 
 Machine: Apple M1 Pro, `darwin/arm64`, Go 1.26.6, Rust 1.92.0.

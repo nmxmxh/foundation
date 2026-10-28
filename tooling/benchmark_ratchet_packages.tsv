@@ -17,7 +17,7 @@
 # so its allocs/op and B/op move with goroutine scheduling. Measured drift of
 # ~40 B/op between consecutive runs on identical hardware confirmed it cannot
 # be gated. Worker-pool cost is tracked in the benchmark ledger instead.
-server-kit/go	./appbench	^Benchmark(NullLane_|AppLane_(Auth|Cache|CircuitBreaker|DirectFrame|HTTPIngress|HTTPMiddleware|Retry))
+server-kit/go	./appbench	^Benchmark(NullLane_|AppLane_(Auth|Cache|CircuitBreaker|DirectFrame|HTTPIngress|HTTPMiddleware|Retry|EndToEnd_ScratchArena)|StringRouting_FoundationVector|HeaderMatch_FoundationVectorFold|ControlPlane_FoundationScratch)
 
 # Frame codec and same-process dispatch: the top rungs of the transport ladder.
 server-kit/go	./grpcsvc	^Benchmark(RouterDispatchFrameDirect|DirectFrameClientDispatch|BoundFrameClientDispatch|BoundFrameClientDispatchTrusted|BinaryFrame|GeneratedProto)
@@ -35,3 +35,4 @@ server-kit/go	./chain	^BenchmarkHasCriticalFailure
 server-kit/go	./hermes	^BenchmarkHermesColumnarBitmapFilterSum$
 server-kit/go	./placement	^Benchmark(MirrorFrame(Encode|Decode)32|RemoteComputeRoundTrip)
 runtime-sdk/go	./runtimehost	^BenchmarkPlacementFullHostPath
+server-kit/go	./vectorstr	^Benchmark(Equal16_Exact|EqualFold16)$

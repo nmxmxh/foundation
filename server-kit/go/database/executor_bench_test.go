@@ -3,6 +3,8 @@ package database
 import (
 	"context"
 	"testing"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func BenchmarkQueryAllFakeRows100(b *testing.B) {
@@ -108,6 +110,27 @@ func BenchmarkExecRowsAffectedFake(b *testing.B) {
 		}
 		if rows != 1 {
 			b.Fatalf("rows affected = %d", rows)
+		}
+	}
+}
+
+func BenchmarkQueryAllArenaDirectScanFakeRows100(b *testing.B) {
+	b.ReportAllocs()
+	ctx := context.Background()
+	arena := scratch.New(4096)
+	rows := &executorFakeRows{items: 100}
+	db := &fakeRowQueryer{rows: rows}
+	for b.Loop() {
+		arena.Reset()
+		rows.index = 0
+		items, err := QueryAllArena(ctx, arena, db, 100, "SELECT id", func(rows Rows) (int, error) {
+			return DirectScanInt(rows)
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(items) != 100 {
+			b.Fatalf("len(items) = %d", len(items))
 		}
 	}
 }

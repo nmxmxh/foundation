@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 // ExecCommand runs a bounded command through the minimal DBTX contract.
@@ -148,6 +150,46 @@ func QueryAllCapacity[T any](ctx context.Context, db RowQueryer, capacity int, q
 		capacity = 0
 	}
 	items := make([]T, 0, capacity)
+	err := QueryEach(ctx, db, query, func(rows Rows) error {
+		item, err := scan(rows)
+		if err != nil {
+			return err
+		}
+		items = append(items, item)
+		return nil
+	}, args...)
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// QueryAllArena collects streamed rows into a typed slice allocated inside a scratch arena.
+// If arena is nil, it inspects ctx via scratch.FromContext(ctx). If an arena is available
+// and capacity > 0, it uses scratch.AllocSlice[T] to achieve zero heap allocations.
+// Otherwise, it falls back to standard slice allocation.
+func QueryAllArena[T any](ctx context.Context, arena *scratch.Arena, db RowQueryer, capacity int, query string, scan func(Rows) (T, error), args ...any) ([]T, error) {
+	if scan == nil {
+		return nil, errors.New("row scanner function is required")
+	}
+	if capacity < 0 {
+		capacity = 0
+	}
+	if arena == nil && ctx != nil {
+		arena = scratch.FromContext(ctx)
+	}
+
+	var items []T
+	if arena != nil && capacity > 0 {
+		buf, err := scratch.AllocSlice[T](arena, capacity)
+		if err == nil {
+			items = buf[:0]
+		}
+	}
+	if items == nil {
+		items = make([]T, 0, capacity)
+	}
+
 	err := QueryEach(ctx, db, query, func(rows Rows) error {
 		item, err := scan(rows)
 		if err != nil {
