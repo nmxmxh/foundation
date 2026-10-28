@@ -117,7 +117,6 @@ export const RUNTIME_ENVELOPE_COMPATIBILITY_MATRIX: EnvelopeCompatibilityMatrix 
   aliases: envelopeSchemaAliases,
 });
 
-const nextToken = (prefix: string) => `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 const normalizeString = (value: string | null | undefined) => value?.trim() ?? "";
 
 const lowerSnakeSegmentPattern = /^[a-z0-9_]+$/;
