@@ -62,10 +62,7 @@ pub struct WideMaplet<const BUCKETS: usize> {
 
 impl<const BUCKETS: usize> Default for WideMaplet<BUCKETS> {
     fn default() -> Self {
-        Self {
-            buckets: [[0; MAPLET_SLOTS_PER_BUCKET]; BUCKETS],
-            count: 0,
-        }
+        Self { buckets: [[0; MAPLET_SLOTS_PER_BUCKET]; BUCKETS], count: 0 }
     }
 }
 
@@ -211,10 +208,7 @@ pub struct CountingMaplet<const BUCKETS: usize> {
 
 impl<const BUCKETS: usize> Default for CountingMaplet<BUCKETS> {
     fn default() -> Self {
-        Self {
-            buckets: [[0; MAPLET_SLOTS_PER_BUCKET]; BUCKETS],
-            count: 0,
-        }
+        Self { buckets: [[0; MAPLET_SLOTS_PER_BUCKET]; BUCKETS], count: 0 }
     }
 }
 

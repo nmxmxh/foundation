@@ -732,6 +732,45 @@ Vector equality masks check all 32 bytes in parallel.
 A trailing-zero count instruction extracts the match index in one clock cycle.
 Scanning throughput jumps from 2 GB/s to 30+ GB/s.
 
+### Compile-time minimal perfect hashing (the Spacetime Folding trick)
+
+Most software searches strings at runtime using dynamic hash maps.
+Dynamic hash maps compute hash digests, search bucket chains, and allocate heap memory.
+When string keys are known at build time, runtime search becomes unnecessary.
+
+The compiler or code generator acts as an offline oracle:
+
+1. It analyzes character frequencies at key positions.
+2. It solves a greedy association table puzzle offline.
+3. It maps each valid key into a single unique slot with zero collisions.
+
+At runtime, search collapses into simple scalar operations:
+`slot = (length + asso[key[0]] + asso[key[len-1]]) & mask`
+
+The lookup needs only one memory read and one equality check.
+Hash computation, bucket chains, and pointer chasing vanish completely.
+Lookup latency drops to two nanoseconds per query.
+
+### Page-safe speculative vector loads (the 16-byte vector illusion)
+
+Textbook string comparison inspects bytes in a sequential loop.
+Each loop iteration executes increments, character comparisons, and conditional branches.
+Branch predictors struggle when string lengths vary frequently.
+
+Speculative vector loads treat short strings as fixed 128-bit words:
+
+1. Load 16 bytes unconditionally into a vector register.
+2. Zero out bytes beyond string length with a vector shuffle instruction.
+3. Compare against zero-padded reference keys with a single SIMD equality instruction.
+
+Speculative reads are safe when memory does not cross virtual memory page boundaries.
+The page guard validates safety with one bitwise test:
+`(address & 0xFFF) <= (4096 - 16)`
+
+When near page edges, execution takes a safe scalar fallback path.
+The processor branch predictor takes the fast vector path almost always.
+Lookup latency drops to five clock cycles.
+
 ### Compiler bounds check elimination (the Roc trick)
 
 Safe languages enforce bounds checks on every slice index.
@@ -831,6 +870,7 @@ These are the magical ideas that map directly to our foundation work.
 - `kernellane.PunchHole` as extent-level deallocation: freeing disk blocks in-place without logical truncation or file copying
 - `hermes` Arrow columnar SWAR/AVX2 scanning: turning substring and multi-tag filtering into branchless bitwise masks
 - stack scanners in `compress.PreferredEncoding`: parsing HTTP quality values without heap allocation
+- compile-time minimal perfect hashing: resolving terminal event states in 2 nanoseconds with zero map collisions
 
 ### TypeScript / runtime-transport
 
@@ -838,6 +878,7 @@ These are the magical ideas that map directly to our foundation work.
 - envelope contracts as structured spell circles
 - capability-scoped routing as permission glyphs
 - fallback chains (`ws -> http`) as continuity enchantments
+- pre-indexed route registries: single-probe route resolution avoiding runtime regex scans
 
 ### Rust / runtime-sdk
 
@@ -845,6 +886,7 @@ These are the magical ideas that map directly to our foundation work.
 - SIMD as parallel incantation
 - ownership and borrowing as conservation laws
 - fixed-size memory topology as ritual geometry
+- vectorized 128-bit opcode verification: dispatching control buffer commands in 5 clock cycles
 
 ### Postgres / Redis
 

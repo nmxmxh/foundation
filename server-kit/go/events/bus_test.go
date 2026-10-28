@@ -461,6 +461,26 @@ func BenchmarkTerminalState(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkIsValidTerminalState_PerfectHash(b *testing.B) {
+	state := "success"
+	b.ReportAllocs()
+	for b.Loop() {
+		if !IsValidTerminalState(state) {
+			b.Fatal("expected valid terminal state")
+		}
+	}
+}
+
+func BenchmarkIsValidTerminalState_MapBaseline(b *testing.B) {
+	state := "success"
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, ok := terminalStates[state]; !ok {
+			b.Fatal("expected valid terminal state")
+		}
+	}
+}
 func TestEventContractTerminalHelpers(t *testing.T) {
 	if got := TerminalState("orders:create:v1:requested"); got != "requested" {
 		t.Fatalf("TerminalState = %q", got)

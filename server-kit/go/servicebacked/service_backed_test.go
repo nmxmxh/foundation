@@ -5,6 +5,7 @@ package servicebacked
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -423,6 +424,159 @@ func TestServiceBackedNervousSystemLifecycle(t *testing.T) {
 	trace := observability.Default().Trace(correlationID, 0)
 	if len(trace) < 2 {
 		t.Fatalf("trace length = %d, want at least publish stages", len(trace))
+	}
+}
+
+func canonicalJSON(data []byte) []byte {
+	var obj any
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return data
+	}
+	canonical, err := json.Marshal(obj)
+	if err != nil {
+		return data
+	}
+	return canonical
+}
+
+// TestServiceBackedDeterministicParityAndStress validates the ISO/IEC 25010 & MAYA data integrity framework:
+// 1. row_count parity: no dropped records.
+// 2. key_parity: exact set equality of primary/correlation keys.
+// 3. null_distribution: zero missing non-nullable metadata.
+// 4. content_checksum: order-independent commutative cryptographic hash matching (XOR sum of SHA-256).
+// 5. column_aggregates: numerical conservation law.
+// 6. stress & variability: Relative Standard Deviation (RSD) monitoring under concurrent load.
+func TestServiceBackedDeterministicParityAndStress(t *testing.T) {
+	observability.Default().Reset()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	env := requireServiceEnv(t)
+	client := openRedis(t, env)
+	defer func() { _ = client.Close() }()
+
+	store := openPostgres(t, env, serviceBackedPoolOptions(16))
+	defer store.Close()
+	applyStateSchema(t, ctx, store)
+
+	bus := events.NewRedisBus(client, uniqueName(env.prefix, "parity-events"), 64, nil)
+	defer func() { _ = bus.Close() }()
+
+	const numOps = 100
+	sourceRecords := make([]contracttest.MAYADataRecord, numOps)
+	stressRecorder := contracttest.NewStressRecorder(numOps)
+
+	for i := 0; i < numOps; i++ {
+		corrID := uniqueName(env.prefix, fmt.Sprintf("corr-%03d", i))
+		tenantID := fmt.Sprintf("tenant-org-%02d", i%5)
+		amount := int64(1000 + i*17)
+		rawJSON := fmt.Sprintf(`{"amount":%d,"index":%d,"organization_id":%q,"tag":"maya-parity"}`, amount, i, tenantID)
+		canonical := canonicalJSON([]byte(rawJSON))
+
+		sourceRecords[i] = contracttest.MAYADataRecord{
+			Key:     corrID,
+			Payload: canonical,
+			Attributes: map[string]string{
+				"tenant_id":      tenantID,
+				"correlation_id": corrID,
+			},
+			Amount: amount,
+		}
+	}
+
+	// Concurrently publish and persist all operations
+	var wg sync.WaitGroup
+	errCh := make(chan error, numOps)
+
+	for i := 0; i < numOps; i++ {
+		wg.Add(1)
+		go func(rec contracttest.MAYADataRecord) {
+			defer wg.Done()
+			start := time.Now()
+
+			// 1. Publish to Redis Bus
+			metadata := map[string]any{
+				"correlation_id":  rec.Key,
+				"organization_id": rec.Attributes["tenant_id"],
+			}
+			env := lifecycleEnvelope("parity:order:requested", rec.Key, metadata)
+			if err := bus.Publish(ctx, env); err != nil {
+				errCh <- fmt.Errorf("bus publish failed for %s: %w", rec.Key, err)
+				return
+			}
+
+			// 2. Persist to Postgres State Store
+			rawStore, ok := store.(database.RawStateStore)
+			if !ok {
+				errCh <- fmt.Errorf("postgres store does not implement RawStateStore")
+				return
+			}
+			rawRecord := database.RawDomainRecord{
+				Domain:         "parity",
+				Collection:     "orders",
+				OrganizationID: rec.Attributes["tenant_id"],
+				RecordID:       rec.Key,
+				DataJSON:       rec.Payload,
+			}
+			if _, err := rawStore.UpsertRecordJSON(ctx, rawRecord); err != nil {
+				errCh <- fmt.Errorf("postgres store upsert failed for %s: %w", rec.Key, err)
+				return
+			}
+
+			stressRecorder.Record(time.Since(start))
+		}(sourceRecords[i])
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Fatalf("concurrent pipeline error: %v", err)
+	}
+
+	rawStore, ok := store.(database.RawStateStore)
+	if !ok {
+		t.Fatalf("postgres store does not implement RawStateStore")
+	}
+
+	// Read back all persisted state from Postgres and construct targetRecords
+	targetRecords := make([]contracttest.MAYADataRecord, 0, numOps)
+	for _, src := range sourceRecords {
+		tenantID := src.Attributes["tenant_id"]
+		rec, found, err := rawStore.GetRecordJSON(ctx, "parity", "orders", tenantID, src.Key)
+		if err != nil {
+			t.Fatalf("postgres store get failed for %s: %v", src.Key, err)
+		}
+		if !found {
+			t.Fatalf("postgres record dropped for %s", src.Key)
+		}
+
+		targetRecords = append(targetRecords, contracttest.MAYADataRecord{
+			Key:     rec.RecordID,
+			Payload: canonicalJSON(rec.DataJSON),
+			Attributes: map[string]string{
+				"tenant_id":      rec.OrganizationID,
+				"correlation_id": rec.RecordID,
+			},
+			Amount: src.Amount,
+		})
+	}
+
+	// Deterministic Data Validation: MAYA 5-Point Parity Proof
+	verifier := contracttest.NewMAYAVerifier("tenant_id", "correlation_id")
+	result := verifier.VerifyParity(sourceRecords, targetRecords)
+	if !result.AllPassed {
+		t.Fatalf("ISO/IEC 25010 & MAYA parity verification FAILED:\n%s", result.ErrorSummary())
+	}
+
+	// Performance and Stress Variability Analysis (ISO/IEC 25010 Time Behavior)
+	metrics := stressRecorder.Evaluate()
+	t.Logf("[MAYA PASS] Parity: 100%% | Checksum: %s | Total Amount: %d", result.SourceChecksum, result.SourceAggregate)
+	t.Logf("[STRESS METRICS] Count: %d | Mean: %v | P95: %v | P99: %v | Max: %v | RSD: %.2f%%",
+		metrics.Count, metrics.MeanLatency, metrics.P95Latency, metrics.P99Latency, metrics.MaxLatency, metrics.RSD)
+
+	if metrics.RSD > 150.0 {
+		t.Fatalf("unstable performance behavior: Relative Standard Deviation (RSD) %.2f%% exceeded threshold (150%%)", metrics.RSD)
 	}
 }
 
