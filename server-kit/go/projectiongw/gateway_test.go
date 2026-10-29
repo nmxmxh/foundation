@@ -487,6 +487,9 @@ func TestScopeKeyAndResolverEdges(t *testing.T) {
 func TestWriteErrorClasses(t *testing.T) {
 	cases := map[error]int{
 		ErrUnauthenticated:        401,
+		ErrScopeForbidden:         403,
+		ErrAudienceForbidden:      403,
+		ErrAudienceUndeclared:     403,
 		ErrScopeInvalid:           400,
 		errors.New("other thing"): 400,
 	}

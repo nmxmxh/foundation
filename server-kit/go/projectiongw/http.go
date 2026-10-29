@@ -9,10 +9,23 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	foundationpb "github.com/nmxmxh/ovasabi_foundation/runtime-transport/go/generated/foundation/v1"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
+)
+
+var (
+	// writeWait is the maximum duration permitted for writing a message.
+	writeWait = 10 * time.Second
+
+	// pongWait is the maximum time allowed to read the next pong message from the peer.
+	pongWait = 60 * time.Second
+
+	// pingPeriod is the send period for pings to the peer. Must be less than pongWait.
+	pingPeriod = 30 * time.Second
 )
 
 // projectionUpgrader upgrades projection subscription requests. Origin is
@@ -250,6 +263,34 @@ func (g *Gateway) snapshotScope(config HandlerConfig, r *http.Request, w http.Re
 // client resumes by sending its last watermark as the first text frame; the
 // gateway does not replay history, so a gap (or any dropped frame) must be
 // reconciled with a fresh snapshot.
+// configureWebSocketConn registers deadlines, heartbeat handlers, and a ping pump.
+func configureWebSocketConn(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, cancel context.CancelFunc) {
+	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+	ticker := time.NewTicker(pingPeriod)
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				writeMu.Lock()
+				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+				err := conn.WriteMessage(websocket.PingMessage, nil)
+				writeMu.Unlock()
+				if err != nil {
+					cancel()
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+}
+
 func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Scope and identity are resolved before the upgrade, so an unauthorized
@@ -278,8 +319,26 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 		defer func() { _ = conn.Close() }()
 		defer sub.Cancel()
 
-		ctx, cancel := context.WithCancel(r.Context())
+		ctx, cancel := context.WithCancel(scratch.WithArena(r.Context(), nil))
 		defer cancel()
+
+		var writeMu sync.Mutex
+		writeFrame := func(messageType int, payload []byte) error {
+			writeMu.Lock()
+			defer writeMu.Unlock()
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+			return conn.WriteMessage(messageType, payload)
+		}
+		writeControl := func(frame ControlFrame) error {
+			payload, err := json.Marshal(frame)
+			if err != nil {
+				return err
+			}
+			return writeFrame(websocket.TextMessage, payload)
+		}
+
+		configureWebSocketConn(ctx, conn, &writeMu, cancel)
+
 		// Reader pump: drain inbound frames (advisory resume token + control)
 		// and detect client close so the writer loop exits promptly.
 		go func() {
@@ -288,6 +347,7 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 					cancel()
 					return
 				}
+				_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 			}
 		}()
 
@@ -298,7 +358,12 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 		emitResyncIfDropped := func() error {
 			if dropped := sub.Dropped(); dropped > lastDropped {
 				lastDropped = dropped
-				return sendResync(conn, lastEpoch, dropped)
+				return writeControl(ControlFrame{
+					Type:    ControlResync,
+					Reason:  "slow-consumer",
+					Epoch:   lastEpoch,
+					Dropped: dropped,
+				})
 			}
 			return nil
 		}
@@ -321,7 +386,7 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 				if err := emitResyncIfDropped(); err != nil {
 					return
 				}
-				if err := conn.WriteMessage(websocket.BinaryMessage, frame.Envelope); err != nil {
+				if err := writeFrame(websocket.BinaryMessage, frame.Envelope); err != nil {
 					return
 				}
 			}
@@ -379,7 +444,7 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 		}
 		defer func() { _ = conn.Close() }()
 
-		ctx, cancel := context.WithCancel(r.Context())
+		ctx, cancel := context.WithCancel(scratch.WithArena(r.Context(), nil))
 		defer cancel()
 
 		// gorilla connections allow one concurrent writer; every scope pump and
@@ -388,6 +453,7 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 		writeFrame := func(messageType int, payload []byte) error {
 			writeMu.Lock()
 			defer writeMu.Unlock()
+			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
 			return conn.WriteMessage(messageType, payload)
 		}
 		writeControl := func(frame ControlFrame) error {
@@ -397,6 +463,8 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 			}
 			return writeFrame(websocket.TextMessage, payload)
 		}
+
+		configureWebSocketConn(ctx, conn, &writeMu, cancel)
 
 		var subsMu sync.Mutex
 		subs := map[string]*Subscription{}
@@ -494,6 +562,7 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 				cancel()
 				return
 			}
+			_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 			if messageType != websocket.TextMessage {
 				continue
 			}
@@ -538,20 +607,7 @@ type ControlFrame struct {
 	Collection string `json:"collection,omitempty"`
 }
 
-// sendResync emits a resync control frame as a WebSocket text message. The
-// client distinguishes control frames (text/string) from delta frames (binary).
-func sendResync(conn *websocket.Conn, epoch, dropped uint64) error {
-	payload, err := json.Marshal(ControlFrame{
-		Type:    ControlResync,
-		Reason:  "slow-consumer",
-		Epoch:   epoch,
-		Dropped: dropped,
-	})
-	if err != nil {
-		return err
-	}
-	return conn.WriteMessage(websocket.TextMessage, payload)
-}
+
 
 func writeError(w http.ResponseWriter, err error) {
 	switch {

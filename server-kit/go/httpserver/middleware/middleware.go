@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"time"
 
@@ -115,6 +116,12 @@ func CORS(next http.Handler) http.Handler {
 // DefaultScratchArenaSize is the default capacity (64 KB) for per-request scratch arenas.
 const DefaultScratchArenaSize = 64 * 1024
 
+// DetachScratchArena strips any scratch arena from context.
+// Use this before spawning background workers or long-lived streaming goroutines.
+func DetachScratchArena(ctx context.Context) context.Context {
+	return scratch.WithArena(ctx, nil)
+}
+
 // WithScratchArena attaches a recycled scratch.Arena to the request context.
 // Downstream handlers, database queries, and serializers use this arena for zero allocations.
 func WithScratchArena(next http.Handler) http.Handler {
@@ -133,6 +140,12 @@ func WithCustomScratchArena(size int) func(http.Handler) http.Handler {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Persistent WebSocket connections must not hold pooled single-worker arenas.
+			if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			arena := pool.Get().(*scratch.Arena)
 			arena.Reset()
 			defer pool.Put(arena)

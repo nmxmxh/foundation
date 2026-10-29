@@ -107,4 +107,27 @@ func TestWithScratchArenaMiddleware(t *testing.T) {
 	if rr2.Code != http.StatusOK {
 		t.Fatalf("custom handler bad code: %d", rr2.Code)
 	}
+
+	// Test WebSocket upgrade request bypasses arena attachment
+	wsCalled := false
+	wsHandler := WithScratchArena(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		wsCalled = true
+		if arena := scratch.FromContext(r.Context()); arena != nil {
+			t.Fatal("expected no scratch arena in WebSocket upgrade context")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	wsReq := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ws", nil)
+	wsReq.Header.Set("Upgrade", "websocket")
+	wsRecorder := httptest.NewRecorder()
+	wsHandler.ServeHTTP(wsRecorder, wsReq)
+	if !wsCalled || wsRecorder.Code != http.StatusOK {
+		t.Fatalf("ws handler failed: called=%v code=%d", wsCalled, wsRecorder.Code)
+	}
+
+	// Test DetachScratchArena removes arena
+	detached := DetachScratchArena(scratch.WithArena(context.Background(), scratch.New(1024)))
+	if scratch.FromContext(detached) != nil {
+		t.Fatal("expected nil arena after DetachScratchArena")
+	}
 }

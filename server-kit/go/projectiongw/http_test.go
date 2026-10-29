@@ -633,3 +633,188 @@ func TestMultiplexHandlerTeardownReleasesOnClientClose(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// TestMultiplexHandlerTeardownWithoutBroadcast proves that when a client closes
+// cleanly, the reader loop promptly tears down subscriptions even if no frames
+// are ever broadcast to that topic.
+func TestMultiplexHandlerTeardownWithoutBroadcast(t *testing.T) {
+	store, _ := hermes.NewStore(hermes.ProjectionSpec{Name: "signals", Domain: "signals", Collection: "quiet", MaxRecords: 64, MaxBytes: 1 << 20})
+	gw, err := NewGateway(store, 1)
+	if err != nil {
+		t.Fatalf("NewGateway() err=%v", err)
+	}
+	defer gw.Close()
+	_, conn := dialMultiplex(t, gw)
+
+	subscribe := `{"type":"subscribe","scopes":[{"domain":"signals","collection":"quiet"}]}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(subscribe)); err != nil {
+		t.Fatalf("subscribe write err=%v", err)
+	}
+	key := "org_1:signals:quiet"
+	deadline := time.Now().Add(2 * time.Second)
+	for gw.Hub().SubscriberCount(key) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("subscription not registered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	// Client closes cleanly without any subsequent broadcasts.
+	_ = conn.Close()
+
+	teardown := time.Now().Add(2 * time.Second)
+	for gw.Hub().SubscriberCount(key) > 0 {
+		if time.Now().After(teardown) {
+			t.Fatalf("subscriber count after clean close without broadcast = %d, want 0", gw.Hub().SubscriberCount(key))
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// TestMultiplexHandlerHeartbeatAndTimeout proves that the server sends periodic
+// ping frames to active WebSocket clients.
+func TestMultiplexHandlerHeartbeatAndTimeout(t *testing.T) {
+	origPing := pingPeriod
+	origPong := pongWait
+	origWrite := writeWait
+	pingPeriod = 10 * time.Millisecond
+	pongWait = 50 * time.Millisecond
+	writeWait = 30 * time.Millisecond
+	defer func() {
+		pingPeriod = origPing
+		pongWait = origPong
+		writeWait = origWrite
+	}()
+
+	store, _ := hermes.NewStore(hermes.ProjectionSpec{Name: "signals", Domain: "signals", Collection: "hb", MaxRecords: 64, MaxBytes: 1 << 20})
+	gw, err := NewGateway(store, 1)
+	if err != nil {
+		t.Fatalf("NewGateway() err=%v", err)
+	}
+	defer gw.Close()
+
+	pingReceived := make(chan struct{}, 1)
+	srv := httptest.NewServer(orgContextHandler("org_1", gw.Handler(HandlerConfig{})))
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/projections/"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		srv.Close()
+		t.Fatalf("ws dial err=%v", err)
+	}
+	defer func() { _ = conn.Close(); srv.Close() }()
+
+	conn.SetPingHandler(func(appData string) error {
+		select {
+		case pingReceived <- struct{}{}:
+		default:
+		}
+		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(30*time.Millisecond))
+	})
+
+	subscribe := `{"type":"subscribe","scopes":[{"domain":"signals","collection":"hb"}]}`
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(subscribe)); err != nil {
+		t.Fatalf("subscribe write err=%v", err)
+	}
+	key := "org_1:signals:hb"
+	deadline := time.Now().Add(2 * time.Second)
+	for gw.Hub().SubscriberCount(key) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("subscription not registered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-pingReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected ping from server heartbeat ticker")
+	}
+
+	// Abrupt connection teardown on underlying connection tests ticker ping failure path
+	_ = conn.UnderlyingConn().Close()
+	teardownDeadline := time.Now().Add(2 * time.Second)
+	for gw.Hub().SubscriberCount(key) > 0 {
+		if time.Now().After(teardownDeadline) {
+			t.Fatalf("subscriber count after socket abort = %d, want 0", gw.Hub().SubscriberCount(key))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestSubscribeHandlerHeartbeatAndTeardown tests ping/pong and connection lifecycle on single-scope streams.
+func TestSubscribeHandlerHeartbeatAndTeardown(t *testing.T) {
+	origPing := pingPeriod
+	origPong := pongWait
+	origWrite := writeWait
+	pingPeriod = 10 * time.Millisecond
+	pongWait = 50 * time.Millisecond
+	writeWait = 30 * time.Millisecond
+	defer func() {
+		pingPeriod = origPing
+		pongWait = origPong
+		writeWait = origWrite
+	}()
+
+	store, _ := hermes.NewStore(hermes.ProjectionSpec{Name: "signals", Domain: "signals", Collection: "single", MaxRecords: 64, MaxBytes: 1 << 20})
+	gw, err := NewGateway(store, 1)
+	if err != nil {
+		t.Fatalf("NewGateway() err=%v", err)
+	}
+	defer gw.Close()
+
+	pingReceived := make(chan struct{}, 1)
+	srv := httptest.NewServer(orgContextHandler("org_1", gw.Handler(HandlerConfig{})))
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/projections/signals/single"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		srv.Close()
+		t.Fatalf("ws dial err=%v", err)
+	}
+	defer func() { _ = conn.Close(); srv.Close() }()
+
+	conn.SetPingHandler(func(appData string) error {
+		select {
+		case pingReceived <- struct{}{}:
+		default:
+		}
+		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(30*time.Millisecond))
+	})
+
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-pingReceived:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected ping on single-scope subscription")
+	}
+
+	key := "org_1:signals:single"
+	_ = conn.UnderlyingConn().Close()
+	teardownDeadline := time.Now().Add(2 * time.Second)
+	for gw.Hub().SubscriberCount(key) > 0 {
+		if time.Now().After(teardownDeadline) {
+			t.Fatalf("subscriber count after socket abort = %d, want 0", gw.Hub().SubscriberCount(key))
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

@@ -104,13 +104,18 @@ func normalizeRecordDataWithOrganization(data database.RecordData, organizationI
 			return data[i].Name >= "organization_id"
 		})
 		if idx < len(data) && data[idx].Name == "organization_id" {
-			data[idx].Value = orgValue
-			return data
+			if data[idx].Value.Equal(orgValue) {
+				return data
+			}
+			cloned := append(database.RecordData(nil), data...)
+			cloned[idx].Value = orgValue
+			return cloned
 		}
-		data = append(data, database.RecordField{})
-		copy(data[idx+1:], data[idx:])
-		data[idx] = database.RecordField{Name: "organization_id", Value: orgValue}
-		return data
+		cloned := make(database.RecordData, len(data)+1)
+		copy(cloned[:idx], data[:idx])
+		cloned[idx] = database.RecordField{Name: "organization_id", Value: orgValue}
+		copy(cloned[idx+1:], data[idx:])
+		return cloned
 	}
 	normalized := data.Normalize()
 	idx := sort.Search(len(normalized), func(i int) bool {

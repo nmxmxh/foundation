@@ -171,9 +171,6 @@ func WithArena(ctx context.Context, a *Arena) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if a == nil {
-		return ctx
-	}
 	return context.WithValue(ctx, contextKey{}, a)
 }
 
