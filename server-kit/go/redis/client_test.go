@@ -1172,3 +1172,42 @@ func TestMemoryClientSortedSetZRem(t *testing.T) {
 func memberFor(index int) string {
 	return "sig-" + string(rune('a'+index))
 }
+
+func TestMemoryClientSortedSetZAddMany(t *testing.T) {
+	ctx := context.Background()
+	base := NewMemoryClient("rank")
+	defer func() { _ = base.Close() }()
+
+	zClient, ok := base.(SortedSetClient)
+	if !ok {
+		t.Fatalf("expected memory client to implement SortedSetClient")
+	}
+
+	entries := []ZAddEntry{
+		{Key: "feed:alpha", Score: 100.0, Member: "sig_1"},
+		{Key: "feed:alpha", Score: 105.0, Member: "sig_2"},
+		{Key: "feed:beta", Score: 200.0, Member: "sig_1"},
+	}
+
+	added, err := zClient.ZAddMany(ctx, entries)
+	if err != nil {
+		t.Fatalf("ZAddMany failed: %v", err)
+	}
+	if len(added) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(added))
+	}
+	if added[0] != 1 || added[1] != 1 || added[2] != 1 {
+		t.Fatalf("expected all new insertions, got: %v", added)
+	}
+
+	// Re-inserting existing member with same score yields 0 added
+	added2, err := zClient.ZAddMany(ctx, []ZAddEntry{
+		{Key: "feed:alpha", Score: 100.0, Member: "sig_1"},
+	})
+	if err != nil {
+		t.Fatalf("ZAddMany repeat failed: %v", err)
+	}
+	if len(added2) != 1 || added2[0] != 0 {
+		t.Fatalf("expected 0 added for existing member, got: %v", added2)
+	}
+}

@@ -110,10 +110,20 @@ type KeyAdminClient interface {
 // semantics. Ranks ascend by score with lexicographically-ascending tie
 // breaks; ZRevRange is the exact mirror of that order, so tied members come
 // back reverse-lexicographic — identical on every driver.
+// ZAddEntry represents one sorted set insertion in a multi-key or batch operation.
+type ZAddEntry struct {
+	Key    string
+	Score  float64
+	Member string
+}
+
 type SortedSetClient interface {
 	// ZAdd inserts or updates one member and reports whether the member was
 	// newly added (1) versus rescored (0).
 	ZAdd(ctx context.Context, key string, score float64, member string) (int64, error)
+	// ZAddMany inserts or updates multiple members across one or more sorted sets
+	// in a single pipelined operation.
+	ZAddMany(ctx context.Context, entries []ZAddEntry) ([]int64, error)
 	// ZRevRange returns members in descending score order within the
 	// inclusive [start, stop] rank window of the reversed set. Negative
 	// indices count from the end (-1 = last), matching Redis. Newest-N reads
@@ -853,6 +863,38 @@ func (c *memoryClient) ZAdd(_ context.Context, key string, score float64, member
 	}
 	set[member] = score
 	return added, nil
+}
+
+func (c *memoryClient) ZAddMany(_ context.Context, entries []ZAddEntry) ([]int64, error) {
+	out := make([]int64, len(entries))
+	if len(entries) == 0 {
+		return out, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil, fmt.Errorf("memory redis client is closed")
+	}
+	now := time.Now()
+	for i, entry := range entries {
+		if entry.Key == "" {
+			continue
+		}
+		qualified := c.qualify(entry.Key)
+		c.expireIfNeededLocked(qualified, now)
+		set := c.zsets[qualified]
+		if set == nil {
+			set = map[string]float64{}
+			c.zsets[qualified] = set
+		}
+		added := int64(1)
+		if _, exists := set[entry.Member]; exists {
+			added = 0
+		}
+		set[entry.Member] = entry.Score
+		out[i] = added
+	}
+	return out, nil
 }
 
 // zsetAscending orders members the way Redis ranks them: score ascending,
@@ -1859,6 +1901,39 @@ func (c *redisClient) ZAdd(ctx context.Context, key string, score float64, membe
 	return added, err
 }
 
+func (c *redisClient) ZAddMany(ctx context.Context, entries []ZAddEntry) ([]int64, error) {
+	out := make([]int64, len(entries))
+	if len(entries) == 0 {
+		return out, nil
+	}
+	start := time.Now()
+	pipe := c.client.Pipeline()
+	cmds := make([]*goredis.IntCmd, len(entries))
+	for i, entry := range entries {
+		if entry.Key == "" {
+			continue
+		}
+		cmds[i] = pipe.ZAdd(ctx, c.qualify(entry.Key), goredis.Z{Score: entry.Score, Member: entry.Member})
+	}
+	_, execErr := pipe.Exec(ctx)
+	var firstErr error
+	for i, cmd := range cmds {
+		if cmd == nil {
+			continue
+		}
+		res, err := cmd.Result()
+		out[i] = res
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if execErr != nil && firstErr == nil {
+		firstErr = execErr
+	}
+	recordRedisOperation("zadd_many", start, firstErr)
+	return out, firstErr
+}
+
 func (c *redisClient) ZRevRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
 	startedAt := time.Now()
 	members, err := c.client.ZRevRange(ctx, c.qualify(key), start, stop).Result()
@@ -2165,6 +2240,42 @@ func (c *shardedClient) DeletePattern(ctx context.Context, pattern string, limit
 
 func (c *shardedClient) ZAdd(ctx context.Context, key string, score float64, member string) (int64, error) {
 	return c.shard(key).ZAdd(ctx, key, score, member)
+}
+
+func (c *shardedClient) ZAddMany(ctx context.Context, entries []ZAddEntry) ([]int64, error) {
+	out := make([]int64, len(entries))
+	if len(entries) == 0 {
+		return out, nil
+	}
+	type item struct {
+		idx   int
+		entry ZAddEntry
+	}
+	byShard := make(map[*redisClient][]item)
+	for i, entry := range entries {
+		if entry.Key == "" {
+			continue
+		}
+		s := c.shard(entry.Key)
+		byShard[s] = append(byShard[s], item{idx: i, entry: entry})
+	}
+	var firstErr error
+	for s, items := range byShard {
+		shardEntries := make([]ZAddEntry, len(items))
+		for j, it := range items {
+			shardEntries[j] = it.entry
+		}
+		res, err := s.ZAddMany(ctx, shardEntries)
+		if err != nil && firstErr == nil {
+			firstErr = err
+		}
+		for j, it := range items {
+			if j < len(res) {
+				out[it.idx] = res[j]
+			}
+		}
+	}
+	return out, firstErr
 }
 
 func (c *shardedClient) ZRevRange(ctx context.Context, key string, start, stop int64) ([]string, error) {
