@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -433,5 +434,47 @@ func TestValidateTokenEmptyPayloadNoPanic(t *testing.T) {
 
 	if _, err := manager.ValidateToken(emptyPayloadToken); err == nil {
 		t.Fatalf("expected error for empty payload token")
+	}
+}
+
+func TestValidateTokenWithArena_DirtyMemoryWithLargePayload(t *testing.T) {
+	manager, err := NewJWTManager("super-secret-key-at-least-16-bytes")
+	if err != nil {
+		t.Fatalf("new jwt manager failed: %v", err)
+	}
+
+	caps := make([]string, 50)
+	for i := range caps {
+		caps[i] = fmt.Sprintf("domain.action_capability_item_%d", i)
+	}
+	largeToken, err := manager.GenerateAccessToken(Claims{
+		UserID:       "usr_large_1",
+		Role:         "customer",
+		Capabilities: caps,
+	}, time.Hour)
+	if err != nil {
+		t.Fatalf("generate token failed: %v", err)
+	}
+
+	// Create an arena and deliberately poison it with 0x80 bytes to simulate
+	// previous columnar/SWAR scanner reuse from sync.Pool.
+	buf := make([]byte, 64*1024)
+	for i := range buf {
+		buf[i] = 0x80
+	}
+	arena := scratch.NewWithBuffer(buf)
+
+	claims, err := manager.ValidateTokenWithArena(arena, largeToken)
+	if err != nil {
+		t.Fatalf("ValidateTokenWithArena failed: %v", err)
+	}
+	if len(claims.Capabilities) != 50 {
+		t.Fatalf("expected 50 capabilities, got %d", len(claims.Capabilities))
+	}
+	for i, c := range claims.Capabilities {
+		expected := fmt.Sprintf("domain.action_capability_item_%d", i)
+		if c != expected {
+			t.Fatalf("capability %d mismatch: got %q, want %q", i, c, expected)
+		}
 	}
 }

@@ -339,4 +339,17 @@ func TestWireEmptyPageCarriesBatchField(t *testing.T) {
 	}
 }
 
+func TestWireSnapshotPartsFromProtoNilScope(t *testing.T) {
+	parts, err := snapshotPartsFromProto(&foundationpb.ProjectionSnapshot{
+		Watermark: "10",
+		Epoch:     1,
+	})
+	if err != nil {
+		t.Fatalf("snapshotPartsFromProto err=%v", err)
+	}
+	if parts.scopeBytes != nil {
+		t.Fatalf("expected nil scopeBytes, got %v", parts.scopeBytes)
+	}
+}
+
 var _ io.Writer = (*errAfterNWriter)(nil)

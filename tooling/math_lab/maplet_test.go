@@ -233,10 +233,12 @@ func BenchmarkMetadataLookup_Maplet(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	var i int
+	for b.Loop() {
 		k := keys[i&(n-1)]
 		val, _ := m.Lookup(k)
 		_ = val
+		i++
 	}
 }
 
@@ -251,10 +253,12 @@ func BenchmarkMetadataLookup_GoMapInt(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	var i int
+	for b.Loop() {
 		k := keys[i&(n-1)]
 		val := goMap[k]
 		_ = val
+		i++
 	}
 }
 
@@ -276,9 +280,11 @@ func BenchmarkMetadataLookup_EnvelopeMetadata(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	var i int
+	for b.Loop() {
 		k := keys[i&(n-1)]
 		env := canonMap[k]
 		_ = env.DataClassification
+		i++
 	}
 }

@@ -42,3 +42,32 @@ func TestHubBroadcastReachesSubscriber(t *testing.T) {
 		t.Fatalf("unexpected drops: %d", sub.Dropped())
 	}
 }
+
+func TestDedupeKeys(t *testing.T) {
+	if got := dedupeKeys(nil); got != nil {
+		t.Fatalf("dedupeKeys(nil) = %v; want nil", got)
+	}
+	keys := []string{"", "key1", "key1", "key2", ""}
+	deduped := dedupeKeys(keys)
+	if len(deduped) != 2 || deduped[0] != "key1" || deduped[1] != "key2" {
+		t.Fatalf("unexpected deduped keys: %v", deduped)
+	}
+}
+
+func TestHubSubscriberCountsEdgeCases(t *testing.T) {
+	hub := NewHub(4)
+	sub := hub.SubscribeKeys(nil, false)
+	if sub == nil {
+		t.Fatal("expected non-nil subscription for empty keys")
+	}
+	defer sub.Cancel()
+
+	if n := hub.SubscriberCount("nonexistent"); n != 0 {
+		t.Fatalf("SubscriberCount(nonexistent) = %d; want 0", n)
+	}
+	withVec, withoutVec := hub.VectorSubscriberCounts("nonexistent")
+	if withVec != 0 || withoutVec != 0 {
+		t.Fatalf("VectorSubscriberCounts(nonexistent) = (%d, %d); want (0, 0)", withVec, withoutVec)
+	}
+}
+

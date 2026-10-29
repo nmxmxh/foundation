@@ -60,6 +60,17 @@ func audienceScope() *foundationpb.ProjectionScope {
 	return &foundationpb.ProjectionScope{TenantId: "org_default", Domain: audienceDomain, Collection: audienceCollection}
 }
 
+func TestAudienceConfigValidateTenantMode(t *testing.T) {
+	cfg := AudienceConfig{
+		Policies: map[string]AudiencePolicy{
+			"tenant_scoped": {Mode: AudienceTenant},
+		},
+	}
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("cfg.validate() err=%v; want nil", err)
+	}
+}
+
 func stringValue(value string) *foundationpb.ScalarValue {
 	return &foundationpb.ScalarValue{Kind: &foundationpb.ScalarValue_StringValue{StringValue: value}}
 }

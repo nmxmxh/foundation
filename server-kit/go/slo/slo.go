@@ -34,6 +34,9 @@ func Evaluate(cfg Config, observed Observation) []Breach {
 	return breaches
 }
 
-func (b Breach) Error() string {
+func (b *Breach) Error() string {
+	if b == nil {
+		return "slo breach: <nil>"
+	}
 	return fmt.Sprintf("%s breach: observed=%g threshold=%g", b.Name, b.Observed, b.Threshold)
 }

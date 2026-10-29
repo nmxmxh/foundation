@@ -126,6 +126,7 @@ func (m *JWTManager) ValidateTokenWithArena(arena *scratch.Arena, token string) 
 	if err != nil {
 		return m.ValidateToken(token)
 	}
+	*claims = Claims{}
 	if err := m.validateTokenIntoArena(claims, token, arena); err != nil {
 		return nil, err
 	}
@@ -138,6 +139,9 @@ func (m *JWTManager) ValidateTokenWithArena(arena *scratch.Arena, token string) 
 // ValidateTokenInto validates token signature and expiry, unmarshaling claims directly into target.
 // When target is caller-allocated (on stack or arena), this eliminates the return pointer allocation.
 func (m *JWTManager) ValidateTokenInto(target *Claims, token string) error {
+	if target != nil {
+		*target = Claims{}
+	}
 	if err := m.validateTokenIntoArena(target, token, nil); err != nil {
 		return err
 	}
@@ -312,6 +316,7 @@ func decodeAndUnmarshalClaimsWithArena(payloadPart string, claims *Claims, arena
 	if len(payload) == 0 {
 		return errInvalidTokenFormat
 	}
+	*claims = Claims{}
 	if err := json.Unmarshal(payload, claims); err != nil {
 		return fmt.Errorf("unmarshal claims: %w", err)
 	}

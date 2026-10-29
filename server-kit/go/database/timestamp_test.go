@@ -122,7 +122,7 @@ func BenchmarkFormatRFC3339UTC_FastPath(b *testing.B) {
 	canonical := "2026-10-24T22:58:00.123456Z"
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = FormatRFC3339UTC(canonical)
 	}
 }
@@ -131,7 +131,7 @@ func BenchmarkFormatRFC3339UTC_NormalizePG(b *testing.B) {
 	pgOutput := "2026-10-24 22:58:00.123456+00"
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = FormatRFC3339UTC(pgOutput)
 	}
 }

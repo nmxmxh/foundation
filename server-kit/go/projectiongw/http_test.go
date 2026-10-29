@@ -808,6 +808,9 @@ func TestSubscribeHandlerHeartbeatAndTeardown(t *testing.T) {
 		t.Fatal("expected ping on single-scope subscription")
 	}
 
+	_ = conn.WriteMessage(websocket.TextMessage, []byte("watermark_0"))
+	time.Sleep(10 * time.Millisecond)
+
 	key := "org_1:signals:single"
 	_ = conn.UnderlyingConn().Close()
 	teardownDeadline := time.Now().Add(2 * time.Second)
@@ -816,5 +819,91 @@ func TestSubscribeHandlerHeartbeatAndTeardown(t *testing.T) {
 			t.Fatalf("subscriber count after socket abort = %d, want 0", gw.Hub().SubscriberCount(key))
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestSnapshotHandlerVectorsInclude(t *testing.T) {
+	gw := newTestGateway(t)
+	if _, err := gw.ApplyEnvelopes(t.Context(), "signals", mustEnvelope(t, tickMutation("tick_1", 1, "OVS"))); err != nil {
+		t.Fatalf("ApplyEnvelopes() err=%v", err)
+	}
+	handler := gw.Handler(HandlerConfig{
+		Tenant: PublicTenantFunc("org_1"),
+	})
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/projections/signals/ticks?vectors=include", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSnapshotHandlerScopeValidationErrors(t *testing.T) {
+	gw := newTestGateway(t)
+	handler := gw.Handler(HandlerConfig{
+		Tenant: PublicTenantFunc("org_1"),
+	})
+
+	for _, path := range []string{
+		"/v1/projections/too/many/path/parts",
+		"/v1/projections/invalid!domain/ticks",
+	} {
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("GET %s status = %d, want 400", path, rec.Code)
+		}
+	}
+}
+
+func TestSubscribeHandlerAudienceAndScopeErrors(t *testing.T) {
+	gw := newTestGateway(t)
+	handler := gw.Handler(HandlerConfig{
+		Tenant: PublicTenantFunc("org_1"),
+		Audience: func(*http.Request) ([]string, error) {
+			return nil, errors.New("audience error")
+		},
+	})
+
+	// Audience error before upgrade
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/projections/signals/ticks", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("audience error status = %d, want 400", rec.Code)
+	}
+
+	// Invalid scope before upgrade
+	validAudienceHandler := gw.Handler(HandlerConfig{
+		Tenant: PublicTenantFunc("org_1"),
+	})
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/v1/projections/invalid!domain/ticks", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	validAudienceHandler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid scope status = %d, want 400", rec.Code)
+	}
+}
+
+func TestMultiplexHandlerAudienceError(t *testing.T) {
+	gw := newTestGateway(t)
+	handler := gw.Handler(HandlerConfig{
+		Tenant: PublicTenantFunc("org_1"),
+		Audience: func(*http.Request) ([]string, error) {
+			return nil, errors.New("multiplex audience error")
+		},
+	})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/projections/", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("multiplex audience error status = %d, want 400", rec.Code)
 	}
 }

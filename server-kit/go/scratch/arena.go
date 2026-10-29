@@ -147,6 +147,7 @@ func AllocSlice[T any](a *Arena, count int) ([]T, error) {
 	if err != nil {
 		return nil, err
 	}
+	clear(raw)
 	return unsafe.Slice((*T)(unsafe.Pointer(&raw[0])), count), nil // #nosec G103 -- arena typed slice view.
 }
 

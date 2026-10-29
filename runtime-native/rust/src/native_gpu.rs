@@ -307,9 +307,7 @@ impl NativeGpuHandleRegistry {
         if !slot.active.load(Ordering::Acquire)
             || slot.generation.load(Ordering::Acquire) != generation
         {
-            return Err(gpu_unavailable(
-                "native GPU slot handle is unavailable or expired",
-            ));
+            return Err(gpu_unavailable("native GPU slot handle is unavailable or expired"));
         }
 
         if slot.owner_scope_hash.load(Ordering::Acquire) != hash_owner_scope(owner_scope) {
@@ -322,9 +320,7 @@ impl NativeGpuHandleRegistry {
         let mut current = slot.ref_count.load(Ordering::Relaxed);
         loop {
             if current == 0 {
-                return Err(gpu_unavailable(
-                    "native GPU slot descriptor has zero references",
-                ));
+                return Err(gpu_unavailable("native GPU slot descriptor has zero references"));
             }
             if current == u32::MAX {
                 return Err(gpu_busy("native GPU descriptor ref_count overflow"));
@@ -357,9 +353,7 @@ impl NativeGpuHandleRegistry {
         if !slot.active.load(Ordering::Acquire)
             || slot.generation.load(Ordering::Acquire) != generation
         {
-            return Err(gpu_unavailable(
-                "native GPU slot handle is unavailable or expired",
-            ));
+            return Err(gpu_unavailable("native GPU slot handle is unavailable or expired"));
         }
 
         if slot.owner_scope_hash.load(Ordering::Acquire) != hash_owner_scope(owner_scope) {
@@ -372,9 +366,7 @@ impl NativeGpuHandleRegistry {
         let mut current = slot.ref_count.load(Ordering::Relaxed);
         loop {
             if current == 0 {
-                return Err(gpu_unavailable(
-                    "native GPU slot descriptor already released",
-                ));
+                return Err(gpu_unavailable("native GPU slot descriptor already released"));
             }
             if current > 1 {
                 match slot.ref_count.compare_exchange_weak(
@@ -417,9 +409,7 @@ impl NativeGpuHandleRegistry {
         if !slot.active.load(Ordering::Acquire)
             || slot.generation.load(Ordering::Acquire) != generation
         {
-            return Err(gpu_unavailable(
-                "native GPU slot handle is unavailable or expired",
-            ));
+            return Err(gpu_unavailable("native GPU slot handle is unavailable or expired"));
         }
 
         let prev = slot.signaled_value.fetch_max(signaled_value, Ordering::AcqRel);
@@ -446,9 +436,7 @@ impl NativeGpuHandleRegistry {
         if !slot.active.load(Ordering::Acquire)
             || slot.generation.load(Ordering::Acquire) != generation
         {
-            return Err(gpu_unavailable(
-                "native GPU slot handle is unavailable or expired",
-            ));
+            return Err(gpu_unavailable("native GPU slot handle is unavailable or expired"));
         }
 
         let signaled = slot.signaled_value.load(Ordering::Acquire);
@@ -470,9 +458,7 @@ impl NativeGpuHandleRegistry {
         if !slot.active.load(Ordering::Acquire)
             || slot.generation.load(Ordering::Acquire) != generation
         {
-            return Err(gpu_unavailable(
-                "native GPU slot handle is unavailable or expired",
-            ));
+            return Err(gpu_unavailable("native GPU slot handle is unavailable or expired"));
         }
 
         let signaled = slot.signaled_value.load(Ordering::Acquire);
@@ -501,9 +487,7 @@ impl NativeGpuHandleRegistry {
         if !slot.active.load(Ordering::Acquire)
             || slot.generation.load(Ordering::Acquire) != generation
         {
-            return Err(gpu_unavailable(
-                "native GPU slot handle is unavailable or expired",
-            ));
+            return Err(gpu_unavailable("native GPU slot handle is unavailable or expired"));
         }
         if slot.owner_scope_hash.load(Ordering::Acquire) != hash_owner_scope(owner_scope) {
             return Err(NativeRuntimeError::new(
@@ -515,10 +499,7 @@ impl NativeGpuHandleRegistry {
         let current_refs = slot.ref_count.load(Ordering::Acquire);
         if current_refs > 1 {
             let new_refs = slot.ref_count.fetch_sub(1, Ordering::AcqRel) - 1;
-            return Ok(NativeGpuSlotReleaseResult {
-                remaining_refs: new_refs,
-                removed: false,
-            });
+            return Ok(NativeGpuSlotReleaseResult { remaining_refs: new_refs, removed: false });
         }
 
         let signaled = slot.signaled_value.load(Ordering::Acquire);
@@ -548,10 +529,7 @@ impl NativeGpuHandleRegistry {
             .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
         free_guard.push(slot_index as u32);
 
-        Ok(NativeGpuSlotReleaseResult {
-            remaining_refs: 0,
-            removed: true,
-        })
+        Ok(NativeGpuSlotReleaseResult { remaining_refs: 0, removed: true })
     }
 
     pub fn acquire(
@@ -721,9 +699,8 @@ impl NativeGpuHandleRegistry {
             .free_slots
             .write()
             .map_err(|_| gpu_unavailable("native GPU registry lock poisoned"))?;
-        let slot_index = free_guard
-            .pop()
-            .ok_or_else(|| gpu_busy("native GPU registry record limit reached"))?;
+        let slot_index =
+            free_guard.pop().ok_or_else(|| gpu_busy("native GPU registry record limit reached"))?;
 
         let slot = &self.slots[slot_index as usize];
         let current_gen = slot.generation.load(Ordering::Acquire);

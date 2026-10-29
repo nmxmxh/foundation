@@ -26,6 +26,10 @@ func TestEvaluateLagAndBreachError(t *testing.T) {
 	if got := breaches[0].Error(); got == "" {
 		t.Fatalf("expected breach error string")
 	}
+	var nilBreach *Breach
+	if got := nilBreach.Error(); got != "slo breach: <nil>" {
+		t.Fatalf("nilBreach.Error() = %q", got)
+	}
 	if got := Evaluate(Config{}, Observation{DispatchP99LatencyMS: 1, WorkerSuccessRate: 0, EventDeliveryLagMS: 1}); len(got) != 0 {
 		t.Fatalf("disabled thresholds should not breach: %+v", got)
 	}

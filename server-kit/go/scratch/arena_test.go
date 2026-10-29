@@ -1,6 +1,7 @@
 package scratch
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"unsafe"
@@ -339,12 +340,11 @@ func TestAdviseHugePage(t *testing.T) {
 }
 
 func TestContextHelpers(t *testing.T) {
-	//lint:ignore SA1012 testing defensive nil context handling
-	if FromContext(nil) != nil {
+	var nilCtx context.Context
+	if FromContext(nilCtx) != nil {
 		t.Fatal("expected nil for nil context")
 	}
-	//lint:ignore SA1012 testing defensive nil context handling
-	ctx := WithArena(nil, nil)
+	ctx := WithArena(nilCtx, nil)
 	if FromContext(ctx) != nil {
 		t.Fatal("expected nil arena from nil attachment")
 	}

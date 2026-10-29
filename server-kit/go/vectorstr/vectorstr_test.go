@@ -206,7 +206,7 @@ func BenchmarkEqual16_Exact(b *testing.B) {
 	padded := MakePadded16("POST")
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if !Equal16(s, &padded, 4) {
 			b.Fatal("mismatch")
 		}
@@ -218,7 +218,7 @@ func BenchmarkGoStandardStringEqual(b *testing.B) {
 	target := "POST"
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if s != target {
 			b.Fatal("mismatch")
 		}
@@ -230,7 +230,7 @@ func BenchmarkEqualFold16(b *testing.B) {
 	padded := MakePadded16("content-type")
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if !EqualFold16(s, &padded, 12) {
 			b.Fatal("mismatch")
 		}
@@ -242,7 +242,7 @@ func BenchmarkStringsEqualFold(b *testing.B) {
 	target := "content-type"
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if !strings.EqualFold(s, target) {
 			b.Fatal("mismatch")
 		}
@@ -290,7 +290,7 @@ func BenchmarkLookupCanonicalHeader_PerfectHash(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		h := headers[i%len(headers)]
 		id, ok := LookupCanonicalHeader(h)
 		_ = id
@@ -321,7 +321,7 @@ func BenchmarkLookupCanonicalHeader_MapBaseline(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		h := headers[i%len(headers)]
 		id, ok := headerMap[h]
 		_ = id

@@ -27,7 +27,7 @@ func BenchmarkStringRouting_StandardMap(b *testing.B) {
 	states := []string{"requested", "success", "failed", "ack", "unknown_state"}
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		s := states[i%len(states)]
 		_, ok := baselineTerminalMap[s]
 		_ = ok
@@ -38,7 +38,7 @@ func BenchmarkStringRouting_FoundationVector(b *testing.B) {
 	states := []string{"requested", "success", "failed", "ack", "unknown_state"}
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		s := states[i%len(states)]
 		_ = events.IsValidTerminalState(s)
 	}
@@ -53,7 +53,7 @@ func BenchmarkHeaderMatch_StandardEqualFold(b *testing.B) {
 	target := "content-type"
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		h := headers[i%len(headers)]
 		_ = strings.EqualFold(h, target)
 	}
@@ -64,7 +64,7 @@ func BenchmarkHeaderMatch_FoundationVectorFold(b *testing.B) {
 	padded := vectorstr.MakePadded16("content-type")
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		h := headers[i%len(headers)]
 		_ = vectorstr.EqualFold16(h, &padded, 12)
 	}
@@ -77,7 +77,7 @@ func BenchmarkHeaderMatch_FoundationVectorFold(b *testing.B) {
 func BenchmarkControlPlane_StandardHeap(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		buf := make([]byte, 4096)
 		binary.LittleEndian.PutUint32(buf[0:4], uint32(i))
 		escapeSink = buf
@@ -88,7 +88,7 @@ func BenchmarkControlPlane_FoundationScratch(b *testing.B) {
 	arena := scratch.New(64 * 1024)
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		arena.Reset()
 		buf, err := arena.Alloc(4096)
 		if err != nil {
@@ -107,7 +107,7 @@ func BenchmarkLifecycleFrame_Standard(b *testing.B) {
 	eventType := "order:checkout:success"
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		// Standard approach: split string, hash map lookup, heap buffer allocation
 		parts := strings.Split(eventType, ":")
 		if len(parts) >= 3 {
@@ -128,7 +128,7 @@ func BenchmarkLifecycleFrame_Foundation(b *testing.B) {
 	arena := scratch.New(64 * 1024)
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		arena.Reset()
 		// Foundation approach: LastIndexByte, O(1) perfect hash + 16-byte vector, scratch bump allocation
 		idx := strings.LastIndexByte(eventType, ':')

@@ -259,9 +259,7 @@ fn run_native_gpu_slot_maplet_hot_path() {
     let owner =
         NativeGpuOwnerScope::new("tenant-1", "camera.plugin", "gpu-0").expect("owner scope");
     let registry = NativeGpuHandleRegistry::new(4);
-    registry
-        .register_stub(descriptor, owner.clone(), 1, 0)
-        .expect("register hot slot descriptor");
+    registry.register_stub(descriptor, owner.clone(), 1, 0).expect("register hot slot descriptor");
     let handle = registry.slot_handle("camera.frame.hot").expect("slot handle");
 
     let stats = sample(|| {

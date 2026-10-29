@@ -326,7 +326,7 @@ func BenchmarkLatticeMaplet_Lookup(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		k := keys[i&(n-1)]
 		val, _ := m.Lookup(k)
 		_ = val
@@ -344,7 +344,7 @@ func BenchmarkWideMaplet_Lookup(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		k := keys[i&(n-1)]
 		val, _ := m.Lookup(k)
 		_ = val
@@ -360,7 +360,7 @@ func BenchmarkCountingMaplet_Increment(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		cm.Increment(ips[i%1000])
 	}
 }
@@ -376,7 +376,7 @@ func BenchmarkScalableLatticeMaplet_Lookup(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		k := keys[i&(n-1)]
 		val, _ := sm.Lookup(k)
 		_ = val

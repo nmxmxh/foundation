@@ -55,7 +55,7 @@ func BenchmarkRouteMaplet_GetRoute(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		k := keys[i&(n-1)]
 		shard, _ := rm.GetRoute(k)
 		_ = shard
@@ -132,7 +132,7 @@ func BenchmarkSecureRouteMaplet_RouteAndAuthorize(b *testing.B) {
 
 	b.ResetTimer()
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		k := keys[i&(n-1)]
 		shard, auth := sm.RouteAndAuthorize(k, actorMask)
 		_ = shard
