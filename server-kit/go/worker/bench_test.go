@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
@@ -141,6 +142,125 @@ func BenchmarkJob_HealthKey(b *testing.B) {
 	for b.Loop() {
 		_ = job.HealthKey()
 	}
+}
+
+func BenchmarkJob_ArgsSerialization_JSONMap(b *testing.B) {
+	job := Job{
+		ID:            "job-bench-1",
+		JobKind:       "order:process",
+		Queue:         "orders",
+		CorrelationID: "corr-12345",
+		Payload: extension.Object{
+			"order_id": extension.String("ord-998877"),
+			"amount":   extension.Int(4500),
+			"currency": extension.String("USD"),
+			"status":   extension.String("pending"),
+		},
+		Metadata: extension.Object{
+			"organization_id": extension.String("org-acme"),
+			"actor_id":        extension.String("user-42"),
+		},
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		bytes, err := json.Marshal(job)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(bytes) == 0 {
+			b.Fatal("empty bytes")
+		}
+	}
+}
+
+func BenchmarkJob_ArgsSerialization_RawPayload(b *testing.B) {
+	raw := []byte(`{"order_id":"ord-998877","amount":4500,"currency":"USD","status":"pending","org":"org-acme"}`)
+	job := Job{
+		ID:            "job-bench-1",
+		JobKind:       "order:process",
+		Queue:         "orders",
+		CorrelationID: "corr-12345",
+		RawPayload:    raw,
+		Metadata: extension.Object{
+			"organization_id": extension.String("org-acme"),
+		},
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		bytes, err := json.Marshal(job)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(bytes) == 0 {
+			b.Fatal("empty bytes")
+		}
+	}
+}
+
+func BenchmarkJob_ArgsDeserialization(b *testing.B) {
+	job := Job{
+		ID:            "job-bench-1",
+		JobKind:       "order:process",
+		Queue:         "orders",
+		CorrelationID: "corr-12345",
+		RawPayload:    []byte(`{"order_id":"ord-998877","amount":4500,"currency":"USD"}`),
+		Metadata: extension.Object{
+			"organization_id": extension.String("org-acme"),
+		},
+	}
+	data, _ := json.Marshal(job)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		var decoded Job
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkProcessor_Dispatch_Map(b *testing.B) {
+	var mu sync.RWMutex
+	processors := map[string]Processor{
+		"order:process":   &benchProcessor{kind: "order:process", queue: "orders"},
+		"email:send":      &benchProcessor{kind: "email:send", queue: "notifications"},
+		"payment:capture": &benchProcessor{kind: "payment:capture", queue: "payments"},
+		"report:generate": &benchProcessor{kind: "report:generate", queue: "analytics"},
+	}
+
+	kinds := []string{"order:process", "email:send", "payment:capture", "report:generate", "unknown:kind"}
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		kind := kinds[i%len(kinds)]
+		mu.RLock()
+		proc := processors[kind]
+		mu.RUnlock()
+		_ = proc
+	}
+}
+
+func BenchmarkEngine_EnqueueMany_InMemory64(b *testing.B) {
+	engine := NewEngine(map[string]int{"bench": 1}, benchmarkLogger(b))
+	_ = engine.Register(&benchProcessor{kind: "bench_kind", queue: "bench"})
+	ctx := b.Context()
+	_ = engine.Start(ctx)
+
+	jobs := make([]Job, 64)
+	for i := range jobs {
+		jobs[i] = Job{
+			JobKind: "bench_kind",
+			Queue:   "bench",
+			Payload: extension.Object{"id": extension.Int(int64(i))},
+		}
+	}
+
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = engine.EnqueueMany(ctx, jobs)
+	}
+	b.ReportMetric(64, "jobs/op")
 }
 
 func benchmarkLogger(b *testing.B) kitlogger.Logger {

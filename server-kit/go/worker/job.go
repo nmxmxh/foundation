@@ -1,14 +1,20 @@
 package worker
 
 import (
+	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
 	"math/rand"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
+	"github.com/tidwall/gjson"
 )
 
 // Job is the transport shape used by the worker engine.
@@ -26,7 +32,12 @@ type Job struct {
 	ScheduledAt     time.Time          `json:"scheduled_at,omitzero"`
 	CreatedAt       time.Time          `json:"created_at,omitzero"`
 	ExecutionPolicy JobExecutionPolicy `json:"execution_policy,omitzero"`
+	RequireSidecar  bool               `json:"require_sidecar,omitempty"`
 }
+
+// MaxInlinePayloadBytes defines the threshold (64 KiB) below which RawPayload
+// is inlined directly in the River job args, avoiding the secondary river_job_metadata query.
+const MaxInlinePayloadBytes = 64 * 1024
 
 // Kind implements river.JobArgs.
 func (j Job) Kind() string {
@@ -143,3 +154,254 @@ func positiveIntFromMetadata(metadata extension.Object, keys ...string) int {
 	}
 	return 0
 }
+
+func isRawJSON(b []byte) bool {
+	trimmed := bytes.TrimSpace(b)
+	if len(trimmed) < 2 {
+		return false
+	}
+	first := trimmed[0]
+	last := trimmed[len(trimmed)-1]
+	return (first == '{' && last == '}') || (first == '[' && last == ']')
+}
+
+var jobBufferPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 0, 512)
+		return &b
+	},
+}
+
+// MarshalJSON serializes Job into JSON without reflection.
+func (j Job) MarshalJSON() ([]byte, error) {
+	return j.MarshalJSONWithArena(nil)
+}
+
+// MarshalJSONWithArena serializes Job into JSON using scratch arena if available.
+func (j Job) MarshalJSONWithArena(arena *scratch.Arena) ([]byte, error) {
+	var buf []byte
+	var poolBufPtr *[]byte
+	if arena != nil {
+		buf, _ = arena.Alloc(512)
+		buf = buf[:0]
+	} else {
+		poolBufPtr = jobBufferPool.Get().(*[]byte)
+		buf = (*poolBufPtr)[:0]
+		defer func() {
+			if cap(buf) <= 64*1024 {
+				*poolBufPtr = buf
+				jobBufferPool.Put(poolBufPtr)
+			}
+		}()
+	}
+
+	buf = append(buf, `{"id":`...)
+	buf = appendJSONString(buf, j.ID)
+	buf = append(buf, `,"kind":`...)
+	buf = appendJSONString(buf, j.JobKind)
+	buf = append(buf, `,"queue":`...)
+	buf = appendJSONString(buf, j.Queue)
+
+	if len(j.Payload) > 0 {
+		buf = append(buf, `,"payload":`...)
+		var payloadJSON []byte
+		var err error
+		if arena != nil {
+			payloadJSON, err = j.Payload.MarshalJSONFastWithArena(arena)
+		} else {
+			payloadJSON, err = j.Payload.MarshalJSONFast()
+		}
+		if err != nil {
+			return nil, err
+		}
+		buf = append(buf, payloadJSON...)
+	}
+
+	if len(j.RawPayload) > 0 {
+		buf = append(buf, `,"raw_payload":`...)
+		if isRawJSON(j.RawPayload) {
+			buf = append(buf, j.RawPayload...)
+		} else {
+			buf = append(buf, '"')
+			encLen := base64.StdEncoding.EncodedLen(len(j.RawPayload))
+			start := len(buf)
+			buf = append(buf, make([]byte, encLen)...)
+			base64.StdEncoding.Encode(buf[start:], j.RawPayload)
+			buf = append(buf, '"')
+		}
+	}
+
+	buf = append(buf, `,"metadata":`...)
+	if len(j.Metadata) > 0 {
+		var metaJSON []byte
+		var err error
+		if arena != nil {
+			metaJSON, err = j.Metadata.MarshalJSONFastWithArena(arena)
+		} else {
+			metaJSON, err = j.Metadata.MarshalJSONFast()
+		}
+		if err != nil {
+			return nil, err
+		}
+		buf = append(buf, metaJSON...)
+	} else {
+		buf = append(buf, `{}`...)
+	}
+
+	buf = append(buf, `,"correlation_id":`...)
+	buf = appendJSONString(buf, j.CorrelationID)
+	buf = append(buf, `,"idempotency_key":`...)
+	buf = appendJSONString(buf, j.IdempotencyKey)
+	buf = append(buf, `,"attempt":`...)
+	buf = strconv.AppendInt(buf, int64(j.Attempt), 10)
+	buf = append(buf, `,"max_attempts":`...)
+	buf = strconv.AppendInt(buf, int64(j.MaxAttempts), 10)
+
+	if !j.ScheduledAt.IsZero() {
+		buf = append(buf, `,"scheduled_at":"`...)
+		buf = append(buf, j.ScheduledAt.UTC().Format(time.RFC3339Nano)...)
+		buf = append(buf, '"')
+	}
+
+	if !j.CreatedAt.IsZero() {
+		buf = append(buf, `,"created_at":"`...)
+		buf = append(buf, j.CreatedAt.UTC().Format(time.RFC3339Nano)...)
+		buf = append(buf, '"')
+	}
+
+	if j.ExecutionPolicy.TimeoutMS > 0 {
+		buf = append(buf, `,"execution_policy":{"timeout_ms":`...)
+		buf = strconv.AppendInt(buf, int64(j.ExecutionPolicy.TimeoutMS), 10)
+		buf = append(buf, '}')
+	}
+
+	if j.RequireSidecar {
+		buf = append(buf, `,"require_sidecar":true`...)
+	}
+
+	buf = append(buf, '}')
+	if arena != nil {
+		return buf, nil
+	}
+	res := make([]byte, len(buf))
+	copy(res, buf)
+	return res, nil
+}
+
+func appendJSONString(dst []byte, s string) []byte {
+	const hex = "0123456789abcdef"
+	dst = append(dst, '"')
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case '"':
+			dst = append(dst, '\\', '"')
+		case '\\':
+			dst = append(dst, '\\', '\\')
+		case '\n':
+			dst = append(dst, '\\', 'n')
+		case '\r':
+			dst = append(dst, '\\', 'r')
+		case '\t':
+			dst = append(dst, '\\', 't')
+		default:
+			if c < 0x20 {
+				dst = append(dst, '\\', 'u', '0', '0', hex[c>>4], hex[c&0xf])
+			} else {
+				dst = append(dst, c)
+			}
+		}
+	}
+	dst = append(dst, '"')
+	return dst
+}
+
+// UnmarshalJSON deserializes Job args using a single-pass zero-reflection scanner.
+func (j *Job) UnmarshalJSON(data []byte) error {
+	res := gjson.ParseBytes(data)
+	if !res.IsObject() {
+		return errors.New("job args must be a json object")
+	}
+
+	j.Metadata = extension.Object{}
+	var parseErr error
+
+	res.ForEach(func(key, val gjson.Result) bool {
+		switch key.Str {
+		case "id":
+			j.ID = val.String()
+		case "kind":
+			j.JobKind = val.String()
+		case "queue":
+			j.Queue = val.String()
+		case "correlation_id":
+			j.CorrelationID = val.String()
+		case "idempotency_key":
+			j.IdempotencyKey = val.String()
+		case "attempt":
+			j.Attempt = int(val.Int())
+		case "max_attempts":
+			j.MaxAttempts = int(val.Int())
+		case "require_sidecar":
+			j.RequireSidecar = val.Bool()
+		case "payload":
+			if val.Raw != "" && val.Raw != "null" {
+				if !val.IsObject() {
+					parseErr = errors.New("payload must be a json object")
+					return false
+				}
+				var obj extension.Object
+				if err := obj.UnmarshalJSON([]byte(val.Raw)); err != nil {
+					parseErr = err
+					return false
+				}
+				j.Payload = obj
+			}
+		case "metadata":
+			if val.Raw != "" && val.Raw != "null" {
+				if !val.IsObject() {
+					parseErr = errors.New("metadata must be a json object")
+					return false
+				}
+				var obj extension.Object
+				if err := obj.UnmarshalJSON([]byte(val.Raw)); err != nil {
+					parseErr = err
+					return false
+				}
+				j.Metadata = obj
+			}
+		case "raw_payload":
+			switch val.Type {
+			case gjson.String:
+				if decoded, err := base64.StdEncoding.DecodeString(val.Str); err == nil {
+					j.RawPayload = decoded
+				} else {
+					j.RawPayload = []byte(val.Str)
+				}
+			case gjson.JSON:
+				j.RawPayload = []byte(val.Raw)
+			}
+		case "scheduled_at":
+			if val.Str != "" {
+				if t, err := time.Parse(time.RFC3339Nano, val.Str); err == nil {
+					j.ScheduledAt = t
+				}
+			}
+		case "created_at":
+			if val.Str != "" {
+				if t, err := time.Parse(time.RFC3339Nano, val.Str); err == nil {
+					j.CreatedAt = t
+				}
+			}
+		case "execution_policy":
+			j.ExecutionPolicy.TimeoutMS = int(val.Get("timeout_ms").Int())
+		}
+		return true
+	})
+
+	if parseErr != nil {
+		return parseErr
+	}
+	return nil
+}
+

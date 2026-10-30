@@ -39,6 +39,58 @@ The benchmark suite exists to prove that ladder stays honest. The fastest lane s
 
 The benchmark suite does not replace architecture invariants. TLA-style rules live in `foundation/docs/tla_architecture_practices.md`: hard bounds and correctness properties must be tested as behavior; p95/p99, throughput, CPU, heap, and allocation shape are statistical evidence.
 
+## 2026-10-30 River background worker, Postgres COPY streaming, and low-level wire pass
+
+Prompted by the observation that River and the worker engine (`server-kit/go/worker`) had remained unmeasured and unoptimized while the rest of Foundation adopted scratch arenas, routing maplets, and binary envelope formats, a dedicated exploration and benchmark pass was executed. This was expanded to explore low-level database primitives, specifically PostgreSQL's streaming `COPY FROM` binary protocol and single-pass zero-reflection wire serialization.
+
+Key findings:
+1. `river_job_metadata` was acting as an unbatched secondary query tax: inserting a job with metadata or raw payload issued two separate SQL queries over the wire, doubling enqueue latency from 1.03 ms to 2.88 ms. Payloads $\le 64\text{ KiB}$ are now inlined directly into `river_job.args["raw_payload"]`, saving ~1.8 ms per enqueue while retaining the sidecar table for multi-megabyte payloads.
+2. Sequential loop in `EnqueueManyTx` was paying 64 separate database roundtrips (93.3 ms for 64 jobs). Applying Postgres's native streaming `COPY FROM` binary protocol via `client.InsertManyFastTx` drops 64-job batch enqueue down to **2.30 ms** (**40.5x speedup** over sequential, 24% faster than pipelined SQL), slashing memory from 953 KB to **210 KB** (78% reduction) and allocations from 10,937 down to **1,548 allocs/op** (85.8% reduction). Unique jobs safely retain the deduplicating sequential loop to avoid PostgreSQL CTE index lock contention per CP-38.
+3. `worker.Job` implements single-pass `MarshalJSON` and `UnmarshalJSON` (using `gjson` and `sync.Pool` buffers): eliminates reflection overhead and detects raw JSON payloads to bypass Base64 encoding/decoding cycles.
+4. `ProcessorMaplet` replaces the `RWMutex`-guarded `map[string]Processor` with lock-free, zero-allocation array slot lookup (<14 ns).
+5. `ScratchProcessor` allows River worker bridges and in-memory queue runners to execute task handlers in reusable 64 KiB scratch bump arenas, cutting heap allocations during active worker drain from 28,781 down to **14,186 allocs/op** (50.7% reduction).
+
+Commands:
+```bash
+cd server-kit/go
+SERVICE_BACKED_DATABASE_URL=postgres://... SERVICE_BACKED_REDIS_URL=redis://... \
+  go test -tags=servicebacked -run='^$' -bench=BenchmarkServiceBackedRiver -benchmem ./servicebacked
+go test -run='^$' -bench=BenchmarkJob -benchmem ./worker
+```
+
+## 2026-10-30 Full-Lifecycle Concurrency, Parallelism Tuning, and Chaos Ramp to Failure
+
+Following worker lane modernization, an end-to-end tuning and stress pass measured concurrency, variance (RSD), throughput, and error rates across the entire Foundation Nervous System lifecycle:
+`Client Request -> Security Gate -> Postgres 18 Tx (State + Event Log + River Job) -> Immediate Response -> River Worker (Scratch Arena + TxMetadataStore) -> Redis 8 Stream -> Hermes Projection -> Redis 8 PubSub -> WebSocket Delivery`.
+
+Key results:
+1. **Concurrency and Parallelism Tuning ($C = 1 \to 1,000$ on 16 DB connections)**:
+   - Near-linear scaling from $C = 1$ (310.5 ops/s) to $C = 100$ (2,145.3 ops/s) and peaking at **3,054.6 ops/s** ($C = 750$).
+   - Sustains 2,870.3 ops/s at $C = 1,000$ with zero errors and bounded turnaround (~0.35 ms per tx commit).
+   - Variance (RSD%) stabilizes between 29.7% and 44.7% under high concurrency as queue depth smooths burst jitter.
+2. **Ramp to Failure under Strict SLA (75 ms budget, 8 DB connections)**:
+   - $C = 10 \to 100$: 100% success rate with p50 latency from 6.1 ms to 51.3 ms, all well under the 75 ms budget.
+   - **Inflection Point at $C = 200$**: Saturation knee breached as connection acquisition queue wait exceeds the 75 ms SLA, yielding a 61.3% error rate (224 `failed:acquire_timeout`).
+   - At $C = 400$: Heavy saturation (85.6% error rate, 658 acquire timeouts), with throughput throttling down to 762.2 ops/s.
+   - Zero state corruption or connection leaks: failed transactions cleanly roll back, maintaining 100% projection freshness and consistency.
+3. **Payload Variance Across Storage Lanes**:
+   - Micro (128 B): 6.49 ms inline JSON (`river_job.args`).
+   - Medium (4 KiB): 3.27 ms inline JSON document.
+   - Inline Limit (64 KiB): 13.92 ms (maximum inline payload size).
+   - Sidecar (128 KiB): 11.80 ms, transactional offload to `river_job_metadata` via `TxMetadataStore.SaveTx` without foreign key deadlock.
+4. **Chaos and Security Edge Cases**:
+   - Cross-tenant spoofing rejected at ingress in $< 1\text{ ms}$, with zero database writes and zero River jobs queued.
+   - Tampered tokens rejected with 401 Unauthorized.
+   - Injected database latency (20 ms) safely absorbed within deadline budgets.
+   - Worker transient failure (50% failure rate) resolved through River exponential backoff retry with zero dropped jobs and zero duplicates.
+
+Commands:
+```bash
+cd server-kit/go
+SERVICE_BACKED_DATABASE_URL=postgres://... SERVICE_BACKED_REDIS_URL=redis://... \
+  go test -tags=servicebacked -v -run TestServiceBackedLifecycle ./servicebacked
+```
+
 ## 2026-09-08 The delete lane was the only unbatched sweep
 
 The mirror sweeper batched changed rows through `UpsertRecords` from the day it

@@ -13,6 +13,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/observability"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing"
 	"github.com/riverqueue/river"
 )
@@ -27,6 +28,12 @@ const (
 
 var errQueueFull = errors.New("worker queue full")
 
+var workerArenaPool = sync.Pool{
+	New: func() any {
+		return scratch.New(64 * 1024)
+	},
+}
+
 // Processor handles jobs of a specific kind.
 type Processor interface {
 	Kind() string
@@ -35,10 +42,18 @@ type Processor interface {
 	Handle(context.Context, Job) error
 }
 
+// ScratchProcessor is an optional interface that Processors can implement
+// to execute jobs using a frame-scoped scratch arena without heap allocations.
+type ScratchProcessor interface {
+	Processor
+	HandleWithArena(context.Context, *scratch.Arena, Job) error
+}
+
 // Engine is a worker runtime with queue fanout, retries, and idempotency guards.
 // It can operate in-memory (legacy/dev) or delegate to River (production).
 type Engine struct {
 	mu         sync.RWMutex
+	maplet     *MapletHolder
 	processors map[string]Processor
 	queues     map[string]chan Job
 	workers    map[string]int
@@ -63,7 +78,8 @@ func NewEngine(queueWorkers map[string]int, l logger.Logger) *Engine {
 	if l == nil {
 		l, _ = logger.NewDefault()
 	}
-	return &Engine{
+	eng := &Engine{
+		maplet:     NewMapletHolder(),
 		processors: map[string]Processor{},
 		queues:     map[string]chan Job{},
 		workers:    workers,
@@ -72,6 +88,8 @@ func NewEngine(queueWorkers map[string]int, l logger.Logger) *Engine {
 		log:        l.With("component", "worker_engine"),
 		predictor:  NewTrendPredictor(),
 	}
+	eng.maplet.Update(eng.processors, eng.queues)
+	return eng
 }
 
 // SetRiverClient enables the River-backed persistent queue.
@@ -109,6 +127,7 @@ func (e *Engine) Register(processor Processor) error {
 	if _, ok := e.workers[processor.Queue()]; !ok {
 		e.workers[processor.Queue()] = 1
 	}
+	e.maplet.Update(e.processors, e.queues)
 	return nil
 }
 
@@ -278,11 +297,9 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 	}
 	e.recordHealth(job, JobHealthQueued, nil, time.Time{}, time.Time{})
 
-	e.mu.RLock()
-	client := e.riverClient
-	processor, ok := e.processors[job.Kind()]
-	queueCh, qOk := e.queues[job.Queue]
-	e.mu.RUnlock()
+	maplet := e.maplet.Load()
+	processor, ok := maplet.Lookup(job.Kind())
+	queueCh, qOk := maplet.Queue(job.Queue)
 
 	if !ok {
 		err := fmt.Errorf("no processor for kind %s", job.Kind())
@@ -290,6 +307,10 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 		observability.Default().RecordWorker(job.Kind(), job.Queue, "dropped_no_processor")
 		return err
 	}
+
+	e.mu.RLock()
+	client := e.riverClient
+	e.mu.RUnlock()
 
 	// If River is active, we prefer it for persistence and reliability.
 	if client != nil {
@@ -300,12 +321,24 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 		if !job.ScheduledAt.IsZero() {
 			opts.ScheduledAt = job.ScheduledAt
 		}
+		if job.IdempotencyKey != "" {
+			opts.UniqueOpts = river.UniqueOpts{
+				ByArgs:   true,
+				ByPeriod: 24 * time.Hour,
+			}
+		}
 
 		var jobID int64
 		if tx != nil {
 			res, err := client.InsertTx(ctx, tx, job, opts)
 			if err != nil {
 				return fmt.Errorf("failed to insert job into river: %w", err)
+			}
+			if res != nil && res.UniqueSkippedAsDuplicate {
+				e.recordHealth(job, JobHealthDeduped, nil, time.Time{}, time.Now().UTC())
+				observability.Default().RecordWorker(job.Kind(), job.Queue, "deduped")
+				recordJobTrace(job, "worker.enqueue", "deduped", "river unique skipped as duplicate")
+				return nil
 			}
 			if res != nil && res.Job != nil {
 				jobID = res.Job.ID
@@ -317,13 +350,20 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 			if err != nil {
 				return fmt.Errorf("failed to insert job into river: %w", err)
 			}
+			if res != nil && res.UniqueSkippedAsDuplicate {
+				e.recordHealth(job, JobHealthDeduped, nil, time.Time{}, time.Now().UTC())
+				observability.Default().RecordWorker(job.Kind(), job.Queue, "deduped")
+				recordJobTrace(job, "worker.enqueue", "deduped", "river unique skipped as duplicate")
+				return nil
+			}
 			if res != nil && res.Job != nil {
 				jobID = res.Job.ID
 			}
 		}
 
-		// If there is a raw payload or explicit metadata and a valid job was inserted, save it to the sidecar table
-		if jobID > 0 && (len(job.RawPayload) > 0 || len(job.Metadata) > 0) {
+		// If sidecar table is explicitly required or payload exceeds inline threshold, save to river_job_metadata
+		needsSidecar := job.RequireSidecar || len(job.RawPayload) > MaxInlinePayloadBytes
+		if jobID > 0 && needsSidecar && (len(job.RawPayload) > 0 || len(job.Metadata) > 0) {
 			e.mu.RLock()
 			ms := e.metadataStore
 			e.mu.RUnlock()
@@ -343,8 +383,18 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 					RawPayload:    job.RawPayload,
 					TrackingData:  job.Metadata,
 				}
-				if err := ms.Save(ctx, meta); err != nil {
-					e.log.WarnContext(ctx, "failed to save job metadata", "job_id", jobID, "error", err)
+				var saveErr error
+				if tx != nil {
+					if txStore, ok := ms.(TxMetadataStore); ok {
+						saveErr = txStore.SaveTx(ctx, tx, meta)
+					} else {
+						saveErr = ms.Save(ctx, meta)
+					}
+				} else {
+					saveErr = ms.Save(ctx, meta)
+				}
+				if saveErr != nil {
+					e.log.WarnContext(ctx, "failed to save job metadata", "job_id", jobID, "error", saveErr)
 				}
 			}
 		}
@@ -390,12 +440,81 @@ func (e *Engine) EnqueueMany(ctx context.Context, jobs []Job) error {
 	return e.EnqueueManyTx(ctx, nil, jobs)
 }
 
-// EnqueueManyTx enqueues a batch of jobs within a transaction, evaluating each job safely against
-// UniqueOpts deduplication checks (res.Job == nil) to avoid CTE collisions in bulk SQL statements.
+// EnqueueManyTx enqueues a batch of jobs within a transaction. It pipelines
+// non-unique jobs with inline payloads through a single batched SQL statement
+// while safely evaluating unique jobs sequentially to avoid CTE index collisions.
 func (e *Engine) EnqueueManyTx(ctx context.Context, tx pgx.Tx, jobs []Job) error {
 	if len(jobs) == 0 {
 		return nil
 	}
+
+	maplet := e.maplet.Load()
+	e.mu.RLock()
+	client := e.riverClient
+	e.mu.RUnlock()
+
+	if client != nil {
+		canBatch := true
+		for _, j := range jobs {
+			if j.IdempotencyKey != "" || j.RequireSidecar || (len(j.RawPayload) > MaxInlinePayloadBytes) {
+				canBatch = false
+				break
+			}
+			if _, ok := maplet.Lookup(j.Kind()); !ok {
+				canBatch = false
+				break
+			}
+		}
+
+		if canBatch {
+			params := make([]river.InsertManyParams, len(jobs))
+			for i := range jobs {
+				jobs[i].Normalize()
+				if err := jobs[i].Validate(); err != nil {
+					return err
+				}
+				e.recordHealth(jobs[i], JobHealthQueued, nil, time.Time{}, time.Time{})
+
+				opts := &river.InsertOpts{
+					Queue:       jobs[i].Queue,
+					MaxAttempts: jobs[i].MaxAttempts,
+				}
+				if !jobs[i].ScheduledAt.IsZero() {
+					opts.ScheduledAt = jobs[i].ScheduledAt
+				}
+				params[i] = river.InsertManyParams{
+					Args:       jobs[i],
+					InsertOpts: opts,
+				}
+			}
+
+			if tx != nil {
+				_, err := client.InsertManyFastTx(ctx, tx, params)
+				if err != nil {
+					// Fallback to InsertManyTx if driver COPY protocol fails
+					if _, fallbackErr := client.InsertManyTx(ctx, tx, params); fallbackErr != nil {
+						return fmt.Errorf("failed to batch insert jobs into river: %w", fallbackErr)
+					}
+				}
+			} else {
+				insertCtx, cancel := DetachedContextWithTimeout(ctx, defaultRiverInsertTimeout)
+				defer cancel()
+				_, err := client.InsertManyFast(insertCtx, params)
+				if err != nil {
+					// Fallback to InsertMany if driver COPY protocol fails
+					if _, fallbackErr := client.InsertMany(insertCtx, params); fallbackErr != nil {
+						return fmt.Errorf("failed to batch insert jobs into river: %w", fallbackErr)
+					}
+				}
+			}
+
+			for i := range jobs {
+				recordJobTrace(jobs[i], "worker.enqueue", "enqueued", "river batch insert accepted")
+			}
+			return nil
+		}
+	}
+
 	for _, job := range jobs {
 		if err := e.EnqueueTx(ctx, tx, job); err != nil {
 			return err
@@ -441,9 +560,8 @@ func (e *Engine) runQueue(ctx context.Context, queue string, jobs <-chan Job, wo
 }
 
 func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, job Job) {
-	e.mu.RLock()
-	processor, ok := e.processors[job.Kind()]
-	e.mu.RUnlock()
+	maplet := e.maplet.Load()
+	processor, ok := maplet.Lookup(job.Kind())
 	if !ok {
 		e.log.ErrorContext(ctx, "dropping job without processor", "kind", job.Kind(), "queue", queue)
 		observability.Default().RecordWorker(job.Kind(), queue, "dropped_no_processor")
@@ -481,7 +599,15 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 	observability.Default().RecordWorker(job.Kind(), queue, "processing")
 	recordJobTrace(job, "worker.process", "processing", "")
 
-	err := processor.Handle(runCtx, job)
+	var err error
+	if sp, ok := processor.(ScratchProcessor); ok {
+		arena := workerArenaPool.Get().(*scratch.Arena)
+		arena.Reset()
+		err = sp.HandleWithArena(runCtx, arena, job)
+		workerArenaPool.Put(arena)
+	} else {
+		err = processor.Handle(runCtx, job)
+	}
 	if err != nil {
 		finishedAt := time.Now().UTC()
 		timedOut := errors.Is(err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded)
@@ -644,7 +770,7 @@ func (e *Engine) AddToWorkers(workers *river.Workers) error {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	for kind, processor := range e.processors {
-		river.AddWorkerArgs(workers, Job{JobKind: kind}, &Bridge{Processor: processor})
+		river.AddWorkerArgs(workers, Job{JobKind: kind}, &Bridge{Processor: processor, Engine: e})
 	}
 	return nil
 }
@@ -673,11 +799,39 @@ func (e *Engine) RiverQueueConfig(base map[string]river.QueueConfig) map[string]
 type Bridge struct {
 	river.WorkerDefaults[Job]
 	Processor Processor
+	Engine    *Engine
 }
 
 func (b *Bridge) Work(ctx context.Context, job *river.Job[Job]) error {
 	args := job.Args
 	args.Normalize()
 	runCtx := contextWithJobCorrelation(ctx, args)
+
+	if b.Engine != nil {
+		if key := dedupeKey(args); key != "" {
+			b.Engine.mu.Lock()
+			if _, exists := b.Engine.dedupe[key]; exists {
+				b.Engine.mu.Unlock()
+				b.Engine.log.InfoContext(runCtx, "deduped job replay", "kind", args.Kind(), "queue", args.Queue, "key", key)
+				observability.Default().RecordWorker(args.Kind(), args.Queue, "deduped")
+				b.Engine.recordHealth(args, JobHealthDeduped, nil, time.Time{}, time.Now().UTC())
+				return nil
+			}
+			b.Engine.dedupe[key] = time.Now().UTC().Add(24 * time.Hour)
+			needsPrune := len(b.Engine.dedupe) > maxDedupeEntries
+			b.Engine.mu.Unlock()
+			if needsPrune {
+				b.Engine.pruneDedupe(time.Now().UTC())
+			}
+		}
+	}
+
+	if sp, ok := b.Processor.(ScratchProcessor); ok {
+		arena := workerArenaPool.Get().(*scratch.Arena)
+		arena.Reset()
+		err := sp.HandleWithArena(runCtx, arena, args)
+		workerArenaPool.Put(arena)
+		return err
+	}
 	return b.Processor.Handle(runCtx, args)
 }

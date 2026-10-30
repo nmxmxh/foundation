@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
 )
@@ -27,6 +28,12 @@ type MetadataStore interface {
 	Save(context.Context, JobMetadata) error
 	Get(context.Context, int64) (JobMetadata, error)
 	UpdateTrackingData(context.Context, int64, extension.Object) error
+}
+
+// TxMetadataStore allows saving job metadata within an active database transaction.
+type TxMetadataStore interface {
+	MetadataStore
+	SaveTx(context.Context, pgx.Tx, JobMetadata) error
 }
 
 // InMemoryMetadataStore is the local implementation for development/test.
@@ -111,8 +118,40 @@ func (s *PostgresMetadataStore) Save(ctx context.Context, m JobMetadata) error {
 			tracking_data = EXCLUDED.tracking_data,
 			updated_at = now()
 	`
+	trackingData := m.TrackingData
+	if trackingData == nil {
+		trackingData = extension.Object{}
+	}
 	_, err := s.pool.Exec(ctx, query,
-		m.JobID, m.WorkflowName, m.EntityType, m.EntityID, m.UserID, m.CorrelationID, m.RawPayload, m.TrackingData,
+		m.JobID, m.WorkflowName, m.EntityType, m.EntityID, m.UserID, m.CorrelationID, m.RawPayload, trackingData,
+	)
+	return err
+}
+
+func (s *PostgresMetadataStore) SaveTx(ctx context.Context, tx pgx.Tx, m JobMetadata) error {
+	if tx == nil {
+		return s.Save(ctx, m)
+	}
+	query := `
+		INSERT INTO river_job_metadata (
+			job_id, workflow_name, entity_type, entity_id, user_id, correlation_id, raw_payload, tracking_data
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		ON CONFLICT (job_id) DO UPDATE SET
+			workflow_name = EXCLUDED.workflow_name,
+			entity_type = EXCLUDED.entity_type,
+			entity_id = EXCLUDED.entity_id,
+			user_id = EXCLUDED.user_id,
+			correlation_id = EXCLUDED.correlation_id,
+			raw_payload = EXCLUDED.raw_payload,
+			tracking_data = EXCLUDED.tracking_data,
+			updated_at = now()
+	`
+	trackingData := m.TrackingData
+	if trackingData == nil {
+		trackingData = extension.Object{}
+	}
+	_, err := tx.Exec(ctx, query,
+		m.JobID, m.WorkflowName, m.EntityType, m.EntityID, m.UserID, m.CorrelationID, m.RawPayload, trackingData,
 	)
 	return err
 }

@@ -448,6 +448,42 @@ func TestBridgeWorkInjectsCorrelationIntoProcessorContext(t *testing.T) {
 	}
 }
 
+func TestBridgeWorkDeduplicationAndScratch(t *testing.T) {
+	engine := NewEngine(nil, nil)
+	scratchProc := &mockScratchProcessor{
+		kind:  "job:scratch",
+		queue: "q_scratch",
+	}
+	bridge := &Bridge{
+		Processor: scratchProc,
+		Engine:    engine,
+	}
+
+	job := &river.Job[Job]{
+		Args: Job{
+			JobKind:        "job:scratch",
+			Queue:          "q_scratch",
+			IdempotencyKey: "idem_bridge_1",
+		},
+	}
+
+	// First execution should process
+	if err := bridge.Work(context.Background(), job); err != nil {
+		t.Fatalf("first bridge Work failed: %v", err)
+	}
+	if scratchProc.arenaCalls.Load() != 1 {
+		t.Fatalf("expected 1 call, got %d", scratchProc.arenaCalls.Load())
+	}
+
+	// Second execution with same idempotency key should deduplicate
+	if err := bridge.Work(context.Background(), job); err != nil {
+		t.Fatalf("deduped bridge Work failed: %v", err)
+	}
+	if scratchProc.arenaCalls.Load() != 1 {
+		t.Fatalf("expected call count to remain 1, got %d", scratchProc.arenaCalls.Load())
+	}
+}
+
 // TestAddToWorkersRegistersDynamicKinds pins the Engine→River glue: every
 // engine-registered processor lands in the river.Workers bundle under its
 // dynamic kind (AddWorkerArgs; plain AddWorker would panic on the zero Job's
@@ -523,4 +559,32 @@ func TestEngine_EnqueueMany_InMemory(t *testing.T) {
 	waitForWorkerCondition(t, 2*time.Second, func() bool {
 		return processor.calls.Load() >= 3
 	}, "batch job execution")
+}
+
+func TestEngine_EnqueueMany_EmptyAndInvalid(t *testing.T) {
+	engine := NewEngine(nil, nil)
+	ctx := context.Background()
+
+	// Empty slice returns nil immediately
+	if err := engine.EnqueueMany(ctx, nil); err != nil {
+		t.Fatalf("expected nil on empty jobs: %v", err)
+	}
+
+	// Invalid job validation error
+	invalidJobs := []Job{{JobKind: ""}}
+	if err := engine.EnqueueMany(ctx, invalidJobs); err == nil {
+		t.Fatal("expected error on invalid job in EnqueueMany")
+	}
+
+	// Missing processor error
+	missingProcessorJobs := []Job{{JobKind: "not_registered", Queue: "default", MaxAttempts: 1}}
+	if err := engine.EnqueueMany(ctx, missingProcessorJobs); err == nil {
+		t.Fatal("expected error on missing processor in EnqueueMany")
+	}
+
+	// Health snapshot
+	snapshot := engine.HealthSnapshot()
+	if snapshot == nil {
+		t.Fatal("expected non-nil health snapshot")
+	}
 }

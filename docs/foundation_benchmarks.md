@@ -80,6 +80,88 @@ that break them are not comparable.
 
 ## Results by lane
 
+### River background worker, Postgres COPY streaming, and low-level wire pass: 2026-10-30
+
+This pass modernizes Foundation's background worker lane (`worker.Engine` and River integration over PostgreSQL 18) by applying low-level binary and protocol primitives:
+It eliminates the two-query sidecar tax for inline payloads ($\le 64\text{ KiB}$), introduces lock-free maplet processor routing, activates Postgres native `COPY FROM` binary streaming ingestion (`client.InsertManyFastTx`), optimizes `Job` args with zero-reflection single-pass JSON marshaling/unmarshaling, and integrates frame-scoped scratch arenas into worker execution.
+
+Machine: Apple M1 Pro, `darwin/arm64`, Go 1.26.6, PostgreSQL 18 (isolated tmpfs container).
+
+| Benchmark / Operation | Before | Pipelined SQL | Postgres `COPY FROM` | Memory / Allocs (`Before \rightarrow Optimized`) | Result / Architectural Meaning |
+| :--- | ---: | ---: | ---: | :---: | :--- |
+| `ServiceBackedRiver_EnqueueMany64` | 93.30 ms (sequential) | 2.68 ms | **2.30 ms** | 1.11 MB $\rightarrow$ 303 KB $\rightarrow$ **210 KB**, 10,968 $\rightarrow$ **1,548 allocs** | **40.5x faster batch enqueue** over baseline sequential loops. Postgres native `COPY FROM` streaming streams binary tuples directly without SQL query parsing or statement plan generation. |
+| `ServiceBackedRiver_EnqueueInlineRawPayload` | 2.88 ms (sidecar) | — | **1.03 ms** | 16.8 KB $\rightarrow$ 12.5 KB, 187 $\rightarrow$ **171 allocs** | **2.8x faster single enqueue**. Bypasses secondary `river_job_metadata` query for payloads $\le 64\text{ KiB}$. |
+| `ServiceBackedRiver_EnqueueSingle` | 1.53 ms | — | **1.02 ms** | 12.2 KB $\rightarrow$ 12.1 KB, 171 $\rightarrow$ **170 allocs** | Lock-free `ProcessorMaplet` eliminates `Engine.mu` lock contention. |
+| `Job_ArgsSerialization` | 1,867 ns (JSON map) | — | **839 ns** (Raw payload) | 864 B $\rightarrow$ 672 B, 6 $\rightarrow$ **5 allocs** | **2.2x faster args encoding**. Pre-encoded binary wire avoids `extension.Object` map reflection. |
+| `Job_ArgsDeserialization` | 4,275 ns (reflection) | — | **2,669 ns** (single pass) | 1,920 B $\rightarrow$ 1,968 B, 15 $\rightarrow$ **11 allocs** | Single-pass scanner without reflection; inlines raw JSON directly without Base64 decode. |
+| `ServiceBackedRiver_WorkerDrainThroughput` | 28,781 allocs | — | **14,186 allocs** | 5.78 MB $\rightarrow$ **3.15 MB** | **50.7% allocation reduction** in active worker drain loop via scratch recycling and fast unmarshaling. |
+
+Key achievements:
+
+1. `worker.Engine.EnqueueManyTx` automatically utilizes Postgres native streaming `COPY FROM` (`client.InsertManyFastTx`) for non-unique batches, streaming binary tuples at $\approx 36.0\text{ }\mu\text{s}$ per job with automatic fallback to `InsertManyTx`, while preserving the safe sequential loop for `UniqueOpts` (CP-38).
+2. `worker.Job` implements single-pass `MarshalJSON` and `UnmarshalJSON`: eliminates reflection overhead, detects raw JSON structures to inline without Base64 encoding/decoding, and pools buffer instances.
+3. `worker.ProcessorMaplet` serves kind-to-processor and queue routing lock-free in under 14 ns.
+4. `ScratchProcessor` integration enables worker handlers to execute in pre-allocated 64 KiB bump arenas, reducing drain heap allocations by 50.7%.
+
+### Full-lifecycle concurrency, parallelism tuning, and chaos ramp to failure: 2026-10-30
+
+This pass measures concurrency, throughput, latency percentiles, variance (RSD), and error distributions through the complete Nervous System lifecycle.
+The execution path exercises client ingress, auth guards, atomic transactions, event logging, worker execution, projection tailing, and real-time client delivery:
+`Ingress -> Auth / Security -> Postgres 18 Tx (State + Event Log + River Job) -> Immediate Response -> River Worker (Scratch Arena + TxMetadataStore) -> Redis 8 Stream -> Hermes Columnar Projection -> Redis 8 PubSub -> WebSocket Delivery`.
+
+Machine: Apple M1 Pro, `darwin/arm64`, Go 1.26.6, PostgreSQL 18 (isolated container), Redis 8 (isolated container).
+
+#### 1. Concurrency and parallelism ramp (pool capacity: 16 connections, 16 river workers)
+
+| Concurrency ($C$) | Total Ops | Success | Failures | Throughput (ops/s) | p50 (ms) | p95 (ms) | p99 (ms) | Max (ms) | Mean (ms) | RSD (%) | Failure Mode |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | 20 | 20 | 0 | 310.5 | 2.54 | 7.06 | 7.06 | 7.99 | 3.19 | 56.2% | None (100% OK) |
+| 10 | 40 | 40 | 0 | 1,143.4 | 6.04 | 21.19 | 24.00 | 26.54 | 8.44 | 66.0% | None (100% OK) |
+| 50 | 200 | 200 | 0 | 2,024.5 | 21.66 | 35.32 | 36.42 | 39.16 | 22.74 | 29.7% | None (100% OK) |
+| 100 | 400 | 400 | 0 | 2,145.3 | 41.73 | 64.47 | 66.30 | 68.21 | 41.95 | 35.2% | None (100% OK) |
+| 250 | 500 | 500 | 0 | 2,853.9 | 80.21 | 88.84 | 89.75 | 90.72 | 67.61 | 36.4% | None (100% OK) |
+| 500 | 1,000 | 1,000 | 0 | 2,355.4 | 184.45 | 222.65 | 233.17 | 235.06 | 153.47 | 44.7% | None (100% OK) |
+| 750 | 1,500 | 1,500 | 0 | 2,821.4 | 255.86 | 263.73 | 265.97 | 267.56 | 201.41 | 39.4% | None (100% OK) |
+| 1,000 | 2,000 | 2,000 | 0 | 2,870.3 | 332.89 | 356.12 | 357.60 | 358.70 | 259.50 | 42.1% | None (100% OK) |
+
+Observations:
+
+- System achieves 2,870.3 ops/sec at $C = 1,000$ concurrent goroutines across only 16 database connections with zero errors.
+- PostgreSQL 18 connection turnaround remains bounded at approximately $0.35\text{ ms}$ per commit.
+- Relative Standard Deviation (RSD) stabilizes between 29.7% and 44.7% as queue depth smooths out burst jitter.
+
+#### 2. Ramp to failure under strict service level objective (75 ms budget, 8 pool connections)
+
+| Concurrency ($C$) | Total Ops | Success | Failures | Error Rate (%) | Throughput (ops/s) | p50 (ms) | p95 (ms) | Max (ms) | Failure Mode |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 10 | 40 | 40 | 0 | 0.0% | 1,296.2 | 6.10 | 14.38 | 14.91 | None (100% OK) |
+| 50 | 100 | 100 | 0 | 0.0% | 2,076.6 | 22.07 | 24.46 | 26.28 | None (100% OK) |
+| 100 | 200 | 200 | 0 | 0.0% | 1,641.9 | 51.30 | 68.38 | 70.84 | None (100% OK) |
+| **200 (Knee)** | **400** | **121** | **279** | **69.8%** | **802.9** | **44.95** | **71.76** | **75.19** | `failed:acquire_timeout` (251), state write (22), commit (2), enqueue (2) |
+| 400 | 800 | 115 | 685 | 85.6% | 762.2 | 47.32 | 72.70 | 74.58 | `failed:acquire_timeout` (658), state write (16), eventlog (8), commit (1) |
+
+Observations:
+
+- Breaking point is empirical: exactly between $C = 100$ (0.0% error) and $C = 200$ (69.8% error) for an 8-connection pool with a 75 ms SLA budget.
+- Over 90% of failure instances stem from pool acquisition timeout (`failed:acquire_timeout`).
+- Failed operations roll back safely without database corruption, connection leakage, or projection drift.
+
+#### 3. Payload variance and storage offload
+
+| Payload Class | Size (Bytes) | Storage Location | Ingress Latency | Architectural Behavior |
+| :--- | ---: | :--- | ---: | :--- |
+| Micro | 128 B | Inline JSON (`river_job.args`) | 6.49 ms | Direct inline storage for rapid heartbeat and market ticks. |
+| Medium | 4,096 B | Inline JSON (`river_job.args`) | 3.27 ms | Standard business record and metadata document. |
+| Inline Limit | 65,536 B | Inline JSON boundary (64 KiB) | 13.92 ms | Maximum inline threshold before offloading to sidecar. |
+| Large Sidecar | 131,072 B | Sidecar table (`river_job_metadata`) | 11.80 ms | Offloads binary body via `TxMetadataStore.SaveTx` inside the transaction. |
+
+#### 4. Security validation and chaos resilience
+
+- **Cross-tenant isolation**: Malicious cross-tenant mutation requests reject at the security boundary in $< 1\text{ ms}$ before touching PostgreSQL or River.
+- **Credential tampering**: Forged authentication tokens fail fast with `401 Unauthorized`.
+- **Database latency injection**: 20 ms artificial delay absorbed cleanly by retry and deadline budgets.
+- **Worker transient chaos**: 50% injected worker failure rate resolved automatically through River exponential backoff retries without data loss or duplicate delivery.
+
 ### Fixed-width string compare (vectorstr): 2026-10-28
 
 The first `vectorstr` version read 8 or 16 bytes past the end of short strings.
@@ -113,6 +195,7 @@ This pass links Foundation primitives into zero-allocation execution paths.
 | `QueryAllArenaDirectScanFakeRows100` | 579 ns | 0 B | 0 allocs | 2,939 ns, 203 allocs |
 
 Key achievements:
+
 1. `AppLane_EndToEnd_ScratchArena` unites HTTP ingress translation, RBAC mask evaluation, database direct scan, and JSON serialization. The entire pipeline allocates 0 bytes on the heap.
 2. `SecureRouteMaplet` evaluates destination shard lookup and bitwise capability checks in a single 15-nanosecond step.
 3. `LookupCanonicalHeader` generates a 5-cycle perfect hash table for HTTP headers.

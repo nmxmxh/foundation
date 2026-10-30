@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func TestJobNextBackoffCapsLargeAttempts(t *testing.T) {
@@ -120,6 +121,22 @@ func TestInMemoryMetadataStore(t *testing.T) {
 			}
 		}()
 		_ = pg.Save(context.Background(), meta)
+	}()
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected nil postgres pool get panic")
+			}
+		}()
+		_, _ = pg.Get(context.Background(), 1)
+	}()
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected nil postgres pool update panic")
+			}
+		}()
+		_ = pg.UpdateTrackingData(context.Background(), 1, nil)
 	}()
 }
 
@@ -265,3 +282,168 @@ func TestConformanceTraceWorkerRetryQueue(t *testing.T) {
 		}
 	}
 }
+
+func TestJobMarshalUnmarshalParity(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	orig := Job{
+		ID:             "job-12345",
+		JobKind:        "test:worker:kind",
+		Queue:          "test_queue",
+		CorrelationID:  "corr-abc",
+		IdempotencyKey: "idem-xyz",
+		Attempt:        1,
+		MaxAttempts:    5,
+		ScheduledAt:    now.Add(10 * time.Minute),
+		CreatedAt:      now,
+		ExecutionPolicy: JobExecutionPolicy{
+			TimeoutMS: 5000,
+		},
+		RequireSidecar: true,
+		Payload: extension.Object{
+			"key_str": extension.String("val"),
+			"key_num": extension.Int(42),
+		},
+		Metadata: extension.Object{
+			"env": extension.String("test"),
+		},
+		RawPayload: []byte(`{"nested":"json_data","num":123}`),
+	}
+
+	// 1. Standard MarshalJSON -> UnmarshalJSON
+	data, err := orig.MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON failed: %v", err)
+	}
+
+	var decoded Job
+	if err := decoded.UnmarshalJSON(data); err != nil {
+		t.Fatalf("UnmarshalJSON failed: %v", err)
+	}
+
+	if decoded.ID != orig.ID || decoded.JobKind != orig.JobKind || decoded.Queue != orig.Queue {
+		t.Fatalf("base fields mismatch: %+v vs %+v", decoded, orig)
+	}
+	if decoded.CorrelationID != orig.CorrelationID || decoded.IdempotencyKey != orig.IdempotencyKey {
+		t.Fatalf("correlation/idempotency mismatch: %+v vs %+v", decoded, orig)
+	}
+	if decoded.Attempt != orig.Attempt || decoded.MaxAttempts != orig.MaxAttempts {
+		t.Fatalf("attempt mismatch: %d vs %d", decoded.Attempt, orig.Attempt)
+	}
+	if decoded.ExecutionPolicy.TimeoutMS != 5000 || !decoded.RequireSidecar {
+		t.Fatalf("policy/sidecar mismatch: %+v", decoded)
+	}
+	if string(decoded.RawPayload) != string(orig.RawPayload) {
+		t.Fatalf("raw_payload mismatch: %s vs %s", string(decoded.RawPayload), string(orig.RawPayload))
+	}
+	if str, _ := decoded.Payload.GetString("key_str"); str != "val" {
+		t.Fatalf("payload string mismatch: %s", str)
+	}
+	if str, _ := decoded.Metadata.GetString("env"); str != "test" {
+		t.Fatalf("metadata string mismatch: %s", str)
+	}
+
+	// 2. Test Binary (Non-JSON) payload encodes as Base64 string and decodes properly
+	binaryPayload := []byte{0x00, 0x01, 0x02, 0xff, 0xfe, 0xfd}
+	binaryJob := Job{
+		JobKind:    "bin:kind",
+		Queue:      "default",
+		RawPayload: binaryPayload,
+	}
+	binData, err := binaryJob.MarshalJSON()
+	if err != nil {
+		t.Fatalf("binary marshal failed: %v", err)
+	}
+	var binDecoded Job
+	if err := binDecoded.UnmarshalJSON(binData); err != nil {
+		t.Fatalf("binary unmarshal failed: %v", err)
+	}
+	if len(binDecoded.RawPayload) != len(binaryPayload) {
+		t.Fatalf("binary payload len mismatch: %d vs %d", len(binDecoded.RawPayload), len(binaryPayload))
+	}
+	for i := range binaryPayload {
+		if binDecoded.RawPayload[i] != binaryPayload[i] {
+			t.Fatalf("binary byte %d mismatch: %x vs %x", i, binDecoded.RawPayload[i], binaryPayload[i])
+		}
+	}
+
+	// 3. Test Arena-backed Marshaling
+	arena := scratch.New(4096)
+	arenaData, err := orig.MarshalJSONWithArena(arena)
+	if err != nil {
+		t.Fatalf("MarshalJSONWithArena failed: %v", err)
+	}
+	var arenaDecoded Job
+	if err := arenaDecoded.UnmarshalJSON(arenaData); err != nil {
+		t.Fatalf("arena unmarshal failed: %v", err)
+	}
+	if arenaDecoded.ID != orig.ID {
+		t.Fatalf("arena decoded id mismatch: %s vs %s", arenaDecoded.ID, orig.ID)
+	}
+
+	// 4. Test String Escaping in appendJSONString
+	complexStringsJob := Job{
+		ID:            "id\"with\\quotes\nand\rnewlines\tand\x00control\x1fchars",
+		JobKind:       "kind:complex",
+		Queue:         "default",
+		CorrelationID: "corr\"quotes",
+	}
+	escData, err := complexStringsJob.MarshalJSON()
+	if err != nil {
+		t.Fatalf("complex strings marshal failed: %v", err)
+	}
+	var escDecoded Job
+	if err := escDecoded.UnmarshalJSON(escData); err != nil {
+		t.Fatalf("complex strings unmarshal failed: %v", err)
+	}
+	if escDecoded.ID != complexStringsJob.ID {
+		t.Fatalf("escaped string roundtrip mismatch:\norig:    %q\ndecoded: %q", complexStringsJob.ID, escDecoded.ID)
+	}
+
+	// 5. Test UnmarshalJSON error paths
+	var invalidJob Job
+	if err := invalidJob.UnmarshalJSON([]byte(`[1, 2, 3]`)); err == nil {
+		t.Fatal("expected array JSON to fail UnmarshalJSON")
+	}
+	if err := invalidJob.UnmarshalJSON([]byte(`{"payload": "not_an_object"}`)); err == nil {
+		t.Fatal("expected invalid payload to fail UnmarshalJSON")
+	}
+	if err := invalidJob.UnmarshalJSON([]byte(`{"metadata": "not_an_object"}`)); err == nil {
+		t.Fatal("expected invalid metadata to fail UnmarshalJSON")
+	}
+	// Non-base64 string in raw_payload falls back to raw string bytes
+	var rawFallback Job
+	if err := rawFallback.UnmarshalJSON([]byte(`{"raw_payload": "not-valid-base64-!@#$"}`)); err != nil {
+		t.Fatalf("expected raw string fallback: %v", err)
+	}
+	if string(rawFallback.RawPayload) != "not-valid-base64-!@#$" {
+		t.Fatalf("raw string fallback mismatch: %s", string(rawFallback.RawPayload))
+	}
+}
+
+func TestProcessorMapletNilAndMissingLookups(t *testing.T) {
+	var nilMaplet *ProcessorMaplet
+	if proc, ok := nilMaplet.Lookup("any"); ok || proc != nil {
+		t.Fatalf("expected nil maplet lookup to return false, got %v, %v", ok, proc)
+	}
+	if ch, ok := nilMaplet.Queue("any"); ok || ch != nil {
+		t.Fatalf("expected nil maplet queue to return false, got %v, %v", ok, ch)
+	}
+
+	maplet := NewProcessorMaplet(nil, nil)
+	if proc, ok := maplet.Lookup("missing"); ok || proc != nil {
+		t.Fatalf("expected missing lookup to return false, got %v", ok)
+	}
+	if ch, ok := maplet.Queue("missing"); ok || ch != nil {
+		t.Fatalf("expected missing queue to return false, got %v", ok)
+	}
+
+	holder := NewMapletHolder()
+	if holder.Load() == nil {
+		t.Fatal("expected default empty maplet from holder")
+	}
+	holder.Update(map[string]Processor{"proc": &benchProcessor{kind: "proc"}}, nil)
+	if p, ok := holder.Load().Lookup("proc"); !ok || p == nil {
+		t.Fatal("expected updated maplet from holder to contain proc")
+	}
+}
+

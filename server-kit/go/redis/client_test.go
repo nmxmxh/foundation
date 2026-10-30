@@ -1211,3 +1211,80 @@ func TestMemoryClientSortedSetZAddMany(t *testing.T) {
 		t.Fatalf("expected 0 added for existing member, got: %v", added2)
 	}
 }
+
+func TestMemoryClientExtendedOperations(t *testing.T) {
+	ctx := context.Background()
+	client := NewMemoryClient("ext")
+	defer func() { _ = client.Close() }()
+
+	// Test IncrExpireMany & PublishMany
+	batchClient, ok := client.(CoordinationBatchClient)
+	if !ok {
+		t.Fatalf("expected CoordinationBatchClient")
+	}
+	errs := batchClient.IncrExpireMany(ctx, []string{"k1", "k2"}, time.Minute)
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("IncrExpireMany[%d] failed: %v", i, err)
+		}
+	}
+	pubErrs := batchClient.PublishMany(ctx, "chan1", [][]byte{[]byte("msg1"), []byte("msg2")})
+	for i, err := range pubErrs {
+		if err != nil {
+			t.Fatalf("PublishMany[%d] failed: %v", i, err)
+		}
+	}
+
+	// Test PSubscribe
+	chans, unsub, err := client.PSubscribe(ctx, "pat:*")
+	if err != nil || len(chans) == 0 {
+		t.Fatalf("PSubscribe failed: %v", err)
+	}
+	defer unsub()
+
+	// Test Sorted Set extras
+	zClient, ok := client.(SortedSetClient)
+	if !ok {
+		t.Fatalf("expected SortedSetClient")
+	}
+	_, _ = zClient.ZAdd(ctx, "zset", 10.0, "m1")
+	_, _ = zClient.ZAdd(ctx, "zset", 20.0, "m2")
+	card, err := zClient.ZCard(ctx, "zset")
+	if err != nil || card != 2 {
+		t.Fatalf("ZCard = %d, want 2: %v", card, err)
+	}
+	rev, err := zClient.ZRevRange(ctx, "zset", 0, -1)
+	if err != nil || len(rev) != 2 || rev[0] != "m2" {
+		t.Fatalf("ZRevRange failed: %v, %v", rev, err)
+	}
+	rem, err := zClient.ZRem(ctx, "zset", "m1")
+	if err != nil || rem != 1 {
+		t.Fatalf("ZRem failed: %v, %v", rem, err)
+	}
+	remRank, err := zClient.ZRemRangeByRank(ctx, "zset", 0, 0)
+	if err != nil || remRank != 1 {
+		t.Fatalf("ZRemRangeByRank failed: %v, %v", remRank, err)
+	}
+
+	// Test HyperLogLog
+	n, err := client.PFAdd(ctx, "hll", "a", "b", "c")
+	if err != nil || n != 1 {
+		t.Fatalf("PFAdd failed: %v, %v", n, err)
+	}
+	cnt, err := client.PFCount(ctx, "hll")
+	if err != nil || cnt != 3 {
+		t.Fatalf("PFCount = %d, want 3: %v", cnt, err)
+	}
+
+	// Test DeletePattern
+	adminClient, ok := client.(KeyAdminClient)
+	if !ok {
+		t.Fatalf("expected KeyAdminClient")
+	}
+	_ = client.Set(ctx, "pat:1", []byte("v1"), time.Minute)
+	_ = client.Set(ctx, "pat:2", []byte("v2"), time.Minute)
+	deleted, err := adminClient.DeletePattern(ctx, "pat:*", 10)
+	if err != nil || len(deleted) != 2 {
+		t.Fatalf("DeletePattern failed: %v, %v", deleted, err)
+	}
+}
