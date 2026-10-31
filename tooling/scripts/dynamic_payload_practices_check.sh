@@ -116,12 +116,12 @@ ratchet_gate() {
 
 if (( ${#product_paths[@]} > 0 )); then
   ratchet_gate dynamic_maps \
-    "dynamic payload maps in scaffolded product hot paths" \
+    "dynamic payload maps are not allowed in scaffolded product hot paths" \
     "map\\[string\\](any|interface\\{\\})|Record<\\s*string\\s*,\\s*(unknown|any)\\s*>|\\{\\s*\\[key:\\s*string\\]\\s*:\\s*(unknown|any)\\s*\\}" \
     "${product_paths[@]}"
 
   ratchet_gate adhoc_json \
-    "ad hoc JSON encode/decode in product hot paths" \
+    "product hot paths avoid ad hoc JSON encode/decode" \
     "json\\.(Marshal|Unmarshal|NewDecoder|NewEncoder)|JSON\\.(parse|stringify)" \
     "${product_paths[@]}"
 fi

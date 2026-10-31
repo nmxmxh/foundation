@@ -371,3 +371,15 @@ func TestCanonicalHeaderTableMatchesSpec(t *testing.T) {
 		t.Fatalf("net/http canonical form must resolve, got (%v, %v)", got, found)
 	}
 }
+
+func TestLookupCanonicalHeaderByteAt(t *testing.T) {
+	if got := lookupCanonicalHeaderByteAt("abc", -1); got != 'c' {
+		t.Fatalf("pos -1 = %q, want 'c'", got)
+	}
+	if got := lookupCanonicalHeaderByteAt("abc", -4); got != 0 {
+		t.Fatalf("pos -4 = %d, want 0", got)
+	}
+	if got := lookupCanonicalHeaderByteAt("abc", 3); got != 0 {
+		t.Fatalf("pos 3 = %d, want 0", got)
+	}
+}

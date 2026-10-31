@@ -110,3 +110,46 @@ func TestFCMSend(t *testing.T) {
 		t.Fatal("expected Rejected for empty payload")
 	}
 }
+
+// TestFCMSendWrapsPlainTextAndRetriesTransportErrors covers the non-JSON wrap
+// path, the correlation header, and transport failure classification.
+func TestFCMSendWrapsPlainTextAndRetriesTransportErrors(t *testing.T) {
+	sender, err := NewFCMSender(FCMConfig{
+		ProjectID:     "test-proj",
+		TokenProvider: func(context.Context) (string, error) { return "tok", nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body string
+	sender.client.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		if r.Header.Get("X-Correlation-ID") != "corr-1" {
+			t.Fatalf("correlation header = %q", r.Header.Get("X-Correlation-ID"))
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{}`)), Header: http.Header{}}, nil
+	})
+	d := item()
+	d.Destination = Destination{Endpoint: "device"}
+	d.CorrelationID = "corr-1"
+	d.Payload = []byte(`plain "text" message`)
+	if res := sender.Send(context.Background(), d); res.Outcome != Accepted {
+		t.Fatalf("outcome = %s", res.Outcome)
+	}
+	if !strings.Contains(body, `"data":{"body":"plain \"text\" message"}`) {
+		t.Fatalf("plain text not wrapped as a JSON body field: %s", body)
+	}
+
+	sender.client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection reset")
+	})
+	if res := sender.Send(context.Background(), d); res.Outcome != Retry {
+		t.Fatalf("transport error outcome = %s, want Retry", res.Outcome)
+	}
+
+	d.Payload = make([]byte, 3001)
+	if res := sender.Send(context.Background(), d); res.Outcome != Rejected {
+		t.Fatalf("oversize payload outcome = %s, want Rejected", res.Outcome)
+	}
+}

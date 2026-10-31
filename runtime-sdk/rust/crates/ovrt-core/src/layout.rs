@@ -275,9 +275,12 @@ mod tests {
 
         // Verify field 0
         let f0_base = 32;
-        let f0_id = u32::from_le_bytes(dest[f0_base..f0_base + 4].try_into().expect("4-byte header field"));
+        let f0_id =
+            u32::from_le_bytes(dest[f0_base..f0_base + 4].try_into().expect("4-byte header field"));
         assert_eq!(f0_id, 101);
-        let f0_val_id = u32::from_le_bytes(dest[f0_base + 32..f0_base + 36].try_into().expect("4-byte header field"));
+        let f0_val_id = u32::from_le_bytes(
+            dest[f0_base + 32..f0_base + 36].try_into().expect("4-byte header field"),
+        );
         assert_eq!(f0_val_id, 1);
 
         // Test scratch assembly

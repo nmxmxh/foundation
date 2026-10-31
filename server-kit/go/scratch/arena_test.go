@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"reflect"
 	"testing"
 	"unsafe"
 )
@@ -482,5 +483,57 @@ func TestAllocSliceRejectsOverflow(t *testing.T) {
 	}
 	if a.Allocated() != 0 {
 		t.Fatalf("failed allocations must not move head, got %d", a.Allocated())
+	}
+}
+
+func TestDetachDropsArenaAndCancellation(t *testing.T) {
+	parent, cancel := context.WithCancel(WithArena(context.Background(), New(64)))
+	detached := Detach(parent)
+	cancel()
+	if FromContext(detached) != nil {
+		t.Fatal("detached context must not carry the request arena")
+	}
+	if detached.Err() != nil {
+		t.Fatal("detached context must not inherit cancellation")
+	}
+	//nolint:staticcheck // nil context is the case under test.
+	if FromContext(Detach(nil)) != nil {
+		t.Fatal("Detach(nil) must give an arena-free context")
+	}
+}
+
+func TestPointerFreeEdgeCases(t *testing.T) {
+	type empty struct{}
+	if !PointerFree[[0]*int]() {
+		t.Fatal("a zero-length array holds no pointers")
+	}
+	if !PointerFree[[4][2]uint16]() {
+		t.Fatal("nested numeric arrays are pointer-free")
+	}
+	a := New(64)
+	if s, err := AllocSlice[empty](a, 3); err != nil || len(s) != 3 {
+		t.Fatalf("zero-size element: len=%d err=%v", len(s), err)
+	}
+	if _, err := a.Alloc(1 << 20); !errors.Is(err, ErrArenaFull) {
+		t.Fatalf("oversize Alloc: got %v, want ErrArenaFull", err)
+	}
+	// Deep nesting beyond the walk bound is treated as unsafe, never as pointer-free.
+	if typePointerFree(reflect.TypeFor[[1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1][1]int](), 0) {
+		t.Fatal("type nesting beyond the bound must not be reported pointer-free")
+	}
+}
+
+// TestAllocFailsWhenRemainingSpaceIsTooSmall covers a request that fits the
+// buffer but not the space left after earlier allocations.
+func TestAllocFailsWhenRemainingSpaceIsTooSmall(t *testing.T) {
+	a := New(64)
+	if _, err := a.Alloc(48); err != nil {
+		t.Fatalf("first alloc: %v", err)
+	}
+	if _, err := a.Alloc(32); !errors.Is(err, ErrArenaFull) {
+		t.Fatalf("second alloc: got %v, want ErrArenaFull", err)
+	}
+	if _, err := AllocSlice[uint64](a, 4); !errors.Is(err, ErrArenaFull) {
+		t.Fatalf("typed alloc past remaining space: got %v, want ErrArenaFull", err)
 	}
 }

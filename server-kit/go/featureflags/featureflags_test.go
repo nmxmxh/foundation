@@ -238,3 +238,23 @@ func TestUndefinedFlagsNeverEnabled(t *testing.T) {
 		t.Fatalf("static flag fast path allocated %.1f times, want 0", allocs)
 	}
 }
+
+// TestDynamicFlagSlowPathBranches covers the evaluation path that the static
+// snapshot no longer reaches: disabled dynamic flags, rollout without a user,
+// and attributes that cannot be encoded as JSON.
+func TestDynamicFlagSlowPathBranches(t *testing.T) {
+	m := New(Config{})
+	defer m.Stop()
+	m.SetFlag(Flag{Name: "off_dynamic", Enabled: false, AllowedUsers: []string{"u1"}})
+	m.SetFlag(Flag{Name: "half", Enabled: true, RolloutPercentage: 50})
+	ctx := context.Background()
+	if m.IsEnabled(ctx, "off_dynamic", WithUser("u1")) {
+		t.Fatal("a disabled dynamic flag must stay off for allowed users")
+	}
+	if m.IsEnabled(ctx, "half") {
+		t.Fatal("a percentage rollout without a user id must be off")
+	}
+	if m.IsEnabled(ctx, "half", WithAttribute("callback", func() {})) {
+		t.Fatal("an unencodable attribute must not enable a rollout without a user")
+	}
+}

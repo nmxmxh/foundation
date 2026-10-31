@@ -521,7 +521,10 @@ func zstdDeclaredTooLarge(data []byte, maxDecoded int64) bool {
 	if err := h.Decode(data); err != nil {
 		return false
 	}
-	return h.HasFCS && h.FrameContentSize > uint64(maxDecoded)
+	if maxDecoded < 0 {
+		return true
+	}
+	return h.HasFCS && h.FrameContentSize > uint64(maxDecoded) // #nosec G115 -- maxDecoded is non-negative here.
 }
 
 // decodeZstdLimited decodes into dst (append semantics) and stops at
