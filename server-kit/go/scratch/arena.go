@@ -246,3 +246,13 @@ func FromContext(ctx context.Context) *Arena {
 	a, _ := ctx.Value(contextKey{}).(*Arena)
 	return a
 }
+
+// Detach returns a context that outlives ctx: no cancellation, no deadline, and no arena.
+// Use it for work that continues after the request returns. The request arena
+// is reset and reused then, so detached work must never see it.
+func Detach(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return WithArena(context.WithoutCancel(ctx), nil)
+}

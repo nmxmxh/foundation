@@ -658,60 +658,76 @@ func (b deleteFailingBackend) Delete(ctx context.Context, key string) error {
 	return b.err
 }
 
-func TestCache_AdmissionAndPenetrationGuards(t *testing.T) {
+func TestCache_AdmissionGuardNeverDropsWrites(t *testing.T) {
 	backend := NewMemoryBackend()
-	c := New(Config{
-		Backend:            backend,
-		AdmissionGuard:     true,
-		AdmissionThreshold: 2,
-		PenetrationGuard:   true,
-		ExpectedKeys:       100,
-	})
+	c := New(Config{Backend: backend, AdmissionGuard: true, AdmissionThreshold: 5})
 	ctx := context.Background()
+	if err := c.Set(ctx, "k", "v"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	var got string
+	if err := c.Get(ctx, "k", &got); err != nil || got != "v" {
+		t.Fatalf("Set returned nil, so the value must be stored: got=%q err=%v", got, err)
+	}
+}
 
-	// 1. Penetration Guard: first miss sets penetration filter
+// TestCache_PenetrationGuardIsExactAndExpires guards the miss memo: a memoized
+// miss must expire, so another replica's write becomes visible.
+func TestCache_PenetrationGuardIsExactAndExpires(t *testing.T) {
+	backend := NewMemoryBackend()
+	c := New(Config{Backend: backend, PenetrationGuard: true, PenetrationTTL: 50 * time.Millisecond, ExpectedKeys: 4})
+	ctx := context.Background()
 	var dest string
-	if err := c.Get(ctx, "missing-key", &dest); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expected ErrNotFound, got %v", err)
+	if err := c.Get(ctx, "missing", &dest); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("first miss: %v", err)
+	}
+	// Another replica writes straight to the backend.
+	_ = backend.Set(ctx, c.key("missing"), []byte(`"remote"`), time.Minute)
+	if err := c.Get(ctx, "missing", &dest); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("memoized miss inside TTL: %v", err)
+	}
+	time.Sleep(80 * time.Millisecond)
+	if err := c.Get(ctx, "missing", &dest); err != nil || dest != "remote" {
+		t.Fatalf("expired memo must read the backend: dest=%q err=%v", dest, err)
 	}
 
-	// Second miss should short-circuit via penetrationMaplet
-	if err := c.Get(ctx, "missing-key", &dest); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("expected ErrNotFound on penetration blocked key, got %v", err)
+	// A local Set clears the memo at once.
+	_ = c.Get(ctx, "other", &dest)
+	if err := c.Set(ctx, "other", "local"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if err := c.Get(ctx, "other", &dest); err != nil || dest != "local" {
+		t.Fatalf("get after set: dest=%q err=%v", dest, err)
 	}
 
-	// 2. Admission Guard: first set below threshold does not write to backend
-	if err := c.Set(ctx, "candidate-key", "value-1"); err != nil {
-		t.Fatalf("set candidate: %v", err)
+	// Many distinct misses never block a key that exists.
+	for i := range 100 {
+		_ = c.Get(ctx, fmt.Sprintf("absent-%d", i), &dest)
 	}
-	raw, _ := backend.Get(ctx, c.key("candidate-key"))
-	if raw != nil {
-		t.Fatal("expected candidate-key to be held back by admission threshold")
+	_ = backend.Set(ctx, c.key("present"), []byte(`"p"`), time.Minute)
+	if err := c.Get(ctx, "present", &dest); err != nil || dest != "p" {
+		t.Fatalf("present key reported missing: dest=%q err=%v", dest, err)
 	}
+}
 
-	// Second set reaches threshold and writes to backend
-	if err := c.Set(ctx, "candidate-key", "value-2"); err != nil {
-		t.Fatalf("set candidate 2: %v", err)
+func TestCache_PenetrationGuardConcurrent(t *testing.T) {
+	c := New(Config{Backend: NewMemoryBackend(), PenetrationGuard: true, ExpectedKeys: 64})
+	ctx := context.Background()
+	var wg sync.WaitGroup
+	for w := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 200 {
+				key := fmt.Sprintf("k-%d-%d", w, i%32)
+				var dest string
+				_ = c.Get(ctx, key, &dest)
+				_ = c.Set(ctx, key, "v")
+				_ = c.Delete(ctx, key)
+			}
+		}()
 	}
-	raw, _ = backend.Get(ctx, c.key("candidate-key"))
-	if raw == nil {
-		t.Fatal("expected candidate-key to be admitted to backend on second write")
-	}
-
-	// 3. Clear penetration upon Set (two writes reach admission threshold 2)
-	_ = c.Set(ctx, "missing-key", "now-found")
-	if err := c.Set(ctx, "missing-key", "now-found"); err != nil {
-		t.Fatalf("set missing-key: %v", err)
-	}
-	var val string
-	if err := c.Get(ctx, "missing-key", &val); err != nil || val != "now-found" {
-		t.Fatalf("get missing-key after set: val=%q err=%v", val, err)
-	}
-
-	// 4. Delete clears penetration state
-	if err := c.Delete(ctx, "missing-key"); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
+	wg.Wait()
 }
 
 func BenchmarkCache_PenetrationGuardMiss(b *testing.B) {

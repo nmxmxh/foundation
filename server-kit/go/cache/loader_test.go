@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 func TestContextLoaderSharesWorkAndCancelsWaitersIndependently(t *testing.T) {
@@ -282,5 +284,23 @@ func TestContextLoaderPreservesContextValuesAndScopedKeys(t *testing.T) {
 		if value != organization || err != nil {
 			t.Fatalf("scope=%q value=%q error=%v", organization, value, err)
 		}
+	}
+}
+
+// TestLoadDetachesRequestArena guards the detached load goroutine. It can
+// outlive the request, so it must not see the request's pooled arena.
+func TestLoadDetachesRequestArena(t *testing.T) {
+	c := New(Config{Backend: NewMemoryBackend()})
+	ctx := scratch.WithArena(context.Background(), scratch.New(1024))
+	var sawArena atomic.Bool
+	_, err := GetOrSetContext(ctx, c, "detached", func(loadCtx context.Context) (string, error) {
+		sawArena.Store(scratch.FromContext(loadCtx) != nil)
+		return "v", nil
+	})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if sawArena.Load() {
+		t.Fatal("detached load must not inherit the request arena")
 	}
 }

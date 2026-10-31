@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 // LoadPolicy bounds shared cache construction. Zero fields use bounded defaults.
@@ -130,7 +132,7 @@ func (c *Cache) acquireLoad(ctx context.Context, key string, run func(context.Co
 	if len(c.loads) >= policy.MaxInflight {
 		return nil, ErrLoadBusy
 	}
-	loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), policy.Timeout)
+	loadCtx, cancel := context.WithTimeout(scratch.Detach(ctx), policy.Timeout)
 	call := &loadCall{ctx: loadCtx, cancel: cancel, done: make(chan struct{}), waiters: 1}
 	if c.loads == nil {
 		c.loads = make(map[string]*loadCall)

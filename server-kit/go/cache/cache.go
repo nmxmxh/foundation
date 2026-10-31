@@ -30,7 +30,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -69,17 +68,23 @@ type Config struct {
 	// OnError is called on cache errors.
 	OnError func(key string, err error)
 
-	// AdmissionGuard enables a bounded CountingMaplet to track frequency and prevent cache pollution.
+	// AdmissionGuard is deprecated and ignored.
+	// It made Set return nil without storing, so callers lost writes while told they succeeded.
 	AdmissionGuard bool
 
-	// AdmissionThreshold is the minimum access count before storing in the remote backend.
+	// AdmissionThreshold is deprecated and ignored. See AdmissionGuard.
 	AdmissionThreshold uint8
 
-	// ExpectedKeys configures the size of the admission counting maplet.
+	// ExpectedKeys bounds the negative-lookup memo of the penetration guard. Default: 10000.
 	ExpectedKeys int
 
-	// PenetrationGuard blocks repeated lookups for verified non-existent keys.
+	// PenetrationGuard memoizes backend misses for PenetrationTTL in this process.
+	// The memo is exact (no false positives) and short-lived, so a write from
+	// another replica becomes visible within PenetrationTTL.
 	PenetrationGuard bool
+
+	// PenetrationTTL bounds how long a miss is memoized. Default: 2s.
+	PenetrationTTL time.Duration
 }
 
 // Serializer handles value encoding/decoding.
@@ -101,13 +106,12 @@ func (JSONSerializer) Unmarshal(data []byte, v any) error {
 
 // Cache provides cache operations.
 type Cache struct {
-	config             Config
-	admissionMaplet    *metadata.CountingMaplet
-	penetrationMaplet  *metadata.WideMaplet
-	sf                 singleflight.Group
-	loadMu             sync.Mutex
-	loads              map[string]*loadCall
-	loadConfig         LoadPolicy
+	config     Config
+	misses     *missMemo
+	sf         singleflight.Group
+	loadMu     sync.Mutex
+	loads      map[string]*loadCall
+	loadConfig LoadPolicy
 }
 
 // New creates a new cache instance.
@@ -119,19 +123,68 @@ func New(cfg Config) *Cache {
 		cfg.Serializer = JSONSerializer{}
 	}
 	c := &Cache{config: cfg}
-	if cfg.AdmissionGuard || cfg.PenetrationGuard {
-		expectedKeys := cfg.ExpectedKeys
-		if expectedKeys <= 0 {
-			expectedKeys = 10000
-		}
-		if cfg.AdmissionGuard {
-			c.admissionMaplet = metadata.NewCountingMaplet(expectedKeys)
-		}
-		if cfg.PenetrationGuard {
-			c.penetrationMaplet = metadata.NewWideMaplet(expectedKeys)
-		}
+	if cfg.PenetrationGuard {
+		c.misses = newMissMemo(cfg.ExpectedKeys, cfg.PenetrationTTL)
 	}
 	return c
+}
+
+// missMemo is an exact, bounded, TTL memo of backend misses.
+// An approximate maplet was used before. It raced under concurrent Get and Set,
+// never expired, and a fingerprint collision reported live keys as missing.
+type missMemo struct {
+	mu      sync.Mutex
+	entries map[string]time.Time
+	max     int
+	ttl     time.Duration
+}
+
+func newMissMemo(maxEntries int, ttl time.Duration) *missMemo {
+	if maxEntries <= 0 {
+		maxEntries = 10000
+	}
+	if ttl <= 0 {
+		ttl = 2 * time.Second
+	}
+	return &missMemo{entries: make(map[string]time.Time), max: maxEntries, ttl: ttl}
+}
+
+func (m *missMemo) has(key string, now time.Time) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	expiry, ok := m.entries[key]
+	if !ok {
+		return false
+	}
+	if now.After(expiry) {
+		delete(m.entries, key)
+		return false
+	}
+	return true
+}
+
+func (m *missMemo) add(key string, now time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.entries) >= m.max {
+		// Drop expired entries first. When all are live, skip the memo: a miss
+		// then costs one backend read, which is the behaviour without the guard.
+		for k, expiry := range m.entries {
+			if now.After(expiry) {
+				delete(m.entries, k)
+			}
+		}
+		if len(m.entries) >= m.max {
+			return
+		}
+	}
+	m.entries[key] = now.Add(m.ttl)
+}
+
+func (m *missMemo) forget(key string) {
+	m.mu.Lock()
+	delete(m.entries, key)
+	m.mu.Unlock()
 }
 
 func (c *Cache) key(k string) string {
@@ -141,8 +194,8 @@ func (c *Cache) key(k string) string {
 // Get retrieves a value from cache.
 func (c *Cache) Get(ctx context.Context, key string, dest any) error {
 	fullKey := c.key(key)
-	if c.penetrationMaplet != nil {
-		if val, ok := c.penetrationMaplet.Lookup(fullKey); ok && val == 1 {
+	if c.misses != nil {
+		if c.misses.has(fullKey, time.Now()) {
 			if c.config.OnMiss != nil {
 				c.config.OnMiss(key)
 			}
@@ -159,8 +212,8 @@ func (c *Cache) Get(ctx context.Context, key string, dest any) error {
 	}
 
 	if data == nil {
-		if c.penetrationMaplet != nil {
-			_ = c.penetrationMaplet.Insert(fullKey, 1)
+		if c.misses != nil {
+			c.misses.add(fullKey, time.Now())
 		}
 		if c.config.OnMiss != nil {
 			c.config.OnMiss(key)
@@ -178,14 +231,8 @@ func (c *Cache) Get(ctx context.Context, key string, dest any) error {
 // Set stores a value in cache with optional TTL.
 func (c *Cache) Set(ctx context.Context, key string, value any, ttl ...time.Duration) error {
 	fullKey := c.key(key)
-	if c.penetrationMaplet != nil {
-		_ = c.penetrationMaplet.Insert(fullKey, 0)
-	}
-	if c.admissionMaplet != nil && c.config.AdmissionThreshold > 1 {
-		count := c.admissionMaplet.Increment(fullKey)
-		if count < c.config.AdmissionThreshold {
-			return nil
-		}
+	if c.misses != nil {
+		c.misses.forget(fullKey)
 	}
 
 	data, err := c.config.Serializer.Marshal(value)
@@ -204,8 +251,8 @@ func (c *Cache) Set(ctx context.Context, key string, value any, ttl ...time.Dura
 // Delete removes a value from cache.
 func (c *Cache) Delete(ctx context.Context, key string) error {
 	fullKey := c.key(key)
-	if c.penetrationMaplet != nil {
-		_ = c.penetrationMaplet.Insert(fullKey, 0)
+	if c.misses != nil {
+		c.misses.forget(fullKey)
 	}
 	return c.config.Backend.Delete(ctx, fullKey)
 }
