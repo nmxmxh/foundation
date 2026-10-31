@@ -1,0 +1,5 @@
+# Ceilings for tooling/scripts/dynamic_payload_practices_check.sh. Counts only fall.
+# Recorded 2026-11-01, when the gate first ran (it was dead before; see the script).
+# gate|ceiling
+dynamic_maps|74
+adhoc_json|27

@@ -9,18 +9,30 @@ check_no_match() {
   local label="$1"
   local pattern="$2"
   shift 2
-  if rg -n \
+  local rc=0
+  rg -n \
     --glob '!**/node_modules/**' \
     --glob '!**/dist/**' \
     --glob '!**/target/**' \
     --glob '!**/coverage/**' \
-    "$pattern" "$@" >"$tmp_output" 2>/dev/null; then
-    echo "[FAIL] $label"
-    cat "$tmp_output"
-    failed=1
-  else
-    echo "[OK] $label"
-  fi
+    "$pattern" "$@" >"$tmp_output" 2>"$tmp_output.err" || rc=$?
+  # rg exits 2 on a search error. Counting that as "no match" made gates pass
+  # without searching, so it fails loudly.
+  case "$rc" in
+    0)
+      echo "[FAIL] $label"
+      cat "$tmp_output"
+      failed=1
+      ;;
+    1)
+      echo "[OK] $label"
+      ;;
+    *)
+      echo "[FAIL] $label (search error, rg exit $rc)"
+      cat "$tmp_output.err"
+      failed=1
+      ;;
+  esac
 }
 
 check_has_match() {
