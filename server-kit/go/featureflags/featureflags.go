@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/extension"
-	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
 )
 
 // Flag represents a feature flag configuration.
@@ -144,7 +143,7 @@ const (
 type Manager struct {
 	config     Config
 	flags      map[string]Flag
-	flagMaplet atomic.Pointer[metadata.WideMaplet]
+	flagStates atomic.Pointer[map[string]uint8]
 	mu         sync.RWMutex
 	stopCh     chan struct{}
 	stopOnce   sync.Once
@@ -160,26 +159,22 @@ func isStaticFlag(flag Flag) bool {
 		flag.EndTime == nil
 }
 
-func buildFlagMaplet(flags map[string]Flag) *metadata.WideMaplet {
-	if len(flags) == 0 {
-		return metadata.NewWideMaplet(16)
-	}
-	capacity := max(len(flags)*2, 16)
-	maplet := metadata.NewWideMaplet(capacity)
+// buildFlagStates builds an exact, immutable name -> state snapshot.
+// An approximate maplet was used before. A fingerprint collision there made an
+// undefined flag read as another flag's static state, and could open a gate.
+func buildFlagStates(flags map[string]Flag) *map[string]uint8 {
+	states := make(map[string]uint8, len(flags))
 	for name, flag := range flags {
-		var state uint8
-		if isStaticFlag(flag) {
-			if flag.Enabled {
-				state = flagStateStaticEnabled
-			} else {
-				state = flagStateStaticDisabled
-			}
-		} else {
-			state = flagStateDynamic
+		switch {
+		case !isStaticFlag(flag):
+			states[name] = flagStateDynamic
+		case flag.Enabled:
+			states[name] = flagStateStaticEnabled
+		default:
+			states[name] = flagStateStaticDisabled
 		}
-		_ = maplet.Insert(name, state)
 	}
-	return maplet
+	return &states
 }
 
 // New creates a new feature flag manager.
@@ -193,7 +188,7 @@ func New(cfg Config) *Manager {
 		flags:  make(map[string]Flag),
 		stopCh: make(chan struct{}),
 	}
-	m.flagMaplet.Store(metadata.NewWideMaplet(16))
+	m.flagStates.Store(buildFlagStates(nil))
 
 	// Initial load
 	if cfg.Source != nil {
@@ -202,7 +197,7 @@ func New(cfg Config) *Manager {
 		cancel()
 		if err == nil {
 			m.flags = flags
-			m.flagMaplet.Store(buildFlagMaplet(flags))
+			m.flagStates.Store(buildFlagStates(flags))
 		}
 
 		// Start watching for changes
@@ -249,7 +244,7 @@ func (m *Manager) updateFlags(newFlags map[string]Flag) {
 	m.mu.Lock()
 	oldFlags := m.flags
 	m.flags = newFlags
-	m.flagMaplet.Store(buildFlagMaplet(newFlags))
+	m.flagStates.Store(buildFlagStates(newFlags))
 	m.mu.Unlock()
 
 	if m.config.OnChange != nil {
@@ -269,16 +264,16 @@ func (m *Manager) Stop() {
 
 // IsEnabled checks if a feature flag is enabled for the given context.
 func (m *Manager) IsEnabled(ctx context.Context, name string, opts ...Option) bool {
-	if len(opts) == 0 {
-		if maplet := m.flagMaplet.Load(); maplet != nil {
-			if state, ok := maplet.Lookup(name); ok {
-				if state == flagStateStaticEnabled {
-					return true
-				}
-				if state == flagStateStaticDisabled {
-					return false
-				}
-			}
+	// A static flag ignores user, org, and environment, so the fast path applies with any options.
+	if states := m.flagStates.Load(); states != nil {
+		state, ok := (*states)[name]
+		switch {
+		case !ok:
+			return false
+		case state == flagStateStaticEnabled:
+			return true
+		case state == flagStateStaticDisabled:
+			return false
 		}
 	}
 
@@ -323,7 +318,7 @@ func (m *Manager) SetFlag(flag Flag) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.flags[flag.Name] = flag
-	m.flagMaplet.Store(buildFlagMaplet(m.flags))
+	m.flagStates.Store(buildFlagStates(m.flags))
 }
 
 // evaluate evaluates a flag against the given context.

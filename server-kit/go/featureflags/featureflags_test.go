@@ -214,3 +214,27 @@ func BenchmarkFeatureFlag_MapletFastPath(b *testing.B) {
 		_ = m.IsEnabled(ctx, keys[i%100])
 	}
 }
+
+// TestUndefinedFlagsNeverEnabled guards the flag snapshot. An approximate structure
+// could map an undefined name onto another flag's static state and open a gate.
+func TestUndefinedFlagsNeverEnabled(t *testing.T) {
+	m := New(Config{})
+	defer m.Stop()
+	for i := range 2000 {
+		m.SetFlag(Flag{Name: fmt.Sprintf("on_%d", i), Enabled: true})
+	}
+	for i := range 20000 {
+		if m.IsEnabled(context.Background(), fmt.Sprintf("undefined_%d", i)) {
+			t.Fatalf("undefined flag undefined_%d read as enabled", i)
+		}
+	}
+	if !m.IsEnabled(context.Background(), "on_7", WithUser("u1"), WithOrg("o1")) {
+		t.Fatal("static enabled flag must stay enabled with options")
+	}
+	allocs := testing.AllocsPerRun(100, func() {
+		_ = m.IsEnabled(context.Background(), "on_7", WithUser("u1"))
+	})
+	if allocs != 0 {
+		t.Fatalf("static flag fast path allocated %.1f times, want 0", allocs)
+	}
+}
