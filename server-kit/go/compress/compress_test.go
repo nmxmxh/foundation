@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"compress/gzip"
 	"errors"
+	"github.com/klauspost/compress/zstd"
 	"io"
 	"math/rand"
 	"net/http"
@@ -837,10 +838,14 @@ type markerResponseWriter struct {
 // The assertion is on cost, not just on the error: a bound that rejects the
 // payload only after allocating it has not bounded anything.
 func TestDecompressionBombIsBoundedDuringDecode(t *testing.T) {
-	const (
-		bombSize = 256 << 20 // 256MB of zeroes: compresses to a few hundred KB.
-		ceiling  = 1 << 20   // 1MB caller ceiling.
-	)
+	const ceiling = 1 << 20 // 1MB caller ceiling.
+	bombSize := 256 << 20   // 256MB of zeroes: compresses to a few hundred KB.
+	if testing.Short() {
+		// Building the bomb is the slow part (about 56s under -race). 32MB still
+		// exceeds the 16x allocation allowance below, so a limit applied after
+		// the decode still fails this test.
+		bombSize = 32 << 20
+	}
 
 	for _, tc := range []struct {
 		encoding string
@@ -1313,5 +1318,53 @@ func TestReadLimitedExactLimitDoesNotOverflow(t *testing.T) {
 	}
 	if _, err := readLimitedWithHint(bytes.NewReader(append(data, 'y')), 4096, 8192); !errors.Is(err, ErrDecodedTooLarge) {
 		t.Fatalf("over limit: got %v, want ErrDecodedTooLarge", err)
+	}
+}
+
+// TestZstdBombWithoutDeclaredSizeIsBoundedDuringDecode covers a frame whose
+// header omits the content size (stream-encoded), so the header precheck
+// cannot refuse it. The streaming decode must still stop at the caller limit.
+func TestZstdBombWithoutDeclaredSizeIsBoundedDuringDecode(t *testing.T) {
+	const ceiling = 256 << 10
+	var buf bytes.Buffer
+	zw, err := zstd.NewWriter(&buf)
+	if err != nil {
+		t.Fatalf("zstd writer: %v", err)
+	}
+	chunk := make([]byte, 1<<20)
+	for range 16 {
+		if _, err := zw.Write(chunk); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	var h zstd.Header
+	if err := h.Decode(buf.Bytes()); err != nil || h.HasFCS {
+		t.Fatalf("fixture must omit the frame content size (HasFCS=%v err=%v)", h.HasFCS, err)
+	}
+
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	_, err = DecompressWithEncodingLimit(buf.Bytes(), EncodingZstd, ceiling)
+	runtime.ReadMemStats(&after)
+	if !errors.Is(err, ErrDecodedTooLarge) {
+		t.Fatalf("err = %v, want ErrDecodedTooLarge", err)
+	}
+	if grew := after.TotalAlloc - before.TotalAlloc; grew > 16*ceiling+(8<<20) {
+		t.Fatalf("decoded %d bytes against a %d ceiling; the limit is applied after the decode", grew, ceiling)
+	}
+
+	// The pooled stream decoder must be clean for the next caller.
+	want := bytes.Repeat([]byte("ok "), 1000)
+	enc, err := CompressZstd(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecompressWithEncodingLimit(enc, EncodingZstd, ceiling)
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("decode after bomb: err=%v equal=%v", err, bytes.Equal(got, want))
 	}
 }

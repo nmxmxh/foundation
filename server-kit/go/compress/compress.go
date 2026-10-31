@@ -488,11 +488,75 @@ func decompressBrotli(data []byte, maxDecoded int64) ([]byte, error) {
 	return out, err
 }
 
-func decompressZstd(data []byte, maxDecoded int64) ([]byte, error) {
-	out, err := zstdDecoder.DecodeAll(data, nil)
+// zstdStreamPool holds single-goroutine streaming decoders. DecodeAll is bounded
+// only by DefaultMaxDecodedBytes, so a tighter caller limit needs a stream.
+var zstdStreamPool sync.Pool
+
+func getZstdStream(src io.Reader) (*zstd.Decoder, error) {
+	if v := zstdStreamPool.Get(); v != nil {
+		dec := v.(*zstd.Decoder)
+		if err := dec.Reset(src); err == nil {
+			return dec, nil
+		}
+		dec.Close()
+	}
+	return zstd.NewReader(src,
+		zstd.WithDecoderConcurrency(1),
+		zstd.WithDecoderMaxMemory(uint64(DefaultMaxDecodedBytes)))
+}
+
+func releaseZstdStream(dec *zstd.Decoder, decodedBytes int, failed bool) {
+	if failed || decodedBytes > maxPooledBrotliOutput {
+		dec.Close()
+		return
+	}
+	if err := dec.Reset(nil); err != nil {
+		dec.Close()
+		return
+	}
+	zstdStreamPool.Put(dec)
+}
+
+// zstdDeclaredTooLarge reports a first frame whose header declares more than
+// maxDecoded bytes. The bomb is then refused before one byte is decoded.
+func zstdDeclaredTooLarge(data []byte, maxDecoded int64) bool {
+	var h zstd.Header
+	if err := h.Decode(data); err != nil {
+		return false
+	}
+	return h.HasFCS && h.FrameContentSize > uint64(maxDecoded)
+}
+
+// decodeZstdLimited decodes into dst (append semantics) and stops at
+// maxDecoded+1 bytes. The limit applies during the decode, not after it.
+func decodeZstdLimited(dst, data []byte, maxDecoded int64) ([]byte, error) {
+	if zstdDeclaredTooLarge(data, maxDecoded) {
+		return nil, ErrDecodedTooLarge
+	}
+	if maxDecoded >= DefaultMaxDecodedBytes {
+		// The shared decoder's own ceiling is DefaultMaxDecodedBytes, enforced during decode.
+		out, err := zstdDecoder.DecodeAll(data, dst)
+		if err != nil {
+			if errors.Is(err, zstd.ErrDecoderSizeExceeded) {
+				return nil, ErrDecodedTooLarge
+			}
+			return nil, err
+		}
+		if int64(len(out)) > maxDecoded {
+			return nil, ErrDecodedTooLarge
+		}
+		return out, nil
+	}
+	dec, err := getZstdStream(bytes.NewReader(data))
 	if err != nil {
-		// The decoder's own ceiling is DefaultMaxDecodedBytes; report a
-		// breach of it in the same terms as a breach of the caller's.
+		return nil, err
+	}
+	if dst == nil {
+		dst = make([]byte, 0, min(max(len(data)*4, 512), maxInitialDecodeBuffer, int(maxDecoded)+1))
+	}
+	out, err := readAllInto(dst, io.LimitReader(dec, maxDecoded+1))
+	releaseZstdStream(dec, len(out), err != nil)
+	if err != nil {
 		if errors.Is(err, zstd.ErrDecoderSizeExceeded) {
 			return nil, ErrDecodedTooLarge
 		}
@@ -502,6 +566,10 @@ func decompressZstd(data []byte, maxDecoded int64) ([]byte, error) {
 		return nil, ErrDecodedTooLarge
 	}
 	return out, nil
+}
+
+func decompressZstd(data []byte, maxDecoded int64) ([]byte, error) {
+	return decodeZstdLimited(nil, data, maxDecoded)
 }
 
 func decompressZstdWithArena(arena *scratch.Arena, data []byte, maxDecoded int64) ([]byte, error) {
@@ -516,17 +584,8 @@ func decompressZstdWithArena(arena *scratch.Arena, data []byte, maxDecoded int64
 	if err != nil {
 		return decompressZstd(data, maxDecoded)
 	}
-	out, err := zstdDecoder.DecodeAll(data, destBuf[:0])
-	if err != nil {
-		if errors.Is(err, zstd.ErrDecoderSizeExceeded) {
-			return nil, ErrDecodedTooLarge
-		}
-		return nil, err
-	}
-	if int64(len(out)) > maxDecoded {
-		return nil, ErrDecodedTooLarge
-	}
-	return out, nil
+	// Output past the arena slice grows on the heap, still under maxDecoded.
+	return decodeZstdLimited(destBuf[:0], data, maxDecoded)
 }
 
 // DecompressZstdWithArena decompresses Zstd data into the provided scratch arena.
