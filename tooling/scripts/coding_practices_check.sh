@@ -120,11 +120,13 @@ check_no_match_multiline() {
 
 check_absent_path() {
   local label="$1"
-  local path="$2"
-  if [[ -e "$path" ]]; then
-    if is_tracked_path "$path"; then
+  # Not "path": in zsh that name is tied to PATH, and a local one hid git from
+  # is_tracked_path, so tracked artifacts passed as "local ignored".
+  local candidate="$2"
+  if [[ -e "$candidate" ]]; then
+    if is_tracked_path "$candidate"; then
       echo "[FAIL] $label"
-      echo "$path"
+      echo "$candidate"
       failed=1
     else
       echo "[OK] $label (local ignored artifact)"

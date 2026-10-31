@@ -7,7 +7,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FOUNDATION_DIR="$(dirname "$SCRIPT_DIR")"
 PARENT_DIR="$(dirname "$FOUNDATION_DIR")"
-TSV_FILE="$PARENT_DIR/scaffolded-projects.tsv"
+# The project list lives next to the foundation checkout by default. Override it
+# with --projects or FLEET_PROJECTS_TSV, for example in CI.
+TSV_FILE="${FLEET_PROJECTS_TSV:-$PARENT_DIR/scaffolded-projects.tsv}"
 REPORT_DIR=""
 MAX_CONCURRENCY=4
 
@@ -31,6 +33,11 @@ while [[ $# -gt 0 ]]; do
             REPORT_DIR="$2"
             shift 2
             ;;
+        --projects)
+            [[ -n "${2:-}" ]] || { echo "--projects requires a path" >&2; exit 2; }
+            TSV_FILE="$2"
+            shift 2
+            ;;
         --concurrency)
             [[ -n "${2:-}" ]] || { echo "--concurrency requires a number" >&2; exit 2; }
             MAX_CONCURRENCY="$2"
@@ -43,7 +50,23 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -f "$TSV_FILE" ]] || { echo "Error: TSV file not found at $TSV_FILE" >&2; exit 1; }
+[[ -f "$TSV_FILE" ]] || {
+    echo "Error: project list not found at $TSV_FILE" >&2
+    echo "Pass --projects <file.tsv> or set FLEET_PROJECTS_TSV (format: slug<TAB>path relative to $PARENT_DIR)." >&2
+    exit 1
+}
+[[ "$MAX_CONCURRENCY" =~ ^[1-9][0-9]*$ ]] || { echo "--concurrency must be a positive integer" >&2; exit 2; }
+
+# json_escape quotes a value for the JSON report (backslash, quote, control characters).
+json_escape() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    value="${value//$'\t'/\\t}"
+    value="${value//$'\n'/\\n}"
+    value="${value//$'\r'/\\r}"
+    printf '%s' "$value"
+}
 if [[ -z "$REPORT_DIR" ]]; then
     REPORT_DIR="$FOUNDATION_DIR/test-results/fleet-check-$(date -u +%Y%m%dT%H%M%SZ)"
 fi
@@ -98,6 +121,11 @@ while IFS=$'\t' read -r slug path || [[ -n "$slug" ]]; do
 done <"$TSV_FILE"
 
 total="${#projects[@]}"
+if [[ "$total" -eq 0 ]]; then
+    # bash 3.2 (macOS /bin/bash) treats "${projects[@]}" on an empty array as unset under set -u.
+    echo "Error: no projects listed in $TSV_FILE" >&2
+    exit 1
+fi
 echo "========================================="
 echo "Starting Fleet Matrix Check: $total projects (concurrency: $MAX_CONCURRENCY)"
 echo "========================================="
@@ -151,7 +179,7 @@ successes=$((total - failures))
         [[ "$first" == "true" ]] || printf ','
         first=false
         printf '{"slug":"%s","path":"%s","scaffold_status":"%s","compile_status":"%s","elapsed_seconds":%d,"exit_code":%d}' \
-            "$slug" "$path" "$sc_st" "$cp_st" "$el_s" "$code"
+            "$(json_escape "$slug")" "$(json_escape "$path")" "$(json_escape "$sc_st")" "$(json_escape "$cp_st")" "$el_s" "$code"
     done <"$matrix_tsv"
     printf ']}\n'
 } >"$REPORT_DIR/fleet_matrix.json"
