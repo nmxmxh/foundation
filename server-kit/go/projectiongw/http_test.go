@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -674,17 +675,7 @@ func TestMultiplexHandlerTeardownWithoutBroadcast(t *testing.T) {
 // TestMultiplexHandlerHeartbeatAndTimeout proves that the server sends periodic
 // ping frames to active WebSocket clients.
 func TestMultiplexHandlerHeartbeatAndTimeout(t *testing.T) {
-	origPing := pingPeriod
-	origPong := pongWait
-	origWrite := writeWait
-	pingPeriod = 10 * time.Millisecond
-	pongWait = 50 * time.Millisecond
-	writeWait = 30 * time.Millisecond
-	defer func() {
-		pingPeriod = origPing
-		pongWait = origPong
-		writeWait = origWrite
-	}()
+	fastHeartbeat := HandlerConfig{Heartbeat: Heartbeat{PingPeriod: 10 * time.Millisecond, PongWait: 50 * time.Millisecond, WriteWait: 30 * time.Millisecond}}
 
 	store, _ := hermes.NewStore(hermes.ProjectionSpec{Name: "signals", Domain: "signals", Collection: "hb", MaxRecords: 64, MaxBytes: 1 << 20})
 	gw, err := NewGateway(store, 1)
@@ -694,7 +685,7 @@ func TestMultiplexHandlerHeartbeatAndTimeout(t *testing.T) {
 	defer gw.Close()
 
 	pingReceived := make(chan struct{}, 1)
-	srv := httptest.NewServer(orgContextHandler("org_1", gw.Handler(HandlerConfig{})))
+	srv := httptest.NewServer(orgContextHandler("org_1", gw.Handler(fastHeartbeat)))
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/projections/"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if resp != nil {
@@ -754,17 +745,7 @@ func TestMultiplexHandlerHeartbeatAndTimeout(t *testing.T) {
 
 // TestSubscribeHandlerHeartbeatAndTeardown tests ping/pong and connection lifecycle on single-scope streams.
 func TestSubscribeHandlerHeartbeatAndTeardown(t *testing.T) {
-	origPing := pingPeriod
-	origPong := pongWait
-	origWrite := writeWait
-	pingPeriod = 10 * time.Millisecond
-	pongWait = 50 * time.Millisecond
-	writeWait = 30 * time.Millisecond
-	defer func() {
-		pingPeriod = origPing
-		pongWait = origPong
-		writeWait = origWrite
-	}()
+	fastHeartbeat := HandlerConfig{Heartbeat: Heartbeat{PingPeriod: 10 * time.Millisecond, PongWait: 50 * time.Millisecond, WriteWait: 30 * time.Millisecond}}
 
 	store, _ := hermes.NewStore(hermes.ProjectionSpec{Name: "signals", Domain: "signals", Collection: "single", MaxRecords: 64, MaxBytes: 1 << 20})
 	gw, err := NewGateway(store, 1)
@@ -774,7 +755,7 @@ func TestSubscribeHandlerHeartbeatAndTeardown(t *testing.T) {
 	defer gw.Close()
 
 	pingReceived := make(chan struct{}, 1)
-	srv := httptest.NewServer(orgContextHandler("org_1", gw.Handler(HandlerConfig{})))
+	srv := httptest.NewServer(orgContextHandler("org_1", gw.Handler(fastHeartbeat)))
 	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/projections/signals/single"
 	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if resp != nil {
@@ -905,5 +886,131 @@ func TestMultiplexHandlerAudienceError(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("multiplex audience error status = %d, want 400", rec.Code)
+	}
+}
+
+func dialMultiplexConn(t *testing.T, gw *Gateway) (*websocket.Conn, func()) {
+	t.Helper()
+	srv := httptest.NewServer(orgContextHandler("org_1", gw.Handler(HandlerConfig{})))
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/v1/projections/"
+	conn, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		srv.Close()
+		t.Fatalf("ws dial err=%v", err)
+	}
+	return conn, func() { _ = conn.Close(); srv.Close() }
+}
+
+// TestMultiplexHandlerRejectsOversizedFrame guards the read limit (CP-02).
+func TestMultiplexHandlerRejectsOversizedFrame(t *testing.T) {
+	store, _ := hermes.NewStore(hermes.ProjectionSpec{Name: "signals", Domain: "signals", Collection: "big", MaxRecords: 64, MaxBytes: 1 << 20})
+	gw, err := NewGateway(store, 1)
+	if err != nil {
+		t.Fatalf("NewGateway() err=%v", err)
+	}
+	defer gw.Close()
+	conn, closeAll := dialMultiplexConn(t, gw)
+	defer closeAll()
+
+	_ = conn.WriteMessage(websocket.TextMessage, make([]byte, maxClientFrameBytes+1))
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	for {
+		if _, _, err := conn.ReadMessage(); err != nil {
+			var closeErr *websocket.CloseError
+			if errors.As(err, &closeErr) && closeErr.Code != websocket.CloseMessageTooBig {
+				t.Fatalf("close code = %d, want %d", closeErr.Code, websocket.CloseMessageTooBig)
+			}
+			var netErr interface{ Timeout() bool }
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				t.Fatal("server kept the connection open after an oversized frame")
+			}
+			return
+		}
+	}
+}
+
+// TestMultiplexHandlerCapsScopesPerConnection guards the per-connection scope bound.
+func TestMultiplexHandlerCapsScopesPerConnection(t *testing.T) {
+	store, _ := hermes.NewStore(hermes.ProjectionSpec{Name: "signals", Domain: "signals", Collection: "c0", MaxRecords: 64, MaxBytes: 1 << 20})
+	gw, err := NewGateway(store, 1)
+	if err != nil {
+		t.Fatalf("NewGateway() err=%v", err)
+	}
+	defer gw.Close()
+	conn, closeAll := dialMultiplexConn(t, gw)
+	defer closeAll()
+
+	var b strings.Builder
+	b.WriteString(`{"type":"subscribe","scopes":[`)
+	for i := range maxMultiplexScopes + 1 {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, `{"domain":"signals","collection":"c%d"}`, i)
+	}
+	b.WriteString(`]}`)
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(b.String())); err != nil {
+		t.Fatalf("subscribe write err=%v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		messageType, payload, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("expected a scope-limit control error, got read err=%v", err)
+		}
+		if messageType != websocket.TextMessage {
+			continue
+		}
+		var frame ControlFrame
+		if json.Unmarshal(payload, &frame) == nil && frame.Reason == ErrTooManyScopes.Error() {
+			if frame.Collection != fmt.Sprintf("c%d", maxMultiplexScopes) {
+				t.Fatalf("limit hit on %q, want c%d", frame.Collection, maxMultiplexScopes)
+			}
+			return
+		}
+	}
+}
+
+// TestMultiplexHandlerClosesSilentClient guards the pong deadline: a client
+// that never answers pings must be disconnected and its subscriptions released.
+func TestMultiplexHandlerClosesSilentClient(t *testing.T) {
+	store, _ := hermes.NewStore(hermes.ProjectionSpec{Name: "signals", Domain: "signals", Collection: "quiet", MaxRecords: 64, MaxBytes: 1 << 20})
+	gw, err := NewGateway(store, 1)
+	if err != nil {
+		t.Fatalf("NewGateway() err=%v", err)
+	}
+	defer gw.Close()
+	cfg := HandlerConfig{Heartbeat: Heartbeat{PingPeriod: 10 * time.Millisecond, PongWait: 60 * time.Millisecond, WriteWait: 30 * time.Millisecond}}
+	srv := httptest.NewServer(orgContextHandler("org_1", gw.Handler(cfg)))
+	defer srv.Close()
+	conn, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/v1/projections/", nil)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatalf("ws dial err=%v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"subscribe","scopes":[{"domain":"signals","collection":"quiet"}]}`)); err != nil {
+		t.Fatalf("subscribe write err=%v", err)
+	}
+	key := "org_1:signals:quiet"
+	deadline := time.Now().Add(2 * time.Second)
+	for gw.Hub().SubscriberCount(key) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("subscription not registered")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	// The client never reads, so it never answers a ping.
+	deadline = time.Now().Add(2 * time.Second)
+	for gw.Hub().SubscriberCount(key) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("silent client was not disconnected after the pong wait")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

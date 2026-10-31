@@ -17,16 +17,49 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 )
 
-var (
-	// writeWait is the maximum duration permitted for writing a message.
-	writeWait = 10 * time.Second
+const (
+	// defaultWriteWait is the maximum duration permitted for writing a message.
+	defaultWriteWait = 10 * time.Second
 
-	// pongWait is the maximum time allowed to read the next pong message from the peer.
-	pongWait = 60 * time.Second
+	// defaultPongWait is the maximum time allowed to read the next pong message from the peer.
+	defaultPongWait = 60 * time.Second
 
-	// pingPeriod is the send period for pings to the peer. Must be less than pongWait.
-	pingPeriod = 30 * time.Second
+	// defaultPingPeriod is the send period for pings to the peer. Must be less than the pong wait.
+	defaultPingPeriod = 30 * time.Second
 )
+
+// Heartbeat configures WebSocket liveness. Zero fields use the defaults.
+// Values are fixed per handler, so tests do not change package state.
+type Heartbeat struct {
+	PingPeriod time.Duration
+	PongWait   time.Duration
+	WriteWait  time.Duration
+}
+
+func (h Heartbeat) resolved() Heartbeat {
+	if h.PingPeriod <= 0 {
+		h.PingPeriod = defaultPingPeriod
+	}
+	if h.PongWait <= 0 {
+		h.PongWait = defaultPongWait
+	}
+	if h.WriteWait <= 0 {
+		h.WriteWait = defaultWriteWait
+	}
+	return h
+}
+
+const (
+	// maxClientFrameBytes bounds one inbound frame. Clients send only small control commands.
+	maxClientFrameBytes = 64 * 1024
+
+	// maxMultiplexScopes bounds the scopes per multiplexed connection (CP-02).
+	// Each scope costs a hub subscription and a goroutine.
+	maxMultiplexScopes = 256
+)
+
+// ErrTooManyScopes rejects a subscribe that would exceed maxMultiplexScopes.
+var ErrTooManyScopes = errors.New("projection connection scope limit reached")
 
 // projectionUpgrader upgrades projection subscription requests. Origin is
 // enforced by the server's CORS middleware upstream of this handler. gorilla is
@@ -121,6 +154,8 @@ type HandlerConfig struct {
 	// tenant-wide. A mount that serves only tenant-wide scopes needs nothing
 	// here.
 	Audience SubjectAudienceFunc
+	// Heartbeat sets ping, pong, and write deadlines for WebSocket handlers.
+	Heartbeat Heartbeat
 }
 
 func (c HandlerConfig) tenant() TenantFunc {
@@ -264,20 +299,24 @@ func (g *Gateway) snapshotScope(config HandlerConfig, r *http.Request, w http.Re
 // gateway does not replay history, so a gap (or any dropped frame) must be
 // reconciled with a fresh snapshot.
 // configureWebSocketConn registers deadlines, heartbeat handlers, and a ping pump.
-func configureWebSocketConn(ctx context.Context, conn *websocket.Conn, writeMu *sync.Mutex, cancel context.CancelFunc) {
-	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+func configureWebSocketConn(ctx context.Context, conn *websocket.Conn, hb Heartbeat, writeMu *sync.Mutex, cancel context.CancelFunc) {
+	conn.SetReadLimit(maxClientFrameBytes)
+	// Cancel closes the connection, so a reader blocked in ReadMessage returns
+	// at once instead of after the pong wait.
+	context.AfterFunc(ctx, func() { _ = conn.Close() })
+	_ = conn.SetReadDeadline(time.Now().Add(hb.PongWait))
 	conn.SetPongHandler(func(string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+		_ = conn.SetReadDeadline(time.Now().Add(hb.PongWait))
 		return nil
 	})
-	ticker := time.NewTicker(pingPeriod)
+	ticker := time.NewTicker(hb.PingPeriod)
 	go func() {
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
 				writeMu.Lock()
-				_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+				_ = conn.SetWriteDeadline(time.Now().Add(hb.WriteWait))
 				err := conn.WriteMessage(websocket.PingMessage, nil)
 				writeMu.Unlock()
 				if err != nil {
@@ -292,6 +331,7 @@ func configureWebSocketConn(ctx context.Context, conn *websocket.Conn, writeMu *
 }
 
 func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
+	hb := config.Heartbeat.resolved()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Scope and identity are resolved before the upgrade, so an unauthorized
 		// or malformed request gets a proper HTTP status (e.g. 401) instead of a
@@ -326,7 +366,7 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 		writeFrame := func(messageType int, payload []byte) error {
 			writeMu.Lock()
 			defer writeMu.Unlock()
-			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = conn.SetWriteDeadline(time.Now().Add(hb.WriteWait))
 			return conn.WriteMessage(messageType, payload)
 		}
 		writeControl := func(frame ControlFrame) error {
@@ -337,7 +377,7 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 			return writeFrame(websocket.TextMessage, payload)
 		}
 
-		configureWebSocketConn(ctx, conn, &writeMu, cancel)
+		configureWebSocketConn(ctx, conn, hb, &writeMu, cancel)
 
 		// Reader pump: drain inbound frames (advisory resume token + control)
 		// and detect client close so the writer loop exits promptly.
@@ -347,7 +387,7 @@ func (g *Gateway) SubscribeHandler(config HandlerConfig) http.Handler {
 					cancel()
 					return
 				}
-				_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+				_ = conn.SetReadDeadline(time.Now().Add(hb.PongWait))
 			}
 		}()
 
@@ -423,6 +463,7 @@ type MultiplexCommand struct {
 // from the payload itself. Resync notices are tagged with the scope they
 // belong to.
 func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
+	hb := config.Heartbeat.resolved()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tenant, err := config.tenant()(r)
 		if err != nil {
@@ -453,7 +494,7 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 		writeFrame := func(messageType int, payload []byte) error {
 			writeMu.Lock()
 			defer writeMu.Unlock()
-			_ = conn.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = conn.SetWriteDeadline(time.Now().Add(hb.WriteWait))
 			return conn.WriteMessage(messageType, payload)
 		}
 		writeControl := func(frame ControlFrame) error {
@@ -464,16 +505,20 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 			return writeFrame(websocket.TextMessage, payload)
 		}
 
-		configureWebSocketConn(ctx, conn, &writeMu, cancel)
+		configureWebSocketConn(ctx, conn, hb, &writeMu, cancel)
 
 		var subsMu sync.Mutex
 		subs := map[string]*Subscription{}
+		var pumps sync.WaitGroup
 		defer func() {
+			cancel()
 			subsMu.Lock()
 			for _, sub := range subs {
 				sub.Cancel()
 			}
 			subsMu.Unlock()
+			// Scope pumps write to conn. Wait for them before the deferred Close runs.
+			pumps.Wait()
 		}()
 
 		startScope := func(domain, collection string) {
@@ -490,6 +535,11 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 				subsMu.Unlock()
 				return
 			}
+			if len(subs) >= maxMultiplexScopes {
+				subsMu.Unlock()
+				_ = writeControl(ControlFrame{Type: ControlError, Reason: ErrTooManyScopes.Error(), Domain: domain, Collection: collection})
+				return
+			}
 			// g.Subscribe validates the scope; a bad scope (e.g. an empty
 			// collection) is answered with a scoped ControlError rather than
 			// tearing the connection down.
@@ -502,7 +552,9 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 			subs[key] = sub
 			subsMu.Unlock()
 
+			pumps.Add(1)
 			go func() {
+				defer pumps.Done()
 				var lastDropped, lastEpoch uint64
 				emitResyncIfDropped := func() error {
 					if dropped := sub.Dropped(); dropped > lastDropped {
@@ -562,7 +614,7 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 				cancel()
 				return
 			}
-			_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+			_ = conn.SetReadDeadline(time.Now().Add(hb.PongWait))
 			if messageType != websocket.TextMessage {
 				continue
 			}
@@ -606,8 +658,6 @@ type ControlFrame struct {
 	Domain     string `json:"domain,omitempty"`
 	Collection string `json:"collection,omitempty"`
 }
-
-
 
 func writeError(w http.ResponseWriter, err error) {
 	switch {
