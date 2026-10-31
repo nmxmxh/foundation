@@ -484,6 +484,15 @@ scaffold_sync_foundation_modules() {
         fi
     fi
 
+    # Every profile gets the shared TypeScript base: frontend/tsconfig.app.json
+    # extends ../foundation/tooling/tsconfig/dom.json, including frontend-only apps.
+    if [[ "${DRY_RUN:-false}" == "true" ]]; then
+        foundation_log_info "[DRY RUN] Would refresh foundation/tooling/tsconfig"
+    else
+        mkdir -p "$PROJECT_PATH/foundation/tooling/tsconfig"
+        cp "$FOUNDATION_DIR/tooling/tsconfig/"*.json "$PROJECT_PATH/foundation/tooling/tsconfig/"
+    fi
+
     if [[ "$PROFILE" == "full" || "$PROFILE" == "backend" || -f "$PROJECT_PATH/backend/go.mod" ]]; then
         for dir in server-kit runtime-transport config-contracts tooling; do
             if [[ "${DRY_RUN:-false}" == "true" ]]; then

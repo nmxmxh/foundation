@@ -125,7 +125,7 @@ const normalizeString = (value: string | null | undefined) => value?.trim() ?? "
 const randomTokenPart = (): string => {
   const cryptoApi = (globalThis as { crypto?: Crypto }).crypto;
   if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
-    return cryptoApi.randomUUID().replaceAll("-", "");
+    return cryptoApi.randomUUID().replace(/-/g, "");
   }
   if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
     const bytes = cryptoApi.getRandomValues(new Uint8Array(16));

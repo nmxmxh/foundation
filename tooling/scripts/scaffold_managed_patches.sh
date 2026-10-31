@@ -3091,6 +3091,88 @@ patch_redundant_foundation_test_files() {
 # compose fallback guaranteed the value was never empty.
 #
 # @since 0.0.1
+# patch_config_test_shape keeps internal/config tests compilable in every project.
+#
+# config_test.go is force-managed but used to test the scaffold-shaped
+# config.go (validateSecurity, knownWeakJWTSecrets, a two-value Load). Nine of
+# twelve fleet projects own a diverged config.go, so the foundation-owned test
+# did not compile there. The shape-specific tests now live in
+# config_security_test.go (create-mode). This patch:
+#   1. replaces a stale config_test.go only when it holds nothing but the
+#      foundation's own tests (no project-added test is ever lost);
+#   2. declines the security seed through .foundation-seeds.ignore when
+#      config.go lacks a symbol those tests call, and removes the seeded copy
+#      only when it is still byte-identical to the template.
+# patch_frontend_tsconfig_shared_base moves app frontends onto the shared base.
+#
+# tsconfig.app.json and tsconfig.node.json are force-managed, so ordinary
+# updates never rewrite them. Apps targeted ES2020 while foundation packages,
+# compiled from source by every app build, targeted ES2022; a replaceAll in
+# runtime-transport then broke pronto and chowdash deploys. The new template
+# extends ../foundation/tooling/tsconfig/{dom,base}.json, so language level
+# has one source. A file is replaced only when it is byte-identical to a stock
+# template (sha256 below); a customised file gets a warning, never an overwrite.
+patch_frontend_tsconfig_shared_base() {
+  local fe="$target/frontend"
+  [[ -d "$fe" ]] || return 0
+  local tpl="$foundation_root/templates/frontend"
+  local name stock_sha current_sha
+  for name in tsconfig.app.json tsconfig.node.json; do
+    [[ -f "$fe/$name" ]] || continue
+    grep -Fq 'foundation/tooling/tsconfig/' "$fe/$name" && continue
+    case "$name" in
+      tsconfig.app.json) stock_sha="9baaea82409a3560e5fd2fa9a4fb17c5f3f79d4238ac77d81291bd709bf9aa84" ;;
+      tsconfig.node.json) stock_sha="08793fea097aafbaa30af30c8a35496f5668359dc5d3a542a4cbd6b2c8518938" ;;
+    esac
+    current_sha="$(shasum -a 256 "$fe/$name" 2>/dev/null | cut -c1-64 || sha256sum "$fe/$name" | cut -c1-64)"
+    if [[ "$current_sha" == "$stock_sha" ]]; then
+      cp "$tpl/$name" "$fe/$name"
+      log_patch "frontend/$name extends the shared foundation tsconfig base"
+    else
+      echo "[WARN] frontend/$name is customised; make it extend ../foundation/tooling/tsconfig/ by hand"
+    fi
+  done
+}
+
+patch_config_test_shape() {
+  local dir="$target/internal/config"
+  local cfg="$dir/config.go"
+  [[ -f "$cfg" ]] || return 0
+  local tpl_dir="$foundation_root/templates/backend/internal/config"
+  local test_file="$dir/config_test.go"
+  local sec_rel="internal/config/config_security_test.go"
+  local sec_file="$target/$sec_rel"
+  local ignore_file="$target/.foundation-seeds.ignore"
+
+  if [[ -f "$test_file" ]] && grep -Eq 'func (TestProductionRejectsKnownWeakJWTSecrets|TestRetentionOverrideIsOptional|TestEnvSpellingCannotDowngradePosture)\(' "$test_file"; then
+    local extra
+    extra="$(grep -Eo '^func Test[A-Za-z0-9_]+' "$test_file" | grep -Ev '^func (TestRetentionOverrideIsOptional|TestConfigScaffoldPackageCompiles|TestProductionRejectsKnownWeakJWTSecrets|TestProductionAcceptsUnknownJWTSecret|TestEnvSpellingCannotDowngradePosture|TestUnrecognizedEnvIsRefused)$' || true)"
+    if [[ -z "$extra" ]]; then
+      cp "$tpl_dir/config_test.go" "$test_file"
+      log_patch "config_test.go reduced to shape-agnostic foundation tests: internal/config/config_test.go"
+    else
+      echo "[WARN] internal/config/config_test.go holds project tests beside foundation shape tests; move them by hand"
+    fi
+  fi
+
+  local missing=""
+  local symbol
+  for symbol in 'func Load() (*Config, error)' 'func (c *Config) validateSecurity() error' 'var knownWeakJWTSecrets' 'func normalizeEnv(' 'RiverRetentionTier ' 'RiverCompletedJobRetention ' 'AllowedOrigins ' 'func (c *Config) IsProduction() bool'; do
+    grep -Fq "$symbol" "$cfg" || missing+="${symbol}; "
+  done
+  if [[ -z "$missing" ]]; then
+    return 0
+  fi
+  if [[ -f "$sec_file" ]] && cmp -s "$sec_file" "$tpl_dir/config_security_test.go"; then
+    rm -f "$sec_file"
+    log_patch "removed seeded config_security_test.go; project config.go lacks: ${missing%; }"
+  fi
+  if ! grep -Fxq "$sec_rel" "$ignore_file" 2>/dev/null; then
+    printf '%s\n' "$sec_rel" >>"$ignore_file"
+    log_patch "declined config_security_test.go seed (diverged config.go): .foundation-seeds.ignore"
+  fi
+}
+
 patch_config_weak_jwt_denylist() {
   local file="$target/internal/config/config.go"
   [[ -f "$file" ]] || return 0
@@ -3812,6 +3894,8 @@ patch_river_table_readiness_gate
 patch_config_state_store_cache
 patch_config_weak_jwt_denylist
 patch_config_env_canonicalization
+patch_config_test_shape
+patch_frontend_tsconfig_shared_base
 patch_worker_main_river_direct_lane
 patch_startup_state_store_cache_and_river_lane
 patch_server_enable_profiling

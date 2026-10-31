@@ -1,17 +1,19 @@
 {
+  "extends": "../../tooling/tsconfig/dom.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": ["DOM", "DOM.Iterable", "ES2022"],
-    "strict": true,
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
     "paths": {
-      "@bufbuild/protobuf": ["../../../frontend/node_modules/@bufbuild/protobuf"],
-      "@bufbuild/protobuf/*": ["../../../frontend/node_modules/@bufbuild/protobuf/*"],
-      "@bufbuild/protobuf/wire": ["../../../frontend/node_modules/@bufbuild/protobuf/dist/esm/wire/index.d.ts"]
-    },
-    "isolatedModules": true,
-    "noEmit": true
+      "@bufbuild/protobuf": [
+        "../../../frontend/node_modules/@bufbuild/protobuf"
+      ],
+      "@bufbuild/protobuf/*": [
+        "../../../frontend/node_modules/@bufbuild/protobuf/*"
+      ],
+      "@bufbuild/protobuf/wire": [
+        "../../../frontend/node_modules/@bufbuild/protobuf/dist/esm/wire/index.d.ts"
+      ]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }
