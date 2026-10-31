@@ -3,6 +3,7 @@ package worker
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -18,6 +19,8 @@ import (
 )
 
 // Job is the transport shape used by the worker engine.
+// IdempotencyKey carries river:"unique", so River deduplicates on the key and kind only.
+// Without the tag, River hashes all args (created_at, attempt), and no two inserts ever match.
 type Job struct {
 	ID              string             `json:"id"`
 	JobKind         string             `json:"kind"`
@@ -26,7 +29,7 @@ type Job struct {
 	RawPayload      []byte             `json:"raw_payload,omitempty"`
 	Metadata        extension.Object   `json:"metadata"`
 	CorrelationID   string             `json:"correlation_id"`
-	IdempotencyKey  string             `json:"idempotency_key"`
+	IdempotencyKey  string             `json:"idempotency_key" river:"unique"`
 	Attempt         int                `json:"attempt"`
 	MaxAttempts     int                `json:"max_attempts"`
 	ScheduledAt     time.Time          `json:"scheduled_at,omitzero"`
@@ -155,6 +158,9 @@ func positiveIntFromMetadata(metadata extension.Object, keys ...string) int {
 	return 0
 }
 
+// isRawJSON reports whether b is one complete JSON object or array.
+// A bracket check alone is not enough: `{"a":1},"kind":"x"` would inject top-level job fields.
+// NOTE: Postgres jsonb normalises inlined JSON. Callers that need exact bytes must not send JSON.
 func isRawJSON(b []byte) bool {
 	trimmed := bytes.TrimSpace(b)
 	if len(trimmed) < 2 {
@@ -162,7 +168,10 @@ func isRawJSON(b []byte) bool {
 	}
 	first := trimmed[0]
 	last := trimmed[len(trimmed)-1]
-	return (first == '{' && last == '}') || (first == '[' && last == ']')
+	if (first != '{' || last != '}') && (first != '[' || last != ']') {
+		return false
+	}
+	return json.Valid(trimmed)
 }
 
 var jobBufferPool = sync.Pool{
@@ -404,4 +413,3 @@ func (j *Job) UnmarshalJSON(data []byte) error {
 	}
 	return nil
 }
-

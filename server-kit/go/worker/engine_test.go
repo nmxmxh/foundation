@@ -588,3 +588,40 @@ func TestEngine_EnqueueMany_EmptyAndInvalid(t *testing.T) {
 		t.Fatal("expected non-nil health snapshot")
 	}
 }
+
+// TestBridgeWorkFailedAttemptStaysRetryable guards delivery: a failed attempt must
+// not mark the idempotency key, or River completes the retry as a dedup hit.
+func TestBridgeWorkFailedAttemptStaysRetryable(t *testing.T) {
+	engine := NewEngine(nil, nil)
+	processor := &fakeProcessor{kind: "job:retry", queue: "q_retry", maxAttempts: 3, failUntil: 1}
+	bridge := &Bridge{Processor: processor, Engine: engine}
+	job := &river.Job[Job]{Args: Job{JobKind: "job:retry", Queue: "q_retry", IdempotencyKey: "idem_retry_1"}}
+
+	if err := bridge.Work(context.Background(), job); err == nil {
+		t.Fatal("first attempt must fail")
+	}
+	if err := bridge.Work(context.Background(), job); err != nil {
+		t.Fatalf("retry must run the handler and succeed, got %v", err)
+	}
+	if got := processor.calls.Load(); got != 2 {
+		t.Fatalf("handler calls = %d, want 2 (retry must not be deduped)", got)
+	}
+	if err := bridge.Work(context.Background(), job); err != nil {
+		t.Fatalf("replay after success: %v", err)
+	}
+	if got := processor.calls.Load(); got != 2 {
+		t.Fatalf("handler calls after replay = %d, want 2 (success must dedupe)", got)
+	}
+}
+
+func TestEngineDedupeRespectsExpiry(t *testing.T) {
+	engine := NewEngine(nil, nil)
+	now := time.Now().UTC()
+	engine.markDeduped("k", now)
+	if !engine.isDeduped("k", now.Add(time.Hour)) {
+		t.Fatal("key must dedupe inside the window")
+	}
+	if engine.isDeduped("k", now.Add(25*time.Hour)) {
+		t.Fatal("expired key must not dedupe")
+	}
+}

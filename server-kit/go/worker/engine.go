@@ -569,16 +569,11 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 		return
 	}
 
-	if key := dedupeKey(job); key != "" {
-		e.mu.Lock()
-		if _, exists := e.dedupe[key]; exists {
-			e.mu.Unlock()
-			e.log.InfoContext(ctx, "deduped job replay", "kind", job.Kind(), "queue", queue, "key", key)
-			observability.Default().RecordWorker(job.Kind(), queue, "deduped")
-			e.recordHealth(job, JobHealthDeduped, nil, time.Time{}, time.Now().UTC())
-			return
-		}
-		e.mu.Unlock()
+	if key := dedupeKey(job); key != "" && e.isDeduped(key, time.Now().UTC()) {
+		e.log.InfoContext(ctx, "deduped job replay", "kind", job.Kind(), "queue", queue, "key", key)
+		observability.Default().RecordWorker(job.Kind(), queue, "deduped")
+		e.recordHealth(job, JobHealthDeduped, nil, time.Time{}, time.Now().UTC())
+		return
 	}
 
 	if !job.ScheduledAt.IsZero() && job.ScheduledAt.After(time.Now().UTC()) {
@@ -599,15 +594,7 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 	observability.Default().RecordWorker(job.Kind(), queue, "processing")
 	recordJobTrace(job, "worker.process", "processing", "")
 
-	var err error
-	if sp, ok := processor.(ScratchProcessor); ok {
-		arena := workerArenaPool.Get().(*scratch.Arena)
-		arena.Reset()
-		err = sp.HandleWithArena(runCtx, arena, job)
-		workerArenaPool.Put(arena)
-	} else {
-		err = processor.Handle(runCtx, job)
-	}
+	err := runProcessor(runCtx, processor, job)
 	if err != nil {
 		finishedAt := time.Now().UTC()
 		timedOut := errors.Is(err, context.DeadlineExceeded) || errors.Is(runCtx.Err(), context.DeadlineExceeded)
@@ -650,13 +637,7 @@ func (e *Engine) handleJob(ctx context.Context, queue string, workerIndex int, j
 	}
 
 	if key := dedupeKey(job); key != "" {
-		e.mu.Lock()
-		e.dedupe[key] = time.Now().UTC().Add(24 * time.Hour)
-		needsPrune := len(e.dedupe) > maxDedupeEntries
-		e.mu.Unlock()
-		if needsPrune {
-			e.pruneDedupe(time.Now().UTC())
-		}
+		e.markDeduped(key, time.Now().UTC())
 	}
 	e.log.InfoContext(runCtx, "job processed",
 		"kind", job.Kind(),
@@ -807,31 +788,61 @@ func (b *Bridge) Work(ctx context.Context, job *river.Job[Job]) error {
 	args.Normalize()
 	runCtx := contextWithJobCorrelation(ctx, args)
 
+	key := ""
 	if b.Engine != nil {
-		if key := dedupeKey(args); key != "" {
-			b.Engine.mu.Lock()
-			if _, exists := b.Engine.dedupe[key]; exists {
-				b.Engine.mu.Unlock()
-				b.Engine.log.InfoContext(runCtx, "deduped job replay", "kind", args.Kind(), "queue", args.Queue, "key", key)
-				observability.Default().RecordWorker(args.Kind(), args.Queue, "deduped")
-				b.Engine.recordHealth(args, JobHealthDeduped, nil, time.Time{}, time.Now().UTC())
-				return nil
-			}
-			b.Engine.dedupe[key] = time.Now().UTC().Add(24 * time.Hour)
-			needsPrune := len(b.Engine.dedupe) > maxDedupeEntries
-			b.Engine.mu.Unlock()
-			if needsPrune {
-				b.Engine.pruneDedupe(time.Now().UTC())
-			}
+		key = dedupeKey(args)
+		if key != "" && b.Engine.isDeduped(key, time.Now().UTC()) {
+			b.Engine.log.InfoContext(runCtx, "deduped job replay", "kind", args.Kind(), "queue", args.Queue, "key", key)
+			observability.Default().RecordWorker(args.Kind(), args.Queue, "deduped")
+			b.Engine.recordHealth(args, JobHealthDeduped, nil, time.Time{}, time.Now().UTC())
+			return nil
 		}
 	}
 
-	if sp, ok := b.Processor.(ScratchProcessor); ok {
-		arena := workerArenaPool.Get().(*scratch.Arena)
-		arena.Reset()
-		err := sp.HandleWithArena(runCtx, arena, args)
-		workerArenaPool.Put(arena)
-		return err
+	err := runProcessor(runCtx, b.Processor, args)
+	// Mark only after success. A failed attempt must stay retryable, or River
+	// completes the retry as a dedup hit and the job never succeeds.
+	if err == nil && key != "" {
+		b.Engine.markDeduped(key, time.Now().UTC())
 	}
-	return b.Processor.Handle(runCtx, args)
+	return err
+}
+
+// runProcessor runs the processor with a pooled scratch arena when it accepts one.
+// The arena is attached to ctx, so downstream readers see the same arena.
+func runProcessor(ctx context.Context, processor Processor, job Job) error {
+	sp, ok := processor.(ScratchProcessor)
+	if !ok {
+		return processor.Handle(ctx, job)
+	}
+	arena := workerArenaPool.Get().(*scratch.Arena)
+	arena.Reset()
+	defer workerArenaPool.Put(arena)
+	return sp.HandleWithArena(scratch.WithArena(ctx, arena), arena, job)
+}
+
+// isDeduped reports whether key completed successfully and its window is still open.
+func (e *Engine) isDeduped(key string, now time.Time) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	expiry, ok := e.dedupe[key]
+	if !ok {
+		return false
+	}
+	if now.After(expiry) {
+		delete(e.dedupe, key)
+		return false
+	}
+	return true
+}
+
+// markDeduped records a successful key for the dedup window.
+func (e *Engine) markDeduped(key string, now time.Time) {
+	e.mu.Lock()
+	e.dedupe[key] = now.Add(24 * time.Hour)
+	needsPrune := len(e.dedupe) > maxDedupeEntries
+	e.mu.Unlock()
+	if needsPrune {
+		e.pruneDedupe(now)
+	}
 }

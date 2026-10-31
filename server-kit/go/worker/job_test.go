@@ -3,6 +3,7 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -447,3 +448,43 @@ func TestProcessorMapletNilAndMissingLookups(t *testing.T) {
 	}
 }
 
+// TestJobMarshalRejectsRawPayloadFieldInjection guards the inlined raw_payload path.
+// Bracketed text that is not one JSON value must be base64-encoded, not spliced.
+func TestJobMarshalRejectsRawPayloadFieldInjection(t *testing.T) {
+	injected := []byte(`{"a":1},"kind":"evil","queue":"admin","z":{}`)
+	job := Job{ID: "j1", JobKind: "safe", Queue: "default", RawPayload: injected}
+	out, err := job.MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(out, &decoded); err != nil {
+		t.Fatalf("output must be valid JSON: %v", err)
+	}
+	if decoded["kind"] != "safe" || decoded["queue"] != "default" {
+		t.Fatalf("raw payload overrode job fields: %s", out)
+	}
+	var back Job
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if string(back.RawPayload) != string(injected) {
+		t.Fatalf("raw payload round trip = %q, want %q", back.RawPayload, injected)
+	}
+
+	valid := Job{ID: "j2", JobKind: "safe", Queue: "default", RawPayload: []byte(`{"b":[1,2]}`)}
+	out, err = valid.MarshalJSON()
+	if err != nil {
+		t.Fatalf("marshal valid: %v", err)
+	}
+	if !strings.Contains(string(out), `"raw_payload":{"b":[1,2]}`) {
+		t.Fatalf("valid JSON payload should stay inline: %s", out)
+	}
+}
+
+func TestJobIdempotencyKeyIsRiverUniqueField(t *testing.T) {
+	field, ok := reflect.TypeFor[Job]().FieldByName("IdempotencyKey")
+	if !ok || field.Tag.Get("river") != "unique" {
+		t.Fatalf(`Job.IdempotencyKey must carry river:"unique", got %q`, field.Tag)
+	}
+}
