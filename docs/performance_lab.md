@@ -436,6 +436,22 @@ Rules:
 3. The floor is a ratcheted budget, not a reading. Allocation ceilings for every
    rung are gated by `tooling/scripts/benchmark_ratchet_check.sh`.
 
+### Reviewed ceiling changes
+
+A ceiling rises only for a correctness fix, and the reason is recorded here.
+
+| Date | Benchmark | Old ceiling | New ceiling | Reason |
+| :--- | :--- | :--- | :--- | :--- |
+| 2026-11-01 | `AppLane_Auth_ValidateToken_Arena` | 0 allocs, 0 B | 3 allocs, 432 B | The zero came from JWT claims in a scratch arena. The GC does not scan arena memory, and claims outlive the request. The new cost equals `ValidateToken`. |
+| 2026-11-01 | `AppLane_HTTPIngress_ZeroAlloc` | 0 allocs, 0 B | 1 alloc, 144 B | `GlobalContext` holds strings and travels into events and logs. It cannot live in arena memory (see `scratch.ErrPointerType`). |
+| 2026-11-01 | `AppLane_EndToEnd_ScratchArena` | 0 allocs, 0 B | 1 alloc, 144 B | Same `GlobalContext` allocation as `HTTPIngress_ZeroAlloc`. |
+
+Retired from the ratchet on 2026-11-01: `StringRouting_FoundationVector`,
+`HeaderMatch_FoundationVectorFold`, `ControlPlane_FoundationScratch`,
+`vectorstr` `Equal16_Exact` and `EqualFold16`. Each measured a trivial unit
+(a four-key map, a 12-byte fold, one bump allocation). A ceiling on a unit that
+small measures the compiler, not the foundation.
+
 ## Do-Not-Optimize Gate
 
 Do not add a faster lane unless all are true:

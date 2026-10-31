@@ -401,18 +401,30 @@ func BenchmarkAppLane_WebSocketToHermesColumnar_Pipeline(b *testing.B) {
 	payload := transport.ObjectFromMap(map[string]any{"order_id": "ord_00000500"})
 	extra := transport.ObjectFromMap(map[string]any{"source": "ws"})
 
+	// Rotate devices and orders so the bench is not one cached key. 1024 is a
+	// power of two, so the index is a mask, not a division.
+	devices := make([]string, 1024)
+	orders := make([]string, 1024)
+	for i := range devices {
+		devices[i] = "device-" + strconv.Itoa(i)
+		orders[i] = fmt.Sprintf("ord_%08d", i%1000)
+	}
+	var sink int
+
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for b.Loop() {
+	for i := 0; b.Loop(); i++ {
 		arena.Reset()
+		k := i & 1023
 
-		// 1. Build envelope with arena (zero heap allocations)
+		// 1. Build envelope with arena (zero heap allocations). Its id is consumed,
+		// so the compiler cannot drop the build.
 		envelope := transport.CreateEnvelopeWithAllocator(arena, "market:order:update", payload, extra)
-		_ = envelope
+		sink += len(envelope.Metadata.CorrelationID)
 
 		// 2. Resolve WebSocket connection for target device (zero heap allocations)
-		connID, ok, err := router.ResolveDeviceConnection(ctx, "device-500")
+		connID, ok, err := router.ResolveDeviceConnection(ctx, devices[k])
 		if err != nil || !ok || connID == "" {
 			b.Fatal("missing device route")
 		}
@@ -423,14 +435,15 @@ func BenchmarkAppLane_WebSocketToHermesColumnar_Pipeline(b *testing.B) {
 		}
 
 		// 4. Hermes off-heap columnar projection point lookup (zero heap allocations)
-		view, found := table.GetView("ord_00000500")
+		view, found := table.GetView(orders[k])
 		if !found {
 			b.Fatal("missing order in columnar projection")
 		}
 		symBytes, _ := view.Bytes("symbol")
-		if !bytes.Equal(symBytes, []byte("AAPL")) {
-			b.Fatalf("expected AAPL, got %s", symBytes)
-		}
+		sink += len(symBytes)
+	}
+	if sink == 0 {
+		b.Fatal("pipeline produced no work")
 	}
 }
 

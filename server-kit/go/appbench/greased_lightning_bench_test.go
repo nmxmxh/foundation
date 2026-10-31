@@ -2,6 +2,7 @@ package appbench
 
 import (
 	"encoding/binary"
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -23,6 +24,10 @@ var baselineTerminalMap = map[string]int{
 	"ack":       3,
 }
 
+// The StringRouting, HeaderMatch and ControlPlane pairs below compare trivial
+// units (a 4-key map, a 12-byte fold, one bump allocation). They stay as
+// illustrations and are not ratcheted: a ratchet on a unit this small measures
+// the compiler, not the foundation.
 func BenchmarkStringRouting_StandardMap(b *testing.B) {
 	states := []string{"requested", "success", "failed", "ack", "unknown_state"}
 	b.ResetTimer()
@@ -150,7 +155,13 @@ func BenchmarkLifecycleFrame_Foundation(b *testing.B) {
 
 var escapeSink []byte
 
+// TestGreasedLightningGarbageAndLatencyProfile is an opt-in profile, not a gate.
+// It allocates about 390 MB and asserts a wall-clock ratio, which is not stable
+// under -race, coverage, or a loaded CI host. Run it with FOUNDATION_PERF_PROFILE=1.
 func TestGreasedLightningGarbageAndLatencyProfile(t *testing.T) {
+	if os.Getenv("FOUNDATION_PERF_PROFILE") != "1" || testing.Short() {
+		t.Skip("opt-in profile: set FOUNDATION_PERF_PROFILE=1")
+	}
 	const iterations = 100000
 
 	// Run Standard Path

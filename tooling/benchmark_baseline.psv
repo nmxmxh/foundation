@@ -6,18 +6,16 @@
 ./appbench|BenchmarkAppLane_Cache_GetHit_JSONValue|0|0|78.12
 ./appbench|BenchmarkAppLane_CircuitBreaker_ClosedSuccess|0|0|14.17
 ./appbench|BenchmarkAppLane_DirectFrame_DomainCall|0|0|41.04
-./appbench|BenchmarkAppLane_EndToEnd_ScratchArena|0|0|1288
+./appbench|BenchmarkAppLane_EndToEnd_ScratchArena|1|144|905.6
 ./appbench|BenchmarkAppLane_HTTPIngress_JSONBodyKilobyte|27|17612|21820
 ./appbench|BenchmarkAppLane_HTTPIngress_JSONBodyKilobyte_DispatchOnly|9|2688|2712
 ./appbench|BenchmarkAppLane_HTTPIngress_JSONToDispatchRequest|39|11204|9688
 ./appbench|BenchmarkAppLane_HTTPIngress_ProtobufBodyKilobyte|9|2688|2341
-./appbench|BenchmarkAppLane_HTTPIngress_ZeroAlloc|0|0|946.5
+./appbench|BenchmarkAppLane_HTTPIngress_ZeroAlloc|1|144|670.6
 ./appbench|BenchmarkAppLane_HTTPMiddleware_AuthSecurityRBAC|35|9240|5610
 ./appbench|BenchmarkAppLane_Retry_CanceledWait|2|96|401.9
 ./appbench|BenchmarkAppLane_Retry_NoRetrySuccess|0|0|7.915
 ./appbench|BenchmarkAppLane_WebSocketToHermesColumnar_Pipeline|0|0|585.4
-./appbench|BenchmarkControlPlane_FoundationScratch|0|0|3.750
-./appbench|BenchmarkHeaderMatch_FoundationVectorFold|0|0|5.000
 ./appbench|BenchmarkNullLane_00_GoCall|0|0|3.125
 ./appbench|BenchmarkNullLane_01_RouterFrameDispatch|0|0|15.42
 ./appbench|BenchmarkNullLane_02_DirectFrameClient|0|0|25.83
@@ -26,7 +24,6 @@
 ./appbench|BenchmarkNullLane_05_HTTPRouteHandlerCorrelated|16|3540|2232
 ./appbench|BenchmarkNullLane_06_HTTPSecuredChain|23|4568|4052
 ./appbench|BenchmarkNullLane_07_JSONObjectMaterialization|1|48|68.12
-./appbench|BenchmarkStringRouting_FoundationVector|0|0|1.040
 ./chain|BenchmarkHasCriticalFailure|0|0|44.59
 ./chain|BenchmarkHasCriticalFailureOrdered|0|0|2.915
 ./events|BenchmarkEnvelope_FromBinary|10|929|1006
@@ -61,5 +58,3 @@
 ./placement|BenchmarkMirrorFrameEncode32|1|1792|805.6
 ./placement|BenchmarkRemoteComputeRoundTrip|3|104|327.3
 ./runtimehost|BenchmarkPlacementFullHostPath|0|0|971.9
-./vectorstr|BenchmarkEqual16_Exact|0|0|1.875
-./vectorstr|BenchmarkEqualFold16|0|0|5.205
