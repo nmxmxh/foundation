@@ -1,6 +1,6 @@
 .PHONY: all generate-contracts build install-ts-deps audit-ts-deps frontend-build delivery-metrics test test-go test-go-race test-ts test-rust test-rust-sdk test-native-rust test-rust-loom check-rust test-service-backed test-service-backed-load test-load-research test-bench test-bench-go test-bench-native-rust test-bench-frontend test-bench-history profile-render-surface bench-simd lint verify docker-up docker-down migrate-up help \
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-scaffold-idempotency check-scaffold-seed-drift check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator check-agent-change \
-	check-core-validation-contract check-contract-drift check-runtime-contract-field-drift check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
+	check-core-validation-contract check-contract-drift check-runtime-contract-field-drift check-perfect-hash check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
 	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-package-licenses check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux bench-holepunch-linux \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet check-benchmark-ratchet check-transport-ladder check-system-profiling lifecycle-manifest check-fleet
@@ -26,6 +26,7 @@ FOUNDATION_LINT_CHECKS := \
 	check-package-licenses \
 	check-contract-drift \
 	check-runtime-contract-field-drift \
+	check-perfect-hash \
 	check-version-consistency \
 	check-managed-patch-hygiene \
 	check-doc-references \
@@ -343,6 +344,10 @@ check-package-licenses:
 
 check-contract-drift:
 	@tooling/scripts/contract_drift_check.sh .
+
+check-perfect-hash:
+	@node --test tests/perfect_hash_gen.test.mjs
+	@node tooling/scripts/perfect_hash_gen.mjs server-kit/go/vectorstr/canonical_headers.phf.json --out server-kit/go/vectorstr/canonical_headers_phf.go --check
 
 check-runtime-contract-field-drift:
 	@node tooling/scripts/runtime_contract_field_drift_check.mjs

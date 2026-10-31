@@ -15,29 +15,11 @@ const (
 	HeaderAccept
 )
 
-var (
-	lookupCanonicalHeaderAsso = [256]uint8{
-		'd': 4,
-		'r': 5,
-	}
+//go:generate node ../../../tooling/scripts/perfect_hash_gen.mjs canonical_headers.phf.json --out canonical_headers_phf.go
 
-	lookupCanonicalHeaderKeys = [8]string{
-		"x-correlation-id", "x-request-id", "", "x-tenant-id", "content-type", "authorization", "accept", "x-device-id",
-	}
-
-	lookupCanonicalHeaderValues = [8]CanonicalHeaderID{
-		HeaderCorrelationID, HeaderRequestID, HeaderUnknown, HeaderTenantID, HeaderContentType, HeaderAuthorization, HeaderAccept, HeaderDeviceID,
-	}
-)
-
-// LookupCanonicalHeader performs zero-collision, branchless perfect hash lookup in ~5 CPU cycles.
+// LookupCanonicalHeader identifies a known ingress header by name. It accepts
+// Go's canonical form (net/http keys such as "Content-Type") and the lowercase
+// wire form (HTTP/2). The table is generated from canonical_headers.phf.json.
 func LookupCanonicalHeader(key string) (CanonicalHeaderID, bool) {
-	if len(key) < 3 {
-		return HeaderUnknown, false
-	}
-	slot := (len(key) + int(lookupCanonicalHeaderAsso[key[0]]) + int(lookupCanonicalHeaderAsso[key[1]]) + int(lookupCanonicalHeaderAsso[key[2]])) & 7
-	if slot < 8 && lookupCanonicalHeaderKeys[slot] == key {
-		return lookupCanonicalHeaderValues[slot], true
-	}
-	return HeaderUnknown, false
+	return lookupCanonicalHeader(key)
 }

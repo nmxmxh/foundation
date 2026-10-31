@@ -1,7 +1,10 @@
 package vectorstr
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"unsafe"
@@ -326,5 +329,45 @@ func BenchmarkLookupCanonicalHeader_MapBaseline(b *testing.B) {
 		id, ok := headerMap[h]
 		_ = id
 		_ = ok
+	}
+}
+
+// TestCanonicalHeaderTableMatchesSpec is the drift gate between the generated
+// table and its spec. Every spec key resolves to its value; near misses do not.
+func TestCanonicalHeaderTableMatchesSpec(t *testing.T) {
+	raw, err := os.ReadFile("canonical_headers.phf.json")
+	if err != nil {
+		t.Fatalf("read spec: %v", err)
+	}
+	var spec struct {
+		Entries map[string]string `json:"entries"`
+	}
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("parse spec: %v", err)
+	}
+	names := map[string]CanonicalHeaderID{
+		"HeaderAuthorization": HeaderAuthorization, "HeaderContentType": HeaderContentType,
+		"HeaderCorrelationID": HeaderCorrelationID, "HeaderRequestID": HeaderRequestID,
+		"HeaderTenantID": HeaderTenantID, "HeaderDeviceID": HeaderDeviceID, "HeaderAccept": HeaderAccept,
+	}
+	for key, valueName := range spec.Entries {
+		want, ok := names[valueName]
+		if !ok {
+			t.Fatalf("spec value %q has no Go constant in this test", valueName)
+		}
+		if got, found := LookupCanonicalHeader(key); !found || got != want {
+			t.Fatalf("LookupCanonicalHeader(%q) = (%v, %v), want (%v, true); regenerate canonical_headers_phf.go", key, got, found, want)
+		}
+		for _, miss := range []string{key + "x", key[:len(key)-1], strings.ToUpper(key) + "!"} {
+			if _, found := LookupCanonicalHeader(miss); found {
+				t.Fatalf("near miss %q resolved", miss)
+			}
+		}
+	}
+	if _, found := LookupCanonicalHeader(""); found {
+		t.Fatal("empty key resolved")
+	}
+	if got, found := LookupCanonicalHeader(http.CanonicalHeaderKey("x-request-id")); !found || got != HeaderRequestID {
+		t.Fatalf("net/http canonical form must resolve, got (%v, %v)", got, found)
 	}
 }

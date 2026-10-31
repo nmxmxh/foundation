@@ -12,6 +12,9 @@ const (
 	EnvelopeSchemaVersion = runtimetransport.EnvelopeSchemaVersion
 )
 
+// terminalStates is the source of truth for terminal states. The perfect-hash
+// table below must accept exactly this set; TestTerminalStateTableMatchesSource
+// is the drift gate. Add a state here first, then regenerate the table.
 var terminalStates = map[string]struct{}{
 	"requested": {},
 	"success":   {},

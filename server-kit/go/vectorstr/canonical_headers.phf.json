@@ -1,0 +1,22 @@
+{
+  "package": "vectorstr",
+  "function": "lookupCanonicalHeader",
+  "valueType": "CanonicalHeaderID",
+  "zeroValue": "HeaderUnknown",
+  "entries": {
+    "Authorization": "HeaderAuthorization",
+    "Content-Type": "HeaderContentType",
+    "X-Correlation-Id": "HeaderCorrelationID",
+    "X-Request-Id": "HeaderRequestID",
+    "X-Tenant-Id": "HeaderTenantID",
+    "X-Device-Id": "HeaderDeviceID",
+    "Accept": "HeaderAccept",
+    "authorization": "HeaderAuthorization",
+    "content-type": "HeaderContentType",
+    "x-correlation-id": "HeaderCorrelationID",
+    "x-request-id": "HeaderRequestID",
+    "x-tenant-id": "HeaderTenantID",
+    "x-device-id": "HeaderDeviceID",
+    "accept": "HeaderAccept"
+  }
+}
