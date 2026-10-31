@@ -107,7 +107,7 @@ Informational maintenance and unsoundness warnings remain visible.
 Core CI pins `cargo-audit` to version 0.22.2.
 Generated security workflows run the same audit without requiring native application compilation.
 
-Wasmtime execution requires version 36.0.19 or a later compatible patch.
+Wasmtime execution requires version 36.0.20 or a later compatible patch.
 This minimum addresses the [Cranelift index advisory](https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-897f-g5gm-fmxm)
 and the [AArch64 branch advisory](https://github.com/bytecodealliance/wasmtime/security/advisories/GHSA-mghf-wjfp-p5xm).
 Both can permit a sandbox escape from a malicious WASM module.

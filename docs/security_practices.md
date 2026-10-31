@@ -119,7 +119,7 @@ Every exposed feature should add tests for the vulnerability families it touches
 ## Advisory 2026-10-20: Rust WASM Hosts
 
 Wasmtime 36.0.14 is affected by critical Cranelift sandbox-escape advisories.
-Foundation requires Wasmtime 36.0.19 in the optional host lane.
+Foundation requires Wasmtime 36.0.20 in the optional host lane.
 The [Rust runtime practices](rust_runtime_practices.md#dependency-security) define the minimum and audit gate.
 Rebuild affected native hosts and applications before claiming deployed protection.
 

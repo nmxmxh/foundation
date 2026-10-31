@@ -6,10 +6,12 @@ All notable changes to Foundation will be documented in this file.
 
 ### Added
 
-- **database**: `QueryAllArena` collects streamed query rows into a typed slice allocated inside a scratch arena. When used with `DirectScanInt` or other scalar scanners, batch database queries execute with zero heap allocations.
-- **wsrouting**: `SecureRouteMaplet` unifies server shard lookups and RBAC capability checks into an atomic 15-nanosecond step. `RouteAndAuthorize` verifies caller permission bitmasks before routing.
-- **vectorstr**: `LookupCanonicalHeader` generated via `perfect_hash_gen.mjs`. It identifies standard HTTP headers in 0.32 nanoseconds with zero collisions and zero allocations.
-- **scripts**: `check-go-race.sh` and `install-git-hooks.sh` enforce race detector validation across core memory packages before code is committed.
+- **database**: `QueryAllArena` collects streamed query rows into a typed slice inside a scratch arena. Only pointer-free row types use the arena; other types use the heap. The zero-allocation figure applies to fake rows: production `pgx` rows do not implement the direct-scan interfaces.
+- **wsrouting**: `SecureRouteMaplet` combines shard lookup and RBAC capability checks (14.7 ns, exact map). `SetRoute` rejects a zero mask; `SetPublicRoute` creates an open route.
+- **vectorstr**: `LookupCanonicalHeader`, generated from `canonical_headers.phf.json` by `perfect_hash_gen.mjs`. It accepts `net/http` canonical keys and lowercase wire names (5.5 ns, map 8.8 ns).
+- **scripts**: `check-go-race.sh` and `install-git-hooks.sh` run the race detector on memory-sensitive packages before a commit.
+- **security**: `RateLimiter` is a sharded sliding window with exact keys and fixed per-key state: 56 ns per call on a hot key (was 859 ns), 0 allocations for known keys.
+- **tooling**: `make lint` runs `check-perfect-hash` (generator tests and generated-table drift).
 
 - **docs**: `ui_render_performance_research.md` — research handoff for the DOM/WebView rendering gap, the one axis Foundation's zero-copy data lanes do not cover. It maps Chromium (Android WebView) and WebKit (WKWebView) rendering models, mobile tile-based GPUs, and AAA frame-budget practice onto Foundation's existing primitives (`frameClock`, render surface ladder, `renderMarks`, `ui-minimal` motion, the styling doc's Motion Design System), and proposes ten next-phase DOM-lane primitives and rules with budgets aligned to Android vitals. ChooseChow is recorded as the first-adopter baseline. Research only: nothing is promoted until its owning document adopts it.
 - **templates/native**: fix `beforeDevCommand`/`beforeBuildCommand` — Tauri runs them from `native/`, not `src-tauri/`, so the template's `cd ../../frontend` left the project and `tauri dev`, `tauri build`, and every mobile build failed before compiling anything. Hooks now `cd ../frontend`; `frontendDist` (resolved from `src-tauri/`) stays `../../frontend/dist`. `project_scaffold_check.sh` fails on the old path.
@@ -31,7 +33,30 @@ All notable changes to Foundation will be documented in this file.
 - **templates/backend**: `RIVER_DIRECT_URL` routes both River pools through a session-mode endpoint bypassing PgBouncer transaction pooling, restoring native LISTEN/NOTIFY wakes (Option A of the read-pressure handoff); `STATE_STORE_CACHE` (`off|memory|redis` + TTL knobs) wires `CachedStateStore` for direct StateStore consumers with first-fallback degradation logging.
 - **scripts**: `db_diagnostics.sh` — parameterized read-pressure evidence collector (pg_stat leaders, river_job state/queue backlog, oldest job age) with no hardcoded hosts or credentials.
 
+### Fixed (perf review hardening, 2026-11-01)
+
+The 2026-10-25 to 2026-10-31 performance work was audited. These defects were fixed, each with a regression test:
+
+- **scratch**: typed arena allocation refuses types that hold Go pointers (`ErrPointerType`). The GC does not scan arena memory. JWT claims, `GlobalContext`, `[]string` and `[]*recordEntry` were stored there and could be freed while in use. Size arithmetic is overflow-checked. `scratch.Detach` drops both cancellation and the arena.
+- **auth**: `ValidateTokenWithArena` returns heap-owned claims. Claim strings aliased the pooled arena and changed when the next request reused it.
+- **hermes**: the sealed columnar cache is keyed by organization, fields and primary key. One shared table answered every tenant, and a cache hit skipped the fence and empty-organization checks. Duplicate primary keys are rejected; null cells return `ErrNullValue`.
+- **worker**: the River bridge marks an idempotency key after success, not before (a failed attempt's retry completed as a dedup hit). `IdempotencyKey` carries `river:"unique"`. Raw payloads must be valid JSON to be inlined (field injection). Dedup and job health are bounded; sidecar and batch errors are returned instead of hidden.
+- **security**: an empty-role template no longer grants capabilities to anonymous callers through the mask fast path. The unwired `MapletRateLimiter` is removed.
+- **featureflags**, **cache**, **wsrouting**: approximate maplets are replaced by exact structures. An undefined flag could read as enabled, the cache guard raced and dropped writes, and route aliases could misroute.
+- **metadata** and **ovrt-core**: a failed cuckoo insert leaves the table unchanged (it used to drop a stored key). Rust maplets require a power-of-two size.
+- **native-gpu**: slot acquire and release use one packed atomic; owner checks compare the exact scope; fence signals require the owner.
+- **runtimehost**: `ExecuteWithScratch` no longer gives arena memory to an exchange that can be abandoned.
+- **projectiongw**: inbound frames are capped at 64 KiB, scopes per connection at 256, and heartbeat timings move to `HandlerConfig.Heartbeat`.
+- **circuitbreaker**: every counter access is atomic.
+- **ovrt**: impossible B-tree splits fail loudly; snapshots are validated on load and saved by rename; the output tail is cleared on success; the epoch sleep ladder is restored.
+- **browser-host** and **runtime-transport**: `frameClock` and pulse no longer skip a subscriber that unsubscribes during dispatch; WebGPU staging padding is zeroed; envelope ids get independent crypto-random parts.
+- **compress**, **database**: Brotli readers that failed or decoded large streams are not pooled; record decoding matches `Normalize`.
+- **kernellane**: the reclaimer checks lost in the chaos-test move are restored, and the eager-punch proof no longer passes on `io.EOF`.
+- **benchmarks**: three allocation ceilings rose for these correctness fixes, and five trivial benchmarks left the ratchet. See `docs/performance_lab.md`, "Reviewed ceiling changes".
+
 ### Changed
+
+- **rust**: Wasmtime 36.0.20 is the minimum for the optional host. See `docs/evidence/rust_security_2026-11-01.md`.
 
 - **vitest 5**: `templates/frontend`, `runtime-transport/ts`, `runtime-sdk/ts/browser-host`, and `runtime-native/ts` move to `vitest`/`@vitest/coverage-v8` `^5.0.0`. With vitest 5 as `latest`, a `^4` manifest made npm resolve vitest 5 through optional peers (`@vitejs/devtools-vitest` peers `vitest@*`), and npm 11 crashed on the mixed-major peer set with `Cannot read properties of null (reading 'edgesOut')` — `./init.sh` aborted at the frontend lockfile sync. `frontend_manifest_sync.mjs` now pins `vitest` to the template range and moves `@vitest/coverage-v8` in lockstep when present, so `foundation-update` carries existing apps across the major. Vitest 5 dropped the top-level `bench` export: every `*.bench.ts` now registers through the `bench` test fixture (`test(name, async ({ bench }) => bench.compare(...))`), and bench invocations pass `--reporter=verbose`, since the default reporter no longer prints the results table.
 - **scripts**: `init.sh --skip-deps` no longer runs `npm install --package-lock-only` after the frontend manifest sync; it warns that the lockfile needs a manual `npm install`.
