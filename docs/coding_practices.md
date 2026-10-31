@@ -1212,6 +1212,31 @@ Enforcement:
 - `tooling/scripts/coding_practices_check.sh` fails when frontend code invokes `localeCompare` on timestamp properties.
 - `@ovasabi/frontend-kit` unit tests verify space versus ISO sorting, sub-millisecond precision, and tie-breaking.
 
+### CP-49: Scratch arena memory holds no Go pointers and does not outlive its scope
+
+Level: `Mandatory`
+
+Requirements:
+
+1. Allocate only pointer-free types in a `scratch.Arena` (numbers, booleans, and arrays or structs of them). Never place a string, slice, map, pointer, interface, channel, or function in arena memory.
+2. A value that refers to arena bytes (`AllocString`, an allocator-backed envelope id, an arena-backed `QueryAllArena` result) is valid only until the arena is reset. Copy it before you store it, queue it, log it asynchronously, or use it as a map or dedup key.
+3. Work that outlives the request uses `scratch.Detach(ctx)`, which drops the arena together with cancellation.
+4. Approximate structures never decide authorization, rate limits, routing, deduplication, or flag gates (see 20c).
+
+Rationale:
+
+The arena buffer is a `[]byte`, so the GC does not scan it. JWT claims and
+`GlobalContext` were stored there, and the heap strings they pointed to could be
+freed while a request still used them. Claim strings also aliased the pooled
+arena, so a held `*Claims` changed when the next request reused the buffer.
+Both were on the default authenticated request path.
+
+Enforcement:
+
+- `scratch.AllocSlice` and `scratch.Alloc` return `ErrPointerType` for any type that holds a Go pointer (runtime check, cached per type).
+- `tooling/scripts/coding_practices_check.sh` fails on typed arena allocations of an obviously pointer-carrying type (`*T`, `[]T`, `map`, `string`, `any`, `interface`, `chan`, `func`, `error`). `tests/coding_practices_check_test.sh` plants a violation to prove the gate fires.
+- `TestValidateTokenWithArena_ClaimsOwnHeapMemory` poisons and reuses the arena, forces a GC, and checks that held claims stay intact.
+
 ## Enforcement matrix
 
 | Rule ID | Primary enforcement | Automation | Merge gate |
@@ -1263,6 +1288,7 @@ Enforcement:
 | `CP-46` | Allocation and interface tests + benchmark | Partial | Yes |
 | `CP-47` | `test_naming_check.cjs` + `test_preservation_check.py` | Strong | Yes |
 | `CP-48` | `database_practices_check.sh` + `coding_practices_check.sh` | Strong | Yes |
+| `CP-49` | `scratch.ErrPointerType` runtime check + `coding_practices_check.sh` + review | Strong | Yes |
 
 ## Exception process and ADR linkage
 

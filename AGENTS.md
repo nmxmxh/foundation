@@ -278,6 +278,7 @@ The Foundation modules are linked through a unified "Nervous System":
 | CP-20 | Server-side authorization on every object |
 | CP-36 | Agent-authored changes must carry evidence |
 | CP-37 | Documentation and comments follow ASD-STE100 |
+| CP-49 | Scratch arena memory holds no Go pointers; approximate structures never decide auth, limits, routing, or dedup |
 
 Full reference: `docs/foundation/coding_practices.md` in generated apps, or `docs/coding_practices.md` in the foundation source repo.
 

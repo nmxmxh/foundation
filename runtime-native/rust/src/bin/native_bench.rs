@@ -495,11 +495,11 @@ fn run_frame_reading_bench() {
         let mut cursor = Cursor::new(&frame_bytes);
         let started = Instant::now();
         let mut size = [0u8; 4];
-        std::io::Read::read_exact(&mut cursor, &mut size).unwrap();
+        std::io::Read::read_exact(&mut cursor, &mut size).expect("read frame size");
         let len = u32::from_le_bytes(size) as usize;
         dynamic_buf.clear();
         dynamic_buf.resize(len, 0);
-        std::io::Read::read_exact(&mut cursor, &mut dynamic_buf).unwrap();
+        std::io::Read::read_exact(&mut cursor, &mut dynamic_buf).expect("read frame body");
         vec_samples.push(started.elapsed());
         black_box(&dynamic_buf);
     }
@@ -508,7 +508,7 @@ fn run_frame_reading_bench() {
     for _ in 0..iters {
         let mut cursor = Cursor::new(&frame_bytes);
         let started = Instant::now();
-        let n = read_frame_slice(&mut cursor, &mut scratch_buf).unwrap();
+        let n = read_frame_slice(&mut cursor, &mut scratch_buf).expect("read frame slice");
         slice_samples.push(started.elapsed());
         black_box(&scratch_buf[..n]);
     }

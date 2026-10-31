@@ -79,7 +79,10 @@ func (f *FCMSender) Send(ctx context.Context, d Delivery) Result {
 		// Valid JSON payload
 	} else {
 		// Wrap raw string into json string
-		wrapped, _ := json.Marshal(map[string]string{"body": string(d.Payload)})
+		wrapped, err := json.Marshal(map[string]string{"body": string(d.Payload)})
+		if err != nil {
+			return Result{Outcome: Retry}
+		}
 		raw = wrapped
 	}
 

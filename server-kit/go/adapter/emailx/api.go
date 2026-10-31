@@ -131,7 +131,10 @@ func (a *APISender) Send(ctx context.Context, msg Message) (*DeliveryReceipt, er
 		var res struct {
 			ID string `json:"id"`
 		}
-		_ = json.Unmarshal(body, &res)
+		if err := json.Unmarshal(body, &res); err != nil {
+			// A 2xx body without a parseable id is accepted; the caller's message id is used.
+			res.ID = ""
+		}
 
 		msgID := res.ID
 		if msgID == "" {

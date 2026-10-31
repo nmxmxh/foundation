@@ -120,52 +120,61 @@ type ByteAllocator interface {
 	Alloc(size int) ([]byte, error)
 }
 
+// appendTokenWithAllocator writes prefix + timestamp + "_" + 16 random hex
+// characters into memory from alloc and returns a string view of it.
+// It returns ok=false when alloc fails or returns a short buffer.
+func appendTokenWithAllocator(alloc ByteAllocator, prefix string, now time.Time) (string, bool) {
+	maxLen := len(prefix) + len("20060102T150405.000000000") + 1 + 16
+	raw, err := alloc.Alloc(maxLen)
+	if err != nil || len(raw) < maxLen {
+		return "", false
+	}
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", false
+	}
+	buf := raw[:0]
+	buf = append(buf, prefix...)
+	buf = now.AppendFormat(buf, "20060102T150405.000000000")
+	buf = append(buf, '_')
+	offset := len(buf)
+	buf = buf[:offset+hex.EncodedLen(len(random))]
+	hex.Encode(buf[offset:], random[:])
+	// #nosec G103 -- zero-copy string view over allocator memory; see the WARNING on callers.
+	return unsafe.String(unsafe.SliceData(buf), len(buf)), true
+}
+
 // NewCorrelationIDWithAllocator generates a unique correlation ID string
 // using memory from alloc, avoiding heap allocation when backed by an arena.
+//
+// WARNING: with an arena the string points into arena memory. It changes when
+// the arena is reset. Clone it (strings.Clone) before you store it, log it
+// asynchronously, or use it as a dedup key.
 func NewCorrelationIDWithAllocator(alloc ByteAllocator) string {
 	if alloc == nil {
 		return NewCorrelationID()
 	}
-	const maxLen = len("corr_") + len("20060102T150405.000000000") + 1 + 16
-	raw, err := alloc.Alloc(maxLen)
-	if err != nil {
-		return NewCorrelationID()
+	if id, ok := appendTokenWithAllocator(alloc, "corr_", time.Now().UTC()); ok {
+		return id
 	}
-	var random [8]byte
-	now := time.Now().UTC()
-	buf := raw[:0]
-	buf = append(buf, "corr_"...)
-	buf = now.AppendFormat(buf, "20060102T150405.000000000")
-	if _, err := rand.Read(random[:]); err == nil {
-		buf = append(buf, '_')
-		offset := len(buf)
-		buf = buf[:offset+hex.EncodedLen(len(random))]
-		hex.Encode(buf[offset:], random[:])
-	}
-	// #nosec G103 -- zero-copy string projection from bounded slice.
-	return unsafe.String(unsafe.SliceData(buf), len(buf))
+	return NewCorrelationID()
 }
 
 // CreateEnvelopeWithAllocator constructs an envelope using alloc for correlation and idempotency keys.
+// The two keys have independent random parts, so one cannot be derived from the other.
+//
+// WARNING: with an arena the metadata ids point into arena memory and change
+// when the arena is reset. Clone them before the envelope outlives the arena
+// (queues, caches, dedup tables, goroutines).
 func CreateEnvelopeWithAllocator(alloc ByteAllocator, eventType string, payload any, extra any) Envelope {
 	if alloc == nil {
 		return CreateEnvelope(eventType, payload, extra)
 	}
 	now := time.Now().UTC()
 	correlationID := NewCorrelationIDWithAllocator(alloc)
-
-	suffix := strings.TrimPrefix(correlationID, "corr_")
-	const prefix = "idem_"
-	rawIdem, err := alloc.Alloc(len(prefix) + len(suffix))
-	var idempotencyKey string
-	if err == nil {
-		buf := rawIdem[:0]
-		buf = append(buf, prefix...)
-		buf = append(buf, suffix...)
-		// #nosec G103 -- zero-copy string projection from bounded slice.
-		idempotencyKey = unsafe.String(unsafe.SliceData(buf), len(buf))
-	} else {
-		idempotencyKey = prefix + suffix
+	idempotencyKey, ok := appendTokenWithAllocator(alloc, "idem_", now)
+	if !ok {
+		idempotencyKey = "idem_" + strings.TrimPrefix(NewCorrelationID(), "corr_")
 	}
 
 	payloadObject := objectArgument(payload)

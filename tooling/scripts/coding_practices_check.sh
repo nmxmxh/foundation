@@ -48,8 +48,12 @@ check_no_match() {
   local label="$1"
   local pattern="$2"
   shift 2
-  if rg -n \
-    "$@" \
+  # The pattern goes through -e. As a trailing positional it became a path,
+  # "$@" put the target first as the pattern, rg exited 2, and every gate
+  # reported OK without searching (negative-tested 2026-11-01).
+  local rc=0
+  # "$@" (target and include globs) comes first: in rg the last matching glob wins.
+  rg -n -e "$pattern" "$@" \
     --glob '!**/generated/**' \
     --glob '!**/*test*' \
     --glob '!*_test.go' \
@@ -59,21 +63,34 @@ check_no_match() {
     --glob '!**/tooling/scripts/**' \
     --glob '!**/docs/**' \
     --glob '!**/data/**' \
-    "$pattern" >"$tmp_output" 2>/dev/null; then
-    echo "[FAIL] $label"
-    cat "$tmp_output"
-    failed=1
-  else
-    echo "[OK] $label"
-  fi
+    >"$tmp_output" 2>"$tmp_output.err" || rc=$?
+  case "$rc" in
+    0)
+      echo "[FAIL] $label"
+      cat "$tmp_output"
+      failed=1
+      ;;
+    1)
+      echo "[OK] $label"
+      ;;
+    *)
+      echo "[FAIL] $label (search error, rg exit $rc)"
+      cat "$tmp_output.err"
+      failed=1
+      ;;
+  esac
 }
 
 check_no_match_multiline() {
   local label="$1"
   local pattern="$2"
   shift 2
-  if rg -n -U \
-    "$@" \
+  # The pattern goes through -e. As a trailing positional it became a path,
+  # "$@" put the target first as the pattern, rg exited 2, and every gate
+  # reported OK without searching (negative-tested 2026-11-01).
+  local rc=0
+  # "$@" (target and include globs) comes first: in rg the last matching glob wins.
+  rg -n -U -e "$pattern" "$@" \
     --glob '!**/generated/**' \
     --glob '!**/*test*' \
     --glob '!*_test.go' \
@@ -83,13 +100,22 @@ check_no_match_multiline() {
     --glob '!**/tooling/scripts/**' \
     --glob '!**/docs/**' \
     --glob '!**/data/**' \
-    "$pattern" >"$tmp_output" 2>/dev/null; then
-    echo "[FAIL] $label"
-    cat "$tmp_output"
-    failed=1
-  else
-    echo "[OK] $label"
-  fi
+    >"$tmp_output" 2>"$tmp_output.err" || rc=$?
+  case "$rc" in
+    0)
+      echo "[FAIL] $label"
+      cat "$tmp_output"
+      failed=1
+      ;;
+    1)
+      echo "[OK] $label"
+      ;;
+    *)
+      echo "[FAIL] $label (search error, rg exit $rc)"
+      cat "$tmp_output.err"
+      failed=1
+      ;;
+  esac
 }
 
 check_absent_path() {
@@ -109,7 +135,11 @@ check_absent_path() {
 }
 
 check_no_match "CP no goto in handwritten sources" "\\bgoto\\b" "$target" --glob '*.go' --glob '*.rs' --glob '*.ts' --glob '*.tsx'
-check_no_match "CP no unsafe in handwritten Go sources" "(\"unsafe\"|\\bunsafe\\.)" "$target" --glob '*.go' --glob '!**/*.pb.go' --glob '!**/foundation/runtime-sdk/**' --glob '!**/runtime-sdk/**'
+# Audited unsafe sites. Each one owns a documented contract and a test:
+#   scratch/arena.go          typed arena views; CP-49 forbids pointer-carrying types
+#   kernellane/punch_darwin.go fcntl(F_PUNCHHOLE) takes a struct pointer
+#   transport/transport.go    allocator-backed envelope ids; borrow WARNING on callers
+check_no_match "CP no unsafe in handwritten Go sources" "(\"unsafe\"|\\bunsafe\\.)" "$target" --glob '*.go' --glob '!**/*.pb.go' --glob '!**/foundation/runtime-sdk/**' --glob '!**/runtime-sdk/**' --glob '!**/server-kit/go/scratch/arena.go' --glob '!**/server-kit/go/kernellane/punch_darwin.go' --glob '!**/runtime-transport/go/transport/transport.go'
 check_no_match "CP JSON marshal/unmarshal errors checked" "(_\\s*=\\s*json\\.Unmarshal|[A-Za-z0-9_]+\\s*,\\s*_\\s*:=\\s*json\\.Marshal|_\\s*,\\s*[A-Za-z0-9_]+\\s*:=\\s*json\\.Marshal)" "$target" --glob '*.go'
 check_no_match "CP no unwrap/todo/dbg in Rust runtime code" "\\bunwrap\\s*\\(|todo!\\s*\\(|dbg!\\s*\\(" "$target" --glob '*.rs'
 check_no_match "CP no blocking Atomics.wait on browser main/runtime code" "\\bAtomics\\.wait\\s*\\(" "$target" --glob '*.ts' --glob '*.tsx' --glob '*.js' --glob '*.jsx'
@@ -119,6 +149,7 @@ check_no_match "CP no transition-all in frontend motion" "transition\\s*:\\s*['\
 check_no_match "CP no large runtime buffer expansion" "runtime.{0,32}buffer.{0,32}(8192|16384|32768|65536)|buffer.{0,32}runtime.{0,32}(8192|16384|32768|65536)" "$target" --glob '*.go' --glob '*.rs' --glob '*.ts' --glob '*.tsx'
 check_no_match "CP internal Go avoids JSON gRPC compatibility dispatch" "grpcsvc\\.Dispatch\\s*\\(|grpcsvc\\.Envelope\\b" "$target" --glob '*.go' --glob '!**/foundation/**' --glob '!**/server-kit/go/grpcsvc/**'
 check_no_match "CP no zero-duration Go timer placeholders" "\\btime\\.NewTimer\\s*\\(\\s*0\\s*\\)|\\bNewTimer\\s*\\(\\s*0\\s*\\)" "$target" --glob '*.go'
+check_no_match "CP-49 scratch arena typed allocations hold no Go pointers" "\\b(scratch\\.)?(Alloc|AllocSlice|QueryAllArena)\\[\\s*(\\*|\\[\\]|map\\[|string\\b|any\\b|interface\\b|chan\\b|func\\b|error\\b)" "$target" --glob '*.go'
 check_no_match_multiline "CP channel close must not use select-default race guard" "select\\s*\\{[\\s\\S]{0,240}default:\\s*\\n\\s*close\\s*\\(" "$target" --glob '*.go'
 check_no_match_multiline "CP WaitGroup Add must happen before goroutine launch" "go\\s+func[\\s\\S]{0,240}\\b([A-Za-z0-9_]*wg|wg|group)\\.Add\\s*\\(" "$target" --glob '*.go'
 

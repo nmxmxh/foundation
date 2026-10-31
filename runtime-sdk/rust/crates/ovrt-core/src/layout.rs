@@ -266,18 +266,18 @@ mod tests {
         assert_eq!(bytes_written, 192);
 
         // Verify magic and counts
-        let magic = u32::from_le_bytes(dest[0..4].try_into().unwrap());
+        let magic = u32::from_le_bytes(dest[0..4].try_into().expect("4-byte header field"));
         assert_eq!(magic, COLUMNAR_BATCH_MAGIC);
-        let row_count = u32::from_le_bytes(dest[8..12].try_into().unwrap());
+        let row_count = u32::from_le_bytes(dest[8..12].try_into().expect("4-byte header field"));
         assert_eq!(row_count, 100);
-        let col_count = u32::from_le_bytes(dest[12..16].try_into().unwrap());
+        let col_count = u32::from_le_bytes(dest[12..16].try_into().expect("4-byte header field"));
         assert_eq!(col_count, 2);
 
         // Verify field 0
         let f0_base = 32;
-        let f0_id = u32::from_le_bytes(dest[f0_base..f0_base + 4].try_into().unwrap());
+        let f0_id = u32::from_le_bytes(dest[f0_base..f0_base + 4].try_into().expect("4-byte header field"));
         assert_eq!(f0_id, 101);
-        let f0_val_id = u32::from_le_bytes(dest[f0_base + 32..f0_base + 36].try_into().unwrap());
+        let f0_val_id = u32::from_le_bytes(dest[f0_base + 32..f0_base + 36].try_into().expect("4-byte header field"));
         assert_eq!(f0_val_id, 1);
 
         // Test scratch assembly

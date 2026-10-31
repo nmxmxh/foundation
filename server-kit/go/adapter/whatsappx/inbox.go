@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -75,8 +76,15 @@ func NewDurableWebhookHandler(cfg WebhookConfig, inbox WebhookInbox) (*WebhookHa
 	h.durable = d
 	return h, nil
 }
+
+// accountKey hashes the JSON array of parts. The bytes are stable on purpose:
+// webhook record keys are persisted and action tokens are signed over them.
 func accountKey(parts ...string) string {
-	b, _ := json.Marshal(parts)
+	b, err := json.Marshal(parts)
+	if err != nil {
+		// Unreachable for []string. Hash the parts anyway rather than an empty input.
+		b = []byte(strings.Join(parts, "\x00"))
+	}
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }

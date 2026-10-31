@@ -2,6 +2,7 @@ package transport
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -227,4 +228,37 @@ func TestValueExtraConversions(t *testing.T) {
 	if err := badVal.UnmarshalJSON([]byte("invalid json {")); err == nil {
 		t.Fatal("expected UnmarshalJSON to fail for invalid json")
 	}
+}
+
+type shortAllocator struct{}
+
+func (shortAllocator) Alloc(int) ([]byte, error) { return make([]byte, 4), nil }
+
+func TestCreateEnvelopeWithAllocatorIndependentKeysAndShortBuffers(t *testing.T) {
+	arena := &testBumpAllocator{buf: make([]byte, 4096)}
+	env := CreateEnvelopeWithAllocator(arena, "orders:create:requested", nil, nil)
+	corr := strings.TrimPrefix(env.Metadata.CorrelationID, "corr_")
+	idem := strings.TrimPrefix(env.Metadata.IdempotencyKey, "idem_")
+	if corr == idem {
+		t.Fatalf("idempotency key must not reuse the correlation random part: %q", corr)
+	}
+	// An allocator that returns less than requested must not panic.
+	short := CreateEnvelopeWithAllocator(shortAllocator{}, "orders:create:requested", nil, nil)
+	if short.Metadata.CorrelationID == "" || short.Metadata.IdempotencyKey == "" {
+		t.Fatalf("short allocator must fall back to heap ids: %+v", short.Metadata)
+	}
+}
+
+type testBumpAllocator struct {
+	buf  []byte
+	head int
+}
+
+func (a *testBumpAllocator) Alloc(n int) ([]byte, error) {
+	if a.head+n > len(a.buf) {
+		return nil, errors.New("full")
+	}
+	out := a.buf[a.head : a.head+n]
+	a.head += n
+	return out, nil
 }
