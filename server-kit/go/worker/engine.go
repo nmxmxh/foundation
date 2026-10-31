@@ -23,6 +23,7 @@ const (
 	queueScaleThreshold       = defaultQueueCapacity / 2
 	maxAdaptiveWorkers        = 64
 	maxDedupeEntries          = 100000
+	maxJobHealthEntries       = 10000
 	defaultRiverInsertTimeout = 5 * time.Second
 )
 
@@ -57,11 +58,13 @@ type Engine struct {
 	processors map[string]Processor
 	queues     map[string]chan Job
 	workers    map[string]int
-	dedupe     map[string]time.Time
+	dedupe     *dedupeSet
 	jobHealth  map[string]JobHealthSnapshot
-	log        logger.Logger
-	predictor  ScalingPredictor
-	wg         sync.WaitGroup
+	// healthOrder is jobHealth's insertion order, so the oldest snapshot is evicted at the bound.
+	healthOrder []string
+	log         logger.Logger
+	predictor   ScalingPredictor
+	wg          sync.WaitGroup
 
 	riverClient   *river.Client[pgx.Tx]
 	metadataStore MetadataStore
@@ -83,7 +86,7 @@ func NewEngine(queueWorkers map[string]int, l logger.Logger) *Engine {
 		processors: map[string]Processor{},
 		queues:     map[string]chan Job{},
 		workers:    workers,
-		dedupe:     map[string]time.Time{},
+		dedupe:     newDedupeSet(maxDedupeEntries),
 		jobHealth:  map[string]JobHealthSnapshot{},
 		log:        l.With("component", "worker_engine"),
 		predictor:  NewTrendPredictor(),
@@ -201,24 +204,7 @@ func (e *Engine) dedupeCleaner(ctx context.Context) {
 }
 
 func (e *Engine) pruneDedupe(now time.Time) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	for key, expiry := range e.dedupe {
-		if now.After(expiry) {
-			delete(e.dedupe, key)
-		}
-	}
-	if len(e.dedupe) <= maxDedupeEntries {
-		return
-	}
-	overflow := len(e.dedupe) - maxDedupeEntries
-	for key := range e.dedupe {
-		delete(e.dedupe, key)
-		overflow--
-		if overflow <= 0 {
-			return
-		}
-	}
+	e.dedupe.prune(now)
 }
 
 func (e *Engine) adaptiveScaler(ctx context.Context) {
@@ -394,6 +380,13 @@ func (e *Engine) EnqueueTx(ctx context.Context, tx pgx.Tx, job Job) error {
 					saveErr = ms.Save(ctx, meta)
 				}
 				if saveErr != nil {
+					if tx != nil {
+						// A failed statement aborts the caller's transaction. Return the cause
+						// here; otherwise Commit fails later with an unrelated error.
+						return fmt.Errorf("save job metadata for job %d: %w", jobID, saveErr)
+					}
+					// Without a transaction the job row is already committed. Returning an
+					// error would invite a retry and a duplicate job, so log it.
 					e.log.WarnContext(ctx, "failed to save job metadata", "job_id", jobID, "error", saveErr)
 				}
 			}
@@ -456,7 +449,9 @@ func (e *Engine) EnqueueManyTx(ctx context.Context, tx pgx.Tx, jobs []Job) error
 	if client != nil {
 		canBatch := true
 		for _, j := range jobs {
-			if j.IdempotencyKey != "" || j.RequireSidecar || (len(j.RawPayload) > MaxInlinePayloadBytes) {
+			// Batch insert has no uniqueness. Any job with an idempotency key, in
+			// either field that dedupeKey reads, takes the per-job path.
+			if dedupeKey(j) != "" || j.RequireSidecar || (len(j.RawPayload) > MaxInlinePayloadBytes) {
 				canBatch = false
 				break
 			}
@@ -467,49 +462,32 @@ func (e *Engine) EnqueueManyTx(ctx context.Context, tx pgx.Tx, jobs []Job) error
 		}
 
 		if canBatch {
+			// Normalize copies, not the caller's slice.
+			batch := make([]Job, len(jobs))
 			params := make([]river.InsertManyParams, len(jobs))
 			for i := range jobs {
-				jobs[i].Normalize()
-				if err := jobs[i].Validate(); err != nil {
+				job := jobs[i]
+				job.Normalize()
+				if err := job.Validate(); err != nil {
 					return err
 				}
-				e.recordHealth(jobs[i], JobHealthQueued, nil, time.Time{}, time.Time{})
-
+				batch[i] = job
 				opts := &river.InsertOpts{
-					Queue:       jobs[i].Queue,
-					MaxAttempts: jobs[i].MaxAttempts,
+					Queue:       job.Queue,
+					MaxAttempts: job.MaxAttempts,
 				}
-				if !jobs[i].ScheduledAt.IsZero() {
-					opts.ScheduledAt = jobs[i].ScheduledAt
+				if !job.ScheduledAt.IsZero() {
+					opts.ScheduledAt = job.ScheduledAt
 				}
-				params[i] = river.InsertManyParams{
-					Args:       jobs[i],
-					InsertOpts: opts,
-				}
+				params[i] = river.InsertManyParams{Args: job, InsertOpts: opts}
 			}
 
-			if tx != nil {
-				_, err := client.InsertManyFastTx(ctx, tx, params)
-				if err != nil {
-					// Fallback to InsertManyTx if driver COPY protocol fails
-					if _, fallbackErr := client.InsertManyTx(ctx, tx, params); fallbackErr != nil {
-						return fmt.Errorf("failed to batch insert jobs into river: %w", fallbackErr)
-					}
-				}
-			} else {
-				insertCtx, cancel := DetachedContextWithTimeout(ctx, defaultRiverInsertTimeout)
-				defer cancel()
-				_, err := client.InsertManyFast(insertCtx, params)
-				if err != nil {
-					// Fallback to InsertMany if driver COPY protocol fails
-					if _, fallbackErr := client.InsertMany(insertCtx, params); fallbackErr != nil {
-						return fmt.Errorf("failed to batch insert jobs into river: %w", fallbackErr)
-					}
-				}
+			if err := insertManyWithFallback(ctx, client, tx, params); err != nil {
+				return err
 			}
-
-			for i := range jobs {
-				recordJobTrace(jobs[i], "worker.enqueue", "enqueued", "river batch insert accepted")
+			for i := range batch {
+				e.recordHealth(batch[i], JobHealthQueued, nil, time.Time{}, time.Time{})
+				recordJobTrace(batch[i], "worker.enqueue", "enqueued", "river batch insert accepted")
 			}
 			return nil
 		}
@@ -519,6 +497,34 @@ func (e *Engine) EnqueueManyTx(ctx context.Context, tx pgx.Tx, jobs []Job) error
 		if err := e.EnqueueTx(ctx, tx, job); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// insertManyWithFallback batch-inserts through COPY and falls back to INSERT
+// only when the retry cannot duplicate or mislead:
+//   - In a transaction, a failed statement aborts the transaction, so a retry
+//     would fail with an unrelated error. The COPY error is returned as is.
+//   - Outside a transaction, a timeout or cancellation is ambiguous (the rows
+//     may be committed) and these jobs have no uniqueness, so no retry.
+func insertManyWithFallback(ctx context.Context, client *river.Client[pgx.Tx], tx pgx.Tx, params []river.InsertManyParams) error {
+	if tx != nil {
+		if _, err := client.InsertManyFastTx(ctx, tx, params); err != nil {
+			return fmt.Errorf("failed to batch insert jobs into river: %w", err)
+		}
+		return nil
+	}
+	insertCtx, cancel := DetachedContextWithTimeout(ctx, defaultRiverInsertTimeout)
+	defer cancel()
+	_, err := client.InsertManyFast(insertCtx, params)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || insertCtx.Err() != nil {
+		return fmt.Errorf("failed to batch insert jobs into river (outcome unknown, not retried): %w", err)
+	}
+	if _, fallbackErr := client.InsertMany(insertCtx, params); fallbackErr != nil {
+		return fmt.Errorf("failed to batch insert jobs into river: %w", errors.Join(err, fallbackErr))
 	}
 	return nil
 }
@@ -714,7 +720,20 @@ func (e *Engine) recordHealth(job Job, state JobHealthState, err error, startedA
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	snapshot := e.jobHealth[key]
+	snapshot, known := e.jobHealth[key]
+	if !known {
+		// Keys without an id or correlation include CreatedAt, so each such job is
+		// a new key. Evict the oldest snapshot at the bound (CP-02).
+		e.healthOrder = append(e.healthOrder, key)
+		for len(e.jobHealth) >= maxJobHealthEntries && len(e.healthOrder) > 0 {
+			delete(e.jobHealth, e.healthOrder[0])
+			e.healthOrder[0] = ""
+			e.healthOrder = e.healthOrder[1:]
+		}
+		if cap(e.healthOrder) > 4*maxJobHealthEntries {
+			e.healthOrder = append([]string(nil), e.healthOrder...)
+		}
+	}
 	snapshot.Key = key
 	snapshot.Kind = job.Kind()
 	snapshot.Queue = job.Queue
@@ -823,26 +842,10 @@ func runProcessor(ctx context.Context, processor Processor, job Job) error {
 
 // isDeduped reports whether key completed successfully and its window is still open.
 func (e *Engine) isDeduped(key string, now time.Time) bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	expiry, ok := e.dedupe[key]
-	if !ok {
-		return false
-	}
-	if now.After(expiry) {
-		delete(e.dedupe, key)
-		return false
-	}
-	return true
+	return e.dedupe.has(key, now)
 }
 
 // markDeduped records a successful key for the dedup window.
 func (e *Engine) markDeduped(key string, now time.Time) {
-	e.mu.Lock()
-	e.dedupe[key] = now.Add(24 * time.Hour)
-	needsPrune := len(e.dedupe) > maxDedupeEntries
-	e.mu.Unlock()
-	if needsPrune {
-		e.pruneDedupe(now)
-	}
+	e.dedupe.mark(key, now)
 }

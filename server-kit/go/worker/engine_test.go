@@ -371,13 +371,13 @@ func TestEngineSettersPruneSpawnAndWait(t *testing.T) {
 
 	expired := time.Now().UTC().Add(-time.Hour)
 	future := time.Now().UTC().Add(time.Hour)
-	engine.dedupe["expired"] = expired
-	engine.dedupe["future"] = future
+	engine.dedupe.mark("expired", expired.Add(-dedupeTTL))
+	engine.dedupe.mark("future", future.Add(-dedupeTTL))
 	engine.pruneDedupe(time.Now().UTC())
-	if _, ok := engine.dedupe["expired"]; ok {
+	if _, ok := engine.dedupe.entries["expired"]; ok {
 		t.Fatalf("expired dedupe entry was not pruned")
 	}
-	if _, ok := engine.dedupe["future"]; !ok {
+	if _, ok := engine.dedupe.entries["future"]; !ok {
 		t.Fatalf("future dedupe entry was pruned")
 	}
 

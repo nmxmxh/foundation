@@ -187,6 +187,8 @@ func (j Job) MarshalJSON() ([]byte, error) {
 }
 
 // MarshalJSONWithArena serializes Job into JSON using scratch arena if available.
+// WARNING: with an arena the result can point into arena memory. It is valid
+// only until the arena is reset; copy it before you keep or queue it.
 func (j Job) MarshalJSONWithArena(arena *scratch.Arena) ([]byte, error) {
 	var buf []byte
 	var poolBufPtr *[]byte
