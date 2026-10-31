@@ -33,13 +33,56 @@ pub fn maplet_hash_str(key: &str) -> u64 {
 }
 
 /// Helper for power-of-two bucket index computation.
+///
+/// `BUCKETS` must be a power of two. The alternate bucket is `b ^ hash(fp)`,
+/// which is reversible only under a power-of-two mask. With `%`, a relocated
+/// entry would land where no lookup checks, so the bound is a compile error.
 #[inline(always)]
 pub fn bucket_index<const BUCKETS: usize>(val: usize) -> usize {
-    if BUCKETS.is_power_of_two() {
-        val & (BUCKETS - 1)
-    } else {
-        val % BUCKETS
+    const { assert!(BUCKETS.is_power_of_two(), "maplet BUCKETS must be a power of two") };
+    val & (BUCKETS - 1)
+}
+
+/// Cuckoo displacement with rollback. Returns false and leaves the table
+/// unchanged when no empty slot appears within `MAPLET_MAX_KICKS`.
+/// The old loop dropped the last victim, which removed an earlier key.
+fn cuckoo_displace<const BUCKETS: usize>(
+    buckets: &mut [[u32; MAPLET_SLOTS_PER_BUCKET]; BUCKETS],
+    start: usize,
+    entry: u32,
+    seed: u64,
+    alt_hash: impl Fn(u32) -> u32,
+) -> bool {
+    let mut path_bucket = [0u32; MAPLET_MAX_KICKS];
+    let mut path_slot = [0u8; MAPLET_MAX_KICKS];
+    let mut path_victim = [0u32; MAPLET_MAX_KICKS];
+    let mut rng = seed | 1;
+    let mut curr_bucket = start;
+    let mut curr_entry = entry;
+    for kick in 0..MAPLET_MAX_KICKS {
+        rng ^= rng << 13;
+        rng ^= rng >> 7;
+        rng ^= rng << 17;
+        let slot_idx = (rng % MAPLET_SLOTS_PER_BUCKET as u64) as usize;
+        let victim = buckets[curr_bucket][slot_idx];
+        path_bucket[kick] = curr_bucket as u32;
+        path_slot[kick] = slot_idx as u8;
+        path_victim[kick] = victim;
+        buckets[curr_bucket][slot_idx] = curr_entry;
+
+        curr_bucket = bucket_index::<BUCKETS>(curr_bucket ^ (alt_hash(victim) as usize));
+        curr_entry = victim;
+        for slot in &mut buckets[curr_bucket] {
+            if *slot == 0 {
+                *slot = curr_entry;
+                return true;
+            }
+        }
     }
+    for kick in (0..MAPLET_MAX_KICKS).rev() {
+        buckets[path_bucket[kick] as usize][path_slot[kick] as usize] = path_victim[kick];
+    }
+    false
 }
 
 /// Secondary fingerprint hash to derive alternate bucket index.
@@ -135,26 +178,12 @@ impl<const BUCKETS: usize> WideMaplet<BUCKETS> {
             }
         }
 
-        // Cuckoo displacement loop.
-        let mut curr_bucket = b1;
-        let mut curr_entry = entry;
-        for kick in 0..MAPLET_MAX_KICKS {
-            let slot_idx = kick % MAPLET_SLOTS_PER_BUCKET;
-            let victim = self.buckets[curr_bucket][slot_idx];
-            self.buckets[curr_bucket][slot_idx] = curr_entry;
-
-            let (v_fp, _) = Self::unpack_slot(victim);
-            let v_hash = hash_fingerprint32(v_fp);
-            curr_bucket = bucket_index::<BUCKETS>(curr_bucket ^ (v_hash as usize));
-            curr_entry = victim;
-
-            for slot in &mut self.buckets[curr_bucket] {
-                if *slot == 0 {
-                    *slot = curr_entry;
-                    self.count += 1;
-                    return true;
-                }
-            }
+        // Cuckoo displacement with rollback on failure.
+        if cuckoo_displace(&mut self.buckets, b1, entry, h, |slot| {
+            hash_fingerprint32(Self::unpack_slot(slot).0)
+        }) {
+            self.count += 1;
+            return true;
         }
         false
     }
@@ -283,27 +312,13 @@ impl<const BUCKETS: usize> CountingMaplet<BUCKETS> {
         }
 
         // Cuckoo displacement.
-        let mut curr_bucket = b1;
-        let mut curr_entry = entry;
-        for kick in 0..MAPLET_MAX_KICKS {
-            let slot_idx = kick % MAPLET_SLOTS_PER_BUCKET;
-            let victim = self.buckets[curr_bucket][slot_idx];
-            self.buckets[curr_bucket][slot_idx] = curr_entry;
-
-            let (v_fp, _) = Self::unpack_slot(victim);
-            let v_hash = hash_fingerprint32(v_fp);
-            curr_bucket = bucket_index::<BUCKETS>(curr_bucket ^ (v_hash as usize));
-            curr_entry = victim;
-
-            for slot in &mut self.buckets[curr_bucket] {
-                if *slot == 0 {
-                    *slot = curr_entry;
-                    self.count += 1;
-                    return 1;
-                }
-            }
+        if cuckoo_displace(&mut self.buckets, b1, entry, h, |slot| {
+            hash_fingerprint32(Self::unpack_slot(slot).0)
+        }) {
+            self.count += 1;
+            return 1;
         }
-        // Table saturated; return saturated limit.
+        // Table saturated and unchanged; return saturated limit.
         Self::MAX_COUNT
     }
 
@@ -338,6 +353,38 @@ impl<const BUCKETS: usize> CountingMaplet<BUCKETS> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A failed insert must keep every key that was stored before it.
+    #[test]
+    fn failed_insert_keeps_stored_keys() {
+        let mut wide = WideMaplet::<8>::new();
+        let mut stored = Vec::new();
+        let mut failures = 0;
+        for i in 0..200u64 {
+            let h = maplet_hash64(i);
+            if wide.insert_hash(h, 3) {
+                stored.push(h);
+            } else {
+                failures += 1;
+            }
+        }
+        assert!(failures > 0, "test must force a failed insert");
+        for h in &stored {
+            assert!(wide.lookup_hash(*h).is_some(), "stored key lost after a failed insert");
+        }
+
+        let mut counting = CountingMaplet::<8>::new();
+        let mut counted = Vec::new();
+        for i in 0..200u64 {
+            let h = maplet_hash64(i ^ 0xABCD);
+            if counting.increment_hash(h) == 1 {
+                counted.push(h);
+            }
+        }
+        for h in &counted {
+            assert!(counting.count_hash(*h) > 0, "stored counter lost after a failed insert");
+        }
+    }
 
     #[test]
     fn test_wide_maplet_roundtrip() {

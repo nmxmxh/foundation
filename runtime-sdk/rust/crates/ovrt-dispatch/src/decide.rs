@@ -261,13 +261,12 @@ impl<const BUCKETS: usize> AffinityMaplet<BUCKETS> {
         z ^ (z >> 31)
     }
 
+    /// `BUCKETS` must be a power of two: the alternate bucket `b ^ fp` is
+    /// reversible only under a power-of-two mask.
     #[inline(always)]
     fn bucket_idx(val: usize) -> usize {
-        if BUCKETS.is_power_of_two() {
-            val & (BUCKETS - 1)
-        } else {
-            val % BUCKETS
-        }
+        const { assert!(BUCKETS.is_power_of_two(), "AffinityMaplet BUCKETS must be a power of two") };
+        val & (BUCKETS - 1)
     }
 
     #[inline(always)]
@@ -282,34 +281,57 @@ impl<const BUCKETS: usize> AffinityMaplet<BUCKETS> {
         (b1, fp, b2)
     }
 
+    /// Inserts or updates `key -> lane_id`. Lanes are 8-bit in the slot, so a
+    /// lane id above 255 is rejected rather than aliased onto another lane.
+    /// A failed insert leaves the table unchanged.
     pub fn insert(&mut self, key: u64, lane_id: u16) -> bool {
+        if lane_id > 0xFF {
+            return false;
+        }
         let (b1, fp, b2) = self.decompose(key);
-        let mut entry = (fp << 8) | (lane_id as u32 & 0xFF);
-        for slot in &mut self.buckets[b1] {
-            if *slot == 0 || (*slot >> 8) == fp {
-                *slot = entry;
-                return true;
+        let entry = (fp << 8) | u32::from(lane_id);
+        // Update an existing entry first, so a key never sits in both buckets.
+        for b in [b1, b2] {
+            for slot in &mut self.buckets[b] {
+                if *slot != 0 && (*slot >> 8) == fp {
+                    *slot = entry;
+                    return true;
+                }
             }
         }
-        for slot in &mut self.buckets[b2] {
-            if *slot == 0 || (*slot >> 8) == fp {
-                *slot = entry;
-                return true;
-            }
-        }
-        let mut curr_b = b1;
-        for _ in 0..64 {
-            let victim = self.buckets[curr_b][0];
-            self.buckets[curr_b][0] = entry;
-            let v_fp = victim >> 8;
-            curr_b = Self::bucket_idx(curr_b ^ (v_fp as usize));
-            entry = victim;
-            for slot in &mut self.buckets[curr_b] {
+        for b in [b1, b2] {
+            for slot in &mut self.buckets[b] {
                 if *slot == 0 {
                     *slot = entry;
                     return true;
                 }
             }
+        }
+        const MAX_KICKS: usize = 64;
+        let mut path = [(0usize, 0usize, 0u32); MAX_KICKS];
+        let mut rng = Self::hash_key(key) | 1;
+        let mut curr_b = b1;
+        let mut curr_entry = entry;
+        for step in path.iter_mut() {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            let slot_idx = (rng % 4) as usize;
+            let victim = self.buckets[curr_b][slot_idx];
+            *step = (curr_b, slot_idx, victim);
+            self.buckets[curr_b][slot_idx] = curr_entry;
+            curr_b = Self::bucket_idx(curr_b ^ ((victim >> 8) as usize));
+            curr_entry = victim;
+            for slot in &mut self.buckets[curr_b] {
+                if *slot == 0 {
+                    *slot = curr_entry;
+                    return true;
+                }
+            }
+        }
+        // Undo the displacement path so no stored key is lost.
+        for &(b, slot_idx, victim) in path.iter().rev() {
+            self.buckets[b][slot_idx] = victim;
         }
         false
     }
@@ -334,6 +356,31 @@ impl<const BUCKETS: usize> AffinityMaplet<BUCKETS> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn affinity_maplet_rejects_wide_lane_ids_and_keeps_keys_on_failure() {
+        let mut m = AffinityMaplet::<4>::new();
+        assert!(!m.insert(7, 256), "lane 256 must not alias lane 0");
+        assert_eq!(m.lookup(7), None);
+        assert!(m.insert(7, 255));
+        assert_eq!(m.lookup(7), Some(255));
+        assert!(m.insert(7, 9), "update in place");
+        assert_eq!(m.lookup(7), Some(9));
+
+        let mut stored = Vec::new();
+        let mut failures = 0;
+        for key in 100..400u64 {
+            if m.insert(key, (key % 200) as u16) {
+                stored.push(key);
+            } else {
+                failures += 1;
+            }
+        }
+        assert!(failures > 0, "test must force a failed insert");
+        for key in stored {
+            assert!(m.lookup(key).is_some(), "stored key {key} lost after a failed insert");
+        }
+    }
 
     const TICK: u64 = 100;
 
