@@ -40,6 +40,12 @@ default_paths() {
     Makefile \
     rustfmt.toml \
     scripts/check-rust.sh \
+    scripts/check-go-race.sh \
+    scripts/install-git-hooks.sh \
+    scripts/fleet-check.sh \
+    tooling/dynamic_payload_baseline.psv \
+    tests/coding_practices_check_test.sh \
+    tests/perfect_hash_gen.test.mjs \
     scripts/lib/foundation.sh \
     scripts/lib/scaffold.sh \
     tooling/practice_controls.psv \
