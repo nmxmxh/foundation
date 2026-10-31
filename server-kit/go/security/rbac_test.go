@@ -2,6 +2,7 @@ package security
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -191,5 +192,66 @@ func BenchmarkAuthorizer_CheckMask_DirectBitwise(b *testing.B) {
 		if !CheckMask(actorMask, reqMask) {
 			b.Fatal("unauthorized")
 		}
+	}
+}
+
+// TestAuthorizerEmptyRoleNeverGetsCapabilities guards anonymous requests.
+// An empty or whitespace role template with a wildcard must not fill the mask for "".
+func TestAuthorizerEmptyRoleNeverGetsCapabilities(t *testing.T) {
+	a := NewAuthorizer([]RoleTemplate{
+		{Role: "admin", Capabilities: []string{"orders.read", "orders.write"}},
+		{Role: "", Capabilities: []string{"orders.*"}},
+		{Role: "   ", Capabilities: []string{"orders.*", "*"}},
+	})
+	for _, role := range []string{"", "   "} {
+		if a.Can(role, "orders.read", nil) {
+			t.Fatalf("role %q must not pass Can", role)
+		}
+		if a.CanAccess(role, "orders.read", "", nil) {
+			t.Fatalf("role %q must not pass CanAccess", role)
+		}
+	}
+	if !a.Can("admin", "orders.read", nil) {
+		t.Fatal("admin must keep orders.read")
+	}
+}
+
+func TestAuthorizerBeyondSixtyFourCapabilities(t *testing.T) {
+	caps := make([]string, 70)
+	for i := range caps {
+		caps[i] = fmt.Sprintf("domain.cap_%02d", i)
+	}
+	a := NewAuthorizer([]RoleTemplate{
+		{Role: "wide", Capabilities: caps},
+		{Role: "narrow", Capabilities: []string{caps[0]}},
+	})
+	for _, c := range caps {
+		if !a.Can("wide", c, nil) {
+			t.Fatalf("wide must hold %s", c)
+		}
+	}
+	// The 65th capability has no bit. It must take the exact slow path and not alias bit 0.
+	if a.Can("narrow", caps[64], nil) || a.Can("narrow", caps[69], nil) {
+		t.Fatal("narrow must not gain unindexed capabilities through bit aliasing")
+	}
+	if _, ok := a.RegisterCapability("domain.cap_new"); ok {
+		t.Fatal("RegisterCapability must refuse once 64 bits are used")
+	}
+}
+
+func TestRegisterCapabilityReachesRolesWithoutInitialMask(t *testing.T) {
+	a := NewAuthorizer([]RoleTemplate{{Role: "reports", Capabilities: []string{"reports.*"}}})
+	bit, ok := a.RegisterCapability("reports.export")
+	if !ok || bit == 0 {
+		t.Fatalf("RegisterCapability failed: bit=%d ok=%v", bit, ok)
+	}
+	a.mu.RLock()
+	mask := a.roleMasks["reports"]
+	a.mu.RUnlock()
+	if mask&bit == 0 {
+		t.Fatal("wildcard role must receive the new capability bit")
+	}
+	if !a.Can("reports", "reports.export", nil) {
+		t.Fatal("reports must pass Can for reports.export")
 	}
 }

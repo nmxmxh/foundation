@@ -40,7 +40,7 @@ type Authorizer struct {
 	byRole    map[string]map[string]struct{}
 	roleMasks map[string]CapabilityMask
 	capBits   map[string]CapabilityMask
-	sync.RWMutex
+	mu        sync.RWMutex // private: an embedded mutex would export Lock and Unlock
 }
 
 func NewAuthorizer(templates []RoleTemplate) *Authorizer {
@@ -85,6 +85,10 @@ func NewAuthorizer(templates []RoleTemplate) *Authorizer {
 	// Resolve wildcard prefixes like "domain.*" across known capability bits
 	for _, tpl := range templates {
 		role := strings.TrimSpace(tpl.Role)
+		if role == "" {
+			// Same rule as the first pass: an empty role never gets a mask, so anonymous requests get nothing.
+			continue
+		}
 		for _, capability := range tpl.Capabilities {
 			capability = strings.TrimSpace(capability)
 			if prefix, ok := strings.CutSuffix(capability, ".*"); ok {
@@ -120,9 +124,9 @@ func (a *Authorizer) CapabilityBit(capability string) (CapabilityMask, bool) {
 	if a == nil {
 		return CapabilityMaskNone, false
 	}
-	a.RLock()
+	a.mu.RLock()
 	bit, ok := a.capBits[strings.TrimSpace(capability)]
-	a.RUnlock()
+	a.mu.RUnlock()
 	return bit, ok
 }
 
@@ -131,9 +135,9 @@ func (a *Authorizer) RoleMask(role string) CapabilityMask {
 	if a == nil {
 		return CapabilityMaskNone
 	}
-	a.RLock()
+	a.mu.RLock()
 	mask := a.roleMasks[strings.TrimSpace(role)]
-	a.RUnlock()
+	a.mu.RUnlock()
 	return mask
 }
 
@@ -143,8 +147,8 @@ func (a *Authorizer) CapabilityMaskFor(capabilities ...string) (CapabilityMask, 
 	if a == nil || len(capabilities) == 0 {
 		return CapabilityMaskNone, false
 	}
-	a.RLock()
-	defer a.RUnlock()
+	a.mu.RLock()
+	defer a.mu.RUnlock()
 	var combined CapabilityMask
 	for _, capName := range capabilities {
 		bit, ok := a.capBits[strings.TrimSpace(capName)]
@@ -170,8 +174,8 @@ func (a *Authorizer) RegisterCapability(capability string) (CapabilityMask, bool
 	if capName == "" {
 		return CapabilityMaskNone, false
 	}
-	a.Lock()
-	defer a.Unlock()
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	if bit, ok := a.capBits[capName]; ok {
 		return bit, true
 	}
@@ -180,15 +184,15 @@ func (a *Authorizer) RegisterCapability(capability string) (CapabilityMask, bool
 	}
 	bit := CapabilityMask(1) << len(a.capBits)
 	a.capBits[capName] = bit
-	for role, mask := range a.roleMasks {
-		if mask == CapabilityMaskAll {
+	// Walk byRole, not roleMasks. A role whose wildcards matched nothing at build time has no mask entry yet.
+	for role, roleCaps := range a.byRole {
+		if a.roleMasks[role] == CapabilityMaskAll {
 			continue
 		}
-		if roleCaps, ok := a.byRole[role]; ok {
-			for granted := range roleCaps {
-				if capabilityGranted(granted, capName) {
-					a.roleMasks[role] |= bit
-				}
+		for granted := range roleCaps {
+			if capabilityGranted(granted, capName) {
+				a.roleMasks[role] |= bit
+				break
 			}
 		}
 	}
@@ -196,11 +200,11 @@ func (a *Authorizer) RegisterCapability(capability string) (CapabilityMask, bool
 }
 
 func (a *Authorizer) Can(role, capability string, directCapabilities []string) bool {
-	if a != nil && len(directCapabilities) == 0 {
-		a.RLock()
+	if a != nil && len(directCapabilities) == 0 && role != "" {
+		a.mu.RLock()
 		bit, okCap := a.capBits[capability]
 		mask, okRole := a.roleMasks[role]
-		a.RUnlock()
+		a.mu.RUnlock()
 		if okCap && okRole && (mask&bit) == bit {
 			return true
 		}
