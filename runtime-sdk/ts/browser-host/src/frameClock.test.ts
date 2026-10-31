@@ -28,6 +28,28 @@ describe("unified frame clock", () => {
     expect(frameClockMode().subscribers).toBe(0);
   });
 
+  it("runs the next subscriber in the same frame when one releases itself", async () => {
+    const seen: Array<[string, number]> = [];
+    const subA = onFrame((tick) => {
+      seen.push(["A", tick.now]);
+      subA.release();
+    }, 25);
+    const subB = onFrame((tick) => {
+      seen.push(["B", tick.now]);
+    }, 25);
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    const aFrame = seen.find(([name]) => name === "A")?.[1];
+    const bFirst = seen.find(([name]) => name === "B")?.[1];
+    expect(aFrame).toBeDefined();
+    expect(bFirst).toBe(aFrame);
+    expect(seen.filter(([name]) => name === "A")).toHaveLength(1);
+    expect(frameClockMode().subscribers).toBe(1);
+    subB.release();
+    expect(frameClockMode().subscribers).toBe(0);
+  });
+
   it("isolates errors thrown by faulty subscribers", async () => {
     const errorCallback = vi.fn(() => {
       throw new Error("Draw crash");

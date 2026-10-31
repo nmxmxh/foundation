@@ -633,6 +633,7 @@ export class RuntimeWebGpuHost {
 
   private observeDeviceLoss(device: RuntimeGpuDevice): void {
     device.lost?.then((info) => {
+      this.stagingScratch = null;
       const dropped = this.dropDeviceResources();
       this.deviceLossStateValue = {
         lost: true,
@@ -641,6 +642,7 @@ export class RuntimeWebGpuHost {
         ...dropped,
       };
     }).catch((error) => {
+      this.stagingScratch = null;
       const dropped = this.dropDeviceResources();
       this.deviceLossStateValue = {
         lost: true,
@@ -804,10 +806,16 @@ const packArenaDescriptorsIntoUnchecked = (
   layout: RuntimeGpuBatchLayout,
   target: Uint8Array
 ): void => {
+  // The target may be a reused staging buffer. Zero every byte that no region
+  // covers (alignment padding and the tail), so earlier batches never reach the GPU.
+  let cursor = 0;
   for (const region of layout.regions) {
+    if (region.offset > cursor) target.fill(0, cursor, region.offset);
     const descriptor = descriptors[region.index];
     arena.copyDescriptorBytesTo(descriptor, target, region.offset, region.byteLength);
+    cursor = Math.max(cursor, region.offset + region.byteLength);
   }
+  if (layout.totalBytes > cursor) target.fill(0, cursor, layout.totalBytes);
 };
 
 export const writeGpuOutputToArena = (

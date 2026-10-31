@@ -119,6 +119,24 @@ export const RUNTIME_ENVELOPE_COMPATIBILITY_MATRIX: EnvelopeCompatibilityMatrix 
 
 const normalizeString = (value: string | null | undefined) => value?.trim() ?? "";
 
+// Each metadata id gets its own random part. One shared suffix let anyone derive
+// the idempotency key from the correlation id in logs. Math.random is a last resort.
+const randomTokenPart = (): string => {
+  const cryptoApi = (globalThis as { crypto?: Crypto }).crypto;
+  if (cryptoApi && typeof cryptoApi.randomUUID === "function") {
+    return cryptoApi.randomUUID().replaceAll("-", "");
+  }
+  if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    let out = "";
+    for (const byte of bytes) out += byte.toString(16).padStart(2, "0");
+    return out;
+  }
+  return `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+};
+
+const nextToken = (prefix: string): string => `${prefix}_${Date.now()}_${randomTokenPart()}`;
+
 const lowerSnakeSegmentPattern = /^[a-z0-9_]+$/;
 const versionSegmentPattern = /^v\d+$/;
 
@@ -198,15 +216,14 @@ export const parseEventType = (eventType: string): ParsedEventType => {
 export const eventTerminalState = (eventType: string): string => parseEventType(eventType).state;
 
 export const createEnvelope = <TPayload>(input: EnvelopeFactoryInput<TPayload>): RuntimeEnvelope<TPayload> => {
-  const tokenSuffix = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   return {
     eventType: parseEventType(input.eventType).raw,
     payload: input.payload,
     payloadEncoding: "json",
     metadata: {
-      correlationId: input.correlationId ?? `corr_${tokenSuffix}`,
-      requestId: input.requestId ?? `req_${tokenSuffix}`,
-      idempotencyKey: input.idempotencyKey ?? `idem_${tokenSuffix}`,
+      correlationId: input.correlationId ?? nextToken("corr"),
+      requestId: input.requestId ?? nextToken("req"),
+      idempotencyKey: input.idempotencyKey ?? nextToken("idem"),
       schemaVersion: assertCompatibleSchemaVersion(input.schemaVersion),
       timestamp: new Date().toISOString(),
       extra: input.extra ?? {},

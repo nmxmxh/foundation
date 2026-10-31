@@ -153,6 +153,24 @@ describe("runtime WebGPU host helpers", () => {
     );
   });
 
+  it("zeroes padding when packing into a reused dirty buffer", () => {
+    const arena = RuntimeSharedArena.create({ arenaBytes: 1024 * 1024 });
+    const first = arena.allocate(3);
+    const second = arena.allocate(5);
+    arena.writeSlabReady(first.id, new Uint8Array([1, 2, 3]));
+    arena.writeSlabReady(second.id, new Uint8Array([4, 5, 6, 7, 8]));
+    const descriptors = [arena.readDescriptor(first.id), arena.readDescriptor(second.id)];
+    const layout = planRuntimeGpuBatchLayout(descriptors);
+    const target = new Uint8Array(layout.totalBytes).fill(0xee);
+
+    packArenaDescriptorsInto(arena, descriptors, layout, target);
+
+    expect([...target.subarray(0, 3)]).toEqual([1, 2, 3]);
+    expect([...target.subarray(256, 261)]).toEqual([4, 5, 6, 7, 8]);
+    expect(target.subarray(3, 256).every((byte) => byte === 0)).toBe(true);
+    expect(target.subarray(261).every((byte) => byte === 0)).toBe(true);
+  });
+
   it("writes GPU output slices back to their arena descriptors", () => {
     const arena = RuntimeSharedArena.create({ arenaBytes: 1024 * 1024 });
     const first = arena.allocate(3);

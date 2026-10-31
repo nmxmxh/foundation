@@ -10,11 +10,18 @@ import { BUFFER_TOTAL_BYTES, IDX_RUNTIME_TICK } from "./generated/runtimeBuffer"
 import { createPulseManager, type PulseManager } from "./pulse/pulseManager";
 import { PASS, markLane } from "./renderMarks";
 
+/**
+ * Frame tick passed to subscribers.
+ *
+ * The clock reuses one Tick object for every subscriber and frame, so the
+ * value is borrowed: read it inside the callback, and copy the fields if
+ * you need them later.
+ */
 export interface Tick {
   /** Timestamp in milliseconds (from performance.now()). */
-  now: number;
+  readonly now: number;
   /** Elapsed time since the subscriber last ran. */
-  delta: number;
+  readonly delta: number;
 }
 
 export interface FrameSubscription {
@@ -35,11 +42,26 @@ interface Subscriber {
   run: (tick: Tick) => void;
   cadenceMs: number;
   lastRunAt: number;
+  released: boolean;
 }
 
 const DEFAULT_TARGET_TPS = 60;
 const subscriberList: Subscriber[] = [];
-const reusedTick: Tick = { now: 0, delta: 0 };
+const reusedTick: { now: number; delta: number } = { now: 0, delta: 0 };
+// A release during dispatch only marks the subscriber. Splicing mid-loop would
+// shift the next subscriber into the current index, and that one would skip a frame.
+let dispatching = false;
+let needsCompaction = false;
+
+function compactSubscribers(): void {
+  let write = 0;
+  for (let read = 0; read < subscriberList.length; read++) {
+    const subscriber = subscriberList[read];
+    if (subscriber && !subscriber.released) subscriberList[write++] = subscriber;
+  }
+  subscriberList.length = write;
+  needsCompaction = false;
+}
 
 let pulse: PulseManager | null = null;
 let scheduled = false;
@@ -178,9 +200,10 @@ function run(now: number): void {
   if (typeof document !== "undefined" && document.hidden) return;
 
   const count = subscriberList.length;
+  dispatching = true;
   for (let i = 0; i < count; i++) {
     const subscriber = subscriberList[i];
-    if (!subscriber) continue;
+    if (!subscriber || subscriber.released) continue;
     const delta = subscriber.lastRunAt === 0 ? subscriber.cadenceMs : now - subscriber.lastRunAt;
     if (delta < subscriber.cadenceMs - 2.5) continue;
     subscriber.lastRunAt = now;
@@ -192,6 +215,8 @@ function run(now: number): void {
       // Individual subscriber errors are isolated so other passes continue uninterrupted.
     }
   }
+  dispatching = false;
+  if (needsCompaction) compactSubscribers();
 }
 
 /**
@@ -199,7 +224,7 @@ function run(now: number): void {
  */
 export function onFrame(runCallback: (tick: Tick) => void, cadenceMs = 1000 / 30): FrameSubscription {
   ensurePulse();
-  const subscriber: Subscriber = { run: runCallback, cadenceMs, lastRunAt: 0 };
+  const subscriber: Subscriber = { run: runCallback, cadenceMs, lastRunAt: 0, released: false };
   subscriberList.push(subscriber);
   schedule();
 
@@ -228,6 +253,12 @@ export function onFrame(runCallback: (tick: Tick) => void, cadenceMs = 1000 / 30
       subscriber.cadenceMs = ms;
     },
     release() {
+      if (subscriber.released) return;
+      subscriber.released = true;
+      if (dispatching) {
+        needsCompaction = true;
+        return;
+      }
       const index = subscriberList.indexOf(subscriber);
       if (index !== -1) {
         subscriberList.splice(index, 1);
@@ -243,7 +274,9 @@ export function frameClockMode(): { mode: string; degraded: boolean; subscribers
   return {
     mode: selfDriven ? "frames" : (diagnosticsSeen?.mode ?? "stopped"),
     degraded: diagnosticsSeen?.degraded ?? false,
-    subscribers: subscriberList.length,
+    subscribers: needsCompaction
+      ? subscriberList.filter((subscriber) => !subscriber.released).length
+      : subscriberList.length,
   };
 }
 
@@ -258,4 +291,6 @@ export function _resetFrameClockForTesting(): void {
   diagnosticsSeen = null;
   workerTicksReceived = 0;
   subscriberList.length = 0;
+  dispatching = false;
+  needsCompaction = false;
 }

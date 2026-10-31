@@ -99,8 +99,10 @@ export const createPulseManager = (options: PulseManagerOptions = {}) => {
     if (!epochs) {
       return;
     }
-    const count = watchedIndices.length;
-    for (let i = 0; i < count; i++) {
+    // Walk backwards. A handler may unwatch during notify, and splice shifts the
+    // later entries down. A forward walk would then skip the next index for a tick.
+    for (let i = watchedIndices.length - 1; i >= 0; i--) {
+      if (i >= watchedIndices.length) continue;
       const index = watchedIndices[i]!;
       const next = Atomics.load(epochs, index);
       if (lastSeenInitialized[index] === 0) {

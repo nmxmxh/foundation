@@ -72,6 +72,29 @@ describe("createPulseManager", () => {
     expect(manager.getMode()).toBe("stopped");
   });
 
+  it("notifies every watched epoch in the tick where a handler unwatches itself", async () => {
+    const manager = createPulseManager({ createWorker: () => { throw new Error("worker unavailable"); }, defaultTPS: 20 });
+    const buffer = new SharedArrayBuffer(4096);
+    const ints = new Int32Array(buffer);
+    manager.start(buffer);
+    const seen: number[] = [];
+    const first = (value: number, index: number) => {
+      seen.push(index);
+      manager.unwatchEpoch(index, first);
+    };
+    const second = (value: number, index: number) => {
+      seen.push(index);
+    };
+    manager.watchEpochs([1], first);
+    manager.watchEpochs([2], second);
+    Atomics.add(ints, 1, 1);
+    Atomics.add(ints, 2, 1);
+    // 20 TPS: exactly one main-thread tick in 50 ms. Both indices must fire in it.
+    await vi.advanceTimersByTimeAsync(50);
+    expect(seen.sort()).toEqual([1, 2]);
+    manager.shutdown();
+  });
+
   it("uses main-thread fallback when worker construction fails", () => {
     const manager = createPulseManager({ createWorker: () => { throw new Error("worker unavailable"); } });
     manager.start(new SharedArrayBuffer(4096));
