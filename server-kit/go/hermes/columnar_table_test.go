@@ -2,7 +2,10 @@ package hermes
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -272,4 +275,122 @@ func BenchmarkColumnarTable_GetPointRead1M(b *testing.B) {
 		}
 	}
 	_ = sink
+}
+
+func columnarTenantRecord(org, id, symbol string) database.DomainRecord {
+	return database.DomainRecord{
+		Domain:         "trading",
+		Collection:     "orders",
+		OrganizationID: org,
+		RecordID:       id,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		Data: database.RecordDataFromPairs(
+			database.RecordField{Name: "symbol", Value: database.StringValue(symbol)},
+		),
+	}
+}
+
+// TestStore_ColumnarCacheIsTenantScoped guards tenant isolation on the sealed table cache.
+// A table sealed for one organization must never answer another organization.
+func TestStore_ColumnarCacheIsTenantScoped(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewStore(ProjectionSpec{
+		Name: "orders", Domain: "trading", Collection: "orders", MaxRecords: 1000,
+		ColumnarFields: []string{"record_id", "symbol"}, ColumnarPK: "record_id",
+	})
+	if err != nil {
+		t.Fatalf("create store failed: %v", err)
+	}
+	if _, err := store.ApplyRecords(ctx, "orders", "test", 1, []database.DomainRecord{
+		columnarTenantRecord("org-a", "a-1", "AAPL"),
+		columnarTenantRecord("org-b", "b-1", "MSFT"),
+	}); err != nil {
+		t.Fatalf("apply records failed: %v", err)
+	}
+
+	// Seal for org-a first, so a shared cache would hand org-a's table to org-b.
+	if _, found, err := store.GetColumnarView(ctx, "orders", Query{OrganizationID: "org-a"}, "a-1"); err != nil || !found {
+		t.Fatalf("org-a own view: found=%v err=%v", found, err)
+	}
+	if _, found, err := store.GetColumnarView(ctx, "orders", Query{OrganizationID: "org-b"}, "a-1"); err != nil || found {
+		t.Fatalf("org-b read org-a row: found=%v err=%v", found, err)
+	}
+	if _, found, err := store.GetColumnarView(ctx, "orders", Query{OrganizationID: "org-b"}, "b-1"); err != nil || !found {
+		t.Fatalf("org-b own view: found=%v err=%v", found, err)
+	}
+	table, err := store.GetColumnarTable(ctx, "orders", Query{OrganizationID: "org-a"}, nil, "", Fence{})
+	if err != nil || table.Rows() != 1 {
+		t.Fatalf("org-a table: rows=%v err=%v", table, err)
+	}
+
+	// The guards run before a cache hit.
+	if _, err := store.GetColumnarTable(ctx, "orders", Query{OrganizationID: "org-a"}, nil, "", Fence{MinEpoch: 1 << 40}); !errors.Is(err, ErrFenceNotSatisfied) {
+		t.Fatalf("fence on cache hit: got %v, want ErrFenceNotSatisfied", err)
+	}
+	if _, _, err := store.GetColumnarView(ctx, "orders", Query{OrganizationID: "  "}, "a-1"); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("empty org on cache hit: got %v, want ErrInvalidEvent", err)
+	}
+
+	// A new epoch makes the cached table stale.
+	if _, err := store.ApplyRecords(ctx, "orders", "test", 10, []database.DomainRecord{
+		columnarTenantRecord("org-a", "a-2", "NVDA"),
+	}); err != nil {
+		t.Fatalf("apply records failed: %v", err)
+	}
+	if _, found, err := store.GetColumnarView(ctx, "orders", Query{OrganizationID: "org-a"}, "a-2"); err != nil || !found {
+		t.Fatalf("view after epoch advance: found=%v err=%v", found, err)
+	}
+
+	allocs := testing.AllocsPerRun(100, func() {
+		if _, _, err := store.GetColumnarView(ctx, "orders", Query{OrganizationID: "org-a"}, "a-1"); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("cached GetColumnarView allocated %.1f times, want 0", allocs)
+	}
+}
+
+func TestStore_ColumnarCacheConcurrentApplyAndView(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewStore(ProjectionSpec{
+		Name: "orders", Domain: "trading", Collection: "orders", MaxRecords: 10000,
+		ColumnarFields: []string{"record_id", "symbol"}, ColumnarPK: "record_id",
+	})
+	if err != nil {
+		t.Fatalf("create store failed: %v", err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := range 200 {
+			id := "a-" + strconv.Itoa(i)
+			if _, err := store.ApplyRecords(ctx, "orders", "test", uint64(i+1), []database.DomainRecord{
+				columnarTenantRecord("org-a", id, "AAPL"),
+			}); err != nil {
+				t.Errorf("apply %d: %v", i, err)
+				return
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 200 {
+			if _, _, err := store.GetColumnarView(ctx, "orders", Query{OrganizationID: "org-b"}, "a-0"); err != nil {
+				t.Errorf("view: %v", err)
+				return
+			}
+			if _, found, _ := store.GetColumnarView(ctx, "orders", Query{OrganizationID: "org-b"}, "a-0"); found {
+				t.Errorf("org-b saw org-a row during concurrent apply")
+				return
+			}
+		}
+	}()
+	wg.Wait()
+	_, found, err := store.GetColumnarView(ctx, "orders", Query{OrganizationID: "org-a"}, "a-199")
+	if err != nil || !found {
+		t.Fatalf("final view must see last write: found=%v err=%v", found, err)
+	}
 }

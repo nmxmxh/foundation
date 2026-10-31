@@ -146,8 +146,10 @@ type partition struct {
 	rejectedApplies  atomic.Int64
 	indexCompactions atomic.Int64
 
-	sealedTable atomic.Pointer[ColumnarTable]
-	sealedEpoch atomic.Uint64
+	// sealedColumnar maps a tenant-scoped key to a sealed table. Copy-on-write: readers load
+	// without locks, and writers replace the whole map under sealedMu.
+	sealedColumnar atomic.Pointer[map[sealedColumnarKey]*sealedColumnarEntry]
+	sealedMu       sync.Mutex
 }
 
 type partitionRegistry struct {
@@ -510,10 +512,17 @@ func (p *partition) stats() Stats {
 	rangeEntries, rangeBytes := p.activeRegistry().rangeIndexStats()
 	var columnarBytes int64
 	var columnarRows int
-	if sealed := p.sealedTable.Load(); sealed != nil {
-		_, _, total, _ := sealed.MemoryFootprint()
-		columnarBytes = int64(total)
-		columnarRows = sealed.Rows()
+	if sealed := p.sealedColumnar.Load(); sealed != nil {
+		seen := make(map[*ColumnarTable]struct{}, len(*sealed))
+		for _, entry := range *sealed {
+			if _, dup := seen[entry.table]; dup {
+				continue
+			}
+			seen[entry.table] = struct{}{}
+			_, _, total, _ := entry.table.MemoryFootprint()
+			columnarBytes += int64(total)
+			columnarRows += entry.table.Rows()
+		}
 	}
 	return Stats{
 		Projection:        p.spec.Name,

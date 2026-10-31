@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/database"
-	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
 
 type DataType int
@@ -328,16 +327,96 @@ func (s *Store) GetColumnarView(ctx context.Context, projection string, query Qu
 	return part.getColumnarView(ctx, query, pk)
 }
 
-func (p *partition) sealColumnar(ctx context.Context, query Query, fields []string, pkColumn string, fence Fence) (*ColumnarTable, error) {
-	if pkColumn == "" {
-		pkColumn = p.spec.ColumnarPK
+// maxSealedColumnarTables bounds the per-partition cache of sealed tables (CP-02).
+const maxSealedColumnarTables = 64
+
+// sealedColumnarKey scopes a sealed table to one tenant and one table shape.
+// A table built for one organization must never answer another (tenant isolation).
+type sealedColumnarKey struct {
+	org    string
+	fields string
+	pk     string
+}
+
+type sealedColumnarEntry struct {
+	table *ColumnarTable
+	epoch uint64
+}
+
+// cacheableColumnarQuery reports whether the query selects the whole tenant scope.
+// Filtered or limited queries build a fresh table and do not replace the cache.
+func cacheableColumnarQuery(query Query) bool {
+	return query.Limit == 0 && query.Plan.count == 0
+}
+
+// newSealedColumnarKey builds the cache key from the caller's raw shape.
+// Empty fields and pk mean the spec defaults, so the hot view path does not allocate.
+func newSealedColumnarKey(org string, fields []string, pkColumn string) sealedColumnarKey {
+	key := sealedColumnarKey{org: org, pk: pkColumn}
+	if len(fields) > 0 {
+		key.fields = strings.Join(fields, "\x00")
 	}
+	return key
+}
+
+func (p *partition) columnarShape(fields []string, pkColumn string) ([]string, string) {
 	if len(fields) == 0 {
 		fields = p.spec.ColumnarFields
 	}
 	if pkColumn == "" {
+		pkColumn = p.spec.ColumnarPK
+	}
+	if pkColumn == "" {
 		pkColumn = "record_id"
 	}
+	return fields, pkColumn
+}
+
+func (p *partition) loadSealedColumnar(key sealedColumnarKey, epoch uint64) *ColumnarTable {
+	cache := p.sealedColumnar.Load()
+	if cache == nil {
+		return nil
+	}
+	entry, ok := (*cache)[key]
+	if !ok || entry.epoch != epoch {
+		return nil
+	}
+	return entry.table
+}
+
+func (p *partition) storeSealedColumnar(key sealedColumnarKey, entry *sealedColumnarEntry) {
+	p.sealedMu.Lock()
+	defer p.sealedMu.Unlock()
+	var next map[sealedColumnarKey]*sealedColumnarEntry
+	if current := p.sealedColumnar.Load(); current != nil {
+		if existing, ok := (*current)[key]; ok && existing.epoch > entry.epoch {
+			return
+		}
+		next = make(map[sealedColumnarKey]*sealedColumnarEntry, len(*current)+1)
+		if len(*current) < maxSealedColumnarTables {
+			for k, v := range *current {
+				next[k] = v
+			}
+		}
+	} else {
+		next = make(map[sealedColumnarKey]*sealedColumnarEntry, 1)
+	}
+	next[key] = entry
+	// A spec without ColumnarFields has no default shape. The last sealed table for
+	// the tenant then serves the default key, so SealColumnar feeds GetColumnarView.
+	if len(p.spec.ColumnarFields) == 0 && (key.fields != "" || key.pk != "") {
+		next[sealedColumnarKey{org: key.org}] = entry
+	}
+	p.sealedColumnar.Store(&next)
+}
+
+// sealColumnar builds a table and caches it for whole-scope queries.
+// The fence and organization guards run in getColumnarBatch before any build.
+func (p *partition) sealColumnar(ctx context.Context, query Query, fields []string, pkColumn string, fence Fence) (*ColumnarTable, error) {
+	key := newSealedColumnarKey(normalizeQuery(query).OrganizationID, fields, pkColumn)
+	fields, pkColumn = p.columnarShape(fields, pkColumn)
+	// Read the epoch before the build. A concurrent apply then leaves a stale label, which forces a rebuild.
+	epoch := p.epoch.Load()
 	batch, err := p.getColumnarBatch(ctx, query, fields, fence)
 	if err != nil {
 		return nil, err
@@ -346,15 +425,25 @@ func (p *partition) sealColumnar(ctx context.Context, query Query, fields []stri
 	if err != nil {
 		return nil, err
 	}
-	p.sealedTable.Store(table)
-	p.sealedEpoch.Store(p.epoch.Load())
+	if cacheableColumnarQuery(query) {
+		p.storeSealedColumnar(key, &sealedColumnarEntry{table: table, epoch: epoch})
+	}
 	return table, nil
 }
 
 func (p *partition) getColumnarTable(ctx context.Context, query Query, fields []string, pkColumn string, fence Fence) (*ColumnarTable, error) {
-	epoch := p.epoch.Load()
-	if sealed := p.sealedTable.Load(); sealed != nil && p.sealedEpoch.Load() == epoch {
-		return sealed, nil
+	if err := p.checkFence(fence); err != nil {
+		return nil, err
+	}
+	query = normalizeQuery(query)
+	if query.OrganizationID == "" {
+		return nil, ErrInvalidEvent
+	}
+	if cacheableColumnarQuery(query) {
+		key := newSealedColumnarKey(query.OrganizationID, fields, pkColumn)
+		if sealed := p.loadSealedColumnar(key, p.epoch.Load()); sealed != nil {
+			return sealed, nil
+		}
 	}
 	return p.sealColumnar(ctx, query, fields, pkColumn, fence)
 }
@@ -363,18 +452,9 @@ func (p *partition) getColumnarView(ctx context.Context, query Query, pk string)
 	if err := p.waitForStable(ctx); err != nil {
 		return ColumnarRowView{}, false, err
 	}
-	epoch := p.epoch.Load()
-	sealed := p.sealedTable.Load()
-	if sealed == nil || p.sealedEpoch.Load() != epoch {
-		pkCol := p.spec.ColumnarPK
-		if pkCol == "" {
-			pkCol = "record_id"
-		}
-		var err error
-		sealed, err = p.sealColumnar(ctx, query, p.spec.ColumnarFields, pkCol, Fence{})
-		if err != nil {
-			return ColumnarRowView{}, false, err
-		}
+	sealed, err := p.getColumnarTable(ctx, query, nil, "", Fence{})
+	if err != nil {
+		return ColumnarRowView{}, false, err
 	}
 	view, ok := sealed.GetView(pk)
 	return view, ok, nil
@@ -390,15 +470,8 @@ func (p *partition) collectRecordEntries(ctx context.Context, registry *partitio
 	if query.Limit > 0 {
 		capacity = min(capacity, query.Limit)
 	}
-	var entries []*recordEntry
-	if arena := scratch.FromContext(ctx); arena != nil {
-		if slice, err := scratch.AllocSlice[*recordEntry](arena, capacity); err == nil {
-			entries = slice[:0]
-		}
-	}
-	if entries == nil {
-		entries = make([]*recordEntry, 0, capacity)
-	}
+	// Entries are Go pointers. The GC does not scan arena memory, so they stay on the heap.
+	entries := make([]*recordEntry, 0, capacity)
 	candidates := entryCandidates{entries: entries, limit: query.Limit}
 	var iterErr error
 	accept := func(entry *recordEntry) bool {
@@ -510,15 +583,7 @@ func (p *partition) collectRangeEntries(
 	if plan.snapshot == nil || plan.estimate == 0 {
 		return nil, 0, nil
 	}
-	var entries []*recordEntry
-	if arena := scratch.FromContext(ctx); arena != nil {
-		if slice, err := scratch.AllocSlice[*recordEntry](arena, plan.estimate); err == nil {
-			entries = slice[:0]
-		}
-	}
-	if entries == nil {
-		entries = make([]*recordEntry, 0, plan.estimate)
-	}
+	entries := make([]*recordEntry, 0, plan.estimate)
 	inspected := 0
 	var iterErr error
 	plan.forEach(func(candidate rangeIndexEntry) bool {
