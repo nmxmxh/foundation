@@ -58,23 +58,25 @@ type headerPlan struct {
 	key  string
 }
 
-var (
-	lastTimestampSec atomic.Int64
-	lastTimestampStr atomic.Pointer[string]
-)
+// cachedTimestamp pairs a second with its formatted string. One atomic pointer
+// publishes both together; two separate atomics let a reader pair a new second
+// with the previous string.
+type cachedTimestamp struct {
+	sec       int64
+	formatted string
+}
+
+var lastTimestamp atomic.Pointer[cachedTimestamp]
 
 func currentRFC3339() string {
 	now := time.Now().UTC()
 	sec := now.Unix()
-	if lastTimestampSec.Load() == sec {
-		if ptr := lastTimestampStr.Load(); ptr != nil {
-			return *ptr
-		}
+	if cached := lastTimestamp.Load(); cached != nil && cached.sec == sec {
+		return cached.formatted
 	}
-	formatted := now.Format(time.RFC3339)
-	lastTimestampSec.Store(sec)
-	lastTimestampStr.Store(&formatted)
-	return formatted
+	next := &cachedTimestamp{sec: sec, formatted: now.Format(time.RFC3339)}
+	lastTimestamp.Store(next)
+	return next.formatted
 }
 
 // NewEventRouteHandler builds a route-level handler that maps HTTP requests to dispatch requests.
