@@ -415,6 +415,33 @@ mod tests {
         }
     }
 
+    /// A short reply after a long one must not leave the old bytes in the
+    /// shared output region past the new length.
+    #[test]
+    fn buffer_success_clears_stale_output_tail() {
+        use ovrt_core::{
+            INT_IDX_INPUT_LENGTH, INT_IDX_OUTPUT_LENGTH, OFFSET_HEADER_INTS, OFFSET_INPUT_BYTES,
+            OFFSET_OUTPUT_BYTES,
+        };
+        let host = NativeRuntimeHost::new(BTreeMap::new());
+        host.register_unit(Arc::new(UppercaseUnit)).expect("register");
+        let mut raw = vec![0_u8; BUFFER_TOTAL_BYTES as usize];
+        let run = |raw: &mut Vec<u8>, input: &[u8]| {
+            let len_off = (OFFSET_HEADER_INTS + INT_IDX_INPUT_LENGTH * 4) as usize;
+            raw[len_off..len_off + 4].copy_from_slice(&(input.len() as i32).to_le_bytes());
+            let in_off = OFFSET_INPUT_BYTES as usize;
+            raw[in_off..in_off + input.len()].copy_from_slice(input);
+            process_runtime_buffer_unpublished(&host, "text.compute", raw).expect("process");
+            let out_len_off = (OFFSET_HEADER_INTS + INT_IDX_OUTPUT_LENGTH * 4) as usize;
+            i32::from_le_bytes(raw[out_len_off..out_len_off + 4].try_into().expect("len")) as usize
+        };
+        assert_eq!(run(&mut raw, b"secret-tenant-a"), 15);
+        assert_eq!(run(&mut raw, b"b"), 1);
+        let out = OFFSET_OUTPUT_BYTES as usize;
+        assert_eq!(&raw[out..out + 1], b"B");
+        assert!(raw[out + 1..out + 15].iter().all(|&b| b == 0), "stale output tail survived");
+    }
+
     #[test]
     fn direct_destinations_refuse_truncation_and_clear_failed_results() {
         let host = NativeRuntimeHost::new(BTreeMap::new());

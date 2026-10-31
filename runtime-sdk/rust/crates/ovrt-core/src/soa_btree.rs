@@ -695,9 +695,10 @@ impl<K: InlineKey, V> ArenaSoABTreeMap<K, V> {
                         }
 
                         let split_prefix = right.prefixes[0];
-                        let split_key = match right.keys[0].as_ref() {
-                            Some(k) => k.clone(),
-                            None => return (None, None),
+                        // A split right leaf always holds at least one key. A silent return here
+                        // would drop the moved half of the leaf, so fail loudly instead.
+                        let Some(split_key) = right.keys[0].clone() else {
+                            unreachable!("soa_btree: split right leaf has no first key");
                         };
                         let right_id = self.nodes.len() as u32;
                         self.nodes.push(ArenaNode::Leaf(right));
@@ -751,9 +752,8 @@ impl<K: InlineKey, V> ArenaSoABTreeMap<K, V> {
 
                         let mid = SOA_NODE_CAPACITY / 2;
                         let promoted_prefix = all_prefixes[mid];
-                        let promoted_key = match all_keys[mid].take() {
-                            Some(k) => k,
-                            None => return (replaced, None),
+                        let Some(promoted_key) = all_keys[mid].take() else {
+                            unreachable!("soa_btree: full internal node has no middle key");
                         };
 
                         for i in 0..mid {
@@ -787,6 +787,47 @@ impl<K: InlineKey, V> ArenaSoABTreeMap<K, V> {
     }
 }
 
+/// Upper bound on the node reservation made from an untrusted snapshot header.
+const MAX_SNAPSHOT_PREALLOC_NODES: usize = 1 << 16;
+
+/// Checks a loaded arena before use. The root and every child id must be in
+/// range, the tree must be acyclic (every node reached at most once), and
+/// the leaves must hold exactly `item_count` entries. A corrupt snapshot
+/// otherwise panics on an index or loops forever in traversal.
+fn validate_snapshot_topology<K, V>(
+    nodes: &[ArenaNode<K, V>],
+    root: u32,
+    item_count: usize,
+) -> Result<(), String> {
+    let node_count = nodes.len();
+    if root as usize >= node_count {
+        return Err(format!("snapshot root {root} out of range ({node_count} nodes)"));
+    }
+    let mut visited = vec![false; node_count];
+    let mut stack = vec![root];
+    let mut leaf_items = 0usize;
+    while let Some(id) = stack.pop() {
+        let idx = id as usize;
+        if idx >= node_count {
+            return Err(format!("snapshot child {id} out of range ({node_count} nodes)"));
+        }
+        if visited[idx] {
+            return Err(format!("snapshot node {id} is reachable twice (cycle or shared child)"));
+        }
+        visited[idx] = true;
+        match &nodes[idx] {
+            ArenaNode::Leaf(leaf) => leaf_items += leaf.len,
+            ArenaNode::Internal(internal) => {
+                stack.extend_from_slice(&internal.children[..=internal.len]);
+            }
+        }
+    }
+    if leaf_items != item_count {
+        return Err(format!("snapshot item count {item_count} != {leaf_items} reachable entries"));
+    }
+    Ok(())
+}
+
 impl<K: InlineKey + SnapshotCodec, V: SnapshotCodec> ArenaSoABTreeMap<K, V> {
     /// Saves the B-tree to a writer as a binary snapshot.
     pub fn save_snapshot<W: Write>(&self, writer: &mut W) -> io::Result<()> {
@@ -805,11 +846,17 @@ impl<K: InlineKey + SnapshotCodec, V: SnapshotCodec> ArenaSoABTreeMap<K, V> {
                     for p in &leaf.prefixes {
                         writer.write_all(&p.to_le_bytes())?;
                     }
+                    // The header already recorded leaf.len. Skipping an entry would
+                    // desynchronise the reader, so a hole is an error, not a skip.
                     for (k, v) in leaf.keys.iter().zip(leaf.values.iter()).take(leaf.len) {
-                        if let (Some(k), Some(v)) = (k.as_ref(), v.as_ref()) {
-                            k.write_snapshot(writer)?;
-                            v.write_snapshot(writer)?;
-                        }
+                        let (Some(k), Some(v)) = (k.as_ref(), v.as_ref()) else {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "soa_btree snapshot: leaf entry missing inside len",
+                            ));
+                        };
+                        k.write_snapshot(writer)?;
+                        v.write_snapshot(writer)?;
                     }
                 }
                 ArenaNode::Internal(internal) => {
@@ -821,7 +868,13 @@ impl<K: InlineKey + SnapshotCodec, V: SnapshotCodec> ArenaSoABTreeMap<K, V> {
                     for c in &internal.children {
                         writer.write_all(&c.to_le_bytes())?;
                     }
-                    for k in internal.keys.iter().take(internal.len).flatten() {
+                    for k in internal.keys.iter().take(internal.len) {
+                        let Some(k) = k.as_ref() else {
+                            return Err(io::Error::new(
+                                io::ErrorKind::InvalidData,
+                                "soa_btree snapshot: internal key missing inside len",
+                            ));
+                        };
                         k.write_snapshot(writer)?;
                     }
                 }
@@ -867,7 +920,11 @@ impl<K: InlineKey + SnapshotCodec, V: SnapshotCodec> ArenaSoABTreeMap<K, V> {
             .read_exact(&mut reserved)
             .map_err(|e| format!("read snapshot reserved header: {e}"))?;
 
-        let mut nodes = Vec::with_capacity(node_count);
+        if node_count == 0 {
+            return Err("snapshot has no nodes".to_string());
+        }
+        // node_count is untrusted input. Bound the up-front reservation; the Vec grows as nodes really arrive.
+        let mut nodes = Vec::with_capacity(node_count.min(MAX_SNAPSHOT_PREALLOC_NODES));
         for idx in 0..node_count {
             let mut kind_buf = [0u8; 1];
             reader.read_exact(&mut kind_buf).map_err(|e| format!("read node {idx} kind: {e}"))?;
@@ -961,15 +1018,30 @@ impl<K: InlineKey + SnapshotCodec, V: SnapshotCodec> ArenaSoABTreeMap<K, V> {
             }
         }
 
+        validate_snapshot_topology(&nodes, root, item_count)?;
         Ok(Self { nodes, root, len: item_count })
     }
 
     /// Saves the snapshot to a file path.
+    /// The write goes to a temporary file, is synced, then renamed over `path`.
+    /// A crash mid-write leaves the previous snapshot intact.
     pub fn save_to_file<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
-        let file = std::fs::File::create(path)?;
-        let mut writer = io::BufWriter::new(file);
-        self.save_snapshot(&mut writer)?;
-        writer.flush()
+        let path = path.as_ref();
+        let mut tmp_name = path.as_os_str().to_owned();
+        tmp_name.push(".tmp");
+        let tmp_path = std::path::PathBuf::from(tmp_name);
+        let result = (|| {
+            let file = std::fs::File::create(&tmp_path)?;
+            let mut writer = io::BufWriter::new(file);
+            self.save_snapshot(&mut writer)?;
+            let file = writer.into_inner().map_err(|e| e.into_error())?;
+            file.sync_all()?;
+            std::fs::rename(&tmp_path, path)
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp_path);
+        }
+        result
     }
 
     /// Loads the snapshot from a file path.
@@ -1109,6 +1181,55 @@ mod tests {
         for i in 0..100 {
             assert_eq!(tree.get(&(i as u64)), Some(&((i * 5) as u64)));
         }
+    }
+
+    /// A corrupt snapshot must be rejected, never panic, loop, or reserve huge memory.
+    #[test]
+    fn test_arena_soa_btree_snapshot_rejects_corrupt_headers() {
+        let mut tree = ArenaSoABTreeMap::with_capacity(64);
+        for i in 0..300u64 {
+            tree.insert(i, i);
+        }
+        let mut good = Vec::new();
+        tree.save_snapshot(&mut good).expect("save snapshot");
+
+        let load = |bytes: Vec<u8>| -> Result<ArenaSoABTreeMap<u64, u64>, String> {
+            ArenaSoABTreeMap::load_snapshot(&mut std::io::Cursor::new(bytes))
+        };
+        assert!(load(good.clone()).is_ok());
+
+        let mut bad_root = good.clone();
+        bad_root[8..12].copy_from_slice(&9999u32.to_le_bytes());
+        assert!(load(bad_root).is_err(), "out-of-range root must be rejected");
+
+        let mut bad_len = good.clone();
+        bad_len[12..20].copy_from_slice(&301u64.to_le_bytes());
+        assert!(load(bad_len).is_err(), "item count mismatch must be rejected");
+
+        let mut huge_count = good.clone();
+        huge_count[20..24].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(load(huge_count).is_err(), "truncated node stream must be rejected");
+
+        let mut zero_count = good;
+        zero_count[20..24].copy_from_slice(&0u32.to_le_bytes());
+        assert!(load(zero_count).is_err(), "empty node table must be rejected");
+    }
+
+    #[test]
+    fn test_arena_soa_btree_save_to_file_is_atomic_rename() {
+        let mut tree = ArenaSoABTreeMap::with_capacity(16);
+        for i in 0..50u64 {
+            tree.insert(i, i * 2);
+        }
+        let dir = std::env::temp_dir().join(format!("ovrt_soa_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("tree.snap");
+        tree.save_to_file(&path).expect("save");
+        assert!(!dir.join("tree.snap.tmp").exists(), "temp file must be renamed away");
+        let restored: ArenaSoABTreeMap<u64, u64> =
+            ArenaSoABTreeMap::load_from_file(&path).expect("load");
+        assert_eq!(restored.len(), 50);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

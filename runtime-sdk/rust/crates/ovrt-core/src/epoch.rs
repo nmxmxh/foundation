@@ -130,6 +130,9 @@ pub fn wait_for_change(
     }
 
     let deadline = Instant::now() + policy.timeout;
+    // Sleep ladder: start short so a reply that lands just after the spin phase
+    // is seen fast, then double up to max_sleep and stay there.
+    let mut sleep_step = Duration::from_micros(1).min(policy.max_sleep);
     loop {
         let current = observe(slot);
         if current != previous {
@@ -147,8 +150,8 @@ pub fn wait_for_change(
         }
 
         let remaining = deadline.saturating_duration_since(now);
-        let sleep_dur = remaining.min(policy.max_sleep);
-        std::thread::park_timeout(sleep_dur);
+        std::thread::park_timeout(remaining.min(sleep_step));
+        sleep_step = (sleep_step * 2).min(policy.max_sleep);
     }
 }
 

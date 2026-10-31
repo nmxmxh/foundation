@@ -128,6 +128,10 @@ pub fn process_runtime_buffer_unpublished(
     add_epoch_raw(raw_buffer, IDX_RUNTIME_TICK, 1)?;
 
     let input_length = input_bytes_view_raw(raw_buffer)?.len();
+    // The previous output length bounds the dirty tail. Clearing only that tail
+    // keeps the fast path cheap and stops a short reply from carrying old bytes.
+    let previous_output = (header_int_raw(raw_buffer, INT_IDX_OUTPUT_LENGTH)?.max(0) as u32)
+        .min(OUTPUT_MAX_BYTES) as usize;
     set_header_int_raw(raw_buffer, INT_IDX_OUTPUT_LENGTH, 0)?;
     let result = {
         let (before_output, output) = raw_buffer.split_at_mut(OFFSET_OUTPUT_BYTES as usize);
@@ -139,6 +143,10 @@ pub fn process_runtime_buffer_unpublished(
     };
     match result {
         Ok(Ok(written)) => {
+            if written < previous_output {
+                let output = region_raw_mut(raw_buffer, OFFSET_OUTPUT_BYTES, OUTPUT_MAX_BYTES)?;
+                output[written..previous_output].fill(0);
+            }
             set_header_int_raw(raw_buffer, INT_IDX_STATUS_CODE, 0)?;
             set_diagnostics_text_raw(raw_buffer, "")?;
             set_header_int_raw(raw_buffer, INT_IDX_OUTPUT_LENGTH, written as i32)?;
