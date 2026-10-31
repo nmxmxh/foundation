@@ -552,9 +552,7 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 			subs[key] = sub
 			subsMu.Unlock()
 
-			pumps.Add(1)
-			go func() {
-				defer pumps.Done()
+			pumps.Go(func() {
 				var lastDropped, lastEpoch uint64
 				emitResyncIfDropped := func() error {
 					if dropped := sub.Dropped(); dropped > lastDropped {
@@ -594,7 +592,7 @@ func (g *Gateway) SubscribeMultiplexHandler(config HandlerConfig) http.Handler {
 						}
 					}
 				}
-			}()
+			})
 		}
 		stopScope := func(domain, collection string) {
 			key := domain + "/" + collection

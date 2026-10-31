@@ -715,9 +715,7 @@ func TestCache_PenetrationGuardConcurrent(t *testing.T) {
 	ctx := context.Background()
 	var wg sync.WaitGroup
 	for w := range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range 200 {
 				key := fmt.Sprintf("k-%d-%d", w, i%32)
 				var dest string
@@ -725,7 +723,7 @@ func TestCache_PenetrationGuardConcurrent(t *testing.T) {
 				_ = c.Set(ctx, key, "v")
 				_ = c.Delete(ctx, key)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

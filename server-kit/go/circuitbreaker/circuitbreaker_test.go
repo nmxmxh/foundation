@@ -530,9 +530,7 @@ func TestCircuitBreakerCountersRaceFree(t *testing.T) {
 	fail := errors.New("fail")
 	var wg sync.WaitGroup
 	for w := range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range 500 {
 				_, _ = cb.Execute(context.Background(), func() (any, error) {
 					if (i+w)%3 == 0 {
@@ -546,7 +544,7 @@ func TestCircuitBreakerCountersRaceFree(t *testing.T) {
 					cb.Reset()
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

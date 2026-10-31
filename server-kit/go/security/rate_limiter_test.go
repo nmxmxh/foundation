@@ -73,9 +73,7 @@ func TestRateLimiterConcurrent(t *testing.T) {
 	rl := NewRateLimiter(50, 50*time.Millisecond)
 	var wg sync.WaitGroup
 	for w := range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range 2000 {
 				rl.Allow(fmt.Sprintf("c-%d-%d", w, i%64))
 				if i%500 == 0 {
@@ -83,7 +81,7 @@ func TestRateLimiterConcurrent(t *testing.T) {
 					_ = rl.KeyCount()
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

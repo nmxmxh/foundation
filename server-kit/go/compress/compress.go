@@ -406,10 +406,7 @@ func readLimited(r io.Reader, maxDecoded int64) ([]byte, error) {
 const maxInitialDecodeBuffer = 1 << 20
 
 func readLimitedWithHint(r io.Reader, maxDecoded int64, hint int) ([]byte, error) {
-	initial := 512
-	if hint > initial {
-		initial = hint
-	}
+	initial := max(hint, 512)
 	if size, ok := r.(interface{ Len() int }); ok && size.Len() > initial {
 		initial = size.Len()
 	}

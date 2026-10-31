@@ -3,6 +3,7 @@ package hermes
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -394,9 +395,7 @@ func (p *partition) storeSealedColumnar(key sealedColumnarKey, entry *sealedColu
 		}
 		next = make(map[sealedColumnarKey]*sealedColumnarEntry, len(*current)+1)
 		if len(*current) < maxSealedColumnarTables {
-			for k, v := range *current {
-				next[k] = v
-			}
+			maps.Copy(next, *current)
 		}
 	} else {
 		next = make(map[sealedColumnarKey]*sealedColumnarEntry, 1)

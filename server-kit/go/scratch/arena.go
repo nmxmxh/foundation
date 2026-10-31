@@ -200,8 +200,8 @@ func typePointerFree(t reflect.Type, depth int) bool {
 	case reflect.Array:
 		return t.Len() == 0 || typePointerFree(t.Elem(), depth+1)
 	case reflect.Struct:
-		for i := range t.NumField() {
-			if !typePointerFree(t.Field(i).Type, depth+1) {
+		for field := range t.Fields() {
+			if !typePointerFree(field.Type, depth+1) {
 				return false
 			}
 		}
