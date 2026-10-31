@@ -465,7 +465,9 @@ func (o Object) appendJSONWithArena(dst []byte, arena *scratch.Arena) ([]byte, e
 		return append(dst, '{', '}'), nil
 	}
 	dst = append(dst, '{')
-	keys := o.keysArena(arena)
+	// Keys hold Go pointers, so they use a stack buffer, not the arena.
+	var stack [16]string
+	keys := o.sortedKeysInto(stack[:0])
 	for i, key := range keys {
 		if i > 0 {
 			dst = append(dst, ',')
@@ -480,21 +482,14 @@ func (o Object) appendJSONWithArena(dst []byte, arena *scratch.Arena) ([]byte, e
 	return append(dst, '}'), nil
 }
 
-func (o Object) keysArena(arena *scratch.Arena) []string {
-	if arena == nil {
-		return o.Keys()
-	}
-	keys, err := scratch.AllocSlice[string](arena, len(o))
-	if err != nil {
-		return o.Keys()
-	}
-	i := 0
+// sortedKeysInto appends the sorted keys to dst. A stack-backed dst keeps small
+// objects allocation-free. A []string must not live in an arena (see scratch.ErrPointerType).
+func (o Object) sortedKeysInto(dst []string) []string {
 	for key := range o {
-		keys[i] = key
-		i++
+		dst = append(dst, key)
 	}
-	sort.Strings(keys)
-	return keys
+	sort.Strings(dst)
+	return dst
 }
 
 func (v Value) appendJSONWithArena(dst []byte, arena *scratch.Arena) ([]byte, error) {

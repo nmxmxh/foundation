@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
@@ -320,7 +321,7 @@ func TestValidateTokenAllocationBudget(t *testing.T) {
 	}
 }
 
-func TestValidateTokenWithArena_ZeroAllocations(t *testing.T) {
+func TestValidateTokenWithArena_ClaimsOwnHeapMemory(t *testing.T) {
 	manager, err := NewJWTManager("this-is-a-very-secure-secret-key-for-jwt")
 	if err != nil {
 		t.Fatalf("NewJWTManager failed: %v", err)
@@ -378,15 +379,32 @@ func TestValidateTokenWithArena_ZeroAllocations(t *testing.T) {
 		t.Fatalf("expected error for nil target")
 	}
 
-	// Zero allocations check!
+	// Claims must survive arena reuse and a GC cycle. The middleware returns
+	// the arena to a pool when the handler returns, but claims stay in the context.
+	held, err := manager.ValidateTokenWithArena(arena, token)
+	if err != nil {
+		t.Fatalf("ValidateTokenWithArena failed: %v", err)
+	}
+	raw := arena.Raw()
+	for i := range raw {
+		raw[i] = 0xA5
+	}
+	arena.Reset()
+	runtime.GC()
+	if held.UserID != expectedClaims.UserID || held.OrganizationID != expectedClaims.OrganizationID ||
+		held.Role != expectedClaims.Role || len(held.Capabilities) != 2 || held.Capabilities[1] != "orders.write" {
+		t.Fatalf("held claims changed after arena reuse: %+v", held)
+	}
+
+	// Allocation budget: claims struct, payload string, capabilities slice.
 	allocs := testing.AllocsPerRun(200, func() {
 		arena.Reset()
 		if _, err := manager.ValidateTokenWithArena(arena, token); err != nil {
 			t.Fatalf("ValidateTokenWithArena failed: %v", err)
 		}
 	})
-	if allocs != 0 {
-		t.Fatalf("expected 0 allocs for ValidateTokenWithArena, got %f", allocs)
+	if allocs > 3 {
+		t.Fatalf("ValidateTokenWithArena exceeded allocation budget: got %.1f, want <= 3", allocs)
 	}
 }
 
@@ -467,6 +485,12 @@ func TestValidateTokenWithArena_DirtyMemoryWithLargePayload(t *testing.T) {
 	claims, err := manager.ValidateTokenWithArena(arena, largeToken)
 	if err != nil {
 		t.Fatalf("ValidateTokenWithArena failed: %v", err)
+	}
+	// The large payload takes the json.Unmarshal path. Force GC cycles so
+	// claims held only from non-scanned memory would be freed and reused.
+	for range 3 {
+		runtime.GC()
+		_ = make([]string, 4096)
 	}
 	if len(claims.Capabilities) != 50 {
 		t.Fatalf("expected 50 capabilities, got %d", len(claims.Capabilities))

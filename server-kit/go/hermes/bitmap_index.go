@@ -413,14 +413,8 @@ func (s *scopeBitmapIndex) IntersectFiltersWithContext(ctx context.Context, filt
 		return nil, true
 	}
 
-	if arena != nil {
-		if slice, err := scratch.AllocSlice[string](arena, matchingCount); err == nil {
-			keys = slice[:0]
-		}
-	}
-	if keys == nil {
-		keys = make([]string, 0, matchingCount)
-	}
+	// Keys are strings (Go pointers), so they stay on the heap, not in the arena.
+	keys = make([]string, 0, matchingCount)
 
 	result.forEachSet(func(slot int) bool {
 		if slot >= 0 && slot < len(s.slotToKey) {

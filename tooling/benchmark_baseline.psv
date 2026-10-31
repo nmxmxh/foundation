@@ -2,7 +2,7 @@
 # Ceilings only fall. max_allocs and max_bytes are gated; ns_ref is a
 # machine-dependent reference value reported as drift, never gated.
 ./appbench|BenchmarkAppLane_Auth_ValidateToken|3|432|1312
-./appbench|BenchmarkAppLane_Auth_ValidateToken_Arena|0|0|1131
+./appbench|BenchmarkAppLane_Auth_ValidateToken_Arena|3|432|1004
 ./appbench|BenchmarkAppLane_Cache_GetHit_JSONValue|0|0|78.12
 ./appbench|BenchmarkAppLane_CircuitBreaker_ClosedSuccess|0|0|14.17
 ./appbench|BenchmarkAppLane_DirectFrame_DomainCall|0|0|41.04

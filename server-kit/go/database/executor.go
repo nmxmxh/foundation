@@ -165,9 +165,9 @@ func QueryAllCapacity[T any](ctx context.Context, db RowQueryer, capacity int, q
 }
 
 // QueryAllArena collects streamed rows into a typed slice allocated inside a scratch arena.
-// If arena is nil, it inspects ctx via scratch.FromContext(ctx). If an arena is available
-// and capacity > 0, it uses scratch.AllocSlice[T] to achieve zero heap allocations.
-// Otherwise, it falls back to standard slice allocation.
+// If arena is nil, it inspects ctx via scratch.FromContext(ctx).
+// Only pointer-free T uses the arena. Other T (strings, slices, pointers) use the heap.
+// WARNING: an arena-backed result is valid only until the arena is reset.
 func QueryAllArena[T any](ctx context.Context, arena *scratch.Arena, db RowQueryer, capacity int, query string, scan func(Rows) (T, error), args ...any) ([]T, error) {
 	if scan == nil {
 		return nil, errors.New("row scanner function is required")

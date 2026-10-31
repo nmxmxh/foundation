@@ -3,6 +3,7 @@ package scratch
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"unsafe"
 )
@@ -415,5 +416,71 @@ func TestAllocations_Scope_Zero(t *testing.T) {
 	})
 	if allocs != 0 {
 		t.Fatalf("expected 0 allocs/run, got %f", allocs)
+	}
+}
+
+func TestAllocSliceRejectsPointerTypes(t *testing.T) {
+	a := New(4096)
+	type withString struct {
+		ID   int64
+		Name string
+	}
+	type nested struct {
+		Inner [2]withString
+	}
+	if _, err := AllocSlice[string](a, 4); !errors.Is(err, ErrPointerType) {
+		t.Fatalf("string: got %v, want ErrPointerType", err)
+	}
+	if _, err := AllocSlice[*int](a, 4); !errors.Is(err, ErrPointerType) {
+		t.Fatalf("pointer: got %v, want ErrPointerType", err)
+	}
+	if _, err := Alloc[withString](a); !errors.Is(err, ErrPointerType) {
+		t.Fatalf("struct with string: got %v, want ErrPointerType", err)
+	}
+	if _, err := Alloc[nested](a); !errors.Is(err, ErrPointerType) {
+		t.Fatalf("nested array of pointer struct: got %v, want ErrPointerType", err)
+	}
+	if _, err := AllocSlice[[]byte](a, 1); !errors.Is(err, ErrPointerType) {
+		t.Fatalf("slice: got %v, want ErrPointerType", err)
+	}
+	if _, err := AllocSlice[any](a, 1); !errors.Is(err, ErrPointerType) {
+		t.Fatalf("interface: got %v, want ErrPointerType", err)
+	}
+	if a.Allocated() != 0 {
+		t.Fatalf("rejected allocations must not consume arena space, got %d", a.Allocated())
+	}
+
+	type flat struct {
+		A int64
+		B [4]uint32
+		C float64
+	}
+	if _, err := AllocSlice[flat](a, 4); err != nil {
+		t.Fatalf("pointer-free struct rejected: %v", err)
+	}
+	allocs := testing.AllocsPerRun(100, func() {
+		a.Reset()
+		if _, err := AllocSlice[flat](a, 4); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs != 0 {
+		t.Fatalf("pointer-free check must not allocate after first use, got %.1f", allocs)
+	}
+}
+
+func TestAllocSliceRejectsOverflow(t *testing.T) {
+	a := New(4096)
+	if _, err := AllocSlice[uint64](a, math.MaxInt/4); !errors.Is(err, ErrArenaFull) {
+		t.Fatalf("overflowing count: got %v, want ErrArenaFull", err)
+	}
+	if _, err := a.Alloc(math.MaxInt); !errors.Is(err, ErrArenaFull) {
+		t.Fatalf("MaxInt size: got %v, want ErrArenaFull", err)
+	}
+	if _, err := a.Alloc(math.MaxInt - 3); !errors.Is(err, ErrArenaFull) {
+		t.Fatalf("align overflow size: got %v, want ErrArenaFull", err)
+	}
+	if a.Allocated() != 0 {
+		t.Fatalf("failed allocations must not move head, got %d", a.Allocated())
 	}
 }

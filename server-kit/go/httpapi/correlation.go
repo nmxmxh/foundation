@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/metadata"
-	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/tracing"
 )
 
@@ -154,16 +153,8 @@ func enrichMetadataFromHeaders(md *metadata.EnvelopeMetadata, r *http.Request) {
 		md.Locale = locale
 	}
 	if md.GlobalContext == nil {
-		if arena := scratch.FromContext(r.Context()); arena != nil {
-			gc, err := scratch.Alloc[metadata.GlobalContext](arena)
-			if err == nil {
-				md.GlobalContext = gc
-			} else {
-				md.GlobalContext = &metadata.GlobalContext{}
-			}
-		} else {
-			md.GlobalContext = &metadata.GlobalContext{}
-		}
+		// GlobalContext holds strings and travels into events and jobs, so it stays on the heap.
+		md.GlobalContext = &metadata.GlobalContext{}
 	}
 	if userID := strings.TrimSpace(r.Header.Get(userIDHeader)); userID != "" {
 		md.GlobalContext.UserID = userID

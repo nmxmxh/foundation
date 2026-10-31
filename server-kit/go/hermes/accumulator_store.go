@@ -439,22 +439,17 @@ func (s *AccumulatorStateStore) GetFacetManifestContext(ctx context.Context, sco
 	return s.GetFacetManifestWithArena(scope, topNPerDim, scratch.FromContext(ctx))
 }
 
-// GetFacetManifestWithArena extracts dimension summaries into scratch arena memory when provided,
-// eliminating heap allocations.
+// GetFacetManifestWithArena extracts dimension summaries.
+// NOTE: results hold strings, so they always use the heap. The arena is ignored.
 func (s *AccumulatorStateStore) GetFacetManifestWithArena(scope string, topNPerDim int, arena *scratch.Arena) []DimensionSummary {
 	sc := s.getScope(scope)
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 
-	var result []DimensionSummary
-	if arena != nil {
-		if slice, err := scratch.AllocSlice[DimensionSummary](arena, len(s.cfg.Dimensions)); err == nil {
-			result = slice[:0]
-		}
-	}
-	if result == nil {
-		result = make([]DimensionSummary, 0, len(s.cfg.Dimensions))
-	}
+	// DimensionSummary and FacetCount hold strings, so the result stays on the heap.
+	// The arena parameter stays for API stability (see scratch.ErrPointerType).
+	_ = arena
+	result := make([]DimensionSummary, 0, len(s.cfg.Dimensions))
 
 	for _, dim := range s.cfg.Dimensions {
 		freqMap, ok := sc.dimensionFrequencies[dim]
@@ -463,15 +458,7 @@ func (s *AccumulatorStateStore) GetFacetManifestWithArena(scope string, topNPerD
 			continue
 		}
 		var total int64
-		var facets []FacetCount
-		if arena != nil {
-			if slice, err := scratch.AllocSlice[FacetCount](arena, len(freqMap)); err == nil {
-				facets = slice[:0]
-			}
-		}
-		if facets == nil {
-			facets = make([]FacetCount, 0, len(freqMap))
-		}
+		facets := make([]FacetCount, 0, len(freqMap))
 
 		for val, count := range freqMap {
 			total += count

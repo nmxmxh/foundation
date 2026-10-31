@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"sync"
 	"unsafe"
 )
 
@@ -13,6 +15,10 @@ var (
 
 	// ErrNegativeAlloc indicates an invalid negative allocation size request.
 	ErrNegativeAlloc = errors.New("negative allocation size")
+
+	// ErrPointerType indicates that a typed allocation requested a type that holds Go pointers.
+	// The arena buffer is a []byte, so the GC does not scan it for pointers.
+	ErrPointerType = errors.New("scratch arena cannot hold types that contain Go pointers")
 )
 
 // DefaultCapacity is the default buffer size for scratch arenas (64 KiB).
@@ -66,8 +72,12 @@ func (a *Arena) Alloc(size int) ([]byte, error) {
 	if size == 0 {
 		return nil, nil
 	}
+	if size > len(a.buf) {
+		return nil, fmt.Errorf("%w: requested %d bytes, available %d",
+			ErrArenaFull, size, len(a.buf)-a.head)
+	}
 	aligned := align8(size)
-	if a.head+aligned > len(a.buf) {
+	if aligned > len(a.buf)-a.head {
 		return nil, fmt.Errorf("%w: requested %d bytes, available %d",
 			ErrArenaFull, size, len(a.buf)-a.head)
 	}
@@ -120,6 +130,7 @@ func (a *Arena) Raw() []byte {
 
 // Alloc allocates a single value of type T in the arena and returns a pointer to it.
 // The allocation is 8-byte aligned and incurs zero heap allocations.
+// T must be pointer-free. Otherwise Alloc returns ErrPointerType.
 func Alloc[T any](a *Arena) (*T, error) {
 	slice, err := AllocSlice[T](a, 1)
 	if err != nil {
@@ -130,6 +141,10 @@ func Alloc[T any](a *Arena) (*T, error) {
 
 // AllocSlice allocates a contiguous slice of type T with the specified count.
 // Allocations are 8-byte aligned and incur zero heap allocations.
+//
+// WARNING: T must be pointer-free (no string, slice, map, pointer, interface,
+// chan, or func fields). The GC does not scan arena memory. A Go pointer kept
+// only there can be freed while in use. AllocSlice returns ErrPointerType for such T.
 func AllocSlice[T any](a *Arena, count int) ([]T, error) {
 	if count < 0 {
 		return nil, ErrNegativeAlloc
@@ -137,10 +152,17 @@ func AllocSlice[T any](a *Arena, count int) ([]T, error) {
 	if count == 0 {
 		return nil, nil
 	}
+	if !PointerFree[T]() {
+		return nil, ErrPointerType
+	}
 	var zero T
 	elemSize := int(unsafe.Sizeof(zero))
 	if elemSize == 0 {
 		return make([]T, count), nil
+	}
+	if count > len(a.buf)/elemSize {
+		return nil, fmt.Errorf("%w: requested %d elements of %d bytes, available %d",
+			ErrArenaFull, count, elemSize, len(a.buf)-a.head)
 	}
 	totalBytes := elemSize * count
 	raw, err := a.Alloc(totalBytes)
@@ -151,8 +173,49 @@ func AllocSlice[T any](a *Arena, count int) ([]T, error) {
 	return unsafe.Slice((*T)(unsafe.Pointer(&raw[0])), count), nil // #nosec G103 -- arena typed slice view.
 }
 
+var pointerFreeCache sync.Map // reflect.Type -> bool
+
+// PointerFree reports whether T holds no Go pointers and is safe to place in an arena.
+// The result is cached per type. Lookups after the first do not allocate.
+func PointerFree[T any]() bool {
+	t := reflect.TypeFor[T]()
+	if v, ok := pointerFreeCache.Load(t); ok {
+		return v.(bool)
+	}
+	free := typePointerFree(t, 0)
+	pointerFreeCache.Store(t, free)
+	return free
+}
+
+// typePointerFree walks the type. The depth bound stops pathological nesting (CP-02).
+func typePointerFree(t reflect.Type, depth int) bool {
+	if depth > 32 {
+		return false
+	}
+	switch t.Kind() {
+	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
+		return true
+	case reflect.Array:
+		return t.Len() == 0 || typePointerFree(t.Elem(), depth+1)
+	case reflect.Struct:
+		for i := range t.NumField() {
+			if !typePointerFree(t.Field(i).Type, depth+1) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 // AllocString copies string s into the arena and returns an immutable string view.
 // The returned string references arena memory and incurs zero heap allocations.
+//
+// WARNING: the string is valid only until Reset. Do not keep it in a map,
+// cache, event, log, or any value that outlives the arena scope.
 func AllocString(a *Arena, s string) (string, error) {
 	if len(s) == 0 {
 		return "", nil

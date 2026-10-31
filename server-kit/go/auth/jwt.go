@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/scratch"
 )
@@ -115,25 +114,12 @@ func (m *JWTManager) ValidateToken(token string) (*Claims, error) {
 	return &claims, nil
 }
 
-// ValidateTokenWithArena validates token signature and expiry, allocating the Claims
-// structure and any string fields from the provided scratch arena.
-// When arena is nil or full, it falls back to standard ValidateToken.
-func (m *JWTManager) ValidateTokenWithArena(arena *scratch.Arena, token string) (*Claims, error) {
-	if arena == nil {
-		return m.ValidateToken(token)
-	}
-	claims, err := scratch.Alloc[Claims](arena)
-	if err != nil {
-		return m.ValidateToken(token)
-	}
-	*claims = Claims{}
-	if err := m.validateTokenIntoArena(claims, token, arena); err != nil {
-		return nil, err
-	}
-	if claims.IsRefreshToken() {
-		return nil, errInvalidTokenType
-	}
-	return claims, nil
+// ValidateTokenWithArena validates token signature and expiry.
+// The returned Claims always own their memory on the Go heap.
+// Claims outlive the request: the context, goroutines, and tenant-keyed maps keep them.
+// Thus the arena is not used for Claims. The parameter stays for API stability.
+func (m *JWTManager) ValidateTokenWithArena(_ *scratch.Arena, token string) (*Claims, error) {
+	return m.ValidateToken(token)
 }
 
 // ValidateTokenInto validates token signature and expiry, unmarshaling claims directly into target.
@@ -142,7 +128,7 @@ func (m *JWTManager) ValidateTokenInto(target *Claims, token string) error {
 	if target != nil {
 		*target = Claims{}
 	}
-	if err := m.validateTokenIntoArena(target, token, nil); err != nil {
+	if err := m.validateTokenInto(target, token); err != nil {
 		return err
 	}
 	if target.IsRefreshToken() {
@@ -151,7 +137,7 @@ func (m *JWTManager) ValidateTokenInto(target *Claims, token string) error {
 	return nil
 }
 
-func (m *JWTManager) validateTokenIntoArena(target *Claims, token string, arena *scratch.Arena) error {
+func (m *JWTManager) validateTokenInto(target *Claims, token string) error {
 	if m == nil || len(m.secret) == 0 {
 		return errors.New("jwt manager not initialized")
 	}
@@ -172,7 +158,7 @@ func (m *JWTManager) validateTokenIntoArena(target *Claims, token string, arena 
 		return errInvalidSignature
 	}
 
-	if err := decodeAndUnmarshalClaimsWithArena(payloadPart, target, arena); err != nil {
+	if err := decodeAndUnmarshalClaims(payloadPart, target); err != nil {
 		return err
 	}
 
@@ -190,7 +176,7 @@ func (m *JWTManager) validateTokenIntoArena(target *Claims, token string, arena 
 // ValidateRefreshToken validates a refresh token signature, expiry, and type.
 func (m *JWTManager) ValidateRefreshToken(token string) (*Claims, error) {
 	var claims Claims
-	if err := m.validateTokenIntoArena(&claims, token, nil); err != nil {
+	if err := m.validateTokenInto(&claims, token); err != nil {
 		return nil, err
 	}
 	if !claims.IsRefreshToken() {
@@ -279,7 +265,7 @@ func (m *JWTManager) hmacSum256(unsigned string) [32]byte {
 	return out
 }
 
-func decodeAndUnmarshalClaimsWithArena(payloadPart string, claims *Claims, arena *scratch.Arena) error {
+func decodeAndUnmarshalClaims(payloadPart string, claims *Claims) error {
 	if len(payloadPart) <= 768 {
 		var srcBuf [768]byte
 		var dstBuf [576]byte
@@ -291,20 +277,10 @@ func decodeAndUnmarshalClaimsWithArena(payloadPart string, claims *Claims, arena
 		if n == 0 {
 			return errInvalidTokenFormat
 		}
-		var data string
-		if arena != nil {
-			raw, err := arena.Alloc(n)
-			if err == nil {
-				copy(raw, dstBuf[:n])
-				data = unsafe.String(&raw[0], n) // #nosec G103 -- zero-allocation string view into arena buffer.
-			} else {
-				data = string(dstBuf[:n])
-			}
-		} else {
-			data = string(dstBuf[:n])
-		}
+		// One heap string backs every claim field as a substring.
+		data := string(dstBuf[:n])
 		var parsed Claims
-		if parseClaimsFastWithArena(data, &parsed, arena) {
+		if parseClaimsFast(data, &parsed) {
 			*claims = parsed
 			return nil
 		}
@@ -325,10 +301,6 @@ func decodeAndUnmarshalClaimsWithArena(payloadPart string, claims *Claims, arena
 
 // parseClaimsFast parses standard flat JWT claims without reflection allocations.
 func parseClaimsFast(data string, claims *Claims) bool {
-	return parseClaimsFastWithArena(data, claims, nil)
-}
-
-func parseClaimsFastWithArena(data string, claims *Claims, arena *scratch.Arena) bool {
 	data = strings.TrimSpace(data)
 	if len(data) < 2 || data[0] != '{' || data[len(data)-1] != '}' {
 		return false
@@ -347,19 +319,12 @@ func parseClaimsFastWithArena(data string, claims *Claims, arena *scratch.Arena)
 			return false
 		}
 		valRaw, next, ok := cutJSONFieldValue(strings.TrimSpace(rest[1:]))
-		if !ok || !assignClaimFastWithArena(claims, key, valRaw, arena) {
+		if !ok || !assignClaimFast(claims, key, valRaw) {
 			return false
 		}
 		body = next
 	}
 	return true
-}
-
-func assignClaimFastWithArena(claims *Claims, key, val string, arena *scratch.Arena) bool {
-	if key == "capabilities" {
-		return assignClaimCapabilitiesWithArena(&claims.Capabilities, val, arena)
-	}
-	return assignClaimFast(claims, key, val)
 }
 
 func cutJSONString(b string) (string, string, bool) {
@@ -495,10 +460,6 @@ func assignClaimInt64(dst *int64, val string) bool {
 }
 
 func assignClaimCapabilities(dst *[]string, val string) bool {
-	return assignClaimCapabilitiesWithArena(dst, val, nil)
-}
-
-func assignClaimCapabilitiesWithArena(dst *[]string, val string, arena *scratch.Arena) bool {
 	if len(val) < 2 || val[0] != '[' || val[len(val)-1] != ']' {
 		return false
 	}
@@ -508,17 +469,7 @@ func assignClaimCapabilitiesWithArena(dst *[]string, val string, arena *scratch.
 		return true
 	}
 	count := 1 + strings.Count(inner, ",")
-	var out []string
-	if arena != nil {
-		slice, err := scratch.AllocSlice[string](arena, count)
-		if err == nil {
-			out = slice[:0]
-		} else {
-			out = make([]string, 0, count)
-		}
-	} else {
-		out = make([]string, 0, count)
-	}
+	out := make([]string, 0, count)
 	for len(inner) > 0 {
 		str, rest, ok := cutJSONString(inner)
 		if !ok {
