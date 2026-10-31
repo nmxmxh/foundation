@@ -265,7 +265,8 @@ fn run_native_gpu_slot_maplet_hot_path() {
     let stats = sample(|| {
         let refs = registry.acquire_slot(handle, black_box(&owner)).expect("acquire slot");
         black_box(refs);
-        let fence = registry.signal_fence_slot(handle, black_box(&owner), 1).expect("signal fence slot");
+        let fence =
+            registry.signal_fence_slot(handle, black_box(&owner), 1).expect("signal fence slot");
         black_box(fence);
         let rel = registry.release_slot(handle, black_box(&owner)).expect("release slot");
         black_box(rel.remaining_refs);

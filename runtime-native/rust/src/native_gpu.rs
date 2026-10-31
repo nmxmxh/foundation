@@ -1195,9 +1195,7 @@ mod tests {
                 (acq, rel) => panic!("round {round}: inconsistent outcome {acq:?} / {rel:?}"),
             }
             assert_eq!(registry.len().expect("len"), 0, "round {round}");
-            registry
-                .acquire_slot(handle, &owner())
-                .expect_err("retired handle must stay expired");
+            registry.acquire_slot(handle, &owner()).expect_err("retired handle must stay expired");
         }
     }
 }

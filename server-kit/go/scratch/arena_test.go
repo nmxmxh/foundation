@@ -496,8 +496,8 @@ func TestDetachDropsArenaAndCancellation(t *testing.T) {
 	if detached.Err() != nil {
 		t.Fatal("detached context must not inherit cancellation")
 	}
-	//nolint:staticcheck // nil context is the case under test.
-	if FromContext(Detach(nil)) != nil {
+	var nilCtx context.Context // nil is the case under test
+	if FromContext(Detach(nilCtx)) != nil {
 		t.Fatal("Detach(nil) must give an arena-free context")
 	}
 }
