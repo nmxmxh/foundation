@@ -82,30 +82,27 @@ async function request<T>(
   return response.json()
 }
 
+// sendJson is the one place this client encodes a body. Only undefined means
+// "no body"; falsy values such as 0, false, or "" are still sent.
+const sendJson = <T>(method: string, endpoint: string, data: unknown, options?: RequestOptions) =>
+  request<T>(endpoint, {
+    ...options,
+    method,
+    body: data === undefined ? undefined : JSON.stringify(data),
+  })
+
 export const api = {
   get: <T>(endpoint: string, options?: RequestOptions) =>
     request<T>(endpoint, { ...options, method: 'GET' }),
 
   post: <T>(endpoint: string, data?: unknown, options?: RequestOptions) =>
-    request<T>(endpoint, {
-      ...options,
-      method: 'POST',
-      body: data ? JSON.stringify(data) : undefined,
-    }),
+    sendJson<T>('POST', endpoint, data, options),
 
   put: <T>(endpoint: string, data?: unknown, options?: RequestOptions) =>
-    request<T>(endpoint, {
-      ...options,
-      method: 'PUT',
-      body: data ? JSON.stringify(data) : undefined,
-    }),
+    sendJson<T>('PUT', endpoint, data, options),
 
   patch: <T>(endpoint: string, data?: unknown, options?: RequestOptions) =>
-    request<T>(endpoint, {
-      ...options,
-      method: 'PATCH',
-      body: data ? JSON.stringify(data) : undefined,
-    }),
+    sendJson<T>('PATCH', endpoint, data, options),
 
   delete: <T>(endpoint: string, options?: RequestOptions) =>
     request<T>(endpoint, { ...options, method: 'DELETE' }),

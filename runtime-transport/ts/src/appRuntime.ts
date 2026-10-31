@@ -9,6 +9,7 @@ import {
   type TransportDiagnostics,
   type TransportStrategy,
 } from "./index";
+import { type JsonRecord } from "./jsonRecord";
 
 /**
  * createAppRuntime is the thin, opinionated facade that collapses the per-app
@@ -53,7 +54,7 @@ export type DispatchOverrides = {
   requestId?: string;
   idempotencyKey?: string;
   schemaVersion?: string;
-  extra?: Record<string, unknown>;
+  extra?: JsonRecord;
 };
 
 /**

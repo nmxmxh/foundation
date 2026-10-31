@@ -77,3 +77,56 @@ func TestServiceBackedSortedSetBoundedRecentBuffer(t *testing.T) {
 		t.Fatalf("after rescore top = %v want sig-mid", top)
 	}
 }
+
+// Service-backed proof for the bounded-window helpers: ZIncrBy, the TTL a
+// ranked counter renews, and the orphan-free payload trim must behave on real
+// Redis exactly as the memory driver's unit tests pin them.
+func TestServiceBackedRankedWindowHelpers(t *testing.T) {
+	env := requireServiceEnv(t)
+	client := openRedis(t, env)
+	defer func() { _ = client.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	const counter = "demand:ranked:sb"
+	defer func() { _ = client.Del(ctx, counter) }()
+	for i, member := range []string{"a", "b", "c", "d"} {
+		if _, err := rediskit.BumpRanked(ctx, client, counter, member, float64(i+1), time.Minute, 3); err != nil {
+			t.Fatalf("bump %s: %v", member, err)
+		}
+	}
+	if score, err := rediskit.BumpRanked(ctx, client, counter, "b", 5, time.Minute, 3); err != nil || score != 7 {
+		t.Fatalf("bump b = %v,%v want 7", score, err)
+	}
+	ss := client.(rediskit.SortedSetClient)
+	if top, _ := ss.ZRevRange(ctx, counter, 0, -1); len(top) != 3 || top[0] != "b" || top[1] != "d" || top[2] != "c" {
+		t.Fatalf("ranked = %v want [b d c]", top)
+	}
+
+	const feed = "signals:window:sb"
+	rows := make([]string, 0, 6)
+	for i := range 6 {
+		member := "row-" + string(rune('a'+i))
+		rows = append(rows, "signals:window:row:"+member)
+		if err := client.Set(ctx, "signals:window:row:"+member, "payload", time.Minute); err != nil {
+			t.Fatalf("set payload: %v", err)
+		}
+		if _, err := ss.ZAdd(ctx, feed, float64(i), member); err != nil {
+			t.Fatalf("zadd: %v", err)
+		}
+	}
+	defer func() { _ = client.Del(ctx, append(rows, feed)...) }()
+	removed, err := rediskit.TrimRankedWindow(ctx, client, feed, rediskit.WindowTrim{
+		Keep:       2,
+		PayloadKey: func(member string) string { return "signals:window:row:" + member },
+		BatchSize:  3,
+	})
+	if err != nil || removed != 4 {
+		t.Fatalf("trim = %d,%v want 4", removed, err)
+	}
+	for _, key := range rows[:4] {
+		if v, _ := client.Get(ctx, key); len(v) != 0 {
+			t.Fatalf("payload %s survived its eviction", key)
+		}
+	}
+}

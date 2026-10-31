@@ -74,6 +74,8 @@ pre-answered questions without scanning multiple files.
 | **Retry policy** | `server-kit/go/retry` — exponential backoff with jitter, max attempts, context-aware cancellation, and preset policies. | `foundation_guide.md` |
 | **River** | Go-based background job queue used for durable worker execution with bounded retries and dead-letter support. | `foundation_guide.md` |
 | **Route catalog** | Machine-readable JSON projection of all registered server routes, used to generate `runtimeRoutes.ts` for the frontend. | `frontend_command_registry.md` |
+| **Ranked window** | A Redis sorted set grown only through `rediskit.BumpRanked` (ranked counters) or `rediskit.TrimRankedWindow` (window indexes with payload rows); members carry no TTL, so every writer trims. Enforced by `redis_practices_check`. | `redis_practices.md` |
+| **Redis budget manifest** | `config/redis_budget.tsv`: per-key-family entries x bytes, summed within 80% of `maxmemory`, with every bound env/const default equal to its row. Required when an app writes sorted sets. | `redis_practices.md` |
 | **Resource binding** | A versioned operation attached to an owned resource, with checked types, access, generations, and performance budgets. | `native_resource_bindings.md` |
 | **Runtime envelope** | See *Envelope* above. | `foundation_nervous_system.md` |
 | **Runtime-native** | `@ovasabi/runtime-native` — Tauri-backed native shell bridge: binary frames, secure storage, capability discovery, and native dispatch. | `runtime_native.md` |
@@ -278,7 +280,7 @@ The recommended facade that wires the generated route registry, HTTP/WS transpor
 | Database schema / query | `database_practices.md`, `migration_practices.md` |
 | Event contracts / lifecycle | `foundation_nervous_system.md`, `coding_practices.md` (CP-10), `testing_practices.md` (TE-10) |
 | Worker / background job | `coding_practices.md` (CP-02, CP-24, CP-35), `testing_practices.md` (TE-14) |
-| Redis usage | `redis_practices.md`, `testing_practices.md` (TE-13) |
+| Redis usage, sorted sets, window sizing | `redis_practices.md` (Bounded ranked windows, Redis budget manifest, Tier ownership), `testing_practices.md` (TE-13) |
 | WebSocket routing | `websocket_scaling.md`, `coding_practices.md` (CP-17) |
 | Frontend component | `styling_design_practices.md`, `frontend_scaffold_sync.md`, `references/README.md` |
 | Frontend transport | `frontend_command_registry.md`, `frontend_scaffold_sync.md` |

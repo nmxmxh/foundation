@@ -1,6 +1,7 @@
 import { createStore } from "zustand/vanilla";
 
 import { createRuntimeSessionID, mergeGlobalContextExtras, resolveRuntimeSessionID } from "../runtimeMetadata";
+import { type JsonRecord } from "../jsonRecord";
 
 export interface BaseMetadata {
   correlationId: string;
@@ -9,7 +10,7 @@ export interface BaseMetadata {
     session_id?: string;
     organization_id?: string;
     source?: string;
-    extras?: Record<string, unknown>;
+    extras?: JsonRecord;
     [key: string]: unknown;
   };
   [key: string]: unknown;

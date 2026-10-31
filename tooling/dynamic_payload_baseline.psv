@@ -1,5 +1,6 @@
 # Ceilings for tooling/scripts/dynamic_payload_practices_check.sh. Counts only fall.
 # Recorded 2026-11-01, when the gate first ran (it was dead before; see the script).
+# Lowered the same day: codec boundary declared, tools excluded, JsonRecord type (74->29, 27->4).
 # gate|ceiling
-dynamic_maps|74
-adhoc_json|27
+dynamic_maps|29
+adhoc_json|4

@@ -1,7 +1,6 @@
+import { type JsonRecord, isJsonRecord } from "./jsonRecord";
 const SESSION_PREFIX = "session_";
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 
 export const normalizeRuntimeString = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
@@ -56,9 +55,9 @@ export const resolveRuntimeAuthToken = (...candidates: unknown[]): string => {
 
 export const mergeGlobalContextExtras = (
   existing: unknown,
-  injected: Record<string, unknown>
-): Record<string, unknown> => {
-  const merged: Record<string, unknown> = isRecord(existing) ? { ...existing } : {};
+  injected: JsonRecord
+): JsonRecord => {
+  const merged: JsonRecord = isJsonRecord(existing) ? { ...existing } : {};
   Object.entries(injected).forEach(([key, value]) => {
     if (value === undefined || value === null || value === "") {
       delete merged[key];

@@ -1,5 +1,6 @@
 import type { RuntimeEnvelope, RuntimeRoute, TransportStrategy } from "./index";
 import { compressRuntimeBytes, type RuntimeCompressionOptions } from "./compression";
+import { type JsonRecord } from "./jsonRecord";
 
 type HTTPTransportOptions = {
   baseUrl: string;
@@ -70,7 +71,7 @@ export const createHTTPTransport = (options: HTTPTransportOptions): TransportStr
         })();
       }
 
-      const decoded = (await response.json()) as Record<string, unknown>;
+      const decoded = (await response.json()) as JsonRecord;
       return decoded.response_payload ?? decoded;
     },
   };
@@ -203,7 +204,7 @@ const appendQuery = (url: URL, payload: unknown, skip?: ReadonlySet<string>) => 
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return;
   }
-  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(payload as JsonRecord)) {
     if (value === undefined || value === null) {
       continue;
     }
@@ -248,7 +249,7 @@ const resolvePathParams = (
   }
   const record =
     payload && typeof payload === "object" && !Array.isArray(payload)
-      ? (payload as Record<string, unknown>)
+      ? (payload as JsonRecord)
       : {};
 
   const path = routePath.replace(PATH_PARAM_PATTERN, (_match, rawName: string) => {
@@ -276,8 +277,8 @@ const omitKeys = (payload: unknown, keys: ReadonlySet<string>): unknown => {
   if (keys.size === 0 || !payload || typeof payload !== "object" || Array.isArray(payload)) {
     return payload;
   }
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+  const out: JsonRecord = {};
+  for (const [key, value] of Object.entries(payload as JsonRecord)) {
     if (!keys.has(key)) {
       out[key] = value;
     }
@@ -299,9 +300,9 @@ const parseErrorBody = async (response: Response): Promise<string> => {
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
   if (contentType.includes("application/json")) {
     try {
-      const body = (await response.json()) as Record<string, unknown>;
+      const body = (await response.json()) as JsonRecord;
       if (typeof body.error === "object" && body.error !== null) {
-        const message = (body.error as Record<string, unknown>).message;
+        const message = (body.error as JsonRecord).message;
         if (typeof message === "string" && message.trim() !== "") {
           return message;
         }

@@ -139,6 +139,15 @@ type SortedSetClient interface {
 	ZCard(ctx context.Context, key string) (int64, error)
 }
 
+// RankedCounterClient is the optional increment surface for ranked counters
+// such as demand or trending sets. ZIncrBy adds delta to a member's score in
+// one command and returns the new score, so a counter lives in the ranked set
+// itself instead of a per-member INCR key that needs its own TTL. Prefer
+// BumpRanked, which also applies the TTL and rank cap.
+type RankedCounterClient interface {
+	ZIncrBy(ctx context.Context, key string, delta float64, member string) (float64, error)
+}
+
 // CoordinationBatchClient is the optional round-trip amortization surface for
 // coordination keys that need counter+TTL updates and notification fanout.
 // WebSocket route registration uses this during reconnect storms so each
@@ -1022,6 +1031,23 @@ func (c *memoryClient) ZCard(_ context.Context, key string) (int64, error) {
 	defer c.mu.RUnlock()
 	c.expireIfNeededLocked(qualified, time.Now())
 	return int64(len(c.zsets[qualified])), nil
+}
+
+func (c *memoryClient) ZIncrBy(_ context.Context, key string, delta float64, member string) (float64, error) {
+	qualified := c.qualify(key)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return 0, fmt.Errorf("memory redis client is closed")
+	}
+	c.expireIfNeededLocked(qualified, time.Now())
+	set := c.zsets[qualified]
+	if set == nil {
+		set = map[string]float64{}
+		c.zsets[qualified] = set
+	}
+	set[member] += delta
+	return set[member], nil
 }
 
 func (c *memoryClient) PFAdd(_ context.Context, key string, els ...any) (int64, error) {
@@ -1969,6 +1995,13 @@ func (c *redisClient) ZCard(ctx context.Context, key string) (int64, error) {
 	return cardinality, err
 }
 
+func (c *redisClient) ZIncrBy(ctx context.Context, key string, delta float64, member string) (float64, error) {
+	start := time.Now()
+	score, err := c.client.ZIncrBy(ctx, c.qualify(key), delta, member).Result()
+	recordRedisOperation("zincrby", start, err)
+	return score, err
+}
+
 func (c *redisClient) Close() error {
 	if c == nil || c.client == nil {
 		return nil
@@ -2292,6 +2325,10 @@ func (c *shardedClient) ZRemRangeByRank(ctx context.Context, key string, start, 
 
 func (c *shardedClient) ZCard(ctx context.Context, key string) (int64, error) {
 	return c.shard(key).ZCard(ctx, key)
+}
+
+func (c *shardedClient) ZIncrBy(ctx context.Context, key string, delta float64, member string) (float64, error) {
+	return c.shard(key).ZIncrBy(ctx, key, delta, member)
 }
 
 func (c *shardedClient) Close() error {

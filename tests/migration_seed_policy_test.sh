@@ -31,7 +31,9 @@ BASELINE_GENERATION=legacy
 EOF
 
 test_step "update migration fixture from current foundation"
-"$FOUNDATION_DIR/scripts/update-project.sh" "$PROJECT_DIR"
+# --skip-deps: this test checks migration seeding only. Resolving npm, Go and
+# Rust dependencies took ~70 s and timed the gate out under make lint load.
+"$FOUNDATION_DIR/scripts/update-project.sh" "$PROJECT_DIR" --skip-deps
 
 if [[ -e "$PROJECT_DIR/migrations/000001_init.up.sql" || -e "$PROJECT_DIR/migrations/000001_init.down.sql" ]]; then
     echo "seed init migration should not be added when project-owned migrations exist" >&2

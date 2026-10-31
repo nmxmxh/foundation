@@ -1,4 +1,5 @@
 import type { RuntimeEnvelope } from "./index";
+import { type JsonRecord } from "./jsonRecord";
 
 export type OfflineConflictResolution = "server-wins" | "client-wins" | "manual";
 
@@ -40,7 +41,7 @@ export type OfflineQueueEntry<TPayload = unknown> = {
 
 const cloneEnvelopeWithExtra = <TPayload>(
   envelope: RuntimeEnvelope<TPayload>,
-  nextExtra: Record<string, unknown>
+  nextExtra: JsonRecord
 ): RuntimeEnvelope<TPayload> => ({
   ...envelope,
   // Clone only the metadata + extra bag. Payload is left by reference because it
@@ -56,15 +57,15 @@ export const createOfflineQueue = (options: OfflineQueueOptions = {}) => {
       : DEFAULT_AUTH_TOKEN_EXTRA_KEYS;
   const entries: OfflineQueueEntry[] = [];
 
-  const stripAuth = (extra: Record<string, unknown> | undefined): Record<string, unknown> => {
-    const next: Record<string, unknown> = { ...(extra ?? {}) };
+  const stripAuth = (extra: JsonRecord | undefined): JsonRecord => {
+    const next: JsonRecord = { ...(extra ?? {}) };
     for (const key of authTokenKeys) {
       delete next[key];
     }
     return next;
   };
 
-  const restampAuth = (extra: Record<string, unknown>): Record<string, unknown> => {
+  const restampAuth = (extra: JsonRecord): JsonRecord => {
     if (!options.resolveAuthToken) {
       return extra;
     }

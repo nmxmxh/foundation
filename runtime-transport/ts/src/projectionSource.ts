@@ -14,6 +14,7 @@ import {
   createRuntimeTransportProjectionCodec,
   type ProjectionProtoCodec,
 } from "./projectionCodec";
+import { type JsonRecord } from "./jsonRecord";
 
 // Structural mirrors of frontend-kit's read-model types. Defined locally so the
 // transport layer does not import the higher UI layer; they meet frontend-kit's
@@ -33,7 +34,7 @@ export type ProjectionMutation = {
   collection: string;
   recordId: string;
   version: number;
-  fields?: Record<string, unknown>;
+  fields?: JsonRecord;
 };
 
 export type ProjectionLoadRequest = {
@@ -56,11 +57,11 @@ export type { ProjectionProtoCodec };
 // optional — so a concrete return is not assignable to it; matching the phantom
 // shape here moves the single unavoidable cast inside this module).
 export type HermesProjectionSourceCompatible = {
-  loadProjection?<TRecord extends Record<string, unknown>>(
+  loadProjection?<TRecord extends JsonRecord>(
     scope: ProjectionScope,
     request: ProjectionLoadRequest,
   ): Promise<{ _phantom?: TRecord }>;
-  subscribeProjection?<TRecord extends Record<string, unknown>>(
+  subscribeProjection?<TRecord extends JsonRecord>(
     scope: ProjectionScope,
     listener: (event: unknown, record?: TRecord) => void,
   ): () => void;
@@ -164,7 +165,7 @@ export const mapMutation = (
   }
   if (!mutation.recordId) return undefined;
 
-  const fields: Record<string, unknown> = {};
+  const fields: JsonRecord = {};
   for (const field of mutation.fields ?? []) {
     if (!field?.name) continue;
     const value = scalarToValue(field.value);
@@ -232,7 +233,7 @@ export const createHttpProjectionSource = (
   };
 
   return {
-    async loadProjection<TRecord extends Record<string, unknown>>(
+    async loadProjection<TRecord extends JsonRecord>(
       scope: ProjectionScope,
       request: ProjectionLoadRequest,
     ): Promise<{ _phantom?: TRecord }> {
@@ -510,7 +511,7 @@ export const createWebSocketProjectionSource = (
   };
 
   return {
-    subscribeProjection<TRecord extends Record<string, unknown>>(
+    subscribeProjection<TRecord extends JsonRecord>(
       scope: ProjectionScope,
       listener: (event: unknown, record?: TRecord) => void,
     ): () => void {

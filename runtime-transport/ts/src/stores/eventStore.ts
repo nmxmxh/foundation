@@ -2,6 +2,7 @@ import { createStore } from "zustand/vanilla";
 
 import { type PayloadEncoding, type RuntimeEnvelope, createEnvelope } from "../index";
 import { normalizeRuntimeString, pickRuntimeSessionID } from "../runtimeMetadata";
+import { type JsonRecord } from "../jsonRecord";
 
 export type RequestReplayPolicy = "auto" | "always" | "never";
 export type RequestCoalescingPolicy = "auto" | "always" | "never";
@@ -26,7 +27,7 @@ export interface EmitEventOptions {
   cacheDurationMs?: number; // 0 means do not cache
   forceRefresh?: boolean;
   payloadEncoding?: PayloadEncoding;
-  extra?: Record<string, unknown>;
+  extra?: JsonRecord;
   replayPolicy?: RequestReplayPolicy;
   coalescingPolicy?: RequestCoalescingPolicy;
   loadingKey?: string;
@@ -36,10 +37,10 @@ const DEFAULT_LOADING_KEY = "global";
 const MUTATION_EVENT_PATTERN =
   /(?:[:_])(create|update|delete|upload|import|export|generate|process|sync|assign|set|post|put|patch|start|stop)/;
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+const isPlainObject = (value: unknown): value is JsonRecord =>
   value !== null && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype;
 
-const pickString = (source: Record<string, unknown>, ...keys: string[]): string => {
+const pickString = (source: JsonRecord, ...keys: string[]): string => {
   for (const key of keys) {
     const raw = source[key];
     const normalized = normalizeRuntimeString(raw);
@@ -66,7 +67,7 @@ const hashBytes = (bytes: Uint8Array): string => {
   return (hash >>> 0).toString(36);
 };
 
-const toBinarySummary = (value: Uint8Array, type: string): Record<string, unknown> => ({
+const toBinarySummary = (value: Uint8Array, type: string): JsonRecord => ({
   __binaryType: type,
   byteLength: value.byteLength,
   hash: hashBytes(value),
@@ -108,7 +109,7 @@ const toStableValue = (value: unknown): unknown => {
   }
 
   if (isPlainObject(value)) {
-    const sorted: Record<string, unknown> = {};
+    const sorted: JsonRecord = {};
     Object.keys(value)
       .sort()
       .forEach((key) => {
@@ -132,7 +133,7 @@ export const buildRequestFingerprint = (payload: unknown): string => hashKey(sta
 
 const buildMetadataFingerprint = (metadata: unknown): string => hashKey(stableStringify(metadata));
 
-const toIdentityScopedMetadata = (metadata: unknown): Record<string, unknown> => {
+const toIdentityScopedMetadata = (metadata: unknown): JsonRecord => {
   if (!isPlainObject(metadata)) {
     return {};
   }
@@ -144,7 +145,7 @@ const toIdentityScopedMetadata = (metadata: unknown): Record<string, unknown> =>
       ? root.globalContext
       : {};
 
-  const scoped: Record<string, unknown> = {};
+  const scoped: JsonRecord = {};
   const sessionId = pickRuntimeSessionID(
     globalContext["session_id"],
     globalContext["sessionId"],
@@ -281,7 +282,7 @@ const shouldCoalesceRequest = (
 
 export const createEventStore = (
   dispatch: <TPayload>(envelope: RuntimeEnvelope<TPayload>) => Promise<unknown>,
-  getMetadata?: () => Record<string, unknown>
+  getMetadata?: () => JsonRecord
 ) => {
   const pendingRequests = new Map<string, Promise<unknown>>();
   const responseCache = new Map<string, { data: unknown; timestamp: number }>();

@@ -11,6 +11,7 @@ import {
   type PayloadEncoding,
   type RuntimeEnvelope,
 } from "./index";
+import { type JsonRecord } from "./jsonRecord";
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -73,7 +74,7 @@ export const encodeJSONRuntimeEnvelope = <TPayload>(envelope: RuntimeEnvelope<TP
   })());
 
 export const decodeJSONRuntimeEnvelope = (payload: string): RuntimeEnvelope<unknown> => {
-  const parsed = JSON.parse(payload) as Record<string, unknown>;
+  const parsed = JSON.parse(payload) as JsonRecord;
   const nestedMetadata = asRecord(parsed.metadata);
   const metadata = normalizeEnvelopeMetadata({
     correlationId:
@@ -94,7 +95,7 @@ export const decodeJSONRuntimeEnvelope = (payload: string): RuntimeEnvelope<unkn
   });
   return {
     eventType: readString(parsed, "event_type", "eventType"),
-    payload: (parsed.payload as Record<string, unknown> | undefined) ?? {},
+    payload: (parsed.payload as JsonRecord | undefined) ?? {},
     payloadEncoding: normalizePayloadEncoding(readString(parsed, "payload_encoding", "payloadEncoding") as PayloadEncoding),
     metadata,
   };
@@ -120,7 +121,7 @@ const decodePayload = (payload: Uint8Array, encoding: PayloadEncoding): unknown 
   if (payload.byteLength === 0) {
     return {};
   }
-  return JSON.parse(textDecoder.decode(payload)) as Record<string, unknown>;
+  return JSON.parse(textDecoder.decode(payload)) as JsonRecord;
 };
 
 const encodeMetadata = (metadata: EnvelopeMetadata): ProtoMetadata => ({
@@ -172,18 +173,18 @@ const decodeMetadata = (envelope: EventEnvelope): EnvelopeMetadata => {
   });
 };
 
-const decodeExtras = (extras?: Uint8Array): Record<string, unknown> => {
+const decodeExtras = (extras?: Uint8Array): JsonRecord => {
   if (!extras || extras.byteLength === 0) {
     return {};
   }
   try {
-    return JSON.parse(textDecoder.decode(extras)) as Record<string, unknown>;
+    return JSON.parse(textDecoder.decode(extras)) as JsonRecord;
   } catch {
     return {};
   }
 };
 
-const readString = (source: Record<string, unknown>, ...keys: string[]): string => {
+const readString = (source: JsonRecord, ...keys: string[]): string => {
   for (const key of keys) {
     const value = source[key];
     if (typeof value === "string" && value.trim() !== "") {
@@ -226,8 +227,8 @@ const protoToPayloadEncoding = (value: ProtoPayloadEncoding): PayloadEncoding =>
         ? "binary"
         : "json";
 
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+const asRecord = (value: unknown): JsonRecord | undefined =>
+  value && typeof value === "object" ? (value as JsonRecord) : undefined;
 
 const reservedMetadataKeys = new Set([
   "correlation_id",
@@ -240,15 +241,15 @@ const reservedMetadataKeys = new Set([
   "schemaVersion",
 ]);
 
-const encodeExtras = (extra: Record<string, unknown> | undefined): Uint8Array => {
+const encodeExtras = (extra: JsonRecord | undefined): Uint8Array => {
   if (!extra || Object.keys(extra).length === 0) {
     return emptyJSONBytes;
   }
   return textEncoder.encode(JSON.stringify(extra));
 };
 
-const stripReservedMetadataKeys = (value: Record<string, unknown>): Record<string, unknown> => {
-  let next: Record<string, unknown> | undefined;
+const stripReservedMetadataKeys = (value: JsonRecord): JsonRecord => {
+  let next: JsonRecord | undefined;
   for (const key of Object.keys(value)) {
     if (reservedMetadataKeys.has(key)) {
       next ??= { ...value };

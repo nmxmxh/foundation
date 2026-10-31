@@ -114,16 +114,31 @@ ratchet_gate() {
   fi
 }
 
+# Declared exclusions, each with a reason:
+# - cmd/ovasabi and cmd/docgen are developer tools (CLI, code generator), not
+#   request hot paths; the cmd/ entry targets a scaffolded app's server.
+# - runtime-transport jsonRecord.ts defines the single JsonRecord boundary type.
+# - The codec boundary is where bytes become objects, so JSON calls belong
+#   there: binaryEnvelope.ts, http.ts, projectionSource.ts (wire control frames)
+#   and Go value.go. Product code reaches JSON only through these.
+tool_globs=(--glob '!**/cmd/ovasabi/**' --glob '!**/cmd/docgen/**')
+codec_globs=(
+  --glob '!**/runtime-transport/ts/src/binaryEnvelope.ts'
+  --glob '!**/runtime-transport/ts/src/http.ts'
+  --glob '!**/runtime-transport/ts/src/projectionSource.ts'
+  --glob '!**/runtime-transport/go/transport/value.go'
+)
+
 if (( ${#product_paths[@]} > 0 )); then
   ratchet_gate dynamic_maps \
     "dynamic payload maps are not allowed in scaffolded product hot paths" \
     "map\\[string\\](any|interface\\{\\})|Record<\\s*string\\s*,\\s*(unknown|any)\\s*>|\\{\\s*\\[key:\\s*string\\]\\s*:\\s*(unknown|any)\\s*\\}" \
-    "${product_paths[@]}"
+    "${product_paths[@]}" "${tool_globs[@]}" --glob '!**/runtime-transport/ts/src/jsonRecord.ts'
 
   ratchet_gate adhoc_json \
     "product hot paths avoid ad hoc JSON encode/decode" \
     "json\\.(Marshal|Unmarshal|NewDecoder|NewEncoder)|JSON\\.(parse|stringify)" \
-    "${product_paths[@]}"
+    "${product_paths[@]}" "${tool_globs[@]}" "${codec_globs[@]}"
 fi
 
 if [[ "$failed" -ne 0 ]]; then

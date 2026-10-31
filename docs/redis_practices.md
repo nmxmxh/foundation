@@ -2,12 +2,18 @@
 
 Status: baseline
 Date: 2026-04-20
+Updated: 2026-10-31 (bounded ranked windows, Redis budget manifest, tier ownership)
 
 ## Purpose
 
 Redis is for ephemeral speed and coordination, not durable business truth.
 
-In this architecture the default read order is local memory cache first, Redis second, Postgres/read model third. Redis should remove repeated network/DB work from hot paths; it should not decide durable state transitions alone.
+Redis should remove repeated network/DB work from side paths; it should not decide durable state transitions alone, and it is not a tier between Hermes and Postgres.
+
+Read order by lane:
+
+1. Data served from a Hermes projection: Hermes, then the durable store. No Redis tier between them. Hermes is already the in-process hot plane; a Redis tier there adds a network round trip to every miss and a second copy that must be written, trimmed, and invalidated (see "Tier ownership").
+2. Side reads with no projection (summaries, idempotency fences, counters): process memory, then Redis through the `cache` package, then the durable store.
 
 ## Non-negotiable rules
 
@@ -37,7 +43,7 @@ Regression guard: `TestAbsentKeySemanticsContract` pins the full contract for th
 4. **Reliable Event Streaming**: Use Redis Streams (`XADD`, `XREADGROUP`) for business-critical events requiring "at-least-once" delivery.
 5. **Distributed Coordination**: Use Fenced Distributed Locks for cross-process resource protection.
 6. Lightweight pub/sub notifications (transient only).
-7. Bounded ranked sets (`SortedSetClient`): recent-signal feeds, leaderboards — always paired with a rank-window trim.
+7. Bounded ranked sets (`SortedSetClient`): recent-signal feeds, leaderboards, trending counters — grown only through the bounded-window helpers in "Bounded ranked windows" below.
    - Driver parity is mandatory for ranked sets: ZRevRange mirrors the ascending order exactly, so equal scores return reverse-lexicographic — verified identical on the memory and live-server drivers by cross-driver tests (`redis/sortedset_test.go`, `servicebacked/sortedset_test.go`). A memory-client implementation that "passes alone" hides real-Redis divergence.
    - Validate mirror/ingest stats at the LISTENER choke point, not inside individual sinks: a guard behind one adapter passes every in-memory test and silently disappears for every other consumer (caught service-backed, 2026-08-23).
 8. Transient session management.
@@ -71,6 +77,101 @@ Rules that keep the lanes honest:
 5. Tag marker keys live under `<prefix>:__tag__:<tag>:<hex(key)>`. Never read
    them as data, never hand-format sibling namespaces, and keep pattern scans
    out of request paths — they belong to mutation and maintenance lanes only.
+
+## Bounded ranked windows
+
+Sorted-set members have no TTL of their own. A key-level `EXPIRE` only fires
+once writes stop, and every `ZADD` keeps it alive, so a sorted set that is
+added to but never trimmed grows until `maxmemory`. Then `allkeys-lfu` evicts
+whatever it samples, including the index itself. Pronto hit this three times
+on 2026-08-23/24, ending in a host OOM. The 2026-10-31 review found the same
+pattern still live in pronto's facet indexes and in the chowdash and trotters
+demand buffers.
+
+Use `server-kit/go/redis`:
+
+| Shape | Helper | What it guarantees |
+| --- | --- | --- |
+| Ranked counter (trending, demand, leaderboard) | `BumpRanked(ctx, c, key, member, delta, ttl, keep)` | One `ZINCRBY`, TTL renewed, set capped at `keep`. Refuses a zero TTL or cap. |
+| Window index with payload rows | `TrimRankedWindow(ctx, c, key, WindowTrim{Keep, PayloadKey, BatchSize, MaxPasses})` | Evicted payloads unlinked before their members leave the index; bounded passes |
+| Index without payloads (facet, collection) | `TrimRankedWindow(ctx, c, key, WindowTrim{Keep})` | One rank trim |
+
+Rules:
+
+1. Every file that adds to a sorted set (`ZAdd`, `ZAddMany`, `ZIncrBy`) also
+   trims it through one of the helpers, or `ZRemRangeByRank`. Enforced by
+   `redis_practices_check`.
+2. Ranked counters live in the ranked set. Do not keep a per-member `INCR`
+   counter and copy it into the set. That needs one key per member, each with
+   a TTL that is easy to forget, plus one round trip per unit of quantity.
+   Both demand buffers had counters that never expired.
+3. Payload behind an index: write payloads before the index, so a reader
+   never sees a member without its row. If either write fails, unlink the
+   batch's payloads. When payload existence doubles as the duplicate test, a
+   payload stranded by a failed index write rejects every re-delivery for the
+   payload TTL while the row stays invisible.
+4. Evict payload rows with `TrimRankedWindow` and a `PayloadKey`. Never rank
+   trim first and `DEL` second: a `DEL` that fails or times out strands the
+   payloads for their whole TTL. That order caused the 2026-08-24 spiral.
+5. Every secondary index gets its own cap, at most
+   `min(window capacity, deepest read)`. A facet index over a master feed holds
+   members the master already evicted, and a read never looks past its
+   deepest range, so those members are pure growth. "Trimmed like the master"
+   is not a cap unless code trims it.
+6. Track which secondary indexes grew and trim them on the amortized cadence.
+   An index touched only by batches that skip the trim must still be capped
+   at the next pass.
+
+## Redis budget manifest
+
+A window's size and the Redis memory cap are set in different files. Pronto
+had four values for one window: `docker-compose.yml` defaulted to 200,000,
+`config.go` to 50,000, the code constant to 200,000, and `redis.conf` was
+sized for 100,000. The deployed default needed about 1.8 GB against a 1.5 GB
+cap.
+
+Any app with a ranked window keeps `config/redis_budget.tsv`, one row per
+key family:
+
+```text
+# family	max_entries	bytes_per_entry	bound	keys
+signal_window	100000	9216	env:SIGNAL_HOT_BUFFER_LIMIT,const:defaultHotBufferLimit
+dedup_markers	120000	350	-
+trending_dishes	500	96	const:trendingKeep	200
+```
+
+- Columns are tab-separated. `max_entries` is the cap per key. `keys`
+  (optional, default 1) is how many keys share the cap, such as one trending
+  set per tenant at the tenant ceiling you plan for.
+- `max_entries x bytes_per_entry x keys`, summed over all rows, must stay
+  within 80% of `maxmemory` in `config/redis.conf`.
+- `bound` ties a row to the settings that size it, comma-separated. With
+  `env:VAR`, every default for `VAR` must equal `max_entries`. That covers
+  `${VAR:-N}` in compose files, `VAR=N` in `.env.example`, and
+  `getEnvInt("VAR", N)` in Go. With `const:NAME`, the Go constant must equal
+  it. Use `-` for families bounded only by a TTL.
+- `redis_practices_check` enforces all three: the file exists when the app
+  uses ranked sets, the sum fits, and every bound default agrees. To change a
+  window, change the manifest, the env defaults, and `maxmemory` together.
+
+## Tier ownership
+
+A cache tier needs a production writer. Without one, every read pays a round
+trip to miss.
+
+1. Each tier you add names its writer, and that writer has a production
+   caller. In chowdash and trotters, `logistics.RedisBuffer` and the Hermes
+   edge projection were read on every estimate, but no code wrote to either.
+   A plan made one lookup per candidate pair, each with a 500ms Redis
+   timeout, inside a 15 second deadline.
+2. Durable first, hot second. Expose one write path that commits to the
+   durable store and publishes to the hot tier only after that commit
+   succeeds (`logistics.Runtime.CommitEdge`). Scattered write calls let tiers
+   disagree.
+3. A process-local decoded-row memo keyed by a Redis generation counter is
+   wiped by every accepted write. Under steady ingest its hit rate falls to
+   almost zero. If the memo carries the read path, the data belongs in a
+   Hermes projection.
 
 ## Key design
 
@@ -151,7 +252,9 @@ Rules:
 ## Delivery checklist
 
 1. Key naming documented.
-2. TTL documented and tested.
-3. Fallback behavior tested for Redis downtime.
-4. Metrics and alerts in place for error rate and memory pressure.
-5. Key families reviewed for tenant bleed, cache poisoning, and stale-session invalidation behavior.
+2. TTL documented and tested. Ranked sets use the bounded-window helpers.
+3. Key family listed in `config/redis_budget.tsv` with its bound, if it can grow with traffic.
+4. Every cache tier has a production writer, and a test that fails if the durable write is refused but the hot tier still publishes.
+5. Fallback behavior tested for Redis downtime.
+6. Metrics and alerts in place for error rate and memory pressure.
+7. Key families reviewed for tenant bleed, cache poisoning, and stale-session invalidation behavior.

@@ -1,3 +1,4 @@
+import { type JsonRecord } from "./jsonRecord";
 export type TransportKind = "postMessage" | "transferable" | "sab" | "native" | "ws" | "http" | "wasm";
 export type PayloadEncoding = "json" | "protobuf" | "capnp" | "binary";
 export type ProtobufCodec<TPayload> = {
@@ -11,10 +12,10 @@ export type EnvelopeMetadata = {
   idempotencyKey: string;
   schemaVersion: string;
   timestamp: string;
-  extra: Record<string, unknown>;
+  extra: JsonRecord;
 };
 
-export type RuntimeEnvelope<TPayload = Record<string, unknown>> = {
+export type RuntimeEnvelope<TPayload = JsonRecord> = {
   eventType: string;
   payload: TPayload;
   payloadEncoding: PayloadEncoding;
@@ -46,7 +47,7 @@ export type TransportDiagnostics = {
 export type EnvelopeFactoryInput<TPayload> = {
   eventType: string;
   payload: TPayload;
-  extra?: Record<string, unknown>;
+  extra?: JsonRecord;
   correlationId?: string;
   requestId?: string;
   idempotencyKey?: string;
@@ -457,3 +458,5 @@ export * from "./websocket";
 
 export * from "./stores/metadataStore";
 export * from "./stores/eventStore";
+
+export { isJsonRecord, type JsonRecord } from "./jsonRecord";
