@@ -334,8 +334,9 @@ func (cb *CircuitBreaker) transitionTo(newState State) {
 	cb.lastStateChange = cb.config.Clock.Now()
 
 	// Reset counters on state change
-	cb.failures = 0
-	cb.successes = 0
+	// Counters are read lock-free by Counts and the success fast path, so writes stay atomic.
+	atomic.StoreUint32(&cb.failures, 0)
+	atomic.StoreUint32(&cb.successes, 0)
 	cb.halfOpenCalls = 0
 	cb.buckets = [rollingBucketCount]windowBucket{}
 
@@ -406,8 +407,9 @@ func (cb *CircuitBreaker) Reset() {
 
 	oldState := State(atomic.LoadInt32(&cb.state))
 	atomic.StoreInt32(&cb.state, int32(StateClosed))
-	cb.failures = 0
-	cb.successes = 0
+	// Counters are read lock-free by Counts and the success fast path, so writes stay atomic.
+	atomic.StoreUint32(&cb.failures, 0)
+	atomic.StoreUint32(&cb.successes, 0)
 	cb.halfOpenCalls = 0
 	cb.buckets = [rollingBucketCount]windowBucket{}
 	cb.lastStateChange = cb.config.Clock.Now()
@@ -443,8 +445,8 @@ func (cb *CircuitBreaker) Stats() Stats {
 	return Stats{
 		Name:            cb.name,
 		State:           State(atomic.LoadInt32(&cb.state)).String(),
-		Failures:        cb.failures,
-		Successes:       cb.successes,
+		Failures:        atomic.LoadUint32(&cb.failures),
+		Successes:       atomic.LoadUint32(&cb.successes),
 		LastStateChange: cb.lastStateChange,
 		LastFailureTime: cb.lastFailureTime,
 		Config: ConfigStats{

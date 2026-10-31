@@ -54,7 +54,10 @@ type registeredMethod struct {
 }
 
 type DispatchInput struct {
-	Payload          extension.Object
+	Payload extension.Object
+	// PayloadBytes is borrowed. On HTTP it can point into the request scratch arena,
+	// which is reset when the handler returns. Decode it during dispatch.
+	// Copy it before you keep it, send it to a goroutine, or queue it.
 	PayloadBytes     []byte
 	PayloadEncoding  string
 	ResponseEncoding string

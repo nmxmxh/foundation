@@ -523,3 +523,30 @@ func TestCircuitBreaker_RollingWindowAndWilsonBound(t *testing.T) {
 		t.Fatal("expected wilsonLowerBound95(1, 0) == 0")
 	}
 }
+
+// TestCircuitBreakerCountersRaceFree guards lock-free Counts against state changes.
+func TestCircuitBreakerCountersRaceFree(t *testing.T) {
+	cb := New("race", Config{FailureThreshold: 3, SuccessThreshold: 1, Timeout: time.Millisecond})
+	fail := errors.New("fail")
+	var wg sync.WaitGroup
+	for w := range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 500 {
+				_, _ = cb.Execute(context.Background(), func() (any, error) {
+					if (i+w)%3 == 0 {
+						return nil, fail
+					}
+					return nil, nil
+				})
+				_, _ = cb.Counts()
+				_ = cb.Stats()
+				if i%100 == 0 {
+					cb.Reset()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
