@@ -11,9 +11,19 @@ var (
 
 	// ErrInvalidPrimaryKey reports that the specified primary key column is not a string vector.
 	ErrInvalidPrimaryKey = errors.New("hermes: primary key column must be StringVector")
+
+	// ErrDuplicatePrimaryKey reports two rows with the same primary key.
+	// A silent last-row-wins index would hide one of the rows.
+	ErrDuplicatePrimaryKey = errors.New("hermes: duplicate primary key in columnar table")
+
+	// ErrNullValue reports a null cell. A typed zero would be indistinguishable from a real 0 or "".
+	ErrNullValue = errors.New("hermes: columnar cell is null")
+
+	// ErrColumnType reports an accessor that does not match the column's vector type.
+	ErrColumnType = errors.New("hermes: column has a different type")
 )
 
-// ColumnarTable provides off-heap Arrow columnar serving with an indexed primary key lookup.
+// ColumnarTable provides contiguous (Go-heap) Arrow-style columnar serving with an indexed primary key lookup.
 // It eliminates 'any' interface boxing, struct pointer graphs, and sync.Map overhead.
 type ColumnarTable struct {
 	batch    RecordBatch
@@ -44,8 +54,15 @@ func NewColumnarTable(batch RecordBatch, pkColumn string) (*ColumnarTable, error
 
 	pkIndex := make(map[string]int32, batch.Rows)
 	for i := 0; i < batch.Rows; i++ {
+		if !strVec.IsValid(i) {
+			// A null key cannot be looked up, so it is not indexed (it used to collide on "").
+			continue
+		}
 		key := strVec.ValueAt(i)
-		pkIndex[key] = int32(i)
+		if _, dup := pkIndex[key]; dup {
+			return nil, fmt.Errorf("%w: %q", ErrDuplicatePrimaryKey, key)
+		}
+		pkIndex[key] = int32(i) // #nosec G115 -- row count is bounded by the projection limits
 	}
 
 	return &ColumnarTable{
@@ -98,7 +115,10 @@ func (v ColumnarRowView) String(colName string) (string, error) {
 	}
 	vec, ok := v.table.batch.Columns[idx].Data.(*StringVector)
 	if !ok {
-		return "", errors.New("hermes: column is not StringVector")
+		return "", fmt.Errorf("%w: want StringVector", ErrColumnType)
+	}
+	if !vec.IsValid(v.row) {
+		return "", ErrNullValue
 	}
 	return vec.ValueAt(v.row), nil
 }
@@ -112,7 +132,10 @@ func (v ColumnarRowView) Bytes(colName string) ([]byte, error) {
 	}
 	vec, ok := v.table.batch.Columns[idx].Data.(*StringVector)
 	if !ok {
-		return nil, errors.New("hermes: column is not StringVector")
+		return nil, fmt.Errorf("%w: want StringVector", ErrColumnType)
+	}
+	if !vec.IsValid(v.row) {
+		return nil, ErrNullValue
 	}
 	return vec.BytesSlice(v.row), nil
 }
@@ -125,7 +148,10 @@ func (v ColumnarRowView) Int64(colName string) (int64, error) {
 	}
 	vec, ok := v.table.batch.Columns[idx].Data.(*Int64Vector)
 	if !ok {
-		return 0, errors.New("hermes: column is not Int64Vector")
+		return 0, fmt.Errorf("%w: want Int64Vector", ErrColumnType)
+	}
+	if !vec.IsValid(v.row) {
+		return 0, ErrNullValue
 	}
 	return vec.Int64Values()[v.row], nil
 }
@@ -138,7 +164,10 @@ func (v ColumnarRowView) Float64(colName string) (float64, error) {
 	}
 	vec, ok := v.table.batch.Columns[idx].Data.(*Float64Vector)
 	if !ok {
-		return 0, errors.New("hermes: column is not Float64Vector")
+		return 0, fmt.Errorf("%w: want Float64Vector", ErrColumnType)
+	}
+	if !vec.IsValid(v.row) {
+		return 0, ErrNullValue
 	}
 	return vec.Float64Values()[v.row], nil
 }

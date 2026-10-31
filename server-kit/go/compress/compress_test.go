@@ -1280,3 +1280,38 @@ func TestOversizedHeaderBoundedExecution(t *testing.T) {
 		t.Fatalf("parsing 64 KiB header took too long: %v", elapsed)
 	}
 }
+
+// TestBrotliPooledReaderRecoversAfterCorruptStream guards the reader pool:
+// a reader that failed on a corrupt stream must not poison the next decode.
+func TestBrotliPooledReaderRecoversAfterCorruptStream(t *testing.T) {
+	want := bytes.Repeat([]byte("foundation-brotli-pool "), 64)
+	good, err := CompressBrotli(want, 5)
+	if err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+	corrupt := append([]byte(nil), good...)
+	for i := len(corrupt) / 2; i < len(corrupt); i++ {
+		corrupt[i] ^= 0x5a
+	}
+	for range 20 {
+		_, _ = decompressBrotli(corrupt, 1<<20)
+		got, err := decompressBrotli(good, 1<<20)
+		if err != nil || !bytes.Equal(got, want) {
+			t.Fatalf("decode after corrupt stream: err=%v equal=%v", err, bytes.Equal(got, want))
+		}
+	}
+}
+
+func TestReadLimitedExactLimitDoesNotOverflow(t *testing.T) {
+	data := bytes.Repeat([]byte{'x'}, 4096)
+	out, err := readLimitedWithHint(bytes.NewReader(data), 4096, 8192)
+	if err != nil || len(out) != 4096 {
+		t.Fatalf("exact-limit body: len=%d err=%v", len(out), err)
+	}
+	if cap(out) != 4097 {
+		t.Fatalf("cap = %d, want 4097 (limit + probe byte, no regrow)", cap(out))
+	}
+	if _, err := readLimitedWithHint(bytes.NewReader(append(data, 'y')), 4096, 8192); !errors.Is(err, ErrDecodedTooLarge) {
+		t.Fatalf("over limit: got %v, want ErrDecodedTooLarge", err)
+	}
+}

@@ -400,17 +400,24 @@ func readLimited(r io.Reader, maxDecoded int64) ([]byte, error) {
 	return readLimitedWithHint(r, maxDecoded, 512)
 }
 
+// maxInitialDecodeBuffer caps the up-front reservation. The hint comes from the
+// encoded length, which the sender controls, so a large body must not reserve
+// the whole decode limit before one byte proves it decodes.
+const maxInitialDecodeBuffer = 1 << 20
+
 func readLimitedWithHint(r io.Reader, maxDecoded int64, hint int) ([]byte, error) {
 	initial := 512
 	if hint > initial {
-		if int64(hint) > maxDecoded {
-			initial = int(maxDecoded)
-		} else {
-			initial = hint
-		}
+		initial = hint
 	}
 	if size, ok := r.(interface{ Len() int }); ok && size.Len() > initial {
 		initial = size.Len()
+	}
+	initial = min(initial, maxInitialDecodeBuffer)
+	// +1 leaves room for the overflow probe byte, so a body of exactly
+	// maxDecoded does not force one more doubling.
+	if int64(initial) > maxDecoded {
+		initial = int(maxDecoded) + 1
 	}
 	out := make([]byte, 0, initial)
 	out, err := readAllInto(out, io.LimitReader(r, maxDecoded+1))
@@ -442,24 +449,43 @@ func readAllInto(buf []byte, r io.Reader) ([]byte, error) {
 
 var brotliReaderPool sync.Pool
 
+// maxPooledBrotliOutput bounds which readers return to the pool. A reader keeps
+// its window ring buffer (up to 16 MiB) across Reset, so a reader that decoded
+// a large stream is dropped instead of pinning that memory in the pool.
+const maxPooledBrotliOutput = 1 << 20
+
 func getBrotliReader(src io.Reader) *brotli.Reader {
 	if v := brotliReaderPool.Get(); v != nil {
 		zr := v.(*brotli.Reader)
-		_ = zr.Reset(src)
-		return zr
+		// Reset also clears a reader left in an error state by a corrupt stream.
+		if err := zr.Reset(src); err == nil {
+			return zr
+		}
 	}
 	return brotli.NewReader(src)
 }
 
-func releaseBrotliReader(zr *brotli.Reader) {
-	_ = zr.Reset(bytes.NewReader(nil))
+func releaseBrotliReader(zr *brotli.Reader, decodedBytes int) {
+	if decodedBytes > maxPooledBrotliOutput {
+		return
+	}
+	// Reset(nil) drops the source reference without allocating a placeholder reader.
+	if err := zr.Reset(nil); err != nil {
+		return
+	}
 	brotliReaderPool.Put(zr)
 }
 
 func decompressBrotli(data []byte, maxDecoded int64) ([]byte, error) {
 	zr := getBrotliReader(bytes.NewReader(data))
-	defer releaseBrotliReader(zr)
-	return readLimitedWithHint(zr, maxDecoded, len(data)*2)
+	out, err := readLimitedWithHint(zr, maxDecoded, len(data)*2)
+	decoded := len(out)
+	if err != nil {
+		// A failed decode may have filled the window; never pool it.
+		decoded = maxPooledBrotliOutput + 1
+	}
+	releaseBrotliReader(zr, decoded)
+	return out, err
 }
 
 func decompressZstd(data []byte, maxDecoded int64) ([]byte, error) {

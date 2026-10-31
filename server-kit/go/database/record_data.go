@@ -415,7 +415,9 @@ func (d *RecordData) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		if isSorted {
-			if len(fields) > 0 && name <= prevKey {
+			// The fast path skips Normalize, so it must also see names Normalize
+			// would change: empty names are dropped and padded names are trimmed.
+			if (len(fields) > 0 && name <= prevKey) || name == "" || name != strings.TrimSpace(name) {
 				isSorted = false
 			}
 			prevKey = name

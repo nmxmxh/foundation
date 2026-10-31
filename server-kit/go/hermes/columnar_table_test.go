@@ -394,3 +394,42 @@ func TestStore_ColumnarCacheConcurrentApplyAndView(t *testing.T) {
 		t.Fatalf("final view must see last write: found=%v err=%v", found, err)
 	}
 }
+
+func TestColumnarTableRejectsDuplicateAndSkipsNullKeys(t *testing.T) {
+	dup, err := newStringVectorFromSlice([]string{"a", "b", "a"}, []bool{true, true, true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewColumnarTable(RecordBatch{Rows: 3, Columns: []Column{{Name: "id", Data: dup}}}, "id"); !errors.Is(err, ErrDuplicatePrimaryKey) {
+		t.Fatalf("duplicate key: got %v, want ErrDuplicatePrimaryKey", err)
+	}
+
+	ids, err := newStringVectorFromSlice([]string{"", "x", ""}, []bool{false, true, false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vals := newInt64Vector(3)
+	vals.values[1] = 0 // a real zero
+	vals.validity.set(1)
+	table, err := NewColumnarTable(RecordBatch{Rows: 3, Columns: []Column{{Name: "id", Data: ids}, {Name: "n", Data: vals}}}, "id")
+	if err != nil {
+		t.Fatalf("null keys must not count as duplicates: %v", err)
+	}
+	if _, ok := table.GetView(""); ok {
+		t.Fatal("a null key must not be addressable as the empty string")
+	}
+	view, ok := table.GetView("x")
+	if !ok {
+		t.Fatal("expected row x")
+	}
+	if n, err := view.Int64("n"); err != nil || n != 0 {
+		t.Fatalf("real zero: n=%d err=%v", n, err)
+	}
+	if _, err := view.Float64("n"); !errors.Is(err, ErrColumnType) {
+		t.Fatalf("type mismatch: got %v, want ErrColumnType", err)
+	}
+	nullView := ColumnarRowView{table: table, row: 0}
+	if _, err := nullView.Int64("n"); !errors.Is(err, ErrNullValue) {
+		t.Fatalf("null cell: got %v, want ErrNullValue", err)
+	}
+}
