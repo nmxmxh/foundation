@@ -1,6 +1,7 @@
 package wsrouting
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -137,5 +138,50 @@ func BenchmarkSecureRouteMaplet_RouteAndAuthorize(b *testing.B) {
 		shard, auth := sm.RouteAndAuthorize(k, actorMask)
 		_ = shard
 		_ = auth
+	}
+}
+
+// TestSecureRouteRejectsZeroMask guards the fail-open case: a zero mask
+// authorizes everyone, so only SetPublicRoute may create an open route.
+func TestSecureRouteRejectsZeroMask(t *testing.T) {
+	sm := NewSecureRouteMaplet(8)
+	if err := sm.SetRoute("orders.read", 1, security.CapabilityMaskNone); !errors.Is(err, ErrRouteNoCapability) {
+		t.Fatalf("zero mask: got %v, want ErrRouteNoCapability", err)
+	}
+	if _, ok := sm.RouteAndAuthorize("orders.read", security.CapabilityMaskNone); ok {
+		t.Fatal("rejected route must not authorize")
+	}
+	if err := sm.SetPublicRoute("health", 2); err != nil {
+		t.Fatalf("public route: %v", err)
+	}
+	if shard, ok := sm.RouteAndAuthorize("health", security.CapabilityMaskNone); !ok || shard != 2 {
+		t.Fatalf("public route: shard=%d ok=%v", shard, ok)
+	}
+}
+
+// TestRouteMapletExactAndBounded guards exactness: no route answers for a key
+// that was never set, and no stored route is overwritten by another key.
+func TestRouteMapletExactAndBounded(t *testing.T) {
+	rm := NewRouteMaplet(1000)
+	for i := range 2000 {
+		if err := rm.SetRoute(fmt.Sprintf("device-%d", i), uint8(i%16)); err != nil {
+			t.Fatalf("set %d: %v", i, err)
+		}
+	}
+	for i := range 2000 {
+		if shard, ok := rm.GetRoute(fmt.Sprintf("device-%d", i)); !ok || shard != uint8(i%16) {
+			t.Fatalf("device-%d: shard=%d ok=%v", i, shard, ok)
+		}
+	}
+	for i := range 20000 {
+		if _, ok := rm.GetRoute(fmt.Sprintf("absent-%d", i)); ok {
+			t.Fatalf("absent-%d returned a route", i)
+		}
+	}
+	if err := rm.SetRoute("one-more", 1); !errors.Is(err, ErrRouteCapacity) {
+		t.Fatalf("over bound: got %v, want ErrRouteCapacity", err)
+	}
+	if err := rm.SetRoute("device-1", 9); err != nil {
+		t.Fatalf("update at bound must succeed: %v", err)
 	}
 }
