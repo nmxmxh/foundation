@@ -17,6 +17,7 @@ var (
 
 // NewBufferFromScratch allocates a 4096-byte control plane buffer slice from the
 // provided frame-scoped scratch arena without invoking the Go runtime heap allocator.
+// WARNING: do not give this buffer to a cancellable exchange. See ExecuteWithScratch.
 func NewBufferFromScratch(arena *scratch.Arena) (*Buffer, error) {
 	if arena == nil {
 		return nil, ErrNilScratchArena
@@ -44,9 +45,13 @@ func NewArenaFromScratch(arena *scratch.Arena, size int) (*Arena, error) {
 	return NewArenaOver(raw)
 }
 
-// ExecuteWithScratch executes a request on the process pool using a control buffer
-// rented directly from the caller's scratch arena. This eliminates sync.Pool lock contention
-// and heap churn during high-frequency dispatch frames.
+// ExecuteWithScratch executes a request on the process pool and copies output into dst.
+//
+// WARNING: the control buffer does not come from the arena. A cancelled request
+// returns ErrExchangeAbandoned while the native exchange can still write the buffer.
+// The caller then resets the arena and the next frame reuses that memory, so
+// arena memory is never handed to an exchange. The pooled path already drops
+// abandoned buffers. The arena parameter stays for API stability.
 func (p *ProcessPool) ExecuteWithScratch(ctx context.Context, req ProcessRequest, arena *scratch.Arena, dst []byte, pinned ...*processWorker) (ProcessResponse, error) {
 	if p == nil {
 		return ProcessResponse{}, errors.New("process pool is nil")
@@ -60,59 +65,5 @@ func (p *ProcessPool) ExecuteWithScratch(ctx context.Context, req ProcessRequest
 	if ctx == nil {
 		ctx = context.Background()
 	}
-
-	buffer, err := NewBufferFromScratch(arena)
-	if err != nil {
-		return ProcessResponse{}, err
-	}
-	raw := buffer.RawBytes()
-	buffer.Reset()
-	buffer.Initialize(req.ModuleVersion)
-	if err := buffer.SetHeaderInt(generated.INT_IDX_CONTEXT_HASH, req.ContextHash); err != nil {
-		return ProcessResponse{}, err
-	}
-	if err := buffer.SetInputBytesFast(req.Input); err != nil {
-		return ProcessResponse{}, err
-	}
-	if _, err := buffer.AddEpoch(generated.IDX_INPUT_WRITTEN, 1); err != nil {
-		return ProcessResponse{}, err
-	}
-
-	if err := p.executeOnSelectedWorker(ctx, req, raw, pinned...); err != nil {
-		return ProcessResponse{}, err
-	}
-
-	statusCode, err := buffer.HeaderInt(generated.INT_IDX_STATUS_CODE)
-	if err != nil {
-		return ProcessResponse{}, err
-	}
-	output, err := buffer.OutputBytesView()
-	if err != nil {
-		return ProcessResponse{}, err
-	}
-
-	ownedOutput := dst
-	if ownedOutput == nil {
-		ownedOutput = make([]byte, len(output))
-	} else if len(ownedOutput) < len(output) {
-		return ProcessResponse{}, fmt.Errorf("process output destination too small: %d < %d", len(ownedOutput), len(output))
-	}
-	ownedOutput = ownedOutput[:len(output)]
-	copy(ownedOutput, output)
-
-	response := ProcessResponse{
-		Output:      ownedOutput,
-		Diagnostics: strings.TrimSpace(buffer.DiagnosticsText()),
-		StatusCode:  statusCode,
-		OutputEpoch: buffer.LoadEpoch(generated.IDX_OUTPUT_WRITTEN),
-	}
-	_, _ = buffer.AddEpoch(generated.IDX_OUTPUT_CONSUMED, 1)
-
-	if statusCode != 0 {
-		if response.Diagnostics == "" {
-			response.Diagnostics = "native runtime returned non-zero status"
-		}
-		return response, errors.New(response.Diagnostics)
-	}
-	return response, nil
+	return p.execute(ctx, req, dst, pinned...)
 }

@@ -105,6 +105,7 @@ func TestExecuteWithScratch(t *testing.T) {
 		exchangeTimeout: DefaultProcessExchangeTimeout,
 		allWorkers:      []*processWorker{worker},
 	}
+	pool.bufferPool.New = newPooledBuffer
 	req := ProcessRequest{
 		UnitID: "runtime.echo",
 		Input:  []byte("hello scratch"),
@@ -115,6 +116,11 @@ func TestExecuteWithScratch(t *testing.T) {
 	}
 	if string(resp.Output) != "HELLO SCRATCH" {
 		t.Fatalf("expected 'HELLO SCRATCH', got %q", string(resp.Output))
+	}
+	// An abandoned exchange can keep writing its control buffer, and the caller
+	// resets the arena after return. So the exchange must never own arena memory.
+	if arena.Allocated() != 0 {
+		t.Fatalf("ExecuteWithScratch took %d arena bytes for a cancellable exchange", arena.Allocated())
 	}
 }
 
@@ -145,7 +151,6 @@ func BenchmarkBufferAllocation_Heap(b *testing.B) {
 	}
 }
 
-
 func BenchmarkProcessPoolExecuteWithScratch(b *testing.B) {
 	worker := &processWorker{
 		testExchange: benchmarkProcessExchange{},
@@ -154,6 +159,7 @@ func BenchmarkProcessPoolExecuteWithScratch(b *testing.B) {
 		exchangeTimeout: DefaultProcessExchangeTimeout,
 		allWorkers:      []*processWorker{worker},
 	}
+	pool.bufferPool.New = newPooledBuffer
 	arena := scratch.New(1024 * 1024)
 	req := ProcessRequest{
 		UnitID: "runtime.echo",
