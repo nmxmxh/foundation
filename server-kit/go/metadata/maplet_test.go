@@ -2,6 +2,7 @@ package metadata
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -245,17 +246,25 @@ func TestCountingMaplet_LifecycleAndReset(t *testing.T) {
 
 func TestCountingMaplet_DisplacementAndSaturation(t *testing.T) {
 	cm := NewCountingMaplet(8)
-	// Fill to capacity and trigger displacements
+	cm.Increment("saturated_ip")
+	// Fill to capacity and trigger displacements. Keys stored before must survive.
 	for i := range 40 {
 		cm.Increment(fmt.Sprintf("ip_%d", i))
 	}
 
-	// Saturate one counter to 255
+	// Saturate the stored counter to 255
 	for range 260 {
 		cm.Increment("saturated_ip")
 	}
 	if got := cm.GetCount("saturated_ip"); got != 255 {
 		t.Fatalf("expected saturated count 255, got %d", got)
+	}
+	// A new key in a full table reports saturation and does not evict a stored key.
+	if got := cm.Increment("late_ip"); got != 255 {
+		t.Fatalf("full table: Increment = %d, want 255", got)
+	}
+	if got := cm.GetCount("saturated_ip"); got != 255 {
+		t.Fatalf("stored counter lost after full-table insert: %d", got)
 	}
 }
 
@@ -381,4 +390,91 @@ func BenchmarkScalableLatticeMaplet_Lookup(b *testing.B) {
 		val, _ := sm.Lookup(k)
 		_ = val
 	}
+}
+
+// TestMapletFailedInsertKeepsStoredKeys guards the cuckoo rollback. A failed
+// insert must leave every key that was stored before it.
+func TestMapletFailedInsertKeepsStoredKeys(t *testing.T) {
+	t.Run("lattice", func(t *testing.T) {
+		m := NewLatticeMaplet(32)
+		m.maxCount = uint32(len(m.buckets)) // let displacement run to the cycle limit
+		var stored []string
+		failures := 0
+		for i := range 4 * len(m.buckets) {
+			key := fmt.Sprintf("lk-%d", i)
+			if err := m.Insert(key, uint8(i%15)+1); err != nil {
+				failures++
+				continue
+			}
+			stored = append(stored, key)
+		}
+		if failures == 0 {
+			t.Fatal("test must force at least one failed insert")
+		}
+		for _, key := range stored {
+			if _, ok := m.Lookup(key); !ok {
+				t.Fatalf("stored key %q lost after a failed insert", key)
+			}
+		}
+	})
+	t.Run("wide", func(t *testing.T) {
+		m := NewWideMaplet(32)
+		m.maxCount = uint32(len(m.buckets))
+		var stored []string
+		failures := 0
+		for i := range 4 * len(m.buckets) {
+			key := fmt.Sprintf("wk-%d", i)
+			if err := m.Insert(key, 1); err != nil {
+				failures++
+				continue
+			}
+			stored = append(stored, key)
+		}
+		if failures == 0 {
+			t.Fatal("test must force at least one failed insert")
+		}
+		for _, key := range stored {
+			if _, ok := m.Lookup(key); !ok {
+				t.Fatalf("stored key %q lost after a failed insert", key)
+			}
+		}
+	})
+	t.Run("counting", func(t *testing.T) {
+		m := NewCountingMaplet(32)
+		m.maxCount = uint32(len(m.buckets))
+		var stored []string
+		for i := range 4 * len(m.buckets) {
+			key := fmt.Sprintf("ck-%d", i)
+			if m.Increment(key) == 1 {
+				stored = append(stored, key)
+			}
+		}
+		for _, key := range stored {
+			if m.GetCount(key) == 0 {
+				t.Fatalf("stored key %q lost after a failed insert", key)
+			}
+		}
+	})
+}
+
+func TestCountingMapletConcurrentReadWrite(t *testing.T) {
+	m := NewCountingMaplet(1024)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := range 5000 {
+			m.Increment(fmt.Sprintf("k-%d", i%700))
+			if i%1000 == 0 {
+				m.Reset()
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := range 5000 {
+			_ = m.GetCount(fmt.Sprintf("k-%d", i%700))
+		}
+	}()
+	wg.Wait()
 }

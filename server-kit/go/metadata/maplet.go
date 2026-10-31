@@ -180,6 +180,56 @@ func unpackLatticeSlot(slot uint16) (fp uint16, val uint8) {
 	return slot >> latticeValueBits, uint8(slot & uint16(latticeMaxValue))
 }
 
+// cuckooMaxKickPath bounds the displacement path that cuckooDisplace can undo.
+const cuckooMaxKickPath = 512
+
+// cuckooDisplace moves entry into the table by cuckoo displacement.
+// It records each step and undoes all of them on failure. A failed insert then
+// leaves every stored key in place. The old loop dropped the last victim, which
+// removed an earlier key and broke the "a stored key is always found" contract.
+// The kick slot comes from a xorshift sequence, so the walk does not cycle on slot 0.
+func cuckooDisplace[S uint16 | uint32](
+	buckets []S,
+	slotsPerBucket, mask, start uint32,
+	entry S,
+	maxKicks int,
+	seed uint64,
+	altHash func(S) uint32,
+	store func(idx uint32, v S),
+) bool {
+	maxKicks = min(maxKicks, cuckooMaxKickPath)
+	var targets [cuckooMaxKickPath]uint32
+	var victims [cuckooMaxKickPath]S
+	rng := seed | 1
+	currBucket := start
+	currEntry := entry
+	for kick := range maxKicks {
+		rng ^= rng << 13
+		rng ^= rng >> 7
+		rng ^= rng << 17
+		targetIdx := currBucket*slotsPerBucket + uint32(rng%uint64(slotsPerBucket)) // #nosec G115 -- bounded by slotsPerBucket
+		victim := buckets[targetIdx]
+		targets[kick] = targetIdx
+		victims[kick] = victim
+		store(targetIdx, currEntry)
+
+		currBucket = (currBucket ^ altHash(victim)) & mask
+		currEntry = victim
+		base := currBucket * slotsPerBucket
+		for s := range slotsPerBucket {
+			if buckets[base+s] == 0 {
+				store(base+s, currEntry)
+				return true
+			}
+		}
+	}
+	// Undo in reverse order. Each step restores the victim it displaced.
+	for kick := maxKicks - 1; kick >= 0; kick-- {
+		store(targets[kick], victims[kick])
+	}
+	return false
+}
+
 // latticeJoin computes the least upper bound (join) of two values.
 // In the classification and retention lattices, higher is more restrictive / longer.
 func latticeJoin(a, b uint8) uint8 {
@@ -245,37 +295,20 @@ func (m *LatticeMaplet) Insert(key string, val uint8) error {
 		}
 	}
 
-	// Cuckoo displacement loop
-	currBucket := i1
-	currEntry := slotEntry
-	for kick := range latticeMaxCuckooKicks {
-		slotIdx := uint32(kick % latticeSlotsPerBucket)
-		targetIdx := currBucket*latticeSlotsPerBucket + slotIdx
-
-		victim := m.buckets[targetIdx]
-		m.buckets[targetIdx] = currEntry
-
-		vFp, _ := unpackLatticeSlot(victim)
-		vFpHash := hash16(vFp)
-		currBucket = (currBucket ^ vFpHash) & m.mask
-		currEntry = victim
-
-		base := currBucket * latticeSlotsPerBucket
-		for s := range uint32(latticeSlotsPerBucket) {
-			if m.buckets[base+s] == 0 {
-				m.buckets[base+s] = currEntry
-				m.count++
-				return nil
-			}
-		}
+	if cuckooDisplace(m.buckets, latticeSlotsPerBucket, m.mask, i1, slotEntry, latticeMaxCuckooKicks, h,
+		func(slot uint16) uint32 { fp, _ := unpackLatticeSlot(slot); return hash16(fp) },
+		func(idx uint32, v uint16) { m.buckets[idx] = v }) {
+		m.count++
+		return nil
 	}
-
-	return errors.New("metadata: maplet insertion failed: cuckoo cycle detected")
+	return errors.New("metadata: maplet insertion failed: cuckoo cycle detected (table unchanged)")
 }
 
 // Lookup queries the LatticeMaplet for key.
 // Returns (value, true) if found, or (0, false) if absent.
-// One-sided error: returned value is guaranteed to be >= true value under the lattice.
+// For a stored key, the returned value is >= the true value under the lattice.
+// CAUTION: an absent key can match a stored fingerprint (about 0.2% at 12 bits)
+// and return an arbitrary value, including the least restrictive one.
 func (m *LatticeMaplet) Lookup(key string) (uint8, bool) {
 	h := mapletHash64(key)
 	i1, fp, i2 := m.decompose(h)
@@ -318,12 +351,16 @@ func (m *LatticeMaplet) Count() int {
 }
 
 // ---------------------------------------------------------------------------
-// WideMaplet: Autonomous 32-bit Micro-Value Maplet (<10^-8 Alias Collisions)
+// WideMaplet: 32-bit Micro-Value Maplet (approximate; see CAUTION below)
 // ---------------------------------------------------------------------------
 
 // WideMaplet packs a 28-bit fingerprint and a 4-bit value into a 32-bit slot.
-// Sized for unordered micro-values (Hermes slot tags, chunk offsets) where
-// internal Birthday collisions must be bounded below 10^-8 for N <= 100,000.
+// Sized for unordered micro-values (Hermes slot tags, chunk offsets).
+//
+// CAUTION: two stored keys alias when they share a bucket pair and a fingerprint.
+// Then Insert overwrites the other key's value. At N = 100,000 the chance of at
+// least one alias is about 1e-3, not 1e-8. Absent keys can also match.
+// Never use a maplet to decide authorization, rate limits, routing, or dedup.
 type WideMaplet struct {
 	numBuckets uint32
 	mask       uint32
@@ -434,31 +471,13 @@ func (m *WideMaplet) Insert(key string, val uint8) error {
 		}
 	}
 
-	currBucket := i1
-	currEntry := slotEntry
-	for kick := range wideMaxCuckooKicks {
-		slotIdx := uint32(kick % wideSlotsPerBucket)
-		targetIdx := currBucket*wideSlotsPerBucket + slotIdx
-
-		victim := m.buckets[targetIdx]
-		m.buckets[targetIdx] = currEntry
-
-		vFp, _ := unpackWideSlot(victim)
-		vFpHash := hash32Val(vFp)
-		currBucket = (currBucket ^ vFpHash) & m.mask
-		currEntry = victim
-
-		base := currBucket * wideSlotsPerBucket
-		for s := range uint32(wideSlotsPerBucket) {
-			if m.buckets[base+s] == 0 {
-				m.buckets[base+s] = currEntry
-				m.count++
-				return nil
-			}
-		}
+	if cuckooDisplace(m.buckets, wideSlotsPerBucket, m.mask, i1, slotEntry, wideMaxCuckooKicks, h,
+		func(slot uint32) uint32 { fp, _ := unpackWideSlot(slot); return hash32Val(fp) },
+		func(idx uint32, v uint32) { m.buckets[idx] = v }) {
+		m.count++
+		return nil
 	}
-
-	return errors.New("metadata: wide maplet insertion failed: cuckoo cycle detected")
+	return errors.New("metadata: wide maplet insertion failed: cuckoo cycle detected (table unchanged)")
 }
 
 // Lookup queries the WideMaplet for key.
@@ -588,7 +607,7 @@ func (m *CountingMaplet) Increment(key string) uint8 {
 			if curr < counterMaxCount {
 				curr++
 			}
-			m.buckets[base1+s] = packCounterSlot(fp, curr)
+			atomic.StoreUint32(&m.buckets[base1+s], packCounterSlot(fp, curr))
 			return curr
 		}
 	}
@@ -602,7 +621,7 @@ func (m *CountingMaplet) Increment(key string) uint8 {
 			if curr < counterMaxCount {
 				curr++
 			}
-			m.buckets[base2+s] = packCounterSlot(fp, curr)
+			atomic.StoreUint32(&m.buckets[base2+s], packCounterSlot(fp, curr))
 			return curr
 		}
 	}
@@ -612,45 +631,28 @@ func (m *CountingMaplet) Increment(key string) uint8 {
 
 	for s := range uint32(counterSlotsPerBucket) {
 		if m.buckets[base1+s] == 0 {
-			m.buckets[base1+s] = slotEntry
+			atomic.StoreUint32(&m.buckets[base1+s], slotEntry)
 			m.count++
 			return 1
 		}
 	}
 	for s := range uint32(counterSlotsPerBucket) {
 		if m.buckets[base2+s] == 0 {
-			m.buckets[base2+s] = slotEntry
+			atomic.StoreUint32(&m.buckets[base2+s], slotEntry)
 			m.count++
 			return 1
 		}
 	}
 
-	// Cuckoo displacement if both full
-	currBucket := i1
-	currEntry := slotEntry
-	for kick := range counterMaxKicks {
-		slotIdx := uint32(kick % counterSlotsPerBucket)
-		targetIdx := currBucket*counterSlotsPerBucket + slotIdx
-
-		victim := m.buckets[targetIdx]
-		m.buckets[targetIdx] = currEntry
-
-		vFp, _ := unpackCounterSlot(victim)
-		vFpHash := hash32Val(vFp)
-		currBucket = (currBucket ^ vFpHash) & m.mask
-		currEntry = victim
-
-		base := currBucket * counterSlotsPerBucket
-		for s := range uint32(counterSlotsPerBucket) {
-			if m.buckets[base+s] == 0 {
-				m.buckets[base+s] = currEntry
-				m.count++
-				return 1
-			}
-		}
+	// Cuckoo displacement if both full. A key in flight can read as 0 from GetCount.
+	if m.count < m.maxCount && cuckooDisplace(m.buckets, counterSlotsPerBucket, m.mask, i1, slotEntry, counterMaxKicks, h,
+		func(slot uint32) uint32 { fp, _ := unpackCounterSlot(slot); return hash32Val(fp) },
+		func(idx uint32, v uint32) { atomic.StoreUint32(&m.buckets[idx], v) }) {
+		m.count++
+		return 1
 	}
 
-	// Overflow condition: return saturating max
+	// Overflow condition: return saturating max. The table is unchanged.
 	return counterMaxCount
 }
 
@@ -682,7 +684,10 @@ func (m *CountingMaplet) GetCount(key string) uint8 {
 func (m *CountingMaplet) Reset() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	clear(m.buckets)
+	// GetCount reads without the lock, so every write is atomic.
+	for i := range m.buckets {
+		atomic.StoreUint32(&m.buckets[i], 0)
+	}
 	m.count = 0
 }
 
