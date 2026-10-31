@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"math/rand"
 	"os"
@@ -551,6 +552,16 @@ func TestReclaimerStreamingDecompressCrashRecovery(t *testing.T) {
 		if !wm.Aborted {
 			t.Fatalf("expected watermark to be aborted")
 		}
+
+		// An aborted reclaimer refuses further commits.
+		if _, err := rec.Commit(BlockSize*4, BlockSize*4, ""); !errors.Is(err, ErrReclaimerAborted) {
+			t.Fatalf("commit after abort: got %v, want ErrReclaimerAborted", err)
+		}
+
+		// A restart must see the aborted checkpoint and refuse to resume.
+		if restartWM, err := ValidateSourceForRestart(sf, ckptPath); !errors.Is(err, ErrReclaimerAborted) {
+			t.Fatalf("restart after abort: got %v (wm %+v), want ErrReclaimerAborted", err, restartWM)
+		}
 	})
 
 	t.Run("successful_complete_preserves_reclaimed_integrity", func(t *testing.T) {
@@ -612,6 +623,9 @@ func TestReclaimerStreamingDecompressCrashRecovery(t *testing.T) {
 		if wm.SourcePunchedOffset <= 0 {
 			t.Fatalf("expected punched offset > 0, got %d", wm.SourcePunchedOffset)
 		}
+		if wm.DestWrittenOffset != payloadSize {
+			t.Fatalf("dest written offset: got %d, want %d", wm.DestWrittenOffset, payloadSize)
+		}
 
 		// Verify extracted content bit-for-bit.
 		extracted, err := os.ReadFile(destPath)
@@ -633,6 +647,54 @@ func TestReclaimerStreamingDecompressCrashRecovery(t *testing.T) {
 			t.Fatalf("expected source file prefix to be reclaimed")
 		}
 	})
+
+	// Safety proof for punching behind the read offset. The pre-move version of
+	// this subtest punched bytes the decompressor had already consumed, which is
+	// harmless (it keeps its window in memory), and it counted io.EOF as a
+	// failure, so it always passed. This version punches past the consumed
+	// offset, as an eager reclaimer that ignores the read watermark would.
+	t.Run("punching_ahead_of_the_read_offset_corrupts_decompression", func(t *testing.T) {
+		eagerPath := filepath.Join(dir, "eager_punch_archive.gz")
+		if err := os.WriteFile(eagerPath, gzBytes, 0o600); err != nil {
+			t.Fatalf("write eager gz: %v", err)
+		}
+		sf, err := os.OpenFile(eagerPath, os.O_RDWR, 0o600)
+		if err != nil {
+			t.Fatalf("open eager source: %v", err)
+		}
+		defer func() { _ = sf.Close() }()
+
+		counting := &reclaimCountingReader{r: sf}
+		zr, err := gzip.NewReader(counting)
+		if err != nil {
+			t.Fatalf("gzip reader: %v", err)
+		}
+		if _, err := zr.Read(make([]byte, 16*1024)); err != nil {
+			t.Fatalf("first read: %v", err)
+		}
+		consumed := counting.n
+		punchTo := (consumed/BlockSize + 8) * BlockSize
+		if punchTo >= int64(len(gzBytes)) {
+			t.Fatalf("archive too small: punch %d >= size %d", punchTo, len(gzBytes))
+		}
+		if _, err := PunchHolePrefix(sf, punchTo); err != nil {
+			t.Fatalf("eager punch: %v", err)
+		}
+
+		drain := make([]byte, 32*1024)
+		var readErr error
+		for range 200 {
+			if _, readErr = zr.Read(drain); readErr != nil {
+				break
+			}
+		}
+		if readErr == nil || errors.Is(readErr, io.EOF) {
+			t.Fatalf("punching unread source bytes must corrupt decompression, got %v", readErr)
+		}
+	})
+
+	// Reclaiming only behind the read offset keeps the stream intact; the
+	// successful_complete subtest above covers that path end to end.
 
 	t.Run("cold_crash_checkpoint_restores_and_reclaims_safely", func(t *testing.T) {
 		sf, err := os.OpenFile(sourceGzPath, os.O_RDWR, 0o600)
