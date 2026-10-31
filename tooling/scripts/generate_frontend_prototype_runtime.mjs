@@ -175,8 +175,26 @@ function discoverPrototypeSchemas(protoRoot, includeTemplate) {
   }
 
   schemas.sort((left, right) => left.key.localeCompare(right.key));
+  namespaceCrossDomainNames(schemas);
   errors.push(...prototypeSchemaCollisions(schemas));
   return { schemas, errors };
+}
+
+// namespaceCrossDomainNames prefixes the domain onto entity names that two or
+// more domains declare (report.TimelineEntry -> ReportTimelineEntry). Before
+// this, such a pair emitted duplicate declarations that did not compile, so no
+// working export can depend on the bare name. Unique names are unchanged, so
+// output for non-colliding protos stays byte-identical. Store keys
+// (domain.collection) are never renamed here: they must match the server.
+function namespaceCrossDomainNames(schemas) {
+  const byName = groupSchemas(schemas, (schema) => safePascalIdentifier(schema.entityName));
+  for (const group of byName.values()) {
+    if (group.length < 2) continue;
+    if (new Set(group.map((schema) => schema.domain)).size !== group.length) continue;
+    for (const schema of group) {
+      schema.entityName = `${safePascalIdentifier(schema.domain)}${safePascalIdentifier(schema.messageName)}`;
+    }
+  }
 }
 
 // Every generated identifier derives from the bare message name, and every
@@ -192,7 +210,7 @@ function prototypeSchemaCollisions(schemas) {
   const describe = (group) =>
     group.map((schema) => `${schema.protoFile} (${schema.protoPackage}.${schema.messageName})`).join(" and ");
 
-  const byIdentifier = groupSchemas(schemas, (schema) => safePascalIdentifier(schema.messageName));
+  const byIdentifier = groupSchemas(schemas, (schema) => safePascalIdentifier(schema.entityName));
   for (const [identifier, group] of byIdentifier) {
     if (group.length < 2) continue;
     const variableBase = lowerFirst(identifier);
@@ -208,7 +226,7 @@ function prototypeSchemaCollisions(schemas) {
   for (const [key, group] of byKey) {
     if (group.length < 2) continue;
     // Same identifier and same key is one collision, already reported above.
-    if (new Set(group.map((schema) => safePascalIdentifier(schema.messageName))).size === 1) continue;
+    if (new Set(group.map((schema) => safePascalIdentifier(schema.entityName))).size === 1) continue;
     errors.push(
       `schema key collision: ${describe(group)} all map to ${JSON.stringify(key)}, ` +
         `so their stores and fixtures would share one domain.collection key. ` +
@@ -408,6 +426,7 @@ function schemaFromMessage(file, message, index) {
     idField: idField ?? "id",
     key,
     messageName: message.name,
+    entityName: message.name,
     protoFile: file.name,
     protoPackage: file.package,
     typeName: `${domainInfo.domain}_${message.name}`,
@@ -639,7 +658,7 @@ export const createPrototypeRuntimeWorkbench = (
 }
 
 function renderSchema(schema) {
-  const base = safePascalIdentifier(schema.messageName);
+  const base = safePascalIdentifier(schema.entityName);
   const variableBase = lowerFirst(base);
   const typeName = `${base}Prototype`;
   const storeName = `${base}Store`;
@@ -866,12 +885,12 @@ export const ${benchmarkName}: readonly PrototypeBenchmarkFixture[] = [
 }
 
 function renderRegistry({ protoRootLabel, schemas }) {
-  const schemaNames = schemas.map((schema) => `${lowerFirst(safePascalIdentifier(schema.messageName))}Schema`);
-  const constantsNames = schemas.map((schema) => `${lowerFirst(safePascalIdentifier(schema.messageName))}RuntimeConstants`);
-  const benchmarkNames = schemas.map((schema) => `${lowerFirst(safePascalIdentifier(schema.messageName))}BenchmarkFixtures`);
+  const schemaNames = schemas.map((schema) => `${lowerFirst(safePascalIdentifier(schema.entityName))}Schema`);
+  const constantsNames = schemas.map((schema) => `${lowerFirst(safePascalIdentifier(schema.entityName))}RuntimeConstants`);
+  const benchmarkNames = schemas.map((schema) => `${lowerFirst(safePascalIdentifier(schema.entityName))}BenchmarkFixtures`);
   const domainEntries = schemas
     .map((schema) => {
-      const base = safePascalIdentifier(schema.messageName);
+      const base = safePascalIdentifier(schema.entityName);
       const variableBase = lowerFirst(base);
       return `  {
     benchmarkFixtures: ${variableBase}BenchmarkFixtures,
@@ -886,7 +905,7 @@ function renderRegistry({ protoRootLabel, schemas }) {
     })
     .join("\n");
   const schemaEntries = schemas
-    .map((schema) => `  ${JSON.stringify(schema.key)}: ${lowerFirst(safePascalIdentifier(schema.messageName))}Schema,`)
+    .map((schema) => `  ${JSON.stringify(schema.key)}: ${lowerFirst(safePascalIdentifier(schema.entityName))}Schema,`)
     .join("\n");
 
   return `export const prototypeSchemaSource = ${JSON.stringify(protoRootLabel)};

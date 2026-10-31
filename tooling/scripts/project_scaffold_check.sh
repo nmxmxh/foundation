@@ -836,7 +836,13 @@ if [[ "${PROFILE:-}" == "full" || "${PROFILE:-}" == "frontend" ]]; then
   check_exists "frontend vitest config" "$frontend_root/vitest.config.ts"
   check_file_contains "vite preserves workspace package symlinks" "$frontend_root/vite.config.ts" "preserveSymlinks: true"
   check_file_contains "vitest preserves workspace package symlinks" "$frontend_root/vitest.config.ts" "preserveSymlinks: true"
-  check_file_contains "tsconfig preserves workspace package symlinks" "$frontend_root/tsconfig.app.json" "\"preserveSymlinks\": true"
+  # preserveSymlinks now comes from the shared base (foundation/tooling/tsconfig/base.json).
+  if grep -Fq 'foundation/tooling/tsconfig/' "$frontend_root/tsconfig.app.json" 2>/dev/null; then
+    check_file_contains "tsconfig extends the shared foundation base" "$frontend_root/tsconfig.app.json" "foundation/tooling/tsconfig/dom.json"
+    check_file_contains "shared tsconfig base preserves workspace package symlinks" "$target/foundation/tooling/tsconfig/base.json" "\"preserveSymlinks\": true"
+  else
+    check_file_contains "tsconfig preserves workspace package symlinks" "$frontend_root/tsconfig.app.json" "\"preserveSymlinks\": true"
+  fi
   check_file_not_contains "vite does not alias ui-minimal source" "$frontend_root/vite.config.ts" "foundation/ui-minimal/ts/src"
   check_file_not_contains "vite does not alias runtime-transport source" "$frontend_root/vite.config.ts" "foundation/runtime-transport/ts/src"
   check_file_not_contains "vitest does not alias ui-minimal source" "$frontend_root/vitest.config.ts" "foundation/ui-minimal/ts/src"

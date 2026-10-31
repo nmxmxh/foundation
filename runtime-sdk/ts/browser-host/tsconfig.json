@@ -1,8 +1,5 @@
 {
   "extends": "../../../tooling/tsconfig/dom.json",
-  "compilerOptions": {
-    "resolveJsonModule": true
-  },
   "include": [
     "src"
   ]

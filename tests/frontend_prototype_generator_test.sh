@@ -161,13 +161,26 @@ expect_collision() {
   done
 }
 
-# Two domains declaring the same entity name.
+# Two domains declaring the same entity name: each gets its domain prefix.
+# Their keys already differ, and the bare-name output never compiled.
 write_entity_proto "$COLLIDE_ROOT/cross/billing/v1/billing.proto" billing.v1 Subscription plan
 write_entity_proto "$COLLIDE_ROOT/cross/mealplan/v1/mealplan.proto" mealplan.v1 Subscription zone
-expect_collision "$COLLIDE_ROOT/cross" \
-  "entity name collision" \
-  "billing/v1/billing.proto (billing.v1.Subscription)" \
-  "mealplan/v1/mealplan.proto (mealplan.v1.Subscription)"
+rm -f "$COLLIDE_OUT_FILE"
+if ! node "$FOUNDATION_DIR/tooling/scripts/generate_frontend_prototype_runtime.mjs" --proto-root "$COLLIDE_ROOT/cross" --out "$COLLIDE_OUT_FILE" >"$COLLIDE_LOG" 2>&1; then
+  cat "$COLLIDE_LOG" >&2
+  echo "frontend prototype generator rejected a cross-domain name it should namespace" >&2
+  exit 1
+fi
+for expected in billingSubscriptionSchema mealplanSubscriptionSchema useBillingSubscriptionSnapshot useMealplanSubscriptionSnapshot '"billing.subscriptions"' '"mealplan.subscriptions"'; do
+  if ! rg -F -q -- "$expected" "$COLLIDE_OUT_FILE"; then
+    echo "namespaced output missing: $expected" >&2
+    exit 1
+  fi
+done
+if rg -q '\bsubscriptionSchema\b' "$COLLIDE_OUT_FILE"; then
+  echo "bare colliding identifier subscriptionSchema still emitted" >&2
+  exit 1
+fi
 
 # One entity declared in two versions of a domain.
 write_entity_proto "$COLLIDE_ROOT/versions/billing/v1/billing.proto" billing.v1 Subscription plan

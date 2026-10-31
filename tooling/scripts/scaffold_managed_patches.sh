@@ -3112,6 +3112,72 @@ patch_redundant_foundation_test_files() {
 # extends ../foundation/tooling/tsconfig/{dom,base}.json, so language level
 # has one source. A file is replaced only when it is byte-identical to a stock
 # template (sha256 below); a customised file gets a warning, never an overwrite.
+# patch_entry_server_matches_client keeps the prerender entry compilable.
+#
+# src/entry-server.tsx is a create-mode seed that wraps App in
+# AppThemeProvider/appTheme. Apps that moved to a provider-less theme (only
+# GlobalStyles) cannot compile it, so their `tsc -b && vite build` failed.
+# The server tree must mirror the client tree in main.tsx anyway (hydration),
+# so the stock seed is rewritten from main.tsx: GlobalStyles only when main.tsx
+# renders it, StaticRouter only when main.tsx uses BrowserRouter. A file that
+# differs from the seed is project-owned and left alone.
+patch_entry_server_matches_client() {
+  local src="$target/frontend/src"
+  local entry="$src/entry-server.tsx"
+  local main="$src/main.tsx"
+  [[ -f "$entry" && -f "$main" ]] || return 0
+
+  # React Router 6 exports StaticRouter only from react-router-dom/server; the
+  # seed's v7 import fails the Rollup build there. Decided from the declared range.
+  if grep -Fq "import { StaticRouter } from 'react-router-dom'" "$entry" \
+    && grep -Eq '"react-router-dom": *"[~^]?6\.' "$target/frontend/package.json" 2>/dev/null; then
+    replace_in_file "$entry" "import { StaticRouter } from 'react-router-dom'" "import { StaticRouter } from 'react-router-dom/server'" "entry-server imports StaticRouter from react-router-dom/server (React Router 6)"
+  fi
+  cmp -s "$entry" "$foundation_root/templates/frontend/src/entry-server.tsx" || return 0
+  local theme
+  theme="$(ls "$src"/styles/theme.ts* 2>/dev/null | head -1)"
+  if [[ -n "$theme" ]] && grep -Eq 'export (const|function) AppThemeProvider' "$theme"; then
+    return 0
+  fi
+
+  local styles=false router=false
+  grep -Fq '<GlobalStyles' "$main" && styles=true
+  grep -Fq '<BrowserRouter' "$main" && router=true
+
+  {
+    echo "import { StrictMode } from 'react'"
+    echo "import { renderToString } from 'react-dom/server'"
+    [[ "$router" == true ]] && echo "import { StaticRouter } from 'react-router-dom'"
+    echo "import App from './App'"
+    [[ "$styles" == true ]] && echo "import { GlobalStyles } from './styles/theme'"
+    cat <<'ENTRY_DOC'
+
+/*
+ * Build-time render of the first screen (prerenderShell in vite.config.ts).
+ * This tree mirrors main.tsx so hydration matches; it was derived from main.tsx
+ * by the managed patch patch_entry_server_matches_client. Keep it identical to
+ * the client: no window, time, randomness or signed-in state during render.
+ */
+ENTRY_DOC
+    echo "export function render(url: string): string {"
+    [[ "$router" == true ]] || echo "  void url"
+    echo "  return renderToString("
+    echo "    <StrictMode>"
+    [[ "$styles" == true ]] && echo "      <GlobalStyles />"
+    if [[ "$router" == true ]]; then
+      echo "      <StaticRouter location={url}>"
+      echo "        <App />"
+      echo "      </StaticRouter>"
+    else
+      echo "      <App />"
+    fi
+    echo "    </StrictMode>,"
+    echo "  )"
+    echo "}"
+  } >"$entry"
+  log_patch "frontend/src/entry-server.tsx derived from main.tsx (theme has no AppThemeProvider)"
+}
+
 patch_frontend_tsconfig_shared_base() {
   local fe="$target/frontend"
   [[ -d "$fe" ]] || return 0
@@ -3132,6 +3198,24 @@ patch_frontend_tsconfig_shared_base() {
       echo "[WARN] frontend/$name is customised; make it extend ../foundation/tooling/tsconfig/ by hand"
     fi
   done
+
+  # A standalone root tsconfig.json (an older scaffold shape) makes `tsc -b`
+  # build src with its own options: old target, no preserveSymlinks, so foundation
+  # packages resolve react/vite from foundation/ and fail. Replace it with the
+  # references stub only when it carries nothing project-specific.
+  local root="$fe/tsconfig.json"
+  if [[ -f "$root" && -f "$fe/tsconfig.app.json" ]] && ! grep -Fq '"references"' "$root" \
+    && grep -Fq 'foundation/tooling/tsconfig/' "$fe/tsconfig.app.json" \
+    && node -e '
+      const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const known = new Set(["target","useDefineForClassFields","lib","module","skipLibCheck","moduleResolution","allowImportingTsExtensions","resolveJsonModule","isolatedModules","noEmit","jsx","strict","noUnusedLocals","noUnusedParameters","noFallthroughCasesInSwitch"]);
+      const opts = Object.keys(c.compilerOptions ?? {});
+      const ok = JSON.stringify(c.include) === JSON.stringify(["src"]) && !c.files && !c.exclude && opts.every((k) => known.has(k));
+      process.exit(ok ? 0 : 1);
+    ' "$root" 2>/dev/null; then
+    cp "$tpl/tsconfig.json" "$root"
+    log_patch "frontend/tsconfig.json converted to project references (standalone root config bypassed the shared base)"
+  fi
 }
 
 patch_config_test_shape() {
@@ -3896,6 +3980,7 @@ patch_config_weak_jwt_denylist
 patch_config_env_canonicalization
 patch_config_test_shape
 patch_frontend_tsconfig_shared_base
+patch_entry_server_matches_client
 patch_worker_main_river_direct_lane
 patch_startup_state_store_cache_and_river_lane
 patch_server_enable_profiling
