@@ -150,6 +150,10 @@ COPY foundation/ui-minimal/ts ./foundation/ui-minimal/ts
 COPY foundation/runtime-native/ts ./foundation/runtime-native/ts
 COPY foundation/runtime-sdk/ts/browser-host ./foundation/runtime-sdk/ts/browser-host
 
+# Every app and package tsconfig extends this shared base. Without it, tsc
+# fails with TS5083 and also loses noEmit, so it writes .js files.
+COPY foundation/tooling/tsconfig ./foundation/tooling/tsconfig
+
 # Copy frontend source code
 COPY frontend/ ./frontend/
 

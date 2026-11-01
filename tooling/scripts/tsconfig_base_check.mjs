@@ -76,6 +76,22 @@ for (const rel of CONFIGS) {
   console.log(`[OK] ${rel} extends ${relative(root, target)}`);
 }
 
+// The base must reach the container build too. Dockerfiles copy foundation
+// packages one by one, so a missing tooling/ COPY passes locally and breaks
+// only the deploy (TS5083, and tsc loses noEmit and writes .js files).
+const DOCKERFILE = "templates/docker/Dockerfile";
+const TSCONFIG_COPY = "COPY foundation/tooling/tsconfig ./foundation/tooling/tsconfig";
+const dockerfile = existsSync(join(root, DOCKERFILE)) ? readFileSync(join(root, DOCKERFILE), "utf8") : "";
+const copyAt = dockerfile.indexOf(TSCONFIG_COPY);
+const buildAt = dockerfile.indexOf("npm run build");
+if (buildAt < 0) {
+  fail(`${DOCKERFILE}: no frontend "npm run build" step found`);
+} else if (copyAt < 0 || copyAt > buildAt) {
+  fail(`${DOCKERFILE}: frontend stage must "${TSCONFIG_COPY}" before npm run build`);
+} else {
+  console.log(`[OK] ${DOCKERFILE} copies the shared tsconfig base into the frontend build`);
+}
+
 const ranges = new Map();
 for (const rel of MANIFESTS) {
   const file = join(root, rel);

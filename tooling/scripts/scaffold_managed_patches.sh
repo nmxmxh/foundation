@@ -690,6 +690,31 @@ COPY foundation/$package_path ./foundation/$package_path"
   done
 }
 
+# patch_tsconfig_base_dockerfile copies the shared tsconfig base into frontend builds.
+#
+# App and package tsconfigs extend foundation/tooling/tsconfig/{base,dom}.json.
+# Dockerfiles copy foundation packages one by one, so tooling/ never reached
+# the build context. tsc then failed with TS5083 and every frontend deploy broke.
+# The COPY goes after the ui-minimal source line, which every frontend stage has.
+#
+# @since 0.0.1
+patch_tsconfig_base_dockerfile() {
+  grep -Fqs 'foundation/tooling/tsconfig/' "$target"/frontend/tsconfig*.json || return 0
+  local file search replace
+  search='COPY foundation/ui-minimal/ts ./foundation/ui-minimal/ts'
+  replace="$search
+COPY foundation/tooling/tsconfig ./foundation/tooling/tsconfig"
+  for file in "$target/Dockerfile" "$target/frontend/Dockerfile"; do
+    [[ -f "$file" ]] || continue
+    grep -Fq 'COPY foundation/tooling/tsconfig ' "$file" && continue
+    if grep -Fq "$search" "$file"; then
+      replace_in_file "$file" "$search" "$replace" "Docker frontend build copies shared tsconfig base"
+    elif grep -Eq '(npm run|yarn) build' "$file" && ! grep -Fq 'COPY foundation ./foundation' "$file"; then
+      echo "[WARN] ${file#$target/} builds the frontend but has no ui-minimal COPY; add COPY foundation/tooling/tsconfig by hand"
+    fi
+  done
+}
+
 # @since 0.0.1
 patch_openapi_dockerfile() {
   local file="$target/Dockerfile"
@@ -3132,6 +3157,24 @@ patch_frontend_tsconfig_shared_base() {
       echo "[WARN] frontend/$name is customised; make it extend ../foundation/tooling/tsconfig/ by hand"
     fi
   done
+
+  # A standalone root tsconfig.json (an older scaffold shape) makes `tsc -b`
+  # build src with its own options: old target, no preserveSymlinks, so foundation
+  # packages resolve react/vite from foundation/ and fail. Replace it with the
+  # references stub only when it carries nothing project-specific.
+  local root="$fe/tsconfig.json"
+  if [[ -f "$root" && -f "$fe/tsconfig.app.json" ]] && ! grep -Fq '"references"' "$root" \
+    && grep -Fq 'foundation/tooling/tsconfig/' "$fe/tsconfig.app.json" \
+    && node -e '
+      const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const known = new Set(["target","useDefineForClassFields","lib","module","skipLibCheck","moduleResolution","allowImportingTsExtensions","resolveJsonModule","isolatedModules","noEmit","jsx","strict","noUnusedLocals","noUnusedParameters","noFallthroughCasesInSwitch"]);
+      const opts = Object.keys(c.compilerOptions ?? {});
+      const ok = JSON.stringify(c.include) === JSON.stringify(["src"]) && !c.files && !c.exclude && opts.every((k) => known.has(k));
+      process.exit(ok ? 0 : 1);
+    ' "$root" 2>/dev/null; then
+    cp "$tpl/tsconfig.json" "$root"
+    log_patch "frontend/tsconfig.json converted to project references (standalone root config bypassed the shared base)"
+  fi
 }
 
 patch_config_test_shape() {
@@ -3819,7 +3862,7 @@ if [[ "${2:-}" == "--only" ]]; then
   [[ ${#selected_patches[@]} -gt 0 && ${#selected_patches[@]} -le 32 ]] || exit 2
   for name in "${selected_patches[@]}"; do
     case "$name" in
-      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile|nginx_edge_transport|wasm_speed_profile|go_security|rust_security) ;;
+      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile|tsconfig_base_dockerfile|nginx_edge_transport|wasm_speed_profile|go_security|rust_security) ;;
       *) printf 'unsupported selected patch: %s\n' "$name" >&2; exit 2 ;;
     esac
   done
@@ -3850,6 +3893,7 @@ patch_coolify_deploy_contract
 patch_coolify_routing_labels
 patch_reframe_frontend_dockerfile
 patch_runtime_native_dockerfile
+patch_tsconfig_base_dockerfile
 patch_openapi_dockerfile
 patch_apidocs_server
 patch_docgen_pointer_helper
