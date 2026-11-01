@@ -313,6 +313,7 @@ check-scaffold-idempotency:
 	@tests/scaffold_idempotency_test.sh
 	@tests/nginx_edge_patch_test.sh
 	@tests/compose_tcp_idle_patch_test.sh
+	@tests/static_precompress_patch_test.sh
 
 check-scaffold-seed-drift:
 	@tests/scaffold_seed_drift_test.sh

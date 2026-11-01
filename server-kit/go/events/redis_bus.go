@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/protobuf/encoding/protowire"
+
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/logger"
 	rediskit "github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 )
@@ -196,6 +198,11 @@ func (b *RedisBus) consumeLoop(msgs <-chan []byte) {
 			if b.ctx.Err() != nil {
 				return
 			}
+			// Every node also receives its own publishes. Skip them before the full decode,
+			// which costs about 40 times the field scan (BenchmarkRedisBusSelfEcho).
+			if isOwnBinaryEnvelope(raw, b.nodeID) {
+				continue
+			}
 			envelope, err := Decode(raw)
 			if err != nil {
 				b.logger.WarnContext(b.ctx, "invalid event envelope from redis", "error", err)
@@ -277,4 +284,34 @@ func sleepWithContext(ctx context.Context, d time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+// envelopeSourceNodeField is source_node_id in foundation.v1.EventEnvelope (envelope.proto).
+const envelopeSourceNodeField protowire.Number = 9
+
+// isOwnBinaryEnvelope reports whether raw is a binary envelope that nodeID published.
+// It reads only the source_node_id field and does not allocate. A JSON envelope, a
+// legacy envelope with the id in metadata, or a scan error returns false, so the
+// caller takes the full decode path, which keeps its own echo check.
+func isOwnBinaryEnvelope(raw []byte, nodeID string) bool {
+	if nodeID == "" {
+		return false
+	}
+	for len(raw) > 0 {
+		num, typ, n := protowire.ConsumeTag(raw)
+		if n < 0 {
+			return false
+		}
+		raw = raw[n:]
+		if num == envelopeSourceNodeField && typ == protowire.BytesType {
+			value, m := protowire.ConsumeBytes(raw)
+			return m >= 0 && string(value) == nodeID
+		}
+		m := protowire.ConsumeFieldValue(num, typ, raw)
+		if m < 0 {
+			return false
+		}
+		raw = raw[m:]
+	}
+	return false
 }

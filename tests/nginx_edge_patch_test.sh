@@ -44,8 +44,10 @@ seed_legacy_project() {
     chmod +x "$dir/start.sh"
 }
 
+# Every patch that edits nginx.conf runs, so the patched file can converge with the
+# template. static_precompression adds gzip_static, which the edge patch does not.
 run_patch() {
-    bash "$PATCHER" "$1" --only nginx_edge_transport 2>&1
+    bash "$PATCHER" "$1" --only nginx_edge_transport,static_precompression 2>&1
 }
 
 # Prints the distinct directives of an nginx file, ignoring comments and order.

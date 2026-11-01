@@ -2992,6 +2992,35 @@ patch_compose_stop_grace_period() {
   fi
 }
 
+# The frontend build precompresses its assets (frontend-kit precompress-static.mjs)
+# and nginx serves the copies through brotli_static and gzip_static, so a request
+# costs a file read instead of a compression. Brotli 11 is about 11 percent smaller
+# than on-the-fly brotli 6 (docs/foundation_benchmarks.md). The Dockerfile step is
+# added only where the build copies frontend-kit source, or the script would be
+# missing from the image and the build would fail.
+# @since 0.0.1
+patch_static_precompression() {
+  local dockerfile="$target/Dockerfile"
+  local nginx="$target/config/nginx.conf"
+  local step='RUN node foundation/frontend-kit/ts/scripts/precompress-static.mjs frontend/dist'
+  if [[ -f "$dockerfile" ]] && ! grep -Fq 'precompress-static.mjs' "$dockerfile" \
+    && grep -Eq '^COPY foundation/frontend-kit/ts \./foundation/frontend-kit/ts' "$dockerfile" \
+    && grep -Eq '^RUN cd frontend && .*npm run build[[:space:]]*$' "$dockerfile"; then
+    export PRECOMPRESS_STEP="$step"
+    perl -0pi -e 's/(^RUN cd frontend && [^\n]*npm run build[ \t]*\n)/$1\n# Precompress the built assets once, so nginx serves them through brotli_static\n# and gzip_static instead of compressing on every request.\n$ENV{PRECOMPRESS_STEP}\n/m' "$dockerfile"
+    if grep -Fq 'precompress-static.mjs' "$dockerfile"; then
+      log_patch "Dockerfile precompresses frontend assets at build: ${dockerfile#$target/}"
+    fi
+  fi
+  if [[ -f "$nginx" ]] && ! grep -Eq '^[[:space:]]*gzip_static[[:space:]]' "$nginx" \
+    && grep -Eq '^[[:space:]]*gzip on;' "$nginx"; then
+    perl -0pi -e 's/^([ \t]*)gzip on;\n/$1gzip on;\n$1# Serve the .gz copies the frontend build writes.\n$1gzip_static on;\n/m' "$nginx"
+    if grep -Eq '^[[:space:]]*gzip_static on;' "$nginx"; then
+      log_patch "nginx serves precompressed .gz assets: ${nginx#$target/}"
+    fi
+  fi
+}
+
 # Browser TCP connections end in the frontend (or, without it, the server)
 # container. Linux restarts slow start after an idle gap, so a WebSocket push
 # after a quiet period pays extra round trips: on typical 4G a 269 KB push went
@@ -3911,7 +3940,7 @@ if [[ "${2:-}" == "--only" ]]; then
   [[ ${#selected_patches[@]} -gt 0 && ${#selected_patches[@]} -le 32 ]] || exit 2
   for name in "${selected_patches[@]}"; do
     case "$name" in
-      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile|tsconfig_base_dockerfile|nginx_edge_transport|wasm_speed_profile|go_security|rust_security|compose_tcp_idle_restart) ;;
+      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile|tsconfig_base_dockerfile|nginx_edge_transport|wasm_speed_profile|go_security|rust_security|compose_tcp_idle_restart|static_precompression) ;;
       *) printf 'unsupported selected patch: %s\n' "$name" >&2; exit 2 ;;
     esac
   done
@@ -3939,6 +3968,7 @@ patch_compose_targets "$target/docker-compose.test.yml"
 patch_compose_database_contract
 patch_compose_stop_grace_period
 patch_compose_tcp_idle_restart
+patch_static_precompression
 patch_coolify_deploy_contract
 patch_coolify_routing_labels
 patch_reframe_frontend_dockerfile

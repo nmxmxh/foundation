@@ -724,6 +724,20 @@ NOTE: On EDGE the link rate dominates, so cubic and BBR are equal there.
 NOTE: A new network namespace inherits the host congestion control but not
 `tcp_slow_start_after_idle`. Set the second one per container.
 
+### Static asset precompression
+
+`frontend-kit/ts/scripts/precompress-static.mjs` writes brotli 11 and gzip 9
+copies at build time. nginx serves them through `brotli_static` and
+`gzip_static`. Measured on pronto_v1's built assets (2026-11-01):
+
+| Encoding | Bytes per cold load | Cost |
+| :--- | ---: | :--- |
+| On-the-fly brotli 6 (before) | 976,683 | about 98 ms of nginx CPU per asset set, every request |
+| Precompressed brotli 11 | 865,075 | about 8 s once per build |
+
+The root shell drops from 6,985 B to 6,131 B. A clients-only-gzip request,
+common for crawlers, gets the gzip 9 copy as a file read.
+
 ## Guardrails
 
 1. Same-process hot dispatch must stay allocation-free.

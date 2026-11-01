@@ -164,6 +164,11 @@ COPY frontend/ ./frontend/
 ENV WYW_OXC_RAW_TRANSFER=0
 RUN cd frontend && node ../foundation/ui-minimal/ts/scripts/wyw-oxc-raw-transfer.mjs . && npm run build
 
+# Precompress the built assets once, so nginx serves them through brotli_static
+# and gzip_static instead of compressing on every request. Brotli 11 is about 11
+# percent smaller than on-the-fly brotli 6 (docs/foundation/foundation_benchmarks.md).
+RUN node foundation/frontend-kit/ts/scripts/precompress-static.mjs frontend/dist
+
 # --- Frontend Final ---
 FROM alpine:3.23 AS frontend
 

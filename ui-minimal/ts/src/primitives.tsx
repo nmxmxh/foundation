@@ -1727,7 +1727,8 @@ const Style = {
     left: ${({ $left }) => `${$left}px`};
     width: ${({ $width }) => `${$width}px`};
     max-height: ${({ $maxHeight }) => `${$maxHeight}px`};
-    z-index: ${minimalVars.zIndex.dropdown};
+    /* Portaled to <body>, so it must paint above the modal it may be opened from. */
+    z-index: calc(${minimalVars.zIndex.modal} + 1);
     transform: ${({ $placement }) => ($placement === "top" ? "translateY(-100%)" : "none")};
     display: flex;
     flex-direction: column;

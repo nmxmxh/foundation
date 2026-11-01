@@ -82,6 +82,20 @@ algorithm that the host kernel does not allow, so the container fails to start.
 NOTE: A CDN or managed load balancer that terminates TCP controls these settings
 itself. The host settings then apply only to the connection behind it.
 
+WARNING: On Coolify, TLS ends at `coolify-proxy`, so the browser TCP connection
+ends in that container, not in the frontend. The `docker-compose.yml` sysctl
+then does not reach browser traffic. Add the same sysctl to the proxy service
+in Coolify's proxy Compose file (`/data/coolify/proxy/docker-compose.yml`, also
+on the server's Proxy page), then restart the proxy. Restart it after the host
+BBR change too, because a container keeps the congestion control it started with:
+
+```yaml
+services:
+  coolify-proxy:
+    sysctls:
+      net.ipv4.tcp_slow_start_after_idle: 0
+```
+
 ## Incident Records
 
 Use `incident_record_template.md` for production-impacting failures, failed deployments, rollbacks, and security-relevant events.
