@@ -1048,7 +1048,7 @@ type batchDeleteMemoryDB struct {
 func (d *batchDeleteMemoryDB) DeleteRecordsBatch(ctx context.Context, records []database.DomainRecord) error {
 	d.batches++
 	for _, rec := range records {
-		if err := d.MemoryDB.DeleteRecord(ctx, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID); err != nil {
+		if err := d.DeleteRecord(ctx, rec.Domain, rec.Collection, rec.OrganizationID, rec.RecordID); err != nil {
 			return err
 		}
 		d.deleted++

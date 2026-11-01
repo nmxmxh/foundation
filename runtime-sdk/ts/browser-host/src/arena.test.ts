@@ -115,6 +115,24 @@ describe("RuntimeSharedArena", () => {
     expect(() => decodeRuntimeColumnarBatchDescriptor(badSchema)).toThrow("unsupported columnar batch schema");
   });
 
+  // Regression: markConsumed is only READY -> CONSUMED.
+  it("refuses to consume a descriptor that is not READY", () => {
+    const arena = RuntimeSharedArena.create({ arenaBytes: ARENA_MIN_BYTES });
+    const payload = new TextEncoder().encode("consume-guard");
+    const descriptor = arena.allocate(payload.byteLength);
+    expect(() => arena.markConsumedById(descriptor.id)).toThrow("not READY");
+
+    arena.writeSlab(descriptor.id, payload);
+    arena.markConsumedById(descriptor.id);
+    const epochAfterFirst = arena.readDescriptor(descriptor.id).consumerEpoch;
+    expect(() => arena.markConsumedById(descriptor.id)).toThrow("not READY");
+    expect(arena.readDescriptor(descriptor.id).consumerEpoch).toBe(epochAfterFirst);
+
+    arena.releaseDescriptorById(descriptor.id);
+    expect(() => arena.markConsumed(descriptor.id)).toThrow("not READY");
+    expect(arena.readDescriptor(descriptor.id).state).toBe(ARENA_DESCRIPTOR_STATE_FREE);
+  });
+
   it("allocates slabs and publishes descriptor-ready queue entries", () => {
     const arena = RuntimeSharedArena.create({ arenaBytes: ARENA_MIN_BYTES });
     const payload = new TextEncoder().encode("runtime-arena-payload");
@@ -311,6 +329,7 @@ describe("RuntimeSharedArena", () => {
 
     const releasedIds = descriptors.slice(0, 4).map((descriptor) => descriptor.id);
     for (const id of releasedIds) {
+      arena.writeSlabReady(id, payload);
       arena.markConsumedById(id);
     }
     const allocatedBeforeReuse = arena.invariantSnapshot().allocatedBytes;

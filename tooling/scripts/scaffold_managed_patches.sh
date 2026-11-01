@@ -2992,6 +2992,55 @@ patch_compose_stop_grace_period() {
   fi
 }
 
+# Browser TCP connections end in the frontend (or, without it, the server)
+# container. Linux restarts slow start after an idle gap, so a WebSocket push
+# after a quiet period pays extra round trips: on typical 4G a 269 KB push went
+# from 162 ms to 336 ms (docs/foundation_benchmarks.md, frame tuning). The
+# sysctl is namespaced and reversible, so every Docker host accepts it; BBR is
+# a host setting and stays out of Compose (ops/README.md).
+# @since 0.0.1
+patch_compose_tcp_idle_restart() {
+  local compose="$target/docker-compose.yml"
+  [[ -f "$compose" ]] || return 0
+  local changed
+  changed="$(python3 - "$compose" <<'PY'
+import re, sys
+
+path = sys.argv[1]
+lines = open(path).read().split("\n")
+SETTING = "net.ipv4.tcp_slow_start_after_idle"
+service = re.compile(r"^  [A-Za-z0-9_.-]+:\s*$")
+out, i, changed = [], 0, []
+while i < len(lines):
+    if not service.match(lines[i]):
+        out.append(lines[i]); i += 1; continue
+    end = i + 1
+    while end < len(lines) and (lines[end] == "" or lines[end].startswith("   ")):
+        end += 1
+    block = lines[i:end]
+    name = next((l for l in block if "container_name:" in l), "")
+    role = "frontend" if name.rstrip().endswith("-frontend") else "server" if name.rstrip().endswith("-server") else ""
+    if role and not any(SETTING in l for l in block):
+        sysctls = next((k for k, l in enumerate(block) if l.strip() == "sysctls:"), None)
+        if sysctls is not None:
+            listed = sysctls + 1 < len(block) and block[sysctls + 1].lstrip().startswith("- ")
+            entry = f"      - {SETTING}=0" if listed else f"      {SETTING}: 0"
+            block.insert(sysctls + 1, entry)
+        else:
+            at = next(k for k, l in enumerate(block) if "container_name:" in l) + 1
+            block[at:at] = ["    sysctls:", f"      {SETTING}: 0"]
+        changed.append(role)
+    out.extend(block); i = end
+if changed:
+    open(path, "w").write("\n".join(out))
+print(" ".join(changed))
+PY
+)" || return 1
+  if [[ -n "$changed" ]]; then
+    log_patch "Docker Compose keeps the TCP window across idle gaps ($changed): ${compose#$target/}"
+  fi
+}
+
 # @since 0.0.1
 patch_river_table_readiness_gate() {
   local main="$target/cmd/worker/main.go"
@@ -3862,7 +3911,7 @@ if [[ "${2:-}" == "--only" ]]; then
   [[ ${#selected_patches[@]} -gt 0 && ${#selected_patches[@]} -le 32 ]] || exit 2
   for name in "${selected_patches[@]}"; do
     case "$name" in
-      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile|tsconfig_base_dockerfile|nginx_edge_transport|wasm_speed_profile|go_security|rust_security) ;;
+      frontend_linaria|browser_wasm_build|retire_go_wasm|rust_unit_output|runtime_native_dockerfile|tsconfig_base_dockerfile|nginx_edge_transport|wasm_speed_profile|go_security|rust_security|compose_tcp_idle_restart) ;;
       *) printf 'unsupported selected patch: %s\n' "$name" >&2; exit 2 ;;
     esac
   done
@@ -3889,6 +3938,7 @@ patch_compose_targets "$target/docker-compose.dev.yml"
 patch_compose_targets "$target/docker-compose.test.yml"
 patch_compose_database_contract
 patch_compose_stop_grace_period
+patch_compose_tcp_idle_restart
 patch_coolify_deploy_contract
 patch_coolify_routing_labels
 patch_reframe_frontend_dockerfile

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	runtimeconfig "github.com/nmxmxh/ovasabi_foundation/config-contracts/go/runtimeconfig"
+	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/compress"
 	apperrors "github.com/nmxmxh/ovasabi_foundation/server-kit/go/errors"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/events"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/kernellane"
@@ -16,6 +17,7 @@ import (
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/redis"
 	"github.com/nmxmxh/ovasabi_foundation/server-kit/go/security"
 	"io"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1063,7 +1065,7 @@ func TestCompressionHelpersBoundMemoryAndEncoding(t *testing.T) {
 		t.Fatalf("short auto compression encoding=%s payload=%q err=%v", encoding, string(identity), err)
 	}
 	compressed, encoding, err := compressAuto(bytes.Repeat([]byte("a"), 512))
-	if err != nil || encoding != EncodingGzip || len(compressed) >= 512 {
+	if err != nil || encoding != EncodingZstd || len(compressed) >= 512 {
 		t.Fatalf("compressible auto compression encoding=%s len=%d err=%v", encoding, len(compressed), err)
 	}
 }
@@ -1612,5 +1614,262 @@ func TestAcceptDescriptorFilePartValidatesInputs(t *testing.T) {
 	bad := PartDescriptor{PartNumber: 0, Size: 4, ExpectedRawSHA256: shaHex("nope")}
 	if _, err := mgr.AcceptDescriptorFilePart(ctx, plan.TransferID, bad, src); err == nil {
 		t.Fatal("digest mismatch should error")
+	}
+}
+
+// Regression: Abort is the initiated -> aborted edge. It is terminal and idempotent.
+func TestAbortIsTerminalAndIdempotent(t *testing.T) {
+	mgr, _, _, _ := newTestManager(t)
+	ctx := bulkContext("org_1", "corr_bulk_abort", "")
+	plan, err := mgr.Initiate(ctx, InitiateRequest{TransferID: "abort_me", TotalSize: 2, ChunkSize: 1, MaxMemory: 1})
+	if err != nil {
+		t.Fatalf("Initiate() error = %v", err)
+	}
+	receipt := acceptTestPart(t, mgr, ctx, plan.TransferID, 0, 0, "a")
+	if err := mgr.Abort(ctx, plan.TransferID, "user cancelled"); err != nil {
+		t.Fatalf("Abort() error = %v", err)
+	}
+	if err := mgr.Abort(ctx, plan.TransferID, "again"); err != nil {
+		t.Fatalf("second Abort() error = %v", err)
+	}
+	status, err := mgr.Status(ctx, plan.TransferID)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if status.State != StateAborted {
+		t.Fatalf("status state = %q, want %q", status.State, StateAborted)
+	}
+	if _, err := mgr.AcceptPart(ctx, plan.TransferID, PartDescriptor{PartNumber: 1, Offset: 1, Size: 1}, strings.NewReader("b")); !apperrors.Is(err, apperrors.CodeInvalidState) {
+		t.Fatalf("AcceptPart after Abort error = %v, want invalid state", err)
+	}
+	if _, err := mgr.Complete(ctx, plan.TransferID, CompleteRequest{ExpectedRootSHA256: manifestRoot([]PartReceipt{receipt})}); !apperrors.Is(err, apperrors.CodeInvalidState) {
+		t.Fatalf("Complete after Abort error = %v, want invalid state", err)
+	}
+
+	done, err := mgr.Initiate(ctx, InitiateRequest{TransferID: "abort_done", TotalSize: 1, ChunkSize: 1, MaxMemory: 1})
+	if err != nil {
+		t.Fatalf("Initiate() error = %v", err)
+	}
+	doneReceipt := acceptTestPart(t, mgr, ctx, done.TransferID, 0, 0, "d")
+	if _, err := mgr.Complete(ctx, done.TransferID, CompleteRequest{ExpectedRootSHA256: manifestRoot([]PartReceipt{doneReceipt})}); err != nil {
+		t.Fatalf("Complete() error = %v", err)
+	}
+	if err := mgr.Abort(ctx, done.TransferID, "late"); !apperrors.Is(err, apperrors.CodeInvalidState) {
+		t.Fatalf("Abort after Complete error = %v, want invalid state", err)
+	}
+}
+
+type failingPlanStore struct {
+	*MemoryStateStore
+	failSave bool
+}
+
+func (s *failingPlanStore) SavePlan(ctx context.Context, plan TransferPlan) error {
+	if s.failSave {
+		return errors.New("plan store unavailable")
+	}
+	return s.MemoryStateStore.SavePlan(ctx, plan)
+}
+
+// Regression: Complete must report a failed plan save. A retry then converges plan.State.
+func TestCompleteReportsPlanSaveFailureAndRetryConverges(t *testing.T) {
+	state := &failingPlanStore{MemoryStateStore: NewMemoryStateStore()}
+	mgr, err := NewManager(Options{
+		ObjectStore: objectstore.New(runtimeconfig.ObjectStorageConfig{Endpoint: "memory://bulk-save", Bucket: "bulk"}),
+		StateStore:  state, DefaultChunkSize: 5, MaxChunkSize: 8, MaxParts: 4, Clock: fixedNow,
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	ctx := bulkContext("org_1", "corr_bulk_save", "")
+	plan, err := mgr.Initiate(ctx, InitiateRequest{TransferID: "save_fail", TotalSize: 1, ChunkSize: 1, MaxMemory: 1})
+	if err != nil {
+		t.Fatalf("Initiate() error = %v", err)
+	}
+	receipt := acceptTestPart(t, mgr, ctx, plan.TransferID, 0, 0, "s")
+	req := CompleteRequest{ExpectedRootSHA256: manifestRoot([]PartReceipt{receipt})}
+
+	state.failSave = true
+	if _, err := mgr.Complete(ctx, plan.TransferID, req); !apperrors.Is(err, apperrors.CodeDependency) {
+		t.Fatalf("Complete with failing plan save error = %v, want dependency", err)
+	}
+	state.failSave = false
+	if _, err := mgr.Complete(ctx, plan.TransferID, req); err != nil {
+		t.Fatalf("retried Complete() error = %v", err)
+	}
+	stored, err := state.LoadPlan(ctx, "org_1", plan.TransferID)
+	if err != nil || stored.State != StateCompleted {
+		t.Fatalf("stored plan = (%q, %v), want completed", stored.State, err)
+	}
+}
+
+func TestAbortFailureBranches(t *testing.T) {
+	state := &failingPlanStore{MemoryStateStore: NewMemoryStateStore()}
+	bus := events.NewInMemoryBus(10)
+	mgr, err := NewManager(Options{
+		ObjectStore: objectstore.New(runtimeconfig.ObjectStorageConfig{Endpoint: "memory://bulk-abort", Bucket: "bulk"}),
+		StateStore:  state, EventBus: bus, DefaultChunkSize: 5, MaxChunkSize: 8, MaxParts: 4, Clock: fixedNow,
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	ctx := bulkContext("org_1", "corr_bulk_abort_fail", "")
+	if err := mgr.Abort(ctx, "missing", "x"); err == nil {
+		t.Fatal("Abort(missing) returned nil")
+	}
+	if err := mgr.Abort(context.Background(), "missing", "x"); err == nil {
+		t.Fatal("Abort without tenant returned nil")
+	}
+	plan, err := mgr.Initiate(ctx, InitiateRequest{TransferID: "abort_save", TotalSize: 1, ChunkSize: 1, MaxMemory: 1})
+	if err != nil {
+		t.Fatalf("Initiate() error = %v", err)
+	}
+	state.failSave = true
+	if err := mgr.Abort(ctx, plan.TransferID, "x"); !apperrors.Is(err, apperrors.CodeDependency) {
+		t.Fatalf("Abort with failing save = %v, want dependency", err)
+	}
+	state.failSave = false
+
+	expired := plan
+	expired.TransferID = "abort_expired"
+	expired.Deadline = fixedNow().Add(-time.Second)
+	if err := state.MemoryStateStore.SavePlan(ctx, expired); err != nil {
+		t.Fatalf("SavePlan(expired) error = %v", err)
+	}
+	if err := mgr.Abort(ctx, expired.TransferID, "x"); !apperrors.Is(err, apperrors.CodeExpired) {
+		t.Fatalf("Abort(expired) = %v, want expired", err)
+	}
+}
+
+// Regression: part codecs are pooled. A fresh zstd encoder allocated about 9.5 MB and
+// 47 objects per 72 KB part; the pooled writer measures 4 objects and about 88 KB.
+func TestCompressBytesUsesPooledWriters(t *testing.T) {
+	if raceDetectorEnabled {
+		t.Skip("the race detector drains sync.Pool; allocation budgets do not apply")
+	}
+	payload := bytes.Repeat([]byte("bulk-part-payload "), 4096)
+	budgets := map[string]float64{EncodingGzip: 4, EncodingBrotli: 4, EncodingZstd: 6}
+	for encoding, budget := range budgets {
+		if _, err := compressBytes(payload, encoding); err != nil {
+			t.Fatalf("warm %s: %v", encoding, err)
+		}
+		allocs := testing.AllocsPerRun(20, func() {
+			if _, err := compressBytes(payload, encoding); err != nil {
+				t.Fatalf("compress %s: %v", encoding, err)
+			}
+		})
+		if allocs > budget {
+			t.Fatalf("%s compressBytes = %.0f allocs/run, budget %.0f", encoding, allocs, budget)
+		}
+	}
+}
+
+// A pooled writer must produce a valid, independent stream after reuse.
+func TestPooledCompressionWritersRoundTrip(t *testing.T) {
+	first := bytes.Repeat([]byte("first-part "), 512)
+	second := bytes.Repeat([]byte("second-part "), 512)
+	for _, encoding := range []string{EncodingGzip, EncodingBrotli, EncodingZstd} {
+		for _, payload := range [][]byte{first, second} {
+			encoded, err := compressBytes(payload, encoding)
+			if err != nil {
+				t.Fatalf("compress %s: %v", encoding, err)
+			}
+			decoded, err := compress.DecompressWithEncodingLimit(encoded, encoding, int64(len(payload)))
+			if err != nil {
+				t.Fatalf("decompress %s: %v", encoding, err)
+			}
+			if !bytes.Equal(decoded, payload) {
+				t.Fatalf("%s round trip after pool reuse changed the payload", encoding)
+			}
+		}
+	}
+	if _, err := acquireCompressionWriter(io.Discard, "deflate"); !apperrors.Is(err, apperrors.CodeValidation) {
+		t.Fatalf("unsupported encoding error = %v, want validation", err)
+	}
+	releaseCompressionWriter("deflate", nil)
+}
+
+// Regression: compressAuto decides by a zstd trial. The old byte heuristic stored
+// structured binary raw although it shrinks to about half.
+func TestCompressAutoDecidesByTrial(t *testing.T) {
+	r := rand.New(rand.NewPCG(7, 11))
+	random := func(n int) []byte {
+		out := make([]byte, n)
+		for i := range out {
+			out[i] = byte(r.UintN(256))
+		}
+		return out
+	}
+	structured := make([]byte, 256*1024)
+	for i := range structured {
+		if i%8 < 3 {
+			structured[i] = byte(r.UintN(256))
+		} else {
+			structured[i] = byte(i % 7)
+		}
+	}
+	cases := []struct {
+		name    string
+		payload []byte
+		want    string
+	}{
+		{"below minimum", bytes.Repeat([]byte("a"), autoMinBytes-1), EncodingIdentity},
+		{"small incompressible", random(1024), EncodingIdentity},
+		{"small compressible", bytes.Repeat([]byte("ledger-row,"), 200), EncodingZstd},
+		{"large random stops at the sample", random(256 * 1024), EncodingIdentity},
+		{"large structured binary", structured, EncodingZstd},
+	}
+	for _, tc := range cases {
+		encoded, encoding, err := compressAuto(tc.payload)
+		if err != nil || encoding != tc.want {
+			t.Fatalf("%s: compressAuto = (%q, %v), want %q", tc.name, encoding, err, tc.want)
+		}
+		if encoding == EncodingIdentity {
+			if !bytes.Equal(encoded, tc.payload) {
+				t.Fatalf("%s: identity result is not the payload", tc.name)
+			}
+			continue
+		}
+		if len(encoded) >= len(tc.payload) {
+			t.Fatalf("%s: zstd result %d bytes is not smaller than %d", tc.name, len(encoded), len(tc.payload))
+		}
+		decoded, err := compress.DecompressWithEncodingLimit(encoded, encoding, int64(len(tc.payload)))
+		if err != nil || !bytes.Equal(decoded, tc.payload) {
+			t.Fatalf("%s: round trip failed: %v", tc.name, err)
+		}
+	}
+}
+
+type errAfterReader struct {
+	data []byte
+	err  error
+}
+
+func (r *errAfterReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, r.err
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func TestBulkHelperBoundaries(t *testing.T) {
+	if _, ok := checkedAddInt64(-1, 1); ok {
+		t.Fatal("checkedAddInt64 accepted a negative operand")
+	}
+	if _, ok := checkedAddInt64(maxInt64, 1); ok {
+		t.Fatal("checkedAddInt64 accepted an overflow")
+	}
+	empty := multiReadCloser(nil)
+	if n, err := empty.Read(make([]byte, 1)); n != 0 || err != io.EOF {
+		t.Fatalf("empty multiReadCloser Read = (%d, %v), want (0, EOF)", n, err)
+	}
+	if err := empty.Close(); err != nil {
+		t.Fatalf("empty multiReadCloser Close: %v", err)
+	}
+	failure := errors.New("trailing read failed")
+	if _, _, err := readBoundedPart(&errAfterReader{data: []byte("abcd"), err: failure}, 4); !errors.Is(err, failure) {
+		t.Fatalf("readBoundedPart trailing error = %v, want %v", err, failure)
 	}
 }

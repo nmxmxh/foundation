@@ -573,6 +573,12 @@ export class RuntimeSharedArena {
   markConsumedById(descriptorId: number): void {
     this.assertDescriptorId(descriptorId);
     const descriptorTableOffset = descriptorOffset(descriptorId);
+    // READY -> CONSUMED is the only legal edge. FREE or ALLOCATED has no published bytes.
+    // CONSUMED again is a double consume, which would advance the consumer epoch twice.
+    const state = this.view.getUint32(descriptorTableOffset, true);
+    if (state !== ARENA_DESCRIPTOR_STATE_READY) {
+      throw new Error(`runtime arena descriptor ${descriptorId} is in state ${state}, not READY; it cannot be consumed`);
+    }
     this.view.setUint32(descriptorTableOffset, ARENA_DESCRIPTOR_STATE_CONSUMED, true);
     this.view.setUint32(
       descriptorTableOffset + 28,

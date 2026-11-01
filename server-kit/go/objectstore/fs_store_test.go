@@ -283,7 +283,7 @@ func TestFSStoreOpenConfinesSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	data, err := io.ReadAll(reader)
 	if err != nil || string(data) != "public" || object.Size != 6 {
 		t.Fatalf("confined alias: %q %+v %v", data, object, err)

@@ -1,0 +1,60 @@
+WebSocket frame tuning on mobile links (2026-11-01)
+tooling/scripts/ws_netlab_tuning.sh in the Colima VM, Linux 6.8.0-117-generic, lo MTU 1500, 7 trials, one network namespace per variant
+Variants: congestion control / tcp_slow_start_after_idle / frame gzip level. Medians in ms.
+
+== 4g-typical-ng  (median ms; base = cubic, slow-start-after-idle on, gzip 1)
+push  state mode    cubic/ssai1/g1  cubic/ssai0/g1    bbr/ssai1/g1    bbr/ssai0/g1    bbr/ssai0/g6    bbr/ssai0/g9
+  1.1K warm  raw              106.1           105.2           103.4           103.8           105.0           105.9
+  0.4K warm  framed           103.9           103.3           103.2           103.7           103.9           103.9
+  1.1K idle  raw              108.2           108.2           108.3           108.2           108.3           108.3
+  0.4K idle  framed           105.4           105.0           105.2           105.2           104.6           105.3
+  4.2K warm  raw              107.0           106.9           107.0           106.9           107.2           106.7
+  1.0K warm  framed           107.6           107.5           105.4           105.6           105.2           105.7
+  4.2K idle  raw              110.0           109.2           110.8           108.2           108.0           108.4
+  1.0K idle  framed           107.5           107.3           106.4           104.5           105.4           104.5
+ 33.4K warm  raw              137.3           137.3           146.2           147.0           146.2           146.3
+  5.9K warm  framed           107.5           108.0           114.7           114.8           108.5           109.0
+ 33.4K idle  raw              230.8           140.0           146.8           147.0           150.3           146.7
+  5.9K idle  framed           109.9           112.7           116.3           117.8           112.5           111.0
+268.8K warm  raw              447.6           448.6           395.9           395.9           397.5           396.2
+ 44.1K warm  framed           156.3           155.3           157.9           156.8           155.9           160.7
+268.8K idle  raw              671.5           399.2           399.0           399.3           401.9           397.9
+ 44.1K idle  framed           336.2           162.3           162.0           158.9           162.7           162.1
+
+== 3g-congested  (median ms; base = cubic, slow-start-after-idle on, gzip 1)
+push  state mode    cubic/ssai1/g1  cubic/ssai0/g1    bbr/ssai1/g1    bbr/ssai0/g1    bbr/ssai0/g6    bbr/ssai0/g9
+  1.1K warm  raw              211.5           211.9           212.6           210.5           212.3           215.4
+  0.4K warm  framed           207.9           208.9           208.2           206.1           209.4           208.2
+  1.1K idle  raw              212.8           214.8           213.6           213.1           218.4           215.3
+  0.4K idle  framed           210.3           212.4           210.8           209.7           210.8           212.4
+  4.2K warm  raw              228.2           227.7           228.6           227.5           228.2           228.0
+  1.0K warm  framed           218.8           209.7           211.3           214.5           212.6           208.4
+  4.2K idle  raw              231.6           231.7           229.5           234.6           233.3           233.1
+  1.0K idle  framed           216.9           215.8           216.5           215.2           217.8           216.5
+ 33.4K warm  raw              397.5           710.5           398.5           399.6           402.1           397.3
+  5.9K warm  framed           240.4           242.9           240.7           240.6           236.6           235.4
+ 33.4K idle  raw              542.1           500.2           400.5           397.0           397.1           482.3
+  5.9K idle  framed           243.4           239.5           242.4           246.0           237.9           240.7
+268.8K warm  raw             2254.0          2518.3          1779.2          1783.9          1785.3          1780.2
+ 44.1K warm  framed           712.1           703.0           471.3           493.4           422.7           521.4
+268.8K idle  raw             2734.3          2146.1          1883.0          1789.6          1776.5          1785.9
+ 44.1K idle  framed           923.6           575.1           477.0           481.9           418.4           474.2
+
+== edge-2g  (median ms; base = cubic, slow-start-after-idle on, gzip 1)
+push  state mode    cubic/ssai1/g1  cubic/ssai0/g1    bbr/ssai1/g1    bbr/ssai0/g1    bbr/ssai0/g6    bbr/ssai0/g9
+  1.1K warm  raw              450.3           450.4           448.3           446.6           447.9           446.1
+  0.4K warm  framed           425.4           429.8           425.4           426.4           425.3           425.9
+  1.1K idle  raw              450.2           446.0           453.0           451.0           450.8           447.1
+  0.4K idle  framed           429.1           426.4           427.4           428.8           431.0           429.3
+  4.2K warm  raw              552.0           552.8           553.3           554.6           550.6           553.7
+  1.0K warm  framed           448.4           444.7           447.0           442.9           438.6           440.2
+  4.2K idle  raw              554.3           552.4           554.8           555.8           558.5           552.7
+  1.0K idle  framed           446.7           447.3           447.6           449.3           445.4           446.0
+ 33.4K warm  raw             1528.7          1534.6          1537.0          1534.8          1697.1          1535.1
+  5.9K warm  framed           612.4           614.2           612.5           613.3           570.8           569.4
+ 33.4K idle  raw             1735.5          1530.5          1752.3          1759.4          1555.2          1535.0
+  5.9K idle  framed           612.4           614.1           614.9           612.5           568.5           567.7
+268.8K warm  raw             9784.5          9616.0         10065.7         10229.7          9743.3         10251.5
+ 44.1K warm  framed          1904.3          2102.3          1964.2          1958.3          1589.5          1582.5
+268.8K idle  raw             9636.3          9613.1          9950.0          9718.2         10189.5          9989.2
+ 44.1K idle  framed          2316.5          1916.2          1939.6          1916.8          1593.7          1587.8

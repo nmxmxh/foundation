@@ -215,7 +215,7 @@ func TestServerHTTP2AndTLSResumption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first request failed: %v", err)
 	}
-	defer firstResp.Body.Close()
+	defer func() { _ = firstResp.Body.Close() }()
 
 	if firstResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200 OK, got %d", firstResp.StatusCode)
@@ -230,8 +230,8 @@ func TestServerHTTP2AndTLSResumption(t *testing.T) {
 		if err != nil {
 			t.Fatalf("multiplexed request %d failed: %v", i, err)
 		}
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("request %d status: %d", i, resp.StatusCode)
 		}
@@ -296,8 +296,8 @@ func TestTLSSessionTicketResumption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first request failed: %v", err)
 	}
-	io.Copy(io.Discard, resp1.Body)
-	resp1.Body.Close()
+	_, _ = io.Copy(io.Discard, resp1.Body)
+	_ = resp1.Body.Close()
 
 	if resp1.TLS == nil {
 		t.Fatal("expected TLS connection state")
@@ -316,8 +316,8 @@ func TestTLSSessionTicketResumption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second request failed: %v", err)
 	}
-	io.Copy(io.Discard, resp2.Body)
-	resp2.Body.Close()
+	_, _ = io.Copy(io.Discard, resp2.Body)
+	_ = resp2.Body.Close()
 
 	if resp2.TLS == nil {
 		t.Fatal("expected TLS connection state on resumed connection")
@@ -378,7 +378,7 @@ func TestServerTLSRetainsHTTP1Fallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK || response.ProtoMajor != 1 {
 		t.Fatalf("HTTP/1 fallback: status=%d protocol=%s", response.StatusCode, response.Proto)
 	}

@@ -57,7 +57,7 @@ func slowStreamHandler(w http.ResponseWriter, gaps int, gap time.Duration) {
 	w.WriteHeader(http.StatusOK)
 	flusher, ok := w.(http.Flusher)
 	for i := range gaps {
-		fmt.Fprintf(w, "{\"i\":%d}\n", i)
+		_, _ = fmt.Fprintf(w, "{\"i\":%d}\n", i)
 		if ok {
 			flusher.Flush()
 		}
@@ -82,7 +82,7 @@ func TestCompressionMiddlewareStreamsFirstByte(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	start := time.Now()
 	buf := make([]byte, 64)

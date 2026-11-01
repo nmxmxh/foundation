@@ -286,6 +286,12 @@ export const createEventStore = (
 ) => {
   const pendingRequests = new Map<string, Promise<unknown>>();
   const responseCache = new Map<string, { data: unknown; timestamp: number }>();
+  // `status` describes a batch of overlapping requests, not the last one to settle.
+  // It stays "loading" while any request is in flight. At idle it is "error" if any request in the batch failed.
+  let inFlight = 0;
+  let batchError: string | null = null;
+  // reset() starts a new generation. Requests from an older generation do not write status.
+  let generation = 0;
 
   const store = createStore<EventState>((set, get) => ({
     pendingRequests,
@@ -319,6 +325,9 @@ export const createEventStore = (
       set({ responseCache });
     },
     reset: () => {
+      inFlight = 0;
+      batchError = null;
+      generation += 1;
       pendingRequests.clear();
       responseCache.clear();
       set({
@@ -329,6 +338,33 @@ export const createEventStore = (
       });
     },
   }));
+
+  const beginBatchRequest = (): number => {
+    if (inFlight === 0) {
+      batchError = null;
+    }
+    inFlight += 1;
+    store.setState({ status: "loading", lastError: batchError });
+    return generation;
+  };
+
+  const recordBatchError = (requestGeneration: number, message: string) => {
+    if (requestGeneration === generation) {
+      batchError = message;
+    }
+  };
+
+  const settleBatchRequest = (requestGeneration: number) => {
+    if (requestGeneration !== generation) {
+      return;
+    }
+    inFlight -= 1;
+    store.setState(
+      inFlight > 0
+        ? { status: "loading", lastError: batchError }
+        : { status: batchError === null ? "success" : "error", lastError: batchError }
+    );
+  };
 
   const computeDedupeKey = (eventType: string, payload: unknown, payloadEncoding: PayloadEncoding): string => {
     const contextKey = buildMetadataFingerprint(toIdentityScopedMetadata(getMetadata ? getMetadata() : {}));
@@ -362,7 +398,7 @@ export const createEventStore = (
       }
     }
 
-    store.getState().setStatus("loading");
+    const requestGeneration = beginBatchRequest();
     store.getState().setIsLoading(true, options.loadingKey);
 
     const extraMetadata = {
@@ -383,18 +419,18 @@ export const createEventStore = (
         if (replayEnabled) {
           responseCache.set(dedupeKey, { data: res, timestamp: Date.now() });
         }
-        store.setState({ status: "success", lastError: null });
         return res;
       })
       .catch((err: unknown) => {
         const error = err instanceof Error ? err : new Error(String(err));
-        store.setState({ status: "error", lastError: error.message });
+        recordBatchError(requestGeneration, error.message);
         throw error;
       })
       .finally(() => {
         if (coalescingEnabled) {
           pendingRequests.delete(dedupeKey);
         }
+        settleBatchRequest(requestGeneration);
         store.getState().setIsLoading(false, options.loadingKey);
       });
 

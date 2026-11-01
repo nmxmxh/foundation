@@ -247,8 +247,8 @@ func TestMiddlewareFlushedResponseIsNotDoubleWritten(t *testing.T) {
 // writer used to break with a 500.
 func TestMiddlewarePreservesHijacker(t *testing.T) {
 	client, server := net.Pipe()
-	defer client.Close()
-	defer server.Close()
+	defer func() { _ = client.Close() }()
+	defer func() { _ = server.Close() }()
 
 	var sawHijacker bool
 	wrapped := HTTPMiddleware(true, 1, 5)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

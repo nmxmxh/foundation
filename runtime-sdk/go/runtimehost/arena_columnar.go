@@ -93,7 +93,9 @@ func WriteFloat32Column(arena *Arena, fieldID uint32, values []float32) (Columna
 	for i, v := range values {
 		binary.LittleEndian.PutUint32(slab[i*4:i*4+4], math.Float32bits(v))
 	}
-	arena.Commit(desc)
+	if err := arena.Commit(desc); err != nil {
+		return ColumnarField{}, fmt.Errorf("commit float32 column %d: %w", fieldID, err)
+	}
 
 	return ColumnarField{
 		FieldID:            fieldID,
@@ -122,7 +124,9 @@ func WriteUint32Column(arena *Arena, fieldID uint32, values []uint32) (ColumnarF
 	for i, v := range values {
 		binary.LittleEndian.PutUint32(slab[i*4:i*4+4], v)
 	}
-	arena.Commit(desc)
+	if err := arena.Commit(desc); err != nil {
+		return ColumnarField{}, fmt.Errorf("commit uint32 column %d: %w", fieldID, err)
+	}
 
 	return ColumnarField{
 		FieldID:            fieldID,
@@ -192,7 +196,9 @@ func WriteColumnarBatch(arena *Arena, rowCount uint32, fields []ColumnarField) (
 		base += generated.COLUMNAR_FIELD_DESCRIPTOR_BYTES
 	}
 
-	arena.Commit(desc)
+	if err := arena.Commit(desc); err != nil {
+		return 0, err
+	}
 	return desc.ID, nil
 }
 

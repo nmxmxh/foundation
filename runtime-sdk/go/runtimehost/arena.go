@@ -2,6 +2,7 @@ package runtimehost
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -53,6 +54,10 @@ type ArenaDescriptor struct {
 	Capacity uint32
 	Type     uint32
 	Flags    uint32
+
+	// generation is the arena reset count when the descriptor was read or allocated.
+	// Commit uses it to refuse a descriptor from before a Reset.
+	generation uint32
 }
 
 // Arena is a mapped region of page-aligned slabs addressed by descriptor id.
@@ -66,6 +71,8 @@ type Arena struct {
 	capacity  uint32
 	allocHead uint32
 	nextID    uint32
+	// generation increments on every reset. Descriptors carry it, so a stale one cannot be committed.
+	generation uint32
 
 	// flush and readAt exist for a consumer that reaches the region by some
 	// route other than a mapping of it. The process pool no longer needs
@@ -135,6 +142,7 @@ func (a *Arena) reset() {
 
 	a.allocHead = generated.ARENA_OFFSET_PAGES
 	a.nextID = 0
+	a.generation++
 }
 
 // Reset returns the arena to its empty state, keeping the mapping.
@@ -204,6 +212,8 @@ func (a *Arena) Allocate(length uint32, slabType uint32) (ArenaDescriptor, []byt
 		Length:   length,
 		Capacity: capacity,
 		Type:     slabType,
+
+		generation: a.generation,
 	}
 	a.writeDescriptor(desc)
 	a.putHeader(generated.ARENA_HEADER_IDX_ALLOCATED_BYTES, a.allocHead)
@@ -213,13 +223,32 @@ func (a *Arena) Allocate(length uint32, slabType uint32) (ArenaDescriptor, []byt
 	return desc, a.raw[offset : offset+length : offset+capacity], nil
 }
 
+// ErrArenaStaleDescriptor reports a Commit that is not ALLOCATED -> READY on the live table.
+var ErrArenaStaleDescriptor = errors.New("arena descriptor is stale or not ALLOCATED")
+
 // Commit publishes a slab as READY.
-func (a *Arena) Commit(desc ArenaDescriptor) {
+//
+// The only legal edge is ALLOCATED -> READY on the current table. Commit refuses a
+// descriptor from before a Reset, a second Commit, and a descriptor whose bounds
+// differ from the table. Each would publish bytes that the slab does not own.
+func (a *Arena) Commit(desc ArenaDescriptor) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if desc.generation != a.generation || desc.ID >= a.nextID {
+		return fmt.Errorf("commit descriptor %d: %w", desc.ID, ErrArenaStaleDescriptor)
+	}
+	stored, err := a.descriptor(desc.ID)
+	if err != nil {
+		return err
+	}
+	if stored.State != generated.ARENA_DESCRIPTOR_STATE_ALLOCATED || stored.Offset != desc.Offset ||
+		stored.Length != desc.Length || stored.Capacity != desc.Capacity || stored.Type != desc.Type {
+		return fmt.Errorf("commit descriptor %d in state %d: %w", desc.ID, stored.State, ErrArenaStaleDescriptor)
+	}
 	desc.State = generated.ARENA_DESCRIPTOR_STATE_READY
 	a.writeDescriptor(desc)
 	a.putEpoch(generated.ARENA_IDX_DESCRIPTOR_EPOCH, desc.ID+1)
+	return nil
 }
 
 func (a *Arena) writeDescriptor(desc ArenaDescriptor) {
@@ -262,6 +291,8 @@ func (a *Arena) descriptor(id uint32) (ArenaDescriptor, error) {
 		Capacity: get(descriptorFieldCapacity),
 		Type:     get(descriptorFieldType),
 		Flags:    get(descriptorFieldFlags),
+
+		generation: a.generation,
 	}, nil
 }
 

@@ -45,16 +45,16 @@ type ProjectionSpec struct {
 	// ColumnarPK optionally specifies the primary key column name for automatic
 	// or on-demand ColumnarTable indexing. If set, GetColumnarView and point reads
 	// can use the sealed Arrow table directly.
-	ColumnarPK     string
-	ColumnarFields []string
-	MaxRecords     int
-	MaxBytes           int64
-	MaxIndexes         int
-	MaxRangeIndexes    int
-	MaxTombstones      int
-	MaxAppliedEvents   int
-	Freshness          time.Duration
-	TTL                time.Duration
+	ColumnarPK       string
+	ColumnarFields   []string
+	MaxRecords       int
+	MaxBytes         int64
+	MaxIndexes       int
+	MaxRangeIndexes  int
+	MaxTombstones    int
+	MaxAppliedEvents int
+	Freshness        time.Duration
+	TTL              time.Duration
 }
 
 // Event is the durable mutation shape consumed by the Hermes hot plane.

@@ -99,7 +99,7 @@ func BenchmarkIdlePoolReuse(b *testing.B) {
 			req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil)
 			resp, err := c.Do(req)
 			if err == nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		}
 	})
@@ -110,7 +110,7 @@ func BenchmarkIdlePoolReuse(b *testing.B) {
 			req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:1/", nil)
 			resp, err := c.Do(req)
 			if err == nil {
-				resp.Body.Close()
+				_ = resp.Body.Close()
 			}
 		}
 	})

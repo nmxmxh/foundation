@@ -14,7 +14,9 @@ type Manager struct {
 	mu         sync.RWMutex
 	connectors map[string]*Connector
 	started    bool
-	ctx        context.Context
+	// closed is terminal. Add and Start after Close must not revive connectors.
+	closed bool
+	ctx    context.Context
 }
 
 // NewManager returns an empty Manager.
@@ -30,6 +32,11 @@ func (m *Manager) Add(cfg Config) (*Connector, error) {
 		return nil, err
 	}
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		_ = c.Close()
+		return nil, ErrClosed
+	}
 	if existing, ok := m.connectors[cfg.Name]; ok {
 		m.mu.Unlock()
 		_ = c.Close()
@@ -56,6 +63,10 @@ func (m *Manager) Get(name string) (*Connector, bool) {
 // connectors added later also start.
 func (m *Manager) Start(ctx context.Context) {
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return
+	}
 	m.started = true
 	m.ctx = ctx
 	conns := make([]*Connector, 0, len(m.connectors))
@@ -94,8 +105,10 @@ func (m *Manager) Healthy() bool {
 }
 
 // Close stops and releases every connector. It satisfies startup.CloseFunc.
+// Close is terminal: later Add calls return ErrClosed and Start does nothing.
 func (m *Manager) Close() error {
 	m.mu.Lock()
+	m.closed = true
 	conns := make([]*Connector, 0, len(m.connectors))
 	for _, c := range m.connectors {
 		conns = append(conns, c)

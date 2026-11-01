@@ -3,6 +3,7 @@ package runtimehost
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	"github.com/nmxmxh/ovasabi_foundation/runtime-sdk/go/runtimehost/generated"
@@ -115,7 +116,9 @@ func TestArenaCommitPublishesOnlyAfterWriting(t *testing.T) {
 	}
 
 	copy(slab, []byte("filled"))
-	arena.Commit(desc)
+	if err := arena.Commit(desc); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
 
 	stored, _ = arena.Descriptor(desc.ID)
 	if stored.State != generated.ARENA_DESCRIPTOR_STATE_READY {
@@ -157,7 +160,9 @@ func TestArenaResetClearsStaleDescriptors(t *testing.T) {
 		t.Fatalf("Allocate: %v", err)
 	}
 	copy(slab, []byte("stale"))
-	arena.Commit(desc)
+	if err := arena.Commit(desc); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
 
 	arena.Reset()
 
@@ -463,7 +468,9 @@ func TestArenaMappingAndSlab(t *testing.T) {
 		t.Fatalf("failed to allocate: %v", err)
 	}
 	copy(slice, []byte("payload-data"))
-	arena.Commit(desc)
+	if err := arena.Commit(desc); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
 
 	if err := arena.Sync(); err != nil {
 		t.Fatalf("failed to sync arena: %v", err)
@@ -478,5 +485,51 @@ func TestArenaMappingAndSlab(t *testing.T) {
 	}
 	if string(readData[:12]) != "payload-data" {
 		t.Fatalf("unexpected read data: %s", string(readData[:12]))
+	}
+}
+
+// Regression: Commit is only ALLOCATED -> READY on the live table. A descriptor
+// held across Reset must not republish over a new slab, and a second Commit is refused.
+func TestArenaCommitRefusesStaleAndRepeatedDescriptors(t *testing.T) {
+	arena := testArena(t, generated.ARENA_MIN_BYTES)
+
+	stale, _, err := arena.Allocate(64, generated.ARENA_DESCRIPTOR_TYPE_BYTES)
+	if err != nil {
+		t.Fatalf("Allocate: %v", err)
+	}
+	arena.Reset()
+	if err := arena.Commit(stale); !errors.Is(err, ErrArenaStaleDescriptor) {
+		t.Fatalf("commit after Reset with no new slab = %v, want ErrArenaStaleDescriptor", err)
+	}
+
+	// Same id, same offset, but a different slab. Only the generation tells them apart.
+	fresh, _, err := arena.Allocate(64, generated.ARENA_DESCRIPTOR_TYPE_BYTES)
+	if err != nil {
+		t.Fatalf("Allocate: %v", err)
+	}
+	if fresh.ID != stale.ID || fresh.Offset != stale.Offset {
+		t.Fatalf("test premise: fresh %+v does not reuse stale %+v", fresh, stale)
+	}
+	if err := arena.Commit(stale); !errors.Is(err, ErrArenaStaleDescriptor) {
+		t.Fatalf("commit of pre-Reset descriptor = %v, want ErrArenaStaleDescriptor", err)
+	}
+	if stored, _ := arena.Descriptor(fresh.ID); stored.State != generated.ARENA_DESCRIPTOR_STATE_ALLOCATED {
+		t.Fatalf("stale commit changed the live slab to state %d", stored.State)
+	}
+
+	if err := arena.Commit(fresh); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if err := arena.Commit(fresh); !errors.Is(err, ErrArenaStaleDescriptor) {
+		t.Fatalf("second commit = %v, want ErrArenaStaleDescriptor", err)
+	}
+
+	next, _, err := arena.Allocate(64, generated.ARENA_DESCRIPTOR_TYPE_BYTES)
+	if err != nil {
+		t.Fatalf("Allocate: %v", err)
+	}
+	next.Length = 4096
+	if err := arena.Commit(next); !errors.Is(err, ErrArenaStaleDescriptor) {
+		t.Fatalf("commit with altered bounds = %v, want ErrArenaStaleDescriptor", err)
 	}
 }

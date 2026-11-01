@@ -1,0 +1,45 @@
+WebSocket runtime frames on shaped links (2026-11-01)
+make bench-ws-netlab, NETLAB_TRIALS=7, Linux 7.0.12-linuxkit, cubic, tcp_slow_start_after_idle=1, lo MTU 1500
+Medians in ms; push = raw envelope size; idle = after a pause longer than the RTO
+
+profile           push state    raw ms framed ms  saved ms speedup bytes saved
+fiber-ng          1.1K  warm      23.7      22.5       1.2   1.05x         62%
+fiber-ng          1.1K  idle      25.7      25.3       0.4   1.01x         62%
+fiber-ng          4.2K  warm      24.0      24.1      -0.1   1.00x         77%
+fiber-ng          4.2K  idle      25.2      26.5      -1.2   0.95x         77%
+fiber-ng         33.4K  warm      27.3      27.0       0.3   1.01x         82%
+fiber-ng         33.4K  idle      52.8      28.7      24.1   1.84x         82%
+fiber-ng        268.8K  warm      53.8      35.7      18.1   1.51x         84%
+fiber-ng        268.8K  idle     131.8      86.0      45.8   1.53x         84%
+4g-good           1.1K  warm      67.1      67.9      -0.8   0.99x         62%
+4g-good           1.1K  idle      70.6      67.2       3.4   1.05x         62%
+4g-good           4.2K  warm      69.6      67.7       2.0   1.03x         77%
+4g-good           4.2K  idle      67.9      69.5      -1.6   0.98x         77%
+4g-good          33.4K  warm      78.4      72.5       5.9   1.08x         82%
+4g-good          33.3K  idle     145.8      73.1      72.8   2.00x         82%
+4g-good         268.8K  warm     254.5      96.3     158.3   2.64x         84%
+4g-good         268.8K  idle     382.2     227.1     155.2   1.68x         84%
+4g-typical-ng     1.1K  warm     108.2     107.1       1.1   1.01x         62%
+4g-typical-ng     1.1K  idle     107.4     109.2      -1.8   0.98x         62%
+4g-typical-ng     4.2K  warm     110.2     110.1       0.2   1.00x         77%
+4g-typical-ng     4.2K  idle     112.2     110.6       1.7   1.02x         77%
+4g-typical-ng    33.4K  warm     140.5     112.8      27.7   1.25x         82%
+4g-typical-ng    33.4K  idle     238.5     115.4     123.1   2.07x         82%
+4g-typical-ng   268.8K  warm     453.2     162.1     291.2   2.80x         84%
+4g-typical-ng   268.8K  idle     674.9     343.7     331.2   1.96x         84%
+3g-congested      1.1K  warm     212.7     209.4       3.3   1.02x         62%
+3g-congested      1.1K  idle     215.7     210.9       4.8   1.02x         62%
+3g-congested      4.2K  warm     230.1     213.1      17.1   1.08x         77%
+3g-congested      4.2K  idle     231.0     213.5      17.5   1.08x         77%
+3g-congested     33.4K  warm     521.4     239.5     281.9   2.18x         82%
+3g-congested     33.4K  idle     545.2     244.7     300.5   2.23x         82%
+3g-congested    268.8K  warm    2847.2     739.2    2108.0   3.85x         84%
+3g-congested    268.8K  idle    3082.9     720.0    2362.9   4.28x         84%
+edge-2g           1.1K  warm     449.0     428.1      20.9   1.05x         62%
+edge-2g           1.1K  idle     451.0     429.4      21.6   1.05x         62%
+edge-2g           4.2K  warm     553.4     447.3     106.1   1.24x         77%
+edge-2g           4.2K  idle     554.1     449.3     104.8   1.23x         77%
+edge-2g          33.3K  warm    1530.1     612.8     917.3   2.50x         82%
+edge-2g          33.4K  idle    1733.7     616.2    1117.5   2.81x         82%
+edge-2g         268.8K  warm    9918.3    2106.7    7811.6   4.71x         84%
+edge-2g         268.8K  idle    9641.4    2319.6    7321.8   4.16x         84%

@@ -2,8 +2,10 @@ package hermes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -436,5 +438,88 @@ func TestAccumulatorTracksHermesTTLRoundTrip(t *testing.T) {
 	values := acc.GetDimensionSummary(scope, "country", 10).TopValues
 	if len(values) != 1 || values[0].Value != "C_2" {
 		t.Fatalf("top values = %+v, want only C_2", values)
+	}
+}
+
+// countingBase counts CountRecords calls and can block them until ctx is done.
+type countingBase struct {
+	database.RuntimeStore
+	counts  atomic.Int32
+	blockFn func(ctx context.Context) error
+}
+
+func (b *countingBase) CountRecords(ctx context.Context, domain, collection, orgID string, q database.RecordQuery) (int64, error) {
+	b.counts.Add(1)
+	if b.blockFn != nil {
+		if err := b.blockFn(ctx); err != nil {
+			return 0, err
+		}
+	}
+	return b.RuntimeStore.CountRecords(ctx, domain, collection, orgID, q)
+}
+
+// Regression: an oversized scope must not repeat its COUNT on every read.
+// The over-limit mark expires, so a scope that shrinks can warm again.
+func TestOversizedScopeDoesNotRecountEveryRead(t *testing.T) {
+	mem := database.NewMemoryDB()
+	base := &countingBase{RuntimeStore: mem}
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{MaxRecordsPerScope: 1, MaxBytesPerScope: 1 << 20})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	store.now = func() time.Time { return now }
+	ctx := t.Context()
+	for i := range 3 {
+		if _, err := mem.UpsertRecord(ctx, database.DomainRecord{Domain: "big", Collection: "rows", OrganizationID: "org_1",
+			RecordID: fmt.Sprintf("r_%d", i), Data: testRecordData(map[string]any{"n": i})}); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	for range 5 {
+		items, err := store.ListRecords(ctx, "big", "rows", "org_1", testRecordQuery(10, nil))
+		if err != nil || len(items) != 3 {
+			t.Fatalf("fallback ListRecords() len=%d err=%v", len(items), err)
+		}
+	}
+	if got := base.counts.Load(); got != 1 {
+		t.Fatalf("CountRecords ran %d times for 5 reads, want 1", got)
+	}
+	now = now.Add(overLimitRetryInterval + time.Second)
+	if _, err := store.ListRecords(ctx, "big", "rows", "org_1", testRecordQuery(10, nil)); err != nil {
+		t.Fatalf("ListRecords() after retry interval: %v", err)
+	}
+	if got := base.counts.Load(); got != 2 {
+		t.Fatalf("CountRecords ran %d times after the interval, want 2", got)
+	}
+}
+
+// Regression: a cancelled caller must not mark the scope degraded.
+func TestCanceledWarmDoesNotDegradeScope(t *testing.T) {
+	mem := database.NewMemoryDB()
+	base := &countingBase{RuntimeStore: mem, blockFn: func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	store, err := WrapRuntimeStore(base, RuntimeStoreOptions{MaxRecordsPerScope: 8, MaxBytesPerScope: 1 << 20})
+	if err != nil {
+		t.Fatalf("WrapRuntimeStore() error = %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+	if err := store.WarmScope(ctx, "cold", "rows", "org_1"); err == nil {
+		t.Fatal("WarmScope() with cancelled ctx returned nil")
+	}
+	name := store.ProjectionName("cold", "rows", "org_1")
+	if store.isDegraded(name) {
+		t.Fatal("a cancelled caller marked the scope degraded")
+	}
+
+	base.blockFn = func(context.Context) error { return errors.New("database down") }
+	if err := store.WarmScope(t.Context(), "cold", "rows", "org_1"); err == nil {
+		t.Fatal("WarmScope() with failing base returned nil")
+	}
+	if !store.isDegraded(name) {
+		t.Fatal("a real base failure did not mark the scope degraded")
 	}
 }

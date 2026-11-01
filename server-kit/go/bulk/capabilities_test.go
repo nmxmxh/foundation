@@ -53,3 +53,18 @@ func TestCapabilityNotesDescribeBothStates(t *testing.T) {
 	_ = DetectPlatformCapabilities()
 	_ = linuxMPTCPEnabled()
 }
+
+// Regression: a probed capability must not carry the static "Linux only" fallback note.
+func TestProbedCapabilitiesDropStaticFallbackNote(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+	caps := DetectPlatformCapabilitiesProbedInDir(ctx, dir)
+	if caps.HolePunchAvailable != kernellane.HolePunchSupportedInDir(dir) {
+		t.Fatalf("hole-punch capability %v disagrees with the probe in %s", caps.HolePunchAvailable, dir)
+	}
+	accelerated := caps.ZeroCopyAvailable || caps.HolePunchAvailable || caps.MPTCPAvailable
+	if _, hasFallback := caps.Notes["fallback"]; accelerated && hasFallback {
+		t.Fatalf("probe found an accelerator but notes still say fallback: %#v", caps.Notes)
+	}
+}

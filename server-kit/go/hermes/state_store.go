@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"golang.org/x/sync/singleflight"
 
@@ -73,7 +74,11 @@ type ProjectedRuntimeStore struct {
 	registered    sync.Map
 	warm          sync.Map
 	degraded      sync.Map
-	rebuildSF     singleflight.Group
+	// overLimit maps a projection to the time its next over-limit warm may run.
+	// Without it, every read of an oversized scope repeats the COUNT query.
+	overLimit sync.Map
+	rebuildSF singleflight.Group
+	now       func() time.Time
 
 	// Shadow-mode snapshot evidence (see RuntimeStoreOptions.SnapshotStore).
 	shadowMatches    atomic.Int64
@@ -91,7 +96,7 @@ func WrapRuntimeStore(base database.RuntimeStore, opts RuntimeStoreOptions) (*Pr
 	if err != nil {
 		return nil, err
 	}
-	return &ProjectedRuntimeStore{base: base, hot: hot, opts: opts}, nil
+	return &ProjectedRuntimeStore{base: base, hot: hot, opts: opts, now: time.Now}, nil
 }
 
 func normalizeRuntimeStoreOptions(opts RuntimeStoreOptions) RuntimeStoreOptions {
@@ -454,13 +459,16 @@ func (s *ProjectedRuntimeStore) ensureWarm(ctx context.Context, domain, collecti
 	if _, ok := s.warm.Load(name); ok && !s.isDegraded(name) {
 		return nil
 	}
+	if s.overLimitUntil(name) {
+		return ErrProjectionLimit
+	}
 	_, err, _ = s.rebuildSF.Do(name, func() (any, error) {
 		if _, ok := s.warm.Load(name); ok && !s.isDegraded(name) {
 			return nil, nil
 		}
 		total, err := s.base.CountRecords(ctx, domain, collection, organizationID, database.RecordQuery{})
 		if err != nil {
-			s.markDegraded(name)
+			s.markDegradedUnlessCanceled(ctx, name)
 			return nil, err
 		}
 		// Self-backfilling warm: an empty mirror with a configured backfiller
@@ -470,20 +478,22 @@ func (s *ProjectedRuntimeStore) ensureWarm(ctx context.Context, domain, collecti
 		// without a separate backfill step.
 		if total == 0 && s.opts.ScopeBackfill != nil {
 			if backfilled, err := s.backfillScope(ctx, domain, collection, organizationID); err != nil {
-				s.markDegraded(name)
+				s.markDegradedUnlessCanceled(ctx, name)
 				return nil, err
 			} else {
 				total = backfilled
 			}
 		}
 		if total > int64(s.opts.MaxRecordsPerScope) {
+			s.overLimit.Store(name, s.now().Add(overLimitRetryInterval))
 			return nil, ErrProjectionLimit
 		}
 		_, err = s.hot.Rebuild(ctx, name, s.base, Query{OrganizationID: organizationID})
 		if err != nil {
-			s.markDegraded(name)
+			s.markDegradedUnlessCanceled(ctx, name)
 			return nil, err
 		}
+		s.overLimit.Delete(name)
 		s.warm.Store(name, struct{}{})
 		s.markHealthy(name)
 		s.shadowSnapshot(ctx, name, organizationID)
@@ -828,6 +838,31 @@ func (s *ProjectedRuntimeStore) markDegraded(name string) {
 	if _, loaded := s.degraded.LoadOrStore(name, struct{}{}); !loaded {
 		s.degradedCount.Add(1)
 	}
+}
+
+// overLimitRetryInterval bounds how often an oversized scope repeats its COUNT.
+// A scope can shrink below the limit, so the mark expires instead of being permanent.
+const overLimitRetryInterval = 30 * time.Second
+
+func (s *ProjectedRuntimeStore) overLimitUntil(name string) bool {
+	v, ok := s.overLimit.Load(name)
+	if !ok {
+		return false
+	}
+	if until, _ := v.(time.Time); s.now().Before(until) {
+		return true
+	}
+	s.overLimit.Delete(name)
+	return false
+}
+
+// markDegradedUnlessCanceled keeps a caller's cancellation out of scope health.
+// The singleflight runs on the first caller's ctx, so its cancel is not a projection fault.
+func (s *ProjectedRuntimeStore) markDegradedUnlessCanceled(ctx context.Context, name string) {
+	if ctx.Err() != nil {
+		return
+	}
+	s.markDegraded(name)
 }
 
 func (s *ProjectedRuntimeStore) markHealthy(name string) {

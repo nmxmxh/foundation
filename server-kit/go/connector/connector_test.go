@@ -90,7 +90,7 @@ func TestCallSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	resp, err := c.Call(context.Background(), Request{Operation: "ping"})
 	if err != nil {
 		t.Fatalf("call: %v", err)
@@ -111,7 +111,7 @@ func TestCallRetriesThenSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	if _, err := c.Call(context.Background(), Request{Operation: "ping"}); err != nil {
 		t.Fatalf("expected success after retries, got %v", err)
 	}
@@ -137,7 +137,7 @@ func TestBreakerOpensAndFailsOver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 	// With a low failure threshold the breaker opens on the primary, triggering
 	// failover to the healthy secondary, and the call ultimately succeeds.
 	resp, err := c.Call(context.Background(), Request{Operation: "ping"})
@@ -167,13 +167,10 @@ func TestSupervisorProbeSetsHealth(t *testing.T) {
 	}
 	ctx := t.Context()
 	c.Start(ctx)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	deadline := time.After(2 * time.Second)
-	for {
-		if c.Status().Health == HealthServing {
-			break
-		}
+	for c.Status().Health != HealthServing {
 		select {
 		case <-deadline:
 			t.Fatalf("connector never reached serving, status=%+v", c.Status())
@@ -200,7 +197,7 @@ func TestSupervisorDegradedOnSLOBreach(t *testing.T) {
 	}
 	ctx := t.Context()
 	c.Start(ctx)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	// Feed a slow observation so EWMA latency breaches the SLO.
 	c.sup.observe(0, true, 50*time.Millisecond)
@@ -232,7 +229,7 @@ func TestConnectorConcurrencyStress(t *testing.T) {
 	}
 	ctx := t.Context()
 	c.Start(ctx)
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	var wg sync.WaitGroup
 	for i := range 50 {
@@ -297,13 +294,13 @@ func TestManagedStreamResumesFromWatermark(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	ms, err := c.Stream(context.Background(), Request{Operation: "sub"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ms.Close()
+	defer func() { _ = ms.Close() }()
 
 	var got []string
 	for {
@@ -343,5 +340,47 @@ func TestManagerLifecycle(t *testing.T) {
 	}
 	if err := m.Close(); err != nil {
 		t.Fatalf("close: %v", err)
+	}
+}
+
+// Regression: Close before Start must stay closed. A later Start must not run the supervisor.
+func TestConnectorCloseBeforeStartStaysClosed(t *testing.T) {
+	fd := &fakeDriver{probe: HealthServing}
+	registerFake(t, "cbs", "epCloseBeforeStart", fd)
+	c, err := New(Config{Name: "cbs", Transports: []TransportConfig{{Transport: "cbs", Endpoint: "epCloseBeforeStart"}}, ProbeInterval: 5 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	c.Start(t.Context())
+	time.Sleep(30 * time.Millisecond)
+	if got := c.Status().Phase; got != PhaseClosed {
+		t.Fatalf("phase after Close then Start = %v, want closed", got)
+	}
+	c.sup.startMu.Lock()
+	started := c.sup.done != nil
+	c.sup.startMu.Unlock()
+	if started {
+		t.Fatal("supervisor started on a closed connector")
+	}
+}
+
+// Regression: a closed manager must refuse new connectors and must not start them.
+func TestManagerAddAfterCloseIsRefused(t *testing.T) {
+	registerFake(t, "mgrc", "epMgrClosed", &fakeDriver{probe: HealthServing})
+	m := NewManager()
+	m.Start(t.Context())
+	if err := m.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	c, err := m.Add(Config{Name: "late", Transports: []TransportConfig{{Transport: "mgrc", Endpoint: "epMgrClosed"}}, ProbeInterval: 5 * time.Millisecond})
+	if !errors.Is(err, ErrClosed) || c != nil {
+		t.Fatalf("Add after Close = (%v, %v), want (nil, ErrClosed)", c, err)
+	}
+	m.Start(t.Context())
+	if n := len(m.Statuses()); n != 0 {
+		t.Fatalf("closed manager holds %d connectors, want 0", n)
 	}
 }

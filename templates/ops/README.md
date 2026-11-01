@@ -56,6 +56,32 @@ The baked `pg_hba.conf` keeps Unix-socket access inside the Postgres container
 trusted for operator recovery. TCP clients, including app and migration
 containers, still require SCRAM authentication.
 
+## Network Tuning for Mobile Clients
+
+These settings apply where the browser TCP connection ends: the frontend
+container, or the load balancer in front of it. The measurements are in
+`docs/foundation/foundation_benchmarks.md`.
+
+1. `tcp_slow_start_after_idle = 0` is set per container in `docker-compose.yml`.
+   A new network namespace does not inherit it from the host.
+2. BBR is a host setting. Containers created after the change inherit it. On a
+   lossy 3G link it made a 269 KB push 34 to 48 percent faster than cubic.
+
+Run on the host, then recreate the containers:
+
+```bash
+sudo modprobe tcp_bbr
+echo tcp_bbr | sudo tee /etc/modules-load.d/bbr.conf
+printf 'net.ipv4.tcp_congestion_control = bbr\n' | sudo tee /etc/sysctl.d/90-bbr.conf
+sudo sysctl --system
+```
+
+NOTE: Do not set `tcp_congestion_control` in Compose. A container cannot use an
+algorithm that the host kernel does not allow, so the container fails to start.
+
+NOTE: A CDN or managed load balancer that terminates TCP controls these settings
+itself. The host settings then apply only to the connection behind it.
+
 ## Incident Records
 
 Use `incident_record_template.md` for production-impacting failures, failed deployments, rollbacks, and security-relevant events.

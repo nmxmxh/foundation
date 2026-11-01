@@ -108,14 +108,16 @@ type Server struct {
 	httpCompressionLevel    int
 
 	// WebSocket configuration
-	wsEnabled                 bool
-	wsMaxConnections          int
-	wsReadLimitBytes          int64
-	wsWriteQueueDepth         int
-	wsPingInterval            time.Duration
-	wsGuestIdleTimeout        time.Duration
-	wsAuthRequired            bool
-	wsCompressionEnabled      bool
+	wsEnabled            bool
+	wsMaxConnections     int
+	wsReadLimitBytes     int64
+	wsWriteQueueDepth    int
+	wsPingInterval       time.Duration
+	wsGuestIdleTimeout   time.Duration
+	wsAuthRequired       bool
+	wsCompressionEnabled bool
+	// wsFrameGzipLevel is the gzip level of server-to-browser runtime frames.
+	wsFrameGzipLevel          int
 	wsCompressionThreshold    int
 	wsUnauthenticatedAllowset map[string]struct{}
 	ws                        *wsRuntime
@@ -201,6 +203,7 @@ func New(cfg *Config, reg *registry.ServiceRegistry, handler ...*graceful.Handle
 		wsGuestIdleTimeout:      15 * time.Minute,
 		wsAuthRequired:          false,
 		wsCompressionEnabled:    true,
+		wsFrameGzipLevel:        wsFrameGzipLevelDefault,
 		wsCompressionThreshold:  1024,
 		wsUnauthenticatedAllowset: map[string]struct{}{
 			"identity:ping:v1:requested": {},

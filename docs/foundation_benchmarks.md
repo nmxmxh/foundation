@@ -662,6 +662,68 @@ The profile named the causes, which reasoning had not:
 | Global context object append and clone | 84 percent of bytes |
 | Four eager empty metadata containers | 13 percent of allocations |
 
+### Server-to-browser frames on shaped links
+
+The WebSocket server sends binary envelopes of 384 B or more as gzip runtime
+frames when the client negotiates gzip. `make bench-ws-netlab` measures this on
+the real Linux TCP stack: a netem qdisc shapes loopback, with a 1500-byte MTU.
+Evidence: `benchmark-results/ws_netlab_20261101.jsonl` and
+`benchmark-results/ws_netlab_20261101_summary.txt`. Medians of 7 trials.
+
+| Link | Push | Raw | Framed | Change |
+| :--- | :--- | ---: | ---: | :--- |
+| Fiber, 20 ms RTT | 33 KB after idle | 52.8 ms | 28.7 ms | 1.8x faster |
+| 4G typical (NG), 100 ms RTT, 8 Mbit/s | 33 KB after idle | 238.5 ms | 115.4 ms | 2.1x faster |
+| 4G typical (NG) | 269 KB | 453.2 ms | 162.1 ms | 2.8x faster |
+| 3G congested, 200 ms RTT, 1% loss | 33 KB | 521.4 ms | 239.5 ms | 2.2x faster |
+| 3G congested | 269 KB | 2,847 ms | 739 ms | 3.9x faster |
+| EDGE, 400 ms RTT, 256 kbit/s, 1% loss | 4.2 KB | 553.4 ms | 447.3 ms | 1.2x faster |
+| EDGE | 269 KB | 9,918 ms | 2,107 ms | 4.7x faster |
+
+Frames carry 62 percent fewer bytes at 1.1 KB and 84 percent fewer at 269 KB.
+After an idle pause, Linux restarts slow start with a 10-segment window of about
+14 KB. A raw 33 KB push then needs one more round trip; its 6 KB frame does not.
+On every link, a 1.1 KB to 4.2 KB push is within 2 ms of raw or faster.
+
+NOTE: The client in this lab is Go. A browser adds the `DecompressionStream`
+cost: 0.15 ms per small frame and 1.3 ms at 269 KB, measured in Node 24.
+
+NOTE: The first lab run used the loopback MTU of 65536. Its 10-segment initial
+window held about 650 KB, so slow start never limited a push and the idle win
+did not appear. Shape the MTU together with delay and rate.
+
+### Frame tuning: congestion control, idle restart, and gzip level
+
+`tooling/scripts/ws_netlab_tuning.sh` compares six variants on the three mobile
+links. It runs in a Linux VM whose kernel offers BBR, because the Docker Desktop
+kernel offers only reno and cubic. Each variant has its own network namespace.
+Evidence: `benchmark-results/ws_netlab_tuning_20261101.jsonl` and
+`benchmark-results/ws_netlab_tuning_20261101_summary.txt`. Medians of 7 trials,
+framed pushes of 269 KB unless the row says otherwise.
+
+| Link | cubic, idle restart on, gzip 1 | cubic, idle restart off | BBR, gzip 1 | BBR, gzip 6 |
+| :--- | ---: | ---: | ---: | ---: |
+| 4G typical (NG), after idle | 336 ms | 162 ms | 159 ms | 163 ms |
+| 3G congested, 1% loss | 712 ms | 703 ms | 493 ms | 423 ms |
+| 3G congested, after idle | 924 ms | 575 ms | 482 ms | 418 ms |
+| EDGE, 1% loss | 1,904 ms | 2,102 ms | 1,958 ms | 1,590 ms |
+| EDGE, 33 KB push | 612 ms | 614 ms | 613 ms | 571 ms |
+
+The tuning that follows from these results:
+
+1. `tcp_slow_start_after_idle = 0` on the host that ends the browser TCP
+   connection. The idle restart costs a 269 KB push on 4G 174 ms.
+2. BBR on the same host. Under 1% loss it is 34 to 48 percent faster than cubic.
+   BBR also keeps its model across idle gaps.
+3. Frame gzip level 6. It sends 20 to 22 percent fewer bytes than level 1 from
+   4 KB up. On EDGE, bytes decide the time, and the 269 KB push drops by 19
+   percent. Level 9 saves about 1 percent more bytes for up to 3.4 times the CPU.
+
+NOTE: On EDGE the link rate dominates, so cubic and BBR are equal there.
+
+NOTE: A new network namespace inherits the host congestion control but not
+`tcp_slow_start_after_idle`. Set the second one per container.
+
 ## Guardrails
 
 1. Same-process hot dispatch must stay allocation-free.
@@ -693,3 +755,5 @@ The profile named the causes, which reasoning had not:
    the transport's.
 4. Report enough cardinalities to expose the growth curve. One data point cannot
    separate a constant cost from a linear one.
+5. Shape the MTU when you emulate a network on loopback. The 65536-byte loopback
+   MTU hides TCP slow start, which is the largest cost on a high-latency link.

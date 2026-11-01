@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encodeRuntimeEnvelope } from "./binaryEnvelope";
 import {
@@ -11,6 +12,16 @@ import {
 import { createEnvelope } from "./index";
 
 describe("runtime transport compression", () => {
+  // The Go server writes this frame (server-kit/go/compress/frame_test.go generates it).
+  // Decoding it here keeps the Go and TypeScript frame layouts in step.
+  it("decodes a gzip runtime frame produced by the Go server", async () => {
+    const hex = readFileSync(new URL("./__fixtures__/runtime_frame_gzip.hex", import.meta.url), "utf8").trim();
+    const frame = Uint8Array.from(hex.match(/../g) ?? [], (byte) => Number.parseInt(byte, 16));
+    const decoded = new TextDecoder().decode(await decodeRuntimeBinaryFrame(frame));
+    const unit = '{"event_type":"projection:mutation:v1:success","record_id":"rec_000001"}';
+    expect(decoded).toBe(unit.repeat(32));
+  });
+
   afterEach(() => vi.unstubAllGlobals());
   it("keeps small binary envelopes on the identity path", async () => {
     const envelope = createEnvelope({

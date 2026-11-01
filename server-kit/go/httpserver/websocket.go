@@ -76,6 +76,10 @@ type wsConnection struct {
 	subscriptions map[string]struct{}
 	createdAt     time.Time
 	binaryFormat  bool
+	// frameGzip and frameLevel are set once at upgrade, before any goroutine reads them.
+	// The client advertised gzip in ?compression= and the server allows compression.
+	frameGzip  bool
+	frameLevel int
 }
 
 type wsOutbound struct {
@@ -225,6 +229,8 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	wsConn.binaryFormat = strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("format")), "binary")
+	wsConn.frameGzip = s.wsCompressionEnabled && wsConn.binaryFormat && advertisesEncoding(r.URL.Query().Get("compression"), "gzip")
+	wsConn.frameLevel = s.wsFrameGzipLevel
 
 	/*
 	 * A socket that arrives with a verified token is authenticated from the
@@ -810,7 +816,7 @@ func (s *Server) enqueueWSEnvelope(conn *wsConnection, envelope events.Envelope)
 		if err != nil {
 			return err
 		}
-		return s.enqueueWS(conn, websocket.BinaryMessage, raw)
+		return s.enqueueWS(conn, websocket.BinaryMessage, conn.frameOutbound(raw))
 	}
 	raw, err := envelope.ToJSON()
 	if err != nil {
@@ -1027,6 +1033,47 @@ func (c *wsConnection) authSnapshot() wsAuthSnapshot {
 	}
 }
 
+// wsFrameGzipLevelDefault is the gzip level of server-to-browser frames.
+// Measured 2026-11-01 (foundation_benchmarks.md): level 6 sends 20 to 22 percent fewer bytes
+// than level 1 from 4 KB up, and a 269 KB push on EDGE drops from about 1.9 s to 1.6 s.
+// Level 9 saves about 1 percent more for up to 3.4 times the CPU, so 6 is the choice.
+const wsFrameGzipLevelDefault = 6
+
+// wsFrameCompressionMinBytes is the smallest binary envelope sent as a gzip runtime frame.
+// Measured 2026-11-01 on projection pushes: 411 B saves 23%, 575 B saves 40%, and 328 B
+// saves 10%. Below this size the saving does not pay for one browser decode per message.
+// Data cost leads this choice: the users are on metered mobile data.
+const wsFrameCompressionMinBytes = 384
+
+// frameOutbound wraps a binary envelope in a gzip runtime frame when the client
+// negotiated it and the frame is smaller. Every other case sends raw, which the
+// client always accepts, so the identity fallback is the contract.
+func (c *wsConnection) frameOutbound(raw []byte) []byte {
+	if !c.frameGzip || len(raw) < wsFrameCompressionMinBytes {
+		return raw
+	}
+	level := c.frameLevel
+	if level == 0 {
+		// gzip level 0 stores without compression, which never shrinks. Zero means unset.
+		level = wsFrameGzipLevelDefault
+	}
+	frame, ok, err := kitcompress.EncodeRuntimeFrameGzip(raw, level)
+	if err != nil || !ok {
+		return raw
+	}
+	return frame
+}
+
+// advertisesEncoding reports whether a comma-separated ?compression= list names encoding.
+func advertisesEncoding(list, encoding string) bool {
+	for item := range strings.SplitSeq(list, ",") {
+		if strings.EqualFold(strings.TrimSpace(item), encoding) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *wsConnection) setBinaryFormat(enabled bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1051,6 +1098,13 @@ func (s *Server) wsMaxDecodedBytes() int64 {
 func (s *Server) decodeWSEnvelope(messageType int, payload []byte) (events.Envelope, bool, error) {
 	switch messageType {
 	case websocket.BinaryMessage:
+		if s.wsCompressionEnabled && kitcompress.IsRuntimeFrame(payload) {
+			decoded, err := kitcompress.DecodeRuntimeFrame(payload, s.wsMaxDecodedBytes())
+			if err != nil {
+				return events.Envelope{}, true, err
+			}
+			payload = decoded
+		}
 		if env, err := events.FromBinary(payload); err == nil {
 			return env, true, nil
 		}

@@ -30,10 +30,13 @@ const (
 	EncodingZstd     = "zstd"
 	EncodingGzip     = "gzip"
 
+	// Transfer states. The legal edges are initiated -> completed and initiated -> aborted.
+	// Both are terminal. A persisted manifest is the commit point for completed.
 	StateInitiated = "initiated"
 	StateCompleted = "completed"
-	StateFailed    = "failed"
-	StateAborted   = "aborted"
+	// StateFailed is reserved. No path assigns it: a failed part or Complete stays retryable.
+	StateFailed  = "failed"
+	StateAborted = "aborted"
 )
 
 type ObjectStore interface {

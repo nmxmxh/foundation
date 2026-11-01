@@ -145,8 +145,28 @@ Open priorities include consumer compatibility, bounded diagnostics, and represe
      `fcntl` (`F_PUNCHHOLE`) primitives with zero allocations, verified
      via `make bench-holepunch-linux`. Paired with bounds check
      elimination hoisting, 4 KiB bitmask alignment, and two-phase
-     commit ordering. Phase 2 connects to `bulk.PlatformCapabilities`
-     and streaming decompressor checkpoints;
+     commit ordering (write-ahead checkpoint since 2026-11-01). Still
+     open: Phase 2. `bulk.PlatformCapabilities` reports the probe only,
+     and no bulk or transfer lane calls `Reclaimer`. The planned join
+     point is part boundaries, because each bulk part is an independent
+     compressed frame. Wired 2026-11-01 as the opt-in
+     `bulk.IngestFileOptions.ReclaimSource`;
+   - zstd dictionaries for small envelopes (added 2026-11-01, research
+     only): a 16 KiB dictionary trained on 3,000 synthetic 559-byte
+     envelopes gave a 0.309 ratio against 0.612 for plain zstd and 0.638
+     for gzip, at 22 us against 10 us per envelope. The client sends
+     envelopes under 4 KiB uncompressed today. Open before adoption: real
+     traffic samples (synthetic samples overfit field names), dictionary
+     identity and rotation (both ends must hold every live dictionary), a
+     browser decoder (no native zstd in `CompressionStream`, so a WASM
+     decoder adds bundle cost), and a compression side-channel review,
+     because envelopes carry session identifiers next to user input. The
+     target lane is server to browser over WebSocket. Server-to-server
+     lanes do not need it: direct dispatch is in process, and Redis and
+     eventlog messages are small on a datacenter network. The prerequisite
+     landed 2026-11-01: the server sends envelopes of 384 B or more as
+     gzip runtime frames (`optimization_points.md` #104). A dictionary
+     would add a frame encoding id and target envelopes under 384 B;
    - vectorized multi-byte ASCII delimiter scanning in Hermes columnar paths (added 2026-10-23,
      source: Go 1.26 `archsimd` and 64-bit SWAR):
      promoted 2026-10-23: `hermes.ScanDelimiter2`, `ScanDelimiter4`, and `ScanByte`

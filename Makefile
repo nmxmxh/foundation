@@ -2,7 +2,7 @@
 	check-scaffold-manifest check-init-project check-update-project check-scaffold-smoke check-scaffold-idempotency check-scaffold-seed-drift check-migration-seed-policy check-lifecycle-contract-generator check-frontend-prototype-generator check-frontend-commands-generator check-agent-change \
 	check-core-validation-contract check-contract-drift check-runtime-contract-field-drift check-perfect-hash check-tsconfig-base check-agent-contract check-practice-controls check-runtime-performance-contracts check-frontend-runtime-workbench check-formal-methods check-spec-conformance check-operational-excellence check-go-fix check-go-static-analysis check-rust-static-analysis check-ts-static-analysis check-coding-practices check-testing-practices check-go-concurrency-practices \
 	check-rust-runtime-practices check-logging-practices check-metadata-practices check-dynamic-payload-practices check-database-practices check-atomic-lane-purity check-redis-practices check-river-practices check-migration-structure check-directory-ownership check-enforcement-integrity check-foundation-assets check-server-kit-module-contract check-server-kit-usage \
-	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-package-licenses check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux bench-holepunch-linux \
+	check-doc-references check-markdown-frontmatter check-ovasabi-cli check-package-licenses check-benchmark-evidence check-server-kit-module-parity bench-zerocopy-linux bench-holepunch-linux bench-ws-netlab bench-ws-netlab-tuning \
 	check-lifecycle-manifest check-app-security-profile check-coverage-ratchet check-benchmark-ratchet check-transport-ladder check-system-profiling lifecycle-manifest check-fleet
 
 .DEFAULT_GOAL := help
@@ -312,6 +312,7 @@ check-fleet:
 check-scaffold-idempotency:
 	@tests/scaffold_idempotency_test.sh
 	@tests/nginx_edge_patch_test.sh
+	@tests/compose_tcp_idle_patch_test.sh
 
 check-scaffold-seed-drift:
 	@tests/scaffold_seed_drift_test.sh
@@ -518,6 +519,29 @@ bench-zerocopy-linux:
 			golang:1.26.10 sh -c \
 			"go test ./hermessnapshot -v -run 'TestFileStore' && go test ./hermessnapshot -run '^$$' -bench BenchmarkFileStorePromoteLatest -benchmem -count=3"; \
 	fi
+
+# bench-ws-netlab measures server-to-browser runtime frames on shaped links
+# (fiber to EDGE, see tooling/scripts/ws_netlab.sh). It needs Docker: tc netem
+# needs NET_ADMIN and a Linux kernel. Results go to benchmark-results/ws_netlab/.
+bench-ws-netlab:
+	@docker run --rm --cap-add NET_ADMIN -v "$$(pwd):/work" -w /work \
+		-v "$$(go env GOMODCACHE):/gomod:ro" -e GOMODCACHE=/gomod -e GOPROXY=off -e GOFLAGS=-mod=readonly \
+		-e GOCACHE=/tmp/gocache -e TMPDIR=/tmp \
+		-e NETLAB_TRIALS="$${NETLAB_TRIALS:-9}" \
+		golang:1.26.10 bash tooling/scripts/ws_netlab.sh
+
+# bench-ws-netlab-tuning compares cubic, BBR, tcp_slow_start_after_idle, and frame
+# gzip levels on mobile links (tooling/scripts/ws_netlab_tuning.sh). Docker Desktop's
+# kernel has no BBR, so it runs in the Colima VM: static Linux binaries, one network
+# namespace per variant. Needs `colima start`. Results go to tmp/ws_netlab_tuning.jsonl.
+bench-ws-netlab-tuning:
+	@mkdir -p tmp/netlab-bin
+	@cd server-kit/go && CGO_ENABLED=0 GOOS=linux GOARCH=$$(colima ssh -- uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/') \
+		go test -tags netlab -c -o ../../tmp/netlab-bin/netlab.test ./httpserver/
+	@cd tooling/netlab && CGO_ENABLED=0 GOOS=linux GOARCH=$$(colima ssh -- uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/') \
+		go build -o ../../tmp/netlab-bin/netlab .
+	@colima ssh -- sudo env NETLAB_BIN="$$(pwd)/tmp/netlab-bin" NETLAB_OUT="$$(pwd)/tmp/ws_netlab_tuning.jsonl" \
+		NETLAB_TRIALS="$${NETLAB_TRIALS:-7}" bash "$$(pwd)/tooling/scripts/ws_netlab_tuning.sh"
 
 # bench-holepunch-linux exercises the kernellane hole-punching primitive
 # (fallocate FALLOC_FL_PUNCH_HOLE) on a real Linux kernel. Inside Docker

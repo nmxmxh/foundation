@@ -617,3 +617,60 @@ func BenchmarkPunchHole_ChaosPattern(b *testing.B) {
 		_, _ = PunchHole(f, offset, BlockSize)
 	}
 }
+
+// Regression: PunchHole aligns inward, so partial blocks keep their bytes on every platform.
+func TestAlignInward(t *testing.T) {
+	cases := []struct {
+		name               string
+		offset, length     int64
+		wantStart, wantEnd int64
+		wantOK             bool
+	}{
+		{"aligned", 0, BlockSize * 2, 0, BlockSize * 2, true},
+		{"unaligned both ends", 100, BlockSize * 3, BlockSize, BlockSize * 3, true},
+		{"inside one block", 10, 100, 0, 0, false},
+		{"ends exactly on next boundary", 100, BlockSize - 100, 0, 0, false},
+		{"spans boundary without a whole block", BlockSize - 10, 20, 0, 0, false},
+		{"one whole block after offset", BlockSize - 10, BlockSize + 10, BlockSize, BlockSize * 2, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start, end, ok := alignInward(tc.offset, tc.length)
+			if ok != tc.wantOK || (ok && (start != tc.wantStart || end != tc.wantEnd)) {
+				t.Fatalf("alignInward(%d,%d) = (%d,%d,%v), want (%d,%d,%v)",
+					tc.offset, tc.length, start, end, ok, tc.wantStart, tc.wantEnd, tc.wantOK)
+			}
+		})
+	}
+}
+
+func TestPunchHoleUnalignedKeepsPartialBlocks(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unaligned.bin")
+	payload := bytes.Repeat([]byte{0x55}, int(BlockSize*4))
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	if punched, err := PunchHole(f, 10, 100); err != nil || punched {
+		t.Fatalf("sub-block punch = (%v, %v), want (false, nil)", punched, err)
+	}
+	punched, err := PunchHole(f, 100, BlockSize*3)
+	if err != nil {
+		t.Fatalf("punch: %v", err)
+	}
+	got := make([]byte, len(payload))
+	if _, err := f.ReadAt(got, 0); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !bytes.Equal(got[:BlockSize], payload[:BlockSize]) || !bytes.Equal(got[BlockSize*3:], payload[BlockSize*3:]) {
+		t.Fatal("partial blocks outside the aligned range changed")
+	}
+	if punched && !bytes.Equal(got[BlockSize:BlockSize*3], make([]byte, BlockSize*2)) {
+		t.Fatal("whole blocks inside the range were not freed")
+	}
+}

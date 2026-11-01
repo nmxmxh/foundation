@@ -6,10 +6,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
+	"syscall"
 )
 
 // Standard lookback window constants for common compression algorithms.
+//
+// NOTE: A decoder keeps its dictionary window in memory or in the output, not in the
+// consumed source bytes. These values are conservative margins behind the read
+// position, not a correctness requirement. Restart safety comes from resuming at a
+// frame boundary, as Commit describes.
 const (
 	// LookbackWindowDeflate is the 32 KiB sliding dictionary window for DEFLATE and Gzip.
 	LookbackWindowDeflate int64 = 32 * 1024
@@ -27,6 +34,8 @@ const (
 var (
 	// ErrReclaimerAborted reports an operation on an aborted reclaimer.
 	ErrReclaimerAborted = errors.New("kernellane: reclaimer aborted")
+	// ErrReclaimerClosed reports an operation on a closed reclaimer.
+	ErrReclaimerClosed = errors.New("kernellane: reclaimer closed")
 
 	// ErrUnrecoverableSparseSource reports a source file with a punched prefix and no checkpoint.
 	ErrUnrecoverableSparseSource = errors.New("kernellane: source file has punched prefix without resume checkpoint")
@@ -69,8 +78,10 @@ type Reclaimer struct {
 	sourcePunchedOffset int64
 	destWrittenOffset   int64
 	checksumHex         string
-	aborted             bool
-	closed              bool
+	// Legal states: active, aborted, closed, and aborted then closed.
+	// Close then Abort is not legal. Abort refuses it, so cleanup never runs on committed output.
+	aborted bool
+	closed  bool
 }
 
 // NewReclaimer creates a reclaimer for the provided source file.
@@ -102,13 +113,21 @@ func NewReclaimer(sourceFile *os.File, opts ReclaimOptions) (*Reclaimer, error) 
 }
 
 // Commit records verified write progress and punches reclaimed blocks with lookback lag.
-// Call this function only after verifying and syncing destination data.
+//
+// Call Commit only after the destination bytes up to destWrittenOffset are verified and synced.
+// sourceReadOffset must be a point where processing can restart, for example a part or frame
+// boundary. A compressed stream cannot resume in the middle of a frame, and a punched prefix
+// cannot be read again.
+//
+// Commit is write-ahead: with CheckpointPath set, the checkpoint is durable before any block
+// is freed. A crash after the punch therefore always finds a checkpoint that covers it.
+// Without CheckpointPath, a crash after a punch leaves ErrUnrecoverableSparseSource.
 func (r *Reclaimer) Commit(sourceReadOffset, destWrittenOffset int64, checksumHex string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.closed {
-		return false, errors.New("kernellane: reclaimer closed")
+		return false, ErrReclaimerClosed
 	}
 	if r.aborted {
 		return false, ErrReclaimerAborted
@@ -141,25 +160,33 @@ func (r *Reclaimer) Commit(sourceReadOffset, destWrittenOffset int64, checksumHe
 		return false, nil
 	}
 
-	punched, err := PunchHolePrefix(r.sourceFile, alignedLimit)
-	if err != nil {
-		return false, err
-	}
-
+	// Write-ahead: record the punch before it happens. If the save fails, nothing is freed.
+	previousPunched := r.sourcePunchedOffset
 	r.sourcePunchedOffset = alignedLimit
-
 	if r.checkpointPath != "" {
 		if err := r.saveCheckpointLocked(); err != nil {
-			return punched, err
+			r.sourcePunchedOffset = previousPunched
+			return false, err
 		}
 	}
 
-	return punched, nil
+	// A failed punch leaves the checkpoint ahead of the disk. That is safe: the bytes still exist.
+	return PunchHolePrefix(r.sourceFile, alignedLimit)
 }
 
 // Abort halts the reclaimer, executes cleanup, and prevents further punch actions.
+// Abort is idempotent: a second call does not run cleanup again.
+// Abort after Close returns ErrReclaimerClosed and does not run cleanup.
 func (r *Reclaimer) Abort(cleanupFn func() error) error {
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return ErrReclaimerClosed
+	}
+	if r.aborted {
+		r.mu.Unlock()
+		return nil
+	}
 	r.aborted = true
 	var cleanupErr error
 	if cleanupFn != nil {
@@ -219,20 +246,56 @@ func (r *Reclaimer) saveCheckpointLocked() error {
 		return err
 	}
 
-	dir := filepath.Dir(r.checkpointPath)
+	return writeFileDurable(r.checkpointPath, data)
+}
+
+// writeFileDurable replaces path atomically and makes the new content survive power loss.
+// It syncs the temporary file before the rename and the directory after it.
+func writeFileDurable(path string, data []byte) error {
+	dir := filepath.Dir(path)
 	tmpFile, err := os.CreateTemp(dir, "reclaim-ckpt-*.tmp")
 	if err != nil {
 		return err
 	}
 	tmpName := tmpFile.Name()
-	_ = tmpFile.Close()
-
-	if err := os.WriteFile(tmpName, data, 0o600); err != nil {
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
 		_ = os.Remove(tmpName)
 		return err
 	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return syncDir(dir)
+}
 
-	return os.Rename(tmpName, r.checkpointPath)
+// syncDir makes a rename in dir durable.
+// Windows cannot sync a directory handle; NTFS journals the rename, so it is skipped there.
+// EINVAL means the filesystem does not support directory sync, and is not an error.
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir) // #nosec G304 -- dir is the caller-specified checkpoint directory.
+	if err != nil {
+		return err
+	}
+	syncErr := d.Sync()
+	closeErr := d.Close()
+	if syncErr != nil && !errors.Is(syncErr, syscall.EINVAL) {
+		return syncErr
+	}
+	return closeErr
 }
 
 // LoadCheckpoint reads and parses a saved reclaim watermark from disk.
@@ -248,7 +311,11 @@ func LoadCheckpoint(path string) (ReclaimWatermark, error) {
 	return wm, nil
 }
 
-// InspectPunchedPrefix checks whether the first block of the file is punched or zeroed.
+// InspectPunchedPrefix reports whether the first block of the file is a hole.
+//
+// Linux and Darwin ask the extent map with SEEK_DATA, so a source that starts with
+// zero bytes is not reported as punched. Where the filesystem cannot answer, the
+// check falls back to "the first block reads as zeros", which can report a false hole.
 func InspectPunchedPrefix(f *os.File) (bool, error) {
 	if f == nil {
 		return false, errors.New("kernellane: nil file descriptor")
@@ -261,8 +328,16 @@ func InspectPunchedPrefix(f *os.File) (bool, error) {
 	if st.Size() == 0 {
 		return false, nil
 	}
+	if hole, supported, err := kernelHoleAtStart(f, st.Size()); err != nil || supported {
+		return hole, err
+	}
+	return firstBlockReadsZero(f, st.Size())
+}
 
-	checkLen := min(st.Size(), int64(BlockSize))
+// firstBlockReadsZero is the fallback hole check: block 0 reads as all zeros.
+// It cannot tell a hole from written zeros, so it is used only where SEEK_DATA is missing.
+func firstBlockReadsZero(f *os.File, size int64) (bool, error) {
+	checkLen := min(size, int64(BlockSize))
 
 	buf := make([]byte, checkLen)
 	if _, err := f.ReadAt(buf, 0); err != nil && !errors.Is(err, io.EOF) {

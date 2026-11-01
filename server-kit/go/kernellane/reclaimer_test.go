@@ -10,6 +10,8 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -256,10 +258,61 @@ func TestReclaimerInspectPunchedPrefix(t *testing.T) {
 	if _, err := zf.Write(make([]byte, BlockSize)); err != nil {
 		t.Fatalf("write zero: %v", err)
 	}
+	// Written zeros are data, not a hole. Only the zero-byte fallback reports them as punched.
 	punched, err = InspectPunchedPrefix(zf)
-	if err != nil || !punched {
-		t.Fatalf("zeroed file: expected punched=true, got %v, err=%v", punched, err)
+	if want := !extentQueryable(t, zf); err != nil || punched != want {
+		t.Fatalf("zeroed file: punched=%v err=%v, want punched=%v", punched, err, want)
 	}
+
+	// A real hole at block 0 is punched on every platform.
+	pf := makePunchedSource(t, filepath.Join(dir, "punched.bin"), BlockSize*2)
+	punched, err = InspectPunchedPrefix(pf)
+	if err != nil || !punched {
+		t.Fatalf("punched file: expected punched=true, got %v, err=%v", punched, err)
+	}
+}
+
+// extentQueryable reports whether f's filesystem answers SEEK_DATA.
+func extentQueryable(t *testing.T, f *os.File) bool {
+	t.Helper()
+	st, err := f.Stat()
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	_, supported, err := kernelHoleAtStart(f, st.Size())
+	if err != nil {
+		t.Fatalf("kernelHoleAtStart: %v", err)
+	}
+	return supported
+}
+
+// makePunchedSource writes non-zero data and frees block 0.
+// Where the filesystem cannot punch or query extents, block 0 is zeroed for the fallback check.
+func makePunchedSource(t *testing.T, path string, size int64) *os.File {
+	t.Helper()
+	payload := bytes.Repeat([]byte{0x55}, int(size))
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open source: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	punched, err := PunchHole(f, 0, BlockSize)
+	if err != nil {
+		t.Fatalf("punch: %v", err)
+	}
+	if punched {
+		return f
+	}
+	if extentQueryable(t, f) {
+		t.Skip("filesystem answers SEEK_DATA but cannot punch; no real hole to inspect")
+	}
+	if _, err := f.WriteAt(make([]byte, BlockSize), 0); err != nil {
+		t.Fatalf("zero block 0: %v", err)
+	}
+	return f
 }
 
 func TestReclaimerRestartValidation(t *testing.T) {
@@ -267,20 +320,12 @@ func TestReclaimerRestartValidation(t *testing.T) {
 	sourcePath := filepath.Join(dir, "source.bin")
 	ckptPath := filepath.Join(dir, "ckpt.json")
 
-	// Create source file with zeroed prefix (simulating punched file).
+	// Create a source file whose first block is a hole.
 	payload := make([]byte, BlockSize*4)
-	if err := os.WriteFile(sourcePath, payload, 0o600); err != nil {
-		t.Fatalf("write source: %v", err)
-	}
-
-	f, err := os.OpenFile(sourcePath, os.O_RDWR, 0o600)
-	if err != nil {
-		t.Fatalf("open source: %v", err)
-	}
-	defer func() { _ = f.Close() }()
+	f := makePunchedSource(t, sourcePath, int64(len(payload)))
 
 	// Restart without checkpoint: must return ErrUnrecoverableSparseSource.
-	_, err = ValidateSourceForRestart(f, "")
+	_, err := ValidateSourceForRestart(f, "")
 	if err != ErrUnrecoverableSparseSource {
 		t.Fatalf("expected ErrUnrecoverableSparseSource, got %v", err)
 	}
@@ -413,9 +458,10 @@ func TestReclaimerSmallFileInspectPrefix(t *testing.T) {
 	}
 	defer func() { _ = zf.Close() }()
 
+	// A file smaller than one block cannot hold a hole. Only the zero-byte fallback reports one.
 	punched, err := InspectPunchedPrefix(zf)
-	if err != nil || !punched {
-		t.Fatalf("small zero file: got punched=%v, err=%v", punched, err)
+	if want := !extentQueryable(t, zf); err != nil || punched != want {
+		t.Fatalf("small zero file: punched=%v err=%v, want punched=%v", punched, err, want)
 	}
 
 	// Small file (< BlockSize) with non-zero byte.
@@ -731,4 +777,259 @@ func TestReclaimerStreamingDecompressCrashRecovery(t *testing.T) {
 			t.Fatalf("expected punched offset 32 KiB, got %d", wm.SourcePunchedOffset)
 		}
 	})
+}
+
+// Regression: Abort runs cleanup once, and never after Close.
+func TestReclaimerAbortTransitions(t *testing.T) {
+	newReclaimer := func(t *testing.T) *Reclaimer {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "source.bin")
+		if err := os.WriteFile(path, make([]byte, BlockSize*4), 0o600); err != nil {
+			t.Fatalf("write source: %v", err)
+		}
+		f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+		if err != nil {
+			t.Fatalf("open source: %v", err)
+		}
+		t.Cleanup(func() { _ = f.Close() })
+		r, err := NewReclaimer(f, ReclaimOptions{})
+		if err != nil {
+			t.Fatalf("new reclaimer: %v", err)
+		}
+		return r
+	}
+
+	t.Run("second abort does not run cleanup again", func(t *testing.T) {
+		r := newReclaimer(t)
+		runs := 0
+		cleanup := func() error { runs++; return nil }
+		if err := r.Abort(cleanup); err != nil {
+			t.Fatalf("first abort: %v", err)
+		}
+		if err := r.Abort(cleanup); err != nil {
+			t.Fatalf("second abort: %v", err)
+		}
+		if runs != 1 {
+			t.Fatalf("cleanup ran %d times, want 1", runs)
+		}
+	})
+
+	t.Run("abort after close is refused", func(t *testing.T) {
+		r := newReclaimer(t)
+		if err := r.Close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+		ran := false
+		if err := r.Abort(func() error { ran = true; return nil }); !errors.Is(err, ErrReclaimerClosed) {
+			t.Fatalf("abort after close = %v, want ErrReclaimerClosed", err)
+		}
+		if ran || r.Watermark().Aborted {
+			t.Fatal("abort after close changed state or ran cleanup")
+		}
+		if _, err := r.Commit(BlockSize, BlockSize, ""); !errors.Is(err, ErrReclaimerClosed) {
+			t.Fatalf("commit after close = %v, want ErrReclaimerClosed", err)
+		}
+	})
+
+	t.Run("close after abort is legal", func(t *testing.T) {
+		r := newReclaimer(t)
+		if err := r.Abort(nil); err != nil {
+			t.Fatalf("abort: %v", err)
+		}
+		if err := r.Close(); err != nil {
+			t.Fatalf("close after abort: %v", err)
+		}
+		if !r.Watermark().Aborted {
+			t.Fatal("watermark lost the aborted mark")
+		}
+	})
+}
+
+// Regression: Commit is write-ahead. A checkpoint that cannot be saved must free nothing.
+func TestReclaimerCommitDoesNotPunchWhenCheckpointFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "source.bin")
+	payload := bytes.Repeat([]byte{0x55}, int(BlockSize*8))
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open source: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	r, err := NewReclaimer(f, ReclaimOptions{
+		MinPunchInterval: BlockSize,
+		CheckpointPath:   filepath.Join(dir, "missing-dir", "ckpt.json"),
+	})
+	if err != nil {
+		t.Fatalf("new reclaimer: %v", err)
+	}
+	punched, err := r.Commit(BlockSize*4, BlockSize*4, "")
+	if err == nil || punched {
+		t.Fatalf("Commit with unsavable checkpoint = (%v, %v), want (false, error)", punched, err)
+	}
+	if wm := r.Watermark(); wm.SourcePunchedOffset != 0 {
+		t.Fatalf("punched offset advanced to %d without a durable checkpoint", wm.SourcePunchedOffset)
+	}
+	got := make([]byte, BlockSize)
+	if _, err := f.ReadAt(got, 0); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !bytes.Equal(got, payload[:BlockSize]) {
+		t.Fatal("source block 0 was freed although the checkpoint failed")
+	}
+}
+
+func TestReclaimerCheckpointCoversPunch(t *testing.T) {
+	dir := t.TempDir()
+	ckpt := filepath.Join(dir, "ckpt.json")
+	f := makePunchedSourceFile(t, filepath.Join(dir, "source.bin"), BlockSize*8)
+	r, err := NewReclaimer(f, ReclaimOptions{MinPunchInterval: BlockSize, CheckpointPath: ckpt})
+	if err != nil {
+		t.Fatalf("new reclaimer: %v", err)
+	}
+	if _, err := r.Commit(BlockSize*4, BlockSize*4, "abc"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	wm, err := LoadCheckpoint(ckpt)
+	if err != nil {
+		t.Fatalf("load checkpoint: %v", err)
+	}
+	if wm.SourcePunchedOffset != BlockSize*4 || wm.SourceReadOffset != BlockSize*4 || wm.ChecksumHex != "abc" {
+		t.Fatalf("checkpoint = %+v, want punched and read offsets at %d", wm, BlockSize*4)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("temporary checkpoint %q was left behind", e.Name())
+		}
+	}
+}
+
+// makePunchedSourceFile writes non-zero data and returns the open file without punching it.
+func makePunchedSourceFile(t *testing.T, path string, size int64) *os.File {
+	t.Helper()
+	if err := os.WriteFile(path, bytes.Repeat([]byte{0x55}, int(size)), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatalf("open source: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Close() })
+	return f
+}
+
+func TestFirstBlockReadsZero(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, data []byte) *os.File {
+		t.Helper()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			t.Fatalf("open %s: %v", name, err)
+		}
+		t.Cleanup(func() { _ = f.Close() })
+		return f
+	}
+	zeros := write("zeros.bin", make([]byte, BlockSize*2))
+	if got, err := firstBlockReadsZero(zeros, BlockSize*2); err != nil || !got {
+		t.Fatalf("zero block = (%v, %v), want (true, nil)", got, err)
+	}
+	small := write("small.bin", make([]byte, 100))
+	if got, err := firstBlockReadsZero(small, 100); err != nil || !got {
+		t.Fatalf("small zero file = (%v, %v), want (true, nil)", got, err)
+	}
+	data := write("data.bin", bytes.Repeat([]byte{1}, int(BlockSize)))
+	if got, err := firstBlockReadsZero(data, BlockSize); err != nil || got {
+		t.Fatalf("data block = (%v, %v), want (false, nil)", got, err)
+	}
+	closed := write("closed.bin", make([]byte, BlockSize))
+	_ = closed.Close()
+	if _, err := firstBlockReadsZero(closed, BlockSize); err == nil {
+		t.Fatal("read of closed file returned nil error")
+	}
+}
+
+// A file extended by Truncate has no data extents. SEEK_DATA reports ENXIO, which is a hole.
+func TestInspectPunchedPrefixSparseFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sparse.bin")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := f.Truncate(BlockSize * 4); err != nil {
+		t.Fatalf("truncate: %v", err)
+	}
+	punched, err := InspectPunchedPrefix(f)
+	if err != nil || !punched {
+		t.Fatalf("sparse file = (%v, %v), want (true, nil)", punched, err)
+	}
+	if pos, err := f.Seek(0, io.SeekCurrent); err != nil || pos != 0 {
+		t.Fatalf("file offset after inspect = (%d, %v), want (0, nil)", pos, err)
+	}
+}
+
+func TestInspectPunchedPrefixErrors(t *testing.T) {
+	if _, err := InspectPunchedPrefix(nil); err == nil {
+		t.Fatal("nil file returned nil error")
+	}
+	path := filepath.Join(t.TempDir(), "closed.bin")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	_ = f.Close()
+	if _, err := InspectPunchedPrefix(f); err == nil {
+		t.Fatal("closed file returned nil error")
+	}
+	if _, _, err := kernelHoleAtStart(f, 1); err == nil && extentQueryableClosedFileIsError() {
+		t.Fatal("kernelHoleAtStart on closed file returned nil error")
+	}
+}
+
+// extentQueryableClosedFileIsError reports whether this platform queries extents at all.
+func extentQueryableClosedFileIsError() bool {
+	return runtime.GOOS == "linux" || runtime.GOOS == "darwin"
+}
+
+func TestWriteFileDurableErrors(t *testing.T) {
+	dir := t.TempDir()
+	if err := writeFileDurable(filepath.Join(dir, "missing", "ckpt.json"), []byte("{}")); err == nil {
+		t.Fatal("write into missing directory returned nil error")
+	}
+	// Rename onto a non-empty directory fails, and the temporary file must be removed.
+	target := filepath.Join(dir, "occupied")
+	if err := os.MkdirAll(filepath.Join(target, "child"), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := writeFileDurable(target, []byte("{}")); err == nil {
+		t.Fatal("rename onto a non-empty directory returned nil error")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".tmp") {
+			t.Fatalf("temporary file %q was left behind", e.Name())
+		}
+	}
+	if err := syncDir(filepath.Join(dir, "missing")); err == nil && runtime.GOOS != "windows" {
+		t.Fatal("syncDir on a missing directory returned nil error")
+	}
+	if err := syncDir(dir); err != nil {
+		t.Fatalf("syncDir: %v", err)
+	}
 }

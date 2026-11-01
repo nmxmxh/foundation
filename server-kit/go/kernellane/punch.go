@@ -20,6 +20,11 @@ var ErrInvalidRange = errors.New("kernellane: invalid punch hole range")
 // PunchHole deallocates physical storage backing the range [offset, offset+length)
 // in f without changing the logical file size.
 //
+// The range is aligned inward to whole BlockSize blocks on every platform. Bytes in a
+// partial block at either end stay unchanged. Linux would zero them and Darwin would
+// refuse the call, so inward alignment gives one result on every lane.
+// A range that holds no whole block returns (false, nil).
+//
 // The return value punched reports whether physical blocks were deallocated by
 // the kernel. On filesystems or operating systems that do not support sparse
 // allocation, it degrades to (false, nil). Callers never need a platform branch.
@@ -31,7 +36,25 @@ func PunchHole(f *os.File, offset, length int64) (punched bool, err error) {
 	if offset < 0 || length <= 0 || offset > math.MaxInt64-length {
 		return false, ErrInvalidRange
 	}
-	return kernelPunchHole(f, offset, length)
+	start, end, ok := alignInward(offset, length)
+	if !ok {
+		return false, nil
+	}
+	return kernelPunchHole(f, start, end-start)
+}
+
+// alignInward returns the whole-block range inside [offset, offset+length).
+// The caller guarantees offset >= 0, length > 0, and no overflow of offset+length.
+func alignInward(offset, length int64) (start, end int64, ok bool) {
+	end = (offset + length) & BlockMask
+	start = offset
+	if rem := offset % BlockSize; rem != 0 {
+		if end-offset < BlockSize-rem {
+			return 0, 0, false
+		}
+		start = offset + (BlockSize - rem)
+	}
+	return start, end, end > start
 }
 
 // PunchHolePrefix deallocates the prefix range [0, upToOffset) in f. It rounds

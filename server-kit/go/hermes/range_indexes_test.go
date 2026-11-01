@@ -21,11 +21,11 @@ func TestInlineKeyPrefixOrder(t *testing.T) {
 		rightPrefix := inlineKeyPrefix(right)
 
 		if leftPrefix < rightPrefix {
-			if !(left < right) {
+			if left >= right {
 				t.Fatalf("prefix said left < right, but string was not: %s vs %s", left, right)
 			}
 		} else if leftPrefix > rightPrefix {
-			if !(left > right) {
+			if left <= right {
 				t.Fatalf("prefix said left > right, but string was not: %s vs %s", left, right)
 			}
 		} else {

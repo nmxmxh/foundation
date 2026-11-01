@@ -19,12 +19,13 @@ import {
   type RuntimeCompressionOptions,
 } from "./compression";
 
-const asWebSocketBinaryPayload = (bytes: Uint8Array): ArrayBuffer | ArrayBufferView => {
+// WebSocket.send accepts only views over an ArrayBuffer, not a SharedArrayBuffer.
+// A view over shared memory is copied into a new ArrayBuffer first.
+const asWebSocketBinaryPayload = (bytes: Uint8Array): Uint8Array<ArrayBuffer> => {
   if (bytes.buffer instanceof ArrayBuffer) {
-    return bytes as unknown as ArrayBufferView;
+    return bytes as Uint8Array<ArrayBuffer>;
   }
-  const copy = Uint8Array.from(bytes);
-  return copy.buffer as ArrayBuffer;
+  return new Uint8Array(bytes);
 };
 
 type WebSocketTransportOptions = {
@@ -106,6 +107,8 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
 
   let socket: WebSocket | null = null;
   let connectPromise: Promise<WebSocket> | null = null;
+  // Aborts the in-flight connect. close() calls it because `socket` is null until readiness.
+  let abortConnect: ((error: Error) => void) | null = null;
   let reconnectAttempts = 0;
   let reconnectTimer: ReturnType<typeof globalThis.setTimeout> | null = null;
   let manualClose = false;
@@ -158,8 +161,12 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
       return connectPromise;
     }
     manualClose = false;
+    // The reconnect timer keeps "reconnecting". Any other connect is caller-started and gets a full retry budget.
+    if (connectionState !== "reconnecting") {
+      reconnectAttempts = 0;
+    }
     connectionState = connectionState === "reconnecting" ? "reconnecting" : "connecting";
-    connectPromise = new Promise<WebSocket>((resolve, reject) => {
+    const attempt: Promise<WebSocket> = new Promise<WebSocket>((resolve, reject) => {
       const url = withFormat(options.url, preferBinary ? "binary" : "json", options.compression);
       const next = createSocket(url, options.protocols);
       let ready = false;
@@ -177,6 +184,9 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
           return;
         }
         settled = true;
+        if (abortConnect === abort) {
+          abortConnect = null;
+        }
         globalThis.clearTimeout(readyTimeoutId);
         reject(error);
         if (next.readyState === WebSocket.CONNECTING || next.readyState === WebSocket.OPEN) {
@@ -188,6 +198,10 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
         }
         scheduleReconnect(close);
       };
+      const abort = (error: Error) => {
+        settleReject(error, { code: 1000, reason: "client_closed", wasClean: true });
+      };
+      abortConnect = abort;
 
       next.binaryType = "arraybuffer";
       next.onopen = () => {
@@ -228,8 +242,17 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
         }
         scheduleReconnect(close);
       };
-      next.onmessage = async (event) => {
-        const envelope = await decodeEnvelopeMessage(event.data);
+      // Decoding is async, and a compressed frame takes longer than a raw envelope. Decode
+      // starts at once, but delivery waits for every earlier message, so arrival order holds.
+      let delivered: Promise<void> = Promise.resolve();
+      next.onmessage = (event) => {
+        const decoding = decodeEnvelopeMessage(event.data);
+        delivered = delivered
+          .then(() => decoding)
+          .then((envelope) => handleInbound(envelope))
+          .catch(() => undefined);
+      };
+      const handleInbound = async (envelope: RuntimeEnvelope<unknown> | null) => {
         if (!envelope) {
           return;
         }
@@ -283,11 +306,21 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
         if (options.authenticate) {
           await options.authenticate(session);
         }
+        // close() can abort the attempt while a hook awaits. Then the socket must not be adopted.
+        if (settled) {
+          return;
+        }
         if (options.onReady) {
           await options.onReady(session);
         }
+        if (settled) {
+          return;
+        }
         ready = true;
         settled = true;
+        if (abortConnect === abort) {
+          abortConnect = null;
+        }
         socket = activeSocket;
         reconnectAttempts = 0;
         connectionState = "open";
@@ -305,9 +338,13 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
         resolve(activeSocket);
       }
     }).finally(() => {
-      connectPromise = null;
+      // Clear only this attempt. A connect() after close() can already own connectPromise.
+      if (connectPromise === attempt) {
+        connectPromise = null;
+      }
     });
-    return connectPromise;
+    connectPromise = attempt;
+    return attempt;
   };
 
   const subscribers = new Set<{
@@ -368,6 +405,10 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
       manualClose = true;
       connectionState = "closed";
       clearReconnectTimer();
+      const abortInFlight = abortConnect;
+      abortConnect = null;
+      connectPromise = null;
+      abortInFlight?.(new Error("websocket transport closed"));
       if (socket) {
         socket.close(code, reason);
         socket = null;
@@ -375,6 +416,8 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
       rejectPending("websocket transport closed");
       pending.clear();
       subscribers.clear();
+      // Patterns count subscribers. Without the subscribers, a later connect must not replay them.
+      activePatterns.clear();
     },
     isConnected() {
       return socket?.readyState === WebSocket.OPEN;
@@ -438,7 +481,9 @@ export const createWebSocketTransport = (options: WebSocketTransportOptions): We
 const withFormat = (url: string, format: "binary" | "json", compression?: RuntimeCompressionOptions): string => {
   const parsed = new URL(url, typeof window !== "undefined" ? window.location.origin : "http://localhost");
   parsed.searchParams.set("format", format);
-  if (format === "binary" && compression?.enabled) {
+  // Advertise by default, as the HTTP transport compresses by default. The server frames
+  // only encodings listed here, and a browser without DecompressionStream lists only identity.
+  if (format === "binary" && compression?.enabled !== false) {
     parsed.searchParams.set("compression", supportedRuntimeCompressionEncodings().join(","));
   }
   return parsed.toString();

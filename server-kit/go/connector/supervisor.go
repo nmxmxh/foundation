@@ -30,6 +30,8 @@ type supervisor struct {
 	startMu sync.Mutex
 	cancel  context.CancelFunc
 	done    chan struct{}
+	// stopped is terminal. It stops a start that comes after stop, including stop before any start.
+	stopped bool
 
 	mu        sync.Mutex
 	laneStats map[int]*laneStats
@@ -54,7 +56,7 @@ func (s *supervisor) getStatsLocked(idx int) *laneStats {
 func (s *supervisor) start(ctx context.Context) {
 	s.startMu.Lock()
 	defer s.startMu.Unlock()
-	if s.cancel != nil {
+	if s.cancel != nil || s.stopped {
 		return
 	}
 	runCtx, cancel := context.WithCancel(ctx)
@@ -65,6 +67,7 @@ func (s *supervisor) start(ctx context.Context) {
 
 func (s *supervisor) stop() {
 	s.startMu.Lock()
+	s.stopped = true
 	cancel := s.cancel
 	done := s.done
 	s.startMu.Unlock()

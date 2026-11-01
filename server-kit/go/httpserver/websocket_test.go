@@ -1,8 +1,11 @@
 package httpserver
 
 import (
+	"compress/gzip"
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -887,7 +890,7 @@ func TestWSGuestRateLimitRejectsSameIP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first dial should succeed: %v", err)
 	}
-	defer first.Close()
+	defer func() { _ = first.Close() }()
 
 	_, resp2, err := websocket.DefaultDialer.Dial(wsURL, hdr)
 	if resp2 != nil {
@@ -1338,5 +1341,170 @@ func TestWSCheckOriginRejectsCrossSiteOrigins(t *testing.T) {
 	req.Header.Set("Origin", "https://evil.example.com")
 	if rt.upgrader.CheckOrigin(req) {
 		t.Fatalf("default upgrader CheckOrigin must reject cross-site origin")
+	}
+}
+
+// bigPingServer answers ping with a payload above wsFrameCompressionMinBytes.
+func bigPingServer(t *testing.T) (*httptest.Server, *Server) {
+	t.Helper()
+	return newWSTestServer(t, map[string]wsHandler{
+		"identity:ping:v1:requested": func(context.Context, extension.Object) (any, error) {
+			return map[string]any{"rows": strings.Repeat("projection-row,", 200)}, nil
+		},
+	})
+}
+
+func pingAndRead(t *testing.T, conn *websocket.Conn, request []byte) []byte {
+	t.Helper()
+	if _, _, err := conn.ReadMessage(); err != nil { // ack
+		t.Fatalf("read ack: %v", err)
+	}
+	if err := conn.WriteMessage(websocket.BinaryMessage, request); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	_, data, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	return data
+}
+
+func pingBinary(t *testing.T) []byte {
+	t.Helper()
+	raw, err := requested("identity:ping:v1:requested", extension.Object{}).ToBinary()
+	if err != nil {
+		t.Fatalf("ToBinary: %v", err)
+	}
+	return raw
+}
+
+// Regression: the server sends large binary envelopes as gzip runtime frames when the
+// client advertised gzip. runtime-transport decodes them; before, only the client compressed.
+func TestWSNegotiatedGzipFramesLargeEnvelopes(t *testing.T) {
+	srv, _ := bigPingServer(t)
+	conn := dialWS(t, srv, "format=binary&compression=gzip,deflate")
+	data := pingAndRead(t, conn, pingBinary(t))
+	if !kitcompress.IsRuntimeFrame(data) {
+		t.Fatalf("large negotiated response is not a runtime frame (%d bytes)", len(data))
+	}
+	decoded, err := kitcompress.DecodeRuntimeFrame(data, 0)
+	if err != nil {
+		t.Fatalf("DecodeRuntimeFrame: %v", err)
+	}
+	env, err := events.FromBinary(decoded)
+	if err != nil || env.EventType != "identity:ping:v1:success" {
+		t.Fatalf("framed response = (%q, %v), want ping success", env.EventType, err)
+	}
+	if len(data) >= len(decoded) {
+		t.Fatalf("frame %d bytes is not smaller than the envelope %d bytes", len(data), len(decoded))
+	}
+}
+
+func TestWSSendsRawWithoutNegotiation(t *testing.T) {
+	for name, query := range map[string]string{
+		"no compression param": "format=binary",
+		"client lacks gzip":    "format=binary&compression=deflate",
+	} {
+		srv, _ := bigPingServer(t)
+		data := pingAndRead(t, dialWS(t, srv, query), pingBinary(t))
+		if kitcompress.IsRuntimeFrame(data) {
+			t.Fatalf("%s: server framed a response the client did not negotiate", name)
+		}
+		if _, err := events.FromBinary(data); err != nil {
+			t.Fatalf("%s: raw response does not decode: %v", name, err)
+		}
+	}
+	srv, s := bigPingServer(t)
+	s.wsCompressionEnabled = false
+	data := pingAndRead(t, dialWS(t, srv, "format=binary&compression=gzip"), pingBinary(t))
+	if kitcompress.IsRuntimeFrame(data) {
+		t.Fatal("server framed a response with compression disabled")
+	}
+}
+
+// A client may send a runtime frame too; the server decodes it before dispatch.
+func TestWSAcceptsInboundRuntimeFrame(t *testing.T) {
+	srv, _ := bigPingServer(t)
+	conn := dialWS(t, srv, "format=binary")
+	request := pingBinary(t)
+	frame, ok, err := kitcompress.EncodeRuntimeFrameGzip(request, gzip.BestSpeed)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if !ok {
+		// A small request may not shrink; build the frame by hand with identity encoding.
+		frame = make([]byte, kitcompress.RuntimeFrameHeaderBytes+len(request))
+		binary.BigEndian.PutUint32(frame, kitcompress.RuntimeFrameMagic)
+		frame[4] = kitcompress.RuntimeFrameVersion
+		binary.BigEndian.PutUint32(frame[8:], uint32(len(request)))
+		binary.BigEndian.PutUint32(frame[12:], uint32(len(request)))
+		copy(frame[kitcompress.RuntimeFrameHeaderBytes:], request)
+	}
+	data := pingAndRead(t, conn, frame)
+	if kitcompress.IsRuntimeFrame(data) {
+		t.Fatal("server framed a response the client did not negotiate")
+	}
+	env, err := events.FromBinary(data)
+	if err != nil || env.EventType != "identity:ping:v1:success" {
+		t.Fatalf("framed request response = (%q, %v), want ping success", env.EventType, err)
+	}
+}
+
+func TestAdvertisesEncoding(t *testing.T) {
+	for list, want := range map[string]bool{"gzip": true, " deflate , GZIP ": true, "deflate,br": false, "": false} {
+		if got := advertisesEncoding(list, "gzip"); got != want {
+			t.Fatalf("advertisesEncoding(%q) = %v, want %v", list, got, want)
+		}
+	}
+}
+
+// projectionEnvelope builds a binary projection push with n records and real metadata.
+func projectionEnvelope(t *testing.T, n int) []byte {
+	t.Helper()
+	recs := make([]any, n)
+	for i := range recs {
+		recs[i] = map[string]any{"record_id": fmt.Sprintf("rec_%06d", i*7919%999983), "name": fmt.Sprintf("Dish %d", i%400),
+			"price_minor": i * 137 % 900000, "status": []string{"available", "sold_out"}[i%2]}
+	}
+	payload := extension.ObjectFromMap(map[string]any{"records": recs})
+	env := events.Envelope{EventType: "projection:mutation:v1:success", Payload: payload, CorrelationID: "9f3c2a71e0b84d5c8a1f6e2d4b7c0a93",
+		Timestamp: time.Unix(1762000000, 0).UTC(), SchemaVersion: events.EnvelopeSchemaVersion,
+		Metadata: extension.Object{"request_id": extension.String("req_7a1c9e3f5b2d"), "organization_id": extension.String("org_1"),
+			"user_id": extension.String("usr_004211"), "session_id": extension.String("ses_9c0d1e2f3a"), "locale": extension.String("en-NG")}}
+	raw, err := env.ToBinary()
+	if err != nil {
+		t.Fatalf("ToBinary: %v", err)
+	}
+	return raw
+}
+
+// Regression guard for data cost: the bytes a negotiated client receives for projection
+// pushes stay within these budgets. Budgets are the 2026-11-01 measurements plus margin.
+// 2 records (411 B) is the smallest push the threshold must still frame. The budgets assume
+// gzip level 6; at level 1 the 50, 400, and 3200 record pushes exceed them.
+func TestWSFrameByteBudgets(t *testing.T) {
+	conn := &wsConnection{frameGzip: true}
+	budgets := []struct {
+		records  int
+		maxRatio float64
+	}{{2, 0.85}, {4, 0.65}, {8, 0.50}, {12, 0.40}, {50, 0.22}, {400, 0.16}, {3200, 0.15}}
+	for _, b := range budgets {
+		raw := projectionEnvelope(t, b.records)
+		sent := conn.frameOutbound(raw)
+		if ratio := float64(len(sent)) / float64(len(raw)); ratio > b.maxRatio {
+			t.Fatalf("%d records: sent %d of %d bytes (%.2f), budget %.2f", b.records, len(sent), len(raw), ratio, b.maxRatio)
+		}
+	}
+}
+
+// Envelopes below the threshold stay raw: framing them saves too little for a decode.
+func TestWSFrameThresholdKeepsTinyEnvelopesRaw(t *testing.T) {
+	conn := &wsConnection{frameGzip: true}
+	tiny := projectionEnvelope(t, 0)
+	if len(tiny) >= wsFrameCompressionMinBytes {
+		t.Fatalf("test premise: %d-byte envelope is not below the %d-byte threshold", len(tiny), wsFrameCompressionMinBytes)
+	}
+	if sent := conn.frameOutbound(tiny); kitcompress.IsRuntimeFrame(sent) {
+		t.Fatal("an envelope below the threshold was framed")
 	}
 }

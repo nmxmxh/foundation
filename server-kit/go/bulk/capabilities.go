@@ -55,14 +55,31 @@ func detectPlatformCapabilities(goos string, mptcpEnabled func() bool) PlatformC
 // once at startup and pass the result into LaneRequest.Capabilities — this feeds
 // the lane planner genuine capability instead of optimistic "linux implies
 // available" guesses. Any unsupported accelerator degrades to its portable lane.
+//
+// Hole punching is probed in os.TempDir(). Use DetectPlatformCapabilitiesProbedInDir
+// when the data lives on another filesystem: support is a property of the filesystem.
 func DetectPlatformCapabilitiesProbed(ctx context.Context) PlatformCapabilities {
+	return DetectPlatformCapabilitiesProbedInDir(ctx, "")
+}
+
+// DetectPlatformCapabilitiesProbedInDir is DetectPlatformCapabilitiesProbed with the
+// hole-punch probe run in dir. An empty dir probes os.TempDir().
+func DetectPlatformCapabilitiesProbedInDir(ctx context.Context, dir string) PlatformCapabilities {
 	caps := DetectPlatformCapabilities() // always returns an initialized Notes map
 	caps.ZeroCopyAvailable = kernellane.ZeroCopyFileSupported()
-	caps.HolePunchAvailable = kernellane.HolePunchSupported()
+	if dir == "" {
+		caps.HolePunchAvailable = kernellane.HolePunchSupported()
+	} else {
+		caps.HolePunchAvailable = kernellane.HolePunchSupportedInDir(dir)
+	}
 	caps.MPTCPAvailable = kernellane.MultipathTCPSupported(ctx)
 	caps.Notes["zero_copy"] = zeroCopyNote(caps.ZeroCopyAvailable)
 	caps.Notes["hole_punch"] = holePunchNote(caps.HolePunchAvailable)
 	caps.Notes["mptcp"] = mptcpNote(caps.MPTCPAvailable)
+	// The static "requires a Linux adapter" note is a guess. A probe that succeeded replaces it.
+	if caps.ZeroCopyAvailable || caps.HolePunchAvailable || caps.MPTCPAvailable {
+		delete(caps.Notes, "fallback")
+	}
 	return caps
 }
 
@@ -75,7 +92,7 @@ func zeroCopyNote(available bool) string {
 
 func holePunchNote(available bool) string {
 	if available {
-		return "verified: sparse hole punching supported on host"
+		return "verified: probe punched a block on the probed filesystem"
 	}
 	return "sparse hole punching unavailable; standard allocation fallback"
 }

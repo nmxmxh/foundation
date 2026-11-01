@@ -297,9 +297,15 @@ This document tracks the deliberate performance and architecture carryovers fold
 101. In-Place Storage Reclamation & Kernel Extent Hole Punching (2026-10-23):
     `kernellane.PunchHole` and `PunchHolePrefix` dynamically deallocate physical disk
     blocks via Linux `fallocate(FALLOC_FL_PUNCH_HOLE)` and Darwin APFS `fcntl(F_PUNCHHOLE)`
-    without modifying logical file sizes. Halves physical storage footprint in 5 microseconds
-    during large-stream decompression, eliminates disk write amplification, and connects
-    directly to `bulk.PlatformCapabilities` with two-phase commit crash safety.
+    without modifying logical file sizes. Punch ranges align inward to whole 4 KiB blocks on
+    every platform, so partial blocks keep their bytes. `kernellane.Reclaimer` frees the
+    consumed prefix of a streamed source file. It is write-ahead: the checkpoint is synced
+    before any block is freed. A restart must resume at a part or frame boundary, because a
+    compressed stream cannot resume mid-frame and a freed prefix cannot be read again.
+    Status (2026-11-01): the only production caller is `bulk.Manager.IngestFile` with the
+    opt-in `ReclaimSource`, for same-host spool files (see `transfer_lane.md`). In-memory
+    lanes (HTTP and WebSocket compression, streamed parts) have no source file, and S3
+    `PutFile` and Hermes snapshots must keep their source bytes, so they do not use it.
 102. Runtime Buffer Zero-Copy Deserialization and Memset Eradication (2026-10-27):
     Removing eager output buffer zeroing and empty diagnostic memsets in `ovrt-native/src/stdio.rs`
     eradicates 2,816 bytes of redundant memory writes per exchange. `native process_runtime_buffer_in_place`
@@ -308,6 +314,27 @@ This document tracks the deliberate performance and architecture carryovers fold
     from 11.24 ns to 6.48 ns per operation (42% faster). Rust epoch wait policy default sleep
     caps align with Go at 20 microseconds, and `ovrt-core::maplet` introduces zero-allocation
     cuckoo structures (`WideMaplet`, `CountingMaplet`) with power-of-two bitwise masking.
+103. Bulk Auto Compression by Trial (2026-11-01): `EncodingAuto` compresses a 64 KiB
+    sample with pooled zstd and stores identity when the sample does not shrink to 90%.
+    On 1 MiB parts, zstd fastest gave the smallest output on JSON (0.094 against gzip
+    0.106), logs (0.149 against 0.180), CSV (0.493 against 0.509), and structured binary
+    (0.469 against 0.559), and ran 1.4x to 2.2x faster. The old byte heuristic stored
+    structured binary raw. Choosing a codec for each payload gave no further gain.
+104. Server-to-Browser Runtime Frames (2026-11-01): the WebSocket server sends a binary
+    envelope of 384 B or more as a gzip runtime frame (`OVRT` header, the layout in
+    `runtime-transport/ts/src/compression.ts`) when the client lists gzip in `?compression=`.
+    `@ovasabi/runtime-transport` advertises what `DecompressionStream` can decode by default;
+    `compression: { enabled: false }` turns it off, and `wsCompressionEnabled` turns it off on
+    the server. A frame that does not shrink is sent raw. `compress.EncodeRuntimeFrameGzip`
+    and `DecodeRuntimeFrame` are the Go codec, and a shared hex fixture keeps both sides equal.
+    Only the server-to-browser lane is compressed: direct dispatch is in process, and Redis
+    and eventlog messages stay small on a datacenter network.
+    Measured with `make bench-ws-netlab` (see `foundation_benchmarks.md`): on a typical
+    Nigerian 4G link a 33 KB push after idle drops from 238.5 ms to 115.4 ms, because the
+    frame fits TCP's initial window. On EDGE a 269 KB push drops from 9.9 s to 2.1 s.
+    Tuning (2026-11-01): frames use gzip level 6; hosts that end browser TCP set
+    `tcp_slow_start_after_idle = 0` and BBR. See the frame tuning entry in
+    `foundation_benchmarks.md`.
 
 **Phase 2 Implementation (Binary-First & Zero-Copy)**:
 

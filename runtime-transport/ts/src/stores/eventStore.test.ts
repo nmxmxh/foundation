@@ -51,6 +51,45 @@ describe("createEventStore", () => {
     expect(eventStore.store.getState()).toMatchObject({ status: "idle", lastError: null, loadingStates: {} });
   });
 
+  // Regression: status describes the batch of overlapping requests, not the last one to settle.
+  it("keeps status loading while requests overlap and keeps a batch failure", async () => {
+    const settlers: Array<{ resolve: (value: unknown) => void; reject: (error: Error) => void }> = [];
+    const dispatch = vi.fn(() => new Promise<unknown>((resolve, reject) => { settlers.push({ resolve, reject }); }));
+    const eventStore = createEventStore(dispatch);
+    const state = () => eventStore.store.getState();
+
+    const failing = eventStore.emitEvent("asset:update:v1:requested", { id: 1 });
+    const passing = eventStore.emitEvent("asset:update:v1:requested", { id: 2 });
+    settlers[0].reject(new Error("first failed"));
+    await expect(failing).rejects.toThrow("first failed");
+    expect(state()).toMatchObject({ status: "loading", lastError: "first failed" });
+
+    settlers[1].resolve({ ok: true });
+    await passing;
+    expect(state()).toMatchObject({ status: "error", lastError: "first failed" });
+
+    const next = eventStore.emitEvent("asset:update:v1:requested", { id: 3 });
+    expect(state()).toMatchObject({ status: "loading", lastError: null });
+    settlers[2].resolve({ ok: true });
+    await next;
+    expect(state()).toMatchObject({ status: "success", lastError: null });
+  });
+
+  it("ignores requests from before reset when it computes status", async () => {
+    const settlers: Array<(value: unknown) => void> = [];
+    const dispatch = vi.fn(() => new Promise<unknown>((resolve) => { settlers.push(resolve); }));
+    const eventStore = createEventStore(dispatch);
+    const stale = eventStore.emitEvent("asset:update:v1:requested", { id: 1 });
+    eventStore.store.getState().reset();
+    const fresh = eventStore.emitEvent("asset:update:v1:requested", { id: 2 });
+    settlers[0]({ ok: true });
+    await stale;
+    expect(eventStore.store.getState().status).toBe("loading");
+    settlers[1]({ ok: true });
+    await fresh;
+    expect(eventStore.store.getState().status).toBe("success");
+  });
+
   it("normalizes stable replay fingerprints for binary and cyclic values", () => {
     expect(stableStringify({ b: 2, a: new Uint8Array([1, 2]) })).toBe(stableStringify({ a: new Uint8Array([1, 2]), b: 2 }));
     expect(buildRequestFingerprint(new ArrayBuffer(2))).toMatch(/^[a-z0-9]+$/);

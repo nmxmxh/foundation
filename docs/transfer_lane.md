@@ -115,6 +115,32 @@ remains the durable source of truth and the upload still resumes from `HEAD`.
 Errors from bulk are surfaced through `errors.HTTPError` so the app error code
 maps to the right status (404 unknown, 401 missing org, 409 conflict, …).
 
+## Same-host file ingest and source reclamation
+
+`bulk.Manager.IngestFile` stores a local file as the parts of an initiated
+transfer. Parts that already have a receipt are not read again, so a restart
+resumes at the first missing part. `IngestFile` does not call `Complete`.
+
+`IngestFileOptions.ReclaimSource` frees the source file prefix after each part
+is durable. This keeps peak disk use near one copy of the file instead of two.
+
+WARNING: `ReclaimSource` deletes the caller's source bytes and cannot be undone.
+Use it only for spool or staging files.
+
+Rules:
+
+1. `ReclaimSource` needs `CheckpointPath` and an object store that implements
+   `bulk.DurableObjectStore`. The memory store refuses with `INVALID_STATE`.
+2. For each part, the order is: save the receipt, sync the object, write and
+   sync the checkpoint, then punch. A failure at any step frees nothing.
+3. Freed bytes are released only at part boundaries. Each part is an
+   independent compressed frame, so a part boundary is a safe restart point.
+4. A part below the checkpoint's freed offset must have a receipt. If the
+   receipt is lost, ingest stops with `INVALID_STATE`. It never reads the
+   freed bytes, which would store zeros.
+5. Where hole punching is not supported, `Punched` is false. The source keeps
+   its bytes and ingest still succeeds.
+
 ## Client surface
 
 `@ovasabi/frontend-kit` exposes `useTransfer(source, transferId)` (and the

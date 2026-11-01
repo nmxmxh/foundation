@@ -78,6 +78,9 @@ services:
         VERSION: "${VERSION:-dev}"
         BUILDKIT_INLINE_CACHE: "1"
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-server
+    # Same TCP setting as the frontend, for deployments that send browsers here directly.
+    sysctls:
+      net.ipv4.tcp_slow_start_after_idle: 0
     stop_grace_period: 15s
     depends_on:
       app-redis:
@@ -236,6 +239,11 @@ services:
       args:
         CACHE_NAMESPACE: "${DOCKER_CACHE_NAMESPACE:-ovasabi-foundation-v1}"
     container_name: ${SERVICE_NAME:-{{PROJECT_NAME}}}-frontend
+    # Browser TCP connections end in this container. Keep the congestion window across idle
+    # WebSocket gaps: on typical 4G, a 269 KB push after idle drops from 336 ms to 162 ms
+    # (docs/foundation/foundation_benchmarks.md). BBR is a host setting; see ops/README.md.
+    sysctls:
+      net.ipv4.tcp_slow_start_after_idle: 0
     depends_on:
       server:
         condition: service_healthy
